@@ -7,6 +7,8 @@
 //! - Exponential backoff reconnection
 //! - Graceful shutdown via [`ClientHandle`]
 
+#![allow(clippy::result_large_err)] // RealtimeError carries WebSocket variants; boxing not worth the noise here
+
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;

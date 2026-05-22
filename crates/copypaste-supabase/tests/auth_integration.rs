@@ -1,6 +1,6 @@
-/// Integration tests for AuthClient using mockito to mock the GoTrue HTTP API.
-///
-/// Uses mockito 0.31 global server API.
+//! Integration tests for AuthClient using mockito to mock the GoTrue HTTP API.
+//!
+//! Uses mockito 0.31 global server API.
 
 use copypaste_supabase::{AuthClient, AuthError};
 

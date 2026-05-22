@@ -9,7 +9,7 @@ use crate::protocol::{Request, Response};
 
 /// Persistent application configuration stored at
 /// `dirs::config_dir()/copypaste/config.json`.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub p2p_enabled: bool,
@@ -17,16 +17,6 @@ pub struct AppConfig {
     pub supabase_url: Option<String>,
     #[serde(default)]
     pub supabase_anon_key: Option<String>,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            p2p_enabled: false,
-            supabase_url: None,
-            supabase_anon_key: None,
-        }
-    }
 }
 
 fn config_path() -> Option<std::path::PathBuf> {
@@ -162,7 +152,7 @@ impl IpcServer {
             Err(e) => return Response::err("?", format!("parse error: {e}")),
         };
 
-        tracing::Span::current().record("method", &req.method.as_str());
+        tracing::Span::current().record("method", req.method.as_str());
         tracing::debug!(method = %req.method, id = %req.id, "IPC request");
 
         match req.method.as_str() {

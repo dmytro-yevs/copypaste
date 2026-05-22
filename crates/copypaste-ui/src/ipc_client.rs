@@ -48,7 +48,7 @@ pub struct HistoryPage {
 // ---------------------------------------------------------------------------
 
 /// Application configuration persisted via the daemon.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppSettings {
     #[serde(default)]
     pub p2p_enabled: bool,
@@ -56,16 +56,6 @@ pub struct AppSettings {
     pub supabase_url: Option<String>,
     #[serde(default)]
     pub supabase_anon_key: Option<String>,
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        Self {
-            p2p_enabled: false,
-            supabase_url: None,
-            supabase_anon_key: None,
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -450,7 +440,7 @@ mod tests {
         };
         let json = serde_json::to_string(&s).unwrap();
         let s2: AppSettings = serde_json::from_str(&json).unwrap();
-        assert_eq!(s2.p2p_enabled, true);
+        assert!(s2.p2p_enabled);
         assert_eq!(s2.supabase_url.as_deref(), Some("https://example.supabase.co"));
         assert_eq!(s2.supabase_anon_key.as_deref(), Some("key123"));
     }

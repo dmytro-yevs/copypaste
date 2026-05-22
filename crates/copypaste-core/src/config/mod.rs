@@ -79,10 +79,9 @@ impl AppConfig {
     fn clamp_values(&mut self) {
         self.poll_interval_ms = self
             .poll_interval_ms
-            .max(POLL_INTERVAL_MIN_MS)
-            .min(POLL_INTERVAL_MAX_MS);
-        self.image_quality = self.image_quality.min(100).max(1);
-        self.encryption_chunk_kb = self.encryption_chunk_kb.max(16).min(4096);
+            .clamp(POLL_INTERVAL_MIN_MS, POLL_INTERVAL_MAX_MS);
+        self.image_quality = self.image_quality.clamp(1, 100);
+        self.encryption_chunk_kb = self.encryption_chunk_kb.clamp(16, 4096);
     }
 }
 

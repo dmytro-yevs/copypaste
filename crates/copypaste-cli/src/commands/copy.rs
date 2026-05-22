@@ -58,7 +58,7 @@ pub fn cmd_list(socket_path: &Path, limit: u64) -> Result<()> {
     }
 
     // Header
-    println!("{:<5}  {:<38}  {:<8}  {}", "INDEX", "ID", "TYPE", "TIME (UTC)");
+    println!("{:<5}  {:<38}  {:<8}  TIME (UTC)", "INDEX", "ID", "TYPE");
     println!("{}", "-".repeat(76));
 
     for (i, item) in items.iter().enumerate() {
@@ -240,6 +240,7 @@ mod tests {
 
     #[test]
     fn run_signature_accepts_all_modes() {
+        #[allow(clippy::type_complexity)]
         let _: fn(&Path, Option<u64>, Option<&str>, Option<&str>, bool, u64) -> Result<()> = run;
     }
 

@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Benchmark
 
 fn bench_keypair(c: &mut Criterion) {
     c.bench_function("keypair_generate", |b| {
-        b.iter(|| DeviceKeypair::generate())
+        b.iter(DeviceKeypair::generate)
     });
 
     let kp = DeviceKeypair::generate();

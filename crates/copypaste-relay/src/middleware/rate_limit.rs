@@ -17,7 +17,7 @@
 /// `/health` and `/stats` are mounted on a **separate** inner router that does
 /// **not** have the `GovernorLayer` attached.  The outer router merges both
 /// sub-routers so that the exempt routes are reachable but unthrottled.
-
+//
 /// Per-IP rate limit: 200 requests/minute.
 /// Uses `per_second(3)` + `burst_size(60)` in `GovernorConfigBuilder`.
 #[allow(dead_code)]

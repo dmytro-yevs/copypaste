@@ -1,13 +1,13 @@
-/// copypaste-ui — Slint HistoryWindow wired to copypaste-daemon via Unix IPC.
-///
-/// Architecture:
-///   - Slint renders the HistoryWindow on the main thread.
-///   - A dedicated background thread polls the daemon IPC socket.
-///   - Results are sent back to the Slint event loop via `slint::invoke_from_event_loop`.
-///   - IPC methods: `history_page` (list), `paste` (activate by id), `status` (health).
-///
-/// Data flow:
-///   Slint callback → Rust callback closure → IPC call → slint::invoke_from_event_loop → Slint update
+//! copypaste-ui — Slint HistoryWindow wired to copypaste-daemon via Unix IPC.
+//!
+//! Architecture:
+//!   - Slint renders the HistoryWindow on the main thread.
+//!   - A dedicated background thread polls the daemon IPC socket.
+//!   - Results are sent back to the Slint event loop via `slint::invoke_from_event_loop`.
+//!   - IPC methods: `history_page` (list), `paste` (activate by id), `status` (health).
+//!
+//! Data flow:
+//!   Slint callback → Rust callback closure → IPC call → slint::invoke_from_event_loop → Slint update
 
 mod ipc_client;
 

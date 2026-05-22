@@ -1,7 +1,7 @@
-/// Integration tests for copypaste-ui IPC client against a mock daemon socket.
-///
-/// Each test spins up a tiny Tokio server that speaks the daemon protocol,
-/// then verifies that the copypaste-ui IpcClient parses responses correctly.
+//! Integration tests for copypaste-ui IPC client against a mock daemon socket.
+//!
+//! Each test spins up a tiny Tokio server that speaks the daemon protocol,
+//! then verifies that the copypaste-ui IpcClient parses responses correctly.
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;

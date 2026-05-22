@@ -4,11 +4,12 @@
 use serde::{Deserialize, Serialize};
 
 /// History size limit options exposed in the UI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HistoryLimit {
     /// Keep 50 most-recent items.
     Fifty,
     /// Keep 100 most-recent items (default).
+    #[default]
     Hundred,
     /// Keep 500 most-recent items.
     FiveHundred,
@@ -35,12 +36,6 @@ impl HistoryLimit {
             76..=300   => HistoryLimit::Hundred,
             _          => HistoryLimit::FiveHundred,
         }
-    }
-}
-
-impl Default for HistoryLimit {
-    fn default() -> Self {
-        HistoryLimit::Hundred
     }
 }
 
@@ -138,8 +133,8 @@ mod tests {
         let s = AppSettings::default();
         let json = serde_json::to_string(&s).expect("serialize");
         let restored: AppSettings = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(restored.launch_at_login, false);
-        assert_eq!(restored.private_mode,    false);
+        assert!(!restored.launch_at_login);
+        assert!(!restored.private_mode);
         assert_eq!(restored.history_limit,   HistoryLimit::Hundred);
         assert_eq!(restored.device_name,     "My Mac");
     }

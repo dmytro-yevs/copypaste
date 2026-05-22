@@ -25,7 +25,7 @@ pub fn run(socket_path: &Path, limit: u64, offset: u64) -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<38}  {:<12}  {:<10}  {}", "ID", "TYPE", "SENSITIVE", "TIME (UTC)");
+    println!("{:<38}  {:<12}  {:<10}  TIME (UTC)", "ID", "TYPE", "SENSITIVE");
     println!("{}", "-".repeat(90));
 
     for item in &items {

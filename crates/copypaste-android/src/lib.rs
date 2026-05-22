@@ -1,3 +1,5 @@
+#![allow(clippy::empty_line_after_doc_comments)] // uniffi-generated scaffolding triggers this lint
+
 uniffi::include_scaffolding!("copypaste_android");
 
 use copypaste_core::{encrypt_item, decrypt_item, detect, NONCE_SIZE};

@@ -280,7 +280,7 @@ impl RelayStore {
                     return false;
                 }
                 let inbox = self.sync_items.get(*id);
-                let has_items = inbox.map_or(false, |items| !items.is_empty());
+                let has_items = inbox.is_some_and(|items| !items.is_empty());
                 !has_items
             })
             .map(|(id, _)| id.clone())
