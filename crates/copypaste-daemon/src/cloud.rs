@@ -379,5 +379,6 @@ fn json_to_clipboard_item(v: &serde_json::Value) -> Option<ClipboardItem> {
         wall_time,
         expires_at,
         app_bundle_id,
+        content_hash: None,
     })
 }
