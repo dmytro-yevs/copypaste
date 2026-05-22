@@ -14,21 +14,54 @@ use tower_governor::GovernorLayer;
 use crate::config::RelayConfig;
 use crate::state::AppState;
 
-/// Build the complete relay router with all routes wired.
+/// Build the complete relay router.
+///
+/// # Rate limiting
+///
+/// The router is split into two sub-routers:
+///
+/// 1. **Exempt routes** (`/health`, `/stats`) — no rate limiting applied.
+///    These are lightweight diagnostic endpoints that must remain available
+///    even under load.
+///
+/// 2. **Rate-limited routes** — everything else:
+///    - *Per-IP*: 200 requests/minute (3 req/s steady-state, burst 60).
+///      Applied to all non-exempt routes.
+///    - *Per-device*: 60 requests/minute (1 req/s steady-state, burst 20).
+///      Applied specifically to device-scoped item routes
+///      (`/devices/:id/items`).
+///
+/// Exceeding either limit returns **HTTP 429 Too Many Requests** with a
+/// `Retry-After` header automatically set by `tower_governor`.
 pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
-    // Rate limit: 60 requests/minute per IP (1 req/s steady-state, burst of 20).
-    let governor_conf = Arc::new(
+    // ---- Exempt routes (no rate limiting) ----------------------------------
+    let exempt = Router::new()
+        .route("/health", get(health::handle))
+        .route("/stats", get(stats_handler))
+        .with_state(state.clone());
+
+    // ---- Per-IP rate limit layer (200 req/min) ------------------------------
+    // 3 tokens/s refill + burst 60 ≈ 200 req/min before throttling.
+    let per_ip_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(3)
+            .burst_size(60)
+            .finish()
+            .expect("invalid per-IP governor configuration"),
+    );
+
+    // ---- Per-device rate limit layer (60 req/min) ---------------------------
+    // 1 token/s refill + burst 20 ≈ 60 req/min before throttling.
+    let per_device_conf = Arc::new(
         GovernorConfigBuilder::default()
             .per_second(1)
             .burst_size(20)
             .finish()
-            .expect("invalid governor configuration"),
+            .expect("invalid per-device governor configuration"),
     );
 
-    Router::new()
-        .route("/health", get(health::handle))
-        .route("/stats", get(stats_handler))
-        .route("/devices", get(list_devices_handler).post(devices::register))
+    // ---- Device-scoped item routes (per-device + per-IP limits) ------------
+    let item_routes = Router::new()
         .route(
             "/devices/:device_id/items",
             get(items::poll).post(items::upload),
@@ -37,13 +70,32 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
             "/devices/:device_id/items/:item_id",
             delete(items::delete_item),
         )
+        .with_state(state.clone())
+        // Apply per-device limit first (tighter), then per-IP limit.
+        .layer(GovernorLayer {
+            config: per_device_conf,
+        })
+        .layer(GovernorLayer {
+            config: per_ip_conf.clone(),
+        });
+
+    // ---- Device registration route (per-IP limit only) ---------------------
+    let device_routes = Router::new()
+        .route("/devices", get(list_devices_handler).post(devices::register))
         .with_state(state)
+        .layer(GovernorLayer {
+            config: per_ip_conf,
+        });
+
+    // ---- Merge all sub-routers + shared body-limit layer -------------------
+    Router::new()
+        .merge(exempt)
+        .merge(item_routes)
+        .merge(device_routes)
         .layer(axum::extract::DefaultBodyLimit::max(
+            // Allow at most max_item_bytes + small JSON overhead.
             config.max_item_bytes + 4096,
         ))
-        .layer(GovernorLayer {
-            config: governor_conf,
-        })
 }
 
 async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
