@@ -8,7 +8,10 @@ pub use config::AppConfig;
 pub use crypto::{DeviceKeypair, KeyError};
 pub use crypto::encrypt::{encrypt_item, decrypt_item, EncryptError, NONCE_SIZE};
 pub use crypto::chunks::{encrypt_chunks, decrypt_chunks, EncryptedChunk, ChunkError};
-pub use sensitive::{detect, SensitiveKind};
+pub use sensitive::{
+    detect, redact, luhn_valid,
+    SensitiveKind, SensitiveCategory, SensitiveDetector, PatternMatch,
+};
 pub use storage::{Database, DbError};
 pub use storage::items::{
     ClipboardItem, ItemsError,
