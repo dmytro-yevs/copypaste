@@ -5,6 +5,7 @@ use std::time::Instant;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 
 use crate::config::RelayConfig;
 use crate::error::RelayError;
@@ -106,9 +107,10 @@ impl RelayStore {
     // -----------------------------------------------------------------------
 
     /// Verify that `token` matches the bearer token for `device_id`.
+    /// Uses constant-time comparison to prevent timing-based token oracle attacks.
     pub fn verify_token(&self, device_id: &str, token: &str) -> Result<(), RelayError> {
         let record = self.devices.get(device_id).ok_or(RelayError::DeviceNotFound)?;
-        if record.bearer_token == token {
+        if record.bearer_token.as_bytes().ct_eq(token.as_bytes()).into() {
             Ok(())
         } else {
             Err(RelayError::Unauthorized)
