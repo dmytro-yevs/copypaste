@@ -258,6 +258,19 @@ impl RelayStore {
     }
 
     // -----------------------------------------------------------------------
+    // Devices listing
+    // -----------------------------------------------------------------------
+
+    /// Return device IDs ordered by registration time (most recent first), capped at 100.
+    /// Bearer tokens are never included.
+    #[allow(dead_code)]
+    pub fn list_devices(&self) -> Vec<String> {
+        let mut records: Vec<&DeviceRecord> = self.devices.values().collect();
+        records.sort_by(|a, b| b.registered_at.cmp(&a.registered_at));
+        records.into_iter().take(100).map(|r| r.device_id.clone()).collect()
+    }
+
+    // -----------------------------------------------------------------------
     // Stats
     // -----------------------------------------------------------------------
 

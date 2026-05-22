@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use axum::extract::State;
 use axum::response::IntoResponse;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get};
 use axum::Router;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::GovernorLayer;
@@ -28,7 +28,7 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
     Router::new()
         .route("/health", get(health::handle))
         .route("/stats", get(stats_handler))
-        .route("/devices", post(devices::register))
+        .route("/devices", get(list_devices_handler).post(devices::register))
         .route(
             "/devices/:device_id/items",
             get(items::poll).post(items::upload),
@@ -54,4 +54,10 @@ async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
         "total_items": items,
         "version": "2"
     }))
+}
+
+async fn list_devices_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let store = state.lock().unwrap();
+    let device_ids = store.list_devices();
+    axum::Json(serde_json::json!({ "devices": device_ids }))
 }

@@ -89,14 +89,13 @@ pub fn delete_item(db: &Database, id: &str) -> Result<(), ItemsError> {
     Ok(())
 }
 
-/// Pin an item by removing its expiry (sets `expires_at = NULL`).
-/// Returns `Ok(true)` if a row was updated, `Ok(false)` if the id was not found.
-pub fn pin_item(db: &Database, id: &str) -> Result<bool, ItemsError> {
-    let changed = db.conn().execute(
+/// Remove expiry from an item so it's never auto-deleted.
+pub fn pin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
+    db.conn().execute(
         "UPDATE clipboard_items SET expires_at = NULL WHERE id = ?1",
-        params![id],
+        rusqlite::params![id],
     )?;
-    Ok(changed > 0)
+    Ok(())
 }
 
 pub fn count_items(db: &Database) -> Result<i64, ItemsError> {
@@ -356,5 +355,17 @@ mod tests {
 
         let results = search_items(&db, "common", 3).unwrap();
         assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn pin_item_removes_expiry() {
+        let db = Database::open_in_memory().unwrap();
+        let mut item = make_item(1);
+        item.expires_at = Some(9999);
+        insert_item(&db, &item).unwrap();
+        pin_item(&db, &item.id).unwrap();
+        // Verify expired returns 0 (pinned item not deleted)
+        let removed = delete_expired(&db, 99999).unwrap();
+        assert_eq!(removed, 0);
     }
 }
