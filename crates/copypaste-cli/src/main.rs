@@ -65,6 +65,11 @@ enum Commands {
     },
     /// Show clipboard statistics
     Stats,
+    /// Import clipboard items from a JSON file (exported by 'export')
+    Import {
+        /// Path to JSON file
+        file: String,
+    },
 }
 
 fn main() {
@@ -82,6 +87,7 @@ fn main() {
         Commands::Watch { interval } => commands::watch::run(&socket, interval),
         Commands::Clear { force } => commands::clear::run(&socket, force),
         Commands::Stats => commands::stats::run(&socket),
+        Commands::Import { file } => commands::import::run(&socket, &file),
     };
 
     if let Err(e) = result {
