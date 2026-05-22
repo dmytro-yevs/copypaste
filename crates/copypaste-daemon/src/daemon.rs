@@ -40,8 +40,16 @@ pub async fn run() -> anyhow::Result<()> {
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
     let mut ticker = interval(Duration::from_millis(config.poll_interval_ms));
     let mut cleanup_ticks: u64 = 0;
+    // Sensitive TTL cleanup runs every 5 seconds; track elapsed ticks separately.
+    let mut sensitive_cleanup_ticks: u64 = 0;
+    let sensitive_ttl_ms = config.sensitive_ttl_secs as i64 * 1000;
 
     tracing::info!("clipboard monitor started");
+    tracing::info!(
+        "sensitive auto-wipe TTL: {}s ({}ms), checked every 5s",
+        config.sensitive_ttl_secs,
+        sensitive_ttl_ms,
+    );
 
     #[cfg(target_os = "macos")]
     {
@@ -52,6 +60,24 @@ pub async fn run() -> anyhow::Result<()> {
                 _ = ticker.tick() => {
                     handle_tick(&mut monitor, &db, &local_key, &config).await;
                     cleanup_ticks += 1;
+                    sensitive_cleanup_ticks += 1;
+
+                    // Sensitive item TTL: run every 5 seconds.
+                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)) {
+                        sensitive_cleanup_ticks = 0;
+                        let db_guard = db.lock().await;
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as i64;
+                        match copypaste_core::delete_sensitive_expired(&db_guard, now_ms, sensitive_ttl_ms) {
+                            Ok(n) if n > 0 => tracing::info!("sensitive TTL cleanup: wiped {n} sensitive items"),
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("sensitive TTL cleanup error: {e}"),
+                        }
+                    }
+
+                    // General expires_at TTL: run every 60 seconds.
                     if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
                         cleanup_ticks = 0;
                         let db_guard = db.lock().await;
@@ -84,6 +110,24 @@ pub async fn run() -> anyhow::Result<()> {
                 _ = ticker.tick() => {
                     handle_tick(&mut monitor, &db, &local_key, &config).await;
                     cleanup_ticks += 1;
+                    sensitive_cleanup_ticks += 1;
+
+                    // Sensitive item TTL: run every 5 seconds.
+                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)) {
+                        sensitive_cleanup_ticks = 0;
+                        let db_guard = db.lock().await;
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as i64;
+                        match copypaste_core::delete_sensitive_expired(&db_guard, now_ms, sensitive_ttl_ms) {
+                            Ok(n) if n > 0 => tracing::info!("sensitive TTL cleanup: wiped {n} sensitive items"),
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("sensitive TTL cleanup error: {e}"),
+                        }
+                    }
+
+                    // General expires_at TTL: run every 60 seconds.
                     if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
                         cleanup_ticks = 0;
                         let db_guard = db.lock().await;

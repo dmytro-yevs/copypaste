@@ -10,6 +10,7 @@ pub const STORAGE_QUOTA_BYTES: u64 = 500_000_000;
 pub const SYNC_TTL_SECS: u64 = 86_400;
 pub const SENSITIVE_TTL_RELAY_SECS: u64 = 1_800;
 pub const SENSITIVE_TTL_LOCAL_SECS: u64 = 1_800;
+pub const SENSITIVE_TTL_SECS: u64 = 30;
 pub const IMAGE_QUALITY: u8 = 80;
 pub const SQLITE_CACHE_MB: u32 = 8;
 pub const ENCRYPTION_CHUNK_KB: u32 = 64;

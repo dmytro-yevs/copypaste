@@ -84,6 +84,17 @@ pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
     Ok(changed)
 }
 
+/// Delete sensitive items whose `wall_time` is older than `sensitive_ttl_ms` milliseconds ago.
+/// This enforces a local auto-wipe TTL for items marked `is_sensitive = 1`.
+pub fn delete_sensitive_expired(db: &Database, now_ms: i64, sensitive_ttl_ms: i64) -> Result<usize, ItemsError> {
+    let threshold = now_ms - sensitive_ttl_ms;
+    let changed = db.conn().execute(
+        "DELETE FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1",
+        params![threshold],
+    )?;
+    Ok(changed)
+}
+
 pub fn delete_item(db: &Database, id: &str) -> Result<(), ItemsError> {
     db.conn().execute("DELETE FROM clipboard_items WHERE id=?1", params![id])?;
     Ok(())
@@ -355,6 +366,37 @@ mod tests {
 
         let results = search_items(&db, "common", 3).unwrap();
         assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn delete_sensitive_expired_removes_old_sensitive_items() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Sensitive item with old wall_time (should be deleted)
+        let mut old_sensitive = make_item(1);
+        old_sensitive.is_sensitive = true;
+        old_sensitive.wall_time = 1_000; // very old
+        insert_item(&db, &old_sensitive).unwrap();
+
+        // Sensitive item with recent wall_time (should be kept)
+        let mut new_sensitive = make_item(2);
+        new_sensitive.is_sensitive = true;
+        new_sensitive.wall_time = 100_000_000; // very recent relative to now_ms below
+        insert_item(&db, &new_sensitive).unwrap();
+
+        // Non-sensitive item with old wall_time (should NOT be deleted)
+        let mut old_plain = make_item(3);
+        old_plain.is_sensitive = false;
+        old_plain.wall_time = 1_000;
+        insert_item(&db, &old_plain).unwrap();
+
+        // now_ms = 200_000, ttl = 30_000 → threshold = 170_000
+        // old_sensitive.wall_time=1000 < 170_000 → deleted
+        // new_sensitive.wall_time=100_000_000 > 170_000 → kept
+        // old_plain.wall_time=1000 < 170_000 but not sensitive → kept
+        let removed = delete_sensitive_expired(&db, 200_000, 30_000).unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(count_items(&db).unwrap(), 2);
     }
 
     #[test]
