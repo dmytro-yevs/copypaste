@@ -1,4 +1,92 @@
-use super::patterns::{pattern_set, pattern_name};
+use std::ops::Range;
+use super::patterns::{pattern_set, pattern_name, pattern_category, pattern_confidence, patterns};
+
+// ── Public types (pattern-detection) ─────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SensitiveCategory {
+    Credential,
+    Financial,
+    PersonalId,
+    Infrastructure,
+}
+
+impl SensitiveCategory {
+    fn from_raw(raw: u8) -> Self {
+        match raw {
+            0 => Self::Credential,
+            1 => Self::Financial,
+            2 => Self::PersonalId,
+            3 => Self::Infrastructure,
+            _ => Self::Credential,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PatternMatch {
+    pub pattern_name: &'static str,
+    pub confidence: f32,
+    pub category: SensitiveCategory,
+    pub matched_range: Range<usize>,
+}
+
+/// Detects sensitive data patterns in text. Compiled regexes are initialised once
+/// (via OnceLock) and shared across all instances — construction is effectively free.
+#[derive(Default)]
+pub struct SensitiveDetector;
+
+impl SensitiveDetector {
+    pub fn new() -> Self { Self }
+
+    /// Return every pattern match found in `text`, with byte ranges and confidence.
+    pub fn detect(&self, text: &str) -> Vec<PatternMatch> {
+        let mut results: Vec<PatternMatch> = Vec::new();
+        for (i, re) in patterns().iter().enumerate() {
+            for m in re.find_iter(text) {
+                results.push(PatternMatch {
+                    pattern_name: pattern_name(i),
+                    confidence: pattern_confidence(i),
+                    category: SensitiveCategory::from_raw(pattern_category(i)),
+                    matched_range: m.range(),
+                });
+            }
+        }
+        results
+    }
+
+    /// Returns true if any sensitive pattern is found (fast path using RegexSet).
+    pub fn is_sensitive(&self, text: &str) -> bool {
+        pattern_set().is_match(text)
+    }
+
+    /// Returns true if any pattern exceeds the confidence threshold.
+    pub fn is_sensitive_threshold(&self, text: &str, threshold: f32) -> bool {
+        self.detect(text).iter().any(|m| m.confidence >= threshold)
+    }
+
+    /// Returns the highest-confidence match, if any.
+    pub fn highest_confidence(&self, text: &str) -> Option<PatternMatch> {
+        self.detect(text).into_iter().max_by(|a, b| {
+            a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal)
+        })
+    }
+}
+
+/// Validate a credit card number using the Luhn algorithm.
+pub fn luhn_valid(s: &str) -> bool {
+    let digits: Vec<u32> = s.chars()
+        .filter(|c| c.is_ascii_digit())
+        .map(|c| c.to_digit(10).unwrap())
+        .collect();
+    if digits.len() < 13 || digits.len() > 19 { return false; }
+    let sum: u32 = digits.iter().rev().enumerate().map(|(i, &d)| {
+        if i % 2 == 1 { let v = d * 2; if v > 9 { v - 9 } else { v } } else { d }
+    }).sum();
+    sum % 10 == 0
+}
+
+// ── is_sensitive_app ──────────────────────────────────────────────────────────
 
 /// Bundle IDs / process names for apps whose clipboard content should always
 /// be treated as sensitive regardless of content patterns (e.g. password managers).

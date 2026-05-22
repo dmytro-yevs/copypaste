@@ -13,7 +13,10 @@ pub use image::{
     encode_image, decode_image, chunks_to_blob, chunks_from_blob,
     ImageError, ImageMeta, IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES,
 };
-pub use sensitive::{detect, is_sensitive_app, SensitiveKind};
+pub use sensitive::{
+    detect, redact, luhn_valid, is_sensitive_app,
+    SensitiveKind, SensitiveCategory, SensitiveDetector, PatternMatch,
+};
 pub use storage::{Database, DbError};
 pub use storage::items::{
     ClipboardItem, ItemsError,
