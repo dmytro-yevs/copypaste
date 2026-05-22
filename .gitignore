@@ -1,11 +1,19 @@
-# Ruflo runtime
-.claude-flow/data/
-.claude-flow/logs/
-.claude-flow/sessions/
-.claude-flow/swarm/
-.claude-flow/metrics/
-ruvector.db
+# Build artifacts
+/target/
 
-# Ruflo memory DB — committing for single-user project
+# Ruflo/claude-flow runtime
+.swarm/
+.claude-flow/
+ruvector.db
 agentdb.rvf
 agentdb.rvf.lock
+
+# IDE
+.idea/
+
+# Claude config
+.claude/
+CLAUDE.md
+
+# OS
+.DS_Store
