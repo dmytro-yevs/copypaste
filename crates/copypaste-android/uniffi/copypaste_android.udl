@@ -1,9 +1,9 @@
 namespace copypaste_android {
   [Throws=CopypasteError]
-  EncryptedBlob encrypt_text([ByRef] bytes u8, [ByRef] key u8);
+  EncryptedBlob encrypt_text([ByRef] sequence<u8> bytes, [ByRef] sequence<u8> key);
 
   [Throws=CopypasteError]
-  sequence<u8> decrypt_text([ByRef] ciphertext u8, [ByRef] nonce u8, [ByRef] key u8);
+  sequence<u8> decrypt_text([ByRef] sequence<u8> ciphertext, [ByRef] sequence<u8> nonce, [ByRef] sequence<u8> key);
 
   boolean is_sensitive(string text);
 
