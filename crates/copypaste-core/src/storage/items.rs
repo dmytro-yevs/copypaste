@@ -46,6 +46,33 @@ impl ClipboardItem {
             app_bundle_id: None,
         }
     }
+
+    /// Create an image item whose content is an encrypted chunk blob.
+    ///
+    /// `encrypted_blob` is produced by `copypaste_core::chunks_to_blob`.
+    /// `image_meta_json` stores width/height/chunk_count/file_id as JSON in `blob_ref`.
+    /// The `content_nonce` field is left `None` because XChaCha20 nonces are stored
+    /// per-chunk inside the blob itself (no single item-level nonce needed).
+    pub fn new_image(encrypted_blob: Vec<u8>, image_meta_json: String, lamport_ts: i64) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        Self {
+            id: Uuid::new_v4().to_string(),
+            item_id: Uuid::new_v4().to_string(),
+            content_type: "image".to_string(),
+            content: Some(encrypted_blob),
+            content_nonce: None,
+            blob_ref: Some(image_meta_json),
+            is_sensitive: false,
+            is_synced: false,
+            lamport_ts,
+            wall_time: now,
+            expires_at: None,
+            app_bundle_id: None,
+        }
+    }
 }
 
 pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError> {
