@@ -51,6 +51,12 @@ enum Commands {
         #[arg(long, short)]
         output: Option<String>,
     },
+    /// Watch clipboard in real-time (prints new items as they arrive)
+    Watch {
+        /// Poll interval in milliseconds (default: 2000)
+        #[arg(long, default_value_t = 2000)]
+        interval: u64,
+    },
 }
 
 fn main() {
@@ -65,6 +71,7 @@ fn main() {
         Commands::Search { query, limit } => commands::search::run(&socket, &query, limit),
         Commands::Copy { id } => commands::copy::run(&socket, &id),
         Commands::Export { limit, output } => commands::export::run(&socket, limit, output.as_deref()),
+        Commands::Watch { interval } => commands::watch::run(&socket, interval),
     };
 
     if let Err(e) = result {
