@@ -60,6 +60,35 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         });
     }
 
+    // Broadcast channel: every newly inserted item is forwarded to the cloud-sync push_loop.
+    // Capacity 64 — if cloud-sync is not active the sender simply has no subscribers,
+    // and send() returns Err(NoReceivers) which we silently ignore.
+    let (new_item_tx, _new_item_rx) = tokio::sync::broadcast::channel::<ClipboardItem>(64);
+
+    // Start optional cloud-sync if credentials are present.
+    #[cfg(feature = "cloud-sync")]
+    let _cloud_handle = {
+        use crate::cloud::{CloudConfig, start_cloud};
+        if let Some(cloud_cfg) = CloudConfig::from_env() {
+            tracing::info!("cloud-sync: SUPABASE_URL found, starting cloud orchestrator");
+            // Subscribe a new receiver from the existing sender.
+            let rx = new_item_tx.subscribe();
+            match start_cloud(cloud_cfg, db.clone(), rx).await {
+                Ok(handle) => {
+                    tracing::info!("cloud-sync: orchestrator started");
+                    Some(handle)
+                }
+                Err(e) => {
+                    tracing::warn!("cloud-sync: failed to start ({e}); continuing without sync");
+                    None
+                }
+            }
+        } else {
+            tracing::debug!("cloud-sync: SUPABASE_URL not set, skipping");
+            None
+        }
+    };
+
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
     let mut ticker = interval(Duration::from_millis(config.poll_interval_ms));
     let mut cleanup_ticks: u64 = 0;
@@ -86,7 +115,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode, &new_item_tx).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -138,7 +167,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode, &new_item_tx).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -193,6 +222,7 @@ async fn handle_tick(
     local_key: &[u8; 32],
     config: &AppConfig,
     private_mode: &Arc<AtomicBool>,
+    new_item_tx: &tokio::sync::broadcast::Sender<ClipboardItem>,
 ) {
     // Skip recording when private/pause mode is active
     if private_mode.load(Ordering::Relaxed) {
@@ -204,10 +234,15 @@ async fn handle_tick(
 
     match monitor.poll() {
         Ok(Some(ClipboardContent::Text(text))) => {
-            handle_text(text, db, local_key, config).await;
+            if let Some(item) = handle_text(text, db, local_key, config).await {
+                // Notify cloud-sync push_loop (ignore if no subscribers).
+                let _ = new_item_tx.send(item);
+            }
         }
         Ok(Some(ClipboardContent::Image(raw_bytes))) => {
-            handle_image(raw_bytes, db, local_key, config).await;
+            if let Some(item) = handle_image(raw_bytes, db, local_key, config).await {
+                let _ = new_item_tx.send(item);
+            }
         }
         Ok(None) => {}
         Err(e) => tracing::warn!("clipboard poll error: {e}"),
@@ -219,7 +254,7 @@ async fn handle_text(
     db: &Arc<Mutex<Database>>,
     local_key: &[u8; 32],
     config: &AppConfig,
-) {
+) -> Option<ClipboardItem> {
     let is_sensitive = detect(&text).is_some();
 
     let (nonce, ciphertext) = encrypt_item(text.as_bytes(), local_key);
@@ -244,8 +279,12 @@ async fn handle_text(
                 tracing::warn!("fts index failed for id={}: {e}", item.id);
             }
             prune_history(&db_guard, config);
+            Some(item)
         }
-        Err(e) => tracing::warn!("failed to store text item: {e}"),
+        Err(e) => {
+            tracing::warn!("failed to store text item: {e}");
+            None
+        }
     }
 }
 
@@ -254,7 +293,7 @@ async fn handle_image(
     db: &Arc<Mutex<Database>>,
     local_key: &[u8; 32],
     config: &AppConfig,
-) {
+) -> Option<ClipboardItem> {
     // Derive a stable file_id from the raw bytes hash (first 16 bytes of SHA-256).
     // This gives a deterministic ID for deduplication without storing plaintext.
     use std::collections::hash_map::DefaultHasher;
@@ -294,6 +333,7 @@ async fn handle_image(
                         tracing::warn!("fts empty index failed for image id={}: {e}", item.id);
                     }
                     prune_history(&db_guard, config);
+                    return Some(item);
                 }
                 Err(e) => tracing::warn!("failed to store image item: {e}"),
             }
@@ -302,6 +342,7 @@ async fn handle_image(
             tracing::warn!("image encode failed (skipping): {e}");
         }
     }
+    None
 }
 
 fn prune_history(db: &Database, config: &AppConfig) {
