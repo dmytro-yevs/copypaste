@@ -5,6 +5,8 @@ members = [
     "crates/copypaste-daemon",
     "crates/copypaste-cli",
     "crates/copypaste-relay",
+    "crates/copypaste-p2p",
+    "crates/copypaste-sync",
 ]
 
 [workspace.package]
@@ -23,6 +25,12 @@ sha2 = "0.10"
 zeroize = { version = "1.7", features = ["derive"] }
 rand = "0.8"
 hex = "0.4"
+# P2P TLS (pinned together to keep ring crypto provider consistent)
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
+rcgen = { version = "0.12", default-features = false, features = ["ring"] }
+# mDNS-SD service discovery
+mdns-sd = "0.19"
 # Storage
 rusqlite = { version = "0.31", features = ["bundled-sqlcipher", "backup"] }
 # Config
