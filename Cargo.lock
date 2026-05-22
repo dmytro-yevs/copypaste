@@ -438,7 +438,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "bytes",
@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-supabase"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "futures-util",
  "mockito",
@@ -496,7 +496,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-sync"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "copypaste-core",
  "serde",
