@@ -4,7 +4,7 @@
 ///   - Slint renders the HistoryWindow on the main thread.
 ///   - A dedicated background thread polls the daemon IPC socket.
 ///   - Results are sent back to the Slint event loop via `slint::invoke_from_event_loop`.
-///   - IPC methods used: `history_page` (list), `paste` (activate by id), `status` (health).
+///   - IPC methods: `history_page` (list), `paste` (activate by id), `status` (health).
 ///
 /// Data flow:
 ///   Slint callback → Rust callback closure → IPC call → slint::invoke_from_event_loop → Slint update
@@ -92,6 +92,44 @@ fn main() -> Result<()> {
         });
     }
 
+    // --- Wire: settings-requested ---
+    {
+        let window_weak = window.as_weak();
+        let state = Arc::clone(&state);
+        window.on_settings_requested(move || {
+            let window_weak = window_weak.clone();
+            let socket_path = {
+                let s = state.lock().unwrap();
+                s.socket_path.clone()
+            };
+            std::thread::spawn(move || {
+                // Fetch current settings from daemon and log them.
+                // Full Settings UI to follow in a separate feature branch.
+                let result: Result<ipc_client::AppSettings, String> =
+                    IpcClient::connect(&socket_path)
+                        .map_err(|e| format!("daemon offline: {e}"))
+                        .and_then(|mut c| c.get_settings().map_err(|e| e.to_string()));
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(win) = window_weak.upgrade() {
+                        match result {
+                            Ok(settings) => win.set_status_text(
+                                format!(
+                                    "Settings: p2p={}, supabase={}",
+                                    settings.p2p_enabled,
+                                    settings.supabase_url.as_deref().unwrap_or("(none)")
+                                )
+                                .into(),
+                            ),
+                            Err(e) => win.set_status_text(
+                                format!("Settings error: {e}").into()
+                            ),
+                        }
+                    }
+                });
+            });
+        });
+    }
+
     // --- Wire: load-next-page ---
     {
         let window_weak = window.as_weak();
@@ -100,15 +138,13 @@ fn main() -> Result<()> {
             let window_weak = window_weak.clone();
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
-                let (socket_path, new_offset, total) = {
+                let (socket_path, new_offset) = {
                     let mut s = state.lock().unwrap();
                     let socket = s.socket_path.clone();
-                    // We'll compute total after the call; peek current
                     let offset = s.current_offset + PAGE_SIZE;
                     s.current_offset = offset;
-                    (socket, offset, 0u64)
+                    (socket, offset)
                 };
-                let _ = total; // will come from response
                 let result = load_history_page(&socket_path, PAGE_SIZE, new_offset);
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {

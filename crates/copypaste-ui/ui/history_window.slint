@@ -1,6 +1,7 @@
 // HistoryWindow — CopyPaste clipboard history UI
 // Displays paginated clipboard items from the daemon via IPC.
 // User clicks an item to paste it back to the system clipboard.
+// Settings button opens the app configuration panel.
 
 import { ScrollView, Button, HorizontalBox, VerticalBox, ListView } from "std-widgets.slint";
 
@@ -29,6 +30,7 @@ export component HistoryWindow inherits Window {
     callback refresh-requested();
     callback load-next-page();
     callback load-prev-page();
+    callback settings-requested();  // open settings panel
 
     VerticalBox {
         padding: 8px;
@@ -51,6 +53,11 @@ export component HistoryWindow inherits Window {
                 text: "Refresh";
                 enabled: !loading;
                 clicked => { refresh-requested(); }
+            }
+
+            Button {
+                text: "⚙ Settings";
+                clicked => { settings-requested(); }
             }
         }
 

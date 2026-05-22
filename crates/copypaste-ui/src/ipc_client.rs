@@ -1,4 +1,4 @@
-/// Minimal synchronous IPC client for the copypaste-daemon Unix socket.
+/// Synchronous IPC client for the copypaste-daemon Unix socket.
 ///
 /// Protocol: newline-delimited JSON.
 ///   Request:  {"id":"<req_id>","method":"<method>","params":{...}}
@@ -7,7 +7,12 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use anyhow::{anyhow, Context, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+// ---------------------------------------------------------------------------
+// Wire types
+// ---------------------------------------------------------------------------
 
 /// Wire-level response from the daemon.
 #[derive(Debug)]
@@ -34,6 +39,46 @@ pub struct HistoryPage {
     pub items: Vec<HistoryEntry>,
     pub total: u64,
 }
+
+// ---------------------------------------------------------------------------
+// Settings / config types
+// ---------------------------------------------------------------------------
+
+/// Application configuration persisted via the daemon.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppSettings {
+    #[serde(default)]
+    pub p2p_enabled: bool,
+    #[serde(default)]
+    pub supabase_url: Option<String>,
+    #[serde(default)]
+    pub supabase_anon_key: Option<String>,
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            p2p_enabled: false,
+            supabase_url: None,
+            supabase_anon_key: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Peer types
+// ---------------------------------------------------------------------------
+
+/// A device paired for P2P clipboard sync.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PairedDevice {
+    pub fingerprint: String,
+    pub name: String,
+}
+
+// ---------------------------------------------------------------------------
+// IpcClient
+// ---------------------------------------------------------------------------
 
 pub struct IpcClient {
     stream: UnixStream,
@@ -79,6 +124,10 @@ impl IpcClient {
             error: v["error"].as_str().map(str::to_owned),
         })
     }
+
+    // -----------------------------------------------------------------------
+    // History methods
+    // -----------------------------------------------------------------------
 
     /// Fetch a page of clipboard history from the daemon.
     pub fn history_page(&mut self, limit: u64, offset: u64) -> Result<HistoryPage> {
@@ -133,7 +182,159 @@ impl IpcClient {
             .map(|r| r.ok)
             .unwrap_or(false)
     }
+
+    // -----------------------------------------------------------------------
+    // Settings methods
+    // -----------------------------------------------------------------------
+
+    /// Read the application configuration from the daemon.
+    pub fn get_settings(&mut self) -> Result<AppSettings> {
+        let resp = self.call("get_config", Value::Null)?;
+        if !resp.ok {
+            return Err(anyhow!(
+                "get_config failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ));
+        }
+        let data = resp.data.unwrap_or(Value::Null);
+        let settings: AppSettings = serde_json::from_value(data)
+            .context("invalid AppSettings JSON from daemon")?;
+        Ok(settings)
+    }
+
+    /// Persist application configuration via the daemon.
+    pub fn save_settings(&mut self, settings: &AppSettings) -> Result<()> {
+        let params = serde_json::to_value(settings)
+            .context("failed to serialize AppSettings")?;
+        let resp = self.call("set_config", params)?;
+        if resp.ok {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "set_config failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ))
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // P2P peer methods
+    // -----------------------------------------------------------------------
+
+    /// Return this device's X25519 public key fingerprint.
+    ///
+    /// Returns `Ok(None)` until the daemon implements p2p key management.
+    pub fn get_own_fingerprint(&mut self) -> Result<String> {
+        // TODO: connect once daemon has X25519 key management
+        let resp = self.call("get_own_fingerprint", Value::Null)?;
+        if !resp.ok {
+            return Err(anyhow!(
+                "get_own_fingerprint failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ));
+        }
+        let data = resp.data.unwrap_or(Value::Null);
+        let fp = data["fingerprint"].as_str().unwrap_or("").to_owned();
+        Ok(fp)
+    }
+
+    /// List all paired P2P devices.
+    ///
+    /// Returns an empty list until the daemon implements p2p peer storage.
+    pub fn list_peers(&mut self) -> Result<Vec<PairedDevice>> {
+        // TODO: connect once daemon has p2p peer storage
+        let resp = self.call("list_peers", Value::Null)?;
+        if !resp.ok {
+            return Err(anyhow!(
+                "list_peers failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ));
+        }
+        let data = resp.data.unwrap_or(Value::Null);
+        let raw = data["peers"].as_array().cloned().unwrap_or_default();
+        let peers = raw
+            .into_iter()
+            .filter_map(|v| serde_json::from_value::<PairedDevice>(v).ok())
+            .collect();
+        Ok(peers)
+    }
+
+    /// Initiate pairing with a peer identified by fingerprint.
+    ///
+    /// Returns `Ok(())` immediately; actual pairing is async and not yet implemented.
+    pub fn pair_peer(&mut self, fingerprint: &str, name: &str) -> Result<()> {
+        // TODO: connect once daemon implements PAKE handshake
+        let resp = self.call("pair_peer", serde_json::json!({
+            "fingerprint": fingerprint,
+            "name": name,
+        }))?;
+        if resp.ok {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "pair_peer failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ))
+        }
+    }
+
+    /// Remove a paired peer by fingerprint.
+    pub fn unpair_peer(&mut self, fingerprint: &str) -> Result<()> {
+        // TODO: connect once daemon implements p2p peer storage
+        let resp = self.call("unpair_peer", serde_json::json!({
+            "fingerprint": fingerprint,
+        }))?;
+        if resp.ok {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "unpair_peer failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ))
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Cloud auth methods
+    // -----------------------------------------------------------------------
+
+    /// Sign in to the cloud sync backend with email + password.
+    ///
+    /// Returns `Ok(())` immediately; actual sign-in is a stub until Supabase is wired.
+    pub fn cloud_sign_in(&mut self, email: &str, password: &str) -> Result<()> {
+        // TODO: connect once daemon has Supabase auth integration
+        let resp = self.call("cloud_sign_in", serde_json::json!({
+            "email": email,
+            "password": password,
+        }))?;
+        if resp.ok {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "cloud_sign_in failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ))
+        }
+    }
+
+    /// Sign out from the cloud sync backend.
+    pub fn cloud_sign_out(&mut self) -> Result<()> {
+        // TODO: connect once daemon has Supabase auth integration
+        let resp = self.call("cloud_sign_out", Value::Null)?;
+        if resp.ok {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "cloud_sign_out failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ))
+        }
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Time formatting helpers
+// ---------------------------------------------------------------------------
 
 /// Format Unix epoch milliseconds as a human-readable string without external deps.
 pub fn format_wall_time(ms: i64) -> String {
@@ -185,6 +386,10 @@ fn is_leap(y: u64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,5 +427,27 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nonexistent.sock");
         assert!(IpcClient::connect(&path).is_err());
+    }
+
+    #[test]
+    fn app_settings_default() {
+        let s = AppSettings::default();
+        assert!(!s.p2p_enabled);
+        assert!(s.supabase_url.is_none());
+        assert!(s.supabase_anon_key.is_none());
+    }
+
+    #[test]
+    fn app_settings_round_trip_json() {
+        let s = AppSettings {
+            p2p_enabled: true,
+            supabase_url: Some("https://example.supabase.co".into()),
+            supabase_anon_key: Some("key123".into()),
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let s2: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(s2.p2p_enabled, true);
+        assert_eq!(s2.supabase_url.as_deref(), Some("https://example.supabase.co"));
+        assert_eq!(s2.supabase_anon_key.as_deref(), Some("key123"));
     }
 }

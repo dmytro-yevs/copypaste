@@ -6,6 +6,52 @@ use tokio::sync::Mutex;
 use copypaste_core::{Database, get_page, delete_item, delete_fts, count_items, search_items};
 use crate::protocol::{Request, Response};
 
+/// Persistent application configuration stored at
+/// `dirs::config_dir()/copypaste/config.json`.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct AppConfig {
+    #[serde(default)]
+    pub p2p_enabled: bool,
+    #[serde(default)]
+    pub supabase_url: Option<String>,
+    #[serde(default)]
+    pub supabase_anon_key: Option<String>,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            p2p_enabled: false,
+            supabase_url: None,
+            supabase_anon_key: None,
+        }
+    }
+}
+
+fn config_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|d| d.join("copypaste").join("config.json"))
+}
+
+fn read_config() -> AppConfig {
+    let Some(path) = config_path() else {
+        return AppConfig::default();
+    };
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
+    let path = config_path().ok_or_else(|| anyhow::anyhow!("cannot determine config dir"))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(cfg)?;
+    std::fs::write(&path, json)?;
+    Ok(())
+}
+
 pub struct IpcServer {
     db: Arc<Mutex<Database>>,
     /// Shared private-mode flag. When true, the clipboard monitor skips recording.
@@ -228,6 +274,53 @@ impl IpcServer {
                     }
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
+            }
+            "get_config" => {
+                let cfg = read_config();
+                match serde_json::to_value(&cfg) {
+                    Ok(v) => Response::ok(req.id, v),
+                    Err(e) => Response::err(req.id, e.to_string()),
+                }
+            }
+            "set_config" => {
+                let cfg: AppConfig = match serde_json::from_value(req.params.clone()) {
+                    Ok(c) => c,
+                    Err(e) => return Response::err(req.id, format!("invalid config: {e}")),
+                };
+                match write_config(&cfg) {
+                    Ok(()) => Response::ok(req.id, serde_json::json!({"saved": true})),
+                    Err(e) => Response::err(req.id, e.to_string()),
+                }
+            }
+            // Cloud auth — stubs until Supabase integration lands
+            "cloud_sign_in" => {
+                // TODO: integrate with Supabase auth once credentials are wired
+                tracing::info!("cloud_sign_in stub called");
+                Response::ok(req.id, serde_json::json!({"signed_in": false, "note": "not yet implemented"}))
+            }
+            "cloud_sign_out" => {
+                // TODO: integrate with Supabase auth once credentials are wired
+                tracing::info!("cloud_sign_out stub called");
+                Response::ok(req.id, serde_json::json!({"signed_out": true}))
+            }
+            // P2P peer management — stubs until p2p daemon crate is integrated
+            "get_own_fingerprint" => {
+                // TODO: read X25519 public key fingerprint from keychain once p2p is wired
+                Response::ok(req.id, serde_json::json!({"fingerprint": null, "note": "not yet implemented"}))
+            }
+            "list_peers" => {
+                // TODO: read peer list from p2p store once wired
+                Response::ok(req.id, serde_json::json!({"peers": []}))
+            }
+            "pair_peer" => {
+                // TODO: initiate PAKE handshake once p2p is wired
+                tracing::info!("pair_peer stub called");
+                Response::ok(req.id, serde_json::json!({"paired": false, "note": "not yet implemented"}))
+            }
+            "unpair_peer" => {
+                // TODO: remove peer from store once p2p is wired
+                tracing::info!("unpair_peer stub called");
+                Response::ok(req.id, serde_json::json!({"unpaired": true}))
             }
             "set_private_mode" => {
                 let enabled = match req.params.get("enabled").and_then(|v| v.as_bool()) {
