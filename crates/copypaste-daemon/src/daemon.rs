@@ -2,12 +2,16 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::interval;
+use sha2::{Sha256, Digest};
 use copypaste_core::{
     AppConfig, Database, DeviceKeypair,
     encrypt_item, insert_item, upsert_fts, ClipboardItem,
-    detect,
+    detect, find_recent_by_hash,
 };
 use crate::{clipboard::ClipboardMonitor, ipc::IpcServer, paths};
+
+/// 60 seconds expressed in milliseconds — duplicate window for content dedup.
+const DEDUP_WINDOW_MS: i64 = 60_000;
 
 pub async fn run() -> anyhow::Result<()> {
     let config = load_config();
@@ -40,6 +44,9 @@ pub async fn run() -> anyhow::Result<()> {
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
     let mut ticker = interval(Duration::from_millis(config.poll_interval_ms));
     let mut cleanup_ticks: u64 = 0;
+    // In-memory cache of the last stored content hash — allows skipping the DB
+    // query for consecutive identical clipboard contents (fast path).
+    let mut last_hash: Option<String> = None;
 
     tracing::info!("clipboard monitor started");
 
@@ -50,7 +57,7 @@ pub async fn run() -> anyhow::Result<()> {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &mut last_hash).await;
                     cleanup_ticks += 1;
                     if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
                         cleanup_ticks = 0;
@@ -82,7 +89,7 @@ pub async fn run() -> anyhow::Result<()> {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &mut last_hash).await;
                     cleanup_ticks += 1;
                     if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
                         cleanup_ticks = 0;
@@ -116,22 +123,55 @@ async fn handle_tick(
     db: &Arc<Mutex<Database>>,
     local_key: &[u8; 32],
     config: &AppConfig,
+    last_hash: &mut Option<String>,
 ) {
     match monitor.poll() {
         Ok(Some(content)) => {
             let bytes = content.as_bytes();
             let text = std::str::from_utf8(bytes).unwrap_or("");
+
+            // --- Content deduplication (SHA-256) ---
+            let hash_bytes = Sha256::digest(bytes);
+            let hash_hex = hex::encode(hash_bytes);
+
+            // Fast path: same hash as the very last stored item — skip immediately.
+            if last_hash.as_deref() == Some(hash_hex.as_str()) {
+                tracing::trace!("dedup(fast): skipping identical clipboard content");
+                return;
+            }
+
+            // Slow path: query DB for a matching hash within the last 60 seconds.
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64;
+            {
+                let db_guard = db.lock().await;
+                match find_recent_by_hash(&db_guard, &hash_hex, now_ms, DEDUP_WINDOW_MS) {
+                    Ok(Some(existing_id)) => {
+                        tracing::debug!(
+                            "dedup(db): skipping duplicate, existing id={} hash={}",
+                            existing_id,
+                            &hash_hex[..8],
+                        );
+                        // Update fast-path cache so next tick is O(1).
+                        *last_hash = Some(hash_hex);
+                        return;
+                    }
+                    Ok(None) => {} // Not a duplicate — proceed with insert.
+                    Err(e) => tracing::warn!("dedup query error: {e}"),
+                }
+            }
+            // --- End deduplication ---
+
             let is_sensitive = detect(text).is_some();
 
             let (nonce, ciphertext) = encrypt_item(bytes, local_key);
             let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
             item.is_sensitive = is_sensitive;
+            item.content_hash = Some(hash_hex.clone());
 
             if is_sensitive {
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as i64;
                 item.expires_at = Some(
                     now_ms + (config.sensitive_ttl_local_secs as i64 * 1000),
                 );
@@ -140,6 +180,9 @@ async fn handle_tick(
             let db_guard = db.lock().await;
             match insert_item(&db_guard, &item) {
                 Ok(_) => {
+                    // Update the in-memory fast-path cache.
+                    *last_hash = Some(hash_hex);
+
                     tracing::debug!(
                         "stored item id={} sensitive={}",
                         item.id,

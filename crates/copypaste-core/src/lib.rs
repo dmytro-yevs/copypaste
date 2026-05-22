@@ -13,5 +13,5 @@ pub use storage::{Database, DbError};
 pub use storage::items::{
     ClipboardItem, ItemsError,
     insert_item, get_page, delete_expired, delete_item, count_items,
-    upsert_fts, delete_fts, search_items, pin_item,
+    upsert_fts, delete_fts, search_items, pin_item, find_recent_by_hash,
 };

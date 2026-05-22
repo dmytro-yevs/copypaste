@@ -384,6 +384,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "copypaste-core",
+ "hex",
  "home",
  "objc2",
  "objc2-app-kit",
@@ -391,6 +392,7 @@ dependencies = [
  "security-framework",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror",
  "tokio",

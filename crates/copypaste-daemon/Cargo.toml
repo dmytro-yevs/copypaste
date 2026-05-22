@@ -18,6 +18,8 @@ tracing-subscriber.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 home.workspace = true
+sha2.workspace = true
+hex.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
