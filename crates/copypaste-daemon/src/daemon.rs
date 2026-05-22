@@ -153,6 +153,17 @@ async fn handle_tick(
                     } else if let Err(e) = upsert_fts(&db_guard, &item.id, "") {
                         tracing::warn!("fts empty index failed for id={}: {e}", item.id);
                     }
+                    // Prune oldest items if over history_limit
+                    let total = copypaste_core::count_items(&db_guard).unwrap_or(0) as usize;
+                    if total > config.history_limit {
+                        let excess = total - config.history_limit;
+                        if let Ok(oldest) = copypaste_core::get_page(&db_guard, excess, config.history_limit) {
+                            for old in &oldest {
+                                let _ = copypaste_core::delete_item(&db_guard, &old.id);
+                            }
+                            tracing::debug!("pruned {} items over history_limit={}", excess, config.history_limit);
+                        }
+                    }
                 }
                 Err(e) => tracing::warn!("failed to store item: {e}"),
             }
