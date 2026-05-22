@@ -8,6 +8,7 @@ use std::time::Instant;
 use crate::auth::BearerToken;
 use crate::error::RelayError;
 use crate::models::{PollParams, PollResponse, UploadRequest, UploadResponse};
+use crate::quota::{self, QuotaViolation, Tier};
 use crate::state::{AppState, RelayItem};
 
 pub async fn poll(
@@ -65,16 +66,21 @@ pub async fn upload(
         ));
     }
 
+    // Enforce per-tier item size quota before acquiring the state lock.
+    // The handler uses the free-tier limit as a conservative pre-check.
+    // (A future enhancement could look up the sender's tier from the token.)
+    // For safety, we always apply the most restrictive tier (Free) as a hard cap
+    // at the HTTP layer; the content-type-aware limit is checked here.
+    quota::check_item_size(Tier::Free, ct_bytes.len(), &body.content_type).map_err(
+        |v| match v {
+            QuotaViolation::ItemTooLarge { limit_bytes } => {
+                RelayError::ItemSizeExceeded { limit_bytes }
+            }
+            _ => unreachable!(),
+        },
+    )?;
+
     let mut store = state.lock().expect("state mutex poisoned");
-
-    // Validate size against config.
-    // (ct_bytes is the decoded payload — check against max_item_bytes)
-    // We need access to config here; pass it via a separate extractor or
-    // embed limit check using store knowledge. For Phase 2b we use 10 MB default.
-    if ct_bytes.len() > 10 * 1024 * 1024 {
-        return Err(RelayError::PayloadTooLarge);
-    }
-
     store.verify_token(&device_id, &token)?;
 
     let item = RelayItem {
@@ -87,7 +93,6 @@ pub async fn upload(
         uploaded_at: Instant::now(),
     };
 
-    // Use a dummy config with defaults for fan-out (size check already done above).
     let config = crate::config::RelayConfig::default();
     let fanned_out_to = store.upload_item(item, &config);
 

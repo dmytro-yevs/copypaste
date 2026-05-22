@@ -20,6 +20,8 @@ mod config;
 mod error;
 #[path = "../src/models.rs"]
 mod models;
+#[path = "../src/quota.rs"]
+mod quota;
 #[path = "../src/state.rs"]
 mod state;
 #[path = "../src/auth.rs"]
