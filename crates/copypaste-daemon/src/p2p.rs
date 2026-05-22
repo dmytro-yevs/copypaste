@@ -3,6 +3,11 @@
 //! Stubs out the mTLS listener, mDNS registration/browse, and broadcast
 //! subscriber.  Full implementation lands when copypaste-p2p and
 //! copypaste-sync are merged via the intg-p2p-crates branch.
+//
+// TODO(wave1.3): wire pairing helpers (get/list/pair/unpair_peer) to
+// `crate::keychain::own_fingerprint` for stable peer identifiers — currently
+// no pairing API surface lives in this file; it will be added together with
+// the mTLS upgrade in intg-p2p-crates.
 
 use std::sync::Arc;
 
