@@ -43,5 +43,10 @@ tray-icon = "0.19"
 # PNG decoding for the tray icon asset
 png = "0.17"
 
+[[test]]
+name = "integration_ipc"
+path = "tests/integration_ipc.rs"
+
 [dev-dependencies]
 tempfile = "3"
+serde_json = "1"
