@@ -36,6 +36,7 @@ impl IpcServer {
         }
     }
 
+    #[tracing::instrument(skip_all, name = "ipc_connection")]
     async fn handle_connection(&self, stream: UnixStream) -> anyhow::Result<()> {
         let (reader, mut writer) = stream.into_split();
         let mut lines = BufReader::new(reader).lines();
@@ -49,11 +50,15 @@ impl IpcServer {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), fields(method), name = "ipc_dispatch")]
     async fn dispatch(&self, line: &str) -> Response {
         let req: Request = match serde_json::from_str(line) {
             Ok(r) => r,
             Err(e) => return Response::err("?", format!("parse error: {e}")),
         };
+
+        tracing::Span::current().record("method", &req.method.as_str());
+        tracing::debug!(method = %req.method, id = %req.id, "IPC request");
 
         match req.method.as_str() {
             "list" => {
