@@ -64,5 +64,6 @@ pub use transport::{
 pub use discovery::{DiscoveryService, PeerInfo, SERVICE_TYPE};
 pub use error::DiscoveryError;
 
+
 /// Default TCP port for P2P direct connections.
 pub const DEFAULT_P2P_PORT: u16 = 51515;
