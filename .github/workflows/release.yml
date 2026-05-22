@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: copypaste-daemon
+            package: copypaste-daemon
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary: copypaste
+            package: copypaste-cli
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: copypaste-relay
+            package: copypaste-relay
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.75
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.75"
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: release-${{ matrix.target }}-${{ matrix.package }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        env:
+          PACKAGE: ${{ matrix.package }}
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release -p "$PACKAGE" --target "$TARGET"
+
+      - name: Package
+        env:
+          BINARY: ${{ matrix.binary }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p dist
+          cp "target/$TARGET/release/$BINARY" dist/
+          tar -czf "dist/${BINARY}-${TARGET}.tar.gz" -C dist "$BINARY"
+          rm "dist/$BINARY"
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.tar.gz
+          generate_release_notes: true
