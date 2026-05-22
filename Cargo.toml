@@ -48,7 +48,9 @@ objc2-app-kit = { version = "0.2", features = ["NSPasteboard"] }
 # macOS Keychain
 security-framework = "2"
 # Logging subscriber
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Rotating file appender for daemon logs
+tracing-appender = "0.2"
 # home dir (pinned <0.5.10 to avoid edition2024 requirement on Rust 1.75)
 home = "=0.5.9"
 # error handling
