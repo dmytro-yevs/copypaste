@@ -24,4 +24,5 @@ thiserror.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-tempfile = "3"
+# Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+
+tempfile = ">=3.0, <3.14"
