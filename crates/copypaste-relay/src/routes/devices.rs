@@ -82,21 +82,19 @@ pub async fn get_device(
     let record = store.get_device(&device_id)?;
 
     // Convert Instant → wall-clock by computing elapsed and subtracting from now.
-    let elapsed_secs = record.registered_at.elapsed().as_secs();
     let now_unix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
-    let registered_at_unix = now_unix - elapsed_secs as i64;
-    let registered_at = unix_to_rfc3339(registered_at_unix);
-    let expires_at = unix_to_rfc3339(record.expires_at_unix);
+    let elapsed_secs = record.registered_at.elapsed().as_secs() as i64;
+    let registered_at_unix = now_unix - elapsed_secs;
 
     Ok(Json(DeviceInfoResponse {
         device_id: record.device_id.clone(),
         device_name: record.device_name.clone(),
         public_key_b64: record.public_key_b64.clone(),
-        registered_at,
-        expires_at,
+        registered_at: unix_to_rfc3339(registered_at_unix),
+        expires_at: unix_to_rfc3339(record.expires_at_unix),
     }))
 }
 
@@ -104,17 +102,10 @@ pub async fn get_device(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Convert a Unix timestamp (seconds) to an RFC-3339 string.
-/// This is a zero-dependency implementation that avoids pulling in `chrono`.
-fn unix_to_rfc3339(unix: i64) -> String {
-    // Use SystemTime to format via std only — no external dep.
-    // We format as UTC: YYYY-MM-DDTHH:MM:SSZ
-    let secs = unix as u64;
+fn unix_to_rfc3339(unix_secs: i64) -> String {
+    let secs = unix_secs.max(0) as u64;
     let (year, month, day, hour, min, sec) = epoch_to_date(secs);
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        year, month, day, hour, min, sec
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
 }
 
 /// Convert Unix epoch seconds to (year, month, day, hour, min, sec) in UTC.

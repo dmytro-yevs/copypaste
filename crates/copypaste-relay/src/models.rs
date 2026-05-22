@@ -82,6 +82,44 @@ pub struct PollParams {
 }
 
 // ---------------------------------------------------------------------------
+// Items — push/pull (wall-clock sync protocol)
+// ---------------------------------------------------------------------------
+
+/// Request body for POST /devices/:id/items (push protocol)
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct PushRequest {
+    pub content_type: String,
+    pub content_b64: String,
+    pub wall_time: u64,
+}
+
+/// Response body for POST /devices/:id/items
+#[derive(Debug, Serialize)]
+#[allow(dead_code)]
+pub struct PushResponse {
+    pub id: i64,
+}
+
+/// Single item returned by GET /devices/:id/items (pull protocol)
+#[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
+pub struct PullItem {
+    pub id: i64,
+    pub content_type: String,
+    pub content_b64: String,
+    pub wall_time: u64,
+}
+
+/// Query params for GET /devices/:id/items?since=<wall_time>
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+pub struct PullParams {
+    #[serde(default)]
+    pub since: u64,
+}
+
+// ---------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------
 

@@ -6,8 +6,12 @@ use base64::Engine;
 use std::time::Instant;
 
 use crate::auth::BearerToken;
+use crate::config::RelayConfig;
 use crate::error::RelayError;
-use crate::models::{PollParams, PollResponse, UploadRequest, UploadResponse};
+use crate::models::{
+    PollParams, PollResponse, PullItem, PullParams, PushRequest, PushResponse, UploadRequest,
+    UploadResponse,
+};
 use crate::quota::{self, QuotaViolation, Tier};
 use crate::state::{AppState, RelayItem};
 
@@ -111,4 +115,48 @@ pub async fn delete_item(
     store.verify_token(&device_id, &token)?;
     store.delete_item(&device_id, &item_id)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Push / Pull — wall-clock sync routes
+// POST /devices/:id/items  — push an encrypted item into the device's inbox.
+// GET  /devices/:id/items?since=<wall_time> — pull items newer than wall_time.
+// ---------------------------------------------------------------------------
+
+/// POST /devices/:device_id/items (push protocol)
+#[allow(dead_code)]
+pub async fn push(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    BearerToken(token): BearerToken,
+    Json(body): Json<PushRequest>,
+) -> Result<(StatusCode, Json<PushResponse>), RelayError> {
+    let mut store = state.lock().expect("state mutex poisoned");
+    store.verify_token(&device_id, &token)?;
+
+    let max_item_bytes = RelayConfig::default().max_item_bytes;
+
+    let id = store.push_item(
+        &device_id,
+        body.content_type,
+        body.content_b64,
+        body.wall_time,
+        max_item_bytes,
+    )?;
+
+    Ok((StatusCode::CREATED, Json(PushResponse { id })))
+}
+
+/// GET /devices/:device_id/items?since=<wall_time> (pull protocol)
+#[allow(dead_code)]
+pub async fn pull(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+    BearerToken(token): BearerToken,
+    Query(params): Query<PullParams>,
+) -> Result<Json<Vec<PullItem>>, RelayError> {
+    let store = state.lock().expect("state mutex poisoned");
+    store.verify_token(&device_id, &token)?;
+    let items = store.pull_items(&device_id, params.since)?;
+    Ok(Json(items))
 }
