@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Create dev user. On macOS Docker Desktop UID mapping works transparently.
+# On Linux hosts: run `docker compose exec -u root dev chown -R 1000:1000 /workspace/target`
+# if you see permission errors on the target/ volume.
 RUN useradd -m -u 1000 dev
 USER dev
 

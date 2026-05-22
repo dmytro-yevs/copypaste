@@ -15,6 +15,7 @@ services:
     tty: true
     stdin_open: true
     command: bash
+    restart: unless-stopped
 
   relay:
     build:

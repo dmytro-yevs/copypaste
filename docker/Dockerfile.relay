@@ -1,7 +1,6 @@
-FROM rust:1.75-slim-bookworm AS builder
-WORKDIR /workspace
-
+# Placeholder for Phase 2 — relay server binary built in Phase 2
+# Final form will be: FROM scratch with compiled copypaste-relay binary
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 EXPOSE 8080
-CMD ["echo", "Relay server - build in Phase 2"]
+CMD ["echo", "Relay server placeholder — build target for Phase 2"]
