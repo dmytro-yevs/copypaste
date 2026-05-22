@@ -1,4 +1,4 @@
-.PHONY: build release bundle dmg test smoke-test bench check fmt clippy install-daemon clean
+.PHONY: build release bundle dmg test smoke-test bench check fmt clippy install-daemon install uninstall clean
 
 build:
 	cargo build --workspace
@@ -32,6 +32,14 @@ clippy:
 
 install-daemon:
 	./launch/install.sh
+
+## Install pre-built binary + LaunchAgent (macOS)
+install:
+	./scripts/install-daemon.sh
+
+## Unload LaunchAgent and remove plist (binary kept unless REMOVE_BINARY=1)
+uninstall:
+	./scripts/uninstall-daemon.sh
 
 install-daemon-linux:
 	./contrib/systemd/install.sh
