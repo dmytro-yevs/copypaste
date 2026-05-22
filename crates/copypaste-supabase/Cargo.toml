@@ -1,0 +1,22 @@
+[package]
+name = "copypaste-supabase"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Supabase Realtime WebSocket client (Phoenix Channel) for CopyPaste sync"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util = "0.3"
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "rt", "macros", "time", "sync"] }

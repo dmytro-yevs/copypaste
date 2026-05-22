@@ -5,6 +5,7 @@ members = [
     "crates/copypaste-daemon",
     "crates/copypaste-cli",
     "crates/copypaste-relay",
+    "crates/copypaste-supabase",
 ]
 
 [workspace.package]
@@ -59,3 +60,5 @@ clap = { version = ">=4.0, <4.5.40", features = ["derive"] }
 base64 = "0.22"
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
+# WebSocket (pinned <=0.23 to remain compatible with Rust 1.75 / tokio 1.x)
+tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
