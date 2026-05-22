@@ -2,7 +2,9 @@
 
 mod daemon;
 mod keychain;
+// clipboard is now a module directory (clipboard/mod.rs)
 mod clipboard;
+// ipc is now a module directory (ipc/mod.rs) with platform sub-modules
 mod ipc;
 mod paths;
 mod platform;

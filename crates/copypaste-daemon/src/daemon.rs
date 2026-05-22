@@ -7,7 +7,7 @@ use copypaste_core::{
     encrypt_item, insert_item, upsert_fts, ClipboardItem,
     detect,
 };
-use crate::{clipboard::ClipboardMonitor, ipc::IpcServer, paths};
+use crate::{clipboard::{ClipboardMonitor, ClipboardMonitorTrait}, ipc::IpcServer, paths};
 
 pub async fn run() -> anyhow::Result<()> {
     let config = load_config();
