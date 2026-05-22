@@ -23,6 +23,7 @@ home.workspace = true
 sha2.workspace = true
 hex.workspace = true
 dirs = "5"
+uuid.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true

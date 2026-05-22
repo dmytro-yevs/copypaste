@@ -7,6 +7,8 @@ mod ipc;
 mod keychain;
 mod launchd;
 mod logging;
+mod p2p;
+mod peers;
 mod paths;
 mod platform;
 mod protocol;
