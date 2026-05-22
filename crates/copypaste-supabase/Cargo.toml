@@ -1,0 +1,23 @@
+[package]
+name = "copypaste-supabase"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Supabase GoTrue auth client for CopyPaste"
+
+[lib]
+name = "copypaste_supabase"
+path = "src/lib.rs"
+
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "rt", "macros"] }
+# mockito 0.31 supports Rust 1.75 and doesn't require edition 2024 deps
+mockito = "0.31"

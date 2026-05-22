@@ -5,6 +5,7 @@ members = [
     "crates/copypaste-daemon",
     "crates/copypaste-cli",
     "crates/copypaste-relay",
+    "crates/copypaste-supabase",
 ]
 
 [workspace.package]
@@ -57,5 +58,7 @@ anyhow = "1"
 clap = { version = ">=4.0, <4.5.40", features = ["derive"] }
 # Base64 encoding
 base64 = "0.22"
+# HTTP client (pin <0.12 to stay on rustls/hyper compatible with Rust 1.75)
+reqwest = { version = ">=0.11, <0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
