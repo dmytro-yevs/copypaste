@@ -1,0 +1,22 @@
+[Unit]
+Description=CopyPaste clipboard manager daemon
+Documentation=https://github.com/user/copypaste
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/copypaste-daemon
+Restart=on-failure
+RestartSec=5s
+Environment=RUST_LOG=info
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/Library/Application Support/CopyPaste
+PrivateTmp=true
+
+[Install]
+WantedBy=graphical-session.target
