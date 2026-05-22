@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 use tokio::time::interval;
 use copypaste_core::{
     AppConfig, Database, DeviceKeypair,
-    encrypt_item, insert_item, ClipboardItem,
+    encrypt_item, insert_item, upsert_fts, ClipboardItem,
     detect,
 };
 use crate::{clipboard::ClipboardMonitor, ipc::IpcServer, paths};
@@ -22,7 +22,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     let db_path = paths::db_path();
     let db = Arc::new(Mutex::new(
-        Database::open(&db_path)
+        Database::open(&db_path, &local_key)
             .map_err(|e| anyhow::anyhow!("Database: {e}"))?
     ));
     tracing::info!("database opened at {}", db_path.display());
@@ -110,11 +110,21 @@ async fn handle_tick(
 
             let db_guard = db.lock().await;
             match insert_item(&db_guard, &item) {
-                Ok(_) => tracing::debug!(
-                    "stored item id={} sensitive={}",
-                    item.id,
-                    is_sensitive
-                ),
+                Ok(_) => {
+                    tracing::debug!(
+                        "stored item id={} sensitive={}",
+                        item.id,
+                        is_sensitive
+                    );
+                    // Index plaintext for FTS5 before encryption is discarded
+                    if item.content_type == "text" {
+                        if let Err(e) = upsert_fts(&db_guard, &item.id, text) {
+                            tracing::warn!("fts index failed for id={}: {e}", item.id);
+                        }
+                    } else if let Err(e) = upsert_fts(&db_guard, &item.id, "") {
+                        tracing::warn!("fts empty index failed for id={}: {e}", item.id);
+                    }
+                }
                 Err(e) => tracing::warn!("failed to store item: {e}"),
             }
         }

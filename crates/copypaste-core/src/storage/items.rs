@@ -93,6 +93,76 @@ pub fn count_items(db: &Database) -> Result<i64, ItemsError> {
     Ok(db.conn().query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))?)
 }
 
+/// Insert or replace a plaintext snippet into the FTS5 index.
+/// `plaintext` must already be decrypted by the caller.
+/// Call this once per item after `insert_item`.
+pub fn upsert_fts(db: &Database, id: &str, plaintext: &str) -> Result<(), ItemsError> {
+    // FTS5 does not support ON CONFLICT; DELETE + INSERT is the correct upsert pattern.
+    db.conn().execute(
+        "DELETE FROM clipboard_fts WHERE id = ?1",
+        params![id],
+    )?;
+    db.conn().execute(
+        "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, ?2)",
+        params![id, plaintext],
+    )?;
+    Ok(())
+}
+
+/// Remove an item's entry from the FTS5 index.
+/// Call this after `delete_item` or `delete_expired`.
+pub fn delete_fts(db: &Database, id: &str) -> Result<(), ItemsError> {
+    db.conn().execute(
+        "DELETE FROM clipboard_fts WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(())
+}
+
+/// Search clipboard items by full-text query.
+/// Returns up to `limit` full `ClipboardItem` rows ordered by FTS5 rank (best match first).
+///
+/// Two-phase fetch: (1) query FTS5 for matching IDs ordered by rank, (2) fetch full rows from
+/// clipboard_items by IN-list, then re-sort in Rust to restore FTS rank order.
+pub fn search_items(db: &Database, query: &str, limit: usize) -> Result<Vec<ClipboardItem>, ItemsError> {
+    if query.trim().is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Phase 1: collect matching IDs ordered by FTS5 rank
+    let mut fts_stmt = db.conn().prepare(
+        "SELECT id FROM clipboard_fts WHERE content_text MATCH ?1 ORDER BY rank LIMIT ?2",
+    )?;
+    let ids: Vec<String> = fts_stmt
+        .query_map(params![query, limit as i64], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Phase 2: fetch full rows from clipboard_items using a dynamic IN-list.
+    // Each placeholder is a separate `?` bound via params_from_iter.
+    let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let sql = format!(
+        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id
+         FROM clipboard_items
+         WHERE id IN ({})",
+        placeholders,
+    );
+
+    let mut stmt = db.conn().prepare(&sql)?;
+    let mut rows: Vec<ClipboardItem> = stmt
+        .query_map(rusqlite::params_from_iter(ids.iter()), row_to_item)?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Re-sort to match FTS5 rank order (IN-list returns rows in storage order)
+    rows.sort_by_key(|item| ids.iter().position(|id| id == &item.id).unwrap_or(usize::MAX));
+
+    Ok(rows)
+}
+
 fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
     Ok(ClipboardItem {
         id: row.get(0)?,
@@ -162,5 +232,119 @@ mod tests {
         insert_item(&db, &item).unwrap();
         delete_item(&db, &id).unwrap();
         assert_eq!(count_items(&db).unwrap(), 0);
+    }
+
+    // --- Task 1: upsert_fts ---
+
+    #[test]
+    fn upsert_fts_inserts_and_replaces() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+
+        upsert_fts(&db, &item.id, "hello world").unwrap();
+
+        let count: i64 = db.conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                params![item.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // Upsert again with different text — must not duplicate
+        upsert_fts(&db, &item.id, "updated text").unwrap();
+        let count2: i64 = db.conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                params![item.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count2, 1);
+    }
+
+    // --- Task 2: delete_fts ---
+
+    #[test]
+    fn delete_fts_removes_fts_entry() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        upsert_fts(&db, &item.id, "some text").unwrap();
+
+        delete_fts(&db, &item.id).unwrap();
+
+        let count: i64 = db.conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                params![item.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn delete_fts_nonexistent_id_is_ok() {
+        let db = Database::open_in_memory().unwrap();
+        // Should not error even if id doesn't exist
+        delete_fts(&db, "nonexistent-id").unwrap();
+    }
+
+    // --- Task 3: search_items ---
+
+    #[test]
+    fn search_items_finds_matching_text() {
+        let db = Database::open_in_memory().unwrap();
+        let item1 = make_item(1);
+        let item2 = make_item(2);
+        insert_item(&db, &item1).unwrap();
+        insert_item(&db, &item2).unwrap();
+        upsert_fts(&db, &item1.id, "hello world clipboard").unwrap();
+        upsert_fts(&db, &item2.id, "rust programming language").unwrap();
+
+        let results = search_items(&db, "hello", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, item1.id);
+    }
+
+    #[test]
+    fn search_items_empty_query_returns_empty() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        upsert_fts(&db, &item.id, "hello world").unwrap();
+
+        let results = search_items(&db, "", 10).unwrap();
+        assert_eq!(results.len(), 0);
+
+        let results2 = search_items(&db, "   ", 10).unwrap();
+        assert_eq!(results2.len(), 0);
+    }
+
+    #[test]
+    fn search_items_no_match_returns_empty() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        upsert_fts(&db, &item.id, "hello world").unwrap();
+
+        let results = search_items(&db, "nonexistentword", 10).unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn search_items_respects_limit() {
+        let db = Database::open_in_memory().unwrap();
+        for i in 0..5 {
+            let item = make_item(i);
+            insert_item(&db, &item).unwrap();
+            upsert_fts(&db, &item.id, "common search term").unwrap();
+        }
+
+        let results = search_items(&db, "common", 3).unwrap();
+        assert_eq!(results.len(), 3);
     }
 }

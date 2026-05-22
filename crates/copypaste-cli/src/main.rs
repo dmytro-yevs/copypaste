@@ -44,6 +44,13 @@ enum Commands {
         /// Item ID (UUID)
         id: String,
     },
+    /// Export clipboard history as JSON
+    Export {
+        #[arg(long, default_value_t = 1000)]
+        limit: u64,
+        #[arg(long, short)]
+        output: Option<String>,
+    },
 }
 
 fn main() {
@@ -57,6 +64,7 @@ fn main() {
         Commands::Delete { id } => commands::delete::run(&socket, &id),
         Commands::Search { query, limit } => commands::search::run(&socket, &query, limit),
         Commands::Copy { id } => commands::copy::run(&socket, &id),
+        Commands::Export { limit, output } => commands::export::run(&socket, limit, output.as_deref()),
     };
 
     if let Err(e) = result {

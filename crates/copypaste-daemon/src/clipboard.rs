@@ -43,7 +43,7 @@ impl ClipboardMonitor {
 
             let (count, content) = unsafe {
                 let pb = NSPasteboard::generalPasteboard();
-                let count = pb.changeCount();
+                let count = pb.changeCount() as i64;
                 let s = pb.stringForType(NSPasteboardTypeString);
                 (count, s.map(|ns| ns.to_string()))
             };
