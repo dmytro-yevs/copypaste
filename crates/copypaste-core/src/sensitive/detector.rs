@@ -82,6 +82,26 @@ mod tests {
     #[test]
     fn credit_card_detected_short_line_only() { assert!(detect("4111111111111111").is_some()); }
     #[test]
+    fn detects_slack_bot_token() {
+        assert!(detect("xoxb-17653285717-17653285718-AbCdEfGhIjKlMnOpQrStUvWx").is_some());
+    }
+    #[test]
+    fn detects_slack_webhook() {
+        assert!(detect("https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX").is_some());
+    }
+    #[test]
+    fn detects_stripe_webhook_secret() {
+        assert!(detect("whsec_aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStT").is_some());
+    }
+    #[test]
+    fn detects_google_api_key() {
+        assert!(detect("AIzaSyD-9tSrke72EmVt4TenJheB96ABCDE12345").is_some());
+    }
+    #[test]
+    fn detects_github_actions_token() {
+        assert!(detect("ghs_16C7e42F292c6912E7710c838347Ae178B4a").is_some());
+    }
+    #[test]
     fn pattern_match_completes_in_5ms_on_10mb_text() {
         let big = "a".repeat(10_000_000);
         let start = std::time::Instant::now();
