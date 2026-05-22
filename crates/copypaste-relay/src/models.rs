@@ -7,14 +7,34 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize)]
 pub struct RegisterRequest {
     pub device_id: String,
+    /// Human-readable device name (1–64 characters).
+    pub device_name: String,
     /// Base64-standard-encoded X25519 public key (must decode to exactly 32 bytes).
-    pub public_key: String,
+    /// Accepted as both `public_key_b64` (preferred) and `public_key` (legacy alias).
+    #[serde(alias = "public_key")]
+    pub public_key_b64: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct RegisterResponse {
     pub device_id: String,
-    pub bearer_token: String,
+    /// Opaque bearer token the device must use for all subsequent requests.
+    pub auth_token: String,
+    /// RFC-3339 timestamp after which the token expires (1 year from registration).
+    pub expires_at: String,
+}
+
+// ---------------------------------------------------------------------------
+// Device info
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct DeviceInfoResponse {
+    pub device_id: String,
+    pub device_name: String,
+    pub public_key_b64: String,
+    pub registered_at: String,
+    pub expires_at: String,
 }
 
 // ---------------------------------------------------------------------------

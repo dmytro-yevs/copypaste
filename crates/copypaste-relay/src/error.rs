@@ -17,6 +17,7 @@ pub enum RelayError {
     PayloadTooLarge,
     #[error("item not found")]
     ItemNotFound,
+<<<<<<< HEAD
     /// Returned when the account has reached the maximum number of registered devices.
     #[error("device quota exceeded: maximum {limit} devices allowed for this tier")]
     DeviceQuotaExceeded { limit: usize },
@@ -27,6 +28,10 @@ pub enum RelayError {
     #[allow(dead_code)]
     #[error("history quota exceeded: maximum {limit} items allowed for this tier")]
     HistoryQuotaExceeded { limit: usize },
+=======
+    #[error("device quota exceeded: maximum free-tier devices reached")]
+    QuotaExceeded,
+>>>>>>> feature/relay-device-register
 }
 
 impl RelayError {
@@ -38,6 +43,7 @@ impl RelayError {
             RelayError::BadRequest(_) => (StatusCode::BAD_REQUEST, "BAD_REQUEST"),
             RelayError::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "PAYLOAD_TOO_LARGE"),
             RelayError::ItemNotFound => (StatusCode::NOT_FOUND, "ITEM_NOT_FOUND"),
+<<<<<<< HEAD
             RelayError::DeviceQuotaExceeded { .. } => {
                 (StatusCode::FORBIDDEN, "DEVICE_QUOTA_EXCEEDED")
             }
@@ -47,6 +53,9 @@ impl RelayError {
             RelayError::HistoryQuotaExceeded { .. } => {
                 (StatusCode::FORBIDDEN, "HISTORY_QUOTA_EXCEEDED")
             }
+=======
+            RelayError::QuotaExceeded => (StatusCode::FORBIDDEN, "QUOTA_EXCEEDED"),
+>>>>>>> feature/relay-device-register
         }
     }
 }
@@ -109,6 +118,7 @@ mod tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn device_quota_exceeded_is_403() {
         assert_eq!(
             status_of(RelayError::DeviceQuotaExceeded { limit: 5 }),
@@ -132,5 +142,9 @@ mod tests {
             status_of(RelayError::HistoryQuotaExceeded { limit: 1000 }),
             StatusCode::FORBIDDEN
         );
+=======
+    fn quota_exceeded_is_403() {
+        assert_eq!(status_of(RelayError::QuotaExceeded), StatusCode::FORBIDDEN);
+>>>>>>> feature/relay-device-register
     }
 }

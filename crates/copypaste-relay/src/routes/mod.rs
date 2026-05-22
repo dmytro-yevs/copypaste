@@ -60,8 +60,16 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
             .expect("invalid per-device governor configuration"),
     );
 
+<<<<<<< HEAD
     // ---- Device-scoped item routes (per-device + per-IP limits) ------------
     let item_routes = Router::new()
+=======
+    Router::new()
+        .route("/health", get(health::handle))
+        .route("/stats", get(stats_handler))
+        .route("/devices", get(list_devices_handler).post(devices::register))
+        .route("/devices/:device_id", get(devices::get_device))
+>>>>>>> feature/relay-device-register
         .route(
             "/devices/:device_id/items",
             get(items::poll).post(items::upload),
