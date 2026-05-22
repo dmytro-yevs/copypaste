@@ -1301,6 +1301,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "tray-icon",
+ "uuid",
 ]
 
 [[package]]
@@ -1321,7 +1322,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
