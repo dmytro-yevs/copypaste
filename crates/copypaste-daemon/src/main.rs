@@ -1,18 +1,20 @@
 #![allow(dead_code)]
 
-mod daemon;
-mod keychain;
 mod clipboard;
+mod daemon;
 mod ipc;
+mod keychain;
+mod logging;
 mod paths;
 mod platform;
 mod protocol;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    // Initialise structured logging (rotating file + stderr).
+    // The guard MUST be kept alive until the process exits so that buffered
+    // log lines are flushed before the non-blocking writer shuts down.
+    let _log_guard = logging::init();
 
     let support_dir = paths::app_support_dir();
     std::fs::create_dir_all(&support_dir)?;
