@@ -76,6 +76,30 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo clippy -p copypaste-core -p copypaste-cli -p copypaste-relay -- -D warnings
 
+  # Dedicated cargo check on Windows to verify cross-platform compatibility
+  # (complements the test matrix — runs check without requiring full test suite).
+  check-windows:
+    name: Windows cargo check (cross-platform)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.75
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.75"
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-check
+
+      - name: Check cross-platform crates
+        run: cargo check -p copypaste-core -p copypaste-cli -p copypaste-relay
+
+      - name: Check workspace (excluding macOS-only daemon)
+        run: cargo check --workspace --exclude copypaste-daemon
+
   # Dedicated macOS job for the daemon with Keychain integration tests.
   test-macos-daemon:
     name: macOS daemon (Keychain)
