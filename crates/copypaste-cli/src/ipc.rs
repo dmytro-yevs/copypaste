@@ -8,6 +8,7 @@ use serde_json::Value;
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct Response {
+    #[allow(dead_code)]
     pub id: String,
     pub ok: bool,
     pub data: Option<Value>,
