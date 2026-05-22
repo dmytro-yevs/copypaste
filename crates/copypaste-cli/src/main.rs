@@ -39,6 +39,11 @@ enum Commands {
         #[arg(long, default_value_t = 20)]
         limit: u64,
     },
+    /// Copy a clipboard item back to the system clipboard
+    Copy {
+        /// Item ID (UUID)
+        id: String,
+    },
 }
 
 fn main() {
@@ -51,6 +56,7 @@ fn main() {
         Commands::Count => commands::count::run(&socket),
         Commands::Delete { id } => commands::delete::run(&socket, &id),
         Commands::Search { query, limit } => commands::search::run(&socket, &query, limit),
+        Commands::Copy { id } => commands::copy::run(&socket, &id),
     };
 
     if let Err(e) = result {
