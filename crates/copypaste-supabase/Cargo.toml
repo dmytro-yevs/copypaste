@@ -25,4 +25,5 @@ uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "rt", "macros", "time", "sync"] }
+# mockito 0.31 supports Rust 1.75 and doesn't require edition 2024 deps
 mockito = "0.31"
