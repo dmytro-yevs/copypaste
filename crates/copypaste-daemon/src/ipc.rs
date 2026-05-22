@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
@@ -7,11 +8,13 @@ use crate::protocol::{Request, Response};
 
 pub struct IpcServer {
     db: Arc<Mutex<Database>>,
+    /// Shared private-mode flag. When true, the clipboard monitor skips recording.
+    private_mode: Arc<AtomicBool>,
 }
 
 impl IpcServer {
-    pub fn new(db: Arc<Mutex<Database>>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<Mutex<Database>>, private_mode: Arc<AtomicBool>) -> Self {
+        Self { db, private_mode }
     }
 
     pub async fn serve(self, socket_path: &std::path::Path) -> anyhow::Result<()> {
@@ -199,7 +202,23 @@ impl IpcServer {
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
             }
-            "status" => Response::ok(req.id, serde_json::json!({"status": "running"})),
+            "set_private_mode" => {
+                let enabled = match req.params.get("enabled").and_then(|v| v.as_bool()) {
+                    Some(b) => b,
+                    None => return Response::err(req.id, "missing param: enabled (bool)"),
+                };
+                self.private_mode.store(enabled, Ordering::Relaxed);
+                tracing::info!("private mode set to {enabled}");
+                Response::ok(req.id, serde_json::json!({"private_mode": enabled}))
+            }
+            "get_private_mode" => {
+                let enabled = self.private_mode.load(Ordering::Relaxed);
+                Response::ok(req.id, serde_json::json!({"private_mode": enabled}))
+            }
+            "status" => {
+                let enabled = self.private_mode.load(Ordering::Relaxed);
+                Response::ok(req.id, serde_json::json!({"status": "running", "private_mode": enabled}))
+            }
             other => Response::err(req.id, format!("unknown method: {other}")),
         }
     }
@@ -213,14 +232,23 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
 
-    async fn start_test_server(socket_path: &std::path::Path) {
+    async fn start_test_server(socket_path: &std::path::Path) -> Arc<AtomicBool> {
+        start_test_server_with_mode(socket_path, false).await
+    }
+
+    async fn start_test_server_with_mode(
+        socket_path: &std::path::Path,
+        initial_private_mode: bool,
+    ) -> Arc<AtomicBool> {
         let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
-        let server = IpcServer::new(db);
+        let private_mode = Arc::new(AtomicBool::new(initial_private_mode));
+        let server = IpcServer::new(db, private_mode.clone());
         let path = socket_path.to_path_buf();
         tokio::spawn(async move {
             server.serve(&path).await.ok();
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        private_mode
     }
 
     #[tokio::test]
@@ -357,5 +385,143 @@ mod tests {
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], true);
         assert!(resp["data"]["deleted"].as_i64().is_some());
+    }
+
+    // --- private mode IPC tests ---
+
+    #[tokio::test]
+    async fn get_private_mode_returns_false_by_default() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("pm_get_default.sock");
+        start_test_server(&sock).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream.write_all(b"{\"id\":\"1\",\"method\":\"get_private_mode\"}\n").await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], true);
+        assert_eq!(resp["data"]["private_mode"], false);
+    }
+
+    #[tokio::test]
+    async fn set_private_mode_enable_then_get() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("pm_set_enable.sock");
+        start_test_server(&sock).await;
+
+        // Enable private mode — first connection
+        {
+            let mut stream = UnixStream::connect(&sock).await.unwrap();
+            stream
+                .write_all(b"{\"id\":\"1\",\"method\":\"set_private_mode\",\"params\":{\"enabled\":true}}\n")
+                .await
+                .unwrap();
+            let mut lines = BufReader::new(&mut stream).lines();
+            let line = lines.next_line().await.unwrap().unwrap();
+            let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(resp["ok"], true);
+            assert_eq!(resp["data"]["private_mode"], true);
+        }
+
+        // Verify get_private_mode reflects the change — second connection
+        {
+            let mut stream2 = UnixStream::connect(&sock).await.unwrap();
+            stream2
+                .write_all(b"{\"id\":\"2\",\"method\":\"get_private_mode\"}\n")
+                .await
+                .unwrap();
+            let mut lines2 = BufReader::new(&mut stream2).lines();
+            let line2 = lines2.next_line().await.unwrap().unwrap();
+            let resp2: serde_json::Value = serde_json::from_str(&line2).unwrap();
+            assert_eq!(resp2["ok"], true);
+            assert_eq!(resp2["data"]["private_mode"], true);
+        }
+    }
+
+    #[tokio::test]
+    async fn set_private_mode_then_disable() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("pm_disable.sock");
+        start_test_server_with_mode(&sock, true).await;
+
+        // Confirm it starts enabled — first connection
+        {
+            let mut stream = UnixStream::connect(&sock).await.unwrap();
+            stream
+                .write_all(b"{\"id\":\"1\",\"method\":\"get_private_mode\"}\n")
+                .await
+                .unwrap();
+            let mut lines = BufReader::new(&mut stream).lines();
+            let line = lines.next_line().await.unwrap().unwrap();
+            let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(resp["data"]["private_mode"], true);
+        }
+
+        // Disable — second connection
+        {
+            let mut stream2 = UnixStream::connect(&sock).await.unwrap();
+            stream2
+                .write_all(b"{\"id\":\"2\",\"method\":\"set_private_mode\",\"params\":{\"enabled\":false}}\n")
+                .await
+                .unwrap();
+            let mut lines2 = BufReader::new(&mut stream2).lines();
+            let line2 = lines2.next_line().await.unwrap().unwrap();
+            let resp2: serde_json::Value = serde_json::from_str(&line2).unwrap();
+            assert_eq!(resp2["ok"], true);
+            assert_eq!(resp2["data"]["private_mode"], false);
+        }
+    }
+
+    #[tokio::test]
+    async fn set_private_mode_missing_param_returns_error() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("pm_missing.sock");
+        start_test_server(&sock).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"1\",\"method\":\"set_private_mode\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], false);
+        assert!(resp["error"].as_str().unwrap().contains("enabled"));
+    }
+
+    #[tokio::test]
+    async fn status_includes_private_mode_field() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("status_pm.sock");
+        start_test_server(&sock).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream.write_all(b"{\"id\":\"1\",\"method\":\"status\"}\n").await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], true);
+        assert_eq!(resp["data"]["status"], "running");
+        assert!(resp["data"]["private_mode"].is_boolean());
+    }
+
+    #[tokio::test]
+    async fn set_private_mode_updates_shared_atomic() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("pm_atomic.sock");
+        let flag = start_test_server(&sock).await;
+
+        // Initially false
+        assert!(!flag.load(Ordering::Relaxed));
+
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"1\",\"method\":\"set_private_mode\",\"params\":{\"enabled\":true}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let _line = lines.next_line().await.unwrap().unwrap();
+
+        // The shared atomic should now be true
+        assert!(flag.load(Ordering::Relaxed));
     }
 }

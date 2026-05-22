@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::interval;
@@ -29,14 +30,19 @@ pub async fn run() -> anyhow::Result<()> {
     ));
     tracing::info!("database opened at {}", db_path.display());
 
+    // Shared private-mode flag: when true, the clipboard monitor skips recording.
+    // This is set/cleared via the IPC `set_private_mode` command.
+    let private_mode = Arc::new(AtomicBool::new(false));
+
     #[cfg(unix)]
     let socket_path = paths::socket_path();
     #[cfg(unix)]
     {
         let ipc_db = db.clone();
+        let ipc_private_mode = private_mode.clone();
         let socket_clone = socket_path.clone();
         tokio::spawn(async move {
-            let server = IpcServer::new(ipc_db);
+            let server = IpcServer::new(ipc_db, ipc_private_mode);
             if let Err(e) = server.serve(&socket_clone).await {
                 tracing::error!("IPC server error: {e}");
             }
@@ -56,7 +62,7 @@ pub async fn run() -> anyhow::Result<()> {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode).await;
                     cleanup_ticks += 1;
                     if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
                         cleanup_ticks = 0;
@@ -88,7 +94,7 @@ pub async fn run() -> anyhow::Result<()> {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode).await;
                     cleanup_ticks += 1;
                     if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
                         cleanup_ticks = 0;
@@ -124,7 +130,16 @@ async fn handle_tick(
     db: &Arc<Mutex<Database>>,
     local_key: &[u8; 32],
     config: &AppConfig,
+    private_mode: &Arc<AtomicBool>,
 ) {
+    // Skip recording when private/pause mode is active
+    if private_mode.load(Ordering::Relaxed) {
+        // Still poll to advance the change-count so we don't replay on resume
+        let _ = monitor.poll();
+        tracing::debug!("private mode active: skipping clipboard recording");
+        return;
+    }
+
     match monitor.poll() {
         Ok(Some(content)) => {
             let bytes = content.as_bytes();

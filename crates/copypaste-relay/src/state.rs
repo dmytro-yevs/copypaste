@@ -27,6 +27,7 @@ const MAX_ITEMS_PER_DEVICE: usize = 500;
 #[allow(dead_code)]
 pub struct DeviceRecord {
     pub device_id: String,
+    #[allow(dead_code)]
     pub public_key_b64: String,
     /// Bearer token: first 32 hex characters of SHA-256(decoded_public_key_bytes).
     pub bearer_token: String,

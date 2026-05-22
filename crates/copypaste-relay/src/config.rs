@@ -10,6 +10,7 @@ pub struct RelayConfig {
     /// Maximum allowed decoded size of a single ciphertext payload in bytes (default: 10 MiB)
     pub max_item_bytes: usize,
     /// Maximum number of items stored per device inbox (default: 1000)
+    #[allow(dead_code)]
     pub max_items_per_device: usize,
 }
 
