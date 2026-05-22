@@ -118,6 +118,7 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[tracing::instrument(skip_all, name = "clipboard_tick")]
 async fn handle_tick(
     monitor: &mut ClipboardMonitor,
     db: &Arc<Mutex<Database>>,
@@ -180,6 +181,7 @@ async fn handle_tick(
     }
 }
 
+#[tracing::instrument(name = "load_local_key")]
 fn load_local_key() -> [u8; 32] {
     #[cfg(target_os = "macos")]
     {
@@ -203,6 +205,7 @@ fn load_local_key() -> [u8; 32] {
     }
 }
 
+#[tracing::instrument(name = "load_config")]
 fn load_config() -> AppConfig {
     let path = paths::config_path();
     AppConfig::load(&path).unwrap_or_else(|_| {
