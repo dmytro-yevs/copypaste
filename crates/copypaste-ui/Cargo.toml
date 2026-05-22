@@ -1,0 +1,19 @@
+[package]
+name = "copypaste-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+slint = "=1.8.0"
+
+[build-dependencies]
+slint-build = "=1.8.0"
+
+[dev-dependencies]
+serde_json.workspace = true
