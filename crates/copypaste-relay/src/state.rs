@@ -24,6 +24,7 @@ const MAX_ITEMS_PER_DEVICE: usize = 500;
 // Domain types
 // ---------------------------------------------------------------------------
 
+#[allow(dead_code)]
 pub struct DeviceRecord {
     pub device_id: String,
     pub public_key_b64: String,

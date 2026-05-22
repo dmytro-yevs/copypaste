@@ -10,10 +10,16 @@ pub fn app_support_dir() -> PathBuf {
 }
 
 pub fn socket_path() -> PathBuf {
+    if let Ok(p) = std::env::var("COPYPASTE_SOCKET") {
+        return PathBuf::from(p);
+    }
     app_support_dir().join("daemon.sock")
 }
 
 pub fn db_path() -> PathBuf {
+    if let Ok(p) = std::env::var("COPYPASTE_DB") {
+        return PathBuf::from(p);
+    }
     app_support_dir().join("clipboard.db")
 }
 
