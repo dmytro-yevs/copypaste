@@ -23,6 +23,10 @@ pub struct ClipboardItem {
     pub wall_time: i64,
     pub expires_at: Option<i64>,
     pub app_bundle_id: Option<String>,
+    /// SHA-256 hex digest of the raw (pre-encryption) content bytes.
+    /// Used for deduplication: skip insert if an identical hash was stored
+    /// within the last 60 seconds.
+    pub content_hash: Option<String>,
 }
 
 impl ClipboardItem {
@@ -44,6 +48,7 @@ impl ClipboardItem {
             wall_time: now,
             expires_at: None,
             app_bundle_id: None,
+            content_hash: None,
         }
     }
 }
@@ -52,23 +57,50 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
     db.conn().execute(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
-          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+          content_hash)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
         params![
             item.id, item.item_id, item.content_type,
             item.content, item.content_nonce, item.blob_ref,
             item.is_sensitive as i64, item.is_synced as i64,
             item.lamport_ts, item.wall_time, item.expires_at,
-            item.app_bundle_id,
+            item.app_bundle_id, item.content_hash,
         ],
     )?;
     Ok(())
 }
 
+/// Find the id of an item with the given content hash stored within the last
+/// `within_ms` milliseconds. Returns `None` if no such item exists.
+///
+/// Used by the daemon to skip inserting duplicate clipboard content.
+pub fn find_recent_by_hash(
+    db: &Database,
+    hash: &str,
+    now_ms: i64,
+    within_ms: i64,
+) -> Result<Option<String>, ItemsError> {
+    let cutoff = now_ms - within_ms;
+    let result = db.conn().query_row(
+        "SELECT id FROM clipboard_items
+         WHERE content_hash = ?1 AND wall_time >= ?2
+         ORDER BY wall_time DESC LIMIT 1",
+        params![hash, cutoff],
+        |row| row.get::<_, String>(0),
+    );
+    match result {
+        Ok(id) => Ok(Some(id)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(ItemsError::Sqlite(e)),
+    }
+}
+
 pub fn get_page(db: &Database, limit: usize, offset: usize) -> Result<Vec<ClipboardItem>, ItemsError> {
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
-                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+                content_hash
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt.query_map(params![limit as i64, offset as i64], row_to_item)?
@@ -155,7 +187,8 @@ pub fn search_items(db: &Database, query: &str, limit: usize) -> Result<Vec<Clip
     let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
     let sql = format!(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
-                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+                content_hash
          FROM clipboard_items
          WHERE id IN ({})",
         placeholders,
@@ -186,6 +219,7 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
         wall_time: row.get(9)?,
         expires_at: row.get(10)?,
         app_bundle_id: row.get(11)?,
+        content_hash: row.get(12)?,
     })
 }
 

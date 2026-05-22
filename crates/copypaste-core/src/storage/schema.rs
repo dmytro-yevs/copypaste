@@ -7,7 +7,7 @@ pub enum SchemaError {
     Sqlite(#[from] rusqlite::Error),
 }
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
@@ -22,7 +22,20 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         return Ok(());
     }
 
-    conn.execute_batch(include_str!("schema_v1.sql"))?;
+    if current_version < 1 {
+        conn.execute_batch(include_str!("schema_v1.sql"))?;
+    }
+
+    if current_version < 2 {
+        // Migration v2: add content_hash column for SHA-256-based deduplication.
+        // ALTER TABLE is used (not DROP/CREATE) to preserve existing data.
+        conn.execute_batch(
+            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;
+             CREATE INDEX IF NOT EXISTS idx_clipboard_content_hash
+                 ON clipboard_items(content_hash) WHERE content_hash IS NOT NULL;",
+        )?;
+    }
+
     conn.execute_batch(&format!("PRAGMA user_version={};", SCHEMA_VERSION))?;
     Ok(())
 }
