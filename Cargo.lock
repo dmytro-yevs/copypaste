@@ -347,7 +347,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "copypaste-cli"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "chacha20poly1305",
  "criterion",
@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "copypaste-core",
@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-relay"
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 dependencies = [
  "anyhow",
  "axum",

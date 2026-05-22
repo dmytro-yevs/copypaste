@@ -1,37 +1,29 @@
 # Changelog
 
-All notable changes are documented here.
-
-## [Unreleased]
-
-### Added (Phase 2a-3 + extras)
-- FTS5 full-text search in clipboard history (`search` IPC + CLI command)
-- SQLCipher at-rest encryption (in progress)
-- Tauri 2 macOS menu bar app with tray icon, search, copy, delete
-- Relay SQLite persistence (survives restarts)
-- Relay v2: constant-time token auth, rate limiting (60 req/min), 500-item quota
-- Android UniFFI Rust crate skeleton + Kotlin app scaffold
-- CLI: `search`, `copy`, `watch`, `export`, `clear`, `stats` commands
-- Platform abstraction traits (ClipboardBackend, KeystoreBackend) for Windows/Linux
-- GitHub Actions CI/CD matrix (ubuntu + macos) + release pipeline
-- Criterion benchmarks for crypto operations
-- ADR documents: XChaCha20 choice, Unix socket IPC, SQLCipher
-- `history_limit` enforcement: daemon prunes oldest items after each insert
-
-### Fixed
-- Zeroized IKM copy in `local_enc_key()` (security fix)
-
-## [0.1.0] — Phase 0+1 — 2026-05-22
+## [0.1.0-alpha.1] - 2026-05-23
 
 ### Added
-- `copypaste-core`: XChaCha20-Poly1305 encryption, X25519 keypair, HKDF key derivation
-- `copypaste-core`: SQLite WAL storage with FTS5 schema
-- `copypaste-core`: Sensitive data detection (20+ pattern types: AWS, GitHub, Stripe, JWT...)
-- `copypaste-core`: AppConfig with TOML load/save
-- `copypaste-daemon`: macOS clipboard monitor (NSPasteboard polling)
-- `copypaste-daemon`: macOS Keychain key storage
-- `copypaste-daemon`: Unix socket IPC (list/delete/count/status)
-- `copypaste-daemon`: launchd user agent integration
-- `copypaste-relay`: HTTP REST relay server (device registration, item sync)
-- `copypaste-cli`: CLI with list/count/delete/status/copy/search/watch/export/clear/stats
-- Docker Compose dev environment (Rust 1.75)
+- macOS clipboard history daemon (NSPasteboard monitor, SQLite + SQLCipher storage)
+- Unix IPC socket protocol (list, search, copy/paste-back, stats, pin, private mode)
+- Full-text search (FTS5) over clipboard history
+- CLI: list, search, copy (INDEX/--id/--search/--list), stats, watch, export, import, clear, pin
+- Slint UI: HistoryWindow with paginated history, IPC wiring, dark Catppuccin theme
+- Slint UI: SettingsWindow + PairWindow (fingerprint display, device pairing)
+- macOS system tray icon (tray-icon crate) + launchd autostart
+- XChaCha20-Poly1305 at-rest encryption for all clipboard content
+- Sensitive data detection (27 password manager patterns, auto-wipe TTL)
+- Private/pause mode (IPC toggle, daemon stops recording)
+- SHA-256 content deduplication (60s window)
+- Relay server: HTTP REST (Axum), device auth, push/pull sync, rate limiting, quotas
+- P2P stack: mDNS-SD discovery, mutual TLS (rustls/rcgen), Lamport+LWW sync engine
+- Supabase cloud sync: GoTrue auth, Realtime WebSocket (Phoenix Channel)
+- Image clipboard: PNG/TIFF capture + WebP + chunked XChaCha20 encryption
+- Android skeleton: UniFFI Rust↔Kotlin bindings, ClipboardService, SyncManager
+- Windows: named-pipe IPC stub, platform abstraction traits
+- CI: GitHub Actions (macOS + Windows matrix, cargo test + clippy + audit)
+- Structured logging: rotating file appender, env-filter (COPYPASTE_LOG)
+
+### Platform Support
+- macOS 12+ (primary)
+- Android (alpha skeleton)
+- Windows (compilation stubs)
