@@ -30,19 +30,45 @@ impl LamportClock {
     }
 
     /// Advance the clock for a local event and return the new value.
+    ///
+    /// Uses `saturating_add` to prevent overflow panic at `u64::MAX`.
+    /// At saturation, the clock remains at `u64::MAX` and a warning is logged once.
     pub fn tick(&mut self) -> u64 {
-        self.value += 1;
+        if self.value == u64::MAX {
+            warn_saturated();
+            return self.value;
+        }
+        self.value = self.value.saturating_add(1);
         self.value
     }
 
     /// Advance the clock upon receiving a message timestamped `received`.
     ///
-    /// Sets `value = max(local, received) + 1` per the Lamport rule.
+    /// Sets `value = max(local, received).saturating_add(1)` per the Lamport rule,
+    /// with saturation to avoid panic at `u64::MAX`.
     /// Returns the new value (which should be stamped on the reply).
     pub fn observe(&mut self, received: u64) -> u64 {
-        self.value = self.value.max(received) + 1;
+        let base = self.value.max(received);
+        if base == u64::MAX {
+            warn_saturated();
+            self.value = u64::MAX;
+            return self.value;
+        }
+        self.value = base.saturating_add(1);
         self.value
     }
+}
+
+/// Log a single warning when the Lamport clock saturates at `u64::MAX`.
+///
+/// Uses `OnceLock` to ensure the warning is only emitted once per process
+/// (preventing log spam if the clock stays at saturation).
+fn warn_saturated() {
+    use std::sync::OnceLock;
+    static WARNED: OnceLock<()> = OnceLock::new();
+    WARNED.get_or_init(|| {
+        tracing::warn!("lamport clock saturated at u64::MAX — subsequent ticks/observes are no-ops");
+    });
 }
 
 #[cfg(test)]
@@ -90,5 +116,56 @@ mod tests {
     fn from_value_restores_state() {
         let c = LamportClock::from_value(42);
         assert_eq!(c.get(), 42);
+    }
+
+    // --- Saturation tests (edge-cases CRITICAL #3) ---
+
+    #[test]
+    fn tick_saturates_at_u64_max() {
+        let mut c = LamportClock::from_value(u64::MAX);
+        // Should NOT panic on overflow.
+        let v = c.tick();
+        assert_eq!(v, u64::MAX, "tick at u64::MAX must stay at u64::MAX");
+        assert_eq!(c.get(), u64::MAX);
+        // Repeated ticks remain at MAX.
+        let v2 = c.tick();
+        assert_eq!(v2, u64::MAX);
+    }
+
+    #[test]
+    fn tick_one_below_max_saturates() {
+        let mut c = LamportClock::from_value(u64::MAX - 1);
+        // First tick reaches exactly MAX.
+        assert_eq!(c.tick(), u64::MAX);
+        // Next tick should saturate, not panic.
+        assert_eq!(c.tick(), u64::MAX);
+    }
+
+    #[test]
+    fn observe_saturates_at_u64_max() {
+        let mut c = LamportClock::from_value(u64::MAX);
+        // observe with local already at MAX — must not panic.
+        let v = c.observe(u64::MAX);
+        assert_eq!(v, u64::MAX, "observe at u64::MAX must stay at u64::MAX");
+        assert_eq!(c.get(), u64::MAX);
+    }
+
+    #[test]
+    fn observe_received_max_saturates() {
+        let mut c = LamportClock::from_value(5);
+        // observe a peer at MAX — must not panic.
+        let v = c.observe(u64::MAX);
+        assert_eq!(v, u64::MAX);
+        assert_eq!(c.get(), u64::MAX);
+    }
+
+    #[test]
+    fn observe_just_below_max_saturates() {
+        let mut c = LamportClock::from_value(u64::MAX - 1);
+        // max(u64::MAX-1, u64::MAX-1) + 1 = u64::MAX
+        let v = c.observe(u64::MAX - 1);
+        assert_eq!(v, u64::MAX);
+        // Next observe should saturate.
+        assert_eq!(c.observe(0), u64::MAX);
     }
 }

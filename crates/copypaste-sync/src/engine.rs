@@ -305,7 +305,18 @@ impl SyncEngine {
 
         for wire in received_items {
             // Advance clock with the item's timestamp.
-            self.clock.observe(wire.lamport_ts as u64);
+            // Saturating cast: negative i64 → 0; otherwise the same value.
+            // observe() itself uses saturating_add internally (edge-cases LOW #34).
+            let observed = if wire.lamport_ts < 0 {
+                warn!(
+                    "received wire item {} with negative lamport_ts {} — clamping to 0",
+                    wire.id, wire.lamport_ts
+                );
+                0u64
+            } else {
+                wire.lamport_ts as u64
+            };
+            self.clock.observe(observed);
 
             if let Some(existing) = local_by_id.get(wire.id.as_str()) {
                 // Item exists locally — apply LWW merge.
@@ -591,6 +602,80 @@ mod tests {
         let t2 = engine.on_local_write();
         assert_eq!(t1, 1);
         assert_eq!(t2, 2);
+    }
+
+    #[tokio::test]
+    async fn identical_everything_merge_is_idempotent() {
+        // edge-cases MEDIUM #16: merging the exact same item twice must not
+        // mutate local state on the second pass. Verifies LWW determinism
+        // for fully-identical (lamport, wall, device, payload) items.
+        let shared = make_item("item-shared", 5);
+
+        // Round 1: A and B exchange and both end up holding `shared`.
+        let mut engine_a = SyncEngine::new("device-A");
+        let mut engine_b = SyncEngine::new("device-B");
+        let (mut sa, mut sb) = make_duplex();
+        let items_a = [shared.clone()];
+        let items_b = [shared.clone()];
+        let (r1_a, r1_b) = tokio::join!(
+            engine_a.run_session(&mut sa, &items_a),
+            engine_b.run_session(&mut sb, &items_b),
+        );
+        let (_, upsert_a_1) = r1_a.unwrap();
+        let (_, upsert_b_1) = r1_b.unwrap();
+        // First pass: both have it already, nothing to upsert.
+        assert!(upsert_a_1.is_empty(), "round 1: A should not upsert");
+        assert!(upsert_b_1.is_empty(), "round 1: B should not upsert");
+
+        // Round 2: identical inputs again → still no-op (idempotent).
+        let (mut sa2, mut sb2) = make_duplex();
+        let (r2_a, r2_b) = tokio::join!(
+            engine_a.run_session(&mut sa2, &items_a),
+            engine_b.run_session(&mut sb2, &items_b),
+        );
+        let (res_a_2, upsert_a_2) = r2_a.unwrap();
+        let (res_b_2, upsert_b_2) = r2_b.unwrap();
+
+        assert!(upsert_a_2.is_empty(), "round 2 must be idempotent on A");
+        assert!(upsert_b_2.is_empty(), "round 2 must be idempotent on B");
+        assert_eq!(res_a_2.items_received, 0);
+        assert_eq!(res_b_2.items_received, 0);
+        assert_eq!(res_a_2.items_sent, 0);
+        assert_eq!(res_b_2.items_sent, 0);
+    }
+
+    #[tokio::test]
+    async fn negative_lamport_does_not_panic() {
+        // edge-cases LOW #34: a malicious/buggy peer sends a wire item with
+        // negative lamport_ts; engine must clamp and not panic from the cast.
+        let item = ClipboardItem {
+            id: "neg".to_string(),
+            item_id: "neg-item".to_string(),
+            content_type: "text".to_string(),
+            content: Some(vec![0x01]),
+            content_nonce: Some(vec![0u8; 24]),
+            blob_ref: None,
+            is_sensitive: false,
+            is_synced: false,
+            lamport_ts: -1, // negative
+            wall_time: 1_700_000_000_000,
+            expires_at: None,
+            app_bundle_id: None,
+            content_hash: None,
+        };
+
+        let mut engine_a = SyncEngine::new("device-A");
+        let mut engine_b = SyncEngine::new("device-B");
+        let (mut sa, mut sb) = make_duplex();
+        let items_a: [ClipboardItem; 0] = [];
+        let items_b = [item];
+        let (res_a, res_b) = tokio::join!(
+            engine_a.run_session(&mut sa, &items_a),
+            engine_b.run_session(&mut sb, &items_b),
+        );
+        // Must not panic — both sides return Ok.
+        assert!(res_a.is_ok());
+        assert!(res_b.is_ok());
     }
 
     #[tokio::test]
