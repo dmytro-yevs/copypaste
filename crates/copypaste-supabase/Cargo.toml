@@ -1,0 +1,28 @@
+[package]
+name = "copypaste-supabase"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Supabase GoTrue auth + Realtime WebSocket client for CopyPaste"
+
+[lib]
+name = "copypaste_supabase"
+path = "src/lib.rs"
+
+[dependencies]
+# Auth (GoTrue HTTP client)
+reqwest = { workspace = true }
+# Realtime (Phoenix Channel WebSocket)
+tokio-tungstenite = { workspace = true }
+futures-util = "0.3"
+# Shared
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "rt", "macros", "time", "sync"] }
+mockito = "0.31"
