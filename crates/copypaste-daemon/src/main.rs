@@ -3,6 +3,7 @@
 mod daemon;
 mod keychain;
 mod clipboard;
+#[cfg(unix)]
 mod ipc;
 mod paths;
 mod platform;

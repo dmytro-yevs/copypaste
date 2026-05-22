@@ -7,7 +7,9 @@ use copypaste_core::{
     encrypt_item, insert_item, upsert_fts, ClipboardItem,
     detect,
 };
-use crate::{clipboard::ClipboardMonitor, ipc::IpcServer, paths};
+use crate::{clipboard::ClipboardMonitor, paths};
+#[cfg(unix)]
+use crate::ipc::IpcServer;
 
 pub async fn run() -> anyhow::Result<()> {
     let config = load_config();
@@ -27,15 +29,19 @@ pub async fn run() -> anyhow::Result<()> {
     ));
     tracing::info!("database opened at {}", db_path.display());
 
-    let ipc_db = db.clone();
+    #[cfg(unix)]
     let socket_path = paths::socket_path();
-    let socket_clone = socket_path.clone();
-    tokio::spawn(async move {
-        let server = IpcServer::new(ipc_db);
-        if let Err(e) = server.serve(&socket_clone).await {
-            tracing::error!("IPC server error: {e}");
-        }
-    });
+    #[cfg(unix)]
+    {
+        let ipc_db = db.clone();
+        let socket_clone = socket_path.clone();
+        tokio::spawn(async move {
+            let server = IpcServer::new(ipc_db);
+            if let Err(e) = server.serve(&socket_clone).await {
+                tracing::error!("IPC server error: {e}");
+            }
+        });
+    }
 
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
     let mut ticker = interval(Duration::from_millis(config.poll_interval_ms));
@@ -106,6 +112,7 @@ pub async fn run() -> anyhow::Result<()> {
         }
     }
 
+    #[cfg(unix)]
     let _ = std::fs::remove_file(&socket_path);
     tracing::info!("daemon stopped");
     Ok(())

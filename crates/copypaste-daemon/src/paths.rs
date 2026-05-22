@@ -9,6 +9,7 @@ pub fn app_support_dir() -> PathBuf {
         .join(APP_NAME)
 }
 
+#[cfg(unix)]
 pub fn socket_path() -> PathBuf {
     if let Ok(p) = std::env::var("COPYPASTE_SOCKET") {
         return PathBuf::from(p);
