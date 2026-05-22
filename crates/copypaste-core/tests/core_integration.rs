@@ -4,7 +4,8 @@ use tempfile::tempdir;
 #[test]
 fn full_encrypt_store_retrieve_decrypt_flow() {
     let dir = tempdir().unwrap();
-    let db = Database::open(dir.path().join("test.db")).unwrap();
+    let key = [0x00u8; 32]; // deterministic test key
+    let db = Database::open(dir.path().join("test.db"), &key).unwrap();
 
     let alice = DeviceKeypair::generate();
     let bob = DeviceKeypair::generate();

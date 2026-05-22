@@ -182,6 +182,19 @@ impl IpcServer {
                     "version": "1"
                 }))
             }
+            "pin" => {
+                // Pin an item (remove expiry so it's never auto-deleted)
+                let id = match req.params.get("id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => return Response::err(req.id, "missing param: id"),
+                };
+                let db = self.db.lock().await;
+                match copypaste_core::pin_item(&db, &id) {
+                    Ok(true) => Response::ok(req.id, serde_json::json!({"pinned": true, "id": id})),
+                    Ok(false) => Response::err(req.id, format!("item not found: {id}")),
+                    Err(e) => Response::err(req.id, e.to_string()),
+                }
+            }
             "status" => Response::ok(req.id, serde_json::json!({"status": "running"})),
             other => Response::err(req.id, format!("unknown method: {other}")),
         }

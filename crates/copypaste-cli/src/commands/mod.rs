@@ -5,5 +5,6 @@ pub mod delete;
 pub mod export;
 pub mod list;
 pub mod search;
+pub mod stats;
 pub mod status;
 pub mod watch;

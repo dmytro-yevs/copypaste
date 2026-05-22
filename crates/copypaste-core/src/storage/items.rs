@@ -89,6 +89,16 @@ pub fn delete_item(db: &Database, id: &str) -> Result<(), ItemsError> {
     Ok(())
 }
 
+/// Pin an item by removing its expiry (sets `expires_at = NULL`).
+/// Returns `Ok(true)` if a row was updated, `Ok(false)` if the id was not found.
+pub fn pin_item(db: &Database, id: &str) -> Result<bool, ItemsError> {
+    let changed = db.conn().execute(
+        "UPDATE clipboard_items SET expires_at = NULL WHERE id = ?1",
+        params![id],
+    )?;
+    Ok(changed > 0)
+}
+
 pub fn count_items(db: &Database) -> Result<i64, ItemsError> {
     Ok(db.conn().query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))?)
 }

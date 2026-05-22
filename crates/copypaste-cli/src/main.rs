@@ -63,6 +63,8 @@ enum Commands {
         #[arg(long, short)]
         force: bool,
     },
+    /// Show clipboard statistics
+    Stats,
 }
 
 fn main() {
@@ -79,6 +81,7 @@ fn main() {
         Commands::Export { limit, output } => commands::export::run(&socket, limit, output.as_deref()),
         Commands::Watch { interval } => commands::watch::run(&socket, interval),
         Commands::Clear { force } => commands::clear::run(&socket, force),
+        Commands::Stats => commands::stats::run(&socket),
     };
 
     if let Err(e) = result {
