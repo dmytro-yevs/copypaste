@@ -4,6 +4,8 @@ mod daemon;
 mod keychain;
 mod clipboard;
 mod ipc;
+mod p2p;
+mod peers;
 mod paths;
 mod platform;
 mod protocol;

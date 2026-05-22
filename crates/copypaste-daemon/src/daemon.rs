@@ -1,13 +1,13 @@
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 use tokio::time::interval;
 use copypaste_core::{
     AppConfig, Database, DeviceKeypair,
     encrypt_item, insert_item, upsert_fts, ClipboardItem,
     detect,
 };
-use crate::{clipboard::ClipboardMonitor, ipc::IpcServer, paths};
+use crate::{clipboard::ClipboardMonitor, ipc::IpcServer, p2p, paths};
 
 pub async fn run() -> anyhow::Result<()> {
     let config = load_config();
@@ -37,6 +37,47 @@ pub async fn run() -> anyhow::Result<()> {
         }
     });
 
+    // Broadcast channel: carries newly-inserted clipboard items to any
+    // subscriber (P2P sync, future extensions).  Capacity 64 — lagging
+    // receivers drop oldest items and log a warning.
+    let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(64);
+
+    // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
+    let _p2p_handle: Option<p2p::P2pHandle> = if std::env::var("COPYPASTE_P2P").as_deref() == Ok("1") {
+        let device_id = uuid::Uuid::new_v4();
+        let device_name = std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("COMPUTERNAME"))
+            .unwrap_or_else(|_| "CopyPaste".to_string());
+
+        let p2p_config = p2p::P2pConfig {
+            listen_port: 0,
+            device_name,
+            enabled: true,
+        };
+
+        match p2p::start_p2p(
+            p2p_config,
+            db.clone(),
+            device_id,
+            local_key,
+            new_item_tx.subscribe(),
+        )
+        .await
+        {
+            Ok(handle) => {
+                tracing::info!(port = handle.actual_port, "P2P subsystem running");
+                Some(handle)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to start P2P subsystem: {e}");
+                None
+            }
+        }
+    } else {
+        tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
+        None
+    };
+
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
     let mut ticker = interval(Duration::from_millis(config.poll_interval_ms));
     let mut cleanup_ticks: u64 = 0;
@@ -50,7 +91,7 @@ pub async fn run() -> anyhow::Result<()> {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &new_item_tx).await;
                     cleanup_ticks += 1;
                     if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
                         cleanup_ticks = 0;
@@ -82,7 +123,7 @@ pub async fn run() -> anyhow::Result<()> {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &new_item_tx).await;
                     cleanup_ticks += 1;
                     if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
                         cleanup_ticks = 0;
@@ -116,6 +157,7 @@ async fn handle_tick(
     db: &Arc<Mutex<Database>>,
     local_key: &[u8; 32],
     config: &AppConfig,
+    new_item_tx: &broadcast::Sender<ClipboardItem>,
 ) {
     match monitor.poll() {
         Ok(Some(content)) => {
@@ -145,6 +187,11 @@ async fn handle_tick(
                         item.id,
                         is_sensitive
                     );
+                    // Broadcast to P2P subscribers (and any future consumer).
+                    // A send error only means there are no active receivers —
+                    // that is normal when P2P is disabled.
+                    let _ = new_item_tx.send(item.clone());
+
                     // Index plaintext for FTS5 before encryption is discarded
                     if item.content_type == "text" {
                         if let Err(e) = upsert_fts(&db_guard, &item.id, text) {
