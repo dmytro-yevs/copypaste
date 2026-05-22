@@ -137,7 +137,7 @@ impl IpcServer {
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
             }
-            "copy" => {
+            "copy" | "paste" => {
                 let id = match req.params.get("id").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
                     None => return Response::err(req.id, "missing param: id"),
@@ -146,14 +146,14 @@ impl IpcServer {
                 match copypaste_core::get_page(&db, 1000, 0) {
                     Ok(items) => {
                         if let Some(item) = items.iter().find(|i| i.id == id) {
-                            // Note: we don't have the key here (it's in daemon.rs state)
-                            // For now return item metadata — full decrypt support in next phase
-                            Response::ok(req.id, serde_json::json!({
-                                "id": item.id,
-                                "content_type": item.content_type,
-                                "found": true,
-                                "note": "copy-to-clipboard requires daemon v2 with key access"
-                            }))
+                            match Self::write_to_pasteboard(item) {
+                                Ok(()) => Response::ok(req.id, serde_json::json!({
+                                    "id": item.id,
+                                    "content_type": item.content_type,
+                                    "written": true,
+                                })),
+                                Err(e) => Response::err(req.id, format!("pasteboard write failed: {e}")),
+                            }
                         } else {
                             Response::err(req.id, format!("item not found: {id}"))
                         }
@@ -220,6 +220,61 @@ impl IpcServer {
                 Response::ok(req.id, serde_json::json!({"status": "running", "private_mode": enabled}))
             }
             other => Response::err(req.id, format!("unknown method: {other}")),
+        }
+    }
+
+    /// Write a clipboard item's content back to NSPasteboard (macOS) or no-op on other platforms.
+    fn write_to_pasteboard(item: &copypaste_core::ClipboardItem) -> Result<(), String> {
+        let content = match &item.content {
+            Some(bytes) => bytes,
+            None => return Err("item has no content".to_string()),
+        };
+
+        #[cfg(target_os = "macos")]
+        {
+            use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+            use objc2_foundation::NSString;
+
+            if item.content_type == "text" {
+                // Interpret bytes as UTF-8 text and write to NSPasteboard
+                let text = std::str::from_utf8(content)
+                    .map_err(|e| format!("content is not valid UTF-8: {e}"))?;
+                unsafe {
+                    let pb = NSPasteboard::generalPasteboard();
+                    pb.clearContents();
+                    let ns_str = NSString::from_str(text);
+                    let ok = pb.setString_forType(&ns_str, NSPasteboardTypeString);
+                    if !ok {
+                        return Err("NSPasteboard setString:forType: returned false".to_string());
+                    }
+                }
+            } else {
+                // Binary content: write raw bytes with a generic type
+                use objc2_foundation::NSData;
+
+                unsafe {
+                    let pb = NSPasteboard::generalPasteboard();
+                    pb.clearContents();
+                    // Use the content_type as the pasteboard type string (best-effort)
+                    let type_str = NSString::from_str(&item.content_type);
+                    let data = NSData::with_bytes(content);
+                    let ok = pb.setData_forType(Some(&data), &type_str);
+                    if !ok {
+                        return Err(format!(
+                            "NSPasteboard setData:forType: returned false for type '{}'",
+                            item.content_type
+                        ));
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = item;
+            // No clipboard support on non-macOS platforms in this crate
+            Ok(())
         }
     }
 }
