@@ -11,40 +11,72 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  test:
-    name: Test
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+  fmt:
+    name: Rustfmt
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust 1.75
+      - name: Install Rust 1.75 (with rustfmt)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.75"
+          components: rustfmt
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+  # Test + clippy on macOS and Windows.
+  # copypaste-daemon links against macOS-only frameworks (objc2, security-framework)
+  # so it is excluded from the Windows build.
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.75 (with clippy)
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.75"
           components: clippy
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ matrix.os }}
 
-      - name: Build
+      # On Windows, exclude copypaste-daemon (macOS-only Objective-C / Keychain deps).
+      - name: Build (macOS — full workspace)
+        if: runner.os == 'macOS'
         run: cargo build --workspace
 
-      - name: Test workspace
+      - name: Build (Windows — cross-platform crates only)
+        if: runner.os == 'Windows'
+        run: cargo build -p copypaste-core -p copypaste-cli -p copypaste-relay
+
+      - name: Test (macOS — full workspace)
+        if: runner.os == 'macOS'
         run: cargo test --workspace
 
-      - name: Clippy
+      - name: Test (Windows — cross-platform crates only)
+        if: runner.os == 'Windows'
+        run: cargo test -p copypaste-core -p copypaste-cli -p copypaste-relay
+
+      - name: Clippy (macOS — full workspace)
+        if: runner.os == 'macOS'
         run: cargo clippy --workspace -- -D warnings
 
+      - name: Clippy (Windows — cross-platform crates only)
+        if: runner.os == 'Windows'
+        run: cargo clippy -p copypaste-core -p copypaste-cli -p copypaste-relay -- -D warnings
+
+  # Dedicated macOS job for the daemon with Keychain integration tests.
   test-macos-daemon:
     name: macOS daemon (Keychain)
     runs-on: macos-latest
@@ -56,17 +88,25 @@ jobs:
         with:
           toolchain: "1.75"
 
-      - name: Cache cargo
-        uses: actions/cache@v4
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target/
-          key: macos-daemon-${{ hashFiles('**/Cargo.lock') }}
+          key: macos-daemon
 
       - name: Build daemon
         run: cargo build -p copypaste-daemon
 
       - name: Test daemon (includes Keychain tests)
         run: cargo test -p copypaste-daemon -- --nocapture
+
+  audit:
+    name: Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: cargo audit
+        run: cargo audit
