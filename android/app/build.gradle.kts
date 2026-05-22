@@ -1,6 +1,65 @@
+import org.gradle.api.tasks.Exec
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+}
+
+// ---------------------------------------------------------------------------
+// cargo-ndk: compile Rust .so libraries for Android targets
+// ---------------------------------------------------------------------------
+val cargoNdkAvailable: Boolean by lazy {
+    try {
+        val result = ProcessBuilder("cargo", "ndk", "--version")
+            .redirectErrorStream(true)
+            .start()
+            .waitFor()
+        result == 0
+    } catch (_: Exception) {
+        false
+    }
+}
+
+// Root of the Cargo workspace (two levels above android/app/)
+val workspaceRoot: String = rootProject.projectDir.parentFile.absolutePath
+
+val buildCargoNdk by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Compile copypaste-android into .so libraries via cargo-ndk"
+
+    doFirst {
+        if (!cargoNdkAvailable) {
+            throw GradleException(
+                """
+                cargo-ndk is not installed or not on PATH.
+                To install: cargo install cargo-ndk
+                Then add Android NDK targets:
+                  rustup target add aarch64-linux-android
+                  rustup target add x86_64-linux-android
+                Alternatively, build manually:
+                  make android-so
+                Or skip native libs for a UI-only build.
+                """.trimIndent()
+            )
+        }
+    }
+
+    workingDir(workspaceRoot)
+    commandLine(
+        "cargo", "ndk",
+        "-t", "arm64-v8a",
+        "-t", "x86_64",
+        "-o", "android/app/src/main/jniLibs",
+        "build",
+        "-p", "copypaste-android"
+    )
+}
+
+// Wire cargo-ndk before every assembleDebug/assembleRelease
+tasks.whenTaskAdded {
+    if (name == "assembleDebug" || name == "assembleRelease") {
+        dependsOn(buildCargoNdk)
+    }
 }
 
 android {
