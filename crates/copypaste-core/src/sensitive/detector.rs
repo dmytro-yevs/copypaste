@@ -231,6 +231,7 @@ mod tests {
         assert!(detect("ghs_16C7e42F292c6912E7710c838347Ae178B4a").is_some());
     }
     #[test]
+    #[cfg_attr(debug_assertions, ignore = "regex perf test only meaningful in release builds")]
     fn pattern_match_completes_in_5ms_on_10mb_text() {
         let big = "a".repeat(10_000_000);
         let start = std::time::Instant::now();

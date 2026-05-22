@@ -71,6 +71,7 @@ fn valid_pub_key() -> String {
 }
 
 const DEVICE_A: &str = "11111111-1111-1111-1111-111111111111";
+#[allow(dead_code)]
 const DEVICE_B: &str = "22222222-2222-2222-2222-222222222222";
 
 fn sample_content_b64() -> String {

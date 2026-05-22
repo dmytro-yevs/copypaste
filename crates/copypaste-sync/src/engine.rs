@@ -414,6 +414,7 @@ mod tests {
             wall_time: 1_700_000_000_000 + lamport,
             expires_at: None,
             app_bundle_id: None,
+            content_hash: None,
         }
     }
 

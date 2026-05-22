@@ -109,6 +109,7 @@ mod tests {
             wall_time: wall,
             expires_at: None,
             app_bundle_id: None,
+            content_hash: None,
         }
     }
 
