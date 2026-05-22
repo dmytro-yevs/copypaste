@@ -1,5 +1,46 @@
 use super::patterns::{pattern_set, pattern_name};
 
+/// Bundle IDs / process names for apps whose clipboard content should always
+/// be treated as sensitive regardless of content patterns (e.g. password managers).
+static SENSITIVE_APP_BUNDLE_IDS: &[&str] = &[
+    // Password managers
+    "com.1password.1password",
+    "com.1password.7.1password",
+    "com.agilebits.onepassword",
+    "com.agilebits.onepassword4",
+    "com.agilebits.onepassword-osx-helper",
+    "com.bitwarden.desktop",
+    "com.bitwarden.desktop.safari",
+    "com.keepassxc.keepassxc",
+    "org.keepassxc.keepassxc-browser",
+    "com.lastpass.lastpass",
+    "de.peterb.Dashlane",
+    "com.dashlane.dashlane",
+    "com.enpass.Enpass",
+    "net.sourceforge.keepass",
+    "com.stegosafe.StegSafe",
+    "com.webpas.webpas",
+    "com.roboform.roboform",
+    "com.nordpass.macos",
+    "com.logmeininc.lastpass",
+    // Process name fragments (matched as substring)
+    "1password",
+    "bitwarden",
+    "keepass",
+    "dashlane",
+    "lastpass",
+    "enpass",
+    "nordpass",
+    "roboform",
+];
+
+/// Returns true if the given app bundle ID or process name is a known sensitive app
+/// (e.g. a password manager). Match is case-insensitive substring on the lowercased input.
+pub fn is_sensitive_app(app_bundle_id: &str) -> bool {
+    let lower = app_bundle_id.to_lowercase();
+    SENSITIVE_APP_BUNDLE_IDS.iter().any(|&known| lower.contains(known))
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SensitiveKind {
     AwsKey, GitHubToken, OpenAIKey, AnthropicKey, StripeKey,
@@ -107,5 +148,53 @@ mod tests {
         let start = std::time::Instant::now();
         let _ = detect(&big);
         assert!(start.elapsed().as_millis() < 500, "took {}ms", start.elapsed().as_millis());
+    }
+
+    // --- is_sensitive_app tests ---
+
+    #[test]
+    fn sensitive_app_1password_bundle_id() {
+        assert!(is_sensitive_app("com.1password.1password"));
+    }
+
+    #[test]
+    fn sensitive_app_bitwarden_bundle_id() {
+        assert!(is_sensitive_app("com.bitwarden.desktop"));
+    }
+
+    #[test]
+    fn sensitive_app_keepassxc_bundle_id() {
+        assert!(is_sensitive_app("com.keepassxc.keepassxc"));
+    }
+
+    #[test]
+    fn sensitive_app_dashlane_bundle_id() {
+        assert!(is_sensitive_app("com.dashlane.dashlane"));
+    }
+
+    #[test]
+    fn sensitive_app_process_name_fragment() {
+        // Process names may be short (e.g. "1password", "bitwarden")
+        assert!(is_sensitive_app("bitwarden"));
+        assert!(is_sensitive_app("keepass"));
+    }
+
+    #[test]
+    fn sensitive_app_case_insensitive() {
+        assert!(is_sensitive_app("com.Bitwarden.Desktop"));
+        assert!(is_sensitive_app("COM.1PASSWORD.1PASSWORD"));
+    }
+
+    #[test]
+    fn sensitive_app_unknown_app_returns_false() {
+        assert!(!is_sensitive_app("com.apple.finder"));
+        assert!(!is_sensitive_app("com.google.chrome"));
+        assert!(!is_sensitive_app(""));
+    }
+
+    #[test]
+    fn sensitive_app_partial_match() {
+        // "1password" appears as substring in longer bundle IDs
+        assert!(is_sensitive_app("com.agilebits.onepassword4"));
     }
 }

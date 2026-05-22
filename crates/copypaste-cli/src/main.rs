@@ -70,6 +70,21 @@ enum Commands {
         /// Path to JSON file
         file: String,
     },
+    /// Enable or disable private/pause mode (daemon stops recording new clipboard changes)
+    Private {
+        #[command(subcommand)]
+        action: PrivateAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PrivateAction {
+    /// Enable private mode — stop recording new clipboard changes
+    On,
+    /// Disable private mode — resume recording clipboard changes
+    Off,
+    /// Show current private mode state
+    Status,
 }
 
 fn main() {
@@ -88,6 +103,11 @@ fn main() {
         Commands::Clear { force } => commands::clear::run(&socket, force),
         Commands::Stats => commands::stats::run(&socket),
         Commands::Import { file } => commands::import::run(&socket, &file),
+        Commands::Private { action } => match action {
+            PrivateAction::On => commands::private::run(&socket, true),
+            PrivateAction::Off => commands::private::run(&socket, false),
+            PrivateAction::Status => commands::private::run_get(&socket),
+        },
     };
 
     if let Err(e) = result {
