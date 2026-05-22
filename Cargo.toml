@@ -5,6 +5,7 @@ members = [
     "crates/copypaste-daemon",
     "crates/copypaste-cli",
     "crates/copypaste-relay",
+    "crates/copypaste-android",
 ]
 
 [workspace.package]
