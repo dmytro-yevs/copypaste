@@ -31,6 +31,14 @@ enum Commands {
         /// Item ID (UUID)
         id: String,
     },
+    /// Search clipboard history
+    Search {
+        /// Search query
+        query: String,
+        /// Maximum results (default: 20)
+        #[arg(long, default_value_t = 20)]
+        limit: u64,
+    },
 }
 
 fn main() {
@@ -42,6 +50,7 @@ fn main() {
         Commands::Status => commands::status::run(&socket),
         Commands::Count => commands::count::run(&socket),
         Commands::Delete { id } => commands::delete::run(&socket, &id),
+        Commands::Search { query, limit } => commands::search::run(&socket, &query, limit),
     };
 
     if let Err(e) = result {
