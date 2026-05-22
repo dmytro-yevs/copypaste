@@ -1,0 +1,8 @@
+target/
+.git/
+*.md
+.claude/
+.claude-flow/
+agentdb.rvf
+agentdb.rvf.lock
+ruvector.db
