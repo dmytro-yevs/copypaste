@@ -1,13 +1,22 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 
 use crate::error::RelayError;
-use crate::models::{RegisterRequest, RegisterResponse};
+use crate::models::{DeviceInfoResponse, RegisterRequest, RegisterResponse};
 use crate::state::AppState;
 
+/// POST /devices — register a new device and issue an auth token.
+///
+/// Body: `{ device_id, device_name, public_key_b64 }`
+/// Response (201): `{ device_id, auth_token, expires_at }`
+///
+/// Errors:
+/// - 400 Bad Request — invalid UUID, invalid base64, key length mismatch, blank name
+/// - 403 Forbidden — free-tier device quota exhausted
+/// - 409 Conflict — device_id already registered
 pub async fn register(
     State(state): State<AppState>,
     Json(body): Json<RegisterRequest>,
@@ -19,27 +28,149 @@ pub async fn register(
         ));
     }
 
-    // Validate public_key is valid base64 and decodes to exactly 32 bytes.
+    // Validate device_name is non-empty and within reasonable length.
+    let device_name = body.device_name.trim().to_string();
+    if device_name.is_empty() {
+        return Err(RelayError::BadRequest(
+            "device_name must not be empty".to_string(),
+        ));
+    }
+    if device_name.len() > 64 {
+        return Err(RelayError::BadRequest(
+            "device_name must be 64 characters or fewer".to_string(),
+        ));
+    }
+
+    // Validate public_key_b64 is valid base64 and decodes to exactly 32 bytes.
     let key_bytes = B64
-        .decode(&body.public_key)
-        .map_err(|_| RelayError::BadRequest("public_key must be valid base64".to_string()))?;
+        .decode(&body.public_key_b64)
+        .map_err(|_| RelayError::BadRequest("public_key_b64 must be valid base64".to_string()))?;
 
     if key_bytes.len() != 32 {
         return Err(RelayError::BadRequest(format!(
-            "public_key must decode to exactly 32 bytes, got {}",
+            "public_key_b64 must decode to exactly 32 bytes, got {}",
             key_bytes.len()
         )));
     }
 
     let mut store = state.lock().expect("state mutex poisoned");
-    let bearer_token =
-        store.register_device(body.device_id.clone(), body.public_key)?;
+    let (auth_token, expires_at_unix) =
+        store.register_device(body.device_id.clone(), device_name, body.public_key_b64)?;
+
+    // Format expires_at as RFC-3339.
+    let expires_at = unix_to_rfc3339(expires_at_unix);
 
     Ok((
         StatusCode::CREATED,
         Json(RegisterResponse {
             device_id: body.device_id,
-            bearer_token,
+            auth_token,
+            expires_at,
         }),
     ))
+}
+
+/// GET /devices/:device_id — retrieve public info about a registered device.
+///
+/// Response (200): `{ device_id, device_name, public_key_b64, registered_at, expires_at }`
+/// Error (404): device not found.
+pub async fn get_device(
+    State(state): State<AppState>,
+    Path(device_id): Path<String>,
+) -> Result<Json<DeviceInfoResponse>, RelayError> {
+    let store = state.lock().expect("state mutex poisoned");
+    let record = store.get_device(&device_id)?;
+
+    // Convert Instant → wall-clock by computing elapsed and subtracting from now.
+    let elapsed_secs = record.registered_at.elapsed().as_secs();
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let registered_at_unix = now_unix - elapsed_secs as i64;
+    let registered_at = unix_to_rfc3339(registered_at_unix);
+    let expires_at = unix_to_rfc3339(record.expires_at_unix);
+
+    Ok(Json(DeviceInfoResponse {
+        device_id: record.device_id.clone(),
+        device_name: record.device_name.clone(),
+        public_key_b64: record.public_key_b64.clone(),
+        registered_at,
+        expires_at,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Convert a Unix timestamp (seconds) to an RFC-3339 string.
+/// This is a zero-dependency implementation that avoids pulling in `chrono`.
+fn unix_to_rfc3339(unix: i64) -> String {
+    // Use SystemTime to format via std only — no external dep.
+    // We format as UTC: YYYY-MM-DDTHH:MM:SSZ
+    let secs = unix as u64;
+    let (year, month, day, hour, min, sec) = epoch_to_date(secs);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        year, month, day, hour, min, sec
+    )
+}
+
+/// Convert Unix epoch seconds to (year, month, day, hour, min, sec) in UTC.
+fn epoch_to_date(mut secs: u64) -> (u32, u32, u32, u32, u32, u32) {
+    let sec = (secs % 60) as u32;
+    secs /= 60;
+    let min = (secs % 60) as u32;
+    secs /= 60;
+    let hour = (secs % 24) as u32;
+    secs /= 24;
+
+    // Days since 1970-01-01.
+    let mut days = secs;
+
+    // Gregorian calendar: 400-year cycle = 97 leap years.
+    let year_400 = days / 146097;
+    days %= 146097;
+    let year_100 = (days / 36524).min(3);
+    days -= year_100 * 36524;
+    let year_4 = days / 1461;
+    days %= 1461;
+    let year_1 = (days / 365).min(3);
+    days -= year_1 * 365;
+
+    let year = (year_400 * 400 + year_100 * 100 + year_4 * 4 + year_1 + 1970) as u32;
+    let leap = (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) as u64;
+
+    let month_days: [u64; 12] = [31, 28 + leap, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut month = 1u32;
+    for &md in &month_days {
+        if days < md {
+            break;
+        }
+        days -= md;
+        month += 1;
+    }
+
+    (year, month, days as u32 + 1, hour, min, sec)
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unix_to_rfc3339_epoch() {
+        assert_eq!(unix_to_rfc3339(0), "1970-01-01T00:00:00Z");
+    }
+
+    #[test]
+    fn unix_to_rfc3339_known_date() {
+        // 2024-01-01T00:00:00Z = 1704067200
+        assert_eq!(unix_to_rfc3339(1_704_067_200), "2024-01-01T00:00:00Z");
+    }
 }

@@ -16,6 +16,8 @@ pub enum RelayError {
     PayloadTooLarge,
     #[error("item not found")]
     ItemNotFound,
+    #[error("device quota exceeded: maximum free-tier devices reached")]
+    QuotaExceeded,
 }
 
 impl RelayError {
@@ -27,6 +29,7 @@ impl RelayError {
             RelayError::BadRequest(_) => (StatusCode::BAD_REQUEST, "BAD_REQUEST"),
             RelayError::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "PAYLOAD_TOO_LARGE"),
             RelayError::ItemNotFound => (StatusCode::NOT_FOUND, "ITEM_NOT_FOUND"),
+            RelayError::QuotaExceeded => (StatusCode::FORBIDDEN, "QUOTA_EXCEEDED"),
         }
     }
 }
@@ -86,5 +89,10 @@ mod tests {
     #[test]
     fn item_not_found_is_404() {
         assert_eq!(status_of(RelayError::ItemNotFound), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn quota_exceeded_is_403() {
+        assert_eq!(status_of(RelayError::QuotaExceeded), StatusCode::FORBIDDEN);
     }
 }

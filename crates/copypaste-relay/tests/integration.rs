@@ -39,6 +39,7 @@ fn relay_router(state: AppState, config: RelayConfig) -> axum::Router {
     axum::Router::new()
         .route("/health", get(routes_health::handle))
         .route("/devices", post(routes_devices::register))
+        .route("/devices/:device_id", get(routes_devices::get_device))
         .route(
             "/devices/:device_id/items",
             get(routes_items::poll).post(routes_items::upload),
@@ -77,12 +78,17 @@ const DEVICE_A: &str = "11111111-1111-1111-1111-111111111111";
 const DEVICE_B: &str = "22222222-2222-2222-2222-222222222222";
 
 /// Send a POST /devices request and return the parsed JSON body + status.
-async fn register_device(
+async fn http_register_device(
     app: axum::Router,
     device_id: &str,
-    public_key: &str,
+    device_name: &str,
+    public_key_b64: &str,
 ) -> (StatusCode, Value, axum::Router) {
-    let body = json!({ "device_id": device_id, "public_key": public_key });
+    let body = json!({
+        "device_id": device_id,
+        "device_name": device_name,
+        "public_key_b64": public_key_b64,
+    });
     let req = Request::builder()
         .method(Method::POST)
         .uri("/devices")
@@ -160,12 +166,16 @@ async fn test_health_empty() {
 #[tokio::test]
 async fn test_register_device() {
     let (app, _state) = make_app();
-    let (status, body, _app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
+    let (status, body, _app) =
+        http_register_device(app, DEVICE_A, "My Mac", &valid_pub_key()).await;
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["device_id"], DEVICE_A);
-    let token = body["bearer_token"].as_str().unwrap();
+    let token = body["auth_token"].as_str().unwrap();
     assert_eq!(token.len(), 32);
     assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+    // expires_at must be a non-empty RFC-3339 string
+    let expires_at = body["expires_at"].as_str().unwrap();
+    assert!(expires_at.starts_with("20"), "expires_at should look like a year: {expires_at}");
 }
 
 #[tokio::test]
@@ -174,9 +184,10 @@ async fn test_register_duplicate_is_409() {
     // Register via state directly to share the same Arc
     {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key()).unwrap();
     }
-    let (status, _body, _app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
+    let (status, _body, _app) =
+        http_register_device(app, DEVICE_A, "Device A", &valid_pub_key()).await;
     assert_eq!(status, StatusCode::CONFLICT);
 }
 
@@ -185,8 +196,60 @@ async fn test_register_invalid_public_key_is_400() {
     let (app, _state) = make_app();
     // 31 bytes — not 32
     let short_key = B64.encode([0u8; 31]);
-    let (status, _body, _app) = register_device(app, DEVICE_A, &short_key).await;
+    let (status, _body, _app) =
+        http_register_device(app, DEVICE_A, "Device A", &short_key).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_register_empty_name_is_400() {
+    let (app, _state) = make_app();
+    let (status, body, _app) =
+        http_register_device(app, DEVICE_A, "   ", &valid_pub_key()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["code"].as_str().unwrap_or("").contains("BAD_REQUEST"));
+}
+
+#[tokio::test]
+async fn test_register_quota_exceeded_is_403() {
+    let (app, state) = make_app();
+    {
+        let mut s = state.lock().unwrap();
+        for i in 0..5usize {
+            let id = format!("{:08x}-0000-0000-0000-000000000000", i);
+            s.register_device(id, format!("Device {i}"), B64.encode([i as u8; 32]))
+                .expect("should register within quota");
+        }
+    }
+    // 6th registration via HTTP must return 403.
+    let (status, body, _app) =
+        http_register_device(app, DEVICE_A, "Over-quota", &valid_pub_key()).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "QUOTA_EXCEEDED");
+}
+
+#[tokio::test]
+async fn test_get_device_returns_info() {
+    let (app, state) = make_app();
+    {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), "My Mac".into(), valid_pub_key()).unwrap();
+    }
+    let (status, body) = get_json(app, &format!("/devices/{DEVICE_A}"), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["device_id"], DEVICE_A);
+    assert_eq!(body["device_name"], "My Mac");
+    assert_eq!(body["public_key_b64"], valid_pub_key());
+    assert!(body["registered_at"].as_str().unwrap().starts_with("20"));
+    assert!(body["expires_at"].as_str().unwrap().starts_with("20"));
+}
+
+#[tokio::test]
+async fn test_get_device_not_found_is_404() {
+    let (app, _state) = make_app();
+    let (status, body) = get_json(app, "/devices/nonexistent-id", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "DEVICE_NOT_FOUND");
 }
 
 #[tokio::test]
@@ -194,7 +257,7 @@ async fn test_poll_requires_auth() {
     let (app, state) = make_app();
     {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key()).unwrap();
     }
     let (status, _body) =
         get_json(app, &format!("/devices/{DEVICE_A}/items"), None).await;
@@ -207,9 +270,9 @@ async fn test_upload_and_poll_roundtrip() {
 
     let (a_token, b_token) = {
         let mut s = state.lock().unwrap();
-        let a = s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
-        let b = s
-            .register_device(DEVICE_B.to_string(), B64.encode([1u8; 32]))
+        let (a, _) = s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key()).unwrap();
+        let (b, _) = s
+            .register_device(DEVICE_B.to_string(), "Device B".into(), B64.encode([1u8; 32]))
             .unwrap();
         (a, b)
     };
@@ -261,7 +324,8 @@ async fn test_upload_invalid_nonce_is_400() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap()
+        let (tok, _) = s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key()).unwrap();
+        tok
     };
 
     let bad_nonce = B64.encode([0u8; 23]); // 23 bytes, not 24
@@ -288,9 +352,9 @@ async fn test_poll_since_lamport() {
 
     let (a_token, b_token) = {
         let mut s = state.lock().unwrap();
-        let a = s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
-        let b = s
-            .register_device(DEVICE_B.to_string(), B64.encode([1u8; 32]))
+        let (a, _) = s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key()).unwrap();
+        let (b, _) = s
+            .register_device(DEVICE_B.to_string(), "Device B".into(), B64.encode([1u8; 32]))
             .unwrap();
         (a, b)
     };
@@ -337,9 +401,9 @@ async fn test_ttl_expiry() {
 
     let (a_token, b_token) = {
         let mut s = app_state.lock().unwrap();
-        let a = s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
-        let b = s
-            .register_device(DEVICE_B.to_string(), B64.encode([1u8; 32]))
+        let (a, _) = s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key()).unwrap();
+        let (b, _) = s
+            .register_device(DEVICE_B.to_string(), "Device B".into(), B64.encode([1u8; 32]))
             .unwrap();
         (a, b)
     };
@@ -387,7 +451,8 @@ async fn test_upload_fanout_excludes_sender() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap()
+        let (tok, _) = s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key()).unwrap();
+        tok
     };
 
     // Upload (only device A registered — no other device to fan out to)
@@ -411,4 +476,28 @@ async fn test_upload_fanout_excludes_sender() {
         get_json(app, &format!("/devices/{DEVICE_A}/items"), Some(&a_token)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["items"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn test_register_legacy_public_key_field_accepted() {
+    // Test that the legacy `public_key` alias works for backwards compatibility.
+    let (_, _state) = make_app();
+    let config = RelayConfig::default();
+    let store = RelayStore::new(config.sync_ttl_secs);
+    let app_state: AppState = Arc::new(Mutex::new(store));
+    let app = relay_router(app_state, config);
+
+    let body = json!({
+        "device_id": DEVICE_A,
+        "device_name": "Legacy Client",
+        "public_key": valid_pub_key(),   // legacy field name
+    });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/devices")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
 }
