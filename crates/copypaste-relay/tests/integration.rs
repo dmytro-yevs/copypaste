@@ -32,7 +32,7 @@ mod routes_devices;
 mod routes_items;
 
 use config::RelayConfig;
-use state::{AppState, RelayItem, RelayStore};
+use state::{AppState, RelayStore};
 
 fn relay_router(state: AppState, config: RelayConfig) -> axum::Router {
     use axum::routing::{delete, get, post};
@@ -41,7 +41,7 @@ fn relay_router(state: AppState, config: RelayConfig) -> axum::Router {
         .route("/devices", post(routes_devices::register))
         .route(
             "/devices/:device_id/items",
-            get(routes_items::poll).post(routes_items::upload),
+            get(routes_items::pull).post(routes_items::push),
         )
         .route(
             "/devices/:device_id/items/:item_id",
@@ -58,7 +58,7 @@ fn relay_router(state: AppState, config: RelayConfig) -> axum::Router {
 // ---------------------------------------------------------------------------
 
 fn make_app() -> (axum::Router, AppState) {
-    let config = RelayConfig { sync_ttl_secs: 3600, ..RelayConfig::default() };
+    let config = RelayConfig::default();
     let store = RelayStore::new(config.sync_ttl_secs);
     let app_state: AppState = Arc::new(Mutex::new(store));
     let router = relay_router(app_state.clone(), config);
@@ -69,31 +69,12 @@ fn valid_pub_key() -> String {
     B64.encode([0u8; 32])
 }
 
-fn valid_nonce() -> String {
-    B64.encode([0u8; 24])
-}
-
 const DEVICE_A: &str = "11111111-1111-1111-1111-111111111111";
 const DEVICE_B: &str = "22222222-2222-2222-2222-222222222222";
 
-/// Send a POST /devices request and return the parsed JSON body + status.
-async fn register_device(
-    app: axum::Router,
-    device_id: &str,
-    public_key: &str,
-) -> (StatusCode, Value, axum::Router) {
-    let body = json!({ "device_id": device_id, "public_key": public_key });
-    let req = Request::builder()
-        .method(Method::POST)
-        .uri("/devices")
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(serde_json::to_string(&body).unwrap()))
-        .unwrap();
-    let resp = app.clone().oneshot(req).await.unwrap();
-    let status = resp.status();
-    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    let json: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
-    (status, json, app)
+/// Encrypted payload — small enough to fit within quota.
+fn sample_content_b64() -> String {
+    B64.encode(b"encrypted-clipboard-content")
 }
 
 async fn get_json(app: axum::Router, uri: &str, token: Option<&str>) -> (StatusCode, Value) {
@@ -144,7 +125,7 @@ async fn delete_req(app: axum::Router, uri: &str, token: &str) -> StatusCode {
 }
 
 // ---------------------------------------------------------------------------
-// Tests
+// Health
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -157,13 +138,26 @@ async fn test_health_empty() {
     assert_eq!(body["total_items"], 0);
 }
 
+// ---------------------------------------------------------------------------
+// Registration
+// ---------------------------------------------------------------------------
+
 #[tokio::test]
 async fn test_register_device() {
     let (app, _state) = make_app();
-    let (status, body, _app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
-    assert_eq!(status, StatusCode::CREATED);
-    assert_eq!(body["device_id"], DEVICE_A);
-    let token = body["bearer_token"].as_str().unwrap();
+    let body = json!({ "device_id": DEVICE_A, "public_key": valid_pub_key() });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/devices")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["device_id"], DEVICE_A);
+    let token = json["bearer_token"].as_str().unwrap();
     assert_eq!(token.len(), 32);
     assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
 }
@@ -171,13 +165,19 @@ async fn test_register_device() {
 #[tokio::test]
 async fn test_register_duplicate_is_409() {
     let (app, state) = make_app();
-    // Register via state directly to share the same Arc
     {
         let mut s = state.lock().unwrap();
         s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
     }
-    let (status, _body, _app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    let body = json!({ "device_id": DEVICE_A, "public_key": valid_pub_key() });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/devices")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
 }
 
 #[tokio::test]
@@ -185,97 +185,250 @@ async fn test_register_invalid_public_key_is_400() {
     let (app, _state) = make_app();
     // 31 bytes — not 32
     let short_key = B64.encode([0u8; 31]);
-    let (status, _body, _app) = register_device(app, DEVICE_A, &short_key).await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let body = json!({ "device_id": DEVICE_A, "public_key": short_key });
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/devices")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
 #[tokio::test]
-async fn test_poll_requires_auth() {
+async fn test_pull_requires_auth() {
     let (app, state) = make_app();
     {
         let mut s = state.lock().unwrap();
         s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
     }
-    let (status, _body) =
-        get_json(app, &format!("/devices/{DEVICE_A}/items"), None).await;
+    let (status, _body) = get_json(app, &format!("/devices/{DEVICE_A}/items"), None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
-async fn test_upload_and_poll_roundtrip() {
+async fn test_push_requires_auth() {
     let (app, state) = make_app();
-
-    let (a_token, b_token) = {
+    {
         let mut s = state.lock().unwrap();
-        let a = s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
-        let b = s
-            .register_device(DEVICE_B.to_string(), B64.encode([1u8; 32]))
-            .unwrap();
-        (a, b)
-    };
-
-    const ITEM_ID: &str = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
-
-    // A uploads
-    let (upload_status, upload_body) = post_json(
-        app.clone(),
+        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
+    }
+    let (status, _body) = post_json(
+        app,
         &format!("/devices/{DEVICE_A}/items"),
-        Some(&a_token),
+        None,
         json!({
-            "item_id": ITEM_ID,
-            "ciphertext_b64": B64.encode(b"encrypted"),
-            "nonce_b64": valid_nonce(),
-            "sender_device_id": DEVICE_A,
-            "lamport_ts": 1,
-            "content_type": "text"
+            "content_type": "text",
+            "content_b64": sample_content_b64(),
+            "wall_time": 1000u64
         }),
     )
     .await;
-    assert_eq!(upload_status, StatusCode::CREATED);
-    assert_eq!(upload_body["fanned_out_to"], 1);
-
-    // B polls and sees the item
-    let (poll_status, poll_body) =
-        get_json(app.clone(), &format!("/devices/{DEVICE_B}/items"), Some(&b_token)).await;
-    assert_eq!(poll_status, StatusCode::OK);
-    assert_eq!(poll_body["items"].as_array().unwrap().len(), 1);
-
-    // B deletes the item
-    let del_status = delete_req(
-        app.clone(),
-        &format!("/devices/{DEVICE_B}/items/{ITEM_ID}"),
-        &b_token,
-    )
-    .await;
-    assert_eq!(del_status, StatusCode::NO_CONTENT);
-
-    // B polls again — empty
-    let (poll2_status, poll2_body) =
-        get_json(app.clone(), &format!("/devices/{DEVICE_B}/items"), Some(&b_token)).await;
-    assert_eq!(poll2_status, StatusCode::OK);
-    assert_eq!(poll2_body["items"].as_array().unwrap().len(), 0);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
-async fn test_upload_invalid_nonce_is_400() {
+async fn test_wrong_token_is_401() {
     let (app, state) = make_app();
-    let a_token = {
+    {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
+    }
+    let (status, _body) = get_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items"),
+        Some("wrongtoken000000000000000000000"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+// ---------------------------------------------------------------------------
+// Push → Pull round-trip
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_push_returns_id() {
+    let (app, state) = make_app();
+    let token = {
         let mut s = state.lock().unwrap();
         s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap()
     };
 
-    let bad_nonce = B64.encode([0u8; 23]); // 23 bytes, not 24
+    let (status, body) = post_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&token),
+        json!({
+            "content_type": "text",
+            "content_b64": sample_content_b64(),
+            "wall_time": 1000u64
+        }),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+    assert!(body["id"].as_i64().is_some(), "response must contain integer id");
+}
+
+#[tokio::test]
+async fn test_push_and_pull_roundtrip() {
+    let (app, state) = make_app();
+    let token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap()
+    };
+
+    // Push one item.
+    let (push_status, push_body) = post_json(
+        app.clone(),
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&token),
+        json!({
+            "content_type": "text",
+            "content_b64": sample_content_b64(),
+            "wall_time": 5000u64
+        }),
+    )
+    .await;
+    assert_eq!(push_status, StatusCode::CREATED);
+    let pushed_id = push_body["id"].as_i64().unwrap();
+
+    // Pull all items (since=0).
+    let (pull_status, pull_body) = get_json(
+        app.clone(),
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(pull_status, StatusCode::OK);
+    let items = pull_body.as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], pushed_id);
+    assert_eq!(items[0]["content_type"], "text");
+    assert_eq!(items[0]["content_b64"], sample_content_b64());
+    assert_eq!(items[0]["wall_time"], 5000u64);
+}
+
+#[tokio::test]
+async fn test_pull_since_filters_correctly() {
+    let (app, state) = make_app();
+    let token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap()
+    };
+
+    // Push three items with wall_time 1000, 2000, 3000.
+    for wt in [1000u64, 2000, 3000] {
+        post_json(
+            app.clone(),
+            &format!("/devices/{DEVICE_A}/items"),
+            Some(&token),
+            json!({
+                "content_type": "text",
+                "content_b64": sample_content_b64(),
+                "wall_time": wt
+            }),
+        )
+        .await;
+    }
+
+    // Pull since=1000 → should return items with wall_time 2000 and 3000.
+    let (status, body) = get_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items?since=1000"),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["wall_time"], 2000u64);
+    assert_eq!(items[1]["wall_time"], 3000u64);
+}
+
+#[tokio::test]
+async fn test_pull_returns_empty_when_no_items() {
+    let (app, state) = make_app();
+    let token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap()
+    };
+
+    let (status, body) = get_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 0);
+}
+
+#[tokio::test]
+async fn test_pull_sorted_ascending_by_wall_time() {
+    let (app, state) = make_app();
+    let token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap()
+    };
+
+    // Push in non-sorted order.
+    for wt in [3000u64, 1000, 2000] {
+        post_json(
+            app.clone(),
+            &format!("/devices/{DEVICE_A}/items"),
+            Some(&token),
+            json!({
+                "content_type": "text",
+                "content_b64": sample_content_b64(),
+                "wall_time": wt
+            }),
+        )
+        .await;
+    }
+
+    let (status, body) = get_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items?since=0"),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().unwrap();
+    let times: Vec<u64> = items
+        .iter()
+        .map(|i| i["wall_time"].as_u64().unwrap())
+        .collect();
+    assert_eq!(times, vec![1000u64, 2000, 3000]);
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_push_invalid_content_type_is_400() {
+    let (app, state) = make_app();
+    let token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap()
+    };
+
     let (status, _body) = post_json(
         app,
         &format!("/devices/{DEVICE_A}/items"),
-        Some(&a_token),
+        Some(&token),
         json!({
-            "item_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-            "ciphertext_b64": B64.encode(b"data"),
-            "nonce_b64": bad_nonce,
-            "sender_device_id": DEVICE_A,
-            "lamport_ts": 1,
-            "content_type": "text"
+            "content_type": "video",
+            "content_b64": sample_content_b64(),
+            "wall_time": 1000u64
         }),
     )
     .await;
@@ -283,132 +436,122 @@ async fn test_upload_invalid_nonce_is_400() {
 }
 
 #[tokio::test]
-async fn test_poll_since_lamport() {
+async fn test_push_invalid_base64_is_400() {
     let (app, state) = make_app();
-
-    let (a_token, b_token) = {
-        let mut s = state.lock().unwrap();
-        let a = s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
-        let b = s
-            .register_device(DEVICE_B.to_string(), B64.encode([1u8; 32]))
-            .unwrap();
-        (a, b)
-    };
-
-    // Upload 3 items with lamport_ts 1, 2, 3
-    for ts in [1u64, 2, 3] {
-        post_json(
-            app.clone(),
-            &format!("/devices/{DEVICE_A}/items"),
-            Some(&a_token),
-            json!({
-                "item_id": format!("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa{:04}", ts),
-                "ciphertext_b64": B64.encode(b"x"),
-                "nonce_b64": valid_nonce(),
-                "sender_device_id": DEVICE_A,
-                "lamport_ts": ts,
-                "content_type": "text"
-            }),
-        )
-        .await;
-    }
-
-    // Poll since_lamport=1 should return ts=2 and ts=3
-    let (status, body) = get_json(
-        app,
-        &format!("/devices/{DEVICE_B}/items?since_lamport=1"),
-        Some(&b_token),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let items = body["items"].as_array().unwrap();
-    assert_eq!(items.len(), 2);
-    assert_eq!(items[0]["lamport_ts"], 2);
-    assert_eq!(items[1]["lamport_ts"], 3);
-}
-
-#[tokio::test]
-async fn test_ttl_expiry() {
-    // Use sync_ttl_secs=0 so items expire immediately
-    let config = RelayConfig { sync_ttl_secs: 0, ..RelayConfig::default() };
-    let store = RelayStore::new(config.sync_ttl_secs);
-    let app_state: AppState = Arc::new(Mutex::new(store));
-    let app = relay_router(app_state.clone(), config.clone());
-
-    let (a_token, b_token) = {
-        let mut s = app_state.lock().unwrap();
-        let a = s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
-        let b = s
-            .register_device(DEVICE_B.to_string(), B64.encode([1u8; 32]))
-            .unwrap();
-        (a, b)
-    };
-
-    // Insert item directly with ttl=0 config so it expires on first poll
-    {
-        let mut s = app_state.lock().unwrap();
-        let item = RelayItem {
-            item_id: "ttl-test-item".to_string(),
-            ciphertext_b64: B64.encode(b"data"),
-            nonce_b64: B64.encode([0u8; 24]),
-            sender_device_id: DEVICE_A.to_string(),
-            lamport_ts: 1,
-            content_type: "text".to_string(),
-            uploaded_at: std::time::Instant::now(),
-        };
-        s.upload_item(item, &config);
-    }
-
-    // Upload via HTTP also (belt-and-suspenders)
-    post_json(
-        app.clone(),
-        &format!("/devices/{DEVICE_A}/items"),
-        Some(&a_token),
-        json!({
-            "item_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-            "ciphertext_b64": B64.encode(b"x"),
-            "nonce_b64": valid_nonce(),
-            "sender_device_id": DEVICE_A,
-            "lamport_ts": 2,
-            "content_type": "text"
-        }),
-    )
-    .await;
-
-    // Poll immediately — with ttl=0, elapsed >= 0 is always true, items pruned
-    let (status, body) =
-        get_json(app, &format!("/devices/{DEVICE_B}/items"), Some(&b_token)).await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["items"].as_array().unwrap().len(), 0);
-}
-
-#[tokio::test]
-async fn test_upload_fanout_excludes_sender() {
-    let (app, state) = make_app();
-    let a_token = {
+    let token = {
         let mut s = state.lock().unwrap();
         s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap()
     };
 
-    // Upload (only device A registered — no other device to fan out to)
+    let (status, _body) = post_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&token),
+        json!({
+            "content_type": "text",
+            "content_b64": "!!!not-base64!!!",
+            "wall_time": 1000u64
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_push_device_isolation() {
+    // Items pushed to device A are not visible to device B.
+    let (app, state) = make_app();
+    let (a_token, b_token) = {
+        let mut s = state.lock().unwrap();
+        let a = s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap();
+        let b = s
+            .register_device(DEVICE_B.to_string(), B64.encode([1u8; 32]))
+            .unwrap();
+        (a, b)
+    };
+
     post_json(
         app.clone(),
         &format!("/devices/{DEVICE_A}/items"),
         Some(&a_token),
         json!({
-            "item_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-            "ciphertext_b64": B64.encode(b"data"),
-            "nonce_b64": valid_nonce(),
-            "sender_device_id": DEVICE_A,
-            "lamport_ts": 1,
-            "content_type": "text"
+            "content_type": "text",
+            "content_b64": sample_content_b64(),
+            "wall_time": 1000u64
         }),
     )
     .await;
 
-    // A polls its OWN inbox — must be empty (sender excluded from fan-out)
-    let (status, body) =
-        get_json(app, &format!("/devices/{DEVICE_A}/items"), Some(&a_token)).await;
+    // Device B's inbox should be empty.
+    let (status, body) = get_json(
+        app,
+        &format!("/devices/{DEVICE_B}/items"),
+        Some(&b_token),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["items"].as_array().unwrap().len(), 0);
+    let items = body.as_array().unwrap();
+    assert_eq!(items.len(), 0, "device B must not see device A's items");
+}
+
+// ---------------------------------------------------------------------------
+// Delete
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_delete_item_removes_it() {
+    let (app, state) = make_app();
+    let token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap()
+    };
+
+    // Push an item.
+    let (_, push_body) = post_json(
+        app.clone(),
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&token),
+        json!({
+            "content_type": "text",
+            "content_b64": sample_content_b64(),
+            "wall_time": 1000u64
+        }),
+    )
+    .await;
+    let item_id = push_body["id"].as_i64().unwrap();
+
+    // Delete it.
+    let del_status = delete_req(
+        app.clone(),
+        &format!("/devices/{DEVICE_A}/items/{item_id}"),
+        &token,
+    )
+    .await;
+    assert_eq!(del_status, StatusCode::NO_CONTENT);
+
+    // Pull — must be empty now.
+    let (_, pull_body) = get_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(pull_body.as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn test_delete_nonexistent_item_is_404() {
+    let (app, state) = make_app();
+    let token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), valid_pub_key()).unwrap()
+    };
+
+    let del_status = delete_req(
+        app,
+        &format!("/devices/{DEVICE_A}/items/9999"),
+        &token,
+    )
+    .await;
+    assert_eq!(del_status, StatusCode::NOT_FOUND);
 }

@@ -18,47 +18,46 @@ pub struct RegisterResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Items — upload
+// Items — push (simple wall-clock sync protocol)
 // ---------------------------------------------------------------------------
 
+/// Request body for POST /devices/:id/items
 #[derive(Debug, Deserialize)]
-pub struct UploadRequest {
-    pub item_id: String,
-    pub ciphertext_b64: String,
-    pub nonce_b64: String,
-    pub sender_device_id: String,
-    pub lamport_ts: u64,
+pub struct PushRequest {
+    /// MIME-style content type: "text", "image", or "file".
     pub content_type: String,
+    /// Encrypted payload, base64-standard encoded.
+    pub content_b64: String,
+    /// Sender wall-clock time (Unix epoch milliseconds).
+    pub wall_time: u64,
 }
 
+/// Response body for POST /devices/:id/items
 #[derive(Debug, Serialize)]
-pub struct UploadResponse {
-    pub fanned_out_to: usize,
+pub struct PushResponse {
+    /// Auto-assigned integer ID for the stored item.
+    pub id: i64,
 }
 
 // ---------------------------------------------------------------------------
-// Items — poll
+// Items — pull (simple wall-clock sync protocol)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RelayItemResponse {
-    pub item_id: String,
-    pub ciphertext_b64: String,
-    pub nonce_b64: String,
-    pub sender_device_id: String,
-    pub lamport_ts: u64,
+/// Single item returned by GET /devices/:id/items
+#[derive(Debug, Clone, Serialize)]
+pub struct PullItem {
+    pub id: i64,
     pub content_type: String,
+    pub content_b64: String,
+    pub wall_time: u64,
 }
 
-#[derive(Debug, Serialize)]
-pub struct PollResponse {
-    pub items: Vec<RelayItemResponse>,
-}
-
+/// Query params for GET /devices/:id/items?since=<wall_time>
 #[derive(Debug, Deserialize)]
-pub struct PollParams {
+pub struct PullParams {
+    /// Return only items with wall_time > since (defaults to 0).
     #[serde(default)]
-    pub since_lamport: u64,
+    pub since: u64,
 }
 
 // ---------------------------------------------------------------------------

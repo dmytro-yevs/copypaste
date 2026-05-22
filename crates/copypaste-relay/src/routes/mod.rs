@@ -31,7 +31,7 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
         .route("/devices", get(list_devices_handler).post(devices::register))
         .route(
             "/devices/:device_id/items",
-            get(items::poll).post(items::upload),
+            get(items::pull).post(items::push),
         )
         .route(
             "/devices/:device_id/items/:item_id",

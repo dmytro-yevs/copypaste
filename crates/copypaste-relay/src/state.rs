@@ -7,18 +7,16 @@ use base64::Engine;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
-use crate::config::RelayConfig;
 use crate::error::RelayError;
-use crate::models::RelayItemResponse;
+use crate::models::PullItem;
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Maximum number of items kept in a single device's inbox.
-/// When exceeded, the oldest items (lowest lamport_ts, then lowest item_id
-/// for ties) are pruned so that exactly MAX_ITEMS_PER_DEVICE items remain.
-const MAX_ITEMS_PER_DEVICE: usize = 500;
+/// Maximum number of push-sync items per device inbox.
+/// When exceeded, the oldest items (lowest wall_time) are pruned on insert.
+const MAX_PUSH_ITEMS_PER_DEVICE: usize = 500;
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -26,20 +24,21 @@ const MAX_ITEMS_PER_DEVICE: usize = 500;
 
 pub struct DeviceRecord {
     pub device_id: String,
+    #[allow(dead_code)]
     pub public_key_b64: String,
     /// Bearer token: first 32 hex characters of SHA-256(decoded_public_key_bytes).
     pub bearer_token: String,
     pub registered_at: Instant,
 }
 
-pub struct RelayItem {
-    pub item_id: String,
-    pub ciphertext_b64: String,
-    pub nonce_b64: String,
-    pub sender_device_id: String,
-    pub lamport_ts: u64,
+/// A single encrypted item in the wall-clock push/pull sync protocol.
+pub struct SyncItem {
+    /// Auto-incremented integer ID (unique per device inbox, ascending).
+    pub id: i64,
     pub content_type: String,
-    pub uploaded_at: Instant,
+    pub content_b64: String,
+    /// Sender wall-clock time (Unix epoch milliseconds).
+    pub wall_time: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -48,17 +47,18 @@ pub struct RelayItem {
 
 pub struct RelayStore {
     pub devices: HashMap<String, DeviceRecord>,
-    /// Per-device inbox: items uploaded by OTHER devices for this device to poll.
-    pub items: HashMap<String, Vec<RelayItem>>,
-    pub sync_ttl_secs: u64,
+    /// Per-device inbox for the wall-clock push/pull sync protocol.
+    pub sync_items: HashMap<String, Vec<SyncItem>>,
+    /// Monotonically increasing counter used to assign IDs to sync items.
+    next_sync_id: i64,
 }
 
 impl RelayStore {
-    pub fn new(sync_ttl_secs: u64) -> Self {
+    pub fn new(_sync_ttl_secs: u64) -> Self {
         Self {
             devices: HashMap::new(),
-            items: HashMap::new(),
-            sync_ttl_secs,
+            sync_items: HashMap::new(),
+            next_sync_id: 1,
         }
     }
 
@@ -84,7 +84,7 @@ impl RelayStore {
 
         let hash = Sha256::digest(&key_bytes);
         let hex = hex_encode(&hash);
-        // First 32 hex characters = 16 bytes of entropy — sufficient for Phase 2b.
+        // First 32 hex characters = 16 bytes of entropy.
         let bearer_token = hex[..32].to_string();
 
         self.devices.insert(
@@ -96,8 +96,8 @@ impl RelayStore {
                 registered_at: Instant::now(),
             },
         );
-        // Pre-create an empty inbox so poll can work without a separate device-check.
-        self.items.entry(device_id).or_default();
+        // Pre-create an empty inbox so pull can work without a separate device-check.
+        self.sync_items.entry(device_id).or_default();
 
         Ok(bearer_token)
     }
@@ -118,98 +118,101 @@ impl RelayStore {
     }
 
     // -----------------------------------------------------------------------
-    // Upload (fan-out)
+    // Push / Pull (wall-clock sync protocol)
     // -----------------------------------------------------------------------
 
-    /// Fan out `item` into the inbox of every device EXCEPT the sender.
-    /// Returns the number of inboxes the item was delivered to.
-    pub fn upload_item(&mut self, item: RelayItem, _config: &RelayConfig) -> usize {
-        // Collect all device IDs that are not the sender.
-        let targets: Vec<String> = self
-            .devices
-            .keys()
-            .filter(|id| *id != &item.sender_device_id)
-            .cloned()
-            .collect();
-
-        let count = targets.len();
-        for target_id in targets {
-            let inbox = self.items.entry(target_id).or_default();
-            // Build a copy of the item for each target (clone fields individually).
-            inbox.push(RelayItem {
-                item_id: item.item_id.clone(),
-                ciphertext_b64: item.ciphertext_b64.clone(),
-                nonce_b64: item.nonce_b64.clone(),
-                sender_device_id: item.sender_device_id.clone(),
-                lamport_ts: item.lamport_ts,
-                content_type: item.content_type.clone(),
-                uploaded_at: item.uploaded_at,
-            });
-
-            // Enforce per-device quota: keep only the newest MAX_ITEMS_PER_DEVICE
-            // items, ordering by (lamport_ts DESC, item_id DESC) so that the oldest
-            // are removed first on overflow.
-            if inbox.len() > MAX_ITEMS_PER_DEVICE {
-                // Sort ascending so that [0] is the oldest — then drain from the front.
-                inbox.sort_by(|a, b| {
-                    a.lamport_ts
-                        .cmp(&b.lamport_ts)
-                        .then_with(|| a.item_id.cmp(&b.item_id))
-                });
-                let overflow = inbox.len() - MAX_ITEMS_PER_DEVICE;
-                inbox.drain(..overflow);
-            }
-        }
-        count
-    }
-
-    // -----------------------------------------------------------------------
-    // Poll
-    // -----------------------------------------------------------------------
-
-    /// Return items in `device_id`'s inbox with `lamport_ts > since_lamport`,
-    /// sorted ascending. Prunes TTL-expired items first (lazy expiry).
-    pub fn poll_items(
+    /// Store an encrypted item in `device_id`'s sync inbox.
+    ///
+    /// Validates that the decoded `content_b64` does not exceed `max_item_bytes`.
+    /// Prunes the oldest item when the inbox exceeds `MAX_PUSH_ITEMS_PER_DEVICE`.
+    /// Returns the auto-assigned integer ID.
+    pub fn push_item(
         &mut self,
         device_id: &str,
-        since_lamport: u64,
-    ) -> Vec<RelayItemResponse> {
-        let ttl = self.sync_ttl_secs;
-        let inbox = self.items.entry(device_id.to_string()).or_default();
+        content_type: String,
+        content_b64: String,
+        wall_time: u64,
+        max_item_bytes: usize,
+    ) -> Result<i64, RelayError> {
+        // Validate device exists (verify_token must already have been called before this).
+        if !self.devices.contains_key(device_id) {
+            return Err(RelayError::DeviceNotFound);
+        }
 
-        // Lazy TTL prune.
-        inbox.retain(|item| item.uploaded_at.elapsed().as_secs() < ttl);
+        // Validate content_type.
+        if !matches!(content_type.as_str(), "text" | "image" | "file") {
+            return Err(RelayError::BadRequest(
+                "content_type must be 'text', 'image', or 'file'".to_string(),
+            ));
+        }
 
-        let mut result: Vec<RelayItemResponse> = inbox
+        // Validate content_b64 decodes and does not exceed quota.
+        let decoded = B64
+            .decode(&content_b64)
+            .map_err(|_| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?;
+        if decoded.len() > max_item_bytes {
+            return Err(RelayError::PayloadTooLarge);
+        }
+
+        let id = self.next_sync_id;
+        self.next_sync_id += 1;
+
+        let inbox = self.sync_items.entry(device_id.to_string()).or_default();
+        inbox.push(SyncItem {
+            id,
+            content_type,
+            content_b64,
+            wall_time,
+        });
+
+        // Enforce per-device quota: oldest item (front) is pruned first.
+        if inbox.len() > MAX_PUSH_ITEMS_PER_DEVICE {
+            let overflow = inbox.len() - MAX_PUSH_ITEMS_PER_DEVICE;
+            inbox.drain(..overflow);
+        }
+
+        Ok(id)
+    }
+
+    /// Return items in `device_id`'s sync inbox with `wall_time > since`, sorted ascending.
+    pub fn pull_items(&self, device_id: &str, since: u64) -> Result<Vec<PullItem>, RelayError> {
+        let inbox = self
+            .sync_items
+            .get(device_id)
+            .ok_or(RelayError::DeviceNotFound)?;
+
+        let mut result: Vec<PullItem> = inbox
             .iter()
-            .filter(|item| item.lamport_ts > since_lamport)
-            .map(|item| RelayItemResponse {
-                item_id: item.item_id.clone(),
-                ciphertext_b64: item.ciphertext_b64.clone(),
-                nonce_b64: item.nonce_b64.clone(),
-                sender_device_id: item.sender_device_id.clone(),
-                lamport_ts: item.lamport_ts,
+            .filter(|item| item.wall_time > since)
+            .map(|item| PullItem {
+                id: item.id,
                 content_type: item.content_type.clone(),
+                content_b64: item.content_b64.clone(),
+                wall_time: item.wall_time,
             })
             .collect();
 
-        result.sort_by_key(|r| r.lamport_ts);
-        result
+        result.sort_by_key(|r| r.wall_time);
+        Ok(result)
     }
 
     // -----------------------------------------------------------------------
-    // Delete
+    // Delete (legacy — remove a specific item from sync_items by string id)
     // -----------------------------------------------------------------------
 
-    /// Remove item `item_id` from `device_id`'s inbox.
+    /// Remove item `item_id` from `device_id`'s inbox (matched by id as string for compat).
     pub fn delete_item(&mut self, device_id: &str, item_id: &str) -> Result<(), RelayError> {
+        let parsed_id: i64 = item_id
+            .parse()
+            .map_err(|_| RelayError::BadRequest("item_id must be an integer".to_string()))?;
+
         let inbox = self
-            .items
+            .sync_items
             .get_mut(device_id)
             .ok_or(RelayError::DeviceNotFound)?;
 
         let before = inbox.len();
-        inbox.retain(|item| item.item_id != item_id);
+        inbox.retain(|item| item.id != parsed_id);
         if inbox.len() == before {
             return Err(RelayError::ItemNotFound);
         }
@@ -222,29 +225,23 @@ impl RelayStore {
 
     /// Remove devices that have been inactive for longer than `inactive_threshold_secs`.
     ///
-    /// A device is considered inactive when its inbox contains no items uploaded
-    /// within the threshold window AND it was registered more than
-    /// `inactive_threshold_secs` ago.  Returns the number of devices removed.
+    /// A device is considered inactive when its inbox is empty AND it was registered
+    /// more than `inactive_threshold_secs` ago. Returns the number of devices removed.
     #[allow(dead_code)]
     pub fn cleanup_inactive_devices(&mut self, inactive_threshold_secs: u64) -> usize {
         let inactive_ids: Vec<String> = self
             .devices
             .iter()
             .filter(|(id, record)| {
-                // Device must have been registered long enough ago.
                 let old_enough =
                     record.registered_at.elapsed().as_secs() >= inactive_threshold_secs;
                 if !old_enough {
                     return false;
                 }
-                // Inbox must have no recently-uploaded items.
-                let inbox = self.items.get(*id);
-                let has_recent = inbox.map_or(false, |items| {
-                    items
-                        .iter()
-                        .any(|i| i.uploaded_at.elapsed().as_secs() < inactive_threshold_secs)
-                });
-                !has_recent
+                // Device is inactive if its sync inbox is empty.
+                let inbox = self.sync_items.get(*id);
+                let has_items = inbox.map_or(false, |items| !items.is_empty());
+                !has_items
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -252,7 +249,7 @@ impl RelayStore {
         let count = inactive_ids.len();
         for id in &inactive_ids {
             self.devices.remove(id);
-            self.items.remove(id);
+            self.sync_items.remove(id);
         }
         count
     }
@@ -267,7 +264,11 @@ impl RelayStore {
     pub fn list_devices(&self) -> Vec<String> {
         let mut records: Vec<&DeviceRecord> = self.devices.values().collect();
         records.sort_by(|a, b| b.registered_at.cmp(&a.registered_at));
-        records.into_iter().take(100).map(|r| r.device_id.clone()).collect()
+        records
+            .into_iter()
+            .take(100)
+            .map(|r| r.device_id.clone())
+            .collect()
     }
 
     // -----------------------------------------------------------------------
@@ -276,7 +277,7 @@ impl RelayStore {
 
     /// Returns `(device_count, total_item_count)`.
     pub fn stats(&self) -> (usize, usize) {
-        let total = self.items.values().map(|v| v.len()).sum();
+        let total = self.sync_items.values().map(|v| v.len()).sum();
         (self.devices.len(), total)
     }
 }
@@ -303,7 +304,6 @@ fn hex_encode(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::RelayConfig;
 
     fn make_store() -> RelayStore {
         RelayStore::new(3600)
@@ -321,6 +321,10 @@ mod tests {
     fn device_b_id() -> String {
         "22222222-2222-2222-2222-222222222222".to_string()
     }
+
+    // -----------------------------------------------------------------------
+    // Registration / auth tests
+    // -----------------------------------------------------------------------
 
     #[test]
     fn register_returns_bearer_token() {
@@ -361,103 +365,153 @@ mod tests {
         assert!(matches!(err, RelayError::Unauthorized));
     }
 
-    #[test]
-    fn upload_fans_out_to_other_devices() {
-        let mut store = make_store();
-        store.register_device(device_a_id(), valid_key_b64()).unwrap();
+    // -----------------------------------------------------------------------
+    // Push / Pull tests
+    // -----------------------------------------------------------------------
+
+    fn push_text(store: &mut RelayStore, device_id: &str, wall_time: u64) -> i64 {
         store
-            .register_device(device_b_id(), B64.encode([1u8; 32]))
-            .unwrap();
-
-        let config = RelayConfig::default();
-        let item = RelayItem {
-            item_id: "item-1".to_string(),
-            ciphertext_b64: B64.encode(b"ciphertext"),
-            nonce_b64: B64.encode([0u8; 24]),
-            sender_device_id: device_a_id(),
-            lamport_ts: 1,
-            content_type: "text".to_string(),
-            uploaded_at: Instant::now(),
-        };
-
-        let count = store.upload_item(item, &config);
-        assert_eq!(count, 1, "only device B should receive it");
+            .push_item(
+                device_id,
+                "text".to_string(),
+                B64.encode(b"hello"),
+                wall_time,
+                10 * 1024 * 1024,
+            )
+            .unwrap()
     }
 
     #[test]
-    fn upload_does_not_fan_out_to_sender() {
+    fn push_returns_ascending_ids() {
         let mut store = make_store();
         store.register_device(device_a_id(), valid_key_b64()).unwrap();
 
-        let config = RelayConfig::default();
-        let item = RelayItem {
-            item_id: "item-2".to_string(),
-            ciphertext_b64: B64.encode(b"data"),
-            nonce_b64: B64.encode([0u8; 24]),
-            sender_device_id: device_a_id(),
-            lamport_ts: 1,
-            content_type: "text".to_string(),
-            uploaded_at: Instant::now(),
-        };
-        store.upload_item(item, &config);
-
-        // Sender's own inbox should be empty.
-        let items = store.poll_items(&device_a_id(), 0);
-        assert!(items.is_empty());
+        let id1 = push_text(&mut store, &device_a_id(), 1000);
+        let id2 = push_text(&mut store, &device_a_id(), 2000);
+        assert!(id2 > id1, "IDs must be strictly ascending");
     }
 
     #[test]
-    fn poll_since_lamport_filters_correctly() {
+    fn pull_returns_items_since_wall_time() {
         let mut store = make_store();
         store.register_device(device_a_id(), valid_key_b64()).unwrap();
-        store
-            .register_device(device_b_id(), B64.encode([1u8; 32]))
-            .unwrap();
 
-        let config = RelayConfig::default();
-        for ts in [1u64, 2, 3] {
-            let item = RelayItem {
-                item_id: format!("item-{ts}"),
-                ciphertext_b64: B64.encode(b"x"),
-                nonce_b64: B64.encode([0u8; 24]),
-                sender_device_id: device_a_id(),
-                lamport_ts: ts,
-                content_type: "text".to_string(),
-                uploaded_at: Instant::now(),
-            };
-            store.upload_item(item, &config);
+        push_text(&mut store, &device_a_id(), 1000);
+        push_text(&mut store, &device_a_id(), 2000);
+        push_text(&mut store, &device_a_id(), 3000);
+
+        let items = store.pull_items(&device_a_id(), 1000).unwrap();
+        // since=1000 means wall_time > 1000, so items at 2000 and 3000.
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].wall_time, 2000);
+        assert_eq!(items[1].wall_time, 3000);
+    }
+
+    #[test]
+    fn pull_since_zero_returns_all() {
+        let mut store = make_store();
+        store.register_device(device_a_id(), valid_key_b64()).unwrap();
+
+        push_text(&mut store, &device_a_id(), 100);
+        push_text(&mut store, &device_a_id(), 200);
+
+        let items = store.pull_items(&device_a_id(), 0).unwrap();
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn pull_sorted_ascending_by_wall_time() {
+        let mut store = make_store();
+        store.register_device(device_a_id(), valid_key_b64()).unwrap();
+
+        // Push out of order to verify sort.
+        push_text(&mut store, &device_a_id(), 3000);
+        push_text(&mut store, &device_a_id(), 1000);
+        push_text(&mut store, &device_a_id(), 2000);
+
+        let items = store.pull_items(&device_a_id(), 0).unwrap();
+        let times: Vec<u64> = items.iter().map(|i| i.wall_time).collect();
+        assert_eq!(times, vec![1000, 2000, 3000]);
+    }
+
+    #[test]
+    fn push_rejects_unknown_content_type() {
+        let mut store = make_store();
+        store.register_device(device_a_id(), valid_key_b64()).unwrap();
+
+        let err = store
+            .push_item(
+                &device_a_id(),
+                "video".to_string(),
+                B64.encode(b"x"),
+                1000,
+                10 * 1024 * 1024,
+            )
+            .unwrap_err();
+        assert!(matches!(err, RelayError::BadRequest(_)));
+    }
+
+    #[test]
+    fn push_rejects_invalid_base64() {
+        let mut store = make_store();
+        store.register_device(device_a_id(), valid_key_b64()).unwrap();
+
+        let err = store
+            .push_item(
+                &device_a_id(),
+                "text".to_string(),
+                "!!!not-base64!!!".to_string(),
+                1000,
+                10 * 1024 * 1024,
+            )
+            .unwrap_err();
+        assert!(matches!(err, RelayError::BadRequest(_)));
+    }
+
+    #[test]
+    fn push_rejects_oversized_payload() {
+        let mut store = make_store();
+        store.register_device(device_a_id(), valid_key_b64()).unwrap();
+
+        // 11 bytes encoded, limit is 10 bytes.
+        let big = B64.encode(b"hello world");
+        let err = store
+            .push_item(&device_a_id(), "text".to_string(), big, 1000, 10)
+            .unwrap_err();
+        assert!(matches!(err, RelayError::PayloadTooLarge));
+    }
+
+    #[test]
+    fn push_quota_prunes_oldest_item() {
+        let mut store = make_store();
+        store.register_device(device_a_id(), valid_key_b64()).unwrap();
+
+        // Fill up to the limit + 1.
+        for t in 1u64..=(MAX_PUSH_ITEMS_PER_DEVICE as u64 + 1) {
+            push_text(&mut store, &device_a_id(), t);
         }
 
-        let results = store.poll_items(&device_b_id(), 1);
-        assert_eq!(results.len(), 2);
-        assert_eq!(results[0].lamport_ts, 2);
-        assert_eq!(results[1].lamport_ts, 3);
+        let items = store.pull_items(&device_a_id(), 0).unwrap();
+        assert_eq!(
+            items.len(),
+            MAX_PUSH_ITEMS_PER_DEVICE,
+            "inbox must be capped at MAX_PUSH_ITEMS_PER_DEVICE"
+        );
+        // Oldest item (wall_time=1) must have been evicted.
+        let min_wt = items.iter().map(|i| i.wall_time).min().unwrap();
+        assert_eq!(min_wt, 2, "oldest item must be evicted");
     }
 
     #[test]
-    fn delete_item_removes_from_inbox() {
-        let mut store = make_store();
-        store.register_device(device_a_id(), valid_key_b64()).unwrap();
-        store
-            .register_device(device_b_id(), B64.encode([1u8; 32]))
-            .unwrap();
-
-        let config = RelayConfig::default();
-        let item = RelayItem {
-            item_id: "del-item".to_string(),
-            ciphertext_b64: B64.encode(b"data"),
-            nonce_b64: B64.encode([0u8; 24]),
-            sender_device_id: device_a_id(),
-            lamport_ts: 1,
-            content_type: "text".to_string(),
-            uploaded_at: Instant::now(),
-        };
-        store.upload_item(item, &config);
-        store.delete_item(&device_b_id(), "del-item").unwrap();
-
-        let items = store.poll_items(&device_b_id(), 0);
-        assert!(items.is_empty());
+    fn pull_returns_device_not_found_for_unknown_device() {
+        let store = make_store();
+        let err = store.pull_items("unknown-device", 0).unwrap_err();
+        assert!(matches!(err, RelayError::DeviceNotFound));
     }
+
+    // -----------------------------------------------------------------------
+    // Stats / cleanup tests
+    // -----------------------------------------------------------------------
 
     #[test]
     fn stats_counts_correctly() {
@@ -470,6 +524,10 @@ mod tests {
         let (devices, items) = store.stats();
         assert_eq!(devices, 2);
         assert_eq!(items, 0);
+
+        push_text(&mut store, &device_a_id(), 1000);
+        let (_, items) = store.stats();
+        assert_eq!(items, 1);
     }
 
     #[test]
@@ -480,12 +538,11 @@ mod tests {
             .register_device(device_b_id(), B64.encode([1u8; 32]))
             .unwrap();
 
-        // With threshold=0 every device is "old enough".
-        // Neither device has items, so both should be removed.
+        // With threshold=0 every device is "old enough" and both inboxes are empty.
         let removed = store.cleanup_inactive_devices(0);
         assert_eq!(removed, 2, "both idle devices must be cleaned up");
         assert!(store.devices.is_empty());
-        assert!(store.items.is_empty());
+        assert!(store.sync_items.is_empty());
     }
 
     #[test]
@@ -496,8 +553,7 @@ mod tests {
             .register_device(device_b_id(), B64.encode([1u8; 32]))
             .unwrap();
 
-        // With u64::MAX threshold, no device has been registered long enough —
-        // registered_at.elapsed() < u64::MAX is always true, so both are kept.
+        // With u64::MAX threshold no device has been registered long enough.
         let removed = store.cleanup_inactive_devices(u64::MAX);
         assert_eq!(removed, 0, "recently registered devices must not be removed");
         assert!(store.devices.contains_key(&device_a_id()));
@@ -505,67 +561,14 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_with_zero_threshold_removes_all_idle_devices() {
+    fn cleanup_keeps_devices_with_items() {
         let mut store = make_store();
         store.register_device(device_a_id(), valid_key_b64()).unwrap();
-        store
-            .register_device(device_b_id(), B64.encode([1u8; 32]))
-            .unwrap();
 
-        // threshold=0: every device is "old enough" (elapsed >= 0 always).
-        // Neither has items with uploaded_at.elapsed() < 0 (impossible for u64),
-        // so both are treated as inactive and removed.
+        push_text(&mut store, &device_a_id(), 1000);
+
+        // threshold=0: device is old enough, but has items — must not be removed.
         let removed = store.cleanup_inactive_devices(0);
-        assert_eq!(removed, 2, "all idle devices must be removed with threshold=0");
-        assert!(store.devices.is_empty());
-        assert!(store.items.is_empty());
-    }
-
-    #[test]
-    fn quota_prunes_oldest_when_exceeded() {
-        let mut store = make_store();
-        store.register_device(device_a_id(), valid_key_b64()).unwrap();
-        store
-            .register_device(device_b_id(), B64.encode([1u8; 32]))
-            .unwrap();
-
-        let config = RelayConfig::default();
-
-        // Insert MAX_ITEMS_PER_DEVICE + 1 items from device A into device B's inbox.
-        // lamport_ts values: 1 … 501.  Item with ts=1 is the oldest and must be evicted.
-        for ts in 1u64..=(MAX_ITEMS_PER_DEVICE as u64 + 1) {
-            store.upload_item(
-                RelayItem {
-                    item_id: format!("item-{ts:05}"),
-                    ciphertext_b64: B64.encode(b"x"),
-                    nonce_b64: B64.encode([0u8; 24]),
-                    sender_device_id: device_a_id(),
-                    lamport_ts: ts,
-                    content_type: "text".to_string(),
-                    uploaded_at: Instant::now(),
-                },
-                &config,
-            );
-        }
-
-        // Device B's inbox must contain exactly MAX_ITEMS_PER_DEVICE items.
-        let items = store.poll_items(&device_b_id(), 0);
-        assert_eq!(
-            items.len(),
-            MAX_ITEMS_PER_DEVICE,
-            "inbox must be capped at MAX_ITEMS_PER_DEVICE"
-        );
-
-        // The item with the lowest lamport_ts (ts=1, the oldest) must have been pruned.
-        let min_ts = items.iter().map(|i| i.lamport_ts).min().unwrap();
-        assert_eq!(min_ts, 2, "oldest item (lamport_ts=1) must be evicted");
-
-        // The newest item (ts=501) must still be present.
-        let max_ts = items.iter().map(|i| i.lamport_ts).max().unwrap();
-        assert_eq!(
-            max_ts,
-            MAX_ITEMS_PER_DEVICE as u64 + 1,
-            "newest item must be retained"
-        );
+        assert_eq!(removed, 0, "device with items must not be removed");
     }
 }
