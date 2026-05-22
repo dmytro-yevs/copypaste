@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 use tokio::time::interval;
 use copypaste_core::{
     AppConfig, Database, DeviceKeypair,
@@ -9,7 +9,7 @@ use copypaste_core::{
     encode_image, chunks_to_blob,
     detect,
 };
-use crate::{clipboard::{ClipboardContent, ClipboardMonitor}, paths};
+use crate::{clipboard::{ClipboardContent, ClipboardMonitor}, p2p, paths};
 #[cfg(unix)]
 use crate::ipc::IpcServer;
 
@@ -60,6 +60,47 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         });
     }
 
+    // Broadcast channel: carries newly-inserted clipboard items to any
+    // subscriber (P2P sync, future extensions).  Capacity 64 — lagging
+    // receivers drop oldest items and log a warning.
+    let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(64);
+
+    // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
+    let _p2p_handle: Option<p2p::P2pHandle> = if std::env::var("COPYPASTE_P2P").as_deref() == Ok("1") {
+        let device_id = uuid::Uuid::new_v4();
+        let device_name = std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("COMPUTERNAME"))
+            .unwrap_or_else(|_| "CopyPaste".to_string());
+
+        let p2p_config = p2p::P2pConfig {
+            listen_port: 0,
+            device_name,
+            enabled: true,
+        };
+
+        match p2p::start_p2p(
+            p2p_config,
+            db.clone(),
+            device_id,
+            local_key,
+            new_item_tx.subscribe(),
+        )
+        .await
+        {
+            Ok(handle) => {
+                tracing::info!(port = handle.actual_port, "P2P subsystem running");
+                Some(handle)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to start P2P subsystem: {e}");
+                None
+            }
+        }
+    } else {
+        tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
+        None
+    };
+
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
     let mut ticker = interval(Duration::from_millis(config.poll_interval_ms));
     let mut cleanup_ticks: u64 = 0;
@@ -86,7 +127,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode, &new_item_tx).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -138,7 +179,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode, &new_item_tx).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -193,6 +234,7 @@ async fn handle_tick(
     local_key: &[u8; 32],
     config: &AppConfig,
     private_mode: &Arc<AtomicBool>,
+    new_item_tx: &broadcast::Sender<ClipboardItem>,
 ) {
     // Skip recording when private/pause mode is active
     if private_mode.load(Ordering::Relaxed) {
@@ -204,10 +246,17 @@ async fn handle_tick(
 
     match monitor.poll() {
         Ok(Some(ClipboardContent::Text(text))) => {
-            handle_text(text, db, local_key, config).await;
+            if let Some(item) = handle_text(text, db, local_key, config).await {
+                // Broadcast to P2P subscribers (and any future consumer).
+                // A send error only means there are no active receivers —
+                // that is normal when P2P is disabled.
+                let _ = new_item_tx.send(item);
+            }
         }
         Ok(Some(ClipboardContent::Image(raw_bytes))) => {
-            handle_image(raw_bytes, db, local_key, config).await;
+            if let Some(item) = handle_image(raw_bytes, db, local_key, config).await {
+                let _ = new_item_tx.send(item);
+            }
         }
         Ok(None) => {}
         Err(e) => tracing::warn!("clipboard poll error: {e}"),
@@ -219,7 +268,7 @@ async fn handle_text(
     db: &Arc<Mutex<Database>>,
     local_key: &[u8; 32],
     config: &AppConfig,
-) {
+) -> Option<ClipboardItem> {
     let is_sensitive = detect(&text).is_some();
 
     let (nonce, ciphertext) = encrypt_item(text.as_bytes(), local_key);
@@ -244,8 +293,12 @@ async fn handle_text(
                 tracing::warn!("fts index failed for id={}: {e}", item.id);
             }
             prune_history(&db_guard, config);
+            Some(item)
         }
-        Err(e) => tracing::warn!("failed to store text item: {e}"),
+        Err(e) => {
+            tracing::warn!("failed to store text item: {e}");
+            None
+        }
     }
 }
 
@@ -254,7 +307,7 @@ async fn handle_image(
     db: &Arc<Mutex<Database>>,
     local_key: &[u8; 32],
     config: &AppConfig,
-) {
+) -> Option<ClipboardItem> {
     // Derive a stable file_id from the raw bytes hash (first 16 bytes of SHA-256).
     // This gives a deterministic ID for deduplication without storing plaintext.
     use std::collections::hash_map::DefaultHasher;
@@ -294,12 +347,17 @@ async fn handle_image(
                         tracing::warn!("fts empty index failed for image id={}: {e}", item.id);
                     }
                     prune_history(&db_guard, config);
+                    Some(item)
                 }
-                Err(e) => tracing::warn!("failed to store image item: {e}"),
+                Err(e) => {
+                    tracing::warn!("failed to store image item: {e}");
+                    None
+                }
             }
         }
         Err(e) => {
             tracing::warn!("image encode failed (skipping): {e}");
+            None
         }
     }
 }
