@@ -129,6 +129,30 @@ impl IpcServer {
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
             }
+            "copy" => {
+                let id = match req.params.get("id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => return Response::err(req.id, "missing param: id"),
+                };
+                let db = self.db.lock().await;
+                match copypaste_core::get_page(&db, 1000, 0) {
+                    Ok(items) => {
+                        if let Some(item) = items.iter().find(|i| i.id == id) {
+                            // Note: we don't have the key here (it's in daemon.rs state)
+                            // For now return item metadata — full decrypt support in next phase
+                            Response::ok(req.id, serde_json::json!({
+                                "id": item.id,
+                                "content_type": item.content_type,
+                                "found": true,
+                                "note": "copy-to-clipboard requires daemon v2 with key access"
+                            }))
+                        } else {
+                            Response::err(req.id, format!("item not found: {id}"))
+                        }
+                    }
+                    Err(e) => Response::err(req.id, e.to_string()),
+                }
+            }
             "status" => Response::ok(req.id, serde_json::json!({"status": "running"})),
             other => Response::err(req.id, format!("unknown method: {other}")),
         }
@@ -232,5 +256,32 @@ mod tests {
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
         assert!(resp["error"].as_str().unwrap().contains("missing param: query"));
+    }
+
+    #[tokio::test]
+    async fn copy_unknown_id_returns_error() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("copy_test.sock");
+        start_test_server(&sock).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream.write_all(b"{\"id\":\"1\",\"method\":\"copy\",\"params\":{\"id\":\"nonexistent\"}}\n").await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], false);
+    }
+
+    #[tokio::test]
+    async fn copy_missing_id_param_returns_error() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("copy_missing_param.sock");
+        start_test_server(&sock).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream.write_all(b"{\"id\":\"2\",\"method\":\"copy\",\"params\":{}}\n").await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], false);
+        assert!(resp["error"].as_str().unwrap().contains("missing param: id"));
     }
 }

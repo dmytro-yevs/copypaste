@@ -217,6 +217,47 @@ impl RelayStore {
     }
 
     // -----------------------------------------------------------------------
+    // Cleanup
+    // -----------------------------------------------------------------------
+
+    /// Remove devices that have been inactive for longer than `inactive_threshold_secs`.
+    ///
+    /// A device is considered inactive when its inbox contains no items uploaded
+    /// within the threshold window AND it was registered more than
+    /// `inactive_threshold_secs` ago.  Returns the number of devices removed.
+    #[allow(dead_code)]
+    pub fn cleanup_inactive_devices(&mut self, inactive_threshold_secs: u64) -> usize {
+        let inactive_ids: Vec<String> = self
+            .devices
+            .iter()
+            .filter(|(id, record)| {
+                // Device must have been registered long enough ago.
+                let old_enough =
+                    record.registered_at.elapsed().as_secs() >= inactive_threshold_secs;
+                if !old_enough {
+                    return false;
+                }
+                // Inbox must have no recently-uploaded items.
+                let inbox = self.items.get(*id);
+                let has_recent = inbox.map_or(false, |items| {
+                    items
+                        .iter()
+                        .any(|i| i.uploaded_at.elapsed().as_secs() < inactive_threshold_secs)
+                });
+                !has_recent
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        let count = inactive_ids.len();
+        for id in &inactive_ids {
+            self.devices.remove(id);
+            self.items.remove(id);
+        }
+        count
+    }
+
+    // -----------------------------------------------------------------------
     // Stats
     // -----------------------------------------------------------------------
 
@@ -416,6 +457,55 @@ mod tests {
         let (devices, items) = store.stats();
         assert_eq!(devices, 2);
         assert_eq!(items, 0);
+    }
+
+    #[test]
+    fn cleanup_removes_old_inactive_devices() {
+        let mut store = make_store();
+        store.register_device(device_a_id(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_b_id(), B64.encode([1u8; 32]))
+            .unwrap();
+
+        // With threshold=0 every device is "old enough".
+        // Neither device has items, so both should be removed.
+        let removed = store.cleanup_inactive_devices(0);
+        assert_eq!(removed, 2, "both idle devices must be cleaned up");
+        assert!(store.devices.is_empty());
+        assert!(store.items.is_empty());
+    }
+
+    #[test]
+    fn cleanup_keeps_recently_registered_devices() {
+        let mut store = make_store();
+        store.register_device(device_a_id(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_b_id(), B64.encode([1u8; 32]))
+            .unwrap();
+
+        // With u64::MAX threshold, no device has been registered long enough —
+        // registered_at.elapsed() < u64::MAX is always true, so both are kept.
+        let removed = store.cleanup_inactive_devices(u64::MAX);
+        assert_eq!(removed, 0, "recently registered devices must not be removed");
+        assert!(store.devices.contains_key(&device_a_id()));
+        assert!(store.devices.contains_key(&device_b_id()));
+    }
+
+    #[test]
+    fn cleanup_with_zero_threshold_removes_all_idle_devices() {
+        let mut store = make_store();
+        store.register_device(device_a_id(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_b_id(), B64.encode([1u8; 32]))
+            .unwrap();
+
+        // threshold=0: every device is "old enough" (elapsed >= 0 always).
+        // Neither has items with uploaded_at.elapsed() < 0 (impossible for u64),
+        // so both are treated as inactive and removed.
+        let removed = store.cleanup_inactive_devices(0);
+        assert_eq!(removed, 2, "all idle devices must be removed with threshold=0");
+        assert!(store.devices.is_empty());
+        assert!(store.items.is_empty());
     }
 
     #[test]
