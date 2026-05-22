@@ -79,17 +79,6 @@ export component SettingsWindow inherits Window {
                 padding-right: 12px;
                 alignment: space-between;
 
-                // FocusScope captures keyboard events on the whole title bar area
-                FocusScope {
-                    width: 0px;  // invisible, just captures keys
-                    key-released(event) => {
-                        if event.text == Key.Escape {
-                            root.close();
-                        }
-                        accept
-                    }
-                }
-
                 Text {
                     text: "Settings";
                     font-size: 17px;
@@ -226,7 +215,7 @@ export component SettingsWindow inherits Window {
                         Button {
                             text: root.sync-connected ? "Disconnect" : "Connect";
                             clicked => {
-                                if root.sync-connected {
+                                if (root.sync-connected) {
                                     root.disconnect-supabase();
                                 } else {
                                     root.connect-supabase(root.supabase-url, root.supabase-key);

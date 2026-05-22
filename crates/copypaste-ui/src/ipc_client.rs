@@ -1,3 +1,6 @@
+// Permit dead code — many IPC methods are stubs for future UI features.
+#![allow(dead_code)]
+
 /// Synchronous IPC client for the copypaste-daemon Unix socket.
 ///
 /// Protocol: newline-delimited JSON.
@@ -203,6 +206,7 @@ impl IpcClient {
     }
 
     /// Persist application configuration via the daemon.
+    #[allow(dead_code)]
     pub fn save_settings(&mut self, settings: &AppSettings) -> Result<()> {
         let params = serde_json::to_value(settings)
             .context("failed to serialize AppSettings")?;

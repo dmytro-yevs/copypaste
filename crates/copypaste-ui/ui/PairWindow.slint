@@ -54,16 +54,6 @@ export component PairWindow inherits Window {
                 padding-right: 12px;
                 alignment: space-between;
 
-                FocusScope {
-                    width: 0px;
-                    key-released(event) => {
-                        if event.text == Key.Escape {
-                            root.close();
-                        }
-                        accept
-                    }
-                }
-
                 Text {
                     text: "Pair Device";
                     font-size: 17px;
@@ -154,7 +144,7 @@ export component PairWindow inherits Window {
                                 root.input-valid = text != "";
                             }
                             accepted => {
-                                if root.input-valid {
+                                if (root.input-valid) {
                                     root.pair(root.peer-input);
                                 }
                             }

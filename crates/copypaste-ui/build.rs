@@ -1,5 +1,4 @@
-// build.rs — compile Slint UI files for copypaste-ui
-// All components exported via appui.slint so a single compile_with_config call is enough.
+// build.rs — compile all Slint UI files via the appui.slint root entry point.
 
 fn main() {
     slint_build::compile_with_config(
