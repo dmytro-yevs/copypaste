@@ -8,6 +8,7 @@ members = [
     "crates/copypaste-p2p",
     "crates/copypaste-sync",
     "crates/copypaste-supabase",
+    "crates/copypaste-android",
 ]
 
 [workspace.package]
