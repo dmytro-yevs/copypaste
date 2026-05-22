@@ -1,7 +1,19 @@
-.PHONY: build test bench check fmt clippy install-daemon clean
+.PHONY: build release bundle dmg test smoke-test bench check fmt clippy install-daemon clean
 
 build:
 	cargo build --workspace
+
+release:
+	cargo build --release --workspace
+
+bundle: release
+	bash scripts/make_app_bundle.sh
+
+dmg: bundle
+	bash scripts/make_dmg.sh
+
+smoke-test: release
+	bash scripts/smoke_test.sh
 
 test:
 	cargo test --workspace
