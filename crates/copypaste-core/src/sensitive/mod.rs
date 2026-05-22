@@ -1,1 +1,3 @@
-// Implemented in Task 3
+mod patterns;
+mod detector;
+pub use detector::{detect, SensitiveKind};
