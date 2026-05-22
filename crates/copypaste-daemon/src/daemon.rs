@@ -39,6 +39,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
     let mut ticker = interval(Duration::from_millis(config.poll_interval_ms));
+    let mut cleanup_ticks: u64 = 0;
 
     tracing::info!("clipboard monitor started");
 
@@ -50,6 +51,20 @@ pub async fn run() -> anyhow::Result<()> {
             tokio::select! {
                 _ = ticker.tick() => {
                     handle_tick(&mut monitor, &db, &local_key, &config).await;
+                    cleanup_ticks += 1;
+                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
+                        cleanup_ticks = 0;
+                        let db_guard = db.lock().await;
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as i64;
+                        match copypaste_core::delete_expired(&db_guard, now_ms) {
+                            Ok(n) if n > 0 => tracing::info!("TTL cleanup: removed {n} expired items"),
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("TTL cleanup error: {e}"),
+                        }
+                    }
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down");
@@ -68,6 +83,20 @@ pub async fn run() -> anyhow::Result<()> {
             tokio::select! {
                 _ = ticker.tick() => {
                     handle_tick(&mut monitor, &db, &local_key, &config).await;
+                    cleanup_ticks += 1;
+                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
+                        cleanup_ticks = 0;
+                        let db_guard = db.lock().await;
+                        let now_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as i64;
+                        match copypaste_core::delete_expired(&db_guard, now_ms) {
+                            Ok(n) if n > 0 => tracing::info!("TTL cleanup: removed {n} expired items"),
+                            Ok(_) => {}
+                            Err(e) => tracing::warn!("TTL cleanup error: {e}"),
+                        }
+                    }
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down");
