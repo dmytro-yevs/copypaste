@@ -134,4 +134,16 @@ class ClipboardRepository(context: Context) {
             return EncryptedBlob(nonce = nonce, ciphertext = ciphertext)
         }
     }
+
+    /**
+     * Pull incoming relay items, decrypt each via UniFFI decryptText, and store
+     * non-sensitive plaintext locally. Returns the list of decrypted strings that
+     * were successfully received (storing may still be a no-op until the .so lands).
+     */
+    suspend fun syncItems(syncManager: SyncManager, encryptionKey: ByteArray): List<String> =
+        withContext(Dispatchers.IO) {
+            val decrypted = syncManager.syncIncoming(encryptionKey)
+            decrypted.forEach { plaintext -> storeItem(plaintext, encryptionKey) }
+            decrypted
+        }
 }
