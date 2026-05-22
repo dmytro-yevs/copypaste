@@ -52,6 +52,16 @@ impl DeviceKeypair {
         let hash = sha2::Sha256::digest(self.public.as_bytes());
         hex::encode(hash)
     }
+
+    /// Derives a 32-byte symmetric key for local-only storage from this device's secret.
+    /// Never transmitted — only used to encrypt items stored on this device.
+    pub fn local_enc_key(&self) -> [u8; 32] {
+        let hk = Hkdf::<Sha256>::new(None, &self.secret.to_bytes());
+        let mut key = [0u8; 32];
+        hk.expand(b"copypaste-local-storage-v1", &mut key)
+            .expect("HKDF expand 32 bytes always succeeds");
+        key
+    }
 }
 
 #[cfg(test)]
@@ -104,5 +114,20 @@ mod tests {
         let secret_bytes = kp.secret_key_bytes();
         let restored = DeviceKeypair::from_secret_bytes(&secret_bytes).unwrap();
         assert_eq!(kp.public_key_bytes(), restored.public_key_bytes());
+    }
+
+    #[test]
+    fn local_enc_key_is_deterministic() {
+        let kp = DeviceKeypair::generate();
+        let k1 = kp.local_enc_key();
+        let k2 = kp.local_enc_key();
+        assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn local_enc_key_differs_between_keypairs() {
+        let kp1 = DeviceKeypair::generate();
+        let kp2 = DeviceKeypair::generate();
+        assert_ne!(kp1.local_enc_key(), kp2.local_enc_key());
     }
 }
