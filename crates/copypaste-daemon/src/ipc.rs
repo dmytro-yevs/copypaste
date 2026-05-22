@@ -1,11 +1,17 @@
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use copypaste_core::{Database, get_page, delete_item, delete_fts, count_items, search_items};
 use crate::protocol::{Request, Response};
+
+/// Maximum size of a single IPC request line. Clients exceeding this receive
+/// an error response and have their connection closed. Prevents OOM from a
+/// malicious or buggy client sending an unbounded stream without newlines.
+const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
 /// Persistent application configuration stored at
 /// `dirs::config_dir()/copypaste/config.json`.
@@ -27,19 +33,33 @@ fn read_config() -> AppConfig {
     let Some(path) = config_path() else {
         return AppConfig::default();
     };
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return AppConfig::default(),
+    };
+    match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "config parse failed at {}: {e}, using defaults",
+                path.display()
+            );
+            AppConfig::default()
+        }
+    }
 }
 
 fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
     let path = config_path().ok_or_else(|| anyhow::anyhow!("cannot determine config dir"))?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
+        // Best-effort: tighten parent dir perms to user-only.
+        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
     }
     let json = serde_json::to_string_pretty(cfg)?;
     std::fs::write(&path, json)?;
+    // chmod 0600 — config may carry supabase keys; never world-readable.
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     Ok(())
 }
 
@@ -61,10 +81,17 @@ fn format_fingerprint(bytes: &[u8]) -> String {
 
 /// Path to peers.json in the app config directory.
 fn peers_file_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("copypaste")
-        .join("peers.json")
+    static FALLBACK_WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    let base = dirs::config_dir().unwrap_or_else(|| {
+        FALLBACK_WARNED.get_or_init(|| {
+            tracing::warn!(
+                "dirs::config_dir() unavailable — falling back to CWD for peers.json. \
+                 Set $XDG_CONFIG_HOME or $HOME to silence this warning."
+            );
+        });
+        PathBuf::from(".")
+    });
+    base.join("copypaste").join("peers.json")
 }
 
 /// Load peers list from peers.json; returns empty vec if file is absent.
@@ -83,9 +110,13 @@ fn save_peers(peers: &[serde_json::Value]) -> anyhow::Result<()> {
     let path = peers_file_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
+        // Best-effort: tighten parent dir perms to user-only.
+        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
     }
     let data = serde_json::to_string_pretty(peers)?;
     std::fs::write(&path, data)?;
+    // chmod 0600 — peer fingerprints are sensitive identifiers; never world-readable.
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
     Ok(())
 }
 
@@ -110,10 +141,29 @@ impl IpcServer {
     }
 
     pub async fn serve(self, socket_path: &std::path::Path) -> anyhow::Result<()> {
+        // Ensure parent directory exists and is user-only (0o700) so that the
+        // socket cannot be reached by other local users even if the socket
+        // mode itself were ever loosened.
+        if let Some(parent) = socket_path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+                let _ = std::fs::set_permissions(
+                    parent,
+                    std::fs::Permissions::from_mode(0o700),
+                );
+            }
+        }
+
         // Remove stale socket file
         let _ = std::fs::remove_file(socket_path);
         let listener = UnixListener::bind(socket_path)?;
-        tracing::info!("IPC listening on {}", socket_path.display());
+
+        // chmod 0600 — the IPC socket gives full control over the user's
+        // clipboard history and peer database. It must not be world- or
+        // group-connectable. Done immediately after bind, before accept loop.
+        std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))?;
+
+        tracing::info!("IPC listening on {} (mode=0600)", socket_path.display());
 
         let server = Arc::new(self);
         loop {
@@ -134,15 +184,73 @@ impl IpcServer {
     #[tracing::instrument(skip_all, name = "ipc_connection")]
     async fn handle_connection(&self, stream: UnixStream) -> anyhow::Result<()> {
         let (reader, mut writer) = stream.into_split();
-        let mut lines = BufReader::new(reader).lines();
+        let mut reader = BufReader::new(reader);
+        let mut buf: Vec<u8> = Vec::with_capacity(4 * 1024);
 
-        while let Some(line) = lines.next_line().await? {
-            let resp = self.dispatch(&line).await;
+        loop {
+            buf.clear();
+            // Bound the read: at most MAX_REQUEST_BYTES + 1 so we can distinguish
+            // "exactly the limit" from "exceeded the limit".
+            let mut limited = (&mut reader).take((MAX_REQUEST_BYTES as u64) + 1);
+            let n = match limited.read_until(b'\n', &mut buf).await {
+                Ok(n) => n,
+                Err(e) => {
+                    tracing::warn!("ipc read error: {e}");
+                    return Ok(());
+                }
+            };
+
+            // Clean EOF — client closed the socket without sending more data.
+            if n == 0 {
+                return Ok(());
+            }
+
+            // Oversized request: read more than MAX_REQUEST_BYTES without
+            // finding a newline. Reject with an error response, then close.
+            if n > MAX_REQUEST_BYTES {
+                tracing::warn!(
+                    "ipc request exceeded {MAX_REQUEST_BYTES} bytes (read {n}); rejecting and closing"
+                );
+                let resp = Response::err("0", "request too large");
+                if let Ok(mut out) = serde_json::to_string(&resp) {
+                    out.push('\n');
+                    let _ = writer.write_all(out.as_bytes()).await;
+                }
+                return Ok(());
+            }
+
+            // Trim trailing \n (and any stray \r) before dispatch.
+            while matches!(buf.last(), Some(b'\n' | b'\r')) {
+                buf.pop();
+            }
+
+            // Empty line — skip silently (treat as keep-alive / no-op).
+            if buf.is_empty() {
+                continue;
+            }
+
+            let line = match std::str::from_utf8(&buf) {
+                Ok(s) => s,
+                Err(e) => {
+                    let resp = Response::err("0", format!("invalid UTF-8: {e}"));
+                    if let Ok(mut out) = serde_json::to_string(&resp) {
+                        out.push('\n');
+                        let _ = writer.write_all(out.as_bytes()).await;
+                    }
+                    continue;
+                }
+            };
+
+            let resp = self.dispatch(line).await;
             let mut out = serde_json::to_string(&resp)?;
             out.push('\n');
-            writer.write_all(out.as_bytes()).await?;
+            if let Err(e) = writer.write_all(out.as_bytes()).await {
+                // Client disconnected mid-response — log and exit cleanly,
+                // do not panic the spawned task.
+                tracing::debug!("ipc write failed (client disconnected): {e}");
+                return Ok(());
+            }
         }
-        Ok(())
     }
 
     #[tracing::instrument(skip(self), fields(method), name = "ipc_dispatch")]
@@ -917,5 +1025,158 @@ mod tests {
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
         assert!(resp["error"].as_str().unwrap().contains("not found"));
+    }
+
+    // ------------------------------------------------------------------
+    // Wave 1.1 IPC hardening tests
+    //
+    // These verify the security guarantees added in
+    // `fix(daemon-ipc): wave1.1 — socket chmod 0o600 + request size cap +
+    //  handle disconnect`:
+    //   * the Unix listener socket is created with mode 0600 (user-only),
+    //   * a request line exceeding MAX_REQUEST_BYTES (16 MiB) is rejected
+    //     with an error response without crashing the server,
+    //   * a client that connects and disconnects abruptly (no newline,
+    //     partial write, or zero bytes) does not panic the spawned task.
+    // ------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn ipc_socket_chmod_is_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("hardening_chmod.sock");
+        start_test_server(&sock).await;
+
+        let meta = std::fs::metadata(&sock).expect("socket file should exist");
+        let mode = meta.permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "socket {} has mode {:o}, expected 0600",
+            sock.display(),
+            mode
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ipc_oversized_request_rejected_not_crashed() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("hardening_oversize.sock");
+        start_test_server(&sock).await;
+
+        // Client A: send 17 MiB without a newline. The server reads up to
+        // MAX_REQUEST_BYTES + 1 (16 MiB + 1) and trips the oversize branch,
+        // returns an error response, and closes the connection.
+        {
+            let mut stream = UnixStream::connect(&sock).await.unwrap();
+            let payload = vec![b'A'; 17 * 1024 * 1024];
+            // The server may close before we finish writing — that's fine.
+            let _ = stream.write_all(&payload).await;
+            // Half-close write so the server's read_until unblocks.
+            let _ = stream.shutdown().await;
+
+            // Try to read the error response, bounded by a timeout so a
+            // misbehaving server can't hang the test.
+            let mut reader = BufReader::new(&mut stream);
+            let mut line = String::new();
+            if let Ok(Ok(_n)) = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                reader.read_line(&mut line),
+            )
+            .await
+            {
+                if !line.trim().is_empty() {
+                    let resp: serde_json::Value = serde_json::from_str(line.trim())
+                        .expect("oversize response should be valid JSON");
+                    assert_eq!(resp["ok"], false, "expected error response, got: {resp}");
+                    let err = resp["error"].as_str().unwrap_or_default();
+                    assert!(
+                        err.contains("too large"),
+                        "expected 'too large' in error, got: {err}"
+                    );
+                }
+                // If we got no bytes back (race with server close), the
+                // next client below proves the server didn't crash.
+            }
+        }
+
+        // Client B: a normal request must still succeed — proves the server
+        // survived the oversize client.
+        {
+            let mut stream = UnixStream::connect(&sock)
+                .await
+                .expect("server must still accept new connections after oversize client");
+            stream
+                .write_all(b"{\"id\":\"after-oversize\",\"method\":\"status\"}\n")
+                .await
+                .unwrap();
+            let mut reader = BufReader::new(&mut stream);
+            let mut line = String::new();
+            let n = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                reader.read_line(&mut line),
+            )
+            .await
+            .expect("status read timed out — server may have crashed")
+            .expect("status read failed");
+            assert!(n > 0, "expected a status response line");
+            let resp: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+            assert_eq!(
+                resp["ok"], true,
+                "status should be ok after oversize, got: {resp}"
+            );
+            assert_eq!(resp["data"]["status"], "running");
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ipc_client_mid_request_disconnect_does_not_panic() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("hardening_disconnect.sock");
+        start_test_server(&sock).await;
+
+        // Open + close 10 times without writing anything (clean EOF on
+        // first read — must be handled, not panic).
+        for _ in 0..10 {
+            let stream = UnixStream::connect(&sock).await.unwrap();
+            drop(stream);
+        }
+
+        // Partial write disconnect: write bytes but no newline, then drop.
+        // Server's read_until returns >0 bytes then EOF on next iteration.
+        {
+            let mut stream = UnixStream::connect(&sock).await.unwrap();
+            stream
+                .write_all(b"{\"id\":\"partial\",\"meth")
+                .await
+                .unwrap();
+            drop(stream);
+        }
+
+        // Give server tasks a moment to settle.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Fresh client must still get an answer — proves no listener crash.
+        let mut stream = UnixStream::connect(&sock)
+            .await
+            .expect("server must still accept new connections after abrupt disconnects");
+        stream
+            .write_all(b"{\"id\":\"survivor\",\"method\":\"status\"}\n")
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(&mut stream);
+        let mut line = String::new();
+        let n = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            reader.read_line(&mut line),
+        )
+        .await
+        .expect("survivor read timed out — server may have crashed")
+        .expect("survivor read failed");
+        assert!(n > 0, "expected a status response line");
+        let resp: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(
+            resp["ok"], true,
+            "status should be ok after disconnects, got: {resp}"
+        );
     }
 }
