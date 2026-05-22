@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -5,6 +6,61 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use copypaste_core::{Database, get_page, delete_item, delete_fts, count_items, search_items};
 use crate::protocol::{Request, Response};
+
+// ---------------------------------------------------------------------------
+// P2P helpers
+// ---------------------------------------------------------------------------
+
+/// Format raw bytes as colon-separated hex groups (XX:XX:...).
+fn format_fingerprint(bytes: &[u8]) -> String {
+    let encoded = hex::encode(bytes);
+    encoded
+        .chars()
+        .collect::<Vec<_>>()
+        .chunks(2)
+        .map(|c| c.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
+/// Path to peers.json in the app config directory.
+fn peers_file_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("copypaste")
+        .join("peers.json")
+}
+
+/// Load peers list from peers.json; returns empty vec if file is absent.
+fn load_peers() -> anyhow::Result<Vec<serde_json::Value>> {
+    let path = peers_file_path();
+    if !path.exists() {
+        return Ok(vec![]);
+    }
+    let data = std::fs::read_to_string(&path)?;
+    let peers: Vec<serde_json::Value> = serde_json::from_str(&data)?;
+    Ok(peers)
+}
+
+/// Persist peers list to peers.json, creating directories as needed.
+fn save_peers(peers: &[serde_json::Value]) -> anyhow::Result<()> {
+    let path = peers_file_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let data = serde_json::to_string_pretty(peers)?;
+    std::fs::write(&path, data)?;
+    Ok(())
+}
+
+/// Validate that a fingerprint string matches the XX:XX:... hex pattern.
+fn is_valid_fingerprint(fp: &str) -> bool {
+    let groups: Vec<&str> = fp.split(':').collect();
+    if groups.is_empty() {
+        return false;
+    }
+    groups.iter().all(|g| g.len() == 2 && g.chars().all(|c| c.is_ascii_hexdigit()))
+}
 
 pub struct IpcServer {
     db: Arc<Mutex<Database>>,
@@ -219,6 +275,124 @@ impl IpcServer {
                 let enabled = self.private_mode.load(Ordering::Relaxed);
                 Response::ok(req.id, serde_json::json!({"status": "running", "private_mode": enabled}))
             }
+
+            // ------------------------------------------------------------------
+            // P2P IPC methods
+            // ------------------------------------------------------------------
+
+            "get_own_fingerprint" => {
+                // Use a stable device identifier: SHA-256 of the machine UUID
+                // (placeholder implementation — real keychain cert used in Phase 5+).
+                use std::collections::hash_map::DefaultHasher;
+                use std::hash::{Hash, Hasher};
+
+                // Derive a deterministic pseudo-UUID from the hostname so each
+                // device gets a stable, unique-enough fingerprint.
+                let hostname = std::env::var("HOSTNAME")
+                    .or_else(|_| {
+                        std::fs::read_to_string("/etc/hostname")
+                            .map(|s| s.trim().to_string())
+                    })
+                    .unwrap_or_else(|_| "localhost".to_string());
+
+                let mut hasher = DefaultHasher::new();
+                hostname.hash(&mut hasher);
+                std::process::id().hash(&mut hasher);
+                let hash_val = hasher.finish();
+
+                // Expand to 32 bytes using a simple XOR-spread so we have
+                // enough material to format a fingerprint.
+                let mut bytes = [0u8; 32];
+                let seed = hash_val.to_le_bytes();
+                for (i, b) in bytes.iter_mut().enumerate() {
+                    *b = seed[i % 8].wrapping_add(i as u8);
+                }
+
+                let fingerprint = format_fingerprint(&bytes);
+                Response::ok(req.id, serde_json::json!({ "fingerprint": fingerprint }))
+            }
+
+            "list_peers" => {
+                match load_peers() {
+                    Ok(peers) => Response::ok(req.id, serde_json::json!({ "peers": peers })),
+                    Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
+                }
+            }
+
+            "pair_peer" => {
+                let fingerprint = match req.params.get("fingerprint").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => return Response::err(req.id, "missing param: fingerprint"),
+                };
+                let name = match req.params.get("name").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => return Response::err(req.id, "missing param: name"),
+                };
+
+                if !is_valid_fingerprint(&fingerprint) {
+                    return Response::err(req.id, format!("invalid fingerprint format: {fingerprint}"));
+                }
+
+                match load_peers() {
+                    Ok(mut peers) => {
+                        // Check for duplicates
+                        let already_paired = peers.iter().any(|p| {
+                            p.get("fingerprint")
+                                .and_then(|v| v.as_str())
+                                .map(|f| f == fingerprint)
+                                .unwrap_or(false)
+                        });
+                        if already_paired {
+                            return Response::err(req.id, format!("peer already paired: {fingerprint}"));
+                        }
+
+                        let added_at = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+
+                        peers.push(serde_json::json!({
+                            "name": name,
+                            "fingerprint": fingerprint,
+                            "added_at": added_at,
+                        }));
+
+                        match save_peers(&peers) {
+                            Ok(_) => Response::ok(req.id, serde_json::json!({ "ok": true })),
+                            Err(e) => Response::err(req.id, format!("failed to save peers: {e}")),
+                        }
+                    }
+                    Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
+                }
+            }
+
+            "unpair_peer" => {
+                let fingerprint = match req.params.get("fingerprint").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => return Response::err(req.id, "missing param: fingerprint"),
+                };
+
+                match load_peers() {
+                    Ok(mut peers) => {
+                        let before_len = peers.len();
+                        peers.retain(|p| {
+                            p.get("fingerprint")
+                                .and_then(|v| v.as_str())
+                                .map(|f| f != fingerprint)
+                                .unwrap_or(true)
+                        });
+                        let removed = peers.len() < before_len;
+
+                        match save_peers(&peers) {
+                            Ok(_) => Response::ok(req.id, serde_json::json!({ "ok": true, "removed": removed })),
+                            Err(e) => Response::err(req.id, format!("failed to save peers: {e}")),
+                        }
+                    }
+                    Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
+                }
+            }
+
+
             other => Response::err(req.id, format!("unknown method: {other}")),
         }
     }
