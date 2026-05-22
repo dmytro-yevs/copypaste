@@ -24,7 +24,8 @@ SOCKET_PATH="$SUPPORT_DIR/daemon.sock"
 DB_PATH="$SUPPORT_DIR/clipboard.db"
 
 DAEMON_BIN="./target/release/copypaste-daemon"
-CLI_BIN="./target/release/copypaste-cli"
+# Package name is `copypaste-cli` but the produced binary is `copypaste`.
+CLI_BIN="./target/release/copypaste"
 
 DAEMON_PID=""
 DAEMON_OWNED=false      # true only if THIS script started the daemon
