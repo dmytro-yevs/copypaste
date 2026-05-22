@@ -7,5 +7,6 @@ class CopyPasteApp : Application() {
         super.onCreate()
         // Load native library
         System.loadLibrary("copypaste_android")
+        NotificationHelper.createChannels(this)
     }
 }
