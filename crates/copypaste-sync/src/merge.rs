@@ -63,6 +63,7 @@ pub fn wire_to_local(wire: WireItem) -> ClipboardItem {
         wall_time: wire.wall_time,
         expires_at: wire.expires_at,
         app_bundle_id: wire.app_bundle_id,
+        content_hash: None,
     }
 }
 
