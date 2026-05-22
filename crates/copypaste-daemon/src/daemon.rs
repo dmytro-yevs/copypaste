@@ -3,18 +3,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::interval;
-use sha2::{Sha256, Digest};
 use copypaste_core::{
     AppConfig, Database, DeviceKeypair,
     encrypt_item, insert_item, upsert_fts, ClipboardItem,
-    detect, find_recent_by_hash,
+    encode_image, chunks_to_blob,
+    detect,
 };
-use crate::{clipboard::ClipboardMonitor, paths};
+use crate::{clipboard::{ClipboardContent, ClipboardMonitor}, paths};
 #[cfg(unix)]
 use crate::ipc::IpcServer;
-
-/// 60 seconds expressed in milliseconds — duplicate window for content dedup.
-const DEDUP_WINDOW_MS: i64 = 60_000;
 
 /// Run the daemon until `Ctrl+C` / `SIGTERM` is received.
 ///
@@ -66,9 +63,6 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
     let mut ticker = interval(Duration::from_millis(config.poll_interval_ms));
     let mut cleanup_ticks: u64 = 0;
-    // In-memory cache of the last stored content hash — allows skipping the DB
-    // query for consecutive identical clipboard contents (fast path).
-    let mut last_hash: Option<String> = None;
     // Sensitive TTL cleanup runs every 5 seconds; track elapsed ticks separately.
     let mut sensitive_cleanup_ticks: u64 = 0;
     let sensitive_ttl_ms = config.sensitive_ttl_secs as i64 * 1000;
@@ -92,7 +86,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode, &mut last_hash).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -144,7 +138,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode, &mut last_hash).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -199,7 +193,6 @@ async fn handle_tick(
     local_key: &[u8; 32],
     config: &AppConfig,
     private_mode: &Arc<AtomicBool>,
-    last_hash: &mut Option<String>,
 ) {
     // Skip recording when private/pause mode is active
     if private_mode.load(Ordering::Relaxed) {
@@ -210,93 +203,117 @@ async fn handle_tick(
     }
 
     match monitor.poll() {
-        Ok(Some(content)) => {
-            let bytes = content.as_bytes();
-            let text = std::str::from_utf8(bytes).unwrap_or("");
+        Ok(Some(ClipboardContent::Text(text))) => {
+            handle_text(text, db, local_key, config).await;
+        }
+        Ok(Some(ClipboardContent::Image(raw_bytes))) => {
+            handle_image(raw_bytes, db, local_key, config).await;
+        }
+        Ok(None) => {}
+        Err(e) => tracing::warn!("clipboard poll error: {e}"),
+    }
+}
 
-            // --- Content deduplication (SHA-256) ---
-            let hash_bytes = Sha256::digest(bytes);
-            let hash_hex = hex::encode(hash_bytes);
+async fn handle_text(
+    text: String,
+    db: &Arc<Mutex<Database>>,
+    local_key: &[u8; 32],
+    config: &AppConfig,
+) {
+    let is_sensitive = detect(&text).is_some();
 
-            // Fast path: same hash as the very last stored item — skip immediately.
-            if last_hash.as_deref() == Some(hash_hex.as_str()) {
-                tracing::trace!("dedup(fast): skipping identical clipboard content");
-                return;
+    let (nonce, ciphertext) = encrypt_item(text.as_bytes(), local_key);
+    let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
+    item.is_sensitive = is_sensitive;
+
+    if is_sensitive {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        item.expires_at = Some(
+            now_ms + (config.sensitive_ttl_local_secs as i64 * 1000),
+        );
+    }
+
+    let db_guard = db.lock().await;
+    match insert_item(&db_guard, &item) {
+        Ok(_) => {
+            tracing::debug!("stored text item id={} sensitive={}", item.id, is_sensitive);
+            if let Err(e) = upsert_fts(&db_guard, &item.id, &text) {
+                tracing::warn!("fts index failed for id={}: {e}", item.id);
             }
+            prune_history(&db_guard, config);
+        }
+        Err(e) => tracing::warn!("failed to store text item: {e}"),
+    }
+}
 
-            // Slow path: query DB for a matching hash within the last 60 seconds.
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as i64;
-            {
-                let db_guard = db.lock().await;
-                match find_recent_by_hash(&db_guard, &hash_hex, now_ms, DEDUP_WINDOW_MS) {
-                    Ok(Some(existing_id)) => {
-                        tracing::debug!(
-                            "dedup(db): skipping duplicate, existing id={} hash={}",
-                            existing_id,
-                            &hash_hex[..8],
-                        );
-                        // Update fast-path cache so next tick is O(1).
-                        *last_hash = Some(hash_hex);
-                        return;
-                    }
-                    Ok(None) => {} // Not a duplicate — proceed with insert.
-                    Err(e) => tracing::warn!("dedup query error: {e}"),
-                }
-            }
-            // --- End deduplication ---
+async fn handle_image(
+    raw_bytes: Vec<u8>,
+    db: &Arc<Mutex<Database>>,
+    local_key: &[u8; 32],
+    config: &AppConfig,
+) {
+    // Derive a stable file_id from the raw bytes hash (first 16 bytes of SHA-256).
+    // This gives a deterministic ID for deduplication without storing plaintext.
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    raw_bytes.hash(&mut hasher);
+    let hash64 = hasher.finish();
+    let mut file_id = [0u8; 16];
+    file_id[..8].copy_from_slice(&hash64.to_be_bytes());
+    // XOR with timestamp to ensure uniqueness across same-content pastes
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+    file_id[8..].copy_from_slice(&ts.to_be_bytes());
 
-            let is_sensitive = detect(text).is_some();
-
-            let (nonce, ciphertext) = encrypt_item(bytes, local_key);
-            let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
-            item.is_sensitive = is_sensitive;
-            item.content_hash = Some(hash_hex.clone());
-
-            if is_sensitive {
-                item.expires_at = Some(
-                    now_ms + (config.sensitive_ttl_local_secs as i64 * 1000),
-                );
-            }
+    match encode_image(&raw_bytes, local_key, &file_id) {
+        Ok((meta, chunks)) => {
+            let blob = chunks_to_blob(&chunks);
+            let meta_json = format!(
+                r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
+                meta.width, meta.height, meta.original_size, meta.chunk_count,
+                meta.file_id
+            );
+            let item = ClipboardItem::new_image(blob, meta_json, 0);
+            tracing::debug!(
+                "image encoded: {}x{} px, {} chunks, original_size={}",
+                meta.width, meta.height, meta.chunk_count, meta.original_size
+            );
 
             let db_guard = db.lock().await;
             match insert_item(&db_guard, &item) {
                 Ok(_) => {
-                    // Update the in-memory fast-path cache.
-                    *last_hash = Some(hash_hex);
-
-                    tracing::debug!(
-                        "stored item id={} sensitive={}",
-                        item.id,
-                        is_sensitive
-                    );
-                    // Index plaintext for FTS5 before encryption is discarded
-                    if item.content_type == "text" {
-                        if let Err(e) = upsert_fts(&db_guard, &item.id, text) {
-                            tracing::warn!("fts index failed for id={}: {e}", item.id);
-                        }
-                    } else if let Err(e) = upsert_fts(&db_guard, &item.id, "") {
-                        tracing::warn!("fts empty index failed for id={}: {e}", item.id);
+                    tracing::debug!("stored image item id={}", item.id);
+                    // Images don't have searchable text; index empty string for FTS consistency.
+                    if let Err(e) = upsert_fts(&db_guard, &item.id, "") {
+                        tracing::warn!("fts empty index failed for image id={}: {e}", item.id);
                     }
-                    // Prune oldest items if over history_limit
-                    let total = copypaste_core::count_items(&db_guard).unwrap_or(0) as usize;
-                    if total > config.history_limit {
-                        let excess = total - config.history_limit;
-                        if let Ok(oldest) = copypaste_core::get_page(&db_guard, excess, config.history_limit) {
-                            for old in &oldest {
-                                let _ = copypaste_core::delete_item(&db_guard, &old.id);
-                            }
-                            tracing::debug!("pruned {} items over history_limit={}", excess, config.history_limit);
-                        }
-                    }
+                    prune_history(&db_guard, config);
                 }
-                Err(e) => tracing::warn!("failed to store item: {e}"),
+                Err(e) => tracing::warn!("failed to store image item: {e}"),
             }
         }
-        Ok(None) => {}
-        Err(e) => tracing::warn!("clipboard poll error: {e}"),
+        Err(e) => {
+            tracing::warn!("image encode failed (skipping): {e}");
+        }
+    }
+}
+
+fn prune_history(db: &Database, config: &AppConfig) {
+    let total = copypaste_core::count_items(db).unwrap_or(0) as usize;
+    if total > config.history_limit {
+        let excess = total - config.history_limit;
+        if let Ok(oldest) = copypaste_core::get_page(db, excess, config.history_limit) {
+            for old in &oldest {
+                let _ = copypaste_core::delete_item(db, &old.id);
+            }
+            tracing::debug!("pruned {} items over history_limit={}", excess, config.history_limit);
+        }
     }
 }
 

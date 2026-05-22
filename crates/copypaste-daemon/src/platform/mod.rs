@@ -7,6 +7,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct ClipboardEvent {
     pub text: Option<String>,
+    /// Raw image bytes (PNG or TIFF) — present when an image was copied.
+    pub image_bytes: Option<Vec<u8>>,
     pub source: ClipboardSource,
 }
 
@@ -18,7 +20,7 @@ pub enum ClipboardSource {
 /// Clipboard monitoring backend — OS-specific.
 pub trait ClipboardBackend: Send {
     /// Block until the clipboard changes, then return the new content.
-    /// Returns `None` if the content type is unsupported (e.g. image).
+    /// Returns `None` if the content type is unsupported.
     fn next_change(&mut self) -> Option<ClipboardEvent>;
 }
 

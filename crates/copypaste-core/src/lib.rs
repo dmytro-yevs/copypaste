@@ -1,5 +1,6 @@
 pub mod config;
 pub mod crypto;
+pub mod image;
 pub mod sensitive;
 pub mod storage;
 
@@ -8,6 +9,10 @@ pub use config::AppConfig;
 pub use crypto::{DeviceKeypair, KeyError};
 pub use crypto::encrypt::{encrypt_item, decrypt_item, EncryptError, NONCE_SIZE};
 pub use crypto::chunks::{encrypt_chunks, decrypt_chunks, EncryptedChunk, ChunkError};
+pub use image::{
+    encode_image, decode_image, chunks_to_blob, chunks_from_blob,
+    ImageError, ImageMeta, IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES,
+};
 pub use sensitive::{detect, is_sensitive_app, SensitiveKind};
 pub use storage::{Database, DbError};
 pub use storage::items::{
