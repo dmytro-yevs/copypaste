@@ -1,0 +1,15 @@
+[package]
+name = "copypaste-p2p"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "P2P peer discovery via mDNS-SD for CopyPaste"
+
+[dependencies]
+mdns-sd.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "time"] }
