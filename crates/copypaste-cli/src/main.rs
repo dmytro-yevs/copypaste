@@ -57,6 +57,12 @@ enum Commands {
         #[arg(long, default_value_t = 2000)]
         interval: u64,
     },
+    /// Clear all clipboard history (irreversible)
+    Clear {
+        /// Skip confirmation prompt
+        #[arg(long, short)]
+        force: bool,
+    },
 }
 
 fn main() {
@@ -72,6 +78,7 @@ fn main() {
         Commands::Copy { id } => commands::copy::run(&socket, &id),
         Commands::Export { limit, output } => commands::export::run(&socket, limit, output.as_deref()),
         Commands::Watch { interval } => commands::watch::run(&socket, interval),
+        Commands::Clear { force } => commands::clear::run(&socket, force),
     };
 
     if let Err(e) = result {

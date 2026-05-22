@@ -153,6 +153,35 @@ impl IpcServer {
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
             }
+            "delete_all" => {
+                let db = self.db.lock().await;
+                let count = count_items(&db).unwrap_or(0);
+                loop {
+                    match get_page(&db, 100, 0) {
+                        Ok(items) if items.is_empty() => break,
+                        Ok(items) => {
+                            for item in items {
+                                let _ = delete_item(&db, &item.id);
+                                let _ = delete_fts(&db, &item.id);
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+                Response::ok(req.id, serde_json::json!({"deleted": count}))
+            }
+            "stats" => {
+                let db = self.db.lock().await;
+                let total = copypaste_core::count_items(&db).unwrap_or(0);
+                // Count sensitive items via get_page scan (limited to first 1000)
+                let sample = copypaste_core::get_page(&db, 1000, 0).unwrap_or_default();
+                let sensitive_count = sample.iter().filter(|i| i.is_sensitive).count() as i64;
+                Response::ok(req.id, serde_json::json!({
+                    "total_items": total,
+                    "sensitive_items": sensitive_count,
+                    "version": "1"
+                }))
+            }
             "status" => Response::ok(req.id, serde_json::json!({"status": "running"})),
             other => Response::err(req.id, format!("unknown method: {other}")),
         }
@@ -283,5 +312,33 @@ mod tests {
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
         assert!(resp["error"].as_str().unwrap().contains("missing param: id"));
+    }
+
+    #[tokio::test]
+    async fn stats_returns_zero_for_empty_db() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("stats.sock");
+        start_test_server(&sock).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream.write_all(b"{\"id\":\"1\",\"method\":\"stats\"}\n").await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], true);
+        assert_eq!(resp["data"]["total_items"], 0);
+    }
+
+    #[tokio::test]
+    async fn delete_all_returns_count() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("del_all.sock");
+        start_test_server(&sock).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream.write_all(b"{\"id\":\"1\",\"method\":\"delete_all\"}\n").await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], true);
+        assert!(resp["data"]["deleted"].as_i64().is_some());
     }
 }
