@@ -11,6 +11,15 @@ use crate::error::RelayError;
 use crate::models::RelayItemResponse;
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/// Maximum number of items kept in a single device's inbox.
+/// When exceeded, the oldest items (lowest lamport_ts, then lowest item_id
+/// for ties) are pruned so that exactly MAX_ITEMS_PER_DEVICE items remain.
+const MAX_ITEMS_PER_DEVICE: usize = 500;
+
+// ---------------------------------------------------------------------------
 // Domain types
 // ---------------------------------------------------------------------------
 
@@ -134,6 +143,20 @@ impl RelayStore {
                 content_type: item.content_type.clone(),
                 uploaded_at: item.uploaded_at,
             });
+
+            // Enforce per-device quota: keep only the newest MAX_ITEMS_PER_DEVICE
+            // items, ordering by (lamport_ts DESC, item_id DESC) so that the oldest
+            // are removed first on overflow.
+            if inbox.len() > MAX_ITEMS_PER_DEVICE {
+                // Sort ascending so that [0] is the oldest — then drain from the front.
+                inbox.sort_by(|a, b| {
+                    a.lamport_ts
+                        .cmp(&b.lamport_ts)
+                        .then_with(|| a.item_id.cmp(&b.item_id))
+                });
+                let overflow = inbox.len() - MAX_ITEMS_PER_DEVICE;
+                inbox.drain(..overflow);
+            }
         }
         count
     }
@@ -391,5 +414,53 @@ mod tests {
         let (devices, items) = store.stats();
         assert_eq!(devices, 2);
         assert_eq!(items, 0);
+    }
+
+    #[test]
+    fn quota_prunes_oldest_when_exceeded() {
+        let mut store = make_store();
+        store.register_device(device_a_id(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_b_id(), B64.encode([1u8; 32]))
+            .unwrap();
+
+        let config = RelayConfig::default();
+
+        // Insert MAX_ITEMS_PER_DEVICE + 1 items from device A into device B's inbox.
+        // lamport_ts values: 1 … 501.  Item with ts=1 is the oldest and must be evicted.
+        for ts in 1u64..=(MAX_ITEMS_PER_DEVICE as u64 + 1) {
+            store.upload_item(
+                RelayItem {
+                    item_id: format!("item-{ts:05}"),
+                    ciphertext_b64: B64.encode(b"x"),
+                    nonce_b64: B64.encode([0u8; 24]),
+                    sender_device_id: device_a_id(),
+                    lamport_ts: ts,
+                    content_type: "text".to_string(),
+                    uploaded_at: Instant::now(),
+                },
+                &config,
+            );
+        }
+
+        // Device B's inbox must contain exactly MAX_ITEMS_PER_DEVICE items.
+        let items = store.poll_items(&device_b_id(), 0);
+        assert_eq!(
+            items.len(),
+            MAX_ITEMS_PER_DEVICE,
+            "inbox must be capped at MAX_ITEMS_PER_DEVICE"
+        );
+
+        // The item with the lowest lamport_ts (ts=1, the oldest) must have been pruned.
+        let min_ts = items.iter().map(|i| i.lamport_ts).min().unwrap();
+        assert_eq!(min_ts, 2, "oldest item (lamport_ts=1) must be evicted");
+
+        // The newest item (ts=501) must still be present.
+        let max_ts = items.iter().map(|i| i.lamport_ts).max().unwrap();
+        assert_eq!(
+            max_ts,
+            MAX_ITEMS_PER_DEVICE as u64 + 1,
+            "newest item must be retained"
+        );
     }
 }
