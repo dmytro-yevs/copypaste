@@ -6,6 +6,7 @@ use serde_json::Value;
 
 /// Minimal wire-level response. Mirrors protocol.rs in the daemon.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Response {
     pub id: String,
     pub ok: bool,

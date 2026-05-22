@@ -1,6 +1,7 @@
 /// Configuration for the relay server, loaded from environment variables
 /// with safe defaults for all fields.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct RelayConfig {
     /// TCP port to listen on (default: 8080)
     pub port: u16,
