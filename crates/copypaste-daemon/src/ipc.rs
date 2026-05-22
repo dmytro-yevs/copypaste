@@ -202,6 +202,33 @@ impl IpcServer {
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
             }
+            "history_page" => {
+                // Paginated history with content preview — used by UI (HistoryWindow)
+                let limit = req.params.get("limit")
+                    .and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+                let offset = req.params.get("offset")
+                    .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let db = self.db.lock().await;
+                match get_page(&db, limit, offset) {
+                    Ok(items) => {
+                        let total = count_items(&db).unwrap_or(0);
+                        let json_items: Vec<_> = items.iter().map(|item| {
+                            // Build a safe text preview (first 120 chars of content, no decryption)
+                            let preview = format!("[{} — id:{}]", item.content_type, &item.id[..8]);
+                            serde_json::json!({
+                                "id": item.id,
+                                "content_type": item.content_type,
+                                "is_sensitive": item.is_sensitive,
+                                "wall_time": item.wall_time,
+                                "lamport_ts": item.lamport_ts,
+                                "preview": preview,
+                            })
+                        }).collect();
+                        Response::ok(req.id, serde_json::json!({"items": json_items, "total": total}))
+                    }
+                    Err(e) => Response::err(req.id, e.to_string()),
+                }
+            }
             "set_private_mode" => {
                 let enabled = match req.params.get("enabled").and_then(|v| v.as_bool()) {
                     Some(b) => b,
@@ -578,5 +605,79 @@ mod tests {
 
         // The shared atomic should now be true
         assert!(flag.load(Ordering::Relaxed));
+    }
+
+    // --- history_page ---
+
+    #[tokio::test]
+    async fn history_page_empty_db_returns_zero() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("hp_empty.sock");
+        start_test_server(&sock).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"hp1\",\"method\":\"history_page\",\"params\":{\"limit\":50,\"offset\":0}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], true);
+        assert_eq!(resp["data"]["total"], 0);
+        assert_eq!(resp["data"]["items"].as_array().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn history_page_default_params_succeed() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("hp_default.sock");
+        start_test_server(&sock).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        // No params — should default to limit=50, offset=0
+        stream
+            .write_all(b"{\"id\":\"hp2\",\"method\":\"history_page\"}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], true);
+        assert!(resp["data"]["items"].is_array());
+    }
+
+    // --- paste ---
+
+    #[tokio::test]
+    async fn paste_missing_id_returns_error() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("paste_missing.sock");
+        start_test_server(&sock).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"p1\",\"method\":\"paste\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], false);
+        assert!(resp["error"].as_str().unwrap().contains("missing param: id"));
+    }
+
+    #[tokio::test]
+    async fn paste_unknown_id_returns_error() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("paste_unknown.sock");
+        start_test_server(&sock).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"p2\",\"method\":\"paste\",\"params\":{\"id\":\"nonexistent-id\"}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], false);
+        assert!(resp["error"].as_str().unwrap().contains("not found"));
     }
 }

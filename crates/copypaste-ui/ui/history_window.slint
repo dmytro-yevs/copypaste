@@ -1,0 +1,187 @@
+// HistoryWindow — CopyPaste clipboard history UI
+// Displays paginated clipboard items from the daemon via IPC.
+// User clicks an item to paste it back to the system clipboard.
+
+import { ScrollView, Button, HorizontalBox, VerticalBox, ListView } from "std-widgets.slint";
+
+struct HistoryItem {
+    id: string,
+    content-type: string,
+    preview: string,
+    timestamp: string,
+    is-sensitive: bool,
+}
+
+export component HistoryWindow inherits Window {
+    title: "CopyPaste History";
+    width: 480px;
+    height: 600px;
+    background: #1e1e2e;
+
+    // Bindable state — updated from Rust
+    in property <[HistoryItem]> items;
+    in property <string> status-text: "Ready";
+    in property <bool> loading: false;
+    in property <int> total-count: 0;
+
+    // Callbacks fired to Rust
+    callback item-clicked(string);   // id of clicked item
+    callback refresh-requested();
+    callback load-next-page();
+    callback load-prev-page();
+
+    VerticalBox {
+        padding: 8px;
+        spacing: 6px;
+
+        // Header bar
+        HorizontalBox {
+            spacing: 8px;
+            height: 36px;
+
+            Text {
+                text: "Clipboard History";
+                font-size: 16px;
+                color: #cdd6f4;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: "Refresh";
+                enabled: !loading;
+                clicked => { refresh-requested(); }
+            }
+        }
+
+        // Status line
+        Text {
+            text: status-text;
+            font-size: 11px;
+            color: #a6adc8;
+            height: 18px;
+        }
+
+        // Item list
+        Rectangle {
+            border-radius: 6px;
+            background: #181825;
+            vertical-stretch: 1;
+
+            if loading : Rectangle {
+                background: #181825;
+                Text {
+                    text: "Loading…";
+                    color: #a6adc8;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            if !loading && items.length == 0 : Rectangle {
+                background: transparent;
+                Text {
+                    text: "No clipboard items.\nCopy something to get started.";
+                    color: #6c7086;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+
+            if !loading && items.length > 0 : ListView {
+                for item[idx] in items : Rectangle {
+                    height: 62px;
+                    border-radius: 4px;
+                    background: touch.has-hover ? #313244 : transparent;
+
+                    touch := TouchArea {
+                        clicked => { item-clicked(item.id); }
+                    }
+
+                    HorizontalBox {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 8px;
+
+                        // Type badge
+                        Rectangle {
+                            width: 48px;
+                            height: 22px;
+                            border-radius: 4px;
+                            background: item.content-type == "text" ? #313244 : #45475a;
+
+                            Text {
+                                text: item.content-type;
+                                color: item.content-type == "text" ? #89b4fa : #fab387;
+                                font-size: 10px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        // Content preview + timestamp
+                        VerticalBox {
+                            spacing: 2px;
+                            horizontal-stretch: 1;
+                            padding: 0;
+
+                            Text {
+                                text: item.is-sensitive ? "••••••••" : item.preview;
+                                color: item.is-sensitive ? #f38ba8 : #cdd6f4;
+                                font-size: 13px;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: item.timestamp;
+                                font-size: 10px;
+                                color: #585b70;
+                            }
+                        }
+
+                        // Sensitive badge
+                        if item.is-sensitive : Rectangle {
+                            width: 24px;
+                            height: 24px;
+                            border-radius: 12px;
+                            background: #f38ba8;
+                            Text {
+                                text: "!";
+                                color: #1e1e2e;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Pagination footer
+        HorizontalBox {
+            spacing: 8px;
+            height: 32px;
+
+            Button {
+                text: "← Prev";
+                clicked => { load-prev-page(); }
+            }
+
+            Text {
+                text: total-count > 0 ? total-count + " items total" : "";
+                color: #6c7086;
+                font-size: 11px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: "Next →";
+                clicked => { load-next-page(); }
+            }
+        }
+    }
+}
