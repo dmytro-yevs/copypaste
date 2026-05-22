@@ -21,6 +21,7 @@ impl Tier {
 
     /// Maximum number of history items kept per device inbox.
     /// `None` means unlimited.
+    #[allow(dead_code)]
     pub fn max_history_items(self) -> Option<usize> {
         match self {
             Tier::Free => Some(1_000),
@@ -29,6 +30,7 @@ impl Tier {
     }
 
     /// Maximum decoded ciphertext size in bytes for a single clipboard item.
+    #[allow(dead_code)]
     pub fn max_item_bytes(self, content_type: &str) -> usize {
         match (self, content_type) {
             // Images: 10 MiB for both tiers (pro has no additional benefit here).
@@ -45,8 +47,10 @@ pub enum QuotaViolation {
     /// The account has reached the maximum number of registered devices.
     MaxDevicesExceeded { limit: usize },
     /// The uploaded item exceeds the size limit for its content type.
+    #[allow(dead_code)]
     ItemTooLarge { limit_bytes: usize },
     /// The device inbox has reached its maximum history count.
+    #[allow(dead_code)]
     HistoryFull { limit: usize },
 }
 
@@ -67,6 +71,7 @@ pub fn check_device_quota(tier: Tier, current_device_count: usize) -> Result<(),
 ///
 /// `payload_bytes` is the number of decoded ciphertext bytes.
 /// `content_type` is e.g. `"text"`, `"image"`, or `"file"`.
+#[allow(dead_code)]
 pub fn check_item_size(
     tier: Tier,
     payload_bytes: usize,
@@ -83,6 +88,7 @@ pub fn check_item_size(
 /// Check whether the device inbox still has capacity for one more item.
 ///
 /// `current_count` is the number of items already in the inbox.
+#[allow(dead_code)]
 pub fn check_history_quota(tier: Tier, current_count: usize) -> Result<(), QuotaViolation> {
     if let Some(limit) = tier.max_history_items() {
         if current_count >= limit {

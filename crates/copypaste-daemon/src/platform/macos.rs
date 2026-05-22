@@ -2,7 +2,7 @@
 //! Full implementation lives in those modules; this re-exports the trait impls.
 
 use super::{ClipboardBackend, ClipboardEvent, ClipboardSource, KeystoreBackend};
-use crate::clipboard::{ClipboardContent, ClipboardMonitor, ClipboardMonitorTrait};
+use crate::clipboard::{ClipboardContent, ClipboardMonitor};
 use crate::keychain::{self, KeychainError};
 
 /// macOS clipboard backend wrapping NSPasteboard polling.

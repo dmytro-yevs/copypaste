@@ -20,6 +20,7 @@ use crate::quota::{self, QuotaViolation, Tier};
 const MAX_PUSH_ITEMS_PER_DEVICE: usize = 500;
 
 /// Maximum number of devices a single logical "account" can register (free tier).
+#[allow(dead_code)]
 pub const MAX_FREE_DEVICES: usize = 5;
 
 // ---------------------------------------------------------------------------
@@ -38,6 +39,7 @@ pub struct DeviceRecord {
     /// Unix timestamp (seconds since epoch) when the token expires (1 year).
     pub expires_at_unix: i64,
     /// Subscription tier — determines device count and history quotas.
+    #[allow(dead_code)]
     pub tier: Tier,
 }
 

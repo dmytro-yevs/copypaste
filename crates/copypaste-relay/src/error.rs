@@ -21,6 +21,7 @@ pub enum RelayError {
     #[error("device quota exceeded: maximum {limit} devices allowed for this tier")]
     DeviceQuotaExceeded { limit: usize },
     /// Returned when a clipboard item exceeds the size limit for its content type.
+    #[allow(dead_code)]
     #[error("item size exceeds the {limit_bytes}-byte limit for this content type")]
     ItemSizeExceeded { limit_bytes: usize },
     /// Returned when a device inbox has reached its maximum history count.

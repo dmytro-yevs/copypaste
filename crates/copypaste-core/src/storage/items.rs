@@ -76,6 +76,7 @@ impl ClipboardItem {
             wall_time: now,
             expires_at: None,
             app_bundle_id: None,
+            content_hash: None,
         }
     }
 }
