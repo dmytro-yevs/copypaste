@@ -1,0 +1,23 @@
+[package]
+name = "copypaste-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Slint-based history window UI for CopyPaste daemon"
+
+[[bin]]
+name = "copypaste-ui"
+path = "src/main.rs"
+
+[dependencies]
+serde_json.workspace = true
+anyhow.workspace = true
+home.workspace = true
+slint.workspace = true
+
+[build-dependencies]
+slint-build.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+serde_json.workspace = true
