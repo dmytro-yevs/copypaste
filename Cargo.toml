@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/copypaste-core",
     "crates/copypaste-daemon",
+    "crates/copypaste-cli",
+    "crates/copypaste-relay",
 ]
 
 [workspace.package]
@@ -51,3 +53,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 home = "=0.5.9"
 # error handling
 anyhow = "1"
+# CLI argument parsing (pin <4.5.40 to stay below edition2024 dep chain on Rust 1.75)
+clap = { version = ">=4.0, <4.5.40", features = ["derive"] }
+# Base64 encoding
+base64 = "0.22"
