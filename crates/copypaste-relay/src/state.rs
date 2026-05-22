@@ -4,7 +4,8 @@ use std::time::Instant;
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use sha2::{Digest, Sha256};
+use rand::rngs::OsRng;
+use rand::RngCore;
 use subtle::ConstantTimeEq;
 
 use crate::error::RelayError;
@@ -33,7 +34,9 @@ pub struct DeviceRecord {
     pub device_name: String,
     #[allow(dead_code)]
     pub public_key_b64: String,
-    /// Bearer token: first 32 hex characters of SHA-256(decoded_public_key_bytes).
+    /// Bearer token: 32 hex characters representing 16 random bytes from OsRng.
+    /// Generated at registration time and stored verbatim — never recomputed
+    /// from the public key (which would make it a deterministic oracle).
     pub bearer_token: String,
     pub registered_at: Instant,
     /// Unix timestamp (seconds since epoch) when the token expires (1 year).
@@ -103,15 +106,32 @@ impl RelayStore {
             _ => unreachable!(),
         })?;
 
-        // Derive bearer token from the decoded public key bytes.
+        // Proof-of-possession (security MEDIUM #14):
+        // Reject zero-length public_key_b64 and ensure base64 decodes to
+        // exactly 32 bytes (X25519 public-key size).
+        // TODO: v0.2 — require a signature over device_id with the
+        // device's private key to fully prove possession of the keypair.
+        if public_key_b64.is_empty() {
+            return Err(RelayError::BadRequest(
+                "public_key_b64 must not be empty".into(),
+            ));
+        }
         let key_bytes = B64
             .decode(&public_key_b64)
             .map_err(|_| RelayError::BadRequest("invalid base64 for public_key_b64".into()))?;
+        if key_bytes.len() != 32 {
+            return Err(RelayError::BadRequest(format!(
+                "public_key_b64 must decode to exactly 32 bytes, got {}",
+                key_bytes.len()
+            )));
+        }
 
-        let hash = Sha256::digest(&key_bytes);
-        let hex = hex_encode(&hash);
-        // First 32 hex characters = 16 bytes of entropy.
-        let bearer_token = hex[..32].to_string();
+        // Generate bearer token from 16 random bytes (NEVER derive from
+        // public key — that would let any client compute the secret).
+        // Output: 32 hex characters representing 16 bytes of entropy.
+        let mut token_bytes = [0u8; 16];
+        OsRng.fill_bytes(&mut token_bytes);
+        let bearer_token = hex_encode(&token_bytes);
 
         // Expiry: 1 year from now expressed as Unix seconds.
         let now_unix = std::time::SystemTime::now()

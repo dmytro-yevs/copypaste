@@ -89,7 +89,8 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
 }
 
 async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let store = state.lock().unwrap();
+    // Survive mutex poisoning (security INFO #21).
+    let store = state.lock().unwrap_or_else(|e| e.into_inner());
     let (devices, items) = store.stats();
     axum::Json(serde_json::json!({
         "devices": devices,
@@ -98,8 +99,14 @@ async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
     }))
 }
 
+/// GET /devices — list registered device IDs only.
+///
+/// Returns only opaque device IDs. Bearer tokens are **never** included
+/// (they would let anyone hijack the device). Other public fields like
+/// `public_key_b64` are exposed via the per-device endpoint `GET /devices/:id`.
 async fn list_devices_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let store = state.lock().unwrap();
+    // Survive mutex poisoning (security INFO #21).
+    let store = state.lock().unwrap_or_else(|e| e.into_inner());
     let device_ids = store.list_devices();
     axum::Json(serde_json::json!({ "devices": device_ids }))
 }

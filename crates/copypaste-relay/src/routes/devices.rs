@@ -53,7 +53,10 @@ pub async fn register(
         )));
     }
 
-    let mut store = state.lock().expect("state mutex poisoned");
+    // Survive mutex poisoning (security INFO #21): if another thread panicked
+    // while holding the lock, recover the inner data rather than crashing this
+    // request. The data is still consistent because all writes are atomic.
+    let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
     let (auth_token, expires_at_unix) =
         store.register_device(body.device_id.clone(), device_name, body.public_key_b64)?;
 
@@ -78,7 +81,8 @@ pub async fn get_device(
     State(state): State<AppState>,
     Path(device_id): Path<String>,
 ) -> Result<Json<DeviceInfoResponse>, RelayError> {
-    let store = state.lock().expect("state mutex poisoned");
+    // Survive mutex poisoning (security INFO #21).
+    let store = state.lock().unwrap_or_else(|e| e.into_inner());
     let record = store.get_device(&device_id)?;
 
     // Convert Instant → wall-clock by computing elapsed and subtracting from now.
