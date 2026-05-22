@@ -1,0 +1,91 @@
+name: CI Android Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'crates/copypaste-android/**'
+      - 'crates/copypaste-core/**'
+      - '.github/workflows/ci-android-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'crates/copypaste-android/**'
+      - 'crates/copypaste-core/**'
+      - '.github/workflows/ci-android-build.yml'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-android-ndk:
+    name: Build Android .so (cargo-ndk)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.75
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.75"
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: android-ndk-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: android-ndk-
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: Build .so libraries via cargo-ndk
+        run: |
+          cargo ndk \
+            -t arm64-v8a \
+            -t x86_64 \
+            -o android/app/src/main/jniLibs \
+            build -p copypaste-android
+
+      - name: Verify .so artifacts
+        run: |
+          echo "=== jniLibs contents ==="
+          find android/app/src/main/jniLibs -type f | sort
+          test -f android/app/src/main/jniLibs/arm64-v8a/libcopypaste_android.so || \
+            { echo "ERROR: arm64-v8a .so missing"; exit 1; }
+          test -f android/app/src/main/jniLibs/x86_64/libcopypaste_android.so || \
+            { echo "ERROR: x86_64 .so missing"; exit 1; }
+
+      - name: Gradle assembleDebug
+        working-directory: android
+        run: |
+          # .so already built above - skip the Gradle cargo-ndk task to avoid
+          # re-running cargo inside CI where ANDROID_NDK_HOME is already set.
+          ./gradlew assembleDebug -x buildCargoNdk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: copypaste-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
