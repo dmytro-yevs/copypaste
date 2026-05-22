@@ -190,8 +190,7 @@ impl IpcServer {
                 };
                 let db = self.db.lock().await;
                 match copypaste_core::pin_item(&db, &id) {
-                    Ok(true) => Response::ok(req.id, serde_json::json!({"pinned": true, "id": id})),
-                    Ok(false) => Response::err(req.id, format!("item not found: {id}")),
+                    Ok(()) => Response::ok(req.id, serde_json::json!({"pinned": true, "id": id})),
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
             }

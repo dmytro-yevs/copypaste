@@ -5,9 +5,10 @@ use tokio::time::interval;
 use copypaste_core::{
     AppConfig, Database, DeviceKeypair,
     encrypt_item, insert_item, upsert_fts, ClipboardItem,
+    encode_image, chunks_to_blob,
     detect,
 };
-use crate::{clipboard::ClipboardMonitor, ipc::IpcServer, paths};
+use crate::{clipboard::{ClipboardContent, ClipboardMonitor}, ipc::IpcServer, paths};
 
 pub async fn run() -> anyhow::Result<()> {
     let config = load_config();
@@ -118,58 +119,117 @@ async fn handle_tick(
     config: &AppConfig,
 ) {
     match monitor.poll() {
-        Ok(Some(content)) => {
-            let bytes = content.as_bytes();
-            let text = std::str::from_utf8(bytes).unwrap_or("");
-            let is_sensitive = detect(text).is_some();
+        Ok(Some(ClipboardContent::Text(text))) => {
+            handle_text(text, db, local_key, config).await;
+        }
+        Ok(Some(ClipboardContent::Image(raw_bytes))) => {
+            handle_image(raw_bytes, db, local_key, config).await;
+        }
+        Ok(None) => {}
+        Err(e) => tracing::warn!("clipboard poll error: {e}"),
+    }
+}
 
-            let (nonce, ciphertext) = encrypt_item(bytes, local_key);
-            let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
-            item.is_sensitive = is_sensitive;
+async fn handle_text(
+    text: String,
+    db: &Arc<Mutex<Database>>,
+    local_key: &[u8; 32],
+    config: &AppConfig,
+) {
+    let is_sensitive = detect(&text).is_some();
 
-            if is_sensitive {
-                let now_ms = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as i64;
-                item.expires_at = Some(
-                    now_ms + (config.sensitive_ttl_local_secs as i64 * 1000),
-                );
+    let (nonce, ciphertext) = encrypt_item(text.as_bytes(), local_key);
+    let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
+    item.is_sensitive = is_sensitive;
+
+    if is_sensitive {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        item.expires_at = Some(
+            now_ms + (config.sensitive_ttl_local_secs as i64 * 1000),
+        );
+    }
+
+    let db_guard = db.lock().await;
+    match insert_item(&db_guard, &item) {
+        Ok(_) => {
+            tracing::debug!("stored text item id={} sensitive={}", item.id, is_sensitive);
+            if let Err(e) = upsert_fts(&db_guard, &item.id, &text) {
+                tracing::warn!("fts index failed for id={}: {e}", item.id);
             }
+            prune_history(&db_guard, config);
+        }
+        Err(e) => tracing::warn!("failed to store text item: {e}"),
+    }
+}
+
+async fn handle_image(
+    raw_bytes: Vec<u8>,
+    db: &Arc<Mutex<Database>>,
+    local_key: &[u8; 32],
+    config: &AppConfig,
+) {
+    // Derive a stable file_id from the raw bytes hash (first 16 bytes of SHA-256).
+    // This gives a deterministic ID for deduplication without storing plaintext.
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    raw_bytes.hash(&mut hasher);
+    let hash64 = hasher.finish();
+    let mut file_id = [0u8; 16];
+    file_id[..8].copy_from_slice(&hash64.to_be_bytes());
+    // XOR with timestamp to ensure uniqueness across same-content pastes
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos() as u64;
+    file_id[8..].copy_from_slice(&ts.to_be_bytes());
+
+    match encode_image(&raw_bytes, local_key, &file_id) {
+        Ok((meta, chunks)) => {
+            let blob = chunks_to_blob(&chunks);
+            let meta_json = format!(
+                r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
+                meta.width, meta.height, meta.original_size, meta.chunk_count,
+                meta.file_id
+            );
+            let item = ClipboardItem::new_image(blob, meta_json, 0);
+            tracing::debug!(
+                "image encoded: {}x{} px, {} chunks, original_size={}",
+                meta.width, meta.height, meta.chunk_count, meta.original_size
+            );
 
             let db_guard = db.lock().await;
             match insert_item(&db_guard, &item) {
                 Ok(_) => {
-                    tracing::debug!(
-                        "stored item id={} sensitive={}",
-                        item.id,
-                        is_sensitive
-                    );
-                    // Index plaintext for FTS5 before encryption is discarded
-                    if item.content_type == "text" {
-                        if let Err(e) = upsert_fts(&db_guard, &item.id, text) {
-                            tracing::warn!("fts index failed for id={}: {e}", item.id);
-                        }
-                    } else if let Err(e) = upsert_fts(&db_guard, &item.id, "") {
-                        tracing::warn!("fts empty index failed for id={}: {e}", item.id);
+                    tracing::debug!("stored image item id={}", item.id);
+                    // Images don't have searchable text; index empty string for FTS consistency.
+                    if let Err(e) = upsert_fts(&db_guard, &item.id, "") {
+                        tracing::warn!("fts empty index failed for image id={}: {e}", item.id);
                     }
-                    // Prune oldest items if over history_limit
-                    let total = copypaste_core::count_items(&db_guard).unwrap_or(0) as usize;
-                    if total > config.history_limit {
-                        let excess = total - config.history_limit;
-                        if let Ok(oldest) = copypaste_core::get_page(&db_guard, excess, config.history_limit) {
-                            for old in &oldest {
-                                let _ = copypaste_core::delete_item(&db_guard, &old.id);
-                            }
-                            tracing::debug!("pruned {} items over history_limit={}", excess, config.history_limit);
-                        }
-                    }
+                    prune_history(&db_guard, config);
                 }
-                Err(e) => tracing::warn!("failed to store item: {e}"),
+                Err(e) => tracing::warn!("failed to store image item: {e}"),
             }
         }
-        Ok(None) => {}
-        Err(e) => tracing::warn!("clipboard poll error: {e}"),
+        Err(e) => {
+            tracing::warn!("image encode failed (skipping): {e}");
+        }
+    }
+}
+
+fn prune_history(db: &Database, config: &AppConfig) {
+    let total = copypaste_core::count_items(db).unwrap_or(0) as usize;
+    if total > config.history_limit {
+        let excess = total - config.history_limit;
+        if let Ok(oldest) = copypaste_core::get_page(db, excess, config.history_limit) {
+            for old in &oldest {
+                let _ = copypaste_core::delete_item(db, &old.id);
+            }
+            tracing::debug!("pruned {} items over history_limit={}", excess, config.history_limit);
+        }
     }
 }
 
