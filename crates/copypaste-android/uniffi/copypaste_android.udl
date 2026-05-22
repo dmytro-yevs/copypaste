@@ -1,0 +1,29 @@
+namespace copypaste_android {
+  [Throws=CopypasteError]
+  EncryptedBlob encrypt_text([ByRef] bytes u8, [ByRef] key u8);
+
+  [Throws=CopypasteError]
+  sequence<u8> decrypt_text([ByRef] ciphertext u8, [ByRef] nonce u8, [ByRef] key u8);
+
+  boolean is_sensitive(string text);
+
+  string? sensitive_kind(string text);
+
+  [Throws=CopypasteError]
+  u64 open_database(string path);
+
+  void close_database(u64 handle);
+};
+
+[Error]
+enum CopypasteError {
+  "EncryptionFailed",
+  "DecryptionFailed",
+  "DatabaseError",
+  "InvalidKeyLength",
+};
+
+dictionary EncryptedBlob {
+  sequence<u8> nonce;
+  sequence<u8> ciphertext;
+};

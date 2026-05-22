@@ -1,0 +1,16 @@
+[package]
+name = "copypaste-android"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+name = "copypaste_android"
+
+[dependencies]
+copypaste-core = { path = "../copypaste-core" }
+uniffi = { version = "0.27", features = ["bindgen"] }
+thiserror = "1"
+
+[build-dependencies]
+uniffi = { version = "0.27", features = ["build"] }
