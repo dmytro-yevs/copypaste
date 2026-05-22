@@ -1,0 +1,52 @@
+//! `copypaste-p2p` — P2P mutual-TLS transport for CopyPaste.
+//!
+//! # Overview
+//!
+//! Each device generates a self-signed X.509 certificate at first run. The
+//! certificate's SHA-256 fingerprint serves as the device identity. During
+//! pairing, devices exchange fingerprints out-of-band (e.g. QR code, relay
+//! server) and store them locally.
+//!
+//! When two devices connect directly:
+//! 1. The server presents its certificate and requires the client to present one too.
+//! 2. Both sides verify the peer's certificate fingerprint against their local
+//!    `PairedPeers` table.
+//! 3. On success, the connection is wrapped with a length-delimited framing
+//!    codec ready for message exchange.
+//!
+//! # Usage
+//!
+//! ```no_run
+//! use copypaste_p2p::{PeerTransport, PairedPeers, SelfSignedCert};
+//! use tokio::net::TcpListener;
+//!
+//! # async fn example() -> anyhow::Result<()> {
+//! // Generate our certificate (normally persisted between runs).
+//! let my_cert = SelfSignedCert::generate("my-device-id")?;
+//! println!("My fingerprint: {}", my_cert.fingerprint());
+//!
+//! // After out-of-band pairing, register the peer.
+//! let mut peers = PairedPeers::new();
+//! peers.add("abc123...peer_fingerprint...", "Alice's MacBook");
+//!
+//! let transport = PeerTransport::from_cert(my_cert.cert_der, my_cert.key_der, peers);
+//!
+//! // Accept incoming connections.
+//! let listener = TcpListener::bind("0.0.0.0:51515").await?;
+//! let (_peer_addr, _stream) = transport.accept(&listener).await?;
+//! # Ok(())
+//! # }
+//! ```
+
+pub mod cert;
+pub mod transport;
+mod verifier;
+
+// Convenient top-level re-exports.
+pub use cert::{fingerprint_of, CertError, SelfSignedCert};
+pub use transport::{
+    DeviceFingerprint, PairedPeers, PeerClientStream, PeerStream, PeerTransport, TransportError,
+};
+
+/// Default TCP port for P2P direct connections.
+pub const DEFAULT_P2P_PORT: u16 = 51515;
