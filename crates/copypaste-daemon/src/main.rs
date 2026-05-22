@@ -5,6 +5,7 @@ mod keychain;
 mod clipboard;
 mod ipc;
 mod paths;
+mod platform;
 mod protocol;
 
 #[tokio::main]
