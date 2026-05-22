@@ -8,6 +8,10 @@ rust-version.workspace = true
 name = "copypaste-daemon"
 path = "src/main.rs"
 
+[features]
+# Enables Supabase cloud sync (requires SUPABASE_URL + SUPABASE_ANON_KEY env vars at runtime).
+cloud-sync = ["reqwest", "base64"]
+
 [dependencies]
 copypaste-core = { path = "../copypaste-core" }
 image.workspace = true
@@ -24,6 +28,10 @@ sha2.workspace = true
 hex.workspace = true
 dirs.workspace = true
 uuid.workspace = true
+rusqlite.workspace = true
+# cloud-sync feature: HTTP client for Supabase REST + Realtime, base64 encoding
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
+base64 = { version = "0.22", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true

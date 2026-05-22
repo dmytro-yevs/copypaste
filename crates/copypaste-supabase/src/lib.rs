@@ -1,5 +1,8 @@
 //! Supabase client for CopyPaste: GoTrue authentication + Realtime WebSocket sync.
 //!
+//! Implements the Phoenix Channel protocol over WebSocket manually —
+//! there is no official Rust Supabase SDK with Realtime support.
+//!
 //! # Auth quick start
 //!
 //! ```no_run

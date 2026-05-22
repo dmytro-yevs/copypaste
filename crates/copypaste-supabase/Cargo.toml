@@ -8,6 +8,7 @@ description = "Supabase GoTrue auth + Realtime WebSocket client for CopyPaste"
 [lib]
 name = "copypaste_supabase"
 path = "src/lib.rs"
+crate-type = ["rlib"]
 
 [dependencies]
 # Auth (GoTrue HTTP client)

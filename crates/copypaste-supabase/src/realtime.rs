@@ -538,6 +538,7 @@ mod tests {
 
     #[test]
     fn config_from_env_requires_supabase_url() {
+        // Remove env vars to test missing SUPABASE_URL
         std::env::remove_var("SUPABASE_URL");
         std::env::remove_var("SUPABASE_ANON_KEY");
         let result = RealtimeConfig::from_env();
@@ -672,6 +673,8 @@ mod tests {
         );
         let (client, _rx) = RealtimeClient::new(config);
         let handle = client.connect().await.expect("connect should succeed even when disabled");
+        // When disabled, the background loop never sets running=true, so is_running is false
+        // (we never stored true for a disabled client)
         assert!(!handle.is_running(), "disabled client should not be running");
     }
 }

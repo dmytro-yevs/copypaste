@@ -12,6 +12,8 @@ mod peers;
 mod paths;
 mod platform;
 mod protocol;
+#[cfg(feature = "cloud-sync")]
+mod cloud;
 
 #[cfg(target_os = "macos")]
 mod tray;

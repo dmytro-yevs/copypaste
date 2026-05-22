@@ -61,7 +61,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     }
 
     // Broadcast channel: carries newly-inserted clipboard items to any
-    // subscriber (P2P sync, future extensions).  Capacity 64 — lagging
+    // subscriber (P2P sync, cloud-sync, future extensions). Capacity 64 — lagging
     // receivers drop oldest items and log a warning.
     let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(64);
 
@@ -99,6 +99,30 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     } else {
         tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
         None
+    };
+
+    // Start optional cloud-sync if credentials are present.
+    #[cfg(feature = "cloud-sync")]
+    let _cloud_handle = {
+        use crate::cloud::{CloudConfig, start_cloud};
+        if let Some(cloud_cfg) = CloudConfig::from_env() {
+            tracing::info!("cloud-sync: SUPABASE_URL found, starting cloud orchestrator");
+            // Subscribe a new receiver from the existing sender.
+            let rx = new_item_tx.subscribe();
+            match start_cloud(cloud_cfg, db.clone(), rx).await {
+                Ok(handle) => {
+                    tracing::info!("cloud-sync: orchestrator started");
+                    Some(handle)
+                }
+                Err(e) => {
+                    tracing::warn!("cloud-sync: failed to start ({e}); continuing without sync");
+                    None
+                }
+            }
+        } else {
+            tracing::debug!("cloud-sync: SUPABASE_URL not set, skipping");
+            None
+        }
     };
 
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
@@ -247,9 +271,9 @@ async fn handle_tick(
     match monitor.poll() {
         Ok(Some(ClipboardContent::Text(text))) => {
             if let Some(item) = handle_text(text, db, local_key, config).await {
-                // Broadcast to P2P subscribers (and any future consumer).
+                // Broadcast to P2P + cloud-sync subscribers (and any future consumer).
                 // A send error only means there are no active receivers —
-                // that is normal when P2P is disabled.
+                // that is normal when both P2P and cloud-sync are disabled.
                 let _ = new_item_tx.send(item);
             }
         }
