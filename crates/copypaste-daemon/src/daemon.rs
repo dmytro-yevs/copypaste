@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -9,7 +10,17 @@ use copypaste_core::{
 };
 use crate::{clipboard::ClipboardMonitor, ipc::IpcServer, paths};
 
+/// Run the daemon until `Ctrl+C` / `SIGTERM` is received.
+///
+/// This is the entry point used on non-macOS platforms and in tests.
 pub async fn run() -> anyhow::Result<()> {
+    run_with_quit_flag(Arc::new(AtomicBool::new(false))).await
+}
+
+/// Run the daemon until `Ctrl+C`, `SIGTERM`, or `quit_flag` is set.
+///
+/// On macOS the tray icon sets `quit_flag` when the user clicks Quit.
+pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()> {
     let config = load_config();
     tracing::info!(
         "poll_interval={}ms history_limit={}",
@@ -48,6 +59,11 @@ pub async fn run() -> anyhow::Result<()> {
         use tokio::signal::unix::{signal, SignalKind};
         let mut sigterm = signal(SignalKind::terminate())?;
         loop {
+            // Check tray quit flag before blocking on select
+            if quit_flag.load(Ordering::Relaxed) {
+                tracing::info!("quit flag set, shutting down daemon");
+                break;
+            }
             tokio::select! {
                 _ = ticker.tick() => {
                     handle_tick(&mut monitor, &db, &local_key, &config).await;
@@ -68,10 +84,12 @@ pub async fn run() -> anyhow::Result<()> {
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down");
+                    quit_flag.store(true, Ordering::Relaxed);
                     break;
                 }
                 _ = sigterm.recv() => {
                     tracing::info!("SIGTERM received, shutting down");
+                    quit_flag.store(true, Ordering::Relaxed);
                     break;
                 }
             }
