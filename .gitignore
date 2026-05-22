@@ -1,0 +1,11 @@
+# Ruflo runtime
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+.claude-flow/swarm/
+.claude-flow/metrics/
+ruvector.db
+
+# Ruflo memory DB — committing for single-user project
+agentdb.rvf
+agentdb.rvf.lock
