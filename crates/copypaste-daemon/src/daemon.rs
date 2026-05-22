@@ -37,6 +37,35 @@ pub async fn run() -> anyhow::Result<()> {
         }
     });
 
+    // Broadcast channel: every newly inserted item is forwarded to the cloud-sync push_loop.
+    // Capacity 64 — if cloud-sync is not active the sender simply has no subscribers,
+    // and send() returns Err(NoReceivers) which we silently ignore.
+    let (new_item_tx, _new_item_rx) = tokio::sync::broadcast::channel::<ClipboardItem>(64);
+
+    // Start optional cloud-sync if credentials are present.
+    #[cfg(feature = "cloud-sync")]
+    let _cloud_handle = {
+        use crate::cloud::{CloudConfig, start_cloud};
+        if let Some(cloud_cfg) = CloudConfig::from_env() {
+            tracing::info!("cloud-sync: SUPABASE_URL found, starting cloud orchestrator");
+            // Subscribe a new receiver from the existing sender.
+            let rx = new_item_tx.subscribe();
+            match start_cloud(cloud_cfg, db.clone(), rx).await {
+                Ok(handle) => {
+                    tracing::info!("cloud-sync: orchestrator started");
+                    Some(handle)
+                }
+                Err(e) => {
+                    tracing::warn!("cloud-sync: failed to start ({e}); continuing without sync");
+                    None
+                }
+            }
+        } else {
+            tracing::debug!("cloud-sync: SUPABASE_URL not set, skipping");
+            None
+        }
+    };
+
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
     let mut ticker = interval(Duration::from_millis(config.poll_interval_ms));
     let mut cleanup_ticks: u64 = 0;
@@ -50,7 +79,7 @@ pub async fn run() -> anyhow::Result<()> {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &new_item_tx).await;
                     cleanup_ticks += 1;
                     if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
                         cleanup_ticks = 0;
@@ -82,7 +111,7 @@ pub async fn run() -> anyhow::Result<()> {
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config).await;
+                    handle_tick(&mut monitor, &db, &local_key, &config, &new_item_tx).await;
                     cleanup_ticks += 1;
                     if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
                         cleanup_ticks = 0;
@@ -116,6 +145,7 @@ async fn handle_tick(
     db: &Arc<Mutex<Database>>,
     local_key: &[u8; 32],
     config: &AppConfig,
+    new_item_tx: &tokio::sync::broadcast::Sender<ClipboardItem>,
 ) {
     match monitor.poll() {
         Ok(Some(content)) => {
@@ -164,6 +194,8 @@ async fn handle_tick(
                             tracing::debug!("pruned {} items over history_limit={}", excess, config.history_limit);
                         }
                     }
+                    // Notify cloud-sync push_loop (ignore if no subscribers).
+                    let _ = new_item_tx.send(item);
                 }
                 Err(e) => tracing::warn!("failed to store item: {e}"),
             }

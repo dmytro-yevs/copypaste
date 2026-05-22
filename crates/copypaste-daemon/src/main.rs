@@ -7,6 +7,8 @@ mod ipc;
 mod paths;
 mod platform;
 mod protocol;
+#[cfg(feature = "cloud-sync")]
+mod cloud;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
