@@ -28,6 +28,8 @@ pub struct AppConfig {
     pub sync_ttl_secs: u64,
     pub sensitive_ttl_relay_secs: u64,
     pub sensitive_ttl_local_secs: u64,
+    /// Local auto-wipe TTL for sensitive items (seconds). Default: 30.
+    pub sensitive_ttl_secs: u64,
     pub image_quality: u8,
     pub sqlite_cache_mb: u32,
     pub encryption_chunk_kb: u32,
@@ -49,6 +51,7 @@ impl Default for AppConfig {
             sync_ttl_secs: SYNC_TTL_SECS,
             sensitive_ttl_relay_secs: SENSITIVE_TTL_RELAY_SECS,
             sensitive_ttl_local_secs: SENSITIVE_TTL_LOCAL_SECS,
+            sensitive_ttl_secs: SENSITIVE_TTL_SECS,
             image_quality: IMAGE_QUALITY,
             sqlite_cache_mb: SQLITE_CACHE_MB,
             encryption_chunk_kb: ENCRYPTION_CHUNK_KB,
