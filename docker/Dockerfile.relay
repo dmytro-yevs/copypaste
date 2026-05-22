@@ -1,6 +1,38 @@
-# Placeholder for Phase 2 — relay server binary built in Phase 2
-# Final form will be: FROM scratch with compiled copypaste-relay binary
+# Stage 1: Build
+FROM rust:1.75-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y build-essential pkg-config && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Cache dependency compilation (copy manifests first)
+COPY Cargo.toml Cargo.lock ./
+COPY crates/copypaste-core/Cargo.toml crates/copypaste-core/
+COPY crates/copypaste-daemon/Cargo.toml crates/copypaste-daemon/
+COPY crates/copypaste-cli/Cargo.toml crates/copypaste-cli/
+COPY crates/copypaste-relay/Cargo.toml crates/copypaste-relay/
+
+# Fake source files so cargo can fetch and build deps without real source
+RUN mkdir -p \
+      crates/copypaste-core/src \
+      crates/copypaste-daemon/src \
+      crates/copypaste-cli/src \
+      crates/copypaste-relay/src && \
+    echo "pub fn dummy() {}" > crates/copypaste-core/src/lib.rs && \
+    echo "fn main() {}" > crates/copypaste-daemon/src/main.rs && \
+    echo "fn main() {}" > crates/copypaste-cli/src/main.rs && \
+    echo "fn main() {}" > crates/copypaste-relay/src/main.rs && \
+    cargo build --release -p copypaste-relay 2>/dev/null || true
+
+# Copy real source and build for real
+COPY crates/ crates/
+RUN touch crates/copypaste-relay/src/main.rs && \
+    cargo build --release -p copypaste-relay
+
+# Stage 2: Runtime
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /workspace/target/release/copypaste-relay /usr/local/bin/copypaste-relay
 EXPOSE 8080
-CMD ["echo", "Relay server placeholder — build target for Phase 2"]
+ENV RUST_LOG=info
+CMD ["copypaste-relay"]
