@@ -1,0 +1,47 @@
+[package]
+name = "copypaste-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+# This crate is intentionally NOT a workspace member: cargo-fuzz adds a
+# nightly-only `-Z` flag (`build-std`) and an unstable libfuzzer linker
+# config that would otherwise pollute the stable workspace build.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+# Workspace crates under test. Paths are relative to fuzz/.
+copypaste-ipc = { path = "../crates/copypaste-ipc" }
+copypaste-core = { path = "../crates/copypaste-core" }
+copypaste-sync = { path = "../crates/copypaste-sync" }
+serde_json = "1"
+
+# Prevent this artifact from being uploaded to crates.io.
+[[bin]]
+name = "ipc_protocol_parse"
+path = "fuzz_targets/ipc_protocol_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image_decode"
+path = "fuzz_targets/image_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sync_event_decode"
+path = "fuzz_targets/sync_event_decode.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1

@@ -1,0 +1,73 @@
+name: fuzz-smoke
+
+# Short coverage-guided fuzz run on every push to the beta branch.
+# Non-blocking: fuzzing is signal, not a gate. A crash here is loud (job
+# annotation + artifact upload) but does not stop the merge.
+#
+# Security note: this workflow does NOT consume any untrusted event fields
+# (no issue/PR title, body, head.ref, commit messages). The only dynamic
+# value is matrix.target, which is a hardcoded enum below.
+on:
+  push:
+    branches:
+      - release/v0.2.0-beta
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - ipc_protocol_parse
+          - image_decode
+          - sync_event_decode
+
+    env:
+      FUZZ_TARGET: ${{ matrix.target }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo registry + fuzz target dir
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            fuzz/target
+          key: fuzz-${{ runner.os }}-${{ hashFiles('fuzz/Cargo.toml', 'crates/**/Cargo.toml') }}
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Build fuzz target
+        run: cargo +nightly fuzz build "$FUZZ_TARGET" --fuzz-dir fuzz
+
+      - name: Run fuzz target for 30 s
+        run: |
+          cargo +nightly fuzz run "$FUZZ_TARGET" \
+            --fuzz-dir fuzz \
+            -- -max_total_time=30 -print_final_stats=1
+
+      - name: Upload crash artifacts (if any)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore
+          retention-days: 14

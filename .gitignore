@@ -25,3 +25,9 @@ CLAUDE.md
 
 # Personal status reports (ephemeral, not version-controlled)
 reports/
+
+# cargo-fuzz runtime (build outputs, corpora, crash reproducers)
+fuzz/target/
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/Cargo.lock

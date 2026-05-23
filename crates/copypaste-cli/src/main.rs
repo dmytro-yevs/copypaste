@@ -22,8 +22,12 @@ enum Commands {
         #[arg(long, default_value_t = 0)]
         offset: u64,
     },
-    /// Check if the daemon is running
-    Status,
+    /// Check if the daemon is running (prints version, uptime, history count)
+    Status {
+        /// Output machine-readable JSON instead of a human table
+        #[arg(long)]
+        json: bool,
+    },
     /// Show total number of stored items
     Count,
     /// Delete a clipboard item by ID
@@ -110,7 +114,7 @@ fn main() {
 
     let result = match cli.command {
         Commands::List { limit, offset } => commands::list::run(&socket, limit, offset),
-        Commands::Status => commands::status::run(&socket),
+        Commands::Status { json } => commands::status::run(&socket, json),
         Commands::Count => commands::count::run(&socket),
         Commands::Delete { id } => commands::delete::run(&socket, &id),
         Commands::Search { query, limit } => commands::search::run(&socket, &query, limit),
