@@ -543,6 +543,7 @@ mod tests {
         }
 
         /// Override the response for a specific (program, first_arg) pair.
+        #[allow(dead_code)]
         fn set_response(
             &mut self,
             program: &str,
@@ -611,6 +612,7 @@ mod tests {
                 files: std::collections::HashMap::new(),
             }
         }
+        #[allow(dead_code)]
         fn with_existing(mut self, p: impl Into<PathBuf>) -> Self {
             self.existing.insert(p.into());
             self
@@ -665,6 +667,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     fn expected_plist() -> PathBuf {
         PathBuf::from("/Users/test/Library/LaunchAgents/com.copypaste.daemon.plist")
     }
@@ -1205,6 +1208,7 @@ mod tests {
         );
     }
 
+    #[allow(dead_code)]
     const SAMPLE_PLIST_FOR_INSTALL: &str = r#"<?xml version="1.0"?>
 <plist><dict>
     <key>StandardOutPath</key>
