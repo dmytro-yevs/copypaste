@@ -31,6 +31,7 @@ reproducibility, but is not the promoted install path.
   **Warm-build envelope:** 5–10 min → 1–2 min for code-only changes.
 
 ### Breaking changes
+- Removed `copypaste-config` crate (orthogonal to `core::config::AppConfig` and `daemon::ipc::AppConfig`; see ADR-011)
 - **Crypto:** dropped the legacy empty-AAD AEAD decrypt fallback in
   `copypaste-core::crypto::encrypt`. The `encrypt_item` / `decrypt_item`
   wrapper functions (empty-AAD variants) have been removed entirely;
