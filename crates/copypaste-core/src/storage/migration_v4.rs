@@ -30,6 +30,14 @@
 //! Text items only. Image items use the per-chunk encryption in
 //! [`crate::crypto::chunks`] which has its own format-version field; image
 //! migration is tracked separately and out of scope for T5.
+//!
+//! ## TODO(v0.4): Cnew — image chunks not migrated
+//!
+//! Image clipboard items captured before the v4 migration retain their
+//! original key derivation (v1 HKDF family). They remain accessible but are
+//! **not** re-encrypted as part of this sweep: the `WHERE content_type = 'text'`
+//! predicate explicitly excludes them. Full re-encryption of image chunks is
+//! deferred to v0.4. See `docs/known-issues.md` for the documented scope.
 
 use super::db::Database;
 use crate::crypto::encrypt::{

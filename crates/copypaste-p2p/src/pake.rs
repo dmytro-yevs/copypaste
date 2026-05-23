@@ -32,7 +32,7 @@ use argon2::Argon2;
 use generic_array::GenericArray;
 use hkdf::Hkdf;
 use opaque_ke::ciphersuite::CipherSuite;
-use opaque_ke::rand::rngs::OsRng;
+use rand::rngs::OsRng;
 use opaque_ke::{
     ClientLogin, ClientLoginFinishParameters, ClientRegistration,
     ClientRegistrationFinishParameters, CredentialFinalization, CredentialRequest,
@@ -114,6 +114,56 @@ impl SessionKey {
         let hk = Hkdf::<Sha256>::new(Some(salt), &self.0);
         let mut out = [0u8; 32];
         hk.expand(b"copypaste-xchacha20-key-v1", &mut out)
+            .expect("32 bytes is well within HKDF-SHA256 output limit");
+        out
+    }
+
+    /// Derive a 32-byte *channel-bound* session key by mixing in a TLS
+    /// channel-binding token (RFC 5705 `export_keying_material`).
+    ///
+    /// # Protocol (S3 — PAKE/TLS channel binding)
+    ///
+    /// After the PAKE handshake both sides hold the same raw `SessionKey`.
+    /// However, an active MitM that can relay PAKE messages over separate TLS
+    /// connections could bridge two sessions and learn the shared key. Binding
+    /// the key to the specific TLS channel prevents this: even if the PAKE
+    /// completes, the derived key is useless on any other channel.
+    ///
+    /// ```text
+    /// tls_binder = TlsStream::export_keying_material(
+    ///     label   = "EXPORTER-copypaste-channel-binding",
+    ///     context = None,          // RFC 5705 §4 — context omitted
+    ///     len     = 32,
+    /// )
+    /// session_binding = HKDF-SHA256(
+    ///     salt = tls_binder,
+    ///     ikm  = self.0 (raw PAKE session key),
+    ///     info = b"copypaste/p2p/channel-binding/v1",
+    /// )
+    /// ```
+    ///
+    /// The `context = None` form is intentional: passing the session key as
+    /// context would create a circular dependency (the binder would depend on
+    /// the key we are trying to protect). RFC 5705 §4 explicitly allows the
+    /// no-context form.
+    ///
+    /// # Arguments
+    ///
+    /// * `tls_binder` — 32 bytes from `export_keying_material` on the
+    ///   completed TLS handshake. Both sides must use identical label +
+    ///   context; the TLS record layer guarantees they will get the same
+    ///   bytes when connected to each other, and different bytes on any
+    ///   other channel.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `tls_binder` is empty (programming error — callers must
+    /// not pass a zero-length slice).
+    pub fn bind_to_tls_channel(&self, tls_binder: &[u8]) -> [u8; 32] {
+        assert!(!tls_binder.is_empty(), "tls_binder must not be empty");
+        let hk = Hkdf::<Sha256>::new(Some(tls_binder), &self.0);
+        let mut out = [0u8; 32];
+        hk.expand(b"copypaste/p2p/channel-binding/v1", &mut out)
             .expect("32 bytes is well within HKDF-SHA256 output limit");
         out
     }
@@ -421,6 +471,57 @@ mod tests {
         assert_eq!(k1, k1_again, "derivation must be deterministic");
         assert_ne!(k1, k2, "different salts must yield different keys");
         assert_eq!(k1.len(), 32);
+    }
+
+    /// S3: `bind_to_tls_channel` mixes the TLS binder into the session key so
+    /// that keys derived on different channels are always distinct, even when
+    /// the PAKE session key is identical.
+    #[test]
+    fn channel_binding_produces_distinct_keys_for_different_binders() {
+        let sk = SessionKey([0xAB; 32]);
+        let binder_a = [0x01u8; 32];
+        let binder_b = [0x02u8; 32];
+
+        let bound_a = sk.bind_to_tls_channel(&binder_a);
+        let bound_b = sk.bind_to_tls_channel(&binder_b);
+        let bound_a_again = sk.bind_to_tls_channel(&binder_a);
+
+        assert_eq!(bound_a, bound_a_again, "binding must be deterministic");
+        assert_ne!(
+            bound_a, bound_b,
+            "different TLS binders must yield different channel-bound keys"
+        );
+        // The channel-bound key must also differ from the raw session key.
+        assert_ne!(
+            bound_a,
+            sk.0,
+            "channel-bound key must differ from the raw PAKE key"
+        );
+    }
+
+    /// S3: The channel-bound key is the same on both ends of a real PAKE
+    /// handshake, provided both sides supply the same TLS binder.
+    #[test]
+    fn channel_binding_is_symmetric_after_pake() {
+        let password = "channel-binding-test-password";
+        let pf = PasswordFile::register(password).expect("register");
+
+        let (client, msg1) = PakeInitiator::new(password).expect("client new");
+        let (server, msg2) = PakeResponder::respond(&pf, &msg1).expect("server respond");
+        let (client_key, msg3) = client.finish(&msg2).expect("client finish");
+        let server_key = server.finish(&msg3).expect("server finish");
+
+        // Simulate the same TLS binder both sides would extract from their
+        // shared TLS session (in production these come from export_keying_material).
+        let shared_binder = [0xFEu8; 32];
+
+        let client_bound = client_key.bind_to_tls_channel(&shared_binder);
+        let server_bound = server_key.bind_to_tls_channel(&shared_binder);
+
+        assert_eq!(
+            client_bound, server_bound,
+            "both sides must derive the same channel-bound key"
+        );
     }
 
     /// PasswordFile must roundtrip through its serialized form and still
