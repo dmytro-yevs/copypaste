@@ -566,6 +566,7 @@ async fn dispatch_event(msg: &PhoenixMessage, tx: &mpsc::Sender<ChangeEvent>, to
 mod tests {
     use super::*;
     use crate::protocol::{ChangeType, PhoenixEvent};
+    use serial_test::serial;
     use tokio::sync::mpsc;
 
     // ── build_ws_url ──────────────────────────────────────────────────────────
@@ -600,6 +601,7 @@ mod tests {
     // ── RealtimeConfig ────────────────────────────────────────────────────────
 
     #[test]
+    #[serial]
     fn config_from_env_requires_supabase_url() {
         // Remove env vars to test missing SUPABASE_URL
         std::env::remove_var("SUPABASE_URL");
@@ -614,6 +616,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn config_from_env_requires_anon_key() {
         std::env::set_var("SUPABASE_URL", "https://test.supabase.co");
         std::env::remove_var("SUPABASE_ANON_KEY");
