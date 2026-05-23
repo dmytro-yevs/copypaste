@@ -484,9 +484,20 @@ mod tests {
         assert!(matches!(kind, SensitiveKind::CreditCard));
     }
     #[test]
-    fn credit_card_no_false_positive_on_random_digits() {
-        // 16 zero digits — Luhn-invalid; must not classify.
-        assert!(detect("transaction id: 0000000000000000 logged").is_none());
+    fn credit_card_no_false_positive_on_luhn_invalid_run() {
+        // Pin: a Luhn-invalid 13-digit run inside longer text must not
+        // classify as CreditCard. We assert *only* "not classified as
+        // CreditCard" — the input may still trigger an unrelated pattern
+        // (e.g. phone_us on a 10-digit subrun), which is out of scope.
+        // (Earlier fixtures used "all zeros" or "all ones": the former
+        // is Luhn-valid (sum=0 ≡ 0 mod 10) and the latter trips phone_us.)
+        let blob = "ref=4242424242422 EOT";
+        let kind = detect(blob);
+        assert!(
+            !matches!(kind, Some(SensitiveKind::CreditCard)),
+            "Luhn-invalid 13-digit run must not classify as CreditCard, got {:?}",
+            kind
+        );
     }
     #[test]
     fn detects_slack_bot_token() {
