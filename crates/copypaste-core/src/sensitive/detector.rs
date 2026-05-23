@@ -169,7 +169,10 @@ pub fn luhn_valid(s: &str) -> bool {
     let digits: Vec<u32> = s
         .chars()
         .filter(|c| c.is_ascii_digit())
-        .map(|c| c.to_digit(10).unwrap())
+        // Audit LOW #7: `to_digit(10).unwrap()` is structurally safe (filter
+        // only admits ASCII digits) but `unwrap_or(0)` removes the bare
+        // unwrap from a security-relevant path. Cannot fire in practice.
+        .map(|c| c.to_digit(10).unwrap_or(0))
         .collect();
     if digits.len() < 13 || digits.len() > 19 {
         return false;
@@ -296,17 +299,58 @@ pub fn detect(text: &str) -> Option<SensitiveKind> {
         tracing::debug!(pattern = pattern_name(idx), "sensitive content detected");
         return Some(SensitiveKind::from_pattern_name(pattern_name(idx)));
     }
-    if normalised.len() <= 25 && is_luhn_valid_card(&normalised) {
+    // Audit MED #6: the previous `normalised.len() <= 25 && Luhn(normalised)`
+    // gate missed any card embedded in a longer string (e.g. "card:
+    // 4111-1111-1111-1111 expires 12/26"). Scan the text for digit runs
+    // 13..=19 long (optionally separated by `-` / whitespace) and
+    // Luhn-validate each candidate independently. Operates on the
+    // already-normalised string so Unicode digit bypasses are defeated by
+    // the same NFKC pass.
+    if contains_luhn_valid_card_run(&normalised) {
         return Some(SensitiveKind::CreditCard);
     }
     None
 }
 
-fn is_luhn_valid_card(s: &str) -> bool {
+/// Returns true iff the input contains at least one candidate digit run
+/// (13–19 ASCII digits, optionally separated by single `-` or whitespace)
+/// that Luhn-validates as a credit-card number.
+///
+/// Uses a static `OnceLock<Regex>` so the candidate scanner is compiled once
+/// per process. The pattern is anchored on word boundaries to skip mid-token
+/// hits like `xid=4111111111111111foobar`.
+fn contains_luhn_valid_card_run(text: &str) -> bool {
+    use std::sync::OnceLock;
+    static CARD_RUN_RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = CARD_RUN_RE.get_or_init(|| {
+        // `\b(?:\d[\s-]?){13,19}\d\b` — between 13 and 19 digits with
+        // optional single space or hyphen between each, plus a final
+        // digit (so total = 14..=20 digits). The leading run already
+        // matches one digit so we accept totals 13..=19 effectively;
+        // the explicit Luhn `digits.len() < 13 || > 19` clamp filters.
+        regex::Regex::new(r"\b(?:\d[\s-]?){12,18}\d\b").expect("static card-run regex is valid")
+    });
+    for m in re.find_iter(text) {
+        if luhn_valid_strict(m.as_str()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Strip whitespace and `-`, then Luhn-validate. Mirrors the public
+/// `super::luhn_valid` helper but inlined here to avoid an extra
+/// allocation+digit-filter pass on the per-candidate hot path.
+fn luhn_valid_strict(s: &str) -> bool {
     let digits: Vec<u32> = s
         .chars()
         .filter(|c| c.is_ascii_digit())
-        .map(|c| c.to_digit(10).unwrap())
+        // Audit LOW #7: `.to_digit(10).unwrap()` is safe in this branch
+        // (the preceding filter only admits ASCII digits) but `unwrap_or(0)`
+        // removes the smell entirely. A `0` could only appear if an
+        // ASCII-digit char somehow rejected base-10 decode, which is
+        // impossible — the `0` is a safety net, not an active value.
+        .map(|c| c.to_digit(10).unwrap_or(0))
         .collect();
     if digits.len() < 13 || digits.len() > 19 {
         return false;
@@ -425,6 +469,24 @@ mod tests {
     #[test]
     fn credit_card_detected_short_line_only() {
         assert!(detect("4111111111111111").is_some());
+    }
+    #[test]
+    fn credit_card_detected_when_embedded_in_longer_text() {
+        // Audit MED #6: the previous `len <= 25` gate dropped this case.
+        let blob = "Customer card: 4111 1111 1111 1111 — expires 12/26";
+        let kind = detect(blob).expect("embedded card must be detected");
+        assert!(matches!(kind, SensitiveKind::CreditCard));
+    }
+    #[test]
+    fn credit_card_with_hyphens_in_long_text() {
+        let blob = "please charge 4111-1111-1111-1111 today";
+        let kind = detect(blob).expect("hyphenated card must be detected");
+        assert!(matches!(kind, SensitiveKind::CreditCard));
+    }
+    #[test]
+    fn credit_card_no_false_positive_on_random_digits() {
+        // 16 zero digits — Luhn-invalid; must not classify.
+        assert!(detect("transaction id: 0000000000000000 logged").is_none());
     }
     #[test]
     fn detects_slack_bot_token() {
