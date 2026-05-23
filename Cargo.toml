@@ -30,7 +30,7 @@ repository = "https://github.com/dmytro/CopyPaste"
 # Crypto
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 chacha20poly1305 = "0.10"
-hkdf = "0.12"
+hkdf = "0.13"
 sha2 = "0.10"
 zeroize = { version = "1.7", features = ["derive"] }
 rand = "0.8"
