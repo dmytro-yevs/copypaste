@@ -16,7 +16,24 @@ pub enum SchemaError {
     Downgrade { found: i64, expected: i64 },
 }
 
-const SCHEMA_VERSION: i64 = 2;
+/// Current on-disk schema version. Bumped from 2 → 3 when the
+/// `origin_device_id` column was added to `clipboard_items` to back the LWW
+/// merge tie-break (see `copypaste-sync::merge::resolve`).
+pub const SCHEMA_VERSION: i64 = 3;
+
+/// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
+/// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
+/// without duplicating the SQL. Integration tests still inline a copy because
+/// `include_str!` paths are crate-relative and not visible from `tests/`.
+pub(crate) const V1_SCHEMA_SQL: &str = include_str!("schema_v1.sql");
+
+/// v3 ALTER step — add `origin_device_id` to `clipboard_items`. SQLite
+/// requires a literal constant default for `ALTER TABLE ADD COLUMN`, so we
+/// use the empty string and let `items::backfill_origin_device_id` stamp the
+/// real local UUID at daemon startup.
+pub(crate) const V3_ALTER_SQL: &str = "\
+ALTER TABLE clipboard_items \
+    ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';\n";
 
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
@@ -59,7 +76,7 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
     script.push_str("BEGIN;\n");
 
     if current_version < 1 {
-        script.push_str(include_str!("schema_v1.sql"));
+        script.push_str(V1_SCHEMA_SQL);
         script.push('\n');
     }
 
@@ -71,6 +88,15 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
              CREATE INDEX IF NOT EXISTS idx_clipboard_content_hash\n\
                  ON clipboard_items(content_hash) WHERE content_hash IS NOT NULL;\n",
         );
+    }
+
+    if current_version < 3 {
+        // Migration v3: add origin_device_id column used by the LWW merge
+        // tie-break (see `copypaste-sync::merge::resolve`). Defaults to the
+        // empty string for legacy rows; the daemon calls
+        // `items::backfill_origin_device_id` after open to stamp the local
+        // device UUID onto any rows still carrying the empty default.
+        script.push_str(V3_ALTER_SQL);
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));
@@ -116,7 +142,7 @@ mod tests {
         // migration runs inside a single transaction, user_version must
         // remain at 1 after the failure (NOT be updated to SCHEMA_VERSION).
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(include_str!("schema_v1.sql")).unwrap();
+        conn.execute_batch(V1_SCHEMA_SQL).unwrap();
         conn.execute_batch("PRAGMA user_version = 1;").unwrap();
 
         // Pre-add the column the v2 step would add → guarantees ALTER fails.
@@ -153,5 +179,21 @@ mod tests {
         apply_migrations(&conn).unwrap();
         // Second call hits the `current_version == SCHEMA_VERSION` fast path.
         apply_migrations(&conn).unwrap();
+    }
+
+    #[test]
+    fn fresh_db_has_origin_device_id_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_migrations(&conn).unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(clipboard_items)").unwrap();
+        let cols: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(
+            cols.iter().any(|c| c == "origin_device_id"),
+            "v3 schema must include origin_device_id column"
+        );
     }
 }

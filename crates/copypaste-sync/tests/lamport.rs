@@ -151,8 +151,10 @@ fn merge_observed_remote_clock_takes_max_plus_one() {
 // versions of the same clipboard item. The contract is:
 //   1. Higher `lamport_ts` wins.
 //   2. On equal Lamport, higher `wall_time` wins.
-//   3. On equal Lamport and wall_time, larger device id wins
-//      (`origin_device_id` on the wire side vs. `id` on the local side).
+//   3. On equal Lamport and wall_time, larger `origin_device_id` wins
+//      (compared as a string on both sides as of schema v3; previously the
+//      remote side was compared against `local.id` (the row UUID) — the
+//      merge.rs:39 BUG).
 //
 // The tests below pin that ordering.
 
@@ -171,6 +173,8 @@ fn make_local(id: &str, lamport: i64, wall: i64) -> ClipboardItem {
         expires_at: None,
         app_bundle_id: None,
         content_hash: None,
+        // Pinned so the device-id tie-break has a known reference string.
+        origin_device_id: "device-local".to_string(),
     }
 }
 
@@ -214,20 +218,21 @@ fn ordering_total_order_via_clock_and_node_id() {
 
     // (c) Equal Lamport + equal wall time → device id tie-break.
     //
-    // `resolve` compares `remote.origin_device_id` against `local.id`
-    // (the item id is used as the local identity in the current
-    // implementation). We construct local.id so the comparison is
-    // unambiguous in each direction.
-    let local = make_local("device-A", 7, 100);
-    let remote = make_remote("device-A", 7, 100, "device-Z"); // "device-Z" > "device-A"
+    // As of schema v3, `resolve` compares `remote.origin_device_id` against
+    // `local.origin_device_id` (not against the row UUID — that was the
+    // merge.rs:39 BUG). `make_local` stamps `origin_device_id =
+    // "device-local"`, so we pick remote ids on either side of that string
+    // to exercise both branches deterministically.
+    let local = make_local("item-x", 7, 100);
+    let remote = make_remote("item-x", 7, 100, "zzz"); // "zzz" > "device-local"
     assert_eq!(
         resolve(&local, &remote),
         MergeOutcome::TakeRemote,
         "larger device id must win the final tie-break"
     );
 
-    let local = make_local("device-Z", 7, 100);
-    let remote = make_remote("device-Z", 7, 100, "device-A"); // "device-A" < "device-Z"
+    let local = make_local("item-x", 7, 100);
+    let remote = make_remote("item-x", 7, 100, "aaa"); // "aaa" < "device-local"
     assert_eq!(
         resolve(&local, &remote),
         MergeOutcome::KeepLocal,
@@ -236,7 +241,7 @@ fn ordering_total_order_via_clock_and_node_id() {
 
     // (d) Exact equality (same device id on both sides) → KeepLocal,
     // because the strict `>` comparison in the tie-break is false.
-    let local = make_local("device-A", 7, 100);
-    let remote = make_remote("device-A", 7, 100, "device-A");
+    let local = make_local("item-x", 7, 100);
+    let remote = make_remote("item-x", 7, 100, "device-local");
     assert_eq!(resolve(&local, &remote), MergeOutcome::KeepLocal);
 }

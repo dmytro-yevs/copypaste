@@ -20,6 +20,18 @@ use std::collections::HashMap;
 // --- helpers ---------------------------------------------------------------
 
 fn mk_local(id: &str, lamport: i64, wall: i64, payload: u8) -> ClipboardItem {
+    // Default device id "device-local" so tie-break tests have a stable,
+    // known string to compare against (e.g. "zzz" > "device-local").
+    mk_local_with_device(id, lamport, wall, payload, "device-local")
+}
+
+fn mk_local_with_device(
+    id: &str,
+    lamport: i64,
+    wall: i64,
+    payload: u8,
+    device_id: &str,
+) -> ClipboardItem {
     ClipboardItem {
         id: id.to_string(),
         item_id: format!("iid-{id}"),
@@ -34,6 +46,7 @@ fn mk_local(id: &str, lamport: i64, wall: i64, payload: u8) -> ClipboardItem {
         expires_at: None,
         app_bundle_id: None,
         content_hash: None,
+        origin_device_id: device_id.to_string(),
     }
 }
 
@@ -266,4 +279,65 @@ fn delete_after_insert_remote_wins_if_lamport_higher() {
         "older lamport must not revive a tombstoned id"
     );
     assert_eq!(state["id-Z"].content, None);
+}
+
+// --- 5. Device-ID tie-break (the merge.rs:39 BUG fix) ----------------------
+
+/// Two replicas write the same logical item at the same lamport_ts AND the
+/// same wall_time but from different devices. The pre-v3 merge compared
+/// `remote.origin_device_id` against `local.id` (the row UUID), which mixed
+/// two unrelated identifier spaces and produced non-deterministic results:
+/// each replica could pick a different winner, causing the state to diverge
+/// permanently. The v3 fix compares `origin_device_id` on both sides, so the
+/// peer with the lexicographically larger device id deterministically wins on
+/// every replica.
+#[test]
+fn equal_lamport_equal_wall_tie_break_converges() {
+    // Both replicas observe the same op-set (one write from "dev-A" and one
+    // from "dev-zzz") in different orders. The final state on both replicas
+    // MUST agree (convergence), and the content MUST be the "dev-zzz" write
+    // because "dev-zzz" > "dev-A" lexicographically.
+    let from_a = mk_wire("id-tie", 7, 5000, "dev-A", 0xAA);
+    let from_z = mk_wire("id-tie", 7, 5000, "dev-zzz", 0xFF);
+
+    let mut state_1: HashMap<String, ClipboardItem> = HashMap::new();
+    apply(&mut state_1, from_a.clone());
+    apply(&mut state_1, from_z.clone());
+
+    let mut state_2: HashMap<String, ClipboardItem> = HashMap::new();
+    apply(&mut state_2, from_z.clone());
+    apply(&mut state_2, from_a.clone());
+
+    assert_eq!(
+        snapshot(&state_1),
+        snapshot(&state_2),
+        "tie-break must converge regardless of apply order"
+    );
+
+    // The winner is the larger device id, dev-zzz.
+    let winner = &state_1["id-tie"];
+    assert_eq!(
+        winner.origin_device_id, "dev-zzz",
+        "tie-break must pick the lexicographically larger device id, \
+         not compare device id against row UUID (the pre-v3 BUG)"
+    );
+    assert_eq!(winner.content, from_z.content);
+}
+
+/// Sanity: when the LOCAL side has the larger device id, it must win. The
+/// pre-v3 code happened to "work" sometimes because row UUIDs occasionally
+/// sorted favourably, but it never honoured the local device id at all.
+#[test]
+fn equal_lamport_equal_wall_local_wins_when_local_device_larger() {
+    let local = mk_local_with_device("id-tie", 9, 8000, 0x11, "zzz-largest");
+    let remote = mk_wire("id-tie", 9, 8000, "aaa-smaller", 0x22);
+
+    let outcome = resolve(&local, &remote);
+    assert_eq!(
+        outcome,
+        MergeOutcome::KeepLocal,
+        "local must win when local.origin_device_id > remote.origin_device_id; \
+         comparing remote.origin_device_id against local.id (pre-v3) would \
+         have given a different and undefined answer"
+    );
 }

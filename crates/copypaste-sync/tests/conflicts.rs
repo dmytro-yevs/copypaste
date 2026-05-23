@@ -25,6 +25,8 @@ use copypaste_sync::{resolve, MergeOutcome};
 // ---------------------------------------------------------------------------
 
 /// Build a local item with a given id, lamport, wall time, and content.
+/// `origin_device_id` is stamped to "device-local" so tie-break tests have a
+/// known string to compare against (e.g. "zzz" > "device-local").
 fn local_item(id: &str, lamport: i64, wall: i64, content: &[u8]) -> ClipboardItem {
     ClipboardItem {
         id: id.to_string(),
@@ -40,6 +42,7 @@ fn local_item(id: &str, lamport: i64, wall: i64, content: &[u8]) -> ClipboardIte
         expires_at: None,
         app_bundle_id: None,
         content_hash: None,
+        origin_device_id: "device-local".to_string(),
     }
 }
 
@@ -87,6 +90,7 @@ fn apply(local: ClipboardItem, remote: &WireItem) -> ClipboardItem {
             expires_at: remote.expires_at,
             app_bundle_id: remote.app_bundle_id.clone(),
             content_hash: None,
+            origin_device_id: remote.origin_device_id.clone(),
         },
     }
 }

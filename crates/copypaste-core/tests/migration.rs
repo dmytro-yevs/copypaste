@@ -1,13 +1,21 @@
 //! Schema migration tests (beta-bonus).
 //!
-//! Exercises the v0 → v1 → v2 migration ladder from `copypaste-core::storage::schema`
-//! via the public `Database::open` / `Database::open_in_memory` API.
+//! Exercises the v0 → v1 → v2 → v3 migration ladder from
+//! `copypaste-core::storage::schema` via the public `Database::open` /
+//! `Database::open_in_memory` API.
 //!
 //! v2 (per scripts/migrate-alpha-to-beta.sh, commit 9e0fd9e):
 //!   * ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT
 //!   * CREATE INDEX idx_clipboard_content_hash ON clipboard_items(content_hash)
 //!     WHERE content_hash IS NOT NULL
 //!   * PRAGMA user_version = 2
+//!
+//! v3 (fix for merge.rs:39 CRDT tie-break BUG):
+//!   * ALTER TABLE clipboard_items ADD COLUMN origin_device_id TEXT NOT NULL
+//!     DEFAULT ''
+//!   * `items::backfill_origin_device_id` stamps the local device UUID onto
+//!     legacy rows whose default empty origin survived the migration.
+//!   * PRAGMA user_version = 3
 //!
 //! All migrations MUST run inside a single transaction so user_version advances
 //! atomically with the schema change (never partially applied).
@@ -20,7 +28,7 @@ use tempfile::tempdir;
 /// Kept in-sync manually because the module is private. Bumping
 /// SCHEMA_VERSION in src/ MUST be accompanied by bumping this and adding
 /// a new migration test below.
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 /// v1 schema (the exact contents of src/storage/schema_v1.sql, inlined because
 /// the file is `include_str!`'d into the crate and not accessible from
@@ -80,6 +88,23 @@ fn stage_v1_plaintext(path: &std::path::Path) {
     conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
     conn.execute_batch(V1_SCHEMA_SQL).unwrap();
     conn.execute_batch("PRAGMA user_version = 1;").unwrap();
+    drop(conn);
+}
+
+/// Helper: stage a plaintext SQLite file already at the v2 schema (v1 + the
+/// `content_hash` column / index, `user_version=2`). Used by the v2 → v3
+/// migration test below.
+fn stage_v2_plaintext(path: &std::path::Path) {
+    let conn = Connection::open(path).expect("create plaintext db");
+    conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+    conn.execute_batch(V1_SCHEMA_SQL).unwrap();
+    conn.execute_batch(
+        "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
+         CREATE INDEX IF NOT EXISTS idx_clipboard_content_hash\n\
+             ON clipboard_items(content_hash) WHERE content_hash IS NOT NULL;",
+    )
+    .unwrap();
+    conn.execute_batch("PRAGMA user_version = 2;").unwrap();
     drop(conn);
 }
 
@@ -406,4 +431,94 @@ fn pragma_user_version_advances_atomically() {
     let db2 = Database::open(&path, &key).unwrap();
     assert_eq!(user_version(&db2), CURRENT_SCHEMA_VERSION);
     assert!(column_exists(&db2, "clipboard_items", "content_hash"));
+}
+
+#[test]
+fn migrate_v2_to_v3_adds_origin_device_id_column_with_empty_default() {
+    // v3 is the fix for the merge.rs:39 CRDT tie-break BUG (comparing
+    // remote.origin_device_id against local.id was a type-mismatched
+    // comparison). The migration adds `origin_device_id TEXT NOT NULL
+    // DEFAULT ''` to clipboard_items so the new field has a deterministic
+    // value for every legacy row; daemon-side
+    // `items::backfill_origin_device_id` stamps the local UUID later.
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("v2.db");
+    stage_v2_plaintext(&path);
+
+    // Seed a row at v2 (before the new column exists) so we can verify the
+    // ALTER's DEFAULT '' lands on pre-v3 data.
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, content, content_nonce, \
+              is_sensitive, is_synced, lamport_ts, wall_time, content_hash) \
+             VALUES ('legacy-1', 'i-legacy-1', 'text/plain', X'AA', X'00', \
+                     0, 0, 1, 1000, 'abc')",
+            [],
+        )
+        .unwrap();
+    }
+
+    // Sanity: pre-migration row exists and v3 column does NOT yet exist.
+    {
+        let conn = Connection::open(&path).unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(clipboard_items)").unwrap();
+        let cols: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(
+            !cols.iter().any(|c| c == "origin_device_id"),
+            "v2 baseline must not have origin_device_id column"
+        );
+    }
+
+    let key = [0x08u8; 32];
+    let db = Database::open(&path, &key).expect("v2 -> v3 migration");
+
+    assert_eq!(user_version(&db), CURRENT_SCHEMA_VERSION);
+    assert!(
+        column_exists(&db, "clipboard_items", "origin_device_id"),
+        "v3 migration must add origin_device_id column"
+    );
+
+    // Existing row's origin must default to '' (per ALTER … DEFAULT '').
+    let got: String = db
+        .conn()
+        .query_row(
+            "SELECT origin_device_id FROM clipboard_items WHERE id = 'legacy-1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        got, "",
+        "v2 row must migrate up with origin_device_id = '' so backfill can \
+         later stamp the local device UUID"
+    );
+
+    // Backfill should then turn the empty string into the local device id,
+    // and re-running backfill must be idempotent (zero updates the second
+    // time because there are no rows left with origin_device_id = '').
+    use copypaste_core::storage::items::backfill_origin_device_id;
+    let updated = backfill_origin_device_id(&db, "local-uuid-xyz").unwrap();
+    assert_eq!(updated, 1, "backfill must touch the one legacy row");
+
+    let got2: String = db
+        .conn()
+        .query_row(
+            "SELECT origin_device_id FROM clipboard_items WHERE id = 'legacy-1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(got2, "local-uuid-xyz");
+
+    let updated2 = backfill_origin_device_id(&db, "local-uuid-xyz").unwrap();
+    assert_eq!(
+        updated2, 0,
+        "backfill must be idempotent — second call updates zero rows"
+    );
 }

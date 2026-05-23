@@ -426,6 +426,7 @@ mod tests {
             expires_at: None,
             app_bundle_id: None,
             content_hash: None,
+            origin_device_id: format!("dev-{id}"),
         }
     }
 
@@ -662,6 +663,7 @@ mod tests {
             expires_at: None,
             app_bundle_id: None,
             content_hash: None,
+            origin_device_id: "device-A".to_string(),
         };
 
         let mut engine_a = SyncEngine::new("device-A");

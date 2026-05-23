@@ -27,6 +27,11 @@ pub struct ClipboardItem {
     /// Used for deduplication: skip insert if an identical hash was stored
     /// within the last 60 seconds.
     pub content_hash: Option<String>,
+    /// UUID of the device that originated this item. Used as the deterministic
+    /// tie-break in the LWW merge (see `copypaste-sync::merge::resolve`).
+    /// Empty string for pre-v3 rows until backfilled via
+    /// [`backfill_origin_device_id`].
+    pub origin_device_id: String,
 }
 
 impl ClipboardItem {
@@ -49,6 +54,7 @@ impl ClipboardItem {
             expires_at: None,
             app_bundle_id: None,
             content_hash: None,
+            origin_device_id: String::new(),
         }
     }
 
@@ -77,6 +83,7 @@ impl ClipboardItem {
             expires_at: None,
             app_bundle_id: None,
             content_hash: None,
+            origin_device_id: String::new(),
         }
     }
 }
@@ -86,17 +93,31 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+          content_hash, origin_device_id)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
         params![
             item.id, item.item_id, item.content_type,
             item.content, item.content_nonce, item.blob_ref,
             item.is_sensitive as i64, item.is_synced as i64,
             item.lamport_ts, item.wall_time, item.expires_at,
-            item.app_bundle_id, item.content_hash,
+            item.app_bundle_id, item.content_hash, item.origin_device_id,
         ],
     )?;
     Ok(())
+}
+
+/// Stamp `origin_device_id` on every row that currently carries the empty
+/// default (pre-v3 rows, or rows inserted before the daemon knew its device
+/// id). Idempotent — rows with a non-empty origin are left alone so items
+/// received from peers preserve their original origin.
+///
+/// Returns the number of rows updated.
+pub fn backfill_origin_device_id(db: &Database, local_device_id: &str) -> Result<usize, ItemsError> {
+    let changed = db.conn().execute(
+        "UPDATE clipboard_items SET origin_device_id = ?1 WHERE origin_device_id = ''",
+        params![local_device_id],
+    )?;
+    Ok(changed)
 }
 
 /// Find the id of an item with the given content hash stored within the last
@@ -128,7 +149,7 @@ pub fn get_page(db: &Database, limit: usize, offset: usize) -> Result<Vec<Clipbo
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash
+                content_hash, origin_device_id
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt.query_map(params![limit as i64, offset as i64], row_to_item)?
@@ -227,7 +248,7 @@ pub fn search_items(db: &Database, query: &str, limit: usize) -> Result<Vec<Clip
     let sql = format!(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash
+                content_hash, origin_device_id
          FROM clipboard_items
          WHERE id IN ({})",
         placeholders,
@@ -259,6 +280,7 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
         expires_at: row.get(10)?,
         app_bundle_id: row.get(11)?,
         content_hash: row.get(12)?,
+        origin_device_id: row.get(13)?,
     })
 }
 
@@ -471,5 +493,38 @@ mod tests {
         // Verify expired returns 0 (pinned item not deleted)
         let removed = delete_expired(&db, 99999).unwrap();
         assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn backfill_origin_device_id_only_touches_empty_rows() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Row A: empty origin (pre-v3 default) → must be backfilled.
+        let mut a = make_item(1);
+        a.origin_device_id = String::new();
+        insert_item(&db, &a).unwrap();
+
+        // Row B: already-set origin (item received from peer "peer-xyz") →
+        // must remain untouched so peer-origin items keep their provenance.
+        let mut b = make_item(2);
+        b.origin_device_id = "peer-xyz".to_string();
+        insert_item(&db, &b).unwrap();
+
+        let changed = backfill_origin_device_id(&db, "local-uuid").unwrap();
+        assert_eq!(changed, 1, "only the empty-origin row must be updated");
+
+        let got_a: String = db.conn().query_row(
+            "SELECT origin_device_id FROM clipboard_items WHERE id = ?1",
+            params![a.id],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(got_a, "local-uuid");
+
+        let got_b: String = db.conn().query_row(
+            "SELECT origin_device_id FROM clipboard_items WHERE id = ?1",
+            params![b.id],
+            |r| r.get(0),
+        ).unwrap();
+        assert_eq!(got_b, "peer-xyz", "peer origin must not be overwritten");
     }
 }
