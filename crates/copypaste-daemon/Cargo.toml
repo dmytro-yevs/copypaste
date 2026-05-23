@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
+[lib]
+name = "copypaste_daemon"
+path = "src/lib.rs"
+
 [[bin]]
 name = "copypaste-daemon"
 path = "src/main.rs"

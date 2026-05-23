@@ -62,6 +62,10 @@ private external fun uniffiOpenDatabase(path: String): Long
 private external fun uniffiCloseDatabase(handle: Long)
 private external fun uniffiAddClipboardItem(dbPath: String, key: ByteArray, text: String): String
 private external fun uniffiGetHistoryCount(dbPath: String, key: ByteArray): Long
+// Pairing stub — real UDL function will be `start_pairing() -> string` returning
+// a QR-encodable token. Native binding not yet wired; Kotlin returns a fake
+// token so the PairActivity flow can be exercised on devices without the .so.
+private external fun uniffiStartPairing(): String
 
 // ---------------------------------------------------------------------------
 // Public API — matches UDL, wraps JNI calls with stub fallback.
@@ -188,5 +192,33 @@ fun getHistoryCount(dbPath: String, key: ByteArray): Long {
         uniffiGetHistoryCount(dbPath, key)
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "getHistoryCount failed")
+    }
+}
+
+/**
+ * Begin device pairing. When the native binding lands this will return a
+ * QR-encodable string containing the device id + ephemeral pairing token
+ * (see ADR for pairing flow). For now, if the .so is unavailable we emit a
+ * deterministic fake token so the [PairActivity] UI can be exercised end-to-end
+ * on developer devices without the Rust core present.
+ *
+ * Format (stub): `copypaste-pair://stub/<random-hex-16>`
+ */
+fun startPairing(): String {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "startPairing: stub — returning fake QR token")
+        val hex = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
+        return "copypaste-pair://stub/$hex"
+    }
+    return try {
+        uniffiStartPairing()
+    } catch (_: UnsatisfiedLinkError) {
+        Log.w(TAG, "startPairing: native symbol missing — falling back to stub")
+        val hex = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
+        "copypaste-pair://stub/$hex"
+    } catch (e: Exception) {
+        Log.w(TAG, "startPairing: native call threw — falling back to stub: ${e.message}")
+        val hex = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
+        "copypaste-pair://stub/$hex"
     }
 }

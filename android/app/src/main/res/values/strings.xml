@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CopyPaste</string>
+    <string name="home_tagline">End-to-end encrypted clipboard sync across your devices.</string>
+
+    <!-- Navigation -->
+    <string name="nav_history">History</string>
+    <string name="nav_pair">Pair Device</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Screen titles -->
+    <string name="title_history">Clipboard History</string>
+    <string name="title_pair">Pair Device</string>
+    <string name="title_settings">Settings</string>
+
+    <!-- History screen -->
+    <string name="empty_history">No clipboard items yet. Copy something to get started.</string>
+
+    <!-- Pair screen -->
+    <string name="pair_instructions">Tap the button below to start pairing. On the other device, scan the QR code or paste the token.</string>
+    <string name="btn_pair_start">Start Pairing</string>
+    <string name="btn_pair_regenerate">Regenerate Token</string>
+    <string name="pair_token_note">Token expires in 60 seconds. Keep this screen visible.</string>
+
+    <!-- Settings -->
+    <string name="setting_sync_enabled_title">Enable Clipboard Sync</string>
+    <string name="setting_sync_enabled_subtitle">Sync clipboard items with paired devices via the relay.</string>
+    <string name="setting_sensitive_warnings_title">Warn on Sensitive Data</string>
+    <string name="setting_sensitive_warnings_subtitle">Show a toast when card numbers or tokens are skipped.</string>
+    <string name="setting_relay_url_label">Relay URL</string>
+    <string name="setting_device_id_label">Device ID</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_back">Back</string>
+    <string name="cd_refresh">Refresh</string>
+    <string name="cd_delete">Delete item</string>
+</resources>

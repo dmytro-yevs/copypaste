@@ -1,22 +1,12 @@
 #![allow(dead_code)]
 
-mod clipboard;
-mod daemon;
-#[cfg(unix)]
-mod ipc;
-mod keychain;
-mod launchd;
-mod logging;
-mod p2p;
-mod peers;
-mod paths;
-mod platform;
-mod protocol;
-#[cfg(feature = "cloud-sync")]
-mod cloud;
+// Beta-bonus: modules now live in the library half of this crate
+// (`src/lib.rs`) so that integration tests under `tests/*.rs` can reach
+// them.  The binary re-uses them via the crate's own library name.
+use copypaste_daemon::{daemon, logging, paths};
 
 #[cfg(target_os = "macos")]
-mod tray;
+use copypaste_daemon::tray;
 
 fn main() -> anyhow::Result<()> {
     // Initialise structured logging (rotating file + stderr).

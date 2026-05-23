@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        AppCompat theme retained for the existing AndroidManifest entries that
+        reference Theme.MaterialComponents.DayNight.NoActionBar — the Compose
+        screens override their own surface colors via CopyPasteTheme.
+        We override the application theme here so Compose Activities
+        (ComponentActivity, not AppCompatActivity) still get a no-action-bar
+        base parent compatible with edge-to-edge layouts.
+    -->
+    <style name="Theme.CopyPaste" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

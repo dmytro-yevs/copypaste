@@ -2,22 +2,55 @@ package com.copypaste.android
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.copypaste.android.ui.theme.CopyPasteTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
- * Main activity — registers a foreground clipboard listener (API 29+).
+ * Main activity — launcher home + foreground clipboard listener (API 29+).
  *
- * Android 10+ only grants clipboard access to the foreground app; the
- * background [ClipboardService] handles API 26-28. Both paths share the same
- * pipeline: isSensitive -> encryptText -> store via [ClipboardRepository].
+ * The Android 10+ clipboard hook from the previous implementation is preserved;
+ * a Compose UI now sits on top with quick links to:
+ *   - History (last 50 clipboard items)
+ *   - Pair Device (calls `startPairing()` stub)
+ *   - Settings (sync toggle etc.)
+ *
+ * The background [ClipboardService] still handles API 26-28. Both paths share
+ * the same pipeline: isSensitive -> encryptText -> store via
+ * [ClipboardRepository].
  */
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
 
     private lateinit var clipboardManager: ClipboardManager
     private lateinit var repository: ClipboardRepository
@@ -35,7 +68,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
 
         settings = Settings(this)
         repository = ClipboardRepository(this)
@@ -43,6 +75,12 @@ class MainActivity : AppCompatActivity() {
 
         // Android 10+ (API 29+): clipboard only readable in foreground
         clipboardManager.addPrimaryClipChangedListener(clipListener)
+
+        setContent {
+            CopyPasteTheme {
+                MainScreen()
+            }
+        }
     }
 
     override fun onDestroy() {
@@ -79,5 +117,62 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MainScreen() {
+    val ctx = LocalContext.current
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.app_name)) },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                )
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.Top)
+        ) {
+            Text(
+                text = stringResource(R.string.home_tagline),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            NavButton(
+                label = stringResource(R.string.nav_history),
+                icon = Icons.Filled.History
+            ) { ctx.startActivity(Intent(ctx, HistoryActivity::class.java)) }
+
+            NavButton(
+                label = stringResource(R.string.nav_pair),
+                icon = Icons.Filled.QrCode
+            ) { ctx.startActivity(Intent(ctx, PairActivity::class.java)) }
+
+            NavButton(
+                label = stringResource(R.string.nav_settings),
+                icon = Icons.Filled.Settings
+            ) { ctx.startActivity(Intent(ctx, SettingsActivity::class.java)) }
+        }
+    }
+}
+
+@Composable
+private fun NavButton(label: String, icon: ImageVector, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Icon(icon, contentDescription = null)
+        Text(text = label, modifier = Modifier.padding(start = 8.dp))
     }
 }
