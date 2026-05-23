@@ -498,15 +498,34 @@ fn prune_history(db: &Database, config: &AppConfig) {
     let total = copypaste_core::count_items(db).unwrap_or(0) as usize;
     if total > config.history_limit {
         let excess = total - config.history_limit;
-        if let Ok(oldest) = copypaste_core::get_page(db, excess, config.history_limit) {
-            for old in &oldest {
-                let _ = copypaste_core::delete_item(db, &old.id);
-            }
-            tracing::debug!(
-                "pruned {} items over history_limit={}",
+        // Direct SQL DELETE ordered by `wall_time ASC` — bulk-removes the
+        // oldest rows in a single statement (audit HIGH #4). The previous
+        // implementation went through `get_page` + per-row `delete_item`,
+        // which was both N+1 and risked pruning the wrong page if the
+        // pagination math drifted.
+        //
+        // TODO(v0.3): the schema does not yet carry a dedicated `pinned`
+        // column — `pin_item` currently only clears `expires_at`, which is
+        // indistinguishable from a never-expiring default row. Once a real
+        // `pinned BOOLEAN` column lands, extend the WHERE clause with
+        // `AND (pinned = 0 OR pinned IS NULL)` so explicitly pinned items
+        // survive the prune.
+        let res = db.conn().execute(
+            "DELETE FROM clipboard_items WHERE id IN (
+                SELECT id FROM clipboard_items
+                ORDER BY wall_time ASC
+                LIMIT ?1
+            )",
+            rusqlite::params![excess as i64],
+        );
+        match res {
+            Ok(n) => tracing::debug!(
+                "pruned {} of {} requested items over history_limit={}",
+                n,
                 excess,
                 config.history_limit
-            );
+            ),
+            Err(e) => tracing::warn!("prune_history failed: {e}"),
         }
     }
 }
