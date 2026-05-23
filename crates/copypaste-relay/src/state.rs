@@ -61,6 +61,12 @@ pub struct SyncItem {
     pub content_b64: String,
     /// Sender wall-clock time (Unix epoch milliseconds).
     pub wall_time: u64,
+    /// Server-side wall-clock time at insert (Unix epoch seconds). Used for
+    /// TTL eviction independent of (untrusted) sender `wall_time`. Read by
+    /// the background evictor (see `store.rs`) — `#[allow]` for crate
+    /// configurations that don't see the binary entry point.
+    #[allow(dead_code)]
+    pub inserted_at_unix: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -287,8 +293,19 @@ impl RelayStore {
         let id = self.next_sync_id;
         self.next_sync_id += 1;
 
+        let inserted_at_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
         let inbox = self.sync_items.entry(device_id.to_string()).or_default();
-        inbox.push(SyncItem { id, content_type, content_b64, wall_time });
+        inbox.push(SyncItem {
+            id,
+            content_type,
+            content_b64,
+            wall_time,
+            inserted_at_unix,
+        });
 
         if inbox.len() > MAX_PUSH_ITEMS_PER_DEVICE {
             let overflow = inbox.len() - MAX_PUSH_ITEMS_PER_DEVICE;
@@ -382,6 +399,35 @@ impl RelayStore {
         let mut records: Vec<&DeviceRecord> = self.devices.values().collect();
         records.sort_by(|a, b| b.registered_at.cmp(&a.registered_at));
         records.into_iter().take(100).map(|r| r.device_id.clone()).collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // TTL eviction (see ADR-009)
+    // -----------------------------------------------------------------------
+
+    /// Drop sync items whose `inserted_at_unix + ttl_secs <= now_unix`.
+    ///
+    /// `now_unix` is supplied by the caller so unit tests can advance a
+    /// virtual clock (`tokio::time::advance`) without touching the real
+    /// system clock.
+    ///
+    /// Returns the number of items evicted (across all device inboxes).
+    /// Empty inboxes are NOT removed — devices keep their registration
+    /// regardless of inbox activity (see [`cleanup_inactive_devices`] for
+    /// device-record pruning).
+    #[allow(dead_code)]
+    pub fn prune_expired(&mut self, now_unix: u64, ttl_secs: u64) -> usize {
+        if ttl_secs == 0 {
+            return 0;
+        }
+        let cutoff = now_unix.saturating_sub(ttl_secs);
+        let mut evicted = 0usize;
+        for inbox in self.sync_items.values_mut() {
+            let before = inbox.len();
+            inbox.retain(|item| item.inserted_at_unix > cutoff);
+            evicted += before - inbox.len();
+        }
+        evicted
     }
 
     // -----------------------------------------------------------------------
