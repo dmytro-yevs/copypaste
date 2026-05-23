@@ -1277,6 +1277,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "uniffi",
+ "uuid",
 ]
 
 [[package]]
