@@ -87,8 +87,8 @@ fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
 /// formatters across daemon/UI/CLI. Within the daemon, only this one and
 /// [`crate::keychain::own_fingerprint`] exist, and their semantics differ:
 ///
-/// - [`keychain::own_fingerprint`] SHA-256-hashes its input, then formats the
-///   first 16 bytes (15 colons) — the canonical *device* fingerprint.
+/// - [`crate::keychain::own_fingerprint`] SHA-256-hashes its input, then formats
+///   the first 16 bytes (15 colons) — the canonical *device* fingerprint.
 /// - This helper formats whatever raw bytes it is handed (any length) — used
 ///   for the legacy `get_own_fingerprint` stub which already supplies a
 ///   pre-derived 32-byte payload (31 colons).

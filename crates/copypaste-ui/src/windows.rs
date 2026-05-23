@@ -483,7 +483,7 @@ impl PairWindowHandle {
     /// Register a callback invoked when "Pair with Password" is clicked.
     /// Receives `(peer_fingerprint, password)`. The closure is responsible
     /// for calling `IpcClient::pair_with_password` and surfacing the
-    /// daemon's success/error status back into the UI via [`set_status`].
+    /// daemon's success/error status back into the UI via [`Self::set_status`].
     ///
     /// Beta W3.2 — wires the new Slint `pair-with-password(string, string)`
     /// callback added to `PairWindow.slint`.
