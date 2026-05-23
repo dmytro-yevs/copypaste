@@ -22,6 +22,17 @@ use copypaste_ui::{
     AppSettings, PairedDevice, PairWindowHandle, SettingsWindowHandle,
 };
 
+// Type aliases keep the clippy `type_complexity` lint quiet for these
+// signature-pinning bindings while preserving the exact callback shapes.
+type PairCbString    = fn(&PairWindowHandle, Box<dyn Fn(String)>);
+type PairCbString2   = fn(&PairWindowHandle, Box<dyn Fn(String, String)>);
+type PairCbUnit      = fn(&PairWindowHandle, Box<dyn Fn()>);
+type SettingsCbApp   = fn(&SettingsWindowHandle, Box<dyn Fn(AppSettings)>);
+type SettingsCbUnit  = fn(&SettingsWindowHandle, Box<dyn Fn()>);
+type SettingsCbStr2  = fn(&SettingsWindowHandle, Box<dyn Fn(String, String)>);
+type TrayCbUnit      = fn(&TrayMenuHandle, Box<dyn Fn()>);
+type TrayCbStrRef    = fn(&TrayMenuHandle, Box<dyn Fn(&str)>);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. AppSettings (drives the SettingsWindow) — field-shape drift guard.
 //    HistoryWindow itself lives in the binary (`main.rs`) and is not
@@ -73,7 +84,7 @@ fn paired_device_struct_fields_stable_drift_guard() {
     // compile error, not a silent semantic shift.
     let d = PairedDevice {
         name:        String::from("Phone"),
-        fingerprint: String::from("a".repeat(64)),
+        fingerprint: "a".repeat(64),
     };
     let PairedDevice { name, fingerprint } = d;
 
@@ -134,7 +145,7 @@ fn pair_window_handle_on_pair_with_password_signature_stable() {
     // file. (Plain `fn(_, _)` parameter inference is ambiguous between
     // `&F` and `Box<F>` impls — we pick `Box<dyn Fn(..)>` explicitly so
     // the bound is unambiguous and matches the trait signature byte-for-byte.)
-    let _method_ptr: fn(&PairWindowHandle, Box<dyn Fn(String, String)>) =
+    let _method_ptr: PairCbString2 =
         |h, cb| h.on_pair_with_password(cb);
     let _ = _method_ptr; // silence unused warning under some toolchains
 }
@@ -143,12 +154,12 @@ fn pair_window_handle_on_pair_with_password_signature_stable() {
 fn pair_window_handle_callback_method_set_stable() {
     // Every `on_*` registration on PairWindowHandle is a contract with the
     // host application. Pin them by name+signature via function pointers.
-    let _on_pair: fn(&PairWindowHandle, Box<dyn Fn(String)>) = |h, cb| h.on_pair(cb);
-    let _on_pair_pw: fn(&PairWindowHandle, Box<dyn Fn(String, String)>) =
+    let _on_pair: PairCbString = |h, cb| h.on_pair(cb);
+    let _on_pair_pw: PairCbString2 =
         |h, cb| h.on_pair_with_password(cb);
-    let _on_remove: fn(&PairWindowHandle, Box<dyn Fn(String)>) =
+    let _on_remove: PairCbString =
         |h, cb| h.on_remove_peer(cb);
-    let _on_close: fn(&PairWindowHandle, Box<dyn Fn()>) = |h, cb| h.on_close(cb);
+    let _on_close: PairCbUnit = |h, cb| h.on_close(cb);
 
     // If any of the above lines fails to type-check, a public callback
     // signature has drifted — update the host wiring deliberately.
@@ -157,15 +168,15 @@ fn pair_window_handle_callback_method_set_stable() {
 #[test]
 fn settings_window_handle_callback_method_set_stable() {
     // Mirror guard for the settings window — same rationale.
-    let _on_save: fn(&SettingsWindowHandle, Box<dyn Fn(AppSettings)>) =
+    let _on_save: SettingsCbApp =
         |h, cb| h.on_save(cb);
-    let _on_clear: fn(&SettingsWindowHandle, Box<dyn Fn()>) =
+    let _on_clear: SettingsCbUnit =
         |h, cb| h.on_clear_history(cb);
-    let _on_connect: fn(&SettingsWindowHandle, Box<dyn Fn(String, String)>) =
+    let _on_connect: SettingsCbStr2 =
         |h, cb| h.on_connect_supabase(cb);
-    let _on_disconnect: fn(&SettingsWindowHandle, Box<dyn Fn()>) =
+    let _on_disconnect: SettingsCbUnit =
         |h, cb| h.on_disconnect_supabase(cb);
-    let _on_close: fn(&SettingsWindowHandle, Box<dyn Fn()>) =
+    let _on_close: SettingsCbUnit =
         |h, cb| h.on_close(cb);
 }
 
@@ -248,18 +259,18 @@ fn tray_menu_top_level_layout_position_stable() {
 fn tray_menu_handle_callback_method_set_stable() {
     // Public callback registration surface — pin via function pointers so
     // a rename or signature change breaks the test, not production.
-    let _on_show: fn(&TrayMenuHandle, Box<dyn Fn()>) =
+    let _on_show: TrayCbUnit =
         |h, cb| h.on_show_history(cb);
-    let _on_pair: fn(&TrayMenuHandle, Box<dyn Fn()>) =
+    let _on_pair: TrayCbUnit =
         |h, cb| h.on_pair_device(cb);
-    let _on_settings: fn(&TrayMenuHandle, Box<dyn Fn()>) =
+    let _on_settings: TrayCbUnit =
         |h, cb| h.on_open_settings(cb);
-    let _on_quit: fn(&TrayMenuHandle, Box<dyn Fn()>) =
+    let _on_quit: TrayCbUnit =
         |h, cb| h.on_quit(cb);
 
     // Recent click is the *one* callback that takes the item id — pin it
     // separately so the &str-vs-String choice is locked in.
-    let _on_recent: fn(&TrayMenuHandle, Box<dyn Fn(&str)>) =
+    let _on_recent: TrayCbStrRef =
         |h, cb| h.on_recent_click(cb);
 }
 
