@@ -89,6 +89,26 @@ fn main() -> Result<()> {
     let window = HistoryWindow::new()?;
     let state = Arc::new(Mutex::new(AppState::new()));
 
+    // v0.3 T3: load the redaction preference from disk and push it into the
+    // window before the first render so sensitive rows are masked on the
+    // initial paint (no flash of un-redacted previews).
+    {
+        let prefs = copypaste_ui::sensitive_helpers::load();
+        window.set_hide_sensitive(prefs.hide_sensitive);
+    }
+
+    // v0.3 T3: persist the toggle whenever the user flips the in-window
+    // CheckBox. Save runs on the UI thread — `serde_json::to_vec_pretty`
+    // + a small write is microseconds, no need for a background thread.
+    {
+        window.on_hide_sensitive_changed(move |value: bool| {
+            let prefs = copypaste_ui::sensitive_helpers::UiPrefs {
+                hide_sensitive: value,
+            };
+            copypaste_ui::sensitive_helpers::save(&prefs);
+        });
+    }
+
     // v0.3: install the macOS menu-bar tray BEFORE Slint takes over the main
     // run loop. The tray host registers a slint::Timer that polls menu events
     // on the UI thread, so we never spin a competing native run loop.
@@ -221,6 +241,10 @@ fn main() -> Result<()> {
             if let Some(win) = window_weak.upgrade() {
                 let model = slint::VecModel::from(slint_items);
                 win.set_items(slint::ModelRc::new(model));
+                // v0.3 T3: feed the visible-count badge so the search
+                // affordance shows "N / total" without waiting for the
+                // status line to update.
+                win.set_visible_count(matched as i32);
                 let status = if q.trim().is_empty() {
                     format!("Showing {total} items")
                 } else {
@@ -447,6 +471,8 @@ fn apply_history_result(
                     .map(entry_to_slint_item)
                     .collect();
 
+            // v0.3 T3: feed the visible-count badge.
+            win.set_visible_count(slint_items.len() as i32);
             let model = slint::VecModel::from(slint_items);
             win.set_items(slint::ModelRc::new(model));
         }

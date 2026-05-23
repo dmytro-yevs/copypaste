@@ -15,6 +15,7 @@
 
 pub mod autostart;
 pub mod fingerprint;
+pub mod sensitive_helpers;
 pub mod settings;
 pub mod tray_menu;
 // macOS-only live tray host (NSStatusItem). Lives in the UI process because

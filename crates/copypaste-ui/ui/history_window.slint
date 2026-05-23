@@ -3,7 +3,7 @@
 // User clicks an item to paste it back to the system clipboard.
 // Settings button opens the app configuration panel.
 
-import { ScrollView, Button, HorizontalBox, VerticalBox, ListView, LineEdit } from "std-widgets.slint";
+import { ScrollView, Button, HorizontalBox, VerticalBox, ListView, LineEdit, CheckBox } from "std-widgets.slint";
 
 struct HistoryItem {
     id: string,
@@ -40,6 +40,16 @@ export component HistoryWindow inherits Window {
     // single IPC call backs many keystrokes — no IPC concurrency issues.
     in-out property <string> search-query: "";
 
+    // v0.3 T3: live count of currently-visible (filtered) rows. Updated by
+    // Rust whenever the model changes; rendered in the search affordance
+    // badge as "N / total".
+    in property <int> visible-count: 0;
+
+    // v0.3 T3: master switch — when true, rows flagged `is-sensitive`
+    // render `••••••••` until the row is hovered. Two-way bound to the
+    // CheckBox below so user can flip without leaving the history window.
+    in-out property <bool> hide-sensitive: true;
+
     // Callbacks fired to Rust
     callback item-clicked(string);   // id of clicked item
     callback refresh-requested();
@@ -50,6 +60,16 @@ export component HistoryWindow inherits Window {
     // in the search field. The Rust handler re-filters the cached page
     // (see `AppState::last_page_items`) and swaps the visible model.
     callback search-changed(string);
+    // v0.3 T3: fired when the user flips the in-window "Hide sensitive"
+    // CheckBox. Rust persists the new value to ui_prefs.json so the
+    // choice survives a relaunch.
+    callback hide-sensitive-changed(bool);
+
+    // Watch the in-out property and bubble to Rust. Using `changed` here
+    // (Slint 1.6+) instead of CheckBox.toggled means we also catch
+    // programmatic changes (settings window writes back through this
+    // property).
+    changed hide-sensitive => { hide-sensitive-changed(self.hide-sensitive); }
 
     // beta-bonus (slint-search): 200 ms debounce timer. Restarts on every
     // keystroke (`edited` handler in `search-input` below) and only fires
@@ -69,6 +89,21 @@ export component HistoryWindow inherits Window {
     // lack `to-lower-case` / `contains` expressions. The Rust handler
     // swaps the `items` model when `search-changed` fires, so the
     // ListView below always renders an already-filtered slice.
+
+    // v0.3 T3: root FocusScope catches ⌘F (Cmd-F on macOS, Ctrl-F elsewhere)
+    // and forwards focus to the search input. `focus()` on init ensures the
+    // scope owns keyboard focus by default; LineEdit grabs focus on click
+    // but releases it back when the user tabs/clicks elsewhere.
+    key-scope := FocusScope {
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if ((event.modifiers.meta || event.modifiers.control)
+                && (event.text == "f" || event.text == "F")) {
+                search-input.focus();
+                return accept;
+            }
+            return reject;
+        }
 
     VerticalBox {
         padding: 8px;
@@ -101,16 +136,49 @@ export component HistoryWindow inherits Window {
             }
         }
 
-        // beta-bonus (slint-search): search input. `edited` fires on every
-        // keystroke and (re)starts the 200 ms debounce timer; the Rust
-        // handler then re-filters `items` once the user pauses.
-        search-input := LineEdit {
-            placeholder-text: "Search history...";
-            text <=> root.search-query;
-            height: 28px;
-            edited(text) => {
-                debounce-timer.running = false;
-                debounce-timer.running = true;
+        // beta-bonus (slint-search) + v0.3 T3 (⌘F focus + count badge):
+        // search input on the left, result-count badge on the right. The
+        // `edited` handler restarts the 200 ms debounce timer; the badge
+        // surfaces the live filtered count so the user sees feedback even
+        // before the status line below updates.
+        HorizontalBox {
+            spacing: 6px;
+            height: 32px;
+            padding: 0;
+
+            search-input := LineEdit {
+                placeholder-text: "Search history... (⌘F)";
+                text <=> root.search-query;
+                height: 28px;
+                horizontal-stretch: 1;
+                edited(text) => {
+                    debounce-timer.running = false;
+                    debounce-timer.running = true;
+                }
+            }
+
+            Rectangle {
+                width: 88px;
+                height: 28px;
+                border-radius: 4px;
+                background: #313244;
+                visible: root.total-count > 0;
+
+                Text {
+                    text: root.search-query == ""
+                        ? @tr("{n} item" | "{n} items" % root.total-count)
+                        : root.visible-count + " / " + root.total-count;
+                    color: #cdd6f4;
+                    font-size: 11px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            CheckBox {
+                text: @tr("Hide sensitive");
+                checked <=> root.hide-sensitive;
+                height: 28px;
             }
         }
 
@@ -210,8 +278,15 @@ export component HistoryWindow inherits Window {
                             horizontal-stretch: 1;
                             padding: 0;
 
+                            // v0.3 T3: redaction is conditional on the
+                            // master `hide-sensitive` toggle. Hovering a
+                            // redacted row reveals the real preview so the
+                            // user can still scan/select without flipping
+                            // the global switch.
                             Text {
-                                text: item.is-sensitive ? "••••••••" : item.preview;
+                                text: (item.is-sensitive && root.hide-sensitive && !touch.has-hover)
+                                    ? "••••••••"
+                                    : item.preview;
                                 color: item.is-sensitive ? #f38ba8 : #cdd6f4;
                                 font-size: 13px;
                                 overflow: elide;
@@ -277,4 +352,5 @@ export component HistoryWindow inherits Window {
             }
         }
     }
+    } // key-scope FocusScope
 }

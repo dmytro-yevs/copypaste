@@ -38,6 +38,11 @@ export component SettingsWindow inherits Window {
 
     in-out property <bool>  launch-at-login:  false;
     in-out property <bool>  private-mode:     false;
+    // v0.3 T3: redact sensitive item previews in the history list and tray.
+    // Stored as a UI-side preference (see `sensitive_helpers::load/save`)
+    // because the daemon flags items via `is_sensitive` but does not own
+    // the user's display preference.
+    in-out property <bool>  hide-sensitive:   true;
     in-out property <int>   history-size:     100;   // 0 = unlimited, 50, 100, 500
 
     in-out property <string> supabase-url:    "";
@@ -115,6 +120,16 @@ export component SettingsWindow inherits Window {
                         spacing: 8px;
                         FieldLabel { text: @tr("Private Mode"); }
                         CheckBox { checked <=> root.private-mode; }
+                    }
+
+                    // v0.3 T3: hide content of items flagged sensitive in
+                    // the history list and tray. Reveals on hover so the
+                    // user can still scan without flipping this off.
+                    HorizontalLayout {
+                        alignment: space-between;
+                        spacing: 8px;
+                        FieldLabel { text: @tr("Hide Sensitive Items"); }
+                        CheckBox { checked <=> root.hide-sensitive; }
                     }
 
                     // History size
