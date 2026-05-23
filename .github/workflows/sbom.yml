@@ -53,7 +53,7 @@ jobs:
 
       - name: Attach SBOM to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: reports/sbom-${{ env.REF_NAME }}.tar.gz
           fail_on_unmatched_files: true

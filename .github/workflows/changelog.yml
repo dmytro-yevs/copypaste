@@ -60,7 +60,7 @@ jobs:
           cat RELEASE_NOTES.md
 
       - name: Update GitHub Release notes
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.prev.outputs.current }}
           body_path: RELEASE_NOTES.md
