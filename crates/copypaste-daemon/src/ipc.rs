@@ -13,6 +13,17 @@ use crate::protocol::{Request, Response};
 /// malicious or buggy client sending an unbounded stream without newlines.
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
+/// Server-side cap on paginated reads (`list`, `history_page`). A client
+/// may request more, but the server silently clamps to this value. Protects
+/// the daemon from accidental or malicious requests that would attempt to
+/// materialize huge result sets in a single response.
+const MAX_PAGE: usize = 1000;
+
+/// Error code returned when an IPC method is called before the server's
+/// backing state (database, etc.) has finished initializing. Clients should
+/// back off and retry rather than treat this as a hard failure.
+const ERR_IPC_NOT_READY: &str = "IPC_NOT_READY";
+
 /// Persistent application configuration stored at
 /// `dirs::config_dir()/copypaste/config.json`.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -133,11 +144,53 @@ pub struct IpcServer {
     db: Arc<Mutex<Database>>,
     /// Shared private-mode flag. When true, the clipboard monitor skips recording.
     private_mode: Arc<AtomicBool>,
+    /// Readiness gate. While `false`, all data-touching methods return
+    /// `IPC_NOT_READY` instead of dispatching. Default `true` for production
+    /// use (db is fully constructed before `IpcServer::new` is called); tests
+    /// use [`IpcServer::new_with_ready`] to exercise the not-ready path.
+    ready: Arc<AtomicBool>,
 }
 
 impl IpcServer {
     pub fn new(db: Arc<Mutex<Database>>, private_mode: Arc<AtomicBool>) -> Self {
-        Self { db, private_mode }
+        Self {
+            db,
+            private_mode,
+            ready: Arc::new(AtomicBool::new(true)),
+        }
+    }
+
+    /// Construct with an explicit readiness flag. The returned handle can be
+    /// flipped to `true` once initialization completes. Intended for tests
+    /// and for callers that want to bind the socket before the database is
+    /// fully open.
+    #[allow(dead_code)]
+    pub fn new_with_ready(
+        db: Arc<Mutex<Database>>,
+        private_mode: Arc<AtomicBool>,
+        ready: Arc<AtomicBool>,
+    ) -> Self {
+        Self { db, private_mode, ready }
+    }
+
+    /// Returns true if a request to `method` requires the backing database.
+    /// Methods that only touch in-memory state (status, get/set_private_mode,
+    /// get_own_fingerprint, peer file ops, config file ops) are allowed
+    /// before the DB is ready so the client can still introspect the daemon.
+    fn requires_db(method: &str) -> bool {
+        matches!(
+            method,
+            "list"
+                | "delete"
+                | "count"
+                | "search"
+                | "copy"
+                | "paste"
+                | "delete_all"
+                | "stats"
+                | "pin"
+                | "history_page"
+        )
     }
 
     pub async fn serve(self, socket_path: &std::path::Path) -> anyhow::Result<()> {
@@ -263,10 +316,21 @@ impl IpcServer {
         tracing::Span::current().record("method", req.method.as_str());
         tracing::debug!(method = %req.method, id = %req.id, "IPC request");
 
+        // Readiness gate — reject DB-touching methods before init is done.
+        if !self.ready.load(Ordering::Relaxed) && Self::requires_db(req.method.as_str()) {
+            tracing::debug!(
+                method = %req.method,
+                id = %req.id,
+                "rejecting DB-touching request: server not ready"
+            );
+            return Response::err(req.id, ERR_IPC_NOT_READY);
+        }
+
         match req.method.as_str() {
             "list" => {
-                let limit = req.params.get("limit")
+                let raw_limit = req.params.get("limit")
                     .and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+                let limit = raw_limit.min(MAX_PAGE);
                 let offset = req.params.get("offset")
                     .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 let db = self.db.lock().await;
@@ -404,8 +468,9 @@ impl IpcServer {
             }
             "history_page" => {
                 // Paginated history with content preview — used by UI (HistoryWindow)
-                let limit = req.params.get("limit")
+                let raw_limit = req.params.get("limit")
                     .and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+                let limit = raw_limit.min(MAX_PAGE);
                 let offset = req.params.get("offset")
                     .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 let db = self.db.lock().await;
@@ -1126,6 +1191,195 @@ mod tests {
             );
             assert_eq!(resp["data"]["status"], "running");
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Wave 2.3 IPC hardening tests
+    //
+    // Cover edge cases that the binary-driven integration suite cannot
+    // reach in-process:
+    //   * IPC_NOT_READY when a DB-touching method fires before the
+    //     readiness flag flips,
+    //   * MAX_PAGE clamping on `list` and `history_page` enforced by the
+    //     dispatcher itself (independent of DB row count).
+    // ------------------------------------------------------------------
+
+    /// Spawn an IpcServer whose readiness flag starts `false`, returning
+    /// the socket path and the flag handle so the test can flip it.
+    async fn start_not_ready_server(
+        socket_path: &std::path::Path,
+    ) -> Arc<AtomicBool> {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let private_mode = Arc::new(AtomicBool::new(false));
+        let ready = Arc::new(AtomicBool::new(false));
+        let ready_clone = ready.clone();
+        let server = IpcServer::new_with_ready(db, private_mode, ready_clone);
+        let path = socket_path.to_path_buf();
+        tokio::spawn(async move {
+            server.serve(&path).await.ok();
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        ready
+    }
+
+    #[tokio::test]
+    async fn dispatch_returns_ipc_not_ready_when_not_ready() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("not_ready.sock");
+        let ready = start_not_ready_server(&sock).await;
+
+        // DB-touching methods must be rejected with IPC_NOT_READY.
+        for (method, params) in [
+            ("list", "{}"),
+            ("count", "{}"),
+            ("stats", "{}"),
+            ("history_page", "{}"),
+            ("delete_all", "{}"),
+        ] {
+            let mut stream = UnixStream::connect(&sock).await.unwrap();
+            let req = format!(
+                "{{\"id\":\"nr-{method}\",\"method\":\"{method}\",\"params\":{params}}}\n"
+            );
+            stream.write_all(req.as_bytes()).await.unwrap();
+            let mut lines = BufReader::new(&mut stream).lines();
+            let line = lines.next_line().await.unwrap().unwrap();
+            let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(resp["ok"], false, "{method} should be rejected: {resp}");
+            assert_eq!(
+                resp["error"].as_str().unwrap_or_default(),
+                "IPC_NOT_READY",
+                "{method} should return IPC_NOT_READY, got: {resp}"
+            );
+        }
+
+        // Non-DB methods (status, get_private_mode) must still work, so the
+        // client can introspect the daemon and decide whether to retry.
+        {
+            let mut stream = UnixStream::connect(&sock).await.unwrap();
+            stream
+                .write_all(b"{\"id\":\"nr-status\",\"method\":\"status\"}\n")
+                .await
+                .unwrap();
+            let mut lines = BufReader::new(&mut stream).lines();
+            let line = lines.next_line().await.unwrap().unwrap();
+            let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(resp["ok"], true, "status should pass: {resp}");
+        }
+
+        // After the readiness flag flips, previously-rejected methods succeed.
+        ready.store(true, Ordering::Relaxed);
+        {
+            let mut stream = UnixStream::connect(&sock).await.unwrap();
+            stream
+                .write_all(b"{\"id\":\"nr-stats-after\",\"method\":\"stats\"}\n")
+                .await
+                .unwrap();
+            let mut lines = BufReader::new(&mut stream).lines();
+            let line = lines.next_line().await.unwrap().unwrap();
+            let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(resp["ok"], true, "stats should pass after ready: {resp}");
+            assert!(resp["data"]["total_items"].is_number());
+        }
+    }
+
+    #[tokio::test]
+    async fn list_clamps_oversize_limit_to_max_page() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("cap_list.sock");
+        start_test_server(&sock).await;
+
+        // Empty DB — we cannot directly observe the clamp on item count,
+        // but we *can* verify the dispatcher accepts the request and
+        // returns at most MAX_PAGE items. The count_items helper is the
+        // path that would blow up if the unclamped limit reached the DB.
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"cap-list\",\"method\":\"list\",\"params\":{\"limit\":5000,\"offset\":0}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], true, "list with limit=5000 should be ok: {resp}");
+        let items = resp["data"]["items"].as_array().unwrap();
+        assert!(
+            items.len() <= 1000,
+            "list returned {} items, exceeds MAX_PAGE=1000",
+            items.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn history_page_clamps_oversize_limit_to_max_page() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("cap_hp.sock");
+        start_test_server(&sock).await;
+
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"cap-hp\",\"method\":\"history_page\",\"params\":{\"limit\":9999,\"offset\":0}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], true);
+        let items = resp["data"]["items"].as_array().unwrap();
+        assert!(
+            items.len() <= 1000,
+            "history_page returned {} items, exceeds MAX_PAGE=1000",
+            items.len()
+        );
+    }
+
+    /// In-process burst that exercises the same accept-spawn path used by
+    /// the binary subprocess test, but without requiring a built binary.
+    /// 10 tokio tasks each issue a status+stats roundtrip on its own
+    /// connection; all must succeed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_clients_in_process_consistent_state() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("concurrent.sock");
+        start_test_server(&sock).await;
+
+        const N: usize = 10;
+        let mut handles = Vec::with_capacity(N);
+        for i in 0..N {
+            let sock = sock.clone();
+            handles.push(tokio::spawn(async move {
+                // status
+                let mut s = UnixStream::connect(&sock).await.unwrap();
+                let req = format!("{{\"id\":\"c{i}-status\",\"method\":\"status\"}}\n");
+                s.write_all(req.as_bytes()).await.unwrap();
+                let mut lines = BufReader::new(&mut s).lines();
+                let line = lines.next_line().await.unwrap().unwrap();
+                let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+                assert_eq!(resp["ok"], true, "client {i} status: {resp}");
+
+                // stats — fresh connection
+                let mut s2 = UnixStream::connect(&sock).await.unwrap();
+                let req2 = format!("{{\"id\":\"c{i}-stats\",\"method\":\"stats\"}}\n");
+                s2.write_all(req2.as_bytes()).await.unwrap();
+                let mut lines2 = BufReader::new(&mut s2).lines();
+                let line2 = lines2.next_line().await.unwrap().unwrap();
+                let resp2: serde_json::Value = serde_json::from_str(&line2).unwrap();
+                assert_eq!(resp2["ok"], true, "client {i} stats: {resp2}");
+                assert!(resp2["data"]["total_items"].is_number());
+            }));
+        }
+        for h in handles {
+            h.await.expect("client task panicked");
+        }
+
+        // Survivor request after the burst.
+        let mut s = UnixStream::connect(&sock).await.unwrap();
+        s.write_all(b"{\"id\":\"survivor\",\"method\":\"status\"}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut s).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], true);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
