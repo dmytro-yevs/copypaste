@@ -45,7 +45,7 @@ mdns-sd = "0.19"
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher", "backup"] }
 # Config
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "1.1"
 # Patterns
 regex = "1.10"
 # Unicode normalisation (NFKC for sensitive-detector bypass guards)
