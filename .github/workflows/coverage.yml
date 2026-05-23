@@ -21,8 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust 1.85 (with llvm-tools-preview)
-        uses: dtolnay/rust-toolchain@1.85.0
+      # Toolchain bumped 1.85 -> 1.86 (2026-05-23): transitive deps
+      # icu_collections / icu_locale_core / icu_normalizer @2.2.0 (pulled in
+      # via idna 1.1.0 -> url 2.5.8 -> reqwest / sentry / slint-compiler) now
+      # require rustc 1.86. cargo-llvm-cov uses cargo test, which honours
+      # package.rust-version and fails on 1.85 with "is not supported by".
+      - name: Install Rust 1.86 (with llvm-tools-preview)
+        uses: dtolnay/rust-toolchain@1.86.0
         with:
           components: llvm-tools-preview
 

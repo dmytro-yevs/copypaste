@@ -119,7 +119,7 @@ main() {
 
     if [[ ${DRY_RUN} -eq 1 ]]; then
         log "[dry-run] mkdir -p ${OUTPUT_DIR}"
-        log "[dry-run] cargo cyclonedx --format ${FORMAT} --all --output-pattern bom"
+        log "[dry-run] cargo cyclonedx --format ${FORMAT} --all --override-filename bom"
         log "[dry-run] would move per-crate bom.${FORMAT} into ${OUTPUT_DIR}/<crate>/"
         log "[dry-run] would emit aggregated workspace.bom.${FORMAT}"
         return 0
@@ -129,7 +129,9 @@ main() {
 
     # Generate per-crate SBOMs; cargo-cyclonedx writes bom.<ext> into each
     # crate's manifest directory.
-    cargo cyclonedx --format "${FORMAT}" --all --output-pattern bom
+    # Note: cargo-cyclonedx renamed --output-pattern to --override-filename
+    # in v0.5.x. We pin/expect v0.5.7+; older 0.4.x is incompatible.
+    cargo cyclonedx --format "${FORMAT}" --all --override-filename bom
 
     # Collect per-crate outputs into ${OUTPUT_DIR}/<crate>/bom.<ext>
     local crate_dir crate_name bom_path dest_dir

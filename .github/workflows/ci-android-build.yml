@@ -33,10 +33,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust 1.85
+      # Toolchain 1.85 -> 1.86 (2026-05-23): cargo-ndk 4.x and transitive icu_*
+      # crates require rustc 1.86. See coverage.yml for full rationale.
+      - name: Install Rust 1.86
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.85"
+          toolchain: "1.86"
           targets: aarch64-linux-android,x86_64-linux-android
 
       - name: Cache cargo
