@@ -22,6 +22,40 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::protocol::{ChangeEvent, PhoenixEvent, PhoenixMessage};
 use futures_util::{SinkExt, StreamExt};
 
+// ── Log redaction (Wave 2.7 sec #17) ─────────────────────────────────────────
+//
+// Raw Phoenix payloads embed clipboard record JSON (`record.content`, etc.)
+// which is end-user plaintext. Logging the full `serde_json::Value` therefore
+// leaks user data into the daemon log file. Replace any log site that
+// previously emitted `payload = %msg.payload` with `payload = %redact_payload(...)`
+// — same fields are still useful for triage (length, fixed-prefix fingerprint)
+// without exposing content.
+
+/// Render a JSON payload in a redaction-safe form: `len=<N>, prefix=<hex16>`.
+///
+/// The serialised representation length and a 16-byte hex fingerprint of the
+/// payload are enough for log triage (size class, "is this the same event we
+/// saw at 12:03?") while never revealing the underlying clipboard content.
+///
+/// Stable / deterministic: pure function of the JSON value's canonical
+/// serialisation. Suitable for tests that pin the exact output.
+pub(crate) fn redact_payload(value: &serde_json::Value) -> String {
+    // `to_string` cannot fail for a well-formed `Value`; if it ever did, the
+    // fallback `<unserialisable>` is still safe (no content leaked).
+    let s = serde_json::to_string(value).unwrap_or_else(|_| String::from("<unserialisable>"));
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    let take = bytes.len().min(16);
+    let prefix_hex = bytes[..take]
+        .iter()
+        .fold(String::with_capacity(take * 2), |mut acc, b| {
+            use std::fmt::Write as _;
+            let _ = write!(acc, "{:02x}", b);
+            acc
+        });
+    format!("len={}, prefix={}", len, prefix_hex)
+}
+
 // ── Configuration ─────────────────────────────────────────────────────────────
 
 /// Configuration for the Supabase Realtime client.
@@ -432,7 +466,23 @@ async fn handle_message(
         Message::Text(text) => {
             match PhoenixMessage::from_wire(&text) {
                 Err(e) => {
-                    tracing::warn!(error = %e, raw = %text, "failed to parse Phoenix message");
+                    // Wave 2.7 sec #17: raw frame can embed clipboard plaintext.
+                    // Log length + 16-byte prefix only, never the full text.
+                    let bytes = text.as_bytes();
+                    let take = bytes.len().min(16);
+                    let prefix = bytes[..take]
+                        .iter()
+                        .fold(String::with_capacity(take * 2), |mut acc, b| {
+                            use std::fmt::Write as _;
+                            let _ = write!(acc, "{:02x}", b);
+                            acc
+                        });
+                    tracing::warn!(
+                        error = %e,
+                        raw_len = bytes.len(),
+                        raw_prefix = %prefix,
+                        "failed to parse Phoenix message"
+                    );
                 }
                 Ok(phoenix_msg) => {
                     dispatch_event(&phoenix_msg, tx, topic).await;
@@ -471,7 +521,11 @@ async fn dispatch_event(msg: &PhoenixMessage, tx: &mpsc::Sender<ChangeEvent>, to
         }
 
         PhoenixEvent::ERROR => {
-            tracing::error!(topic = %msg.topic, payload = %msg.payload, "Phoenix channel error");
+            tracing::error!(
+                topic = %msg.topic,
+                payload_redacted = %redact_payload(&msg.payload),
+                "Phoenix channel error"
+            );
         }
 
         PhoenixEvent::CLOSE => {
@@ -489,7 +543,10 @@ async fn dispatch_event(msg: &PhoenixMessage, tx: &mpsc::Sender<ChangeEvent>, to
                     tracing::debug!("change event receiver dropped; ignoring event");
                 }
             } else {
-                tracing::warn!(payload = %msg.payload, "could not parse postgres_changes payload");
+                tracing::warn!(
+                    payload_redacted = %redact_payload(&msg.payload),
+                    "could not parse postgres_changes payload"
+                );
             }
         }
 
@@ -661,6 +718,77 @@ mod tests {
             b = (b * 2).min(max);
         }
         assert_eq!(b, max, "backoff should cap at max_backoff");
+    }
+
+    // ── Payload redaction (Wave 2.7 sec #17) ──────────────────────────────────
+
+    /// `redact_payload` must NEVER include the raw record content (clipboard
+    /// plaintext) in its output. It must surface only length + a fixed-size
+    /// hex prefix of the JSON serialisation. This is the contract every
+    /// log call site relies on for compliance with the user-data redaction
+    /// requirement.
+    #[test]
+    fn payload_redacted_in_logs() {
+        // Plaintext that MUST NOT appear in the redacted form.
+        let secret = "super-secret-clipboard-contents-do-not-leak-abc123";
+        let payload = serde_json::json!({
+            "data": {
+                "type": "INSERT",
+                "table": "clipboard_items",
+                "record": { "id": "abc", "content_type": "text", "content": secret },
+            }
+        });
+
+        let redacted = redact_payload(&payload);
+
+        // 1. No raw plaintext.
+        assert!(
+            !redacted.contains(secret),
+            "redacted form must not contain raw payload content; got: {redacted}"
+        );
+        // 2. Also no obvious JSON keys from `record` that imply we dumped the value.
+        assert!(
+            !redacted.contains("content_type"),
+            "redacted form must not include JSON keys from the original payload; got: {redacted}"
+        );
+
+        // 3. Must still carry usable triage signal (length + prefix).
+        assert!(redacted.contains("len="), "expected length field in: {redacted}");
+        assert!(redacted.contains("prefix="), "expected prefix field in: {redacted}");
+
+        // 4. The prefix is a hex string of the first 16 bytes of the canonical
+        //    JSON serialisation — deterministic, so we can pin it.
+        let canonical = serde_json::to_string(&payload).expect("serialise");
+        let expected_prefix: String = canonical
+            .as_bytes()
+            .iter()
+            .take(16)
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        assert!(
+            redacted.contains(&expected_prefix),
+            "expected prefix {expected_prefix} in redacted: {redacted}"
+        );
+        // 5. The reported length must equal the serialised byte length.
+        assert!(
+            redacted.contains(&format!("len={}", canonical.len())),
+            "expected len={} in redacted: {redacted}",
+            canonical.len()
+        );
+    }
+
+    /// Edge cases — empty object and short payloads must not panic and must
+    /// still produce a coherent redacted form.
+    #[test]
+    fn payload_redaction_handles_short_and_empty() {
+        let empty = serde_json::json!({});
+        let r = redact_payload(&empty);
+        assert!(r.contains("len=2"), "empty object serialises to '{{}}' (2 bytes); got: {r}");
+
+        let tiny = serde_json::json!("x");
+        let r = redact_payload(&tiny);
+        // "\"x\"" → 3 bytes
+        assert!(r.contains("len=3"), "tiny string payload should be 3 bytes; got: {r}");
     }
 
     // ── Disabled client ───────────────────────────────────────────────────────

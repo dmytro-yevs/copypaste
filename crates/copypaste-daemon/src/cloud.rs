@@ -31,11 +31,26 @@
 //!   the daemon enters degraded mode — cloud sync is disabled, the error is
 //!   surfaced, and we do NOT crash-loop. See [`probe_keychain_with_retry`].
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use copypaste_core::{ClipboardItem, Database};
+
+// ── Push reliability tuning (Wave 2.7 edge #19/#20/#21) ───────────────────────
+
+/// Maximum number of items the in-memory retry queue will hold before it starts
+/// dropping the oldest entries. Bounded so a sustained outage cannot exhaust
+/// daemon memory.
+const PUSH_RETRY_QUEUE_CAP: usize = 1024;
+
+/// Maximum delay between retry attempts for transient push failures.
+const PUSH_MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+/// Initial delay between retry attempts. Doubles on each failure up to
+/// `PUSH_MAX_BACKOFF`.
+const PUSH_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 
 // ── CloudError ────────────────────────────────────────────────────────────────
 
@@ -273,7 +288,10 @@ pub async fn start_cloud(
     // Resolve the bearer fail-closed: if email/password is configured and
     // sign-in fails, we abort cloud sync entirely instead of silently using
     // the anon key (which would downgrade scope without operator awareness).
-    let bearer = resolve_bearer(&config).await?;
+    let bearer_str = resolve_bearer(&config).await?;
+    // Shared, mutable bearer so the 401-refresh path (Wave 2.7 edge #20) can
+    // swap in a fresh token without restarting the loops.
+    let bearer: Arc<RwLock<String>> = Arc::new(RwLock::new(bearer_str));
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     // We need two copies of the shutdown signal — use a shared Notify.
@@ -379,54 +397,143 @@ async fn sign_in_with_password(
 
 /// Receive locally created items from the broadcast channel and POST them to
 /// `POST /rest/v1/clipboard_items`.
+///
+/// Wave 2.7 hardening:
+/// - **#19 disconnect/reconnect**: items that fail to push are appended to an
+///   in-memory retry queue (bounded by [`PUSH_RETRY_QUEUE_CAP`]). The queue is
+///   drained between fresh broadcast receives, so when connectivity returns we
+///   flush backlog before accepting new work.
+/// - **#20 401 refresh**: `push_item_with_retries` refreshes the shared bearer
+///   token on a 401 and retries the request once.
+/// - **#21 429 Retry-After**: the helper honours `Retry-After` (seconds form)
+///   and otherwise applies bounded exponential backoff (1s → 30s).
 async fn push_loop(
     config: CloudConfig,
-    bearer: String,
+    bearer: Arc<RwLock<String>>,
     mut rx: tokio::sync::broadcast::Receiver<ClipboardItem>,
     shutdown: Arc<tokio::sync::Notify>,
 ) {
     let client = reqwest::Client::new();
     let rest_url = format!("{}/rest/v1/clipboard_items", config.supabase_url);
 
+    // In-memory retry queue. Items land here after a transient failure and are
+    // drained on the next loop iteration (after we yield once so we don't
+    // spin-busy when the remote is down).
+    let mut retry_queue: VecDeque<ClipboardItem> = VecDeque::new();
+
     loop {
+        // Drain the retry queue first — if we made progress on backlog before
+        // touching new items, recovery is observable and old items are not
+        // perpetually starved by a steady stream of new work.
+        if let Some(item) = retry_queue.pop_front() {
+            match push_item_with_retries(&client, &rest_url, &config, &bearer, &item).await {
+                Ok(()) => {
+                    tracing::info!("cloud-sync flushed queued id={} (retry queue drained one)", item.id);
+                    continue;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "cloud-sync still failing for id={} ({e}); re-queuing (queue_len={})",
+                        item.id,
+                        retry_queue.len() + 1,
+                    );
+                    enqueue_for_retry(&mut retry_queue, item);
+                    // Yield to the scheduler so we don't hot-loop while the
+                    // remote is down; also lets shutdown.notified() get a turn.
+                    tokio::select! {
+                        _ = tokio::time::sleep(PUSH_INITIAL_BACKOFF) => {}
+                        _ = shutdown.notified() => {
+                            tracing::info!("cloud-sync push_loop: shutdown received during retry drain");
+                            return;
+                        }
+                    }
+                    continue;
+                }
+            }
+        }
+
         tokio::select! {
             result = rx.recv() => {
                 match result {
                     Ok(item) => {
-                        if let Err(e) = push_item(&client, &rest_url, &config.anon_key, &bearer, &item).await {
-                            tracing::warn!("cloud-sync push failed for id={}: {e}", item.id);
-                        } else {
-                            tracing::debug!("cloud-sync pushed id={}", item.id);
+                        match push_item_with_retries(&client, &rest_url, &config, &bearer, &item).await {
+                            Ok(()) => tracing::debug!("cloud-sync pushed id={}", item.id),
+                            Err(e) => {
+                                tracing::warn!(
+                                    "cloud-sync push failed for id={}: {e}; queuing for retry",
+                                    item.id
+                                );
+                                enqueue_for_retry(&mut retry_queue, item);
+                            }
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("cloud-sync push_loop: lagged by {n} items");
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        tracing::info!("cloud-sync push_loop: channel closed, exiting");
+                        tracing::info!(
+                            "cloud-sync push_loop: channel closed, exiting (dropping {} queued items)",
+                            retry_queue.len(),
+                        );
                         break;
                     }
                 }
             }
             _ = shutdown.notified() => {
-                tracing::info!("cloud-sync push_loop: shutdown received");
+                tracing::info!(
+                    "cloud-sync push_loop: shutdown received ({} queued items not flushed)",
+                    retry_queue.len(),
+                );
                 break;
             }
         }
     }
 }
 
-/// Serialise a [`ClipboardItem`] and POST it to the Supabase REST endpoint.
-async fn push_item(
+/// Append `item` to the retry queue, evicting the oldest entry when the queue
+/// is at capacity. Bounded so a long outage cannot exhaust memory.
+fn enqueue_for_retry(queue: &mut VecDeque<ClipboardItem>, item: ClipboardItem) {
+    if queue.len() >= PUSH_RETRY_QUEUE_CAP {
+        if let Some(dropped) = queue.pop_front() {
+            tracing::warn!(
+                "cloud-sync retry queue at cap ({}); dropping oldest id={}",
+                PUSH_RETRY_QUEUE_CAP,
+                dropped.id,
+            );
+        }
+    }
+    queue.push_back(item);
+}
+
+/// Outcome of a single push attempt.
+#[derive(Debug)]
+enum PushOutcome {
+    /// 2xx — accepted by the server.
+    Ok,
+    /// 401 — bearer expired or invalid. Caller should refresh and retry once.
+    Unauthorized,
+    /// 429 — rate-limited. The `Option<Duration>` carries the `Retry-After`
+    /// value if the server provided one (in seconds form).
+    RateLimited(Option<Duration>),
+    /// Network or 5xx error. Transient; caller should back off and requeue.
+    Transient(String),
+    /// 4xx other than 401/429 — request is malformed or rejected for a reason
+    /// retrying will not fix. Caller should give up on this item.
+    Permanent(String),
+}
+
+/// One push attempt, surfacing structured outcomes so the caller can decide
+/// between refresh, backoff, and abort.
+async fn push_item_once(
     client: &reqwest::Client,
     url: &str,
     anon_key: &str,
     bearer: &str,
     item: &ClipboardItem,
-) -> anyhow::Result<()> {
+) -> PushOutcome {
     let body = clipboard_item_to_json(item);
 
-    let resp = client
+    let resp = match client
         .post(url)
         .header("apikey", anon_key)
         .header("Authorization", format!("Bearer {bearer}"))
@@ -434,14 +541,143 @@ async fn push_item(
         .header("Prefer", "return=minimal")
         .json(&body)
         .send()
-        .await?;
+        .await
+    {
+        Ok(r) => r,
+        // Network / DNS / TLS / connection-refused → transient.
+        Err(e) => return PushOutcome::Transient(format!("send: {e}")),
+    };
 
     let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        anyhow::bail!("REST POST failed ({status}): {text}");
+    if status.is_success() {
+        return PushOutcome::Ok;
     }
-    Ok(())
+    if status.as_u16() == 401 {
+        return PushOutcome::Unauthorized;
+    }
+    if status.as_u16() == 429 {
+        let retry_after = parse_retry_after_secs(resp.headers());
+        return PushOutcome::RateLimited(retry_after);
+    }
+    let text = resp.text().await.unwrap_or_default();
+    if status.is_server_error() {
+        return PushOutcome::Transient(format!("{status}: {text}"));
+    }
+    PushOutcome::Permanent(format!("{status}: {text}"))
+}
+
+/// Parse the HTTP `Retry-After` header in its delta-seconds form. We
+/// deliberately do NOT support the HTTP-date variant — Supabase emits the
+/// integer-seconds form and supporting both pulls in a date-parsing dep for
+/// no operator benefit.
+fn parse_retry_after_secs(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+}
+
+/// Compose the per-item push pipeline:
+/// - try once;
+/// - on `Unauthorized` → refresh the shared bearer (Wave 2.7 #20) and retry
+///   exactly once;
+/// - on `RateLimited(Some(d))` → honour `Retry-After` and retry once
+///   (Wave 2.7 #21);
+/// - on `Transient` → exponential backoff between attempts, capped at
+///   `PUSH_MAX_BACKOFF`;
+/// - on `Permanent` → abort and surface the error.
+///
+/// Returns `Ok(())` on 2xx, `Err(msg)` for permanent failures or after the
+/// transient-retry budget is exhausted. Callers (the push loop) then decide
+/// whether to requeue.
+pub(crate) async fn push_item_with_retries(
+    client: &reqwest::Client,
+    url: &str,
+    config: &CloudConfig,
+    bearer: &Arc<RwLock<String>>,
+    item: &ClipboardItem,
+) -> Result<(), String> {
+    let mut backoff = PUSH_INITIAL_BACKOFF;
+    // Hard cap on attempts to avoid hot loops even if every attempt comes back
+    // as `Transient(_)`. The loop body sleeps between attempts so the worst-case
+    // duration is bounded by the sum of backoffs.
+    let max_transient_attempts: u8 = 4;
+    let mut transient_attempts: u8 = 0;
+    // `Unauthorized` may only trigger ONE refresh-and-retry per item to
+    // avoid an infinite loop if the refresh itself returns a still-401 token.
+    let mut refreshed_once = false;
+    // Same single-shot guard for `Retry-After` so a misconfigured server
+    // returning permanent 429 cannot pin us forever.
+    let mut honoured_retry_after_once = false;
+
+    loop {
+        let token = bearer.read().await.clone();
+        match push_item_once(client, url, &config.anon_key, &token, item).await {
+            PushOutcome::Ok => return Ok(()),
+
+            PushOutcome::Unauthorized if !refreshed_once => {
+                refreshed_once = true;
+                tracing::info!("cloud-sync got 401; refreshing bearer and retrying once");
+                match refresh_bearer(config).await {
+                    Ok(new_token) => {
+                        *bearer.write().await = new_token;
+                    }
+                    Err(e) => {
+                        return Err(format!("401 refresh failed: {e}"));
+                    }
+                }
+                // Loop again with the refreshed token.
+                continue;
+            }
+            PushOutcome::Unauthorized => {
+                return Err("401 Unauthorized (already refreshed once)".into());
+            }
+
+            PushOutcome::RateLimited(retry_after) if !honoured_retry_after_once => {
+                honoured_retry_after_once = true;
+                let delay = retry_after.unwrap_or(backoff).min(PUSH_MAX_BACKOFF);
+                tracing::warn!(
+                    "cloud-sync got 429; sleeping {:?} before retry (Retry-After: {:?})",
+                    delay,
+                    retry_after,
+                );
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+            PushOutcome::RateLimited(_) => {
+                return Err("429 Too Many Requests (already retried after Retry-After)".into());
+            }
+
+            PushOutcome::Transient(msg) => {
+                transient_attempts += 1;
+                if transient_attempts >= max_transient_attempts {
+                    return Err(format!(
+                        "transient failure budget exhausted after {transient_attempts} attempts: {msg}"
+                    ));
+                }
+                tracing::warn!(
+                    "cloud-sync transient failure ({msg}); backing off {:?} (attempt {}/{})",
+                    backoff,
+                    transient_attempts,
+                    max_transient_attempts,
+                );
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(PUSH_MAX_BACKOFF);
+                continue;
+            }
+
+            PushOutcome::Permanent(msg) => return Err(msg),
+        }
+    }
+}
+
+/// Refresh the bearer token. Currently calls `resolve_bearer`, which re-runs
+/// the email/password sign-in path if those env vars are set, or falls back to
+/// the anon key. Returning the anon key on refresh is intentional — it matches
+/// the initial `start_cloud` behaviour for the no-credentials case.
+async fn refresh_bearer(config: &CloudConfig) -> Result<String, String> {
+    resolve_bearer(config).await.map_err(|e| e.to_string())
 }
 
 // ── Realtime / poll loop ──────────────────────────────────────────────────────
@@ -450,7 +686,7 @@ async fn push_item(
 /// any that are not already in the local database.
 async fn realtime_loop(
     config: CloudConfig,
-    bearer: String,
+    bearer: Arc<RwLock<String>>,
     db: Arc<Mutex<Database>>,
     shutdown: Arc<tokio::sync::Notify>,
 ) {
@@ -464,7 +700,8 @@ async fn realtime_loop(
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                match fetch_remote_items(&client, &poll_url, &config.anon_key, &bearer).await {
+                let token = bearer.read().await.clone();
+                match fetch_remote_items(&client, &poll_url, &config.anon_key, &token).await {
                     Err(e) => tracing::warn!("cloud-sync poll failed: {e}"),
                     Ok(remote_items) => {
                         let db_guard = db.lock().await;
@@ -816,5 +1053,248 @@ mod tests {
         let err = preflight_encrypted_db_check(&path)
             .expect_err("existing encrypted DB must also block ephemeral key");
         assert!(matches!(err, CloudError::EncryptedDbRequiresPersistentKey(_)));
+    }
+
+    // ── Wave 2.7 push reliability (#19/#20/#21) ───────────────────────────────
+    //
+    // These tests exercise the public push pipeline end-to-end against
+    // mockito's local HTTP server. They construct `CloudConfig` via struct
+    // literal to bypass the HTTPS gate in `CloudConfig::new` — the gate is
+    // tested separately above; here we want to drive the retry paths.
+
+    /// Build a minimal `ClipboardItem` for tests. The push pipeline only cares
+    /// about `id` for log lines and the serialised JSON body.
+    fn test_item(id: &str) -> copypaste_core::ClipboardItem {
+        copypaste_core::ClipboardItem {
+            id: id.to_owned(),
+            item_id: id.to_owned(),
+            content_type: "text".to_owned(),
+            content: Some(b"hello".to_vec()),
+            content_nonce: Some(b"nonce-12-bytes".to_vec()),
+            blob_ref: None,
+            is_sensitive: false,
+            is_synced: false,
+            lamport_ts: 1,
+            wall_time: 1,
+            expires_at: None,
+            app_bundle_id: None,
+            content_hash: None,
+        }
+    }
+
+    /// Build a config pointing at the mockito server. `mockito::server_url()`
+    /// returns an `http://127.0.0.1:PORT` URL; we bypass `CloudConfig::new` so
+    /// the HTTPS gate (already covered elsewhere) does not block the test.
+    fn test_cfg() -> CloudConfig {
+        CloudConfig {
+            supabase_url: mockito::server_url(),
+            anon_key: "anon-key-for-tests".to_owned(),
+        }
+    }
+
+    /// **Edge #19 — push queued during disconnect must flush on reconnect.**
+    ///
+    /// We model "disconnect" as a sequence of 503 (transient server error)
+    /// responses followed by a 201 once the server "recovers". The test must
+    /// observe that the item is eventually delivered without a manual reset
+    /// of the push pipeline.
+    ///
+    /// Concretely: 3 attempts return 503, the 4th returns 201. With initial
+    /// backoff = 1s doubling, the first 503 → sleep 1s → second 503 →
+    /// sleep 2s → third 503 → sleep 4s → fourth (201). Bound the whole test
+    /// at 30s.
+    #[tokio::test]
+    async fn push_during_disconnect_retries_on_reconnect() {
+        // 3 transient 503s, then a success. mockito 0.31 returns mocks in
+        // registration order, each `expect(n)` configures how many times
+        // that mock should match.
+        let m_fail = mockito::mock("POST", "/rest/v1/clipboard_items")
+            .with_status(503)
+            .with_body("temporarily unavailable")
+            .expect(3)
+            .create();
+
+        let m_ok = mockito::mock("POST", "/rest/v1/clipboard_items")
+            .with_status(201)
+            .with_body("")
+            .expect(1)
+            .create();
+
+        let cfg = test_cfg();
+        let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
+        let client = reqwest::Client::new();
+        let url = format!("{}/rest/v1/clipboard_items", cfg.supabase_url);
+        let item = test_item("queued-during-disconnect");
+
+        // Wrap in a generous timeout so a hung pipeline cannot deadlock the
+        // test runner. 30s is well over the 1+2+4 = 7s worth of backoff.
+        let result = tokio::time::timeout(
+            Duration::from_secs(30),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item),
+        )
+        .await
+        .expect("push pipeline must not hang");
+
+        assert!(
+            result.is_ok(),
+            "push must eventually succeed after transient outage; got: {result:?}"
+        );
+        m_fail.assert();
+        m_ok.assert();
+    }
+
+    /// **Edge #20 — 401 mid-push must trigger refresh + retry exactly once.**
+    ///
+    /// First POST returns 401. The pipeline calls `refresh_bearer`, which
+    /// (with no email/password env vars set) re-resolves to the anon key.
+    /// Second POST returns 201. We assert: bearer is replaced, retry happens,
+    /// no third call.
+    #[tokio::test]
+    async fn token_expiry_race_refreshes_and_retries() {
+        // Ensure no stale email/password env vars from earlier tests pollute
+        // `resolve_bearer`. We never *set* them in this test file, but be
+        // defensive — other test files in the same binary might.
+        std::env::remove_var("SUPABASE_EMAIL");
+        std::env::remove_var("SUPABASE_PASSWORD");
+
+        let m_401 = mockito::mock("POST", "/rest/v1/clipboard_items")
+            .with_status(401)
+            .with_body(r#"{"message":"JWT expired"}"#)
+            .expect(1)
+            .create();
+
+        let m_ok = mockito::mock("POST", "/rest/v1/clipboard_items")
+            .with_status(201)
+            .with_body("")
+            .expect(1)
+            .create();
+
+        let cfg = test_cfg();
+        // Seed an obviously-stale bearer so we can verify the refresh swapped
+        // it out for the anon key (the path `resolve_bearer` returns when no
+        // email/password is configured).
+        let bearer = Arc::new(RwLock::new("stale-expired-token".to_owned()));
+        let client = reqwest::Client::new();
+        let url = format!("{}/rest/v1/clipboard_items", cfg.supabase_url);
+        let item = test_item("token-expiry");
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item),
+        )
+        .await
+        .expect("must not hang");
+
+        assert!(result.is_ok(), "401 must trigger refresh + retry; got: {result:?}");
+        m_401.assert();
+        m_ok.assert();
+
+        // Bearer was rotated to the anon key after refresh.
+        let final_token = bearer.read().await.clone();
+        assert_eq!(
+            final_token, "anon-key-for-tests",
+            "401 path must replace stale bearer with refreshed token"
+        );
+    }
+
+    /// **Edge #21 — 429 with `Retry-After` header must sleep that long before
+    /// retrying, then succeed on the next attempt.**
+    ///
+    /// We use `Retry-After: 1` (1 second) to keep the test fast while still
+    /// proving the header is parsed and honoured.
+    #[tokio::test]
+    async fn http_429_honours_retry_after_header() {
+        let m_429 = mockito::mock("POST", "/rest/v1/clipboard_items")
+            .with_status(429)
+            .with_header("retry-after", "1")
+            .with_body("rate limited")
+            .expect(1)
+            .create();
+
+        let m_ok = mockito::mock("POST", "/rest/v1/clipboard_items")
+            .with_status(201)
+            .with_body("")
+            .expect(1)
+            .create();
+
+        let cfg = test_cfg();
+        let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
+        let client = reqwest::Client::new();
+        let url = format!("{}/rest/v1/clipboard_items", cfg.supabase_url);
+        let item = test_item("rate-limited");
+
+        let start = std::time::Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item),
+        )
+        .await
+        .expect("must not hang");
+        let elapsed = start.elapsed();
+
+        assert!(result.is_ok(), "429 + Retry-After must succeed on retry; got: {result:?}");
+        m_429.assert();
+        m_ok.assert();
+
+        // We slept at least 1s (the Retry-After value). Allow a tiny lower
+        // slack for clock granularity (>=900ms) and a generous upper bound to
+        // catch accidental long backoff.
+        assert!(
+            elapsed >= Duration::from_millis(900),
+            "should have honoured Retry-After: 1s; only waited {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(10),
+            "should not have waited the full timeout; elapsed: {elapsed:?}"
+        );
+    }
+
+    /// `parse_retry_after_secs` must handle:
+    ///   - missing header → None
+    ///   - integer seconds → Some(Duration)
+    ///   - non-numeric (HTTP-date form is unsupported) → None (not a panic)
+    #[test]
+    fn parse_retry_after_secs_handles_edge_cases() {
+        use reqwest::header::{HeaderMap, HeaderValue, RETRY_AFTER};
+
+        let mut h = HeaderMap::new();
+        assert_eq!(parse_retry_after_secs(&h), None, "missing header → None");
+
+        h.insert(RETRY_AFTER, HeaderValue::from_static("5"));
+        assert_eq!(
+            parse_retry_after_secs(&h),
+            Some(Duration::from_secs(5)),
+            "integer seconds parsed"
+        );
+
+        h.insert(RETRY_AFTER, HeaderValue::from_static("Wed, 21 Oct 2026 07:28:00 GMT"));
+        assert_eq!(
+            parse_retry_after_secs(&h),
+            None,
+            "HTTP-date form is unsupported; must return None rather than panic"
+        );
+
+        h.insert(RETRY_AFTER, HeaderValue::from_static("  12  "));
+        assert_eq!(
+            parse_retry_after_secs(&h),
+            Some(Duration::from_secs(12)),
+            "whitespace-padded integer must still parse"
+        );
+    }
+
+    /// The bounded-retry queue must evict the oldest entry when at capacity,
+    /// never grow without bound. Mirrors the in-loop behaviour under sustained
+    /// outage.
+    #[test]
+    fn enqueue_for_retry_caps_at_max() {
+        let mut q: VecDeque<copypaste_core::ClipboardItem> = VecDeque::new();
+        // Push CAP + 5 items; size must remain == CAP and the oldest must be
+        // evicted.
+        for i in 0..(PUSH_RETRY_QUEUE_CAP + 5) {
+            enqueue_for_retry(&mut q, test_item(&format!("item-{i}")));
+        }
+        assert_eq!(q.len(), PUSH_RETRY_QUEUE_CAP, "queue must cap at PUSH_RETRY_QUEUE_CAP");
+        // Front of queue should now be `item-5` (the first 5 were evicted).
+        assert_eq!(q.front().expect("non-empty").id, "item-5");
     }
 }
