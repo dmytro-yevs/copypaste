@@ -1,8 +1,11 @@
 # ADR-010: Ad-hoc Code Signing for macOS Distribution
 
-**Status:** Accepted
-**Date:** 2026-05-23
-**Context:** beta-w4.1 (v0.2.0-beta hardening)
+## Status
+
+Accepted
+
+Date: 2026-05-23
+Track: beta-w4.1 (v0.2.0-beta hardening)
 
 ## Context
 

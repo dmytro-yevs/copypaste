@@ -1,7 +1,10 @@
 # ADR-003: SQLCipher for database at-rest encryption
 
-**Date:** 2026-05-22  
-**Status:** In progress (Phase 2c)
+## Status
+
+Accepted (in progress — Phase 2c)
+
+Date: 2026-05-22
 
 ## Context
 

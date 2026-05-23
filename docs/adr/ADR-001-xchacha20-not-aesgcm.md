@@ -1,7 +1,10 @@
 # ADR-001: XChaCha20-Poly1305 over AES-GCM for clipboard encryption
 
-**Date:** 2026-05-22  
-**Status:** Accepted
+## Status
+
+Accepted
+
+Date: 2026-05-22
 
 ## Context
 

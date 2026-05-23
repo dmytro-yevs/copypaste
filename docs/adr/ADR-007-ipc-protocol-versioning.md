@@ -1,10 +1,13 @@
-# ADR-007 — IPC Protocol Versioning
+# ADR-007: IPC Protocol Versioning
 
-**Status:** Accepted
-**Date:** 2026-05-23
-**Scope:** `copypaste-daemon` IPC wire format (`crates/copypaste-daemon/src/protocol.rs`)
-**Supersedes:** none
-**Related:** ADR-002 (Unix socket IPC)
+## Status
+
+Accepted
+
+Date: 2026-05-23
+Scope: `copypaste-daemon` IPC wire format (`crates/copypaste-daemon/src/protocol.rs`)
+Supersedes: none
+Related: ADR-002 (Unix socket IPC)
 
 ## Context
 

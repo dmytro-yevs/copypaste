@@ -1,10 +1,13 @@
 # ADR-009: Relay Storage — In-Memory HashMap with TTL Eviction
 
-- **Status:** Accepted
-- **Date:** 2026-05-23
-- **Track:** beta-w4 (relay durability)
-- **Supersedes:** —
-- **Related:** ADR-003 (SQLCipher at-rest, daemon-side), ADR-004 (SQLite WAL, daemon-side)
+## Status
+
+Accepted
+
+- Date: 2026-05-23
+- Track: beta-w4 (relay durability)
+- Supersedes: —
+- Related: ADR-003 (SQLCipher at-rest, daemon-side), ADR-004 (SQLite WAL, daemon-side)
 
 ## Context
 

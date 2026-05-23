@@ -1,7 +1,10 @@
 # ADR-002: Unix socket over HTTP/gRPC for daemon IPC
 
-**Date:** 2026-05-22  
-**Status:** Accepted
+## Status
+
+Accepted
+
+Date: 2026-05-22
 
 ## Context
 

@@ -1,8 +1,11 @@
 # ADR-005: Slint as UI Framework
 
-**Status:** Accepted  
-**Date:** 2026-05-23  
-**Deciders:** Project owner  
+## Status
+
+Accepted
+
+Date: 2026-05-23
+Deciders: Project owner
 
 ## Context
 

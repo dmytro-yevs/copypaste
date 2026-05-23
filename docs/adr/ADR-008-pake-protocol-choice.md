@@ -1,9 +1,12 @@
 # ADR-008: PAKE Protocol Choice for Device Pairing
 
-**Status:** Accepted
-**Date:** 2026-05-23
-**Deciders:** Project owner
-**Related:** ADR-001 (XChaCha20-Poly1305 envelope), ADR-003 (SQLCipher at rest)
+## Status
+
+Accepted
+
+Date: 2026-05-23
+Deciders: Project owner
+Related: ADR-001 (XChaCha20-Poly1305 envelope), ADR-003 (SQLCipher at rest)
 
 ## Context
 

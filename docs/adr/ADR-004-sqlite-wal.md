@@ -1,7 +1,10 @@
 # ADR-004: SQLite WAL Mode
 
-**Date:** 2026-05-22  
-**Status:** Accepted
+## Status
+
+Accepted
+
+Date: 2026-05-22
 
 ## Context
 
