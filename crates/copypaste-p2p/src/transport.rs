@@ -21,6 +21,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, ServerConfig};
@@ -28,6 +29,11 @@ use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
+
+/// Maximum time we will wait for a TLS handshake (client or server side) to
+/// complete before giving up. Protects against dead sockets and slowloris-style
+/// stalls during handshake.
+pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 use crate::cert::{fingerprint_of, SelfSignedCert};
 use crate::verifier::PeerCertVerifier;
@@ -82,6 +88,9 @@ pub enum TransportError {
 
     #[error("Invalid private key encoding")]
     InvalidKey,
+
+    #[error("TLS handshake timed out after {:?}", TLS_HANDSHAKE_TIMEOUT)]
+    HandshakeTimeout,
 }
 
 /// A framed async I/O stream after a successful mutual-TLS handshake.
@@ -153,7 +162,22 @@ impl PeerTransport {
         let (tcp_stream, peer_addr) = listener.accept().await?;
         tracing::debug!(peer_addr = %peer_addr, "incoming TCP connection");
 
-        let tls_stream = acceptor.accept(tcp_stream).await?;
+        let tls_stream = match tokio::time::timeout(
+            TLS_HANDSHAKE_TIMEOUT,
+            acceptor.accept(tcp_stream),
+        )
+        .await
+        {
+            Ok(res) => res?,
+            Err(_elapsed) => {
+                tracing::warn!(
+                    peer_addr = %peer_addr,
+                    timeout = ?TLS_HANDSHAKE_TIMEOUT,
+                    "TLS server handshake timed out"
+                );
+                return Err(TransportError::HandshakeTimeout);
+            }
+        };
 
         // Extract and verify the peer's certificate fingerprint.
         let peer_fp = peer_fingerprint_server(&tls_stream)?;
@@ -179,7 +203,22 @@ impl PeerTransport {
         let client_config = self.build_client_config(expected_fingerprint)?;
         let connector = TlsConnector::from(Arc::new(client_config));
 
-        let tcp_stream = TcpStream::connect(addr).await?;
+        let tcp_stream = match tokio::time::timeout(
+            TLS_HANDSHAKE_TIMEOUT,
+            TcpStream::connect(addr),
+        )
+        .await
+        {
+            Ok(res) => res?,
+            Err(_elapsed) => {
+                tracing::warn!(
+                    peer_addr = %addr,
+                    timeout = ?TLS_HANDSHAKE_TIMEOUT,
+                    "TCP connect timed out before TLS handshake"
+                );
+                return Err(TransportError::HandshakeTimeout);
+            }
+        };
         tracing::debug!(peer_addr = %addr, "TCP connection established");
 
         // rustls requires a ServerName even for mutual-TLS peer-to-peer.
@@ -187,7 +226,22 @@ impl PeerTransport {
         let server_name = ServerName::try_from("copypaste.peer")
             .expect("static server name is always valid");
 
-        let tls_stream = connector.connect(server_name, tcp_stream).await?;
+        let tls_stream = match tokio::time::timeout(
+            TLS_HANDSHAKE_TIMEOUT,
+            connector.connect(server_name, tcp_stream),
+        )
+        .await
+        {
+            Ok(res) => res?,
+            Err(_elapsed) => {
+                tracing::warn!(
+                    peer_addr = %addr,
+                    timeout = ?TLS_HANDSHAKE_TIMEOUT,
+                    "TLS client handshake timed out"
+                );
+                return Err(TransportError::HandshakeTimeout);
+            }
+        };
         tracing::info!(peer_addr = %addr, expected_fingerprint = %expected_fingerprint, "peer authenticated");
 
         let framed = Framed::new(tls_stream, LengthDelimitedCodec::new());
@@ -327,5 +381,100 @@ mod tests {
 
         // The server must reject the unknown client.
         assert!(server_result.is_err(), "server must reject unknown peer");
+    }
+
+    /// edge HIGH #13 — a dead/silent peer must not stall the TLS handshake
+    /// indefinitely. We open a TCP listener but never accept, so the connector
+    /// will complete TCP SYN/ACK with the kernel but the TLS handshake bytes
+    /// will sit in the kernel buffer with nobody on the other end. The client
+    /// must give up with `HandshakeTimeout` within ~11s.
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn tls_handshake_timeout_after_10s() {
+        // Bind a listener but never call accept — TCP completes, TLS bytes go nowhere.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let client_cert = SelfSignedCert::generate("client-device").unwrap();
+        // Use a bogus expected fingerprint — verifier never runs because the
+        // handshake stalls long before any cert is received.
+        let bogus_fp = "0".repeat(64);
+        let mut client_peers = PairedPeers::new();
+        client_peers.add(bogus_fp.clone(), "dead-peer");
+
+        let client_transport =
+            PeerTransport::from_cert(client_cert.cert_der, client_cert.key_der, client_peers);
+
+        // Drive both the client connect and a virtual-time advance concurrently.
+        // With `start_paused = true`, `tokio::time::sleep` advances the test
+        // clock instantly, exercising the 10s timeout deterministically.
+        let connect_fut = client_transport.connect(addr, &bogus_fp);
+        let advance_fut = async {
+            tokio::time::sleep(Duration::from_secs(11)).await;
+        };
+
+        let (result, _) = tokio::join!(connect_fut, advance_fut);
+
+        let err = result.expect_err("client must time out, not succeed");
+        assert!(
+            matches!(err, TransportError::HandshakeTimeout),
+            "expected HandshakeTimeout, got {:?}",
+            err
+        );
+
+        // Keep the listener alive until here to avoid kernel TCP reset before
+        // the timeout would fire on real time.
+        drop(listener);
+    }
+
+    /// edge HIGH #12 — a rogue mDNS advertisement may direct us to a real peer
+    /// presenting a certificate we have never paired with. The `TlsVerifier`
+    /// (via `is_known`) must reject such a peer, surfacing a TLS error on the
+    /// client side (the server-side counterpart is already covered by
+    /// `unknown_peer_cert_is_rejected`).
+    #[tokio::test]
+    async fn rogue_mdns_peer_rejected_by_verifier() {
+        // Two legitimate device certs, plus a rogue cert pretending to be the
+        // server we expect to connect to.
+        let real_server_cert = SelfSignedCert::generate("real-server").unwrap();
+        let rogue_server_cert = SelfSignedCert::generate("rogue-server").unwrap();
+        let client_cert = SelfSignedCert::generate("client-device").unwrap();
+
+        let real_server_fp = real_server_cert.fingerprint();
+        let rogue_server_fp = rogue_server_cert.fingerprint();
+        let client_fp = client_cert.fingerprint();
+        assert_ne!(real_server_fp, rogue_server_fp);
+
+        // The rogue server happens to know the client (so the server-side
+        // ClientCertVerifier would pass), but the client has only ever paired
+        // with `real_server_fp` — never with `rogue_server_fp`.
+        let mut rogue_server_peers = PairedPeers::new();
+        rogue_server_peers.add(client_fp.clone(), "client-device");
+
+        let mut client_peers = PairedPeers::new();
+        client_peers.add(real_server_fp.clone(), "real-server");
+
+        let rogue_transport = PeerTransport::from_cert(
+            rogue_server_cert.cert_der,
+            rogue_server_cert.key_der,
+            rogue_server_peers,
+        );
+        let client_transport =
+            PeerTransport::from_cert(client_cert.cert_der, client_cert.key_der, client_peers);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Client expects `real_server_fp` but the rogue server presents its
+        // own (unknown) fingerprint. The client's `verify_fingerprint` must
+        // reject before any data is exchanged.
+        let server_fut = rogue_transport.accept(&listener);
+        let client_fut = client_transport.connect(addr, &real_server_fp);
+
+        let (_server_result, client_result) = tokio::join!(server_fut, client_fut);
+
+        assert!(
+            client_result.is_err(),
+            "client must reject rogue mDNS peer with mismatched cert"
+        );
     }
 }

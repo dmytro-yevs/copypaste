@@ -5,13 +5,27 @@
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use crate::error::DiscoveryError;
+
+/// Lock a `Mutex` even if a previous holder panicked.
+///
+/// Poison-tolerance is required for callbacks that may panic: a panic in
+/// `on_peer_found`/`on_peer_lost` user code would otherwise permanently
+/// disable discovery for the rest of the process. We recover the inner
+/// guard and log a warning so the issue surfaces in production telemetry.
+#[inline]
+fn lock_safe<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e: PoisonError<MutexGuard<'_, T>>| {
+        warn!("recovering from poisoned mutex in discovery service");
+        e.into_inner()
+    })
+}
 
 /// Service type used for mDNS-SD advertisement and browsing.
 pub const SERVICE_TYPE: &str = "_copypaste._tcp.local.";
@@ -93,7 +107,7 @@ impl DiscoveryService {
     where
         F: Fn(PeerInfo) + Send + Sync + 'static,
     {
-        self.on_found.lock().unwrap().push(Arc::new(callback));
+        lock_safe(&self.on_found).push(Arc::new(callback));
     }
 
     /// Register a callback that fires whenever a peer disappears.
@@ -103,7 +117,7 @@ impl DiscoveryService {
     where
         F: Fn(String) + Send + Sync + 'static,
     {
-        self.on_lost.lock().unwrap().push(Arc::new(callback));
+        lock_safe(&self.on_lost).push(Arc::new(callback));
     }
 
     /// Configure own service registration.
@@ -120,7 +134,7 @@ impl DiscoveryService {
         device_id: impl Into<String>,
         device_name: impl Into<String>,
     ) -> Result<(), DiscoveryError> {
-        let mut reg = self.registration.lock().unwrap();
+        let mut reg = lock_safe(&self.registration);
         if reg.is_some() {
             return Err(DiscoveryError::AlreadyRegistered);
         }
@@ -144,7 +158,7 @@ impl DiscoveryService {
             .map_err(|e| DiscoveryError::Daemon(e.to_string()))?;
 
         // Advertise own service if registration was provided.
-        let reg_opt = self.registration.lock().unwrap().clone();
+        let reg_opt = lock_safe(&self.registration).clone();
         if let Some(ref reg) = reg_opt {
             self.advertise(&daemon, reg)?;
         }
@@ -183,7 +197,7 @@ impl DiscoveryService {
 
     /// Return a snapshot of all currently known peers.
     pub fn peers(&self) -> Vec<PeerInfo> {
-        self.known_peers.lock().unwrap().values().cloned().collect()
+        lock_safe(&self.known_peers).values().cloned().collect()
     }
 
     // ── private helpers ──────────────────────────────────────────────────────
@@ -263,7 +277,7 @@ fn handle_event(
                 let fullname = resolved.fullname.clone();
 
                 // Dedup: only emit if this is a new or changed peer.
-                let mut peers = known_peers.lock().unwrap();
+                let mut peers = lock_safe(known_peers);
                 let is_new = peers
                     .get(&fullname)
                     .map(|existing| existing != &peer)
@@ -280,7 +294,12 @@ fn handle_event(
                     peers.insert(fullname, peer.clone());
                     drop(peers);
 
-                    for cb in on_found.lock().unwrap().iter() {
+                    // Snapshot callbacks so user code never holds the mutex —
+                    // a panic inside a callback can only poison the mutex
+                    // briefly; `lock_safe` will recover on the next call.
+                    let callbacks: Vec<PeerFoundCallback> =
+                        lock_safe(on_found).iter().cloned().collect();
+                    for cb in callbacks.iter() {
                         cb(peer.clone());
                     }
                 }
@@ -293,12 +312,14 @@ fn handle_event(
         }
 
         ServiceEvent::ServiceRemoved(_svc_type, fullname) => {
-            let mut peers = known_peers.lock().unwrap();
+            let mut peers = lock_safe(known_peers);
             if let Some(peer) = peers.remove(&fullname) {
                 info!(device_id = %peer.device_id, "mDNS peer lost");
                 drop(peers);
 
-                for cb in on_lost.lock().unwrap().iter() {
+                let callbacks: Vec<PeerLostCallback> =
+                    lock_safe(on_lost).iter().cloned().collect();
+                for cb in callbacks.iter() {
                     cb(peer.device_id.clone());
                 }
             }
@@ -618,6 +639,57 @@ mod tests {
         handle.abort();
         let _ = handle.await;
 
-        println!("Found peers during integration test: {:?}", found.lock().unwrap());
+        tracing::debug!(
+            peers = ?found.lock().unwrap(),
+            "Found peers during integration test"
+        );
+    }
+
+    // ── poison-tolerance ─────────────────────────────────────────────────────
+
+    /// best-prac HIGH #6 — a panic inside a user callback must not permanently
+    /// break the discovery service. Even if the inner Mutex gets poisoned,
+    /// subsequent operations on the service must continue to work.
+    #[test]
+    fn discovery_mutex_survives_callback_panic() {
+        let svc = Arc::new(DiscoveryService::new());
+
+        // Register a callback that always panics.
+        svc.on_peer_found(|_peer| {
+            panic!("intentional callback panic for poison-tolerance test");
+        });
+
+        // Manually poison the on_found mutex by invoking the panicking
+        // callback while we hold the lock. We do this in a sub-thread so the
+        // panic does not abort the test process.
+        let svc_clone = Arc::clone(&svc);
+        let _ = std::thread::spawn(move || {
+            // Snapshot then invoke under the lock to guarantee poisoning.
+            let guard = svc_clone.on_found.lock().unwrap();
+            for cb in guard.iter() {
+                cb(PeerInfo {
+                    device_id: "deadbeef".to_string(),
+                    device_name: "Panic".to_string(),
+                    ip_addrs: vec!["127.0.0.1".parse().unwrap()],
+                    port: 1,
+                });
+            }
+        })
+        .join();
+
+        // The mutex is now poisoned. Verify all public APIs that touch it
+        // still work via `lock_safe`.
+        assert_eq!(svc.peers().len(), 0, "peers() must work after poison");
+
+        // Adding another callback must not panic.
+        svc.on_peer_found(|_| {});
+
+        // Registering must succeed too.
+        svc.register(12345, "id", "Name")
+            .expect("register must succeed after poison");
+
+        // And `lock_safe` directly returns a usable guard.
+        let guard = lock_safe(&svc.on_found);
+        assert_eq!(guard.len(), 2, "callback list survives poisoning");
     }
 }
