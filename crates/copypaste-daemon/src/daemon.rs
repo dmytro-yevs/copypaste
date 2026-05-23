@@ -67,7 +67,16 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
 
     // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
     let _p2p_handle: Option<p2p::P2pHandle> = if std::env::var("COPYPASTE_P2P").as_deref() == Ok("1") {
-        let device_id = uuid::Uuid::new_v4();
+        // Persistent device_id: regenerating on every restart would break P2P
+        // pairing and cloud peer recognition (arch LOW #24). Read from disk,
+        // creating + writing a fresh UUID v4 on first run.
+        let device_id = match load_or_create_device_id() {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!("device_id load/create failed ({e}); using ephemeral UUID");
+                uuid::Uuid::new_v4()
+            }
+        };
         let device_name = std::env::var("HOSTNAME")
             .or_else(|_| std::env::var("COMPUTERNAME"))
             .unwrap_or_else(|_| "CopyPaste".to_string());
@@ -442,4 +451,104 @@ fn load_config() -> AppConfig {
         }
         cfg
     })
+}
+
+/// Loads the persistent device_id from disk, creating it on first run.
+///
+/// Fixes arch LOW #24: previously the daemon regenerated a fresh UUID on
+/// every restart, which broke P2P pairing and confused cloud peers. We now
+/// persist a UUID v4 to `app_support_dir()/device_id` (or
+/// `COPYPASTE_DEVICE_ID_PATH` when set) and chmod the file to `0o600` on
+/// Unix so it is not world-readable.
+///
+/// On parse failure of an existing file we log + regenerate rather than
+/// erroring — corrupt state should not block daemon startup.
+#[tracing::instrument(name = "load_or_create_device_id")]
+fn load_or_create_device_id() -> anyhow::Result<uuid::Uuid> {
+    let path = paths::device_id_path()?;
+
+    if let Ok(contents) = std::fs::read_to_string(&path) {
+        let trimmed = contents.trim();
+        match uuid::Uuid::parse_str(trimmed) {
+            Ok(id) => {
+                tracing::info!(device_id = %id, "loaded persistent device_id");
+                return Ok(id);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "device_id file unparsable, regenerating"
+                );
+            }
+        }
+    }
+
+    // Ensure parent dir exists before writing.
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let id = uuid::Uuid::new_v4();
+    std::fs::write(&path, id.to_string())?;
+
+    // Restrict to owner-only on Unix.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        if let Err(e) = std::fs::set_permissions(&path, perms) {
+            tracing::warn!(
+                path = %path.display(),
+                error = %e,
+                "could not chmod device_id to 0600"
+            );
+        }
+    }
+
+    tracing::info!(device_id = %id, path = %path.display(), "created persistent device_id");
+    Ok(id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// arch LOW #24 regression: the device_id must survive restarts.
+    /// Two consecutive calls to `load_or_create_device_id` with the same
+    /// backing file must return the same UUID.
+    #[test]
+    fn device_id_persists_across_restart() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("device_id");
+
+        // SAFETY: env mutation is process-global. We use a unique tmpdir path
+        // so parallel tests don't collide on the value, and we restore the
+        // previous value after the test.
+        let prev = std::env::var_os("COPYPASTE_DEVICE_ID_PATH");
+        unsafe { std::env::set_var("COPYPASTE_DEVICE_ID_PATH", &path); }
+
+        let first = load_or_create_device_id().expect("first call must succeed");
+        assert!(path.exists(), "device_id file must be written on first call");
+
+        let second = load_or_create_device_id().expect("second call must succeed");
+
+        // Restore env before assertions so a failure doesn't leak state.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_DEVICE_ID_PATH", v),
+                None => std::env::remove_var("COPYPASTE_DEVICE_ID_PATH"),
+            }
+        }
+
+        assert_eq!(first, second, "device_id must persist across restarts");
+
+        // On Unix the file must be 0o600.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "device_id file must be chmod 0600");
+        }
+    }
 }

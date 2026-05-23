@@ -93,6 +93,20 @@ pub fn config_path() -> PathBuf {
     app_support_dir().join("config.toml")
 }
 
+/// Returns the path to the persistent device-id file.
+///
+/// The file stores a UUID v4 string used to identify this device for P2P
+/// pairing and cloud-sync. It must persist across daemon restarts so peers
+/// can re-recognise this device — see arch LOW #24.
+///
+/// Honours `COPYPASTE_DEVICE_ID_PATH` for tests.
+pub fn device_id_path() -> Result<PathBuf, PathsError> {
+    if let Ok(p) = std::env::var("COPYPASTE_DEVICE_ID_PATH") {
+        return Ok(PathBuf::from(p));
+    }
+    Ok(try_app_support_dir()?.join("device_id"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
