@@ -1,6 +1,11 @@
 # Build artifacts
 /target/
 
+# Multi-platform build outputs (per-platform binaries).
+# Ignore everything under builds/ EXCEPT .gitkeep so the directory is tracked.
+builds/*
+!builds/.gitkeep
+
 # Ruflo/claude-flow runtime
 .swarm/
 .claude-flow/
@@ -17,3 +22,6 @@ CLAUDE.md
 
 # OS
 .DS_Store
+
+# Personal status reports (ephemeral, not version-controlled)
+reports/
