@@ -48,3 +48,5 @@ tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
 # Required for SinkExt on Framed streams in disconnect tests
 futures-util = { workspace = true, features = ["sink"] }
+# Network interface enumeration for network_scan tests (already transitive via mdns-sd).
+if-addrs = "0.15"
