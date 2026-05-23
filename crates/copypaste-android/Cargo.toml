@@ -45,4 +45,4 @@ uniffi = { version = "0.27", features = ["build"] }
 
 [dev-dependencies]
 # Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+
-tempfile = ">=3.0, <3.14"
+tempfile = ">=3.0, <3.28"

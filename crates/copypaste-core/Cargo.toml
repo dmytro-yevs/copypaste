@@ -35,7 +35,7 @@ image.workspace = true
 
 [dev-dependencies]
 # Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+
-tempfile = ">=3.0, <3.14"
+tempfile = ">=3.0, <3.28"
 criterion.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 hkdf.workspace = true
@@ -44,7 +44,7 @@ sha2.workspace = true
 # unification keeps these out of prod builds because production `image`
 # dep above is pinned to ["png", "tiff"]). Used by tests/image_formats.rs
 # to round-trip JPEG / GIF synthetic fixtures.
-image = { version = ">=0.25, <0.25.10", default-features = false, features = ["png", "tiff", "jpeg", "gif"] }
+image = { version = ">=0.25, <0.25.11", default-features = false, features = ["png", "tiff", "jpeg", "gif"] }
 serde_json.workspace = true
 # Audit HIGH #1 (encrypt.rs): env-var-mutating tests for the legacy
 # empty-AAD fallback MUST serialise — concurrent env::set_var on different

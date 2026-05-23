@@ -18,7 +18,7 @@ criterion.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 # tempfile pinned to match copypaste-core dev-deps (Rust 1.75 MSRV).
-tempfile = ">=3.0, <3.14"
+tempfile = ">=3.0, <3.28"
 
 [[bench]]
 name = "encryption"

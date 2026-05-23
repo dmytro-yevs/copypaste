@@ -56,7 +56,7 @@ tracing = "0.1"
 thiserror = "1"
 # Misc
 # Pin to <1.21 retained for now; MSRV bumped to 1.86 (getrandom 0.4 OK), relax post-beta.
-uuid = { version = ">=1.0, <1.21", features = ["v4"] }
+uuid = { version = ">=1.0, <1.24", features = ["v4"] }
 # Async runtime
 tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "macros", "signal", "sync", "time"] }
 # Serialization
@@ -64,7 +64,7 @@ serde_json = "1"
 # Image processing
 # Pin >=0.25, <0.25.10 — 0.25.10 requires Rust 1.88 (MSRV is 1.86). 0.25.x fixes CVEs in 0.24.
 # Transitive `tiff` crate moves from 0.9 → 0.11 (also CVE-fixed).
-image = { version = ">=0.25, <0.25.10", default-features = false, features = ["png", "tiff"] }
+image = { version = ">=0.25, <0.25.11", default-features = false, features = ["png", "tiff"] }
 # macOS clipboard
 objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSString", "NSData"] }
@@ -76,13 +76,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Rotating file appender for daemon logs
 tracing-appender = "0.2"
 # home dir (pin retained from Rust 1.75 era; safe to relax post-beta now MSRV=1.86)
-home = "=0.5.9"
+home = "=0.5.12"
 # platform config / data dirs
 dirs = "5"
 # error handling
 anyhow = "1"
 # CLI argument parsing (pin retained; relax post-beta now MSRV=1.86 supports edition2024)
-clap = { version = ">=4.0, <4.5.40", features = ["derive"] }
+clap = { version = ">=4.0, <4.6.2", features = ["derive"] }
 # Base64 encoding
 base64 = "0.22"
 # HTTP client. Old `<0.12` ceiling dropped now we follow stable. 0.12 pulls
