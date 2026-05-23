@@ -245,6 +245,45 @@ fn main() -> Result<()> {
         });
     }
 
+    // --- v0.3 in-app updater (Homebrew Cask, ADR-012) ---------------------
+    //
+    // Periodically asks `brew outdated --cask copypaste` if a newer version
+    // is published. For v0.3 we log the outcome; a follow-up wire-up will
+    // surface a banner / tray-menu badge through a Slint `updates-available`
+    // property. The check is macOS-only because the daemon is macOS-only;
+    // gating with `cfg!(target_os = "macos")` keeps cross-compile / CI on
+    // other hosts free of spurious `brew` calls.
+    #[cfg(target_os = "macos")]
+    std::thread::spawn(|| {
+        use copypaste_ui::updater::{self, SystemRunner, UpdateStatus};
+        loop {
+            match updater::check_for_update(&SystemRunner) {
+                UpdateStatus::UpdateAvailable(info) => {
+                    // TODO(v0.3-followup): hook into Slint `updates-available`
+                    // property + tray-menu "Update to vX" item.
+                    eprintln!(
+                        "[updater] update available: {} → {}",
+                        info.current_version, info.latest_version
+                    );
+                }
+                UpdateStatus::UpToDate => {
+                    eprintln!("[updater] up to date");
+                }
+                UpdateStatus::BrewNotInstalled => {
+                    eprintln!(
+                        "[updater] brew not installed; in-app auto-update unavailable"
+                    );
+                    // No point in retrying every 24h if brew is absent.
+                    break;
+                }
+                UpdateStatus::CheckFailed(e) => {
+                    eprintln!("[updater] check failed: {e}");
+                }
+            }
+            std::thread::sleep(updater::CHECK_INTERVAL);
+        }
+    });
+
     // Initial load on startup
     {
         let window_weak = window.as_weak();

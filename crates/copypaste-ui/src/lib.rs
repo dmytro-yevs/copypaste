@@ -16,6 +16,7 @@
 pub mod fingerprint;
 pub mod settings;
 pub mod tray_menu;
+pub mod updater;
 pub mod windows;
 
 pub use settings::{AppSettings, HistoryLimit, PairedDevice};
@@ -30,4 +31,8 @@ pub use fingerprint::{
     format_fingerprint_long,
     format_fingerprint_truncated,
     is_valid_fingerprint,
+};
+pub use updater::{
+    apply_update, check_for_update, CommandRunner, SystemRunner, UpdateInfo, UpdateStatus,
+    CHECK_INTERVAL,
 };
