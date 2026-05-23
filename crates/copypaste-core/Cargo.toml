@@ -23,6 +23,7 @@ toml.workspace = true
 regex.workspace = true
 unicode-normalization.workspace = true
 tracing.workspace = true
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json"] }
 thiserror.workspace = true
 uuid.workspace = true
 image.workspace = true
@@ -39,6 +40,7 @@ sha2.workspace = true
 # dep above is pinned to ["png", "tiff"]). Used by tests/image_formats.rs
 # to round-trip JPEG / GIF synthetic fixtures.
 image = { version = ">=0.25, <0.25.10", default-features = false, features = ["png", "tiff", "jpeg", "gif"] }
+serde_json.workspace = true
 
 [[bench]]
 name = "crypto"

@@ -1,6 +1,7 @@
 pub mod config;
 pub mod crypto;
 pub mod image;
+pub mod logging;
 pub mod sensitive;
 pub mod storage;
 
