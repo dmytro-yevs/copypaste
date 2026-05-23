@@ -115,6 +115,79 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
     Ok(())
 }
 
+/// Atomically insert a clipboard item AND its FTS5 plaintext index
+/// inside a single transaction.
+///
+/// Why this exists: calling `insert_item` followed by `upsert_fts` from
+/// the daemon ingest path means a crash (panic, SIGKILL, power-cut)
+/// between the two writes leaves a row in `clipboard_items` with no
+/// matching `clipboard_fts` entry. Search misses that row forever — and
+/// because the FTS table is a virtual table, there is no foreign key /
+/// cascade we can lean on to repair the inconsistency.
+///
+/// Wrapping both writes in `Connection::unchecked_transaction()` makes
+/// the pair atomic: either both succeed and are visible, or neither is.
+///
+/// `plaintext_for_fts` is the already-decrypted text the caller wants
+/// indexed for search. Pass an empty string to skip FTS indexing (e.g.
+/// for image items that have no searchable text — though in practice
+/// the daemon should just call `insert_item` directly in that case).
+///
+/// TODO(daemon-owner): existing daemon ingest paths still call
+/// `insert_item` + `upsert_fts` as two separate steps. Switch them to
+/// this new fn to close the crash-window. We intentionally do NOT
+/// modify daemon.rs from this scope — another agent owns that file.
+pub fn insert_item_with_fts(
+    db: &Database,
+    item: &ClipboardItem,
+    plaintext_for_fts: &str,
+) -> Result<(), ItemsError> {
+    let conn = db.conn();
+    // `unchecked_transaction` lets us run a tx over a `&Connection`
+    // (vs. `transaction()` which needs `&mut Connection`). It's safe
+    // here because `&Database` already serialises external access.
+    let tx = conn.unchecked_transaction()?;
+    tx.execute(
+        "INSERT INTO clipboard_items
+         (id, item_id, content_type, content, content_nonce, blob_ref,
+          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+          content_hash, origin_device_id)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+        params![
+            item.id,
+            item.item_id,
+            item.content_type,
+            item.content,
+            item.content_nonce,
+            item.blob_ref,
+            item.is_sensitive as i64,
+            item.is_synced as i64,
+            item.lamport_ts,
+            item.wall_time,
+            item.expires_at,
+            item.app_bundle_id,
+            item.content_hash,
+            item.origin_device_id,
+        ],
+    )?;
+    if !plaintext_for_fts.is_empty() {
+        // FTS5 does not support ON CONFLICT; DELETE + INSERT is the
+        // upsert pattern. The DELETE is a no-op for a brand-new row but
+        // keeps this fn correct if a caller ever re-uses it for an
+        // update path.
+        tx.execute(
+            "DELETE FROM clipboard_fts WHERE id = ?1",
+            params![item.id],
+        )?;
+        tx.execute(
+            "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, ?2)",
+            params![item.id, plaintext_for_fts],
+        )?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
 /// Stamp `origin_device_id` on every row that currently carries the empty
 /// default (pre-v3 rows, or rows inserted before the daemon knew its device
 /// id). Idempotent — rows with a non-empty origin are left alone so items
@@ -526,6 +599,70 @@ mod tests {
         // Verify expired returns 0 (pinned item not deleted)
         let removed = delete_expired(&db, 99999).unwrap();
         assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn insert_item_with_fts_writes_both_atomically() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        let id = item.id.clone();
+
+        insert_item_with_fts(&db, &item, "hello clipboard world").unwrap();
+
+        let row_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(row_count, 1, "item row must be present");
+
+        let fts_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_count, 1, "FTS row must be present");
+
+        // Search round-trip — confirms the FTS index actually points at
+        // the same id and is searchable.
+        let results = search_items(&db, "clipboard", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, id);
+    }
+
+    #[test]
+    fn insert_item_with_fts_skips_fts_on_empty_text() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        let id = item.id.clone();
+
+        insert_item_with_fts(&db, &item, "").unwrap();
+
+        let row_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(row_count, 1, "item row inserted even when FTS skipped");
+
+        let fts_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_count, 0, "FTS row skipped for empty plaintext");
     }
 
     #[test]
