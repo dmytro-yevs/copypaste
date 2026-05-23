@@ -35,6 +35,8 @@ cargo build -p copypaste-bench --benches
 
 # Run one bench (HTML report → target/criterion/).
 cargo bench -p copypaste-bench --bench encryption
+cargo bench -p copypaste-bench --bench ipc_roundtrip
+cargo bench -p copypaste-bench --bench cli_parse
 
 # Run everything.
 cargo bench -p copypaste-bench

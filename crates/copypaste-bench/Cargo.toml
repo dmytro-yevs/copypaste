@@ -10,8 +10,11 @@ description = "Beta-bonus criterion benchmark harness for CopyPaste"
 
 [dev-dependencies]
 copypaste-core = { path = "../copypaste-core" }
+copypaste-ipc = { path = "../copypaste-ipc" }
 copypaste-sync = { path = "../copypaste-sync" }
+clap = { workspace = true, features = ["derive"] }
 criterion.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 # tempfile pinned to match copypaste-core dev-deps (Rust 1.75 MSRV).
 tempfile = ">=3.0, <3.14"
@@ -30,4 +33,12 @@ harness = false
 
 [[bench]]
 name = "sync"
+harness = false
+
+[[bench]]
+name = "ipc_roundtrip"
+harness = false
+
+[[bench]]
+name = "cli_parse"
 harness = false
