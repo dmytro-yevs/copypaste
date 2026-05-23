@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.0-dev] — Unreleased
+
+v0.3 development branch. Cut from release/v0.2.0-beta after Wave 5 verify-gate.
+See docs/release/v0.3-plan.md for scope.
+
 ## [0.1.0-alpha.1] — 2026-05-23
 
 ### Added
