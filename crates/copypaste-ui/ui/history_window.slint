@@ -3,7 +3,7 @@
 // User clicks an item to paste it back to the system clipboard.
 // Settings button opens the app configuration panel.
 
-import { ScrollView, Button, HorizontalBox, VerticalBox, ListView } from "std-widgets.slint";
+import { ScrollView, Button, HorizontalBox, VerticalBox, ListView, LineEdit } from "std-widgets.slint";
 
 struct HistoryItem {
     id: string,
@@ -22,16 +22,23 @@ struct HistoryItem {
 }
 
 export component HistoryWindow inherits Window {
-    title: "CopyPaste History";
+    title: @tr("CopyPaste History");
     width: 480px;
     height: 600px;
     background: #1e1e2e;
 
     // Bindable state — updated from Rust
     in property <[HistoryItem]> items;
-    in property <string> status-text: "Ready";
+    in property <string> status-text: @tr("Ready");
     in property <bool> loading: false;
     in property <int> total-count: 0;
+
+    // beta-bonus (slint-search): live search query. Two-way bound to the
+    // search LineEdit; Rust reads it via `get_search_query()` when the
+    // debounced `search-changed(string)` callback fires (200 ms after the
+    // last keystroke). Filtering itself is done locally on `items` so a
+    // single IPC call backs many keystrokes — no IPC concurrency issues.
+    in-out property <string> search-query: "";
 
     // Callbacks fired to Rust
     callback item-clicked(string);   // id of clicked item
@@ -39,6 +46,29 @@ export component HistoryWindow inherits Window {
     callback load-next-page();
     callback load-prev-page();
     callback settings-requested();  // open settings panel
+    // beta-bonus (slint-search): fired 200 ms after the user stops typing
+    // in the search field. The Rust handler re-filters the cached page
+    // (see `AppState::last_page_items`) and swaps the visible model.
+    callback search-changed(string);
+
+    // beta-bonus (slint-search): 200 ms debounce timer. Restarts on every
+    // keystroke (`edited` handler in `search-input` below) and only fires
+    // `search-changed` once the user pauses — matches the spec's debounce
+    // requirement while keeping the per-keystroke handler cheap.
+    debounce-timer := Timer {
+        interval: 200ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            search-changed(root.search-query);
+        }
+    }
+
+    // beta-bonus (slint-search): filtering itself is performed Rust-side
+    // (`filter_history_items` in `windows.rs`) because Slint 1.8 strings
+    // lack `to-lower-case` / `contains` expressions. The Rust handler
+    // swaps the `items` model when `search-changed` fires, so the
+    // ListView below always renders an already-filtered slice.
 
     VerticalBox {
         padding: 8px;
@@ -50,7 +80,7 @@ export component HistoryWindow inherits Window {
             height: 36px;
 
             Text {
-                text: "Clipboard History";
+                text: @tr("Clipboard History");
                 font-size: 16px;
                 color: #cdd6f4;
                 vertical-alignment: center;
@@ -58,14 +88,29 @@ export component HistoryWindow inherits Window {
             }
 
             Button {
-                text: "Refresh";
+                text: @tr("Refresh");
                 enabled: !loading;
                 clicked => { refresh-requested(); }
             }
 
             Button {
-                text: "⚙ Settings";
+                // Gear glyph prefixed before the localised "Settings" label so
+                // the icon stays put while the word flips with the locale.
+                text: "⚙ " + @tr("Settings");
                 clicked => { settings-requested(); }
+            }
+        }
+
+        // beta-bonus (slint-search): search input. `edited` fires on every
+        // keystroke and (re)starts the 200 ms debounce timer; the Rust
+        // handler then re-filters `items` once the user pauses.
+        search-input := LineEdit {
+            placeholder-text: "Search history...";
+            text <=> root.search-query;
+            height: 28px;
+            edited(text) => {
+                debounce-timer.running = false;
+                debounce-timer.running = true;
             }
         }
 
@@ -86,7 +131,7 @@ export component HistoryWindow inherits Window {
             if loading : Rectangle {
                 background: #181825;
                 Text {
-                    text: "Loading…";
+                    text: @tr("Loading…");
                     color: #a6adc8;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -96,7 +141,7 @@ export component HistoryWindow inherits Window {
             if !loading && items.length == 0 : Rectangle {
                 background: transparent;
                 Text {
-                    text: "No clipboard items.\nCopy something to get started.";
+                    text: @tr("No clipboard items.\nCopy something to get started.");
                     color: #6c7086;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -137,7 +182,7 @@ export component HistoryWindow inherits Window {
                                 image-fit: contain;
                             }
                             if item.thumb-width == 0 : Text {
-                                text: "IMG";
+                                text: @tr("IMG");
                                 color: #fab387;
                                 font-size: 11px;
                                 horizontal-alignment: center;
@@ -204,11 +249,17 @@ export component HistoryWindow inherits Window {
             height: 32px;
 
             Button {
+                // TODO(i18n): "← Prev" composite not in lang/*.po — add a
+                // matching msgid (or split arrow into a separate Text) before
+                // wrapping in @tr.
                 text: "← Prev";
                 clicked => { load-prev-page(); }
             }
 
             Text {
+                // TODO(i18n): pluralisation needed — Slint's @tr does not yet
+                // expose ngettext. Defer until a singular/plural helper lands;
+                // leave the English template visible across locales for now.
                 text: total-count > 0 ? total-count + " items total" : "";
                 color: #6c7086;
                 font-size: 11px;
@@ -218,7 +269,7 @@ export component HistoryWindow inherits Window {
             }
 
             Button {
-                text: "Next →";
+                text: @tr("Next →");
                 clicked => { load-next-page(); }
             }
         }

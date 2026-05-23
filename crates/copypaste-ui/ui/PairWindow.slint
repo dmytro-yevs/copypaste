@@ -18,7 +18,7 @@ component SectionTitle inherits Text {
 }
 
 export component PairWindow inherits Window {
-    title: "CopyPaste — Pair Device";
+    title: @tr("CopyPaste — Pair Device");
     preferred-width: 520px;
     preferred-height: 580px;
     min-width: 400px;
@@ -62,7 +62,7 @@ export component PairWindow inherits Window {
                 alignment: space-between;
 
                 Text {
-                    text: "Pair Device";
+                    text: @tr("Pair Device");
                     font-size: 17px;
                     font-weight: 700;
                     color: #cdd6f4;
@@ -80,7 +80,7 @@ export component PairWindow inherits Window {
                 VerticalLayout {
                     spacing: 10px;
 
-                    SectionTitle { text: "YOUR DEVICE FINGERPRINT"; }
+                    SectionTitle { text: @tr("YOUR DEVICE FINGERPRINT"); }
 
                     Rectangle {
                         border-radius: 10px;
@@ -94,7 +94,7 @@ export component PairWindow inherits Window {
                             alignment: center;
 
                             Text {
-                                text: root.own-fingerprint == "" ? "Generating…" : root.own-fingerprint;
+                                text: root.own-fingerprint == "" ? @tr("Generating…") : root.own-fingerprint;
                                 color: #89b4fa;
                                 font-size: 17px;
                                 font-weight: 700;
@@ -115,13 +115,14 @@ export component PairWindow inherits Window {
                                     padding: 16px;
 
                                     Text {
-                                        text: "QR code will appear here";
+                                        text: @tr("QR code will appear here");
                                         color: #6c7086;
                                         font-size: 13px;
                                         horizontal-alignment: center;
                                     }
 
                                     Text {
+                                        // TODO(i18n): "(coming soon)" not in lang/*.po — add msgid then wrap in @tr.
                                         text: "(coming soon)";
                                         color: #45475a;
                                         font-size: 11px;
@@ -137,13 +138,13 @@ export component PairWindow inherits Window {
                 VerticalLayout {
                     spacing: 10px;
 
-                    SectionTitle { text: "PAIR NEW DEVICE"; }
+                    SectionTitle { text: @tr("PAIR NEW DEVICE"); }
 
                     VerticalLayout {
                         spacing: 8px;
 
                         peer-field := LineEdit {
-                            placeholder-text: "Enter peer fingerprint (hex)";
+                            placeholder-text: @tr("Enter peer fingerprint (hex)");
                             text <=> root.peer-input;
                             edited(text) => {
                                 root.peer-input = text;
@@ -160,7 +161,7 @@ export component PairWindow inherits Window {
                         HorizontalLayout {
                             alignment: end;
                             Button {
-                                text: "Pair";
+                                text: @tr("Pair");
                                 primary: true;
                                 enabled: root.input-valid;
                                 clicked => { root.pair(root.peer-input); }
@@ -169,7 +170,7 @@ export component PairWindow inherits Window {
 
                         // Beta W3.2 — password field for PAKE pairing.
                         password-field := LineEdit {
-                            placeholder-text: "Shared password (min 6 chars)";
+                            placeholder-text: @tr("Shared password (min 6 chars)");
                             input-type: password;
                             text <=> root.password-input;
                             edited(text) => {
@@ -191,7 +192,7 @@ export component PairWindow inherits Window {
                         HorizontalLayout {
                             alignment: end;
                             Button {
-                                text: "Pair with Password";
+                                text: @tr("Pair with Password");
                                 primary: true;
                                 enabled: root.input-valid && root.password-valid;
                                 clicked => {
@@ -223,7 +224,7 @@ export component PairWindow inherits Window {
                 VerticalLayout {
                     spacing: 10px;
 
-                    SectionTitle { text: "PAIRED DEVICES"; }
+                    SectionTitle { text: @tr("PAIRED DEVICES"); }
 
                     if root.paired-devices.length == 0: Rectangle {
                         border-radius: 8px;
@@ -239,7 +240,7 @@ export component PairWindow inherits Window {
                             padding: 8px;
 
                             Text {
-                                text: "No peers discovered.";
+                                text: @tr("No peers discovered.");
                                 color: #cdd6f4;
                                 font-size: 13px;
                                 font-weight: 600;
@@ -247,7 +248,7 @@ export component PairWindow inherits Window {
                             }
 
                             Text {
-                                text: "Ensure other device is on same Wi-Fi and running CopyPaste.";
+                                text: @tr("Ensure other device is on same Wi-Fi and running CopyPaste.");
                                 color: #6c7086;
                                 font-size: 12px;
                                 horizontal-alignment: center;
@@ -271,7 +272,7 @@ export component PairWindow inherits Window {
                                 spacing: 4px;
 
                                 Text {
-                                    text: device.name == "" ? "Unknown Device" : device.name;
+                                    text: device.name == "" ? @tr("Unknown Device") : device.name;
                                     color: #cdd6f4;
                                     font-size: 14px;
                                     font-weight: 600;
@@ -287,7 +288,7 @@ export component PairWindow inherits Window {
                             }
 
                             Button {
-                                text: "Remove";
+                                text: @tr("Remove");
                                 clicked => { root.remove-peer(device.fingerprint); }
                             }
                         }
@@ -311,7 +312,7 @@ export component PairWindow inherits Window {
                 alignment: end;
 
                 Button {
-                    text: "Close";
+                    text: @tr("Close");
                     clicked => { root.close(); }
                 }
             }

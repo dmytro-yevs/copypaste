@@ -27,7 +27,7 @@ component FieldLabel inherits Text {
 }
 
 export component SettingsWindow inherits Window {
-    title: "CopyPaste — Settings";
+    title: @tr("CopyPaste — Settings");
     preferred-width: 560px;
     preferred-height: 620px;
     min-width: 420px;
@@ -43,7 +43,7 @@ export component SettingsWindow inherits Window {
     in-out property <string> supabase-url:    "";
     in-out property <string> supabase-key:    "";
     in-out property <bool>   sync-connected:  false;
-    in-out property <string> sync-status-msg: "Not connected";
+    in-out property <string> sync-status-msg: @tr("Not connected");
 
     in-out property <string> app-version:        "0.1.0";
     in-out property <string> device-name:        "";
@@ -80,7 +80,7 @@ export component SettingsWindow inherits Window {
                 alignment: space-between;
 
                 Text {
-                    text: "Settings";
+                    text: @tr("Settings");
                     font-size: 17px;
                     font-weight: 700;
                     color: #cdd6f4;
@@ -99,13 +99,13 @@ export component SettingsWindow inherits Window {
                 VerticalLayout {
                     spacing: 14px;
 
-                    SectionTitle { text: "GENERAL"; }
+                    SectionTitle { text: @tr("GENERAL"); }
 
                     // Launch at Login
                     HorizontalLayout {
                         alignment: space-between;
                         spacing: 8px;
-                        FieldLabel { text: "Launch at Login"; }
+                        FieldLabel { text: @tr("Launch at Login"); }
                         CheckBox { checked <=> root.launch-at-login; }
                     }
 
@@ -113,7 +113,7 @@ export component SettingsWindow inherits Window {
                     HorizontalLayout {
                         alignment: space-between;
                         spacing: 8px;
-                        FieldLabel { text: "Private Mode"; }
+                        FieldLabel { text: @tr("Private Mode"); }
                         CheckBox { checked <=> root.private-mode; }
                     }
 
@@ -123,9 +123,13 @@ export component SettingsWindow inherits Window {
 
                         HorizontalLayout {
                             alignment: space-between;
-                            FieldLabel { text: "History Size"; }
+                            FieldLabel { text: @tr("History Size"); }
                             Text {
-                                text: root.history-size == 0   ? "Unlimited"
+                                // TODO(i18n): "50 items" / "100 items" / "500 items" need
+                                // plural-aware msgids (ngettext). Wrap "Unlimited" which
+                                // already exists in lang/*.po; defer the numeric labels
+                                // until plural support lands.
+                                text: root.history-size == 0   ? @tr("Unlimited")
                                     : root.history-size == 50  ? "50 items"
                                     : root.history-size == 500 ? "500 items"
                                     : "100 items";
@@ -155,7 +159,7 @@ export component SettingsWindow inherits Window {
                     HorizontalLayout {
                         alignment: end;
                         Button {
-                            text: "Clear History";
+                            text: @tr("Clear History");
                             clicked => { root.clear-history(); }
                         }
                     }
@@ -167,11 +171,11 @@ export component SettingsWindow inherits Window {
                 VerticalLayout {
                     spacing: 14px;
 
-                    SectionTitle { text: "SYNC"; }
+                    SectionTitle { text: @tr("SYNC"); }
 
                     VerticalLayout {
                         spacing: 6px;
-                        FieldLabel { text: "Supabase URL"; }
+                        FieldLabel { text: @tr("Supabase URL"); }
                         LineEdit {
                             placeholder-text: "https://your-project.supabase.co";
                             text <=> root.supabase-url;
@@ -181,7 +185,7 @@ export component SettingsWindow inherits Window {
 
                     VerticalLayout {
                         spacing: 6px;
-                        FieldLabel { text: "Anon Key"; }
+                        FieldLabel { text: @tr("Anon Key"); }
                         LineEdit {
                             placeholder-text: "eyJ…";
                             text <=> root.supabase-key;
@@ -213,7 +217,7 @@ export component SettingsWindow inherits Window {
                         }
 
                         Button {
-                            text: root.sync-connected ? "Disconnect" : "Connect";
+                            text: root.sync-connected ? @tr("Disconnect") : @tr("Connect");
                             clicked => {
                                 if (root.sync-connected) {
                                     root.disconnect-supabase();
@@ -231,7 +235,7 @@ export component SettingsWindow inherits Window {
                 VerticalLayout {
                     spacing: 10px;
 
-                    SectionTitle { text: "SHORTCUTS"; }
+                    SectionTitle { text: @tr("SHORTCUTS"); }
 
                     for entry in root.shortcuts: HorizontalLayout {
                         alignment: space-between;
@@ -268,11 +272,11 @@ export component SettingsWindow inherits Window {
                 VerticalLayout {
                     spacing: 14px;
 
-                    SectionTitle { text: "ABOUT"; }
+                    SectionTitle { text: @tr("ABOUT"); }
 
                     HorizontalLayout {
                         alignment: space-between;
-                        FieldLabel { text: "Version"; }
+                        FieldLabel { text: @tr("Version"); }
                         Text {
                             text: root.app-version;
                             color: #a6adc8;
@@ -283,16 +287,16 @@ export component SettingsWindow inherits Window {
 
                     VerticalLayout {
                         spacing: 6px;
-                        FieldLabel { text: "Device Name"; }
+                        FieldLabel { text: @tr("Device Name"); }
                         LineEdit {
                             text <=> root.device-name;
-                            placeholder-text: "My Mac";
+                            placeholder-text: @tr("My Mac");
                         }
                     }
 
                     VerticalLayout {
                         spacing: 6px;
-                        FieldLabel { text: "Device Fingerprint"; }
+                        FieldLabel { text: @tr("Device Fingerprint"); }
                         Rectangle {
                             border-radius: 6px;
                             background: #181825;
@@ -330,12 +334,12 @@ export component SettingsWindow inherits Window {
                 spacing: 12px;
 
                 Button {
-                    text: "Cancel";
+                    text: @tr("Cancel");
                     clicked => { root.close(); }
                 }
 
                 Button {
-                    text: "Save";
+                    text: @tr("Save");
                     primary: true;
                     clicked => { root.save(); }
                 }

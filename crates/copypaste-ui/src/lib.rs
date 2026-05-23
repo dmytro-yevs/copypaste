@@ -23,7 +23,7 @@ pub use tray_menu::{
     MenuEntry, RecentItem, TrayAction, TrayMenuHandle, TrayMenuState,
     MAX_PREVIEW_CHARS, MAX_RECENT_ITEMS,
 };
-pub use windows::{SettingsWindowHandle, PairWindowHandle};
+pub use windows::{SettingsWindowHandle, PairWindowHandle, SearchableHistoryItem, filter_history_items};
 pub use fingerprint::{
     format_fingerprint,
     format_fingerprint_short,

@@ -17,7 +17,9 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 home.workspace = true
-slint.workspace = true
+# Beta-bonus i18n: `gettext` feature exposes `slint::init_translations!` and
+# runtime msgid lookup against `.mo` catalogs under `lang/<locale>/LC_MESSAGES`.
+slint = { workspace = true, features = ["gettext"] }
 copypaste-ipc = { path = "../copypaste-ipc" }
 
 [build-dependencies]
