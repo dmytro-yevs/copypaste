@@ -18,7 +18,7 @@
 #
 # Pinned action versions (no @master or @v0 refs):
 #   actions/checkout@v4
-#   actions/upload-artifact@v4
+#   actions/upload-artifact@v7
 #   dtolnay/rust-toolchain@stable
 #   Swatinem/rust-cache@v2
 #   peter-evans/commit-comment@v3
@@ -86,7 +86,7 @@ jobs:
           ls -la nightly-out/
 
       - name: Upload macOS nightly DMG
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: copypaste-nightly-macos-${{ steps.date.outputs.date }}.dmg
           path: nightly-out/copypaste-nightly-macos-${{ steps.date.outputs.date }}.dmg
@@ -143,7 +143,7 @@ jobs:
           ls -la nightly-out/ || true
 
       - name: Upload Android nightly artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: copypaste-nightly-android-${{ steps.date.outputs.date }}
           path: nightly-out/*
