@@ -263,9 +263,7 @@ fn pool_thread_local_isolation() {
                     .expect("update tid");
 
                 // Read back: this conn must see only its own tid.
-                let mut stmt = conn
-                    .prepare("SELECT tid FROM t_iso")
-                    .expect("prepare read");
+                let mut stmt = conn.prepare("SELECT tid FROM t_iso").expect("prepare read");
                 let rows: Vec<i64> = stmt
                     .query_map([], |r| r.get::<_, i64>(0))
                     .expect("query temp")

@@ -55,7 +55,10 @@ mod tests {
     #[test]
     fn core_version_is_non_empty() {
         let v = core_version();
-        assert!(!v.is_empty(), "CARGO_PKG_VERSION must resolve at compile time");
+        assert!(
+            !v.is_empty(),
+            "CARGO_PKG_VERSION must resolve at compile time"
+        );
         // Sanity check that it looks semver-ish (contains at least one dot).
         assert!(v.contains('.'), "expected semver-style version, got {v}");
     }
@@ -74,7 +77,10 @@ mod tests {
         let bad = UNIFFI_ABI_VERSION.wrapping_add(1);
         let err = check_compatibility(bad).expect_err("mismatched ABI must error");
         match err {
-            VersionError::Incompatible { rust_abi, kotlin_abi } => {
+            VersionError::Incompatible {
+                rust_abi,
+                kotlin_abi,
+            } => {
                 assert_eq!(rust_abi, UNIFFI_ABI_VERSION);
                 assert_eq!(kotlin_abi, bad);
             }

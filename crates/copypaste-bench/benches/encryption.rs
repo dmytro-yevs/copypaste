@@ -41,7 +41,9 @@ fn bench_decrypt(c: &mut Criterion) {
             BenchmarkId::from_parameter(label),
             &(nonce, ciphertext),
             |b, (n, ct)| {
-                b.iter(|| decrypt_item(black_box(ct), black_box(n), black_box(&KEY)).expect("decrypt"));
+                b.iter(|| {
+                    decrypt_item(black_box(ct), black_box(n), black_box(&KEY)).expect("decrypt")
+                });
             },
         );
     }
@@ -56,7 +58,8 @@ fn bench_roundtrip(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::from_parameter(label), &plaintext, |b, p| {
             b.iter(|| {
                 let (n, ct) = encrypt_item(black_box(p), black_box(&KEY)).expect("encrypt");
-                let pt = decrypt_item(black_box(&ct), black_box(&n), black_box(&KEY)).expect("decrypt");
+                let pt =
+                    decrypt_item(black_box(&ct), black_box(&n), black_box(&KEY)).expect("decrypt");
                 black_box(pt);
             });
         });

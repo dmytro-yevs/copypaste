@@ -4,7 +4,9 @@
 //! certificate fingerprint is SHA-256(DER bytes) encoded as lowercase hex —
 //! this is the device identity exchanged out-of-band during pairing.
 
-use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, IsCa, PKCS_ECDSA_P256_SHA256};
+use rcgen::{
+    Certificate, CertificateParams, DistinguishedName, DnType, IsCa, PKCS_ECDSA_P256_SHA256,
+};
 use sha2::Digest;
 use thiserror::Error;
 
@@ -77,7 +79,10 @@ mod tests {
         let cert = SelfSignedCert::generate("device-abc").unwrap();
         let fp = cert.fingerprint();
         assert_eq!(fp.len(), 64, "SHA-256 hex fingerprint must be 64 chars");
-        assert!(fp.chars().all(|c| c.is_ascii_hexdigit()), "fingerprint must be hex");
+        assert!(
+            fp.chars().all(|c| c.is_ascii_hexdigit()),
+            "fingerprint must be hex"
+        );
     }
 
     #[test]
@@ -97,6 +102,9 @@ mod tests {
     fn fingerprint_of_empty_bytes_is_sha256_of_empty() {
         // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
         let fp = fingerprint_of(&[]);
-        assert_eq!(fp, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(
+            fp,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
     }
 }

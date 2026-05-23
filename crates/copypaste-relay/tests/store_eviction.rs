@@ -72,14 +72,8 @@ fn prune_expired_removes_items_past_ttl() {
         .unwrap()
         .as_secs();
     for w in [100u64, 200, 300] {
-        s.push_item(
-            &device_id(),
-            "text".into(),
-            B64.encode(b"hi"),
-            w,
-            10 * 1024,
-        )
-        .unwrap();
+        s.push_item(&device_id(), "text".into(), B64.encode(b"hi"), w, 10 * 1024)
+            .unwrap();
     }
     assert_eq!(s.stats().1, 3);
 
@@ -153,8 +147,14 @@ fn prune_expired_partial_eviction() {
         .unwrap();
 
     // Insert one "old" item, sleep briefly, then one "fresh" item.
-    s.push_item(&device_id(), "text".into(), B64.encode(b"old"), 1, 10 * 1024)
-        .unwrap();
+    s.push_item(
+        &device_id(),
+        "text".into(),
+        B64.encode(b"old"),
+        1,
+        10 * 1024,
+    )
+    .unwrap();
     std::thread::sleep(Duration::from_millis(1100));
     s.push_item(
         &device_id(),

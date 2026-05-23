@@ -106,7 +106,10 @@ pub struct ClipboardMonitor {
 
 impl ClipboardMonitor {
     pub fn new(max_text_bytes: u64) -> Self {
-        Self { last_change_count: -1, max_text_bytes }
+        Self {
+            last_change_count: -1,
+            max_text_bytes,
+        }
     }
 
     /// Poll for new clipboard content. Returns `Some` only if the pasteboard changed.
@@ -186,7 +189,13 @@ impl ClipboardMonitor {
                     }
                 }
 
-                (count, text, image_bytes, had_image_alongside_text, unsupported_kinds)
+                (
+                    count,
+                    text,
+                    image_bytes,
+                    had_image_alongside_text,
+                    unsupported_kinds,
+                )
             };
 
             if count == self.last_change_count {
@@ -216,9 +225,7 @@ impl ClipboardMonitor {
             }
 
             if had_image_alongside_text {
-                tracing::info!(
-                    "clipboard had text+image; text wins (image dropped this poll)"
-                );
+                tracing::info!("clipboard had text+image; text wins (image dropped this poll)");
             }
 
             if let Some(text) = text {
@@ -292,13 +299,19 @@ mod tests {
 
     #[test]
     fn too_large_error_on_oversized_text() {
-        let err = ClipboardError::TooLarge { max: 10, actual: 50 };
+        let err = ClipboardError::TooLarge {
+            max: 10,
+            actual: 50,
+        };
         assert!(err.to_string().contains("50"));
     }
 
     #[test]
     fn image_too_large_error_message() {
-        let err = ClipboardError::ImageTooLarge { max: 1000, actual: 2000 };
+        let err = ClipboardError::ImageTooLarge {
+            max: 1000,
+            actual: 2000,
+        };
         let msg = err.to_string();
         assert!(msg.contains("2000"));
         assert!(msg.contains("1000"));

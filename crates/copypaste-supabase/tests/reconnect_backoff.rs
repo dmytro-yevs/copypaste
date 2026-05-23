@@ -209,8 +209,7 @@ async fn jitter_within_10_percent_window() {
 #[tokio::test(start_paused = true)]
 async fn max_retries_then_gives_up_with_error() {
     let max_retries: u32 = 10;
-    let mut state =
-        BackoffState::new(Duration::from_secs(1), Duration::from_secs(60), max_retries);
+    let mut state = BackoffState::new(Duration::from_secs(1), Duration::from_secs(60), max_retries);
 
     // First `max_retries` calls must yield a delay.
     for i in 0..max_retries {

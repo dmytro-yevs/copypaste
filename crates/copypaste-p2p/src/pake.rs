@@ -36,8 +36,8 @@ use opaque_ke::rand::rngs::OsRng;
 use opaque_ke::{
     ClientLogin, ClientLoginFinishParameters, ClientRegistration,
     ClientRegistrationFinishParameters, CredentialFinalization, CredentialRequest,
-    CredentialResponse, RegistrationRequest, RegistrationResponse, RegistrationUpload,
-    ServerLogin, ServerLoginStartParameters, ServerRegistration, ServerSetup,
+    CredentialResponse, RegistrationRequest, RegistrationResponse, RegistrationUpload, ServerLogin,
+    ServerLoginStartParameters, ServerRegistration, ServerSetup,
 };
 use sha2::Sha256;
 use thiserror::Error;
@@ -188,8 +188,7 @@ impl PasswordFile {
             .try_into()
             .map_err(|_| PakeError::Protocol("server setup > 64 KiB".into()))?;
 
-        let mut serialized =
-            Vec::with_capacity(1 + 2 + setup_bytes.len() + reg_bytes.len());
+        let mut serialized = Vec::with_capacity(1 + 2 + setup_bytes.len() + reg_bytes.len());
         serialized.push(PASSWORD_FILE_VERSION);
         serialized.extend_from_slice(&setup_len.to_be_bytes());
         serialized.extend_from_slice(&setup_bytes);
@@ -277,11 +276,7 @@ impl PakeInitiator {
             .map_err(|e| PakeError::WireFormat(format!("CredentialResponse: {e}")))?;
 
         let Self { state, password } = self;
-        let result = state.finish(
-            &password,
-            resp,
-            ClientLoginFinishParameters::default(),
-        );
+        let result = state.finish(&password, resp, ClientLoginFinishParameters::default());
         // Zero the password copy now that we are done with it.
         let mut pw = password;
         for b in pw.iter_mut() {
@@ -337,13 +332,10 @@ impl PakeResponder {
     pub fn finish(self, client_final: &[u8]) -> Result<SessionKey, PakeError> {
         let fin = CredentialFinalization::deserialize(client_final)
             .map_err(|e| PakeError::WireFormat(format!("CredentialFinalization: {e}")))?;
-        let result = self
-            .state
-            .finish(fin)
-            .map_err(|e| match e {
-                opaque_ke::errors::ProtocolError::InvalidLoginError => PakeError::InvalidPassword,
-                other => PakeError::Protocol(format!("server login finish: {other}")),
-            })?;
+        let result = self.state.finish(fin).map_err(|e| match e {
+            opaque_ke::errors::ProtocolError::InvalidLoginError => PakeError::InvalidPassword,
+            other => PakeError::Protocol(format!("server login finish: {other}")),
+        })?;
         let key = session_key_to_array(result.session_key.as_slice())?;
         Ok(SessionKey(key))
     }
@@ -397,8 +389,7 @@ mod tests {
         let pf = PasswordFile::register("the-right-one").expect("register");
 
         let (client, msg1) = PakeInitiator::new("the-wrong-one").expect("client new");
-        let (server, msg2) =
-            PakeResponder::respond(&pf, &msg1).expect("server respond proceeds");
+        let (server, msg2) = PakeResponder::respond(&pf, &msg1).expect("server respond proceeds");
         // Client `finish` is the first place OPAQUE detects mismatch — it
         // surfaces `InvalidPassword` because the OPRF output doesn't decrypt
         // the envelope.
@@ -413,7 +404,10 @@ mod tests {
         // server must also reject. Feed garbage of the right shape.
         let garbage = vec![0u8; 128];
         let server_res = server.finish(&garbage);
-        assert!(server_res.is_err(), "server must reject forged finalization");
+        assert!(
+            server_res.is_err(),
+            "server must reject forged finalization"
+        );
     }
 
     /// HKDF subkey derivation must be deterministic and salt-separated.

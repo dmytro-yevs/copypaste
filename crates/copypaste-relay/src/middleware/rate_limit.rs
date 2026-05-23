@@ -75,6 +75,9 @@ mod tests {
     fn per_device_rate_is_approx_60_per_minute() {
         // 1 req/s * 60s = 60 steady-state.
         let steady_per_minute = PER_DEVICE_PER_SECOND * 60;
-        assert_eq!(steady_per_minute, 60, "per-device steady-state must be 60 req/min");
+        assert_eq!(
+            steady_per_minute, 60,
+            "per-device steady-state must be 60 req/min"
+        );
     }
 }

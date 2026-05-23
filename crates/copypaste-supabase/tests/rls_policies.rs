@@ -36,8 +36,7 @@ fn repo_root() -> PathBuf {
 
 fn read_sql(rel: &str) -> String {
     let path = repo_root().join(rel);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }
 
 /// Lowercase + collapse all internal whitespace runs (incl. newlines) to a
@@ -133,10 +132,7 @@ fn each_policy_block_contains_scoping_clause() {
     let n = normalise(&body);
 
     // Find every "create policy" cut point.
-    let cut_points: Vec<usize> = n
-        .match_indices("create policy ")
-        .map(|(i, _)| i)
-        .collect();
+    let cut_points: Vec<usize> = n.match_indices("create policy ").map(|(i, _)| i).collect();
     assert!(
         cut_points.len() >= 4,
         "expected at least 4 `create policy` declarations, got {}",

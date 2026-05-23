@@ -109,10 +109,7 @@ fn export_json_writes_valid_array_of_history_items() {
     // already bound (bind() above is synchronous), so this is paranoia.
     thread::sleep(Duration::from_millis(20));
 
-    let (ok, _stdout, stderr) = run_cli(
-        &sock,
-        &["export", "--output", out_file.to_str().unwrap()],
-    );
+    let (ok, _stdout, stderr) = run_cli(&sock, &["export", "--output", out_file.to_str().unwrap()]);
     assert!(ok, "export failed: {stderr}");
     assert!(out_file.exists(), "export did not create output file");
 
@@ -160,10 +157,7 @@ fn export_to_existing_file_refuses_without_force() {
     spawn_mock_daemon(&sock, canned_list_response_3_items());
     thread::sleep(Duration::from_millis(20));
 
-    let (ok, _stdout, stderr) = run_cli(
-        &sock,
-        &["export", "--output", out_file.to_str().unwrap()],
-    );
+    let (ok, _stdout, stderr) = run_cli(&sock, &["export", "--output", out_file.to_str().unwrap()]);
 
     assert!(!ok, "export over existing file must fail without --force");
     assert!(
@@ -214,10 +208,7 @@ fn import_json_roundtrip_count_matches() {
     //    daemon (see import.rs); no second mock is needed. When import gains
     //    daemon support, spawn a second mock_daemon here that accepts N store
     //    requests and returns `{"ok": true}` for each.
-    let (ok_i, stdout_i, stderr_i) = run_cli(
-        &sock,
-        &["import", export_file.to_str().unwrap()],
-    );
+    let (ok_i, stdout_i, stderr_i) = run_cli(&sock, &["import", export_file.to_str().unwrap()]);
     assert!(ok_i, "import step failed: {stderr_i}");
 
     // The stub prints `found N items in <file>` — match the 3 items from the
@@ -239,10 +230,7 @@ fn import_invalid_json_returns_clear_error() {
     // No mock daemon: import.rs parses the file before any IPC, so a missing
     // socket would only matter if parsing succeeded. We deliberately point at
     // a nonexistent socket to prove parse-time errors short-circuit cleanly.
-    let (ok, _stdout, stderr) = run_cli(
-        &sock,
-        &["import", bad_file.to_str().unwrap()],
-    );
+    let (ok, _stdout, stderr) = run_cli(&sock, &["import", bad_file.to_str().unwrap()]);
     assert!(!ok, "import of malformed JSON must exit non-zero");
     // The CLI's main wraps errors as `copypaste: <err>`. The underlying parse
     // error comes from serde_json and contains `expected` / `key` / `line`.
@@ -287,11 +275,11 @@ fn import_partial_failure_continues_on_skip_flag() {
     spawn_mock_daemon(&sock, r#"{"id":"1","ok":true,"data":{"stored":true}}"#);
     thread::sleep(Duration::from_millis(20));
 
-    let (ok, stdout, stderr) = run_cli(
-        &sock,
-        &["import", mixed_file.to_str().unwrap(), "--skip"],
+    let (ok, stdout, stderr) = run_cli(&sock, &["import", mixed_file.to_str().unwrap(), "--skip"]);
+    assert!(
+        ok,
+        "import with --skip must succeed despite bad rows: {stderr}"
     );
-    assert!(ok, "import with --skip must succeed despite bad rows: {stderr}");
     assert!(
         stdout.contains("imported 2") || stdout.contains("skipped 1"),
         "import must report skip/imported counts, got: {stdout}"

@@ -21,20 +21,20 @@ impl HistoryLimit {
     /// Returns the numeric value used internally (0 = unlimited).
     pub fn as_count(self) -> usize {
         match self {
-            HistoryLimit::Fifty       => 50,
-            HistoryLimit::Hundred     => 100,
+            HistoryLimit::Fifty => 50,
+            HistoryLimit::Hundred => 100,
             HistoryLimit::FiveHundred => 500,
-            HistoryLimit::Unlimited   => 0,
+            HistoryLimit::Unlimited => 0,
         }
     }
 
     /// Build from a numeric count (0 = unlimited; nearest valid value is chosen).
     pub fn from_count(n: usize) -> Self {
         match n {
-            0          => HistoryLimit::Unlimited,
-            1..=75     => HistoryLimit::Fifty,
-            76..=300   => HistoryLimit::Hundred,
-            _          => HistoryLimit::FiveHundred,
+            0 => HistoryLimit::Unlimited,
+            1..=75 => HistoryLimit::Fifty,
+            76..=300 => HistoryLimit::Hundred,
+            _ => HistoryLimit::FiveHundred,
         }
     }
 }
@@ -43,23 +43,23 @@ impl HistoryLimit {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub launch_at_login: bool,
-    pub private_mode:    bool,
-    pub history_limit:   HistoryLimit,
-    pub supabase_url:    String,
+    pub private_mode: bool,
+    pub history_limit: HistoryLimit,
+    pub supabase_url: String,
     /// Supabase anon key — stored in memory only, persisted via Keychain by the caller.
-    pub supabase_key:    String,
-    pub device_name:     String,
+    pub supabase_key: String,
+    pub device_name: String,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             launch_at_login: false,
-            private_mode:    false,
-            history_limit:   HistoryLimit::default(),
-            supabase_url:    String::new(),
-            supabase_key:    String::new(),
-            device_name:     String::from("My Mac"),
+            private_mode: false,
+            history_limit: HistoryLimit::default(),
+            supabase_url: String::new(),
+            supabase_key: String::new(),
+            device_name: String::from("My Mac"),
         }
     }
 }
@@ -75,7 +75,7 @@ impl AppSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PairedDevice {
     /// Human-readable name (may be empty if unknown).
-    pub name:        String,
+    pub name: String,
     /// Full hex fingerprint (as returned by `DeviceKeypair::fingerprint()`).
     pub fingerprint: String,
 }
@@ -83,7 +83,7 @@ pub struct PairedDevice {
 impl PairedDevice {
     pub fn new(name: impl Into<String>, fingerprint: impl Into<String>) -> Self {
         Self {
-            name:        name.into(),
+            name: name.into(),
             fingerprint: fingerprint.into(),
         }
     }
@@ -109,9 +109,9 @@ mod tests {
 
     #[test]
     fn history_limit_from_count_boundaries() {
-        assert_eq!(HistoryLimit::from_count(50),  HistoryLimit::Fifty);
-        assert_eq!(HistoryLimit::from_count(75),  HistoryLimit::Fifty);
-        assert_eq!(HistoryLimit::from_count(76),  HistoryLimit::Hundred);
+        assert_eq!(HistoryLimit::from_count(50), HistoryLimit::Fifty);
+        assert_eq!(HistoryLimit::from_count(75), HistoryLimit::Fifty);
+        assert_eq!(HistoryLimit::from_count(76), HistoryLimit::Hundred);
         assert_eq!(HistoryLimit::from_count(100), HistoryLimit::Hundred);
         assert_eq!(HistoryLimit::from_count(300), HistoryLimit::Hundred);
         assert_eq!(HistoryLimit::from_count(301), HistoryLimit::FiveHundred);
@@ -120,10 +120,10 @@ mod tests {
 
     #[test]
     fn history_limit_as_count_all_variants() {
-        assert_eq!(HistoryLimit::Fifty.as_count(),       50);
-        assert_eq!(HistoryLimit::Hundred.as_count(),     100);
+        assert_eq!(HistoryLimit::Fifty.as_count(), 50);
+        assert_eq!(HistoryLimit::Hundred.as_count(), 100);
         assert_eq!(HistoryLimit::FiveHundred.as_count(), 500);
-        assert_eq!(HistoryLimit::Unlimited.as_count(),   0);
+        assert_eq!(HistoryLimit::Unlimited.as_count(), 0);
     }
 
     // ── AppSettings serialization ─────────────────────────────────────────────
@@ -135,19 +135,19 @@ mod tests {
         let restored: AppSettings = serde_json::from_str(&json).expect("deserialize");
         assert!(!restored.launch_at_login);
         assert!(!restored.private_mode);
-        assert_eq!(restored.history_limit,   HistoryLimit::Hundred);
-        assert_eq!(restored.device_name,     "My Mac");
+        assert_eq!(restored.history_limit, HistoryLimit::Hundred);
+        assert_eq!(restored.device_name, "My Mac");
     }
 
     #[test]
     fn app_settings_custom_values_roundtrip() {
         let s = AppSettings {
             launch_at_login: true,
-            private_mode:    true,
-            history_limit:   HistoryLimit::Unlimited,
-            supabase_url:    "https://example.supabase.co".into(),
-            supabase_key:    "secret-key".into(),
-            device_name:     "Alice's MacBook".into(),
+            private_mode: true,
+            history_limit: HistoryLimit::Unlimited,
+            supabase_url: "https://example.supabase.co".into(),
+            supabase_key: "secret-key".into(),
+            device_name: "Alice's MacBook".into(),
         };
         let json = serde_json::to_string(&s).expect("serialize");
         let r: AppSettings = serde_json::from_str(&json).expect("deserialize");

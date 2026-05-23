@@ -1,11 +1,9 @@
-use copypaste_core::{DeviceKeypair, encrypt_item, decrypt_item, detect};
 use copypaste_core::crypto::chunks::encrypt_chunks;
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use copypaste_core::{decrypt_item, detect, encrypt_item, DeviceKeypair};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 
 fn bench_keypair(c: &mut Criterion) {
-    c.bench_function("keypair_generate", |b| {
-        b.iter(DeviceKeypair::generate)
-    });
+    c.bench_function("keypair_generate", |b| b.iter(DeviceKeypair::generate));
 
     let kp = DeviceKeypair::generate();
     let peer = DeviceKeypair::generate();
@@ -13,9 +11,7 @@ fn bench_keypair(c: &mut Criterion) {
     c.bench_function("derive_enc_key", |b| {
         b.iter(|| kp.derive_enc_key(black_box(&peer_pub), "a", "b"))
     });
-    c.bench_function("local_enc_key", |b| {
-        b.iter(|| kp.local_enc_key())
-    });
+    c.bench_function("local_enc_key", |b| b.iter(|| kp.local_enc_key()));
 }
 
 fn bench_encrypt_item(c: &mut Criterion) {
@@ -46,7 +42,14 @@ fn bench_chunks(c: &mut Criterion) {
     for size in [65_536usize, 1_048_576, 10_485_760] {
         let data = vec![0xCCu8; size];
         group.bench_with_input(BenchmarkId::from_parameter(size), &data, |b, d| {
-            b.iter(|| encrypt_chunks(black_box(d), black_box(&key), black_box(&file_id), 64 * 1024))
+            b.iter(|| {
+                encrypt_chunks(
+                    black_box(d),
+                    black_box(&key),
+                    black_box(&file_id),
+                    64 * 1024,
+                )
+            })
         });
     }
     group.finish();
@@ -57,7 +60,10 @@ fn bench_sensitive_detect(c: &mut Criterion) {
         ("clean_short", "Hello world, this is normal text."),
         ("clean_10kb", &"x".repeat(10_000) as &str),
         ("aws_key", "AKIAIOSFODNN7EXAMPLE"),
-        ("jwt", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature"),
+        (
+            "jwt",
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature",
+        ),
     ];
     let mut group = c.benchmark_group("sensitive_detect");
     for (name, text) in &texts {

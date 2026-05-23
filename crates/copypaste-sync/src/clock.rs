@@ -67,7 +67,9 @@ fn warn_saturated() {
     use std::sync::OnceLock;
     static WARNED: OnceLock<()> = OnceLock::new();
     WARNED.get_or_init(|| {
-        tracing::warn!("lamport clock saturated at u64::MAX — subsequent ticks/observes are no-ops");
+        tracing::warn!(
+            "lamport clock saturated at u64::MAX — subsequent ticks/observes are no-ops"
+        );
     });
 }
 

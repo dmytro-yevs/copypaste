@@ -17,8 +17,7 @@ fn main() -> anyhow::Result<()> {
     // The shared helper lives in `copypaste-core::logging` so the same rotation
     // policy applies to any future binary (CLI long-running modes, agents…).
     let log_dir = paths::log_dir();
-    let _log_guard =
-        copypaste_core::logging::init_with_file_rotation(&log_dir, "copypaste-daemon");
+    let _log_guard = copypaste_core::logging::init_with_file_rotation(&log_dir, "copypaste-daemon");
 
     let support_dir = paths::app_support_dir();
     std::fs::create_dir_all(&support_dir)?;
@@ -78,12 +77,7 @@ fn run_macos() -> anyhow::Result<()> {
 
     // Give the daemon a moment to drain in-flight work then shut down the runtime.
     rt.block_on(async {
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(3),
-            daemon_handle,
-        )
-        .await
-        {
+        match tokio::time::timeout(std::time::Duration::from_secs(3), daemon_handle).await {
             Ok(Ok(())) => tracing::info!("daemon stopped cleanly"),
             Ok(Err(e)) => tracing::warn!("daemon join error: {e}"),
             Err(_) => tracing::warn!("daemon did not stop within 3s; forcing runtime shutdown"),

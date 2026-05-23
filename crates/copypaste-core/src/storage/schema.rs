@@ -146,10 +146,8 @@ mod tests {
         conn.execute_batch("PRAGMA user_version = 1;").unwrap();
 
         // Pre-add the column the v2 step would add → guarantees ALTER fails.
-        conn.execute_batch(
-            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;",
-        )
-        .unwrap();
+        conn.execute_batch("ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;")
+            .unwrap();
 
         let result = apply_migrations(&conn);
         assert!(result.is_err(), "migration should fail on duplicate column");

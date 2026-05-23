@@ -12,9 +12,7 @@
 //! `copypaste-sync::lib`).
 
 use copypaste_core::storage::items::ClipboardItem;
-use copypaste_sync::{
-    local_to_wire, resolve, wire_to_local, LamportClock, MergeOutcome, WireItem,
-};
+use copypaste_sync::{local_to_wire, resolve, wire_to_local, LamportClock, MergeOutcome, WireItem};
 use std::collections::HashMap;
 
 // --- helpers ---------------------------------------------------------------
@@ -88,9 +86,7 @@ fn apply(state: &mut HashMap<String, ClipboardItem>, remote: WireItem) {
 /// (id → (lamport_ts, wall_time, content)).
 /// `is_synced` is intentionally excluded — wire_to_local always flips it to
 /// true, so it carries no convergence information.
-fn snapshot(
-    state: &HashMap<String, ClipboardItem>,
-) -> Vec<(String, i64, i64, Option<Vec<u8>>)> {
+fn snapshot(state: &HashMap<String, ClipboardItem>) -> Vec<(String, i64, i64, Option<Vec<u8>>)> {
     let mut out: Vec<_> = state
         .values()
         .map(|i| (i.id.clone(), i.lamport_ts, i.wall_time, i.content.clone()))
@@ -218,7 +214,10 @@ fn causality_lamport_ordering_preserved_after_merge() {
     // dev-2 creates item-B locally (causally after A).
     let ts3 = clock_2.tick();
     let item_b = mk_local("id-B", ts3 as i64, 1100, 2);
-    assert!(ts3 > ts1, "B causally follows A — its lamport must be higher");
+    assert!(
+        ts3 > ts1,
+        "B causally follows A — its lamport must be higher"
+    );
 
     // Wire both items into a fresh "merged" replica.
     let mut merged: HashMap<String, ClipboardItem> = HashMap::new();

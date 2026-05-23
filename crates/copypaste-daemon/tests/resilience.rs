@@ -37,8 +37,8 @@
 //!   externally-injectable panic-handler / shutdown-channel by exercising
 //!   the strongest contract that is observable through the public API.
 
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -46,7 +46,7 @@ use tokio::net::UnixStream;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
 
-use copypaste_core::{ClipboardItem, Database, count_items, insert_item};
+use copypaste_core::{count_items, insert_item, ClipboardItem, Database};
 use copypaste_daemon::ipc::IpcServer;
 
 // ---------------------------------------------------------------------------
@@ -214,11 +214,8 @@ async fn concurrent_clients_no_state_corruption() {
     {
         let g = db.lock().await;
         for i in 0..N {
-            let item = ClipboardItem::new_text(
-                vec![b'x', b'_', i as u8],
-                vec![0u8; 24],
-                (i as i64) + 1,
-            );
+            let item =
+                ClipboardItem::new_text(vec![b'x', b'_', i as u8], vec![0u8; 24], (i as i64) + 1);
             ids.push(item.id.clone());
             insert_item(&g, &item).expect("seed insert");
         }
@@ -233,9 +230,8 @@ async fn concurrent_clients_no_state_corruption() {
         let sock = sock.clone();
         let id = id.clone();
         handles.push(tokio::spawn(async move {
-            let del_req = format!(
-                r#"{{"id":"del-{i}","method":"delete","params":{{"id":"{id}"}}}}"#
-            );
+            let del_req =
+                format!(r#"{{"id":"del-{i}","method":"delete","params":{{"id":"{id}"}}}}"#);
             let del_resp = ipc_roundtrip(&sock, &del_req).await;
             assert_eq!(del_resp["ok"], true, "client {i} delete: {del_resp}");
 

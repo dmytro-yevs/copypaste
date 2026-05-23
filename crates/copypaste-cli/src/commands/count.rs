@@ -1,6 +1,6 @@
-use anyhow::Result;
 use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
+use anyhow::Result;
 use std::path::Path;
 
 pub fn run(socket_path: &Path) -> Result<()> {
@@ -9,7 +9,8 @@ pub fn run(socket_path: &Path) -> Result<()> {
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
-    let count = resp.data
+    let count = resp
+        .data
         .as_ref()
         .and_then(|d| d["count"].as_u64())
         .unwrap_or(0);

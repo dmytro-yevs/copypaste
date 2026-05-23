@@ -1,7 +1,7 @@
-use rusqlite::params;
-use uuid::Uuid;
-use thiserror::Error;
 use super::db::Database;
+use rusqlite::params;
+use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum ItemsError {
@@ -96,11 +96,20 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
           content_hash, origin_device_id)
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
         params![
-            item.id, item.item_id, item.content_type,
-            item.content, item.content_nonce, item.blob_ref,
-            item.is_sensitive as i64, item.is_synced as i64,
-            item.lamport_ts, item.wall_time, item.expires_at,
-            item.app_bundle_id, item.content_hash, item.origin_device_id,
+            item.id,
+            item.item_id,
+            item.content_type,
+            item.content,
+            item.content_nonce,
+            item.blob_ref,
+            item.is_sensitive as i64,
+            item.is_synced as i64,
+            item.lamport_ts,
+            item.wall_time,
+            item.expires_at,
+            item.app_bundle_id,
+            item.content_hash,
+            item.origin_device_id,
         ],
     )?;
     Ok(())
@@ -112,7 +121,10 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
 /// received from peers preserve their original origin.
 ///
 /// Returns the number of rows updated.
-pub fn backfill_origin_device_id(db: &Database, local_device_id: &str) -> Result<usize, ItemsError> {
+pub fn backfill_origin_device_id(
+    db: &Database,
+    local_device_id: &str,
+) -> Result<usize, ItemsError> {
     let changed = db.conn().execute(
         "UPDATE clipboard_items SET origin_device_id = ?1 WHERE origin_device_id = ''",
         params![local_device_id],
@@ -145,14 +157,19 @@ pub fn find_recent_by_hash(
     }
 }
 
-pub fn get_page(db: &Database, limit: usize, offset: usize) -> Result<Vec<ClipboardItem>, ItemsError> {
+pub fn get_page(
+    db: &Database,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<ClipboardItem>, ItemsError> {
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
                 content_hash, origin_device_id
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
-    let items = stmt.query_map(params![limit as i64, offset as i64], row_to_item)?
+    let items = stmt
+        .query_map(params![limit as i64, offset as i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(items)
 }
@@ -167,7 +184,11 @@ pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
 
 /// Delete sensitive items whose `wall_time` is older than `sensitive_ttl_ms` milliseconds ago.
 /// This enforces a local auto-wipe TTL for items marked `is_sensitive = 1`.
-pub fn delete_sensitive_expired(db: &Database, now_ms: i64, sensitive_ttl_ms: i64) -> Result<usize, ItemsError> {
+pub fn delete_sensitive_expired(
+    db: &Database,
+    now_ms: i64,
+    sensitive_ttl_ms: i64,
+) -> Result<usize, ItemsError> {
     let threshold = now_ms - sensitive_ttl_ms;
     let changed = db.conn().execute(
         "DELETE FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1",
@@ -177,7 +198,8 @@ pub fn delete_sensitive_expired(db: &Database, now_ms: i64, sensitive_ttl_ms: i6
 }
 
 pub fn delete_item(db: &Database, id: &str) -> Result<(), ItemsError> {
-    db.conn().execute("DELETE FROM clipboard_items WHERE id=?1", params![id])?;
+    db.conn()
+        .execute("DELETE FROM clipboard_items WHERE id=?1", params![id])?;
     Ok(())
 }
 
@@ -191,7 +213,9 @@ pub fn pin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
 }
 
 pub fn count_items(db: &Database) -> Result<i64, ItemsError> {
-    Ok(db.conn().query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))?)
+    Ok(db
+        .conn()
+        .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))?)
 }
 
 /// Insert or replace a plaintext snippet into the FTS5 index.
@@ -199,10 +223,8 @@ pub fn count_items(db: &Database) -> Result<i64, ItemsError> {
 /// Call this once per item after `insert_item`.
 pub fn upsert_fts(db: &Database, id: &str, plaintext: &str) -> Result<(), ItemsError> {
     // FTS5 does not support ON CONFLICT; DELETE + INSERT is the correct upsert pattern.
-    db.conn().execute(
-        "DELETE FROM clipboard_fts WHERE id = ?1",
-        params![id],
-    )?;
+    db.conn()
+        .execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
     db.conn().execute(
         "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, ?2)",
         params![id, plaintext],
@@ -213,10 +235,8 @@ pub fn upsert_fts(db: &Database, id: &str, plaintext: &str) -> Result<(), ItemsE
 /// Remove an item's entry from the FTS5 index.
 /// Call this after `delete_item` or `delete_expired`.
 pub fn delete_fts(db: &Database, id: &str) -> Result<(), ItemsError> {
-    db.conn().execute(
-        "DELETE FROM clipboard_fts WHERE id = ?1",
-        params![id],
-    )?;
+    db.conn()
+        .execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
     Ok(())
 }
 
@@ -225,7 +245,11 @@ pub fn delete_fts(db: &Database, id: &str) -> Result<(), ItemsError> {
 ///
 /// Two-phase fetch: (1) query FTS5 for matching IDs ordered by rank, (2) fetch full rows from
 /// clipboard_items by IN-list, then re-sort in Rust to restore FTS rank order.
-pub fn search_items(db: &Database, query: &str, limit: usize) -> Result<Vec<ClipboardItem>, ItemsError> {
+pub fn search_items(
+    db: &Database,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<ClipboardItem>, ItemsError> {
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
@@ -260,7 +284,11 @@ pub fn search_items(db: &Database, query: &str, limit: usize) -> Result<Vec<Clip
         .collect::<Result<Vec<_>, _>>()?;
 
     // Re-sort to match FTS5 rank order (IN-list returns rows in storage order)
-    rows.sort_by_key(|item| ids.iter().position(|id| id == &item.id).unwrap_or(usize::MAX));
+    rows.sort_by_key(|item| {
+        ids.iter()
+            .position(|id| id == &item.id)
+            .unwrap_or(usize::MAX)
+    });
 
     Ok(rows)
 }
@@ -304,7 +332,9 @@ mod tests {
     #[test]
     fn pagination_returns_correct_page() {
         let db = Database::open_in_memory().unwrap();
-        for i in 0..10 { insert_item(&db, &make_item(i)).unwrap(); }
+        for i in 0..10 {
+            insert_item(&db, &make_item(i)).unwrap();
+        }
         let page1 = get_page(&db, 3, 0).unwrap();
         let page2 = get_page(&db, 3, 3).unwrap();
         assert_eq!(page1.len(), 3);
@@ -348,7 +378,8 @@ mod tests {
 
         upsert_fts(&db, &item.id, "hello world").unwrap();
 
-        let count: i64 = db.conn()
+        let count: i64 = db
+            .conn()
             .query_row(
                 "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
                 params![item.id],
@@ -359,7 +390,8 @@ mod tests {
 
         // Upsert again with different text — must not duplicate
         upsert_fts(&db, &item.id, "updated text").unwrap();
-        let count2: i64 = db.conn()
+        let count2: i64 = db
+            .conn()
             .query_row(
                 "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
                 params![item.id],
@@ -380,7 +412,8 @@ mod tests {
 
         delete_fts(&db, &item.id).unwrap();
 
-        let count: i64 = db.conn()
+        let count: i64 = db
+            .conn()
             .query_row(
                 "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
                 params![item.id],
@@ -513,18 +546,24 @@ mod tests {
         let changed = backfill_origin_device_id(&db, "local-uuid").unwrap();
         assert_eq!(changed, 1, "only the empty-origin row must be updated");
 
-        let got_a: String = db.conn().query_row(
-            "SELECT origin_device_id FROM clipboard_items WHERE id = ?1",
-            params![a.id],
-            |r| r.get(0),
-        ).unwrap();
+        let got_a: String = db
+            .conn()
+            .query_row(
+                "SELECT origin_device_id FROM clipboard_items WHERE id = ?1",
+                params![a.id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(got_a, "local-uuid");
 
-        let got_b: String = db.conn().query_row(
-            "SELECT origin_device_id FROM clipboard_items WHERE id = ?1",
-            params![b.id],
-            |r| r.get(0),
-        ).unwrap();
+        let got_b: String = db
+            .conn()
+            .query_row(
+                "SELECT origin_device_id FROM clipboard_items WHERE id = ?1",
+                params![b.id],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(got_b, "peer-xyz", "peer origin must not be overwritten");
     }
 }

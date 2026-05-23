@@ -3,9 +3,11 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[cfg(target_os = "macos")]
-use security_framework::passwords::{delete_generic_password, get_generic_password, set_generic_password};
-#[cfg(target_os = "macos")]
 use security_framework::base::Error as SfError;
+#[cfg(target_os = "macos")]
+use security_framework::passwords::{
+    delete_generic_password, get_generic_password, set_generic_password,
+};
 
 const SERVICE: &str = "com.copypaste.daemon";
 const ACCOUNT: &str = "device-secret-key";
@@ -56,7 +58,10 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
                 set_generic_password(SERVICE, ACCOUNT, &kp.secret_key_bytes())?;
                 let fp = own_fingerprint(&kp.public_key_bytes());
                 // Log only the short prefix to keep full fingerprint out of info logs.
-                tracing::info!("Generated new device keypair; fingerprint_prefix={}", &fp[..23]);
+                tracing::info!(
+                    "Generated new device keypair; fingerprint_prefix={}",
+                    &fp[..23]
+                );
                 tracing::debug!("full device fingerprint={}", fp);
                 Ok(kp)
             }

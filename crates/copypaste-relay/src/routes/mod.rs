@@ -71,15 +71,24 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
             delete(items::delete_item),
         )
         .with_state(state.clone())
-        .layer(GovernorLayer { config: per_device_conf })
-        .layer(GovernorLayer { config: per_ip_conf.clone() });
+        .layer(GovernorLayer {
+            config: per_device_conf,
+        })
+        .layer(GovernorLayer {
+            config: per_ip_conf.clone(),
+        });
 
     // ---- Device registration + info routes (per-IP limit only) -------------
     let device_routes = Router::new()
-        .route("/devices", get(list_devices_handler).post(devices::register))
+        .route(
+            "/devices",
+            get(list_devices_handler).post(devices::register),
+        )
         .route("/devices/:device_id", get(devices::get_device))
         .with_state(state)
-        .layer(GovernorLayer { config: per_ip_conf });
+        .layer(GovernorLayer {
+            config: per_ip_conf,
+        });
 
     // ---- Merge all sub-routers + shared body-limit layer -------------------
     Router::new()

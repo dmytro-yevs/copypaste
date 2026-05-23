@@ -103,7 +103,10 @@ pub fn vacuum_with_key(db_path: &Path, key: &[u8; 32], plan: Plan) -> Result<()>
         } else {
             println!("Plan:     VACUUM + REINDEX (skipped — dry-run)");
         }
-        println!("After:    {} (unchanged — dry-run)", format_size(size_before));
+        println!(
+            "After:    {} (unchanged — dry-run)",
+            format_size(size_before)
+        );
         return Ok(());
     }
 
@@ -284,7 +287,10 @@ mod tests {
         vacuum_with_key(
             &db_path,
             &key,
-            Plan { dry_run: false, reindex_only: false },
+            Plan {
+                dry_run: false,
+                reindex_only: false,
+            },
         )
         .expect("vacuum should succeed");
 
@@ -314,7 +320,10 @@ mod tests {
         vacuum_with_key(
             &db_path,
             &key,
-            Plan { dry_run: true, reindex_only: false },
+            Plan {
+                dry_run: true,
+                reindex_only: false,
+            },
         )
         .expect("dry-run should succeed");
 
@@ -350,7 +359,10 @@ mod tests {
         let err = run(
             &sock,
             fake_db,
-            Plan { dry_run: false, reindex_only: false },
+            Plan {
+                dry_run: false,
+                reindex_only: false,
+            },
         )
         .expect_err("must refuse to run while daemon is alive");
 
@@ -377,7 +389,10 @@ mod tests {
         vacuum_with_key(
             &db_path,
             &key,
-            Plan { dry_run: false, reindex_only: true },
+            Plan {
+                dry_run: false,
+                reindex_only: true,
+            },
         )
         .expect("reindex-only should succeed");
 
@@ -410,7 +425,10 @@ mod tests {
         let err = vacuum_with_key(
             &missing,
             &[0u8; 32],
-            Plan { dry_run: true, reindex_only: false },
+            Plan {
+                dry_run: true,
+                reindex_only: false,
+            },
         )
         .expect_err("missing db must error");
         assert!(format!("{err:#}").contains("does-not-exist.db"));

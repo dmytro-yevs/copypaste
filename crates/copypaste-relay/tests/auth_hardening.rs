@@ -22,6 +22,8 @@ use tower::ServiceExt;
 // attribute at the top of this file because each test binary only walks
 // part of the module graph.
 
+#[path = "../src/auth.rs"]
+mod auth;
 #[path = "../src/config.rs"]
 mod config;
 #[path = "../src/error.rs"]
@@ -30,16 +32,14 @@ mod error;
 mod models;
 #[path = "../src/quota.rs"]
 mod quota;
-#[path = "../src/state.rs"]
-mod state;
-#[path = "../src/auth.rs"]
-mod auth;
-#[path = "../src/routes/health.rs"]
-mod routes_health;
 #[path = "../src/routes/devices.rs"]
 mod routes_devices;
+#[path = "../src/routes/health.rs"]
+mod routes_health;
 #[path = "../src/routes/items.rs"]
 mod routes_items;
+#[path = "../src/state.rs"]
+mod state;
 
 use config::RelayConfig;
 use state::{AppState, RelayStore};
@@ -60,7 +60,10 @@ fn relay_router(state: AppState, config: RelayConfig) -> axum::Router {
     }
 
     axum::Router::new()
-        .route("/devices", post(routes_devices::register).get(list_devices_handler))
+        .route(
+            "/devices",
+            post(routes_devices::register).get(list_devices_handler),
+        )
         .route("/devices/:device_id", get(routes_devices::get_device))
         .with_state(state)
         .layer(axum::extract::DefaultBodyLimit::max(

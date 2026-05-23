@@ -115,8 +115,12 @@ fn is_loaded<R: CommandRunner>(runner: &mut R, uid: u32) -> Result<bool> {
 }
 
 fn user_plist_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
-    let home = fs.home_dir().ok_or_else(|| anyhow!("could not determine $HOME"))?;
-    Ok(home.join(USER_LAUNCH_AGENTS_DIR).join(format!("{LAUNCHD_LABEL}.plist")))
+    let home = fs
+        .home_dir()
+        .ok_or_else(|| anyhow!("could not determine $HOME"))?;
+    Ok(home
+        .join(USER_LAUNCH_AGENTS_DIR)
+        .join(format!("{LAUNCHD_LABEL}.plist")))
 }
 
 /// Discover the source plist that should be copied into
@@ -139,17 +143,23 @@ fn packaged_plist_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
     // Candidate 1 — inside the .app bundle (production install).
     if let Ok(exe) = fs.current_exe() {
         if let Some(bundle_resources) = exe
-            .parent()                 // .../Contents/MacOS
-            .and_then(Path::parent)   // .../Contents
+            .parent() // .../Contents/MacOS
+            .and_then(Path::parent)
+        // .../Contents
         {
-            candidates.push(bundle_resources.join("Resources").join("com.copypaste.daemon.plist"));
+            candidates.push(
+                bundle_resources
+                    .join("Resources")
+                    .join("com.copypaste.daemon.plist"),
+            );
         }
 
         // Candidate 2 — dev path: target/release/copypaste → repo/packaging/macos/...
         if let Some(repo_root) = exe
-            .parent()                 // target/release
-            .and_then(Path::parent)   // target
-            .and_then(Path::parent)   // repo root
+            .parent() // target/release
+            .and_then(Path::parent) // target
+            .and_then(Path::parent)
+        // repo root
         {
             candidates.push(repo_root.join(PACKAGED_PLIST_RELATIVE));
         }
@@ -197,7 +207,10 @@ fn packaged_plist_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
 fn friendly_launchctl_error(uid: u32, op: &str, stderr: &str) -> String {
     let s = stderr.trim();
     // Error 37 = ALREADY_BOOTSTRAPPED — the correct "already loaded" code.
-    if s.contains(": 37:") || s.contains("service already loaded") || s.contains("already bootstrapped") {
+    if s.contains(": 37:")
+        || s.contains("service already loaded")
+        || s.contains("already bootstrapped")
+    {
         return "daemon already running (launchctl error 37, ALREADY_BOOTSTRAPPED). \
                 Run `copypaste daemon restart` if you want to reload it."
             .to_string();
@@ -269,9 +282,7 @@ fn macos_start<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Result
 
     // Idempotency: bail out cleanly if already loaded.
     if is_loaded(runner, uid)? {
-        eprintln!(
-            "daemon already running (label: {LAUNCHD_LABEL}, domain: gui/{uid}). No-op."
-        );
+        eprintln!("daemon already running (label: {LAUNCHD_LABEL}, domain: gui/{uid}). No-op.");
         return Ok(());
     }
 
@@ -285,10 +296,17 @@ fn macos_start<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Result
     let domain = format!("gui/{uid}");
     let out = runner.run(
         "launchctl",
-        &["bootstrap".into(), OsString::from(&domain), plist.clone().into_os_string()],
+        &[
+            "bootstrap".into(),
+            OsString::from(&domain),
+            plist.clone().into_os_string(),
+        ],
     )?;
     if !out.success {
-        bail!("{}", friendly_launchctl_error(uid, "bootstrap", &out.stderr));
+        bail!(
+            "{}",
+            friendly_launchctl_error(uid, "bootstrap", &out.stderr)
+        );
     }
     eprintln!("daemon started (label: {LAUNCHD_LABEL}, domain: {domain})");
     Ok(())
@@ -518,7 +536,10 @@ mod tests {
                 ("launchctl".into(), "print".into()),
                 (false, String::new(), "Could not find service".into()),
             );
-            Self { calls: Vec::new(), responses }
+            Self {
+                calls: Vec::new(),
+                responses,
+            }
         }
 
         /// Override the response for a specific (program, first_arg) pair.
@@ -551,12 +572,16 @@ mod tests {
                 program.to_string(),
                 args_str.first().cloned().unwrap_or_default(),
             );
-            let (success, stdout, stderr) = self
-                .responses
-                .get(&key)
-                .cloned()
-                .unwrap_or((true, String::new(), String::new()));
-            Ok(CommandOutput { success, stdout, stderr })
+            let (success, stdout, stderr) =
+                self.responses
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or((true, String::new(), String::new()));
+            Ok(CommandOutput {
+                success,
+                stdout,
+                stderr,
+            })
         }
     }
 
@@ -655,7 +680,12 @@ mod tests {
         // Expect: `id -u`, `launchctl print gui/501/...` (idempotency probe),
         // `launchctl enable gui/501/...` (re-enable in case label was disabled),
         // then `launchctl bootstrap gui/501 <plist>`.
-        assert_eq!(runner.calls.len(), 4, "expected 4 shell-outs, got {:?}", runner.calls);
+        assert_eq!(
+            runner.calls.len(),
+            4,
+            "expected 4 shell-outs, got {:?}",
+            runner.calls
+        );
         assert_eq!(runner.calls[0].program, "id");
         assert_eq!(runner.calls[0].args, vec!["-u"]);
 
@@ -681,15 +711,17 @@ mod tests {
         let mut fs = MockFs::new().with_existing(expected_plist());
         runner.set_response("launchctl", "print", true, "", "");
 
-        dispatch(DaemonAction::Uninstall, &mut runner, &mut fs)
-            .expect("uninstall should succeed");
+        dispatch(DaemonAction::Uninstall, &mut runner, &mut fs).expect("uninstall should succeed");
 
         // bootout must have been attempted
-        let bootout_called = runner
-            .calls
-            .iter()
-            .any(|c| c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootout"));
-        assert!(bootout_called, "expected launchctl bootout, got {:?}", runner.calls);
+        let bootout_called = runner.calls.iter().any(|c| {
+            c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootout")
+        });
+        assert!(
+            bootout_called,
+            "expected launchctl bootout, got {:?}",
+            runner.calls
+        );
 
         // plist must have been removed
         assert_eq!(fs.removed, vec![expected_plist()]);
@@ -704,7 +736,9 @@ mod tests {
             .expect_err("non-macos must return error");
         let msg = err.to_string();
         assert!(
-            msg.contains("not yet wired") || msg.contains("not yet implemented") || msg.contains("unsupported"),
+            msg.contains("not yet wired")
+                || msg.contains("not yet implemented")
+                || msg.contains("unsupported"),
             "expected clear platform error, got: {msg}"
         );
     }
@@ -729,7 +763,10 @@ mod tests {
         let mut fs = MockFs::new(); // plist not registered as existing
         let err = dispatch(DaemonAction::Start, &mut runner, &mut fs)
             .expect_err("start must fail when plist missing");
-        assert!(err.to_string().contains("install"), "expected install hint, got: {err}");
+        assert!(
+            err.to_string().contains("install"),
+            "expected install hint, got: {err}"
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -817,10 +854,9 @@ mod tests {
             .expect("start must be idempotent when already loaded");
 
         // Must NOT have issued bootstrap.
-        let bootstrap_called = runner
-            .calls
-            .iter()
-            .any(|c| c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
+        let bootstrap_called = runner.calls.iter().any(|c| {
+            c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootstrap")
+        });
         assert!(
             !bootstrap_called,
             "start must not re-bootstrap when already loaded, got: {:?}",
@@ -846,11 +882,14 @@ mod tests {
             fs.files.keys().collect::<Vec<_>>()
         );
         // No bootstrap either.
-        let bootstrap_called = runner
-            .calls
-            .iter()
-            .any(|c| c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
-        assert!(!bootstrap_called, "no bootstrap expected, got: {:?}", runner.calls);
+        let bootstrap_called = runner.calls.iter().any(|c| {
+            c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootstrap")
+        });
+        assert!(
+            !bootstrap_called,
+            "no bootstrap expected, got: {:?}",
+            runner.calls
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -875,7 +914,11 @@ mod tests {
             .calls
             .iter()
             .any(|c| c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
-        assert!(bootstrap_called, "expected bootstrap, got: {:?}", runner.calls);
+        assert!(
+            bootstrap_called,
+            "expected bootstrap, got: {:?}",
+            runner.calls
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -898,7 +941,11 @@ mod tests {
             .calls
             .iter()
             .any(|c| c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
-        assert!(!bootstrap_called, "no bootstrap expected under root, got: {:?}", runner.calls);
+        assert!(
+            !bootstrap_called,
+            "no bootstrap expected under root, got: {:?}",
+            runner.calls
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -921,11 +968,8 @@ mod tests {
     fn error_5_translates_to_bootstrap_failed_with_enable_hint() {
         // Error 5 is bootstrap genuine failure (most often: label on disabled
         // list). Should mention the enable hint, NOT "already running".
-        let msg = friendly_launchctl_error(
-            501,
-            "bootstrap",
-            "Bootstrap failed: 5: Input/output error",
-        );
+        let msg =
+            friendly_launchctl_error(501, "bootstrap", "Bootstrap failed: 5: Input/output error");
         assert!(
             !msg.to_lowercase().contains("already running"),
             "error 5 must NOT be classified as 'already running', got: {msg}"
@@ -983,7 +1027,10 @@ mod tests {
     #[test]
     fn unknown_error_passes_through_with_diagnostic_hint() {
         let msg = friendly_launchctl_error(501, "bootstrap", "Something weird: 99: Mystery");
-        assert!(msg.contains("Mystery"), "original text must remain, got: {msg}");
+        assert!(
+            msg.contains("Mystery"),
+            "original text must remain, got: {msg}"
+        );
         assert!(
             msg.contains("launchctl print"),
             "diagnostic hint must be present, got: {msg}"
@@ -1001,11 +1048,14 @@ mod tests {
             .expect("stop must succeed as no-op when not loaded");
 
         // Must NOT have issued bootout.
-        let bootout_called = runner
-            .calls
-            .iter()
-            .any(|c| c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootout"));
-        assert!(!bootout_called, "no bootout expected, got: {:?}", runner.calls);
+        let bootout_called = runner.calls.iter().any(|c| {
+            c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootout")
+        });
+        assert!(
+            !bootout_called,
+            "no bootout expected, got: {:?}",
+            runner.calls
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -1076,7 +1126,10 @@ mod tests {
             .calls
             .iter()
             .any(|c| c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
-        assert!(bootstrap_called, "expected bootstrap to proceed despite enable failure");
+        assert!(
+            bootstrap_called,
+            "expected bootstrap to proceed despite enable failure"
+        );
     }
 
     // -----------------------------------------------------------------------------

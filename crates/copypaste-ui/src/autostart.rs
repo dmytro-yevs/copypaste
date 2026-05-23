@@ -139,14 +139,15 @@ where
                 // Error 5: most often means the label is still on launchd's
                 // disabled list (despite our enable attempt) or the plist is
                 // structurally invalid. Surface an actionable message.
-                let hint = if stderr_raw.contains(": 5:") || stderr_raw.contains("Input/output error") {
-                    format!(
-                        " — service may still be disabled. \
+                let hint =
+                    if stderr_raw.contains(": 5:") || stderr_raw.contains("Input/output error") {
+                        format!(
+                            " — service may still be disabled. \
                          Try `launchctl enable gui/{uid}/{LAUNCHD_LABEL}` from a Terminal."
-                    )
-                } else {
-                    String::new()
-                };
+                        )
+                    } else {
+                        String::new()
+                    };
                 return Ok(DaemonStatus::FailedToStart(format!(
                     "launchctl bootstrap {} {}: {}{}",
                     domain,
@@ -176,13 +177,16 @@ where
 // --------------------------------------------------------------------------------------------
 
 pub(crate) fn daemon_socket_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
-    let home = fs.home_dir().ok_or_else(|| anyhow!("could not determine $HOME"))?;
-    Ok(home
-        .join("Library/Application Support/CopyPaste/daemon.sock"))
+    let home = fs
+        .home_dir()
+        .ok_or_else(|| anyhow!("could not determine $HOME"))?;
+    Ok(home.join("Library/Application Support/CopyPaste/daemon.sock"))
 }
 
 pub(crate) fn user_plist_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
-    let home = fs.home_dir().ok_or_else(|| anyhow!("could not determine $HOME"))?;
+    let home = fs
+        .home_dir()
+        .ok_or_else(|| anyhow!("could not determine $HOME"))?;
     Ok(home.join(USER_LAUNCH_AGENTS_DIR).join(PLIST_FILENAME))
 }
 
@@ -204,7 +208,9 @@ pub(crate) fn bundled_plist_path<E: EnvOps>(env: &E) -> Result<PathBuf> {
 /// log paths point at the actual user. The bundled plist ships with
 /// `USERNAME` as a placeholder for log paths (see `packaging/macos/`).
 pub(crate) fn substitute_username<F: FsOps>(plist: &str, fs: &F) -> String {
-    let Some(home) = fs.home_dir() else { return plist.to_string(); };
+    let Some(home) = fs.home_dir() else {
+        return plist.to_string();
+    };
     plist.replace("/Users/USERNAME", &home.display().to_string())
 }
 
@@ -344,10 +350,8 @@ mod tests {
     impl MockRunner {
         fn with_default_uid() -> Self {
             let mut s = Self::default();
-            s.responses.insert(
-                "id -u".into(),
-                (true, "501\n".into(), String::new()),
-            );
+            s.responses
+                .insert("id -u".into(), (true, "501\n".into(), String::new()));
             s.responses.insert(
                 "launchctl bootstrap".into(),
                 (true, String::new(), String::new()),
@@ -384,12 +388,16 @@ mod tests {
                 program,
                 args_str.first().cloned().unwrap_or_default()
             );
-            let (success, stdout, stderr) = self
-                .responses
-                .get(&key)
-                .cloned()
-                .unwrap_or((true, String::new(), String::new()));
-            Ok(CommandOutput { success, stdout, stderr })
+            let (success, stdout, stderr) =
+                self.responses
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or((true, String::new(), String::new()));
+            Ok(CommandOutput {
+                success,
+                stdout,
+                stderr,
+            })
         }
     }
 
@@ -404,7 +412,10 @@ mod tests {
 
     impl TempFs {
         fn new(home: PathBuf) -> Self {
-            Self { home, files: HashMap::new() }
+            Self {
+                home,
+                files: HashMap::new(),
+            }
         }
         fn seed(&mut self, path: PathBuf, content: String) {
             self.files.insert(path, content);
@@ -500,8 +511,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let exe = fake_app_exe(tmp.path());
         let bundled = exe
-            .parent().unwrap()           // MacOS
-            .parent().unwrap()           // Contents
+            .parent()
+            .unwrap() // MacOS
+            .parent()
+            .unwrap() // Contents
             .join("Resources")
             .join(PLIST_FILENAME);
 
@@ -573,8 +586,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let exe = fake_app_exe(tmp.path());
         let bundled = exe
-            .parent().unwrap()
-            .parent().unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
             .join("Resources")
             .join(PLIST_FILENAME);
 
@@ -664,8 +679,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let exe = fake_app_exe(tmp.path());
         let bundled = exe
-            .parent().unwrap()
-            .parent().unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
             .join("Resources")
             .join(PLIST_FILENAME);
         let mut fs = TempFs::new(tmp.path().join("home"));
@@ -706,8 +723,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let exe = fake_app_exe(tmp.path());
         let bundled = exe
-            .parent().unwrap()
-            .parent().unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
             .join("Resources")
             .join(PLIST_FILENAME);
         let mut fs = TempFs::new(tmp.path().join("home"));
@@ -725,7 +744,11 @@ mod tests {
         // With always_alive socket the fast-path short-circuits before any
         // launchctl call. Verify no launchctl invocations occurred at all.
         let any_launchctl = runner.calls.iter().any(|(prog, _)| prog == "launchctl");
-        assert!(!any_launchctl, "fast-path must skip launchctl entirely, got: {:?}", runner.calls);
+        assert!(
+            !any_launchctl,
+            "fast-path must skip launchctl entirely, got: {:?}",
+            runner.calls
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -736,8 +759,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let exe = fake_app_exe(tmp.path());
         let bundled = exe
-            .parent().unwrap()
-            .parent().unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
             .join("Resources")
             .join(PLIST_FILENAME);
         let mut fs = TempFs::new(tmp.path().join("home"));

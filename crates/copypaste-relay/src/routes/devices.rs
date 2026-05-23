@@ -25,10 +25,9 @@ pub async fn register(
 ) -> Result<(StatusCode, Json<RegisterResponse>), Response> {
     // Validate device_id is a valid UUID (basic format check).
     if uuid::Uuid::parse_str(&body.device_id).is_err() {
-        return Err(RelayError::BadRequest(
-            "device_id must be a valid UUID".to_string(),
-        )
-        .into_response());
+        return Err(
+            RelayError::BadRequest("device_id must be a valid UUID".to_string()).into_response(),
+        );
     }
 
     // Per-device rate limit (security MEDIUM #13). Runs *after* UUID format
@@ -56,10 +55,9 @@ pub async fn register(
     // Validate device_name is non-empty and within reasonable length.
     let device_name = body.device_name.trim().to_string();
     if device_name.is_empty() {
-        return Err(RelayError::BadRequest(
-            "device_name must not be empty".to_string(),
-        )
-        .into_response());
+        return Err(
+            RelayError::BadRequest("device_name must not be empty".to_string()).into_response(),
+        );
     }
     if device_name.len() > 64 {
         return Err(RelayError::BadRequest(

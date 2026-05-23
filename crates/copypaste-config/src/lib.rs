@@ -139,8 +139,8 @@ impl AppConfig {
         // 3. Overlay on-disk config.json if present.
         let cfg_path = base_data_dir.join(CONFIG_FILE_NAME);
         if cfg_path.is_file() {
-            let text = std::fs::read_to_string(&cfg_path)
-                .map_err(|e| ConfigError::io(&cfg_path, e))?;
+            let text =
+                std::fs::read_to_string(&cfg_path).map_err(|e| ConfigError::io(&cfg_path, e))?;
             cfg = serde_json::from_str(&text)?;
             // If the on-disk file was written with a stale data_dir, but the
             // user explicitly overrode it via env, prefer the env value.
@@ -158,8 +158,7 @@ impl AppConfig {
     /// Persist `self` as pretty JSON at `data_dir/config.json`, creating
     /// `data_dir` if missing.
     pub fn save(&self) -> Result<(), ConfigError> {
-        std::fs::create_dir_all(&self.data_dir)
-            .map_err(|e| ConfigError::io(&self.data_dir, e))?;
+        std::fs::create_dir_all(&self.data_dir).map_err(|e| ConfigError::io(&self.data_dir, e))?;
         let path = self.data_dir.join(CONFIG_FILE_NAME);
         let json = serde_json::to_string_pretty(self)?;
         std::fs::write(&path, json).map_err(|e| ConfigError::io(&path, e))?;

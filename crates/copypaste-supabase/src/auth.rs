@@ -193,17 +193,12 @@ impl AuthClient {
                             .duration_since(UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_secs();
-                        let refresh_at = session
-                            .expires_at
-                            .saturating_sub(REFRESH_MARGIN_SECS);
+                        let refresh_at = session.expires_at.saturating_sub(REFRESH_MARGIN_SECS);
                         if now >= refresh_at {
                             // Time to refresh.
                             match self.refresh_session(&session.refresh_token).await {
                                 Ok(new) => {
-                                    info!(
-                                        "auto-refresh: new expiry = {}",
-                                        new.expires_at
-                                    );
+                                    info!("auto-refresh: new expiry = {}", new.expires_at);
                                     // Next check in expires_in - margin.
                                     new.expires_in.saturating_sub(REFRESH_MARGIN_SECS)
                                 }

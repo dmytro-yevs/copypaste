@@ -111,7 +111,10 @@ async fn happy_path_hello_have_want_items_done() {
     let peer_task = tokio::spawn(async move {
         // Receive engine HELLO, reply with our HELLO.
         let hello = peer_recv(&mut peer_side).await;
-        assert!(matches!(hello, Message::Hello { .. }), "expected HELLO first");
+        assert!(
+            matches!(hello, Message::Hello { .. }),
+            "expected HELLO first"
+        );
         peer_send(
             &mut peer_side,
             &Message::Hello {
@@ -353,7 +356,10 @@ async fn one_side_has_more_items_other_requests_via_want_then_receives_items() {
     assert_eq!(to_upsert.len(), 1);
     assert_eq!(to_upsert[0].id, "item-from-peer");
     assert_eq!(to_upsert[0].lamport_ts, peer_item.lamport_ts);
-    assert!(to_upsert[0].is_synced, "received items must be flagged synced");
+    assert!(
+        to_upsert[0].is_synced,
+        "received items must be flagged synced"
+    );
 }
 
 // ---------------------------------------------------------------------------

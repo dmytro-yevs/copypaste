@@ -224,15 +224,12 @@ async fn peer_offline_during_handshake_returns_timeout_within_5s() {
     let client = PeerTransport::from_cert(client_cert.cert_der, client_cert.key_der, client_peers);
 
     let start = Instant::now();
-    let result = tokio::time::timeout(
-        Duration::from_secs(5),
-        client.connect(addr, &bogus_fp),
-    )
-    .await;
+    let result =
+        tokio::time::timeout(Duration::from_secs(5), client.connect(addr, &bogus_fp)).await;
     let elapsed = start.elapsed();
 
-    let inner = result
-        .expect("connect must complete (with Err) within 5s — must not hang on offline peer");
+    let inner =
+        result.expect("connect must complete (with Err) within 5s — must not hang on offline peer");
     assert!(
         inner.is_err(),
         "connect to an offline peer must return Err, got Ok"

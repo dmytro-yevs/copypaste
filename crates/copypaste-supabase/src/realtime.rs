@@ -338,7 +338,10 @@ async fn run_session(
     shutdown: &Arc<Notify>,
 ) -> SessionResult {
     // Parse the URL.
-    let url = match config.ws_url.parse::<tokio_tungstenite::tungstenite::http::Uri>() {
+    let url = match config
+        .ws_url
+        .parse::<tokio_tungstenite::tungstenite::http::Uri>()
+    {
         Ok(u) => u,
         Err(e) => return SessionResult::ConnectError(format!("bad URL: {e}")),
     };
@@ -470,13 +473,14 @@ async fn handle_message(
                     // Log length + 16-byte prefix only, never the full text.
                     let bytes = text.as_bytes();
                     let take = bytes.len().min(16);
-                    let prefix = bytes[..take]
-                        .iter()
-                        .fold(String::with_capacity(take * 2), |mut acc, b| {
-                            use std::fmt::Write as _;
-                            let _ = write!(acc, "{:02x}", b);
-                            acc
-                        });
+                    let prefix =
+                        bytes[..take]
+                            .iter()
+                            .fold(String::with_capacity(take * 2), |mut acc, b| {
+                                use std::fmt::Write as _;
+                                let _ = write!(acc, "{:02x}", b);
+                                acc
+                            });
                     tracing::warn!(
                         error = %e,
                         raw_len = bytes.len(),
@@ -603,7 +607,10 @@ mod tests {
         let result = RealtimeConfig::from_env();
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("SUPABASE_URL"), "error should mention SUPABASE_URL, got: {err}");
+        assert!(
+            err.contains("SUPABASE_URL"),
+            "error should mention SUPABASE_URL, got: {err}"
+        );
     }
 
     #[test]
@@ -614,7 +621,10 @@ mod tests {
         std::env::remove_var("SUPABASE_URL");
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("SUPABASE_ANON_KEY"), "error should mention SUPABASE_ANON_KEY, got: {err}");
+        assert!(
+            err.contains("SUPABASE_ANON_KEY"),
+            "error should mention SUPABASE_ANON_KEY, got: {err}"
+        );
     }
 
     #[test]
@@ -686,7 +696,10 @@ mod tests {
         };
 
         dispatch_event(&msg, &tx, topic).await;
-        assert!(rx.try_recv().is_err(), "phx_reply should not produce a ChangeEvent");
+        assert!(
+            rx.try_recv().is_err(),
+            "phx_reply should not produce a ChangeEvent"
+        );
     }
 
     #[tokio::test]
@@ -753,8 +766,14 @@ mod tests {
         );
 
         // 3. Must still carry usable triage signal (length + prefix).
-        assert!(redacted.contains("len="), "expected length field in: {redacted}");
-        assert!(redacted.contains("prefix="), "expected prefix field in: {redacted}");
+        assert!(
+            redacted.contains("len="),
+            "expected length field in: {redacted}"
+        );
+        assert!(
+            redacted.contains("prefix="),
+            "expected prefix field in: {redacted}"
+        );
 
         // 4. The prefix is a hex string of the first 16 bytes of the canonical
         //    JSON serialisation — deterministic, so we can pin it.
@@ -783,12 +802,18 @@ mod tests {
     fn payload_redaction_handles_short_and_empty() {
         let empty = serde_json::json!({});
         let r = redact_payload(&empty);
-        assert!(r.contains("len=2"), "empty object serialises to '{{}}' (2 bytes); got: {r}");
+        assert!(
+            r.contains("len=2"),
+            "empty object serialises to '{{}}' (2 bytes); got: {r}"
+        );
 
         let tiny = serde_json::json!("x");
         let r = redact_payload(&tiny);
         // "\"x\"" → 3 bytes
-        assert!(r.contains("len=3"), "tiny string payload should be 3 bytes; got: {r}");
+        assert!(
+            r.contains("len=3"),
+            "tiny string payload should be 3 bytes; got: {r}"
+        );
     }
 
     // ── Disabled client ───────────────────────────────────────────────────────
@@ -802,9 +827,15 @@ mod tests {
             false,
         );
         let (client, _rx) = RealtimeClient::new(config);
-        let handle = client.connect().await.expect("connect should succeed even when disabled");
+        let handle = client
+            .connect()
+            .await
+            .expect("connect should succeed even when disabled");
         // When disabled, the background loop never sets running=true, so is_running is false
         // (we never stored true for a disabled client)
-        assert!(!handle.is_running(), "disabled client should not be running");
+        assert!(
+            !handle.is_running(),
+            "disabled client should not be running"
+        );
     }
 }

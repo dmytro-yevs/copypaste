@@ -22,7 +22,10 @@ use crate::ipc::IpcClient;
 fn validate_uuid(id: &str) -> Result<()> {
     // 8-4-4-4-12 hex = 36 chars with four hyphens.
     if id.len() != 36 {
-        return Err(anyhow!("invalid id: expected UUID (36 chars), got {} chars", id.len()));
+        return Err(anyhow!(
+            "invalid id: expected UUID (36 chars), got {} chars",
+            id.len()
+        ));
     }
     let bytes = id.as_bytes();
     for (i, b) in bytes.iter().enumerate() {
@@ -94,7 +97,10 @@ mod tests {
     fn pin_command_sends_correct_ipc_method() {
         let dir = tempdir().unwrap();
         let sock = dir.path().join("pin.sock");
-        let rx = mock_server(&sock, r#"{"id":"1","ok":true,"data":{"pinned":true,"id":"550e8400-e29b-41d4-a716-446655440000"}}"#);
+        let rx = mock_server(
+            &sock,
+            r#"{"id":"1","ok":true,"data":{"pinned":true,"id":"550e8400-e29b-41d4-a716-446655440000"}}"#,
+        );
         thread::sleep(std::time::Duration::from_millis(20));
 
         run_pin(&sock, VALID_UUID).unwrap();
@@ -109,7 +115,10 @@ mod tests {
     fn unpin_command_sends_correct_ipc_method() {
         let dir = tempdir().unwrap();
         let sock = dir.path().join("unpin.sock");
-        let rx = mock_server(&sock, r#"{"id":"1","ok":true,"data":{"unpinned":true,"id":"550e8400-e29b-41d4-a716-446655440000"}}"#);
+        let rx = mock_server(
+            &sock,
+            r#"{"id":"1","ok":true,"data":{"unpinned":true,"id":"550e8400-e29b-41d4-a716-446655440000"}}"#,
+        );
         thread::sleep(std::time::Duration::from_millis(20));
 
         run_unpin(&sock, VALID_UUID).unwrap();
@@ -127,12 +136,18 @@ mod tests {
         // Don't even bind — UUID validation must fail BEFORE we touch the socket.
         let err = run_pin(&sock, "not-a-uuid").unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("invalid id"), "expected clear error, got: {msg}");
+        assert!(
+            msg.contains("invalid id"),
+            "expected clear error, got: {msg}"
+        );
 
         // Same for unpin.
         let err = run_unpin(&sock, "still-not-a-uuid").unwrap_err();
         let msg = format!("{err}");
-        assert!(msg.contains("invalid id"), "expected clear error, got: {msg}");
+        assert!(
+            msg.contains("invalid id"),
+            "expected clear error, got: {msg}"
+        );
 
         // And a 36-char string with non-hex chars should also be caught.
         let bad = "ZZZe8400-e29b-41d4-a716-446655440000";

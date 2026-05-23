@@ -122,7 +122,11 @@ fn install_writes_plist_to_launch_agents_path() {
         .join("Library/LaunchAgents/com.copypaste.daemon.plist");
     assert_eq!(plist, expected, "plist path must derive from $HOME");
     assert!(plist.exists(), "plist file was not written");
-    assert_eq!(launchd::plist_path(), expected, "public plist_path() agrees");
+    assert_eq!(
+        launchd::plist_path(),
+        expected,
+        "public plist_path() agrees"
+    );
 
     // Sanity: the file we wrote actually contains the binary path we passed
     // and the canonical label, not stale content from a previous run.
@@ -171,7 +175,10 @@ fn uninstall_removes_plist_file() {
     let _guard = HomeGuard::set(tmp.path());
 
     let plist = write_plist_for_test(&PathBuf::from("/usr/local/bin/copypaste-daemon"));
-    assert!(plist.exists(), "precondition: plist exists before uninstall");
+    assert!(
+        plist.exists(),
+        "precondition: plist exists before uninstall"
+    );
 
     // uninstall() will call `launchctl unload -w <plist>` — that returns a
     // non-zero exit code because nothing ever loaded this tempdir plist,
@@ -268,12 +275,13 @@ fn install_with_invalid_program_path_returns_error() {
     // side-effect.
     match err {
         launchd::LaunchdError::Io(_) => { /* expected */ }
-        other => panic!(
-            "expected LaunchdError::Io from create_dir_all, got {other:?}"
-        ),
+        other => panic!("expected LaunchdError::Io from create_dir_all, got {other:?}"),
     }
 
     // And no plist was leaked next to the bogus HOME file.
     let leaked = bogus_home.join("Library/LaunchAgents/com.copypaste.daemon.plist");
-    assert!(!leaked.exists(), "no plist should be written on the error path");
+    assert!(
+        !leaked.exists(),
+        "no plist should be written on the error path"
+    );
 }

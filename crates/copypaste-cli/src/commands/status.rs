@@ -12,8 +12,8 @@
 //!   0 — daemon reachable and responded OK
 //!   1 — daemon not reachable, or daemon returned an error response
 
-use anyhow::Result;
 use crate::ipc::IpcClient;
+use anyhow::Result;
 use serde::Serialize;
 use std::path::Path;
 use std::time::SystemTime;
@@ -172,7 +172,9 @@ fn socket_uptime_secs(socket: &Path) -> Option<u64> {
     let meta = std::fs::metadata(socket).ok()?;
     let mtime = meta.modified().ok()?;
     let now = SystemTime::now();
-    now.duration_since(mtime).ok().map(|d| d.as_secs())
+    now.duration_since(mtime)
+        .ok()
+        .map(|d| d.as_secs())
         // If clock went backwards (NTP step), report 0 rather than panicking.
         .or(Some(0))
 }
@@ -237,7 +239,10 @@ mod tests {
             format!("Version:   {}", r.version.as_deref().unwrap()),
             format!("Uptime:    {}", format_uptime(r.uptime_secs.unwrap())),
             format!("History:   {} items", r.history.unwrap()),
-            format!("Private:   {}", if r.private_mode.unwrap() { "on" } else { "off" }),
+            format!(
+                "Private:   {}",
+                if r.private_mode.unwrap() { "on" } else { "off" }
+            ),
         ];
         assert_eq!(lines[0], "Daemon:    running");
         assert_eq!(lines[1], "Socket:    /tmp/test.sock");
@@ -266,10 +271,22 @@ mod tests {
         let off_json = serde_json::to_value(&off).expect("serialize offline");
         assert_eq!(off_json["daemon"], "not running");
         assert_eq!(off_json["socket"], "/tmp/x.sock");
-        assert!(off_json.get("version").is_none(), "version must be omitted when None");
-        assert!(off_json.get("history").is_none(), "history must be omitted when None");
-        assert!(off_json.get("uptime_secs").is_none(), "uptime must be omitted when None");
-        assert!(off_json.get("private_mode").is_none(), "private_mode must be omitted when None");
+        assert!(
+            off_json.get("version").is_none(),
+            "version must be omitted when None"
+        );
+        assert!(
+            off_json.get("history").is_none(),
+            "history must be omitted when None"
+        );
+        assert!(
+            off_json.get("uptime_secs").is_none(),
+            "uptime must be omitted when None"
+        );
+        assert!(
+            off_json.get("private_mode").is_none(),
+            "private_mode must be omitted when None"
+        );
     }
 
     /// When the socket does not exist, `probe` must produce a clean offline

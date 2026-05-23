@@ -122,11 +122,7 @@ impl RelayStore {
     pub fn metrics_snapshot(&self) -> (u64, u64, u64) {
         let items = self.items_total.load(Ordering::Relaxed);
         let evictions = self.evictions_total.load(Ordering::Relaxed);
-        let active = self
-            .sync_items
-            .values()
-            .filter(|v| !v.is_empty())
-            .count() as u64;
+        let active = self.sync_items.values().filter(|v| !v.is_empty()).count() as u64;
         (items, evictions, active)
     }
 
@@ -273,7 +269,9 @@ impl RelayStore {
 
     /// Return public info about a registered device. Bearer tokens are never included.
     pub fn get_device(&self, device_id: &str) -> Result<&DeviceRecord, RelayError> {
-        self.devices.get(device_id).ok_or(RelayError::DeviceNotFound)
+        self.devices
+            .get(device_id)
+            .ok_or(RelayError::DeviceNotFound)
     }
 
     // -----------------------------------------------------------------------
@@ -283,8 +281,16 @@ impl RelayStore {
     /// Verify that `token` matches the bearer token for `device_id`.
     /// Uses constant-time comparison to prevent timing-based token oracle attacks.
     pub fn verify_token(&self, device_id: &str, token: &str) -> Result<(), RelayError> {
-        let record = self.devices.get(device_id).ok_or(RelayError::DeviceNotFound)?;
-        if record.bearer_token.as_bytes().ct_eq(token.as_bytes()).into() {
+        let record = self
+            .devices
+            .get(device_id)
+            .ok_or(RelayError::DeviceNotFound)?;
+        if record
+            .bearer_token
+            .as_bytes()
+            .ct_eq(token.as_bytes())
+            .into()
+        {
             Ok(())
         } else {
             Err(RelayError::Unauthorized)
@@ -437,7 +443,11 @@ impl RelayStore {
     pub fn list_devices(&self) -> Vec<String> {
         let mut records: Vec<&DeviceRecord> = self.devices.values().collect();
         records.sort_by(|a, b| b.registered_at.cmp(&a.registered_at));
-        records.into_iter().take(100).map(|r| r.device_id.clone()).collect()
+        records
+            .into_iter()
+            .take(100)
+            .map(|r| r.device_id.clone())
+            .collect()
     }
 
     // -----------------------------------------------------------------------
@@ -505,24 +515,44 @@ fn hex_encode(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    fn make_store() -> RelayStore { RelayStore::new(3600) }
-    fn valid_key_b64() -> String { B64.encode([0u8; 32]) }
-    fn device_a_id() -> String { "11111111-1111-1111-1111-111111111111".to_string() }
-    fn device_b_id() -> String { "22222222-2222-2222-2222-222222222222".to_string() }
+    fn make_store() -> RelayStore {
+        RelayStore::new(3600)
+    }
+    fn valid_key_b64() -> String {
+        B64.encode([0u8; 32])
+    }
+    fn device_a_id() -> String {
+        "11111111-1111-1111-1111-111111111111".to_string()
+    }
+    fn device_b_id() -> String {
+        "22222222-2222-2222-2222-222222222222".to_string()
+    }
 
     fn unique_device_id(n: u8) -> String {
         format!("{n:02x}{n:02x}{n:02x}{n:02x}-{n:02x}{n:02x}-{n:02x}{n:02x}-{n:02x}{n:02x}-{n:02x}{n:02x}{n:02x}{n:02x}{n:02x}{n:02x}")
     }
-    fn unique_key(seed: u8) -> String { B64.encode([seed; 32]) }
+    fn unique_key(seed: u8) -> String {
+        B64.encode([seed; 32])
+    }
 
     fn push_text(store: &mut RelayStore, device_id: &str, wall_time: u64) -> i64 {
-        store.push_item(device_id, "text".to_string(), B64.encode(b"hello"), wall_time, 10 * 1024 * 1024).unwrap()
+        store
+            .push_item(
+                device_id,
+                "text".to_string(),
+                B64.encode(b"hello"),
+                wall_time,
+                10 * 1024 * 1024,
+            )
+            .unwrap()
     }
 
     #[test]
     fn register_returns_bearer_token() {
         let mut store = make_store();
-        let (token, expires_at) = store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
+        let (token, expires_at) = store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
         assert_eq!(token.len(), 32);
         assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(expires_at > 0);
@@ -531,30 +561,42 @@ mod tests {
     #[test]
     fn register_duplicate_is_conflict() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
-        let err = store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap_err();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        let err = store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap_err();
         assert!(matches!(err, RelayError::DeviceConflict));
     }
 
     #[test]
     fn verify_token_ok() {
         let mut store = make_store();
-        let (token, _) = store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
+        let (token, _) = store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
         assert!(store.verify_token(&device_a_id(), &token).is_ok());
     }
 
     #[test]
     fn verify_token_wrong_token_is_unauthorized() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
-        let err = store.verify_token(&device_a_id(), "badtoken00000000000000000000000").unwrap_err();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        let err = store
+            .verify_token(&device_a_id(), "badtoken00000000000000000000000")
+            .unwrap_err();
         assert!(matches!(err, RelayError::Unauthorized));
     }
 
     #[test]
     fn get_device_returns_correct_info() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "My Mac".into(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_a_id(), "My Mac".into(), valid_key_b64())
+            .unwrap();
         let record = store.get_device(&device_a_id()).unwrap();
         assert_eq!(record.device_id, device_a_id());
         assert_eq!(record.device_name, "My Mac");
@@ -572,7 +614,9 @@ mod tests {
     #[test]
     fn push_returns_ascending_ids() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
         let id1 = push_text(&mut store, &device_a_id(), 1000);
         let id2 = push_text(&mut store, &device_a_id(), 2000);
         assert!(id2 > id1);
@@ -581,7 +625,9 @@ mod tests {
     #[test]
     fn pull_returns_items_since_wall_time() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
         push_text(&mut store, &device_a_id(), 1000);
         push_text(&mut store, &device_a_id(), 2000);
         push_text(&mut store, &device_a_id(), 3000);
@@ -594,7 +640,9 @@ mod tests {
     #[test]
     fn pull_since_zero_returns_all() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
         push_text(&mut store, &device_a_id(), 100);
         push_text(&mut store, &device_a_id(), 200);
         let items = store.pull_items(&device_a_id(), 0).unwrap();
@@ -604,7 +652,9 @@ mod tests {
     #[test]
     fn pull_sorted_ascending_by_wall_time() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
         push_text(&mut store, &device_a_id(), 3000);
         push_text(&mut store, &device_a_id(), 1000);
         push_text(&mut store, &device_a_id(), 2000);
@@ -616,32 +666,58 @@ mod tests {
     #[test]
     fn push_rejects_unknown_content_type() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
-        let err = store.push_item(&device_a_id(), "video".to_string(), B64.encode(b"x"), 1000, 10 * 1024 * 1024).unwrap_err();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        let err = store
+            .push_item(
+                &device_a_id(),
+                "video".to_string(),
+                B64.encode(b"x"),
+                1000,
+                10 * 1024 * 1024,
+            )
+            .unwrap_err();
         assert!(matches!(err, RelayError::BadRequest(_)));
     }
 
     #[test]
     fn push_rejects_invalid_base64() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
-        let err = store.push_item(&device_a_id(), "text".to_string(), "!!!not-base64!!!".to_string(), 1000, 10 * 1024 * 1024).unwrap_err();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        let err = store
+            .push_item(
+                &device_a_id(),
+                "text".to_string(),
+                "!!!not-base64!!!".to_string(),
+                1000,
+                10 * 1024 * 1024,
+            )
+            .unwrap_err();
         assert!(matches!(err, RelayError::BadRequest(_)));
     }
 
     #[test]
     fn push_rejects_oversized_payload() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
         let big = B64.encode(b"hello world");
-        let err = store.push_item(&device_a_id(), "text".to_string(), big, 1000, 10).unwrap_err();
+        let err = store
+            .push_item(&device_a_id(), "text".to_string(), big, 1000, 10)
+            .unwrap_err();
         assert!(matches!(err, RelayError::PayloadTooLarge));
     }
 
     #[test]
     fn push_quota_prunes_oldest_item() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
         for t in 1u64..=(MAX_PUSH_ITEMS_PER_DEVICE as u64 + 1) {
             push_text(&mut store, &device_a_id(), t);
         }
@@ -661,8 +737,12 @@ mod tests {
     #[test]
     fn stats_counts_correctly() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
-        store.register_device(device_b_id(), "Device B".into(), B64.encode([1u8; 32])).unwrap();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        store
+            .register_device(device_b_id(), "Device B".into(), B64.encode([1u8; 32]))
+            .unwrap();
         let (devices, items) = store.stats();
         assert_eq!(devices, 2);
         assert_eq!(items, 0);
@@ -674,8 +754,12 @@ mod tests {
     #[test]
     fn cleanup_removes_old_inactive_devices() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
-        store.register_device(device_b_id(), "Device B".into(), B64.encode([1u8; 32])).unwrap();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        store
+            .register_device(device_b_id(), "Device B".into(), B64.encode([1u8; 32]))
+            .unwrap();
         let removed = store.cleanup_inactive_devices(0);
         assert_eq!(removed, 2);
         assert!(store.devices.is_empty());
@@ -685,8 +769,12 @@ mod tests {
     #[test]
     fn cleanup_keeps_recently_registered_devices() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
-        store.register_device(device_b_id(), "Device B".into(), B64.encode([1u8; 32])).unwrap();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        store
+            .register_device(device_b_id(), "Device B".into(), B64.encode([1u8; 32]))
+            .unwrap();
         let removed = store.cleanup_inactive_devices(u64::MAX);
         assert_eq!(removed, 0);
         assert!(store.devices.contains_key(&device_a_id()));
@@ -696,7 +784,9 @@ mod tests {
     #[test]
     fn cleanup_keeps_devices_with_items() {
         let mut store = make_store();
-        store.register_device(device_a_id(), "Device A".into(), valid_key_b64()).unwrap();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
         push_text(&mut store, &device_a_id(), 1000);
         let removed = store.cleanup_inactive_devices(0);
         assert_eq!(removed, 0, "device with items must not be removed");
@@ -706,28 +796,73 @@ mod tests {
     fn sixth_free_device_registration_fails_with_403() {
         let mut store = make_store();
         for i in 0u8..5 {
-            store.register_device_with_tier(unique_device_id(i), format!("Dev {i}"), unique_key(i), Tier::Free).unwrap();
+            store
+                .register_device_with_tier(
+                    unique_device_id(i),
+                    format!("Dev {i}"),
+                    unique_key(i),
+                    Tier::Free,
+                )
+                .unwrap();
         }
-        let err = store.register_device_with_tier(unique_device_id(5), "Dev 5".into(), unique_key(5), Tier::Free).unwrap_err();
-        assert!(matches!(err, RelayError::DeviceQuotaExceeded { limit: 5 }), "got {err:?}");
+        let err = store
+            .register_device_with_tier(
+                unique_device_id(5),
+                "Dev 5".into(),
+                unique_key(5),
+                Tier::Free,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, RelayError::DeviceQuotaExceeded { limit: 5 }),
+            "got {err:?}"
+        );
     }
 
     #[test]
     fn fifth_free_device_registration_succeeds() {
         let mut store = make_store();
         for i in 0u8..4 {
-            store.register_device_with_tier(unique_device_id(i), format!("Dev {i}"), unique_key(i), Tier::Free).unwrap();
+            store
+                .register_device_with_tier(
+                    unique_device_id(i),
+                    format!("Dev {i}"),
+                    unique_key(i),
+                    Tier::Free,
+                )
+                .unwrap();
         }
-        store.register_device_with_tier(unique_device_id(4), "Dev 4".into(), unique_key(4), Tier::Free).expect("5th free device must be accepted");
+        store
+            .register_device_with_tier(
+                unique_device_id(4),
+                "Dev 4".into(),
+                unique_key(4),
+                Tier::Free,
+            )
+            .expect("5th free device must be accepted");
     }
 
     #[test]
     fn eleventh_pro_device_registration_fails() {
         let mut store = make_store();
         for i in 0u8..10 {
-            store.register_device_with_tier(unique_device_id(i), format!("Dev {i}"), unique_key(i), Tier::Pro).unwrap();
+            store
+                .register_device_with_tier(
+                    unique_device_id(i),
+                    format!("Dev {i}"),
+                    unique_key(i),
+                    Tier::Pro,
+                )
+                .unwrap();
         }
-        let err = store.register_device_with_tier(unique_device_id(10), "Dev 10".into(), unique_key(10), Tier::Pro).unwrap_err();
+        let err = store
+            .register_device_with_tier(
+                unique_device_id(10),
+                "Dev 10".into(),
+                unique_key(10),
+                Tier::Pro,
+            )
+            .unwrap_err();
         assert!(matches!(err, RelayError::DeviceQuotaExceeded { limit: 10 }));
     }
 
@@ -735,9 +870,18 @@ mod tests {
     fn default_register_device_uses_free_tier() {
         let mut store = make_store();
         for i in 0u8..5 {
-            store.register_device_with_tier(unique_device_id(i), format!("Dev {i}"), unique_key(i), Tier::Free).unwrap();
+            store
+                .register_device_with_tier(
+                    unique_device_id(i),
+                    format!("Dev {i}"),
+                    unique_key(i),
+                    Tier::Free,
+                )
+                .unwrap();
         }
-        let err = store.register_device(unique_device_id(5), "Dev 5".into(), unique_key(5)).unwrap_err();
+        let err = store
+            .register_device(unique_device_id(5), "Dev 5".into(), unique_key(5))
+            .unwrap_err();
         assert!(matches!(err, RelayError::DeviceQuotaExceeded { limit: 5 }));
     }
 }

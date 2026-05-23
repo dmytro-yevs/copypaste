@@ -15,8 +15,8 @@ use std::process::Command;
 /// Sourced manually from `src/main.rs` `enum Commands` — if a subcommand is added
 /// to the CLI but not to the completion script, these tests fail and force an update.
 const REQUIRED_SUBCOMMANDS: &[&str] = &[
-    "list", "count", "status", "delete", "search", "copy", "watch", "export", "clear",
-    "stats", "import",
+    "list", "count", "status", "delete", "search", "copy", "watch", "export", "clear", "stats",
+    "import",
 ];
 
 fn repo_root() -> PathBuf {

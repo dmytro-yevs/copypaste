@@ -93,11 +93,13 @@ fn register_within_limit_succeeds() {
 
     // Exactly REG_LIMIT_MAX_ATTEMPTS calls must all succeed.
     for attempt in 1..=REG_LIMIT_MAX_ATTEMPTS {
-        store.check_registration_rate_limit(&id).unwrap_or_else(|retry| {
-            panic!(
+        store
+            .check_registration_rate_limit(&id)
+            .unwrap_or_else(|retry| {
+                panic!(
                 "attempt #{attempt}/{REG_LIMIT_MAX_ATTEMPTS} must succeed (retry_after={retry}s)"
             );
-        });
+            });
     }
 }
 

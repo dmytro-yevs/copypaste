@@ -11,11 +11,11 @@
 
 mod ipc_client;
 
+use anyhow::Result;
+use ipc_client::{format_wall_time, IpcClient};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use anyhow::Result;
-use ipc_client::{IpcClient, format_wall_time};
 
 // Include generated Slint bindings.
 slint::include_modules!();
@@ -64,20 +64,18 @@ fn main() -> Result<()> {
     // install. Runs in a dedicated thread — UI rendering must NOT block on
     // launchctl. See `crates/copypaste-ui/src/autostart.rs` for the flow.
     #[cfg(target_os = "macos")]
-    std::thread::spawn(|| {
-        match copypaste_ui::autostart::ensure_daemon_running() {
-            Ok(copypaste_ui::autostart::DaemonStatus::AlreadyRunning) => {
-                eprintln!("[autostart] daemon already running");
-            }
-            Ok(copypaste_ui::autostart::DaemonStatus::Started) => {
-                eprintln!("[autostart] daemon started via launchctl");
-            }
-            Ok(copypaste_ui::autostart::DaemonStatus::FailedToStart(reason)) => {
-                eprintln!("[autostart] daemon failed to start: {reason}");
-            }
-            Err(e) => {
-                eprintln!("[autostart] error: {e}");
-            }
+    std::thread::spawn(|| match copypaste_ui::autostart::ensure_daemon_running() {
+        Ok(copypaste_ui::autostart::DaemonStatus::AlreadyRunning) => {
+            eprintln!("[autostart] daemon already running");
+        }
+        Ok(copypaste_ui::autostart::DaemonStatus::Started) => {
+            eprintln!("[autostart] daemon started via launchctl");
+        }
+        Ok(copypaste_ui::autostart::DaemonStatus::FailedToStart(reason)) => {
+            eprintln!("[autostart] daemon failed to start: {reason}");
+        }
+        Err(e) => {
+            eprintln!("[autostart] error: {e}");
         }
     });
 
@@ -131,11 +129,9 @@ fn main() -> Result<()> {
                     if let Some(win) = window_weak.upgrade() {
                         match result {
                             Ok(_) => win.set_status_text(
-                                format!("Pasted: {}", &id_str[..8.min(id_str.len())]).into()
+                                format!("Pasted: {}", &id_str[..8.min(id_str.len())]).into(),
                             ),
-                            Err(e) => win.set_status_text(
-                                format!("Paste failed: {e}").into()
-                            ),
+                            Err(e) => win.set_status_text(format!("Paste failed: {e}").into()),
                         }
                     }
                 });
@@ -171,9 +167,7 @@ fn main() -> Result<()> {
                                 )
                                 .into(),
                             ),
-                            Err(e) => win.set_status_text(
-                                format!("Settings error: {e}").into()
-                            ),
+                            Err(e) => win.set_status_text(format!("Settings error: {e}").into()),
                         }
                     }
                 });
@@ -199,10 +193,8 @@ fn main() -> Result<()> {
             let q = query.to_string();
             let total = snapshot.len();
             let filtered = copypaste_ui::filter_history_items(&snapshot, &q);
-            let slint_items: Vec<HistoryItem> = filtered
-                .into_iter()
-                .map(entry_to_slint_item)
-                .collect();
+            let slint_items: Vec<HistoryItem> =
+                filtered.into_iter().map(entry_to_slint_item).collect();
             let matched = slint_items.len();
             if let Some(win) = window_weak.upgrade() {
                 let model = slint::VecModel::from(slint_items);
@@ -299,8 +291,7 @@ fn load_history_page(
     limit: u64,
     offset: u64,
 ) -> std::result::Result<ipc_client::HistoryPage, String> {
-    let mut client = IpcClient::connect(socket_path)
-        .map_err(|e| format!("daemon offline: {e}"))?;
+    let mut client = IpcClient::connect(socket_path).map_err(|e| format!("daemon offline: {e}"))?;
     client
         .history_page(limit, offset)
         .map_err(|e| e.to_string())
@@ -308,8 +299,7 @@ fn load_history_page(
 
 /// Call `paste` on the daemon.
 fn paste_item(socket_path: &std::path::Path, id: &str) -> std::result::Result<String, String> {
-    let mut client = IpcClient::connect(socket_path)
-        .map_err(|e| format!("daemon offline: {e}"))?;
+    let mut client = IpcClient::connect(socket_path).map_err(|e| format!("daemon offline: {e}"))?;
     client.paste(id).map_err(|e| e.to_string())
 }
 

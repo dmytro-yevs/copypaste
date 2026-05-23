@@ -66,8 +66,7 @@ fn current_version_constant_matches_expected() {
     let actual: Vec<String> = all.iter().map(tag_of).collect();
 
     assert_eq!(
-        actual,
-        PROTOCOL_V1_TAGS,
+        actual, PROTOCOL_V1_TAGS,
         "Protocol v1 message type surface changed. If this was intentional, \
          bump the protocol version, update PROTOCOL_V1_TAGS, and coordinate \
          a network-wide rollout."
@@ -131,10 +130,7 @@ fn decode_unknown_version_returns_specific_error_not_panic() {
     // Plausible "version = 0xFF" style — a totally unknown tag.
     let unknown_tag = br#"{"type":"FF"}"#;
     let result = Message::decode(unknown_tag);
-    assert!(
-        result.is_err(),
-        "unknown message tag 'FF' must be rejected"
-    );
+    assert!(result.is_err(), "unknown message tag 'FF' must be rejected");
 
     // Missing the discriminator entirely.
     let no_type = br#"{"device_id":"x","clock":1,"item_count":0}"#;
@@ -178,8 +174,7 @@ fn encode_then_decode_roundtrip_identity() {
 
         // Frame format: [u32 LE length][JSON bytes]
         assert!(framed.len() >= 4, "frame must include 4-byte prefix");
-        let claimed_len =
-            u32::from_le_bytes(framed[..4].try_into().expect("4 bytes")) as usize;
+        let claimed_len = u32::from_le_bytes(framed[..4].try_into().expect("4 bytes")) as usize;
         assert_eq!(
             claimed_len,
             framed.len() - 4,

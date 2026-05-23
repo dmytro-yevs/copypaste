@@ -1,6 +1,6 @@
-use anyhow::Result;
 use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
+use anyhow::Result;
 use std::path::Path;
 
 /// Enable or disable private/pause mode on the daemon.

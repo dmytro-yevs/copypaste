@@ -1,6 +1,6 @@
-use anyhow::{anyhow, Result};
 use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
+use anyhow::{anyhow, Result};
 use std::io::Write;
 use std::path::Path;
 
@@ -72,10 +72,16 @@ mod tests {
         fs::write(&path, "old contents").unwrap();
 
         let result = write_to_file(&path, "new contents", false);
-        assert!(result.is_err(), "expected error when file exists without --force");
+        assert!(
+            result.is_err(),
+            "expected error when file exists without --force"
+        );
 
         let msg = format!("{}", result.unwrap_err());
-        assert!(msg.contains("file exists"), "error message should mention 'file exists', got: {msg}");
+        assert!(
+            msg.contains("file exists"),
+            "error message should mention 'file exists', got: {msg}"
+        );
 
         // Original contents must remain untouched.
         let still = fs::read_to_string(&path).unwrap();
@@ -90,7 +96,10 @@ mod tests {
         fs::write(&path, "old contents").unwrap();
 
         let result = write_to_file(&path, "new contents", true);
-        assert!(result.is_ok(), "expected Ok when --force is set, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok when --force is set, got {result:?}"
+        );
 
         let written = fs::read_to_string(&path).unwrap();
         assert_eq!(written, "new contents");
@@ -104,7 +113,10 @@ mod tests {
         assert!(!path.exists(), "precondition: temp path must not exist");
 
         let result = write_to_file(&path, "fresh contents", false);
-        assert!(result.is_ok(), "expected Ok when target file does not exist, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok when target file does not exist, got {result:?}"
+        );
 
         let written = fs::read_to_string(&path).unwrap();
         assert_eq!(written, "fresh contents");

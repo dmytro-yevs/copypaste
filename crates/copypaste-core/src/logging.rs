@@ -128,34 +128,32 @@ pub fn init_with_file_rotation_kind(
         .with_filter(build_env_filter())
         .boxed();
 
-    let (file_layer_opt, guard): (
-        Option<Box<dyn Layer<Registry> + Send + Sync>>,
-        WorkerGuard,
-    ) = match file_appender_result {
-        Ok(file_appender) => {
-            let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-            let file_layer = fmt::layer()
-                .json()
-                .with_current_span(true)
-                .with_span_list(false)
-                .with_writer(non_blocking)
-                .with_span_events(FmtSpan::CLOSE)
-                .with_filter(build_env_filter())
-                .boxed();
-            (Some(file_layer), guard)
-        }
-        Err(e) => {
-            eprintln!(
-                "copypaste: WARNING: file log appender failed at {}: {e}; \
+    let (file_layer_opt, guard): (Option<Box<dyn Layer<Registry> + Send + Sync>>, WorkerGuard) =
+        match file_appender_result {
+            Ok(file_appender) => {
+                let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+                let file_layer = fmt::layer()
+                    .json()
+                    .with_current_span(true)
+                    .with_span_list(false)
+                    .with_writer(non_blocking)
+                    .with_span_events(FmtSpan::CLOSE)
+                    .with_filter(build_env_filter())
+                    .boxed();
+                (Some(file_layer), guard)
+            }
+            Err(e) => {
+                eprintln!(
+                    "copypaste: WARNING: file log appender failed at {}: {e}; \
                  continuing with stdout-only logging",
-                log_dir.display()
-            );
-            // Return a guard for a discarded non-blocking sink so the
-            // caller's API stays uniform.
-            let (_sink, guard) = tracing_appender::non_blocking(std::io::sink());
-            (None, guard)
-        }
-    };
+                    log_dir.display()
+                );
+                // Return a guard for a discarded non-blocking sink so the
+                // caller's API stays uniform.
+                let (_sink, guard) = tracing_appender::non_blocking(std::io::sink());
+                (None, guard)
+            }
+        };
 
     // `.with(Option<L>)` is equivalent to omitting the layer when None,
     // and identically nested when Some — keeping the subscriber type stable.

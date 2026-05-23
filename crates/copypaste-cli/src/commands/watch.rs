@@ -1,9 +1,9 @@
-use anyhow::Result;
 use crate::ipc::IpcClient;
+use anyhow::Result;
 use std::collections::HashSet;
 use std::path::Path;
-use std::time::Duration;
 use std::thread;
+use std::time::Duration;
 
 pub fn run(socket_path: &Path, interval_ms: u64) -> Result<()> {
     let mut seen_ids: HashSet<String> = HashSet::new();
@@ -26,14 +26,16 @@ pub fn run(socket_path: &Path, interval_ms: u64) -> Result<()> {
 
 fn poll_once(socket_path: &Path, seen_ids: &mut HashSet<String>, silent_first: bool) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({"id": "1", "method": "list", "params": {"limit": 20, "offset": 0}});
+    let req =
+        serde_json::json!({"id": "1", "method": "list", "params": {"limit": 20, "offset": 0}});
     let resp = client.call(&req)?;
 
     if !resp.ok {
         return Err(anyhow::anyhow!("{}", resp.error.unwrap_or_default()));
     }
 
-    let items = resp.data
+    let items = resp
+        .data
         .as_ref()
         .and_then(|d| d["items"].as_array())
         .map(|a| a.as_slice())

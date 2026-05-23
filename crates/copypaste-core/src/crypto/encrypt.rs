@@ -65,7 +65,10 @@ pub fn encrypt_item_with_aad(
     let mut nonce_bytes = [0u8; NONCE_SIZE];
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = XNonce::from(nonce_bytes);
-    let payload = Payload { msg: plaintext, aad };
+    let payload = Payload {
+        msg: plaintext,
+        aad,
+    };
     let ciphertext = cipher
         .encrypt(&nonce, payload)
         .map_err(|e| EncryptError::CipherFailed(e.to_string()))?;
@@ -92,7 +95,10 @@ pub fn decrypt_item_with_aad(
 ) -> Result<Vec<u8>, EncryptError> {
     let cipher = XChaCha20Poly1305::new(key.into());
     let nonce_x = XNonce::from(*nonce);
-    let payload = Payload { msg: ciphertext, aad };
+    let payload = Payload {
+        msg: ciphertext,
+        aad,
+    };
     match cipher.decrypt(&nonce_x, payload) {
         Ok(pt) => Ok(pt),
         Err(_) if !aad.is_empty() => {
@@ -203,8 +209,7 @@ mod tests {
         // The signature itself is the guarantee: callers handle errors via `?`
         // instead of unwinding the stack on adversarial input. We assert the
         // type-level contract: the function returns Result, not a raw tuple.
-        let result: Result<([u8; NONCE_SIZE], Vec<u8>), EncryptError> =
-            encrypt_item(b"x", &key);
+        let result: Result<([u8; NONCE_SIZE], Vec<u8>), EncryptError> = encrypt_item(b"x", &key);
         assert!(result.is_ok());
 
         // And the error variant exists and formats sensibly.

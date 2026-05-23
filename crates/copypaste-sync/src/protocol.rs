@@ -84,9 +84,7 @@ pub enum Message {
     },
 
     /// Sender delivers the requested items.
-    Items {
-        items: Vec<WireItem>,
-    },
+    Items { items: Vec<WireItem> },
 
     /// Sender signals it has finished and will not send more data.
     Done,

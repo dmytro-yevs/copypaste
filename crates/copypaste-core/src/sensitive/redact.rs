@@ -62,8 +62,8 @@ fn merge_spans(sorted: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::detector::{PatternMatch, SensitiveCategory};
+    use super::*;
 
     fn make_match(start: usize, end: usize, name: &'static str) -> PatternMatch {
         PatternMatch {
@@ -107,7 +107,10 @@ mod tests {
         let text = "AAAA middle BBBB";
         let m1 = make_match(0, 4, "a");
         let m2 = make_match(12, 16, "b");
-        assert_eq!(redact(text, &[m1, m2]), "***REDACTED*** middle ***REDACTED***");
+        assert_eq!(
+            redact(text, &[m1, m2]),
+            "***REDACTED*** middle ***REDACTED***"
+        );
     }
 
     #[test]

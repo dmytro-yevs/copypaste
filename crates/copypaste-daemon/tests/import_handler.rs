@@ -12,8 +12,8 @@
 //!   4. `import_malformed_b64_returns_error` — invalid base64 → typed
 //!      `invalid_argument` error response.
 
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;

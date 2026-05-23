@@ -128,8 +128,8 @@ mod tests {
         ];
         for code in all {
             let s = code.as_str();
-            let parsed = ErrorCode::parse(s)
-                .unwrap_or_else(|| panic!("parse failed to handle {s}"));
+            let parsed =
+                ErrorCode::parse(s).unwrap_or_else(|| panic!("parse failed to handle {s}"));
             assert_eq!(parsed, code, "round-trip mismatch for {s}");
         }
     }
@@ -177,7 +177,10 @@ mod tests {
         };
         assert_eq!(ErrorCode::NotFound.as_str(), ERR_CODE_NOT_FOUND);
         assert_eq!(ErrorCode::AuthFailed.as_str(), ERR_CODE_AUTH_FAILED);
-        assert_eq!(ErrorCode::InvalidArgument.as_str(), ERR_CODE_INVALID_ARGUMENT);
+        assert_eq!(
+            ErrorCode::InvalidArgument.as_str(),
+            ERR_CODE_INVALID_ARGUMENT
+        );
         assert_eq!(ErrorCode::NotImplemented.as_str(), ERR_CODE_NOT_IMPLEMENTED);
         assert_eq!(ErrorCode::IpcNotReady.as_str(), ERR_CODE_IPC_NOT_READY);
         assert_eq!(ErrorCode::InternalError.as_str(), ERR_CODE_INTERNAL_ERROR);

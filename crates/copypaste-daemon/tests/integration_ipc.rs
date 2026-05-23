@@ -56,12 +56,16 @@ fn daemon_binary() -> PathBuf {
     // Walk up from the manifest dir to find `target/`.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
-        .parent()          // crates/
+        .parent() // crates/
         .and_then(|p| p.parent()) // workspace root
         .expect("unexpected directory layout");
 
     // Choose debug vs release based on how the tests were built.
-    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
 
     workspace_root
         .join("target")
@@ -93,14 +97,17 @@ fn wait_for_socket(socket_path: &Path, timeout: Duration) -> bool {
 
 /// Send one newline-delimited JSON request and return the parsed response.
 fn ipc_roundtrip(socket_path: &Path, request: &str) -> serde_json::Value {
-    let mut stream = UnixStream::connect(socket_path)
-        .expect("could not connect to daemon socket");
-    stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+    let mut stream = UnixStream::connect(socket_path).expect("could not connect to daemon socket");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
 
     // Write request followed by newline (the daemon reads line-by-line).
     let mut payload = request.to_string();
     payload.push('\n');
-    stream.write_all(payload.as_bytes()).expect("IPC write failed");
+    stream
+        .write_all(payload.as_bytes())
+        .expect("IPC write failed");
 
     // Read one response line.
     let mut reader = BufReader::new(stream);
@@ -144,10 +151,7 @@ fn daemon_ipc_status_and_list() {
     );
 
     // ---- 1. status ----
-    let status_resp = ipc_roundtrip(
-        &socket_path,
-        r#"{"id":"t1","method":"status"}"#,
-    );
+    let status_resp = ipc_roundtrip(&socket_path, r#"{"id":"t1","method":"status"}"#);
     assert_eq!(
         status_resp["ok"], true,
         "expected ok=true for status, got: {status_resp}"
@@ -225,9 +229,9 @@ fn concurrent_ten_clients_consistent_state() {
                 &format!(r#"{{"id":"c{client_idx}-status","method":"status"}}"#),
             );
             if status_resp["ok"] != true {
-                errs.lock().unwrap().push(format!(
-                    "client {client_idx} status: {status_resp}"
-                ));
+                errs.lock()
+                    .unwrap()
+                    .push(format!("client {client_idx} status: {status_resp}"));
                 return;
             }
             if status_resp["data"]["status"] != "running" {
@@ -242,9 +246,9 @@ fn concurrent_ten_clients_consistent_state() {
                 &format!(r#"{{"id":"c{client_idx}-stats","method":"stats"}}"#),
             );
             if stats_resp["ok"] != true {
-                errs.lock().unwrap().push(format!(
-                    "client {client_idx} stats: {stats_resp}"
-                ));
+                errs.lock()
+                    .unwrap()
+                    .push(format!("client {client_idx} stats: {stats_resp}"));
                 return;
             }
             if !stats_resp["data"]["total_items"].is_number() {
@@ -268,10 +272,7 @@ fn concurrent_ten_clients_consistent_state() {
 
     // Daemon must still serve a fresh client after the burst — proves no
     // listener task crashed mid-flight.
-    let final_resp = ipc_roundtrip(
-        &socket_path,
-        r#"{"id":"after-burst","method":"status"}"#,
-    );
+    let final_resp = ipc_roundtrip(&socket_path, r#"{"id":"after-burst","method":"status"}"#);
     assert_eq!(
         final_resp["ok"], true,
         "daemon stopped accepting after concurrent burst: {final_resp}"

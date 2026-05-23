@@ -78,15 +78,15 @@ fn bench_lookup(c: &mut Criterion) {
     let mut group = c.benchmark_group("dedup_lookup");
     group.bench_with_input("hit", &hit_hash, |b, h| {
         b.iter(|| {
-            let r = find_recent_by_hash(black_box(&db), black_box(h), now, WITHIN_MS)
-                .expect("query");
+            let r =
+                find_recent_by_hash(black_box(&db), black_box(h), now, WITHIN_MS).expect("query");
             black_box(r);
         });
     });
     group.bench_with_input("miss", &miss_hash, |b, h| {
         b.iter(|| {
-            let r = find_recent_by_hash(black_box(&db), black_box(h), now, WITHIN_MS)
-                .expect("query");
+            let r =
+                find_recent_by_hash(black_box(&db), black_box(h), now, WITHIN_MS).expect("query");
             black_box(r);
         });
     });

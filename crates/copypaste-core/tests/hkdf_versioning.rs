@@ -16,7 +16,7 @@
 //! We re-derive the HKDF independently using the documented salt bytes to
 //! verify the rotation property end-to-end via the public API.
 
-use copypaste_core::{DeviceKeypair, NONCE_SIZE, decrypt_item, encrypt_item};
+use copypaste_core::{decrypt_item, encrypt_item, DeviceKeypair, NONCE_SIZE};
 use hkdf::Hkdf;
 use sha2::Sha256;
 

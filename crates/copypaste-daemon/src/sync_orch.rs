@@ -259,13 +259,11 @@ mod tests {
         local_tx.send(item).expect("broadcast send");
 
         // Receive on the transport side.
-        let received = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            outbound_rx.recv(),
-        )
-        .await
-        .expect("must receive within 200ms")
-        .expect("outbound channel must yield item");
+        let received =
+            tokio::time::timeout(std::time::Duration::from_millis(200), outbound_rx.recv())
+                .await
+                .expect("must receive within 200ms")
+                .expect("outbound channel must yield item");
 
         assert_eq!(received.id, item_id, "wire id must match local id");
         assert_eq!(

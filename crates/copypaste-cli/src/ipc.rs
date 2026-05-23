@@ -1,13 +1,13 @@
 #[cfg(unix)]
-use std::io::{BufRead, BufReader, Write};
-#[cfg(unix)]
-use std::os::unix::net::UnixStream;
-use std::path::Path;
-#[cfg(unix)]
 use anyhow::Context;
 use anyhow::{anyhow, Result};
 use copypaste_ipc::ErrorCode;
 use serde_json::Value;
+#[cfg(unix)]
+use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
+use std::path::Path;
 
 /// Minimal wire-level response. Mirrors protocol.rs in the daemon.
 ///
@@ -63,12 +63,17 @@ impl IpcClient {
         }
 
         // Parse response
-        let v: Value = serde_json::from_str(resp_line.trim()).context("invalid JSON from daemon")?;
+        let v: Value =
+            serde_json::from_str(resp_line.trim()).context("invalid JSON from daemon")?;
 
         Ok(Response {
             id: v["id"].as_str().unwrap_or("").to_string(),
             ok: v["ok"].as_bool().unwrap_or(false),
-            data: if v["data"].is_null() { None } else { Some(v["data"].clone()) },
+            data: if v["data"].is_null() {
+                None
+            } else {
+                Some(v["data"].clone())
+            },
             error: v["error"].as_str().map(|s| s.to_string()),
             // W3.3: parse the machine-readable `error_code` if attached.
             // Unknown / missing codes collapse to `None` so older daemons
@@ -99,7 +104,9 @@ impl IpcClient {
     }
 
     pub fn call(&mut self, _request: &Value) -> Result<Response> {
-        Err(anyhow!("CLI IPC is not yet implemented on Windows in this beta."))
+        Err(anyhow!(
+            "CLI IPC is not yet implemented on Windows in this beta."
+        ))
     }
 }
 
@@ -154,7 +161,10 @@ mod tests {
     fn call_returns_err_response() {
         let dir = tempdir().unwrap();
         let sock = dir.path().join("err.sock");
-        mock_server(&sock, r#"{"id":"2","ok":false,"error":"unknown method: foo"}"#);
+        mock_server(
+            &sock,
+            r#"{"id":"2","ok":false,"error":"unknown method: foo"}"#,
+        );
         std::thread::sleep(std::time::Duration::from_millis(20));
 
         let mut client = IpcClient::connect(&sock).unwrap();

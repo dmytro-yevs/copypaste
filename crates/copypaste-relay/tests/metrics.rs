@@ -16,14 +16,14 @@ use tower::ServiceExt;
 mod config;
 #[path = "../src/error.rs"]
 mod error;
+#[path = "../src/api/metrics.rs"]
+mod metrics_handler;
 #[path = "../src/models.rs"]
 mod models;
 #[path = "../src/quota.rs"]
 mod quota;
 #[path = "../src/state.rs"]
 mod state;
-#[path = "../src/api/metrics.rs"]
-mod metrics_handler;
 
 use state::{AppState, RelayStore};
 

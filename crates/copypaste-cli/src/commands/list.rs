@@ -1,6 +1,6 @@
-use anyhow::Result;
 use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
+use anyhow::Result;
 use std::path::Path;
 
 pub fn run(socket_path: &Path, limit: u64, offset: u64) -> Result<()> {
@@ -22,7 +22,10 @@ pub fn run(socket_path: &Path, limit: u64, offset: u64) -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<38}  {:<12}  {:<10}  TIME (UTC)", "ID", "TYPE", "SENSITIVE");
+    println!(
+        "{:<38}  {:<12}  {:<10}  TIME (UTC)",
+        "ID", "TYPE", "SENSITIVE"
+    );
     println!("{}", "-".repeat(90));
 
     for item in &items {
@@ -84,8 +87,20 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
     }
 
     let leap = is_leap(year);
-    let month_days: [u64; 12] =
-        [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
 
     let mut month = 1u64;
     for &md in &month_days {

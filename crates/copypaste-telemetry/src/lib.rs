@@ -173,9 +173,6 @@ mod tests {
             "test.event",
             OsTag::current(),
         );
-        assert!(matches!(
-            r.report(evt),
-            Err(TelemetryError::NotImplemented)
-        ));
+        assert!(matches!(r.report(evt), Err(TelemetryError::NotImplemented)));
     }
 }

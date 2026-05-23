@@ -55,13 +55,19 @@ fn bit_flip_in_ciphertext_body_returns_error() {
 
     // Body = everything before the trailing 16-byte tag. Flip a bit in the
     // middle of the body.
-    assert!(ciphertext.len() > TAG_SIZE, "ciphertext must contain body + tag");
+    assert!(
+        ciphertext.len() > TAG_SIZE,
+        "ciphertext must contain body + tag"
+    );
     let body_idx = (ciphertext.len() - TAG_SIZE) / 2;
     ciphertext[body_idx] ^= 0x01;
 
     let result = decrypt_item(&ciphertext, &nonce, &key);
-    assert!(matches!(result, Err(EncryptError::AuthFailed)),
-        "expected AuthFailed for body bit-flip, got {:?}", result);
+    assert!(
+        matches!(result, Err(EncryptError::AuthFailed)),
+        "expected AuthFailed for body bit-flip, got {:?}",
+        result
+    );
 }
 
 #[test]
@@ -73,8 +79,11 @@ fn bit_flip_in_nonce_returns_error() {
     nonce[0] ^= 0x01;
 
     let result = decrypt_item(&ciphertext, &nonce, &key);
-    assert!(matches!(result, Err(EncryptError::AuthFailed)),
-        "expected AuthFailed for nonce bit-flip, got {:?}", result);
+    assert!(
+        matches!(result, Err(EncryptError::AuthFailed)),
+        "expected AuthFailed for nonce bit-flip, got {:?}",
+        result
+    );
 }
 
 #[test]
@@ -89,8 +98,11 @@ fn bit_flip_in_auth_tag_returns_error() {
     ciphertext[len - 1] ^= 0x80;
 
     let result = decrypt_item(&ciphertext, &nonce, &key);
-    assert!(matches!(result, Err(EncryptError::AuthFailed)),
-        "expected AuthFailed for tag bit-flip, got {:?}", result);
+    assert!(
+        matches!(result, Err(EncryptError::AuthFailed)),
+        "expected AuthFailed for tag bit-flip, got {:?}",
+        result
+    );
 }
 
 #[test]
@@ -103,8 +115,11 @@ fn truncated_ciphertext_returns_error_not_panic() {
     ciphertext.pop();
 
     let result = decrypt_item(&ciphertext, &nonce, &key);
-    assert!(matches!(result, Err(EncryptError::AuthFailed)),
-        "truncated ciphertext must return Err, not panic; got {:?}", result);
+    assert!(
+        matches!(result, Err(EncryptError::AuthFailed)),
+        "truncated ciphertext must return Err, not panic; got {:?}",
+        result
+    );
 }
 
 #[test]
@@ -116,8 +131,11 @@ fn truncated_below_tag_size_returns_error_not_panic() {
 
     let stub = vec![0u8; TAG_SIZE - 1];
     let result = decrypt_item(&stub, &nonce, &key);
-    assert!(matches!(result, Err(EncryptError::AuthFailed)),
-        "sub-tag-size ciphertext must return Err; got {:?}", result);
+    assert!(
+        matches!(result, Err(EncryptError::AuthFailed)),
+        "sub-tag-size ciphertext must return Err; got {:?}",
+        result
+    );
 }
 
 #[test]
@@ -138,10 +156,16 @@ fn swapped_two_ciphertexts_same_key_decrypts_to_other_plaintext() {
     // Cross-pair: wrong nonce must NOT yield the other plaintext.
     let cross_1 = decrypt_item(&ct_a, &nonce_b, &key);
     let cross_2 = decrypt_item(&ct_b, &nonce_a, &key);
-    assert!(matches!(cross_1, Err(EncryptError::AuthFailed)),
-        "ct_a + nonce_b must fail; got {:?}", cross_1);
-    assert!(matches!(cross_2, Err(EncryptError::AuthFailed)),
-        "ct_b + nonce_a must fail; got {:?}", cross_2);
+    assert!(
+        matches!(cross_1, Err(EncryptError::AuthFailed)),
+        "ct_a + nonce_b must fail; got {:?}",
+        cross_1
+    );
+    assert!(
+        matches!(cross_2, Err(EncryptError::AuthFailed)),
+        "ct_b + nonce_a must fail; got {:?}",
+        cross_2
+    );
 
     // Correct pairing still works.
     assert_eq!(decrypt_item(&ct_a, &nonce_a, &key).unwrap(), pt_a);
@@ -154,8 +178,11 @@ fn wrong_key_returns_error() {
     let (nonce, ciphertext) = encrypt_item(plaintext, &key_a()).expect("encrypt");
 
     let result = decrypt_item(&ciphertext, &nonce, &key_b());
-    assert!(matches!(result, Err(EncryptError::AuthFailed)),
-        "expected AuthFailed for wrong key, got {:?}", result);
+    assert!(
+        matches!(result, Err(EncryptError::AuthFailed)),
+        "expected AuthFailed for wrong key, got {:?}",
+        result
+    );
 }
 
 #[test]
@@ -164,8 +191,11 @@ fn empty_plaintext_encrypts_decrypts_correctly() {
     let (nonce, ciphertext) = encrypt_item(b"", &key).expect("encrypt empty");
 
     // Even empty plaintext produces a 16-byte tag.
-    assert_eq!(ciphertext.len(), TAG_SIZE,
-        "empty plaintext ciphertext must equal tag size");
+    assert_eq!(
+        ciphertext.len(),
+        TAG_SIZE,
+        "empty plaintext ciphertext must equal tag size"
+    );
     assert_eq!(nonce.len(), NONCE_SIZE);
 
     let decrypted = decrypt_item(&ciphertext, &nonce, &key).expect("decrypt empty");
@@ -186,8 +216,12 @@ fn every_byte_flip_in_tag_is_detected() {
         let mut tampered = ciphertext.clone();
         tampered[offset] ^= 0xFF;
         let result = decrypt_item(&tampered, &nonce, &key);
-        assert!(matches!(result, Err(EncryptError::AuthFailed)),
-            "flip at tag offset {} must fail, got {:?}", offset, result);
+        assert!(
+            matches!(result, Err(EncryptError::AuthFailed)),
+            "flip at tag offset {} must fail, got {:?}",
+            offset,
+            result
+        );
     }
 }
 
@@ -248,8 +282,8 @@ fn aad_match_succeeds() {
     // build_item_aad must be deterministic — encrypting and decrypting from
     // independently-reconstructed AAD bytes must also succeed.
     let aad_again = build_item_aad("item-X-uuid", AAD_SCHEMA_VERSION);
-    let decrypted_again =
-        decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad_again).expect("decrypt with rebuilt AAD");
+    let decrypted_again = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad_again)
+        .expect("decrypt with rebuilt AAD");
     assert_eq!(decrypted_again, plaintext);
 }
 

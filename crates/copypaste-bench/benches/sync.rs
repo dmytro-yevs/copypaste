@@ -56,12 +56,7 @@ fn build_messages(n: usize) -> Vec<(&'static str, Message)> {
             },
         ),
         ("Have", Message::Have { items: have_items }),
-        (
-            "Want",
-            Message::Want {
-                item_ids: want_ids,
-            },
-        ),
+        ("Want", Message::Want { item_ids: want_ids }),
         ("Items", Message::Items { items: wire_items }),
         ("Done", Message::Done),
     ]
@@ -74,13 +69,9 @@ fn bench_encode(c: &mut Criterion) {
             // Precompute encoded size so Throughput is meaningful.
             let encoded_len = msg.encode().expect("encode setup").len() as u64;
             group.throughput(Throughput::Bytes(encoded_len));
-            group.bench_with_input(
-                BenchmarkId::new(variant, n),
-                &msg,
-                |b, m: &Message| {
-                    b.iter(|| black_box(m).encode().expect("encode"));
-                },
-            );
+            group.bench_with_input(BenchmarkId::new(variant, n), &msg, |b, m: &Message| {
+                b.iter(|| black_box(m).encode().expect("encode"));
+            });
         }
     }
     group.finish();
@@ -94,13 +85,9 @@ fn bench_decode(c: &mut Criterion) {
             // Strip the 4-byte length prefix — decode operates on the JSON body.
             let body = encoded[4..].to_vec();
             group.throughput(Throughput::Bytes(encoded.len() as u64));
-            group.bench_with_input(
-                BenchmarkId::new(variant, n),
-                &body,
-                |b, bytes: &Vec<u8>| {
-                    b.iter(|| Message::decode(black_box(bytes.as_slice())).expect("decode"));
-                },
-            );
+            group.bench_with_input(BenchmarkId::new(variant, n), &body, |b, bytes: &Vec<u8>| {
+                b.iter(|| Message::decode(black_box(bytes.as_slice())).expect("decode"));
+            });
         }
     }
     group.finish();
@@ -112,18 +99,13 @@ fn bench_roundtrip(c: &mut Criterion) {
         for (variant, msg) in build_messages(n) {
             let encoded_len = msg.encode().expect("encode setup").len() as u64;
             group.throughput(Throughput::Bytes(encoded_len));
-            group.bench_with_input(
-                BenchmarkId::new(variant, n),
-                &msg,
-                |b, m: &Message| {
-                    b.iter(|| {
-                        let encoded = black_box(m).encode().expect("encode");
-                        let decoded =
-                            Message::decode(black_box(&encoded[4..])).expect("decode");
-                        black_box(decoded);
-                    });
-                },
-            );
+            group.bench_with_input(BenchmarkId::new(variant, n), &msg, |b, m: &Message| {
+                b.iter(|| {
+                    let encoded = black_box(m).encode().expect("encode");
+                    let decoded = Message::decode(black_box(&encoded[4..])).expect("decode");
+                    black_box(decoded);
+                });
+            });
         }
     }
     group.finish();

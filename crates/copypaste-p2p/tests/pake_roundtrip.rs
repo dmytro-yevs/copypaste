@@ -78,15 +78,13 @@ fn replay_old_client_message_rejected() {
 
     // Handshake A: run to completion to capture the client's final message.
     let (client_a, msg1_a) = PakeInitiator::new(password).expect("client A start");
-    let (_server_a, msg2_a) =
-        PakeResponder::respond(&pf, &msg1_a).expect("server A respond");
+    let (_server_a, msg2_a) = PakeResponder::respond(&pf, &msg1_a).expect("server A respond");
     let (_key_a, msg3_a) = client_a.finish(&msg2_a).expect("client A finish");
 
     // Handshake B: fresh server, brand-new nonces. Feed it A's stale
     // finalization message instead of B's own.
     let (client_b, msg1_b) = PakeInitiator::new(password).expect("client B start");
-    let (server_b, _msg2_b) =
-        PakeResponder::respond(&pf, &msg1_b).expect("server B respond");
+    let (server_b, _msg2_b) = PakeResponder::respond(&pf, &msg1_b).expect("server B respond");
     drop(client_b); // we don't need B's real finalization
 
     let replay_res = server_b.finish(&msg3_a);
@@ -109,6 +107,14 @@ fn shared_secret_is_32_bytes() {
     let (client_key, msg3) = client.finish(&msg2).expect("client finish");
     let server_key = server.finish(&msg3).expect("server finish");
 
-    assert_eq!(client_key.as_bytes().len(), 32, "client SessionKey is 32 bytes");
-    assert_eq!(server_key.as_bytes().len(), 32, "server SessionKey is 32 bytes");
+    assert_eq!(
+        client_key.as_bytes().len(),
+        32,
+        "client SessionKey is 32 bytes"
+    );
+    assert_eq!(
+        server_key.as_bytes().len(),
+        32,
+        "server SessionKey is 32 bytes"
+    );
 }

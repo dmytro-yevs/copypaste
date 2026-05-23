@@ -3,9 +3,11 @@
 uniffi::include_scaffolding!("copypaste_android");
 
 pub mod version;
-pub use version::{check_compatibility, core_version, uniffi_abi_version, VersionError, UNIFFI_ABI_VERSION};
+pub use version::{
+    check_compatibility, core_version, uniffi_abi_version, VersionError, UNIFFI_ABI_VERSION,
+};
 
-use copypaste_core::{encrypt_item, decrypt_item, detect, NONCE_SIZE};
+use copypaste_core::{decrypt_item, detect, encrypt_item, NONCE_SIZE};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -29,18 +31,34 @@ pub struct EncryptedBlob {
 }
 
 pub fn encrypt_text(bytes: &[u8], key: &[u8]) -> Result<EncryptedBlob, CopypasteError> {
-    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+    let key_arr: [u8; 32] = key
+        .try_into()
+        .map_err(|_| CopypasteError::InvalidKeyLength)?;
     let (nonce, ciphertext) =
         encrypt_item(bytes, &key_arr).map_err(|_| CopypasteError::EncryptionFailed)?;
-    Ok(EncryptedBlob { nonce: nonce.to_vec(), ciphertext })
+    Ok(EncryptedBlob {
+        nonce: nonce.to_vec(),
+        ciphertext,
+    })
 }
 
-pub fn decrypt_text(ciphertext: &[u8], nonce: &[u8], key: &[u8]) -> Result<Vec<u8>, CopypasteError> {
-    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
-    let nonce_arr: [u8; NONCE_SIZE] = nonce.try_into()
-        .map_err(|_| CopypasteError::DecryptionFailed { message: "wrong nonce length".into() })?;
-    decrypt_item(ciphertext, &nonce_arr, &key_arr)
-        .map_err(|e| CopypasteError::DecryptionFailed { message: e.to_string() })
+pub fn decrypt_text(
+    ciphertext: &[u8],
+    nonce: &[u8],
+    key: &[u8],
+) -> Result<Vec<u8>, CopypasteError> {
+    let key_arr: [u8; 32] = key
+        .try_into()
+        .map_err(|_| CopypasteError::InvalidKeyLength)?;
+    let nonce_arr: [u8; NONCE_SIZE] =
+        nonce
+            .try_into()
+            .map_err(|_| CopypasteError::DecryptionFailed {
+                message: "wrong nonce length".into(),
+            })?;
+    decrypt_item(ciphertext, &nonce_arr, &key_arr).map_err(|e| CopypasteError::DecryptionFailed {
+        message: e.to_string(),
+    })
 }
 
 pub fn is_sensitive(text: String) -> bool {
@@ -62,9 +80,15 @@ fn db_handles() -> &'static Mutex<HashMap<u64, copypaste_core::Database>> {
 /// Open (or create) an encrypted SQLite database at `path` using the 32-byte `key`.
 /// Returns an opaque handle for subsequent calls.
 pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
-    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
-    let db = copypaste_core::Database::open(std::path::Path::new(&path), &key_arr)
-        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+    let key_arr: [u8; 32] = key
+        .try_into()
+        .map_err(|_| CopypasteError::InvalidKeyLength)?;
+    let db =
+        copypaste_core::Database::open(std::path::Path::new(&path), &key_arr).map_err(|e| {
+            CopypasteError::DatabaseError {
+                message: e.to_string(),
+            }
+        })?;
     let handle = NEXT_HANDLE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     db_handles().lock().unwrap().insert(handle, db);
     Ok(handle)
@@ -96,18 +120,24 @@ pub fn add_clipboard_item(
     key: &[u8],
     text: String,
 ) -> Result<String, CopypasteError> {
-    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+    let key_arr: [u8; 32] = key
+        .try_into()
+        .map_err(|_| CopypasteError::InvalidKeyLength)?;
 
     // Skip sensitive content (caller-visible: empty string return).
     if detect(&text).is_some() {
         return Ok(String::new());
     }
 
-    let db = copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr)
-        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+    let db =
+        copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr).map_err(|e| {
+            CopypasteError::DatabaseError {
+                message: e.to_string(),
+            }
+        })?;
 
-    let (nonce, ciphertext) = encrypt_item(text.as_bytes(), &key_arr)
-        .map_err(|_| CopypasteError::EncryptionFailed)?;
+    let (nonce, ciphertext) =
+        encrypt_item(text.as_bytes(), &key_arr).map_err(|_| CopypasteError::EncryptionFailed)?;
 
     let lamport_ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -117,8 +147,9 @@ pub fn add_clipboard_item(
     let item = copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport_ts);
     let id = item.id.clone();
 
-    copypaste_core::insert_item(&db, &item)
-        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+    copypaste_core::insert_item(&db, &item).map_err(|e| CopypasteError::DatabaseError {
+        message: e.to_string(),
+    })?;
 
     Ok(id)
 }
@@ -130,23 +161,34 @@ pub fn add_clipboard_item(
     _text: String,
 ) -> Result<String, CopypasteError> {
     // Validate key shape to mirror the live path's error surface.
-    let _: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+    let _: [u8; 32] = key
+        .try_into()
+        .map_err(|_| CopypasteError::InvalidKeyLength)?;
     Ok("stub-uniffi-not-live".to_string())
 }
 
 #[cfg(feature = "android-uniffi-live")]
 pub fn get_history_count(db_path: String, key: &[u8]) -> Result<u64, CopypasteError> {
-    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
-    let db = copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr)
-        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
-    let n = copypaste_core::count_items(&db)
-        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+    let key_arr: [u8; 32] = key
+        .try_into()
+        .map_err(|_| CopypasteError::InvalidKeyLength)?;
+    let db =
+        copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr).map_err(|e| {
+            CopypasteError::DatabaseError {
+                message: e.to_string(),
+            }
+        })?;
+    let n = copypaste_core::count_items(&db).map_err(|e| CopypasteError::DatabaseError {
+        message: e.to_string(),
+    })?;
     Ok(n.max(0) as u64)
 }
 
 #[cfg(not(feature = "android-uniffi-live"))]
 pub fn get_history_count(_db_path: String, key: &[u8]) -> Result<u64, CopypasteError> {
-    let _: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+    let _: [u8; 32] = key
+        .try_into()
+        .map_err(|_| CopypasteError::InvalidKeyLength)?;
     Ok(0)
 }
 
@@ -180,8 +222,8 @@ mod tests {
     #[cfg(not(feature = "android-uniffi-live"))]
     #[test]
     fn add_clipboard_item_returns_stub_when_feature_off() {
-        let id = add_clipboard_item("/dev/null".into(), &test_key(), "hello".into())
-            .expect("stub path");
+        let id =
+            add_clipboard_item("/dev/null".into(), &test_key(), "hello".into()).expect("stub path");
         assert_eq!(id, "stub-uniffi-not-live");
         let n = get_history_count("/dev/null".into(), &test_key()).expect("stub count");
         assert_eq!(n, 0);

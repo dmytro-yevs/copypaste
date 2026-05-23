@@ -1,6 +1,6 @@
-use anyhow::Result;
 use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
+use anyhow::Result;
 use std::path::Path;
 
 pub fn run(socket_path: &Path, id: &str) -> Result<()> {

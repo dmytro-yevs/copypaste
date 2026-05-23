@@ -85,7 +85,10 @@ mod tests {
 
     #[test]
     fn unauthorized_is_401() {
-        assert_eq!(status_of(RelayError::Unauthorized), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            status_of(RelayError::Unauthorized),
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     #[test]

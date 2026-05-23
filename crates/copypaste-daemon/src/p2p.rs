@@ -13,9 +13,9 @@
 
 use std::sync::Arc;
 
+use thiserror::Error;
 use tokio::net::TcpListener;
 use tokio::sync::{broadcast, oneshot, Mutex};
-use thiserror::Error;
 
 use copypaste_core::{ClipboardItem, Database};
 use copypaste_p2p::{
@@ -89,11 +89,7 @@ pub struct P2pState {
 /// # Errors
 /// Returns [`P2pError::Transport`] if cert generation fails, or
 /// [`P2pError::Discovery`] if mDNS registration cannot be configured.
-pub fn init(
-    listen_port: u16,
-    device_id: &str,
-    device_name: &str,
-) -> Result<P2pState, P2pError> {
+pub fn init(listen_port: u16, device_id: &str, device_name: &str) -> Result<P2pState, P2pError> {
     let peers = PairedPeers::new();
     let transport = PeerTransport::new_with_generated_cert(device_id, peers.clone())
         .map_err(|e| P2pError::Transport(e.to_string()))?;
@@ -237,7 +233,10 @@ pub async fn start_p2p(
 // ── private helpers ───────────────────────────────────────────────────────────
 
 async fn accept_loop(listener: TcpListener, mut shutdown_rx: oneshot::Receiver<()>) {
-    tracing::debug!("P2P accept loop running on {}", listener.local_addr().unwrap());
+    tracing::debug!(
+        "P2P accept loop running on {}",
+        listener.local_addr().unwrap()
+    );
     loop {
         tokio::select! {
             result = listener.accept() => {
@@ -305,7 +304,10 @@ mod tests {
     fn list_peers_returns_empty_initially() {
         let state = init(0, "test-device-id", "Test Device").expect("init must succeed");
         let peers = list_peers(&state);
-        assert!(peers.is_empty(), "fresh P2pState must have zero known peers");
+        assert!(
+            peers.is_empty(),
+            "fresh P2pState must have zero known peers"
+        );
     }
 
     /// `pair_peer` is a placeholder until W2.4 — it must surface the explicit

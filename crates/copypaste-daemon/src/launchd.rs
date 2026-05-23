@@ -288,16 +288,17 @@ mod tests {
     fn launchctl_unload_args_correct() {
         let plist = PathBuf::from("/tmp/com.copypaste.daemon.plist");
         let args = launchctl_unload_args(&plist);
-        assert_eq!(args, vec!["unload", "-w", "/tmp/com.copypaste.daemon.plist"]);
+        assert_eq!(
+            args,
+            vec!["unload", "-w", "/tmp/com.copypaste.daemon.plist"]
+        );
     }
 
     #[test]
     fn plist_path_is_in_launch_agents() {
         let p = plist_path();
         assert!(p.to_string_lossy().contains("Library/LaunchAgents"));
-        assert!(p
-            .to_string_lossy()
-            .ends_with("com.copypaste.daemon.plist"));
+        assert!(p.to_string_lossy().ends_with("com.copypaste.daemon.plist"));
     }
 
     #[test]
