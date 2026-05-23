@@ -323,6 +323,17 @@ async fn handle_tick(
 
     match monitor.poll() {
         Ok(Some(ClipboardContent::Text(text))) => {
+            // beta.5 Bug-1 visibility: log every capture at info level so
+            // users can confirm from `daemon.out.log` that the pasteboard is
+            // actually being read. Prior code only emitted `debug!` here
+            // which the default `copypaste=info` filter dropped, leaving
+            // operators unable to distinguish "no captures happening" from
+            // "captures happening but UI not refreshing".
+            tracing::info!(
+                bytes = text.len(),
+                "clipboard captured: text ({} bytes)",
+                text.len()
+            );
             if let Some(item) = handle_text(text, db, local_key, config).await {
                 // Broadcast to P2P + cloud-sync subscribers (and any future consumer).
                 // A send error only means there are no active receivers —
@@ -331,6 +342,11 @@ async fn handle_tick(
             }
         }
         Ok(Some(ClipboardContent::Image(raw_bytes))) => {
+            tracing::info!(
+                bytes = raw_bytes.len(),
+                "clipboard captured: image ({} bytes raw)",
+                raw_bytes.len()
+            );
             if let Some(item) = handle_image(raw_bytes, db, local_key, config).await {
                 let _ = new_item_tx.send(item);
             }
@@ -382,7 +398,15 @@ async fn handle_text(
     let db_guard = db.lock().await;
     match insert_item(&db_guard, &item) {
         Ok(_) => {
-            tracing::debug!("stored text item id={} sensitive={}", item.id, is_sensitive);
+            // beta.5 Bug-1 visibility: promoted from debug! to info! so users
+            // can verify in `daemon.out.log` that captured items reach the DB.
+            tracing::info!(
+                id = %item.id,
+                sensitive = is_sensitive,
+                "stored text item id={} sensitive={}",
+                item.id,
+                is_sensitive
+            );
             if let Err(e) = upsert_fts(&db_guard, &item.id, &text) {
                 tracing::warn!("fts index failed for id={}: {e}", item.id);
             }
@@ -427,7 +451,8 @@ async fn handle_image(
             let db_guard = db.lock().await;
             match insert_item(&db_guard, &item) {
                 Ok(_) => {
-                    tracing::debug!("stored image item id={}", item.id);
+                    // beta.5 Bug-1 visibility: promoted from debug! to info!.
+                    tracing::info!(id = %item.id, "stored image item id={}", item.id);
                     // Images don't have searchable text; index empty string for FTS consistency.
                     if let Err(e) = upsert_fts(&db_guard, &item.id, "") {
                         tracing::warn!("fts empty index failed for image id={}: {e}", item.id);
