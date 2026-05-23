@@ -264,10 +264,10 @@ fn key_rotation_old_key_no_longer_works_new_key_works() {
 
     // Phase 1: create with old key, insert known marker, rotate, drop.
     {
-        let mut db = Database::open(&path, &old_key).unwrap();
+        let db = Database::open(&path, &old_key).unwrap();
         let item = ClipboardItem::new_text(b"rotation-marker".to_vec(), vec![0u8; 24], 1);
         insert_item(&db, &item).unwrap();
-        db.rekey(&new_key).expect("rekey should succeed");
+        let db = db.rekey(&new_key).expect("rekey should succeed");
         checkpoint_wal(&db);
     }
 

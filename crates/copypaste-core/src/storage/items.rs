@@ -199,8 +199,10 @@ pub fn insert_item_with_fts(
                 if err.code == rusqlite::ErrorCode::ConstraintViolation
         );
         if is_unique_violation {
-            drop(tx);
-            if let Some(id) = lookup_existing_id(db, item)? {
+            // Dedup SELECT runs inside the same transaction so it sees the
+            // exact committed state that triggered the conflict — no TOCTOU
+            // window between the failed INSERT and the fallback SELECT.
+            if let Some(id) = lookup_existing_id_in_tx(&tx, item)? {
                 return Ok(id);
             }
         }
@@ -221,10 +223,16 @@ pub fn insert_item_with_fts(
 /// Find the id of an existing row that conflicts with `item` on one of
 /// the v5 UNIQUE indexes. Tries `content_hash` first (the more common
 /// race), then falls back to `item_id` (sync replay).
-fn lookup_existing_id(db: &Database, item: &ClipboardItem) -> Result<Option<String>, ItemsError> {
+///
+/// Runs inside the provided transaction so the dedup SELECT is serialised
+/// with the failed INSERT and sees no in-between commits.
+fn lookup_existing_id_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    item: &ClipboardItem,
+) -> Result<Option<String>, ItemsError> {
     if let Some(hash) = &item.content_hash {
         let minute_bucket = item.wall_time / 60;
-        let by_hash = db.conn().query_row(
+        let by_hash = tx.query_row(
             "SELECT id FROM clipboard_items
              WHERE content_hash = ?1 AND (wall_time / 60) = ?2
              ORDER BY wall_time DESC LIMIT 1",
@@ -237,7 +245,7 @@ fn lookup_existing_id(db: &Database, item: &ClipboardItem) -> Result<Option<Stri
             Err(e) => return Err(ItemsError::Sqlite(e)),
         }
     }
-    let by_item_id = db.conn().query_row(
+    let by_item_id = tx.query_row(
         "SELECT id FROM clipboard_items WHERE item_id = ?1",
         params![item.item_id],
         |row| row.get::<_, String>(0),
@@ -402,11 +410,59 @@ pub fn delete_fts(db: &Database, id: &str) -> Result<(), ItemsError> {
     Ok(())
 }
 
+/// Sanitize a user-supplied FTS5 query string, keeping only characters
+/// that are safe to pass through the FTS5 MATCH operator:
+///
+/// Allowed:
+///   - Unicode letters and digits (covers ASCII + Cyrillic, CJK, etc.)
+///   - `_` and `-` (word-separator conventions)
+///   - `"` (phrase-query delimiters, e.g. `"bar baz"`)
+///   - `*` (explicit prefix operator)
+///   - ASCII space
+///
+/// Stripped (FTS5 structural operators and SQL special chars):
+///   - `:` (column filter, e.g. `col:term`)
+///   - `^` (initial-token anchor)
+///   - `;`, `'`, `\`, `\0` and other chars with no legitimate FTS use
+///
+/// Since the sanitized string is passed as a bound parameter (not
+/// interpolated into SQL), SQL injection via MATCH is not possible even
+/// without sanitization. This layer defends against malformed FTS5 query
+/// syntax that could cause SQLITE_ERROR or unexpected result sets.
+fn sanitize_fts_query(raw: &str) -> String {
+    let sanitized: String = raw
+        .chars()
+        .filter(|c| {
+            c.is_alphabetic()
+                || c.is_numeric()
+                || *c == '_'
+                || *c == '-'
+                || *c == ' '
+                || *c == '"'
+                || *c == '*'
+        })
+        .collect();
+    let trimmed = sanitized.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    // Only append `*` for prefix search if the query doesn't already end
+    // with `"` (closing a phrase) or `*` (explicit prefix).
+    if trimmed.ends_with('"') || trimmed.ends_with('*') {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}*")
+    }
+}
+
 /// Search clipboard items by full-text query.
 /// Returns up to `limit` full `ClipboardItem` rows ordered by FTS5 rank (best match first).
 ///
 /// Two-phase fetch: (1) query FTS5 for matching IDs ordered by rank, (2) fetch full rows from
 /// clipboard_items by IN-list, then re-sort in Rust to restore FTS rank order.
+///
+/// The query is sanitized to `[a-zA-Z0-9_ -]*` before being passed to FTS5 to prevent
+/// injection through MATCH operator special syntax.
 pub fn search_items(
     db: &Database,
     query: &str,
@@ -416,12 +472,17 @@ pub fn search_items(
         return Ok(vec![]);
     }
 
+    let safe_query = sanitize_fts_query(query);
+    if safe_query.is_empty() {
+        return Ok(vec![]);
+    }
+
     // Phase 1: collect matching IDs ordered by FTS5 rank
     let mut fts_stmt = db.conn().prepare(
         "SELECT id FROM clipboard_fts WHERE content_text MATCH ?1 ORDER BY rank LIMIT ?2",
     )?;
     let ids: Vec<String> = fts_stmt
-        .query_map(params![query, limit as i64], |row| row.get(0))?
+        .query_map(params![safe_query, limit as i64], |row| row.get(0))?
         .collect::<Result<Vec<_>, _>>()?;
 
     if ids.is_empty() {

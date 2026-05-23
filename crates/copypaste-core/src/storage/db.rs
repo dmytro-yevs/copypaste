@@ -1,4 +1,5 @@
 use super::schema::{apply_migrations, SchemaError};
+use crate::sensitive::init_patterns;
 use rusqlite::{Connection, OpenFlags};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
@@ -164,6 +165,13 @@ impl Database {
     /// Returns `Err(DbError::Sqlite(...))` if `key` is wrong for an existing
     /// encrypted database.
     pub fn open(path: impl AsRef<Path>, key: &[u8; 32]) -> Result<Self, DbError> {
+        // Eagerly compile sensitive-data patterns at first DB open so any
+        // invalid regex surfaces as a startup error rather than a panic
+        // during the first clipboard scan.
+        if let Err(e) = init_patterns() {
+            return Err(DbError::Migration(format!("pattern init failed: {e}")));
+        }
+
         let path = path.as_ref();
 
         let conn = Connection::open_with_flags(
@@ -325,11 +333,15 @@ impl Database {
     /// callers compile without modification.
     pub fn open_in_memory() -> Result<Self, DbError> {
         let conn = Connection::open_in_memory()?;
+        conn.execute_batch(CONNECTION_PRAGMAS)?;
         apply_migrations(&conn)?;
         Ok(Self { conn, path: None })
     }
 
     /// Re-encrypt the database with a new key (key rotation).
+    ///
+    /// Consumes `self` so the caller cannot use a half-rekeyed handle on
+    /// failure — the only way to continue is via the returned `Result<Self>`.
     ///
     /// **Why we do NOT use `PRAGMA rekey`**: `rekey` rewrites the database
     /// pages in-place. If the process is interrupted (power cut, panic,
@@ -345,14 +357,14 @@ impl Database {
     ///   3. `sqlcipher_export` the live data into the tmp.
     ///   4. Carry the source `user_version` across to the tmp (the export
     ///      copies tables but not pragmas).
-    ///   5. DETACH, close the source connection, fsync tmp, atomic
-    ///      `rename` over the original, fsync parent dir.
-    ///   6. Re-open under the new key and replace `self.conn`.
+    ///   5. DETACH, close the source connection (drop self), fsync tmp,
+    ///      atomic `rename` over the original, fsync parent dir.
+    ///   6. Re-open under the new key and return the new `Database`.
     ///
     /// Crash-safety: at every point a power-cut leaves *either* the old
     /// file (old key still works) or the new file (new key works), never
     /// a half-rekeyed file.
-    pub fn rekey(&mut self, new_key: &[u8; 32]) -> Result<(), DbError> {
+    pub fn rekey(self, new_key: &[u8; 32]) -> Result<Self, DbError> {
         use std::fmt::Write;
 
         // In-memory connections have no path to atomically rename onto;
@@ -368,7 +380,10 @@ impl Database {
                 }
                 let sql = format!("PRAGMA rekey = \"x'{}'\"", hex);
                 self.conn.execute_batch(&sql)?;
-                return Ok(());
+                return Ok(Self {
+                    conn: self.conn,
+                    path: None,
+                });
             }
         };
 
@@ -414,13 +429,9 @@ impl Database {
             .execute_batch("DETACH DATABASE rekeyed")
             .map_err(|e| DbError::Migration(format!("DETACH rekeyed: {e}")))?;
 
-        // Step 5a: close the live conn so the OS will let us rename onto
-        // its file (Windows). The struct field can't be left moved-from,
-        // so swap in a throwaway in-memory conn as a placeholder.
-        let placeholder = Connection::open_in_memory()
-            .map_err(|e| DbError::Migration(format!("placeholder conn: {e}")))?;
-        let old_conn = std::mem::replace(&mut self.conn, placeholder);
-        drop(old_conn);
+        // Step 5a: close the live conn by dropping self so the OS will let
+        // us rename onto its file (Windows).
+        drop(self);
 
         // Step 5b: fsync tmp → rename → fsync parent dir.
         std::fs::File::open(&tmp_path)
@@ -450,9 +461,11 @@ impl Database {
         })?;
         enc.execute_batch(CONNECTION_PRAGMAS)?;
         apply_migrations(&enc)?;
-        self.conn = enc;
 
-        Ok(())
+        Ok(Self {
+            conn: enc,
+            path: Some(path),
+        })
     }
 
     pub fn conn(&self) -> &Connection {
@@ -554,8 +567,8 @@ mod tests {
         let old_key = [0x11u8; 32];
         let new_key = [0x22u8; 32];
         {
-            let mut db = Database::open(&path, &old_key).unwrap();
-            db.rekey(&new_key).unwrap();
+            let db = Database::open(&path, &old_key).unwrap();
+            let _db = db.rekey(&new_key).unwrap();
         }
         assert!(Database::open(&path, &old_key).is_err());
         assert!(Database::open(&path, &new_key).is_ok());

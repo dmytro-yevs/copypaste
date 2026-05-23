@@ -28,11 +28,11 @@ fn rekey_changes_key_and_data_still_readable() {
 
     // Phase 1: open with old key, insert one row, rekey, drop.
     {
-        let mut db = Database::open(&path, &old_key).expect("open with old key");
+        let db = Database::open(&path, &old_key).expect("open with old key");
         let item = ClipboardItem::new_text(b"payload".to_vec(), vec![0u8; 24], 1);
         insert_item(&db, &item).expect("insert pre-rekey row");
 
-        db.rekey(&new_key).expect("rekey to new key");
+        let _db = db.rekey(&new_key).expect("rekey to new key");
     }
 
     // Phase 2: old key must NOT open the file anymore.
@@ -56,10 +56,10 @@ fn rekey_to_same_key_is_noop() {
     let key = [0x33u8; 32];
 
     {
-        let mut db = Database::open(&path, &key).expect("open");
+        let db = Database::open(&path, &key).expect("open");
         let item = ClipboardItem::new_text(b"x".to_vec(), vec![0u8; 24], 1);
         insert_item(&db, &item).expect("insert");
-        db.rekey(&key).expect("rekey to same key");
+        let _db = db.rekey(&key).expect("rekey to same key");
     }
 
     let db = Database::open(&path, &key).expect("reopen with same key");

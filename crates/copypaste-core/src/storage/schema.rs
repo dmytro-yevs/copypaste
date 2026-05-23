@@ -75,18 +75,14 @@ pub(crate) const V5_INDEXES_SQL: &str = include_str!("schema_v2.sql");
 ///     Previously this branch fell through to `Ok(())` and silently masked
 ///     the version mismatch (CRITICAL edge-case #2).
 pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
-    // Connection-level pragmas. These are NOT part of a migration and MUST
-    // run before BEGIN (PRAGMA journal_mode is a no-op inside a transaction).
-    //
-    // Mirrors `db::CONNECTION_PRAGMAS` and `pool::open_pool`'s `with_init`
-    // — every code path that opens a connection must set these so behaviour
-    // is uniform across UI reader, daemon writer, and the migration pass.
+    // Connection-level pragmas that MUST run before BEGIN (PRAGMA journal_mode
+    // is a no-op inside a transaction). Only the pragmas NOT already applied by
+    // `db::CONNECTION_PRAGMAS` live here — callers that go through
+    // `Database::open` / `Database::open_in_memory` apply CONNECTION_PRAGMAS
+    // separately, so we keep only the ones unique to the migration path
+    // (journal_mode and cache_size) to avoid redundant double-application.
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
     conn.execute_batch(&format!("PRAGMA cache_size=-{};", 8 * 1024))?;
-    conn.execute_batch("PRAGMA foreign_keys=ON;")?;
-    conn.execute_batch("PRAGMA busy_timeout=5000;")?;
-    conn.execute_batch("PRAGMA synchronous=NORMAL;")?;
-    conn.execute_batch("PRAGMA temp_store=MEMORY;")?;
 
     let current_version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
