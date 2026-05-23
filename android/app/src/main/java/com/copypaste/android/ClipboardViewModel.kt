@@ -1,6 +1,7 @@
 package com.copypaste.android
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -11,6 +12,11 @@ import kotlinx.coroutines.launch
  * ViewModel for clipboard history UI.
  * Extends [AndroidViewModel] to obtain [Application] context required by
  * [ClipboardRepository] for SharedPreferences access.
+ *
+ * Errors from repository / UniFFI calls are surfaced via [errors] (one-shot
+ * messages). The UI is expected to observe and present them as a Snackbar,
+ * then call [clearError] once shown to prevent re-display on configuration
+ * change.
  */
 class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -22,18 +28,41 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     private val _loading = MutableLiveData(false)
     val loading: LiveData<Boolean> = _loading
 
+    private val _errors = MutableLiveData<String?>(null)
+    val errors: LiveData<String?> = _errors
+
     fun loadItems() {
         viewModelScope.launch {
             _loading.value = true
-            _items.value = repository.getItems()
-            _loading.value = false
+            try {
+                _items.value = repository.getItems()
+            } catch (e: Exception) {
+                Log.w(TAG, "loadItems failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            } finally {
+                _loading.value = false
+            }
         }
     }
 
     fun deleteItem(id: String) {
         viewModelScope.launch {
-            repository.deleteItem(id)
-            loadItems() // refresh
+            try {
+                repository.deleteItem(id)
+                loadItems() // refresh
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteItem($id) failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            }
         }
+    }
+
+    /** Call from UI after the current error has been displayed to the user. */
+    fun clearError() {
+        _errors.value = null
+    }
+
+    companion object {
+        private const val TAG = "ClipboardViewModel"
     }
 }

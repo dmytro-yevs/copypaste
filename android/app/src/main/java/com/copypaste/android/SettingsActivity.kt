@@ -16,11 +16,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +61,19 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
 
     var syncEnabled by remember { mutableStateOf(settings.syncEnabled) }
     var showWarnings by remember { mutableStateOf(settings.showSensitiveWarnings) }
+    var settingsError by remember { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val errorTemplate = stringResource(R.string.error_settings_save)
+    val dismissLabel = stringResource(R.string.snackbar_dismiss)
+
+    LaunchedEffect(settingsError) {
+        val msg = settingsError ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(
+            message = errorTemplate.format(msg),
+            actionLabel = dismissLabel,
+        )
+        settingsError = null
+    }
 
     Scaffold(
         topBar = {
@@ -74,7 +90,8 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
                     navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
                 )
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -87,8 +104,14 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
                 subtitle = stringResource(R.string.setting_sync_enabled_subtitle),
                 checked = syncEnabled,
                 onCheckedChange = {
+                    val previous = syncEnabled
                     syncEnabled = it
-                    settings.syncEnabled = it
+                    try {
+                        settings.syncEnabled = it
+                    } catch (e: Exception) {
+                        syncEnabled = previous
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
                 }
             )
             HorizontalDivider()
@@ -97,8 +120,14 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
                 subtitle = stringResource(R.string.setting_sensitive_warnings_subtitle),
                 checked = showWarnings,
                 onCheckedChange = {
+                    val previous = showWarnings
                     showWarnings = it
-                    settings.showSensitiveWarnings = it
+                    try {
+                        settings.showSensitiveWarnings = it
+                    } catch (e: Exception) {
+                        showWarnings = previous
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
                 }
             )
             HorizontalDivider()

@@ -34,4 +34,13 @@
     <string name="cd_back">Back</string>
     <string name="cd_refresh">Refresh</string>
     <string name="cd_delete">Delete item</string>
+
+    <!-- Error / status -->
+    <string name="error_generic">Failed: %1$s</string>
+    <string name="error_load_history">Failed to load history: %1$s</string>
+    <string name="error_delete_item">Failed to delete item: %1$s</string>
+    <string name="error_pairing">Pairing failed: %1$s</string>
+    <string name="error_settings_save">Could not save setting: %1$s</string>
+    <string name="status_pairing">Generating pairing token…</string>
+    <string name="snackbar_dismiss">Dismiss</string>
 </resources>
