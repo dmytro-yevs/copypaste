@@ -47,6 +47,10 @@ png = "0.17"
 name = "integration_ipc"
 path = "tests/integration_ipc.rs"
 
+[[test]]
+name = "lifecycle"
+path = "tests/lifecycle.rs"
+
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"
