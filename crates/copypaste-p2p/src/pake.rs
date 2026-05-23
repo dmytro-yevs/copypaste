@@ -242,10 +242,23 @@ impl PasswordFile {
 pub struct PakeInitiator {
     state: ClientLogin<CopypasteCipherSuite>,
     /// Password is needed again at `finish` time (OPAQUE PRF re-evaluation).
-    /// Zeroed explicitly inside [`PakeInitiator::finish`] before being
-    /// dropped. The `state` field zeroizes itself on drop via opaque-ke's
-    /// `derive-where(zeroize-on-drop)` attribute.
+    /// Zeroed on every drop path via the [`Drop`] impl below (security
+    /// MED #9) — covers the panic / early-return cases where `finish`
+    /// is never reached. The `state` field zeroizes itself on drop via
+    /// opaque-ke's `derive-where(zeroize-on-drop)` attribute.
     password: Vec<u8>,
+}
+
+impl Drop for PakeInitiator {
+    fn drop(&mut self) {
+        // Zeroize the password buffer regardless of whether the handshake
+        // completed (success), failed (deserialize / protocol error), or
+        // was aborted by an unwinding panic on a higher stack frame. The
+        // `Vec`'s heap allocation is the only sensitive copy held here —
+        // `state` self-zeroizes via opaque-ke.
+        use zeroize::Zeroize;
+        self.password.zeroize();
+    }
 }
 
 impl PakeInitiator {
@@ -271,17 +284,22 @@ impl PakeInitiator {
     /// session key. Returns `(session_key, message_to_send_to_server)` — the
     /// server needs the final message to confirm and reach the same key.
     /// Consumes `self` because the handshake state is single-use.
-    pub fn finish(self, server_message: &[u8]) -> Result<(SessionKey, Vec<u8>), PakeError> {
+    pub fn finish(mut self, server_message: &[u8]) -> Result<(SessionKey, Vec<u8>), PakeError> {
+        use zeroize::Zeroize;
+
         let resp = CredentialResponse::deserialize(server_message)
             .map_err(|e| PakeError::WireFormat(format!("CredentialResponse: {e}")))?;
 
-        let Self { state, password } = self;
-        let result = state.finish(&password, resp, ClientLoginFinishParameters::default());
-        // Zero the password copy now that we are done with it.
+        // Take the password out so we can both feed it to `state.finish`
+        // and zeroize it eagerly. The drained `self.password` (an empty
+        // Vec) is later visited by `Drop`, which is a no-op on empty.
+        let password = std::mem::take(&mut self.password);
+        let result = self
+            .state
+            .clone()
+            .finish(&password, resp, ClientLoginFinishParameters::default());
         let mut pw = password;
-        for b in pw.iter_mut() {
-            *b = 0;
-        }
+        pw.zeroize();
 
         let finish = result.map_err(|e| match e {
             opaque_ke::errors::ProtocolError::InvalidLoginError => PakeError::InvalidPassword,

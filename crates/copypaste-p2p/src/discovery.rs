@@ -290,14 +290,22 @@ fn handle_event(
                     return;
                 }
 
-                // OI-3 mitigation: rate-limit per source IP. We key off the
-                // first resolved address since mdns-sd merges multi-interface
-                // records into one event. Drop = silent denial-of-response;
-                // the limiter emits trace + sampled warn telemetry itself.
-                if let Some(source_ip) = peer.ip_addrs.first().copied() {
-                    if !rate_limiter.try_admit(source_ip) {
-                        return;
-                    }
+                // OI-3 mitigation: rate-limit per peer identity. Prefer
+                // `device_id` (the cert fingerprint advertised in TXT) so a
+                // dual-stack peer with both v4 and v6 addresses doesn't get
+                // 2× budget (security MED #11). When `device_id` is empty
+                // (older clients / malformed TXT) we fall back to a stable
+                // hash of the *sorted* address set rather than the first
+                // address, which also closes the same v4/v6-rotation bypass.
+                // Drop = silent denial-of-response; the limiter emits
+                // trace + sampled warn telemetry itself.
+                let rl_key = if !peer.device_id.is_empty() {
+                    peer.device_id.clone()
+                } else {
+                    address_set_key(&peer.ip_addrs)
+                };
+                if !rate_limiter.try_admit_key(&rl_key) {
+                    return;
                 }
 
                 let fullname = resolved.fullname.clone();
@@ -393,6 +401,20 @@ fn peer_from_resolved(resolved: &ResolvedService) -> Option<PeerInfo> {
 /// `ScopedIp` is `#[non_exhaustive]`; the wildcard arm handles any future
 /// variants by falling back to the IPv4 unspecified address so callers
 /// can safely filter it out if needed.
+/// Build a stable rate-limit key from a set of resolved peer addresses.
+///
+/// Used when the peer's `device_id` is unknown (older clients / malformed
+/// TXT). Sorting + delimiter-joining means the key is invariant to the
+/// order `mdns-sd` happens to enumerate v4 vs v6 vs link-local addresses,
+/// so a dual-stack peer cannot escape per-peer rate limiting by rotating
+/// which address ends up first (security MED #11).
+fn address_set_key(addrs: &[IpAddr]) -> String {
+    let mut sorted: Vec<String> = addrs.iter().map(|a| a.to_string()).collect();
+    sorted.sort();
+    sorted.dedup();
+    sorted.join(",")
+}
+
 fn scoped_ip_to_ip_addr(scoped: &ScopedIp) -> IpAddr {
     match scoped {
         ScopedIp::V4(v4) => IpAddr::V4(*v4.addr()),

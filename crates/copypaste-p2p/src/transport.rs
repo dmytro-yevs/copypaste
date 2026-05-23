@@ -293,14 +293,19 @@ impl PeerTransport {
                         return Err(err);
                     }
                     if attempt < MAX_CONNECT_ATTEMPTS {
+                        // ±50 ms jitter around the 100 ms base so concurrent
+                        // peers that hit the same transient (e.g. mDNS race)
+                        // don't lock-step their retries (security MED #10).
+                        let jitter_ms = rand::random::<u8>() as u64 % 100;
+                        let delay = CONNECT_RETRY_DELAY + Duration::from_millis(jitter_ms);
                         tracing::debug!(
                             peer_addr = %addr,
                             attempt,
-                            backoff_ms = CONNECT_RETRY_DELAY.as_millis(),
+                            backoff_ms = delay.as_millis(),
                             error = %err,
                             "peer connect transient failure — retrying"
                         );
-                        tokio::time::sleep(CONNECT_RETRY_DELAY).await;
+                        tokio::time::sleep(delay).await;
                     }
                     last_err = Some(err);
                 }
