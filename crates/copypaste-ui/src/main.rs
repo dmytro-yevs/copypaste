@@ -549,12 +549,49 @@ fn refresh_history_after_autostart(
         (s.socket_path.clone(), s.current_offset)
     };
     let result = load_history_page(&socket_path, PAGE_SIZE, offset);
-    let state_for_apply = Arc::clone(&state);
-    let _ = slint::invoke_from_event_loop(move || {
-        if let Some(win) = window_weak.upgrade() {
-            apply_history_result(&win, &state_for_apply, result, offset);
+
+    // beta.5 Bug-5 fix: `invoke_from_event_loop` returns
+    // `EventLoopError::NoEventLoopProvider` if the Slint loop has not
+    // started yet. The autostart worker is spawned *before*
+    // `window.run()`, so on a fast machine the post-startup post can
+    // fire before the loop is ready. Previously the `let _ = ...`
+    // swallowed the error and the UI stayed stuck on the
+    // "Daemon not running" placeholder.
+    //
+    // Retry up to 3 times with a 500 ms backoff. We share `result`
+    // across attempts via `Arc<Mutex<Option<...>>>` so the closure can
+    // .take() it without moving the outer binding.
+    let payload: Arc<Mutex<Option<std::result::Result<ipc_client::HistoryPage, String>>>> =
+        Arc::new(Mutex::new(Some(result)));
+
+    for attempt in 0..3 {
+        let window_weak_attempt = window_weak.clone();
+        let state_for_apply = Arc::clone(&state);
+        let payload_for_attempt = Arc::clone(&payload);
+        let post = slint::invoke_from_event_loop(move || {
+            if let Some(win) = window_weak_attempt.upgrade() {
+                if let Some(result) = lock_or_recover(&payload_for_attempt).take() {
+                    apply_history_result(&win, &state_for_apply, result, offset);
+                }
+            }
+        });
+        match post {
+            Ok(()) => return,
+            Err(e) => {
+                eprintln!(
+                    "[autostart] invoke_from_event_loop attempt {} failed: {e}",
+                    attempt + 1
+                );
+                if attempt < 2 {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            }
         }
-    });
+    }
+    eprintln!(
+        "[autostart] giving up on post-autostart refresh after 3 attempts — \
+         user can click Refresh once the window appears"
+    );
 }
 
 /// Call `paste` on the daemon.
