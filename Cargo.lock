@@ -1483,6 +1483,7 @@ dependencies = [
 name = "copypaste-telemetry"
 version = "0.3.0-dev"
 dependencies = [
+ "regex",
  "serde",
  "thiserror 1.0.69",
  "tracing",

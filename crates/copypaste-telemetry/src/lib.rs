@@ -31,9 +31,12 @@
 #![warn(missing_docs)]
 
 mod error;
+mod scrubber;
 
 pub use crate::error::{OsTag, ReportableError};
+pub use crate::scrubber::PiiScrubber;
 
+use std::sync::Arc;
 use thiserror::Error;
 
 /// User consent for outbound telemetry. Default is [`Self::Disabled`].
@@ -103,18 +106,44 @@ impl ErrorReporter for NoopReporter {
 /// Stub Sentry backend. Returns [`TelemetryError::NotImplemented`] from
 /// [`ErrorReporter::report`]. The constructor exists so downstream crates can
 /// pin to the type today; wiring lands in a later release.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct SentryReporter;
+///
+/// Carries an [`Arc<PiiScrubber>`] so the redaction layer runs on every
+/// outbound event the moment a real backend lands. The stub still invokes
+/// the scrubber before tracing so any accidental PII in `error_class` is
+/// also kept out of local debug logs.
+#[derive(Debug, Clone)]
+pub struct SentryReporter {
+    scrubber: Arc<PiiScrubber>,
+}
 
 impl SentryReporter {
-    /// Construct a stub [`SentryReporter`]. Does not contact any network.
-    pub const fn new() -> Self {
-        Self
+    /// Construct a stub [`SentryReporter`] with the default
+    /// [`PiiScrubber`]. Does not contact any network.
+    pub fn new() -> Self {
+        Self {
+            scrubber: Arc::new(PiiScrubber::default()),
+        }
+    }
+
+    /// Construct a [`SentryReporter`] with a caller-supplied scrubber. Use
+    /// this when extra organisation-specific redaction patterns must be
+    /// layered on top of the defaults.
+    pub fn with_scrubber(scrubber: Arc<PiiScrubber>) -> Self {
+        Self { scrubber }
+    }
+}
+
+impl Default for SentryReporter {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 impl ErrorReporter for SentryReporter {
     fn report(&self, event: ReportableError) -> Result<(), TelemetryError> {
+        // Scrub *before* anything else touches the event so even the local
+        // tracing line cannot accidentally surface raw PII to log sinks.
+        let event = event.scrubbed(&self.scrubber);
         // Trace at debug so accidental invocations during dev are visible
         // without spamming production logs.
         tracing::debug!(

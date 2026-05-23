@@ -12,3 +12,6 @@ repository.workspace = true
 thiserror = { workspace = true }
 serde = { workspace = true }
 tracing = { workspace = true }
+# PII scrubber patterns. Kept crate-local (not workspace) so the telemetry
+# crate's privacy surface owns its dependency boundary explicitly.
+regex = "1"

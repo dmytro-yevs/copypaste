@@ -66,11 +66,45 @@ data leaves the device. When the backend ships, this section will spell out:
 - Data subject rights (access, deletion).
 - Whether any sub-processor receives events.
 
+## PII scrubber
+
+As a defence-in-depth measure, every event handed to the `SentryReporter`
+is first run through a `PiiScrubber` (see
+`crates/copypaste-telemetry/src/scrubber.rs`) before any transmission or
+local debug-tracing call. Producers MUST still avoid putting user data
+into `ReportableError` — the scrubber is a safety net, not a license to
+include PII.
+
+The default scrubber redacts, in order:
+
+1. **Long hex strings** (UUIDs with or without dashes, ≥32-char hex
+   digests) → `<REDACTED-HEX>`.
+2. **JWT-like tokens** (three base64url segments, each ≥20 chars) →
+   `<REDACTED-JWT>`.
+3. **URL credentials** (`user:pass@` inside any `scheme://`) →
+   `scheme://<REDACTED-AUTH>@…` (scheme and host preserved).
+4. **Email addresses** → `<REDACTED-EMAIL>`.
+5. **IPv4 and IPv6 addresses** → `<REDACTED-IP>`.
+6. **Home directory prefixes** (`/Users/<name>/`, `/home/<name>/`) →
+   `~/` (structural path tail preserved).
+
+Custom organisation-specific patterns can be layered on with
+`PiiScrubber::add_custom`; they redact to `<REDACTED-CUSTOM>`.
+
+Scrubbing is deterministic and idempotent — re-scrubbing a scrubbed
+string yields the same string. The `pii_scrubber` integration test suite
+(`crates/copypaste-telemetry/tests/pii_scrubber.rs`) pins this contract.
+
+The `NoopReporter` does not invoke the scrubber because it discards every
+event without inspection or transmission.
+
 ## Reading the source
 
 - API surface: `crates/copypaste-telemetry/src/lib.rs`
 - Event shape: `crates/copypaste-telemetry/src/error.rs`
+- PII scrubber: `crates/copypaste-telemetry/src/scrubber.rs`
 - Opt-out tests: `crates/copypaste-telemetry/tests/opt_out.rs`
+- PII scrubber tests: `crates/copypaste-telemetry/tests/pii_scrubber.rs`
 
 If the source ever diverges from this document, the source wins and this
 document is a bug — please open an issue.
