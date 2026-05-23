@@ -3,6 +3,10 @@
 # Distinct from scripts/build-android.sh, which targets android/app/.../jniLibs
 # for the Gradle app integration. This script is for the multi-platform
 # distribution layout under builds/.
+#
+# Runs on host (needs cargo-ndk + ANDROID_NDK_HOME) OR in the Docker image
+# docker/Dockerfile.android (which provides both). Set IN_DOCKER=1 in the
+# container to silence host-install instructions.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,6 +15,7 @@ cd "$ROOT"
 ABI="${1:-arm64-v8a}"
 OUT_BASE="$ROOT/builds"
 CRATE_DIR="$ROOT/crates/copypaste-android"
+IN_DOCKER="${IN_DOCKER:-0}"
 
 abi_to_rust_target() {
   case "$1" in
@@ -24,8 +29,24 @@ abi_to_rust_target() {
 
 if ! command -v cargo-ndk >/dev/null 2>&1; then
   echo "!! cargo-ndk not installed."
-  echo "   Install: cargo install cargo-ndk"
-  echo "   Also requires: Android NDK + ANDROID_NDK_HOME env var"
+  if [[ "$IN_DOCKER" == "1" ]]; then
+    echo "   (unexpected: should be preinstalled in the Android Docker image)"
+  else
+    echo "   Install on host: cargo install cargo-ndk"
+    echo "   Also requires: Android NDK + ANDROID_NDK_HOME env var"
+    echo "   Or run in container: bash scripts/build-in-docker.sh android"
+  fi
+  exit 1
+fi
+
+if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
+  echo "!! ANDROID_NDK_HOME not set."
+  if [[ "$IN_DOCKER" == "1" ]]; then
+    echo "   (unexpected: container should export ANDROID_NDK_HOME)"
+  else
+    echo "   Install Android NDK and export ANDROID_NDK_HOME, or use:"
+    echo "     bash scripts/build-in-docker.sh android"
+  fi
   exit 1
 fi
 

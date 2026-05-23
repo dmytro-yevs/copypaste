@@ -1,3 +1,18 @@
+# Container-based builds for non-macOS platforms.
+# macOS builds remain on host (Apple SDK cannot legally run in Linux container).
+#
+# Usage:
+#   docker compose build android         # build the image once (~5 min first time)
+#   docker compose run --rm android      # run the build
+#   docker compose run --rm windows
+#   docker compose run --rm linux
+#
+# Or via wrapper: bash scripts/build-in-docker.sh [android|windows|linux|all]
+#
+# Build outputs land in ./builds/<platform>-<arch>/ via the bind mount on
+# /workspace. Cargo registry + per-platform target dirs are kept in named
+# volumes so the host's ./target stays untouched and rebuilds are fast.
+
 services:
   dev:
     build:
@@ -28,7 +43,63 @@ services:
     profiles:
       - relay
 
+  # --- Cross-build images (non-macOS) ---------------------------------------
+  android:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.android
+    image: copypaste-builder-android:latest
+    volumes:
+      - .:/workspace
+      - cargo-android-cache:/usr/local/cargo/registry
+      - cargo-android-target:/workspace/target-android
+    environment:
+      - CARGO_TARGET_DIR=/workspace/target-android
+      - ABI=arm64-v8a
+      - IN_DOCKER=1
+    command: ["bash", "scripts/build-android-pkg.sh", "arm64-v8a"]
+    profiles:
+      - build
+
+  windows:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.windows
+    image: copypaste-builder-windows:latest
+    volumes:
+      - .:/workspace
+      - cargo-windows-cache:/usr/local/cargo/registry
+      - cargo-windows-target:/workspace/target-windows
+    environment:
+      - CARGO_TARGET_DIR=/workspace/target-windows
+      - IN_DOCKER=1
+    command: ["bash", "scripts/build-windows.sh", "x86_64"]
+    profiles:
+      - build
+
+  linux:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.linux
+    image: copypaste-builder-linux:latest
+    volumes:
+      - .:/workspace
+      - cargo-linux-cache:/usr/local/cargo/registry
+      - cargo-linux-target:/workspace/target-linux
+    environment:
+      - CARGO_TARGET_DIR=/workspace/target-linux
+      - IN_DOCKER=1
+    command: ["cargo", "build", "--release", "--target", "x86_64-unknown-linux-musl", "-p", "copypaste-daemon"]
+    profiles:
+      - build
+
 volumes:
   cargo-registry:
   cargo-git:
   cargo-target:
+  cargo-android-cache:
+  cargo-android-target:
+  cargo-windows-cache:
+  cargo-windows-target:
+  cargo-linux-cache:
+  cargo-linux-target:

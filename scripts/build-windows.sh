@@ -2,6 +2,9 @@
 # Cross-compile copypaste-daemon for Windows x86_64 via mingw-w64.
 # Outputs to builds/windows-<arch>/.
 #
+# Runs on host (needs mingw-w64) OR in docker/Dockerfile.windows.
+# Set IN_DOCKER=1 in the container to silence host-install instructions.
+#
 # CAVEAT: Windows daemon currently has stub IPC; build may fail at link time.
 # This script is best-effort.
 set -euo pipefail
@@ -11,6 +14,7 @@ cd "$ROOT"
 
 ARCH="${1:-x86_64}"
 OUT_BASE="$ROOT/builds"
+IN_DOCKER="${IN_DOCKER:-0}"
 
 case "$ARCH" in
   x86_64)
@@ -26,8 +30,13 @@ esac
 
 if ! command -v "$LINKER" >/dev/null 2>&1; then
   echo "!! ${LINKER} not found (mingw-w64 not installed)."
-  echo "   Install (macOS): brew install mingw-w64"
-  echo "   Install (Linux): apt install mingw-w64"
+  if [[ "$IN_DOCKER" == "1" ]]; then
+    echo "   (unexpected: should be preinstalled in the Windows Docker image)"
+  else
+    echo "   Install (macOS): brew install mingw-w64"
+    echo "   Install (Linux): apt install mingw-w64"
+    echo "   Or run in container: bash scripts/build-in-docker.sh windows"
+  fi
   exit 1
 fi
 
@@ -48,8 +57,9 @@ cargo build --release --target "$RUST_TARGET" -p copypaste-daemon || {
   exit 1
 }
 
-cp "target/${RUST_TARGET}/release/copypaste-daemon.exe" "$OUT_DIR/" 2>/dev/null || {
-  echo "!! No copypaste-daemon.exe produced."
+CARGO_TARGET_BASE="${CARGO_TARGET_DIR:-$ROOT/target}"
+cp "${CARGO_TARGET_BASE}/${RUST_TARGET}/release/copypaste-daemon.exe" "$OUT_DIR/" 2>/dev/null || {
+  echo "!! No copypaste-daemon.exe produced at ${CARGO_TARGET_BASE}/${RUST_TARGET}/release/."
   exit 1
 }
 

@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1.6
+#
+# Docker image for cross-compiling copypaste-daemon for Windows x86_64
+# from Linux via mingw-w64. No Windows host required.
+#
+# Build:   docker build -f docker/Dockerfile.windows -t copypaste-builder-windows .
+# Run:     docker run --rm -v $PWD:/workspace copypaste-builder-windows
+# Or via:  docker compose run --rm windows
+#
+# CAVEAT: copypaste-daemon currently has stub Windows IPC; the link step
+# may fail. This is expected and not a Docker issue — see
+# scripts/build-windows.sh for the same caveat on host builds.
+
+FROM rust:1.75-slim-bookworm
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# ----- Layer 1: system deps (mingw-w64 cross toolchain) ----------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        mingw-w64 \
+        pkg-config \
+        && rm -rf /var/lib/apt/lists/*
+
+# ----- Layer 2: Rust target + linker config ----------------------------------
+RUN rustup target add x86_64-pc-windows-gnu
+
+# Tell cargo to use mingw-w64's gcc for the Windows gnu target.
+RUN mkdir -p /root/.cargo && \
+    printf '[target.x86_64-pc-windows-gnu]\nlinker = "x86_64-w64-mingw32-gcc"\nar = "x86_64-w64-mingw32-ar"\n' \
+    > /root/.cargo/config.toml
+
+# Sanity: linker present.
+RUN x86_64-w64-mingw32-gcc --version | head -1
+
+WORKDIR /workspace
+
+CMD ["cargo", "build", "--release", "--target", "x86_64-pc-windows-gnu", "-p", "copypaste-daemon"]

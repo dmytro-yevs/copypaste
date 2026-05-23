@@ -6,13 +6,43 @@
 #   bash scripts/build-all.sh android     # only Android (arm64-v8a + armeabi-v7a)
 #   bash scripts/build-all.sh windows     # only Windows x86_64 (best-effort)
 #
+#   bash scripts/build-all.sh --docker [android|windows|linux|all]
+#     Delegates non-macOS builds to Docker containers (no host pollution).
+#     macOS still runs on host (Apple SDK cannot run in Linux container).
+#
 # Note: uses plain if-cascade for bash 3.2 compatibility (macOS default shell).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-PLATFORM="${1:-all}"
+USE_DOCKER=false
+PLATFORM=""
+for arg in "$@"; do
+  case "$arg" in
+    --docker) USE_DOCKER=true ;;
+    *) PLATFORM="$arg" ;;
+  esac
+done
+PLATFORM="${PLATFORM:-all}"
+
+if [[ "$USE_DOCKER" == "true" ]]; then
+  case "$PLATFORM" in
+    android|windows|linux|all)
+      echo "==> Delegating $PLATFORM build to Docker"
+      exec bash scripts/build-in-docker.sh "$PLATFORM"
+      ;;
+    macos)
+      echo "!! --docker not applicable to macOS (Apple SDK is host-only)."
+      echo "   Falling through to host build."
+      ;;
+    *)
+      echo "Unknown platform with --docker: $PLATFORM"
+      exit 1
+      ;;
+  esac
+fi
+
 mkdir -p "$ROOT/builds"
 
 # Track outcomes for final summary.

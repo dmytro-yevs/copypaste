@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1.6
+#
+# Docker image for cross-compiling copypaste-android (.so) on Linux.
+# Produces aarch64-linux-android and armv7-linux-androideabi artifacts via cargo-ndk.
+#
+# Why container: Android NDK + sdkmanager + cargo-ndk is ~3GB of host pollution.
+# This image installs them once; host stays clean.
+#
+# Build:   docker build -f docker/Dockerfile.android -t copypaste-builder-android .
+# Run:     docker run --rm -v $PWD:/workspace copypaste-builder-android
+# Or via:  docker compose run --rm android
+#
+# Outputs land in /workspace/builds/android-<abi>/ (mounted from host).
+
+FROM rust:1.75-slim-bookworm AS base
+
+ARG DEBIAN_FRONTEND=noninteractive
+ARG NDK_VERSION=26.3.11579264
+ARG CMDLINE_TOOLS_VERSION=11076708
+
+# ----- Layer 1: system deps ---------------------------------------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        clang \
+        curl \
+        libssl-dev \
+        make \
+        openjdk-17-jdk-headless \
+        pkg-config \
+        python3 \
+        unzip \
+        wget \
+        && rm -rf /var/lib/apt/lists/*
+
+# ----- Layer 2: Android cmdline-tools + NDK ----------------------------------
+ENV ANDROID_HOME=/opt/android-sdk
+ENV ANDROID_SDK_ROOT=${ANDROID_HOME}
+ENV ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}
+ENV PATH=${ANDROID_HOME}/cmdline-tools/latest/bin:${ANDROID_HOME}/platform-tools:${PATH}
+
+RUN mkdir -p ${ANDROID_HOME}/cmdline-tools \
+    && cd /tmp \
+    && wget -q "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_VERSION}_latest.zip" -O cmdline-tools.zip \
+    && unzip -q cmdline-tools.zip -d ${ANDROID_HOME}/cmdline-tools \
+    && mv ${ANDROID_HOME}/cmdline-tools/cmdline-tools ${ANDROID_HOME}/cmdline-tools/latest \
+    && rm cmdline-tools.zip \
+    && yes | sdkmanager --licenses >/dev/null 2>&1 || true \
+    && sdkmanager --install "ndk;${NDK_VERSION}" "platform-tools" >/dev/null
+
+# ----- Layer 3: Rust targets + cargo-ndk -------------------------------------
+RUN rustup target add aarch64-linux-android armv7-linux-androideabi \
+    && cargo install cargo-ndk --locked
+
+# Sanity: cargo-ndk on PATH and NDK reachable.
+RUN cargo ndk --version && ls ${ANDROID_NDK_HOME}/source.properties
+
+WORKDIR /workspace
+
+# Default: build arm64-v8a. Override with: docker run ... <image> bash scripts/build-android-pkg.sh armeabi-v7a
+CMD ["bash", "-c", "scripts/build-android-pkg.sh ${ABI:-arm64-v8a}"]

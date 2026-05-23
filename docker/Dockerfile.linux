@@ -1,0 +1,31 @@
+# syntax=docker/dockerfile:1.6
+#
+# ============================================================================
+# NOTE: Linux is FROZEN as a runtime target per project rules. This image
+# exists ONLY for cross-build sanity checks (does the daemon still link on
+# Linux at all). Do NOT ship Linux artifacts to users from this image.
+# Runtime support remains macOS + Android (+ best-effort Windows).
+# ============================================================================
+#
+# Build:   docker build -f docker/Dockerfile.linux -t copypaste-builder-linux .
+# Run:     docker run --rm -v $PWD:/workspace copypaste-builder-linux
+# Or via:  docker compose run --rm linux
+
+FROM rust:1.75-slim-bookworm
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# ----- Layer 1: system deps (musl for static binaries) -----------------------
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libssl-dev \
+        musl-tools \
+        pkg-config \
+        && rm -rf /var/lib/apt/lists/*
+
+# ----- Layer 2: Rust target --------------------------------------------------
+RUN rustup target add x86_64-unknown-linux-musl
+
+WORKDIR /workspace
+
+CMD ["cargo", "build", "--release", "--target", "x86_64-unknown-linux-musl", "-p", "copypaste-daemon"]
