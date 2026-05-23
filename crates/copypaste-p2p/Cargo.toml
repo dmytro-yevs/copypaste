@@ -31,7 +31,7 @@ opaque-ke = { version = "3.0", default-features = false, features = ["ristretto2
 # OPAQUE KSF — Argon2 password hashing
 argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
 # generic-array — required by opaque-ke message types
-generic-array = "0.14"
+generic-array = "1.4"
 # HKDF for SessionKey -> XChaCha20 key derivation (ADR-001)
 hkdf = { workspace = true }
 # Error handling
