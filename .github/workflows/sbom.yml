@@ -1,0 +1,59 @@
+name: SBOM (CycloneDX)
+
+# Generate CycloneDX SBOMs on release tag push, attach them as
+# GitHub Release assets. Manual runs upload artifacts only.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  sbom:
+    name: Generate CycloneDX SBOM
+    runs-on: ubuntu-latest
+    env:
+      REF_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+
+      - name: Generate SBOMs (JSON)
+        run: bash scripts/gen-sbom.sh --format json --output-dir reports/sbom
+
+      - name: Bundle SBOMs into archive
+        run: |
+          set -euo pipefail
+          cd reports
+          tar -czf "sbom-${REF_NAME}.tar.gz" sbom/
+          ls -lh "sbom-${REF_NAME}.tar.gz"
+
+      - name: Upload SBOM as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-${{ env.REF_NAME }}
+          path: reports/sbom-${{ env.REF_NAME }}.tar.gz
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attach SBOM to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: reports/sbom-${{ env.REF_NAME }}.tar.gz
+          fail_on_unmatched_files: true
