@@ -1283,9 +1283,12 @@ dependencies = [
 name = "copypaste-bench"
 version = "0.2.0-beta.0"
 dependencies = [
+ "clap",
  "copypaste-core",
+ "copypaste-ipc",
  "copypaste-sync",
  "criterion",
+ "serde_json",
  "sha2",
  "tempfile",
 ]
@@ -1340,6 +1343,7 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "tracing-appender",
  "tracing-subscriber",
  "unicode-normalization",
  "uuid",
