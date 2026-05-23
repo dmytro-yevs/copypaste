@@ -9,10 +9,13 @@ pub mod storage;
 pub use config::AppConfig;
 pub use crypto::chunks::{decrypt_chunks, encrypt_chunks, ChunkError, EncryptedChunk};
 pub use crypto::encrypt::{
-    build_item_aad, decrypt_item_with_aad, encrypt_item_with_aad, EncryptError, AAD_SCHEMA_VERSION,
-    NONCE_SIZE,
+    build_item_aad, build_item_aad_v2, decrypt_item_with_aad, encrypt_item_with_aad, EncryptError,
+    AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
-pub use crypto::{DeviceKeypair, KeyError};
+pub use crypto::{
+    derive_storage_key_v1, derive_storage_key_v2, derive_sync_key_v2, derive_telemetry_key_v2,
+    DeviceKeypair, KeyError, HKDF_VERSION,
+};
 pub use image::{
     chunks_from_blob, chunks_to_blob, decode_image, encode_image, thumbnail, ImageError, ImageMeta,
     IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES,
@@ -27,3 +30,6 @@ pub use storage::items::{
     ItemsError,
 };
 pub use storage::{Database, DbError};
+pub use storage::devices::{
+    ensure_revoked_devices_table, list_revoked_devices, revoke_device, DevicesError, RevokedDevice,
+};
