@@ -2,6 +2,9 @@
 
 uniffi::include_scaffolding!("copypaste_android");
 
+pub mod version;
+pub use version::{check_compatibility, core_version, uniffi_abi_version, VersionError, UNIFFI_ABI_VERSION};
+
 use copypaste_core::{encrypt_item, decrypt_item, detect, NONCE_SIZE};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};

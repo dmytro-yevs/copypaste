@@ -26,6 +26,16 @@ namespace copypaste_android {
   // currently stored at `db_path`. Returns 0 when the feature is off.
   [Throws=CopypasteError]
   u64 get_history_count(string db_path, [ByRef] sequence<u8> key);
+
+  // Version + ABI compatibility check.
+  // Kotlin calls these on startup to confirm it is talking to a compatible
+  // Rust core. Bump UNIFFI_ABI_VERSION (in src/version.rs) whenever the
+  // UDL surface or any FFI data contract breaks.
+  string core_version();
+  u32 uniffi_abi_version();
+
+  [Throws=VersionError]
+  void check_compatibility(u32 kotlin_abi_version);
 };
 
 [Error]
@@ -34,6 +44,11 @@ interface CopypasteError {
   DecryptionFailed(string message);
   DatabaseError(string message);
   InvalidKeyLength();
+};
+
+[Error]
+interface VersionError {
+  Incompatible(u32 rust_abi, u32 kotlin_abi);
 };
 
 dictionary EncryptedBlob {
