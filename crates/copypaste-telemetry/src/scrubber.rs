@@ -29,6 +29,7 @@
 //! `scrubber_is_idempotent` integration test).
 
 use regex::Regex;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::error::ReportableError;
 
@@ -121,12 +122,25 @@ impl PiiScrubber {
                 re: Regex::new(r"\b(?:\d{1,3}\.){3}\d{1,3}\b").expect("ipv4 pattern is valid"),
                 replacement: "<REDACTED-IP>",
             },
-            // IPv6 — requires at least two `:` separators so we don't eat
-            // ratios or timestamps. Allows `::` compression.
+            // IPv6 — we anchor on ASCII non-hex non-colon boundaries
+            // rather than `\b` because `:` itself is not a word character —
+            // the original `\b::` form matched erratically depending on
+            // what surrounded the colons. The boundary chars are captured
+            // into `$1`/`$2` so the replacement preserves them.
+            //
+            // We accept any run that contains at least two `:` separators
+            // and only [0-9a-fA-F:] in between, which is permissive enough
+            // to catch compressed forms like `fe80::1ff:fe23:4567:890a` and
+            // `::1` without writing the full RFC 4291 grammar. The leading
+            // boundary group prevents matching inside a longer
+            // alphanumeric run (e.g. a hash that happens to contain
+            // colons in a different schema).
             Pattern {
-                re: Regex::new(r"\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{0,4}\b|::1\b|::\b")
-                    .expect("ipv6 pattern is valid"),
-                replacement: "<REDACTED-IP>",
+                re: Regex::new(
+                    r"(^|[^0-9a-fA-F:])([0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7})($|[^0-9a-fA-F:])",
+                )
+                .expect("ipv6 pattern is valid"),
+                replacement: "$1<REDACTED-IP>$3",
             },
             // Home directory prefixes: macOS `/Users/<name>/…` and Linux
             // `/home/<name>/…`. We collapse to `~/` so the structural part
@@ -162,10 +176,21 @@ impl PiiScrubber {
 
     /// Apply every pattern in order and return the scrubbed copy.
     ///
-    /// Pure function: no I/O, no allocation beyond the returned `String`
-    /// (and intermediate buffers internal to [`Regex::replace_all`]).
+    /// The input is first normalised to NFKC. Without this step an attacker
+    /// (or, more commonly, a copy-pasted log line) can bypass the regex
+    /// patterns with Unicode-equivalent characters that *look* like ASCII
+    /// but do not match the ASCII regex class — e.g. fullwidth Latin letters
+    /// (U+FF21 'Ａ' vs U+0041 'A'), Greek small letter omicron in place of
+    /// Latin 'o' inside an email's local part, or compatibility forms of
+    /// digits. NFKC collapses those to their canonical ASCII equivalents
+    /// before pattern matching so the existing regex set covers them.
+    ///
+    /// Pure function: no I/O, no allocation beyond the normalised input and
+    /// the returned `String` (and intermediate buffers internal to
+    /// [`Regex::replace_all`]).
     pub fn scrub(&self, input: &str) -> String {
-        let mut out = std::borrow::Cow::Borrowed(input);
+        let normalised: String = input.nfkc().collect();
+        let mut out = std::borrow::Cow::Owned(normalised);
         for p in &self.patterns {
             // `replace_all` only allocates when there is at least one
             // match, so pass-through strings stay cheap.

@@ -270,6 +270,25 @@ impl ClientHandle {
 
 // ── Connection loop ───────────────────────────────────────────────────────────
 
+/// RAII guard that clears the `running` flag on Drop.
+///
+/// Audit-concurrency HIGH #4: `connection_loop` used to clear `running` only
+/// at the bottom of the function. If any await in the loop body panicked (or
+/// the task was aborted), the flag stayed `true` forever — making
+/// `ClientHandle::is_running` lie about a dead worker and blocking restart
+/// logic that consults the flag.
+///
+/// Wrapping the flag in a Drop guard means the cleanup runs unconditionally
+/// when the task ends, whether via normal return, ?-style early return, or
+/// panic unwinding.
+struct RunningGuard(Arc<AtomicBool>);
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Outer reconnection loop.  Reconnects with exponential backoff when the
 /// WebSocket connection drops.
 async fn connection_loop(
@@ -278,6 +297,10 @@ async fn connection_loop(
     shutdown: Arc<Notify>,
     running: Arc<AtomicBool>,
 ) {
+    // Audit-concurrency HIGH #4: clear `running` on ALL exit paths (return,
+    // panic, abort) via a Drop guard, not just the bottom of the function.
+    let _guard = RunningGuard(running.clone());
+
     let mut backoff = config.initial_backoff;
 
     loop {
@@ -317,7 +340,9 @@ async fn connection_loop(
         backoff = (backoff * 2).min(config.max_backoff);
     }
 
-    running.store(false, Ordering::SeqCst);
+    // `_guard` drops here on the normal exit path; if we unwound earlier
+    // (panic in run_session/select!) the same drop ran then. Either way
+    // the flag is cleared exactly once.
     tracing::info!("Supabase Realtime client stopped");
 }
 

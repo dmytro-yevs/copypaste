@@ -447,6 +447,7 @@ mod tests {
             app_bundle_id: None,
             content_hash: None,
             origin_device_id: format!("dev-{id}"),
+            key_version: 1,
         }
     }
 
@@ -687,6 +688,7 @@ mod tests {
             app_bundle_id: None,
             content_hash: None,
             origin_device_id: "device-A".to_string(),
+            key_version: 1,
         };
 
         let mut engine_a = SyncEngine::new("device-A");

@@ -5,8 +5,9 @@ use crate::{
     p2p, paths,
 };
 use copypaste_core::{
-    build_item_aad, chunks_to_blob, detect, encode_image, encrypt_item_with_aad, insert_item,
-    upsert_fts, AppConfig, ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION,
+    build_item_aad, chunks_to_blob, detect, encode_image, encrypt_item_with_aad,
+    insert_item_with_fts, AppConfig, ClipboardItem, Database, DeviceKeypair,
+    AAD_SCHEMA_VERSION,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -453,6 +454,10 @@ async fn handle_text(
     local_key: &[u8; 32],
     config: &AppConfig,
 ) -> Option<ClipboardItem> {
+    // Migration gate is now enforced at the Database layer inside
+    // `insert_item` / `insert_item_with_fts` (ItemsError::MigrationInProgress).
+    // The call-site guard that used to live here has been removed.
+
     let is_sensitive = detect(&text).is_some();
 
     // v0.3: encrypt_item_with_aad binds ciphertext to (item_id, schema_version)
@@ -482,19 +487,30 @@ async fn handle_text(
     }
 
     let db_guard = db.lock().await;
-    match insert_item(&db_guard, &item) {
-        Ok(_) => {
+    // v0.3 post-T2: insert_item + upsert_fts collapsed into a single
+    // transaction. Closes the TOCTOU window where a crash between the row
+    // insert and the FTS upsert could leave a row that search would never
+    // find. Also handles the v5 UNIQUE-index dedup race internally — if
+    // another writer wins the (content_hash, minute) race we get back the
+    // existing row's id rather than a SQLITE_CONSTRAINT error.
+    match insert_item_with_fts(&db_guard, &item, &text) {
+        Ok(stored_id) => {
             // beta.5 Bug-1 visibility: promoted from debug! to info! so users
             // can verify in `daemon.out.log` that captured items reach the DB.
-            tracing::info!(
-                id = %item.id,
-                sensitive = is_sensitive,
-                "stored text item id={} sensitive={}",
-                item.id,
-                is_sensitive
-            );
-            if let Err(e) = upsert_fts(&db_guard, &item.id, &text) {
-                tracing::warn!("fts index failed for id={}: {e}", item.id);
+            if stored_id != item.id {
+                tracing::debug!(
+                    requested = %item.id,
+                    existing = %stored_id,
+                    "text item deduped against existing row"
+                );
+            } else {
+                tracing::info!(
+                    id = %item.id,
+                    sensitive = is_sensitive,
+                    "stored text item id={} sensitive={}",
+                    item.id,
+                    is_sensitive
+                );
             }
             prune_history(&db_guard, config);
             Some(item)
@@ -512,6 +528,10 @@ async fn handle_image(
     local_key: &[u8; 32],
     config: &AppConfig,
 ) -> Option<ClipboardItem> {
+    // Migration gate is now enforced at the Database layer inside
+    // `insert_item` / `insert_item_with_fts` (ItemsError::MigrationInProgress).
+    // The call-site guard that used to live here has been removed.
+
     // Derive a stable file_id from SHA-256(raw_bytes)[..16] — a 128-bit
     // collision-resistant content hash. This is deterministic so identical
     // images dedup naturally, and replaces the prior `DefaultHasher XOR
@@ -535,13 +555,20 @@ async fn handle_image(
             );
 
             let db_guard = db.lock().await;
-            match insert_item(&db_guard, &item) {
-                Ok(_) => {
+            // Atomic insert: images have no searchable text, so we pass "" to
+            // skip the FTS write (insert_item_with_fts treats empty as
+            // "image item" and only writes the row).
+            match insert_item_with_fts(&db_guard, &item, "") {
+                Ok(stored_id) => {
                     // beta.5 Bug-1 visibility: promoted from debug! to info!.
-                    tracing::info!(id = %item.id, "stored image item id={}", item.id);
-                    // Images don't have searchable text; index empty string for FTS consistency.
-                    if let Err(e) = upsert_fts(&db_guard, &item.id, "") {
-                        tracing::warn!("fts empty index failed for image id={}: {e}", item.id);
+                    if stored_id != item.id {
+                        tracing::debug!(
+                            requested = %item.id,
+                            existing = %stored_id,
+                            "image item deduped against existing row"
+                        );
+                    } else {
+                        tracing::info!(id = %item.id, "stored image item id={}", item.id);
                     }
                     prune_history(&db_guard, config);
                     Some(item)

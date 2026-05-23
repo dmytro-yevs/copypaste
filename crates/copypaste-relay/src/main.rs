@@ -9,6 +9,7 @@ mod routes;
 mod state;
 mod store;
 
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use config::RelayConfig;
@@ -41,7 +42,15 @@ async fn main() -> anyhow::Result<()> {
         config.sync_ttl_secs,
         TTL_EVICTOR_TICK_SECS
     );
-    axum::serve(listener, app).await?;
+    // `into_make_service_with_connect_info` is required so handlers like
+    // `devices::register` can read the client's `SocketAddr` via the
+    // `ConnectInfo` extractor — needed by the per-(ip, device) registration
+    // rate limiter (security HIGH #5).
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }

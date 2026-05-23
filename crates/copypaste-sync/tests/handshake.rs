@@ -75,6 +75,7 @@ fn make_item(id: &str, lamport: i64) -> ClipboardItem {
         app_bundle_id: None,
         content_hash: None,
         origin_device_id: format!("dev-{id}"),
+        key_version: 1,
     }
 }
 

@@ -28,6 +28,11 @@ pub enum RelayError {
     #[allow(dead_code)]
     #[error("history quota exceeded: maximum {limit} items allowed for this tier")]
     HistoryQuotaExceeded { limit: usize },
+    /// Returned for unrecoverable server-internal failures (e.g. counter
+    /// overflow). Maps to 500 — the client cannot fix this by changing
+    /// the request.
+    #[error("internal server error: {0}")]
+    Internal(String),
 }
 
 impl RelayError {
@@ -48,6 +53,7 @@ impl RelayError {
             RelayError::HistoryQuotaExceeded { .. } => {
                 (StatusCode::FORBIDDEN, "HISTORY_QUOTA_EXCEEDED")
             }
+            RelayError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL"),
         }
     }
 }

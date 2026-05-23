@@ -1289,7 +1289,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-android"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "copypaste-core",
  "rusqlite",
@@ -1301,7 +1301,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-bench"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "clap",
  "copypaste-core",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-cli"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -1331,7 +1331,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "chacha20poly1305",
  "criterion",
@@ -1362,7 +1362,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -1400,7 +1400,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-ipc"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1408,7 +1408,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "argon2",
  "bytes",
@@ -1419,6 +1419,7 @@ dependencies = [
  "if-addrs",
  "mdns-sd",
  "opaque-ke",
+ "rand 0.8.6",
  "rcgen",
  "rustls",
  "sha2",
@@ -1428,11 +1429,12 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
 ]
 
 [[package]]
 name = "copypaste-relay"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -1454,7 +1456,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-supabase"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "futures-util",
  "mockito",
@@ -1471,7 +1473,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-sync"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "copypaste-core",
  "serde",
@@ -1482,18 +1484,19 @@ dependencies = [
 
 [[package]]
 name = "copypaste-telemetry"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "regex",
  "sentry",
  "serde",
  "thiserror 1.0.69",
  "tracing",
+ "unicode-normalization",
 ]
 
 [[package]]
 name = "copypaste-ui"
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 dependencies = [
  "anyhow",
  "copypaste-ipc",

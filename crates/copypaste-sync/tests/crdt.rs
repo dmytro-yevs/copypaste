@@ -45,6 +45,7 @@ fn mk_local_with_device(
         app_bundle_id: None,
         content_hash: None,
         origin_device_id: device_id.to_string(),
+        key_version: 1,
     }
 }
 

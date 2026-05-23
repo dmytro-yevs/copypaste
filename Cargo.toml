@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.0-dev"
+version = "0.3.0-alpha.1"
 edition = "2021"
 # Metadata only — we follow stable (see rust-toolchain.toml). 1.89 is the
 # current Cargo.lock-implied floor (smol_str 0.3.6). Bump when lockfile bumps.

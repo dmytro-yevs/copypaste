@@ -87,6 +87,41 @@ pub fn derive_telemetry_key_v2(ikm: &[u8], pair_id: &str) -> [u8; 32] {
     derive_key_v2(ikm, pair_id, "telemetry")
 }
 
+/// Fixed 32-byte HKDF salt for the local-storage key-version-2 derivation path.
+///
+/// Computed as `SHA-256(b"copypaste/storage-key/v2/hkdf-salt")` and pinned as
+/// a literal so it can never drift from what is written on disk. Any change
+/// here is a hard-fork of all `key_version = 2` local-storage ciphertexts.
+///
+/// This constant is distinct from [`HKDF_SALT_V2_BASE`] (which is a *prefix*
+/// used to derive per-pair salts for sync/telemetry keys). This one is used
+/// exclusively by [`derive_v2`] for the single-device local-storage path where
+/// there is no `pair_id`.
+pub(crate) const HKDF_SALT_V2: &[u8; 32] = &[
+    0xdd, 0x4e, 0xb4, 0x9c, 0x1e, 0x2e, 0x3c, 0x66,
+    0x11, 0xa4, 0x1b, 0x03, 0x3c, 0xea, 0x9a, 0x50,
+    0x5c, 0x91, 0xa3, 0x09, 0x09, 0xa6, 0x67, 0xbb,
+    0x3f, 0x42, 0xb3, 0xd7, 0xf3, 0x33, 0x02, 0x8e,
+];
+
+/// Derive a 32-byte local-storage key from a raw 32-byte seed using the v2
+/// HKDF family.
+///
+/// Uses HKDF-SHA512 with the frozen [`HKDF_SALT_V2`] salt and the info string
+/// `"copypaste-local-storage-v2"`. Domain-separated from the network sync/
+/// telemetry keys by the `info` string and from v1 by both the algorithm
+/// (SHA-512 vs SHA-256) and the salt bytes.
+///
+/// This is the single-device equivalent of [`derive_storage_key_v2`]: it does
+/// NOT take a `pair_id` because local-storage encryption has no peer concept.
+pub fn derive_v2(seed: &[u8; 32]) -> [u8; 32] {
+    let hk = Hkdf::<Sha512>::new(Some(HKDF_SALT_V2), seed);
+    let mut key = [0u8; 32];
+    hk.expand(b"copypaste-local-storage-v2", &mut key)
+        .expect("HKDF-SHA512 expand 32 bytes always succeeds");
+    key
+}
+
 /// v1 local-storage-key derivation, exposed as a free function so the
 /// migration sweep can derive the legacy key without going through the
 /// `DeviceKeypair` instance API. Identical output to
@@ -425,6 +460,65 @@ mod tests {
     #[test]
     fn hkdf_version_is_2() {
         assert_eq!(HKDF_VERSION, 2);
+    }
+
+    // -------------------------------------------------------------------------
+    // wave1a-atomic: HKDF_SALT_V2 golden-byte test + derive_v2 tests
+    // -------------------------------------------------------------------------
+
+    /// T4 (golden-file): `HKDF_SALT_V2` must be exactly the SHA-256 of the
+    /// canonical input string `"copypaste/storage-key/v2/hkdf-salt"`. Changing
+    /// these bytes is a hard-fork of every `key_version = 2` local-storage
+    /// ciphertext — this test makes that a deliberate, visible act.
+    #[test]
+    fn hkdf_salt_v2_is_sha256_of_canonical_input() {
+        use sha2::Digest;
+        let expected = Sha256::digest(b"copypaste/storage-key/v2/hkdf-salt");
+        assert_eq!(
+            HKDF_SALT_V2.as_ref(),
+            expected.as_slice(),
+            "HKDF_SALT_V2 bytes must equal SHA-256(b\"copypaste/storage-key/v2/hkdf-salt\")"
+        );
+    }
+
+    /// `derive_v2` must be deterministic: same seed → same key.
+    #[test]
+    fn derive_v2_is_deterministic() {
+        let seed = [0xA1u8; 32];
+        let k1 = derive_v2(&seed);
+        let k2 = derive_v2(&seed);
+        assert_eq!(k1, k2);
+    }
+
+    /// `derive_v2` must produce a different key than `derive_storage_key_v1`
+    /// for the same IKM — domain separation between v1 and v2 is critical.
+    #[test]
+    fn derive_v2_differs_from_v1() {
+        let seed = [0xB2u8; 32];
+        let v1 = derive_storage_key_v1(&seed);
+        let v2 = derive_v2(&seed);
+        assert_ne!(v1, v2, "derive_v2 must not collide with derive_storage_key_v1");
+    }
+
+    /// `derive_v2` must produce a different key than `derive_storage_key_v2`
+    /// even for the same seed — they use different salt constructions.
+    #[test]
+    fn derive_v2_differs_from_derive_storage_key_v2() {
+        let seed = [0xC3u8; 32];
+        let local_v2 = derive_v2(&seed);
+        let pair_v2 = derive_storage_key_v2(&seed, "some-pair-id");
+        assert_ne!(
+            local_v2, pair_v2,
+            "local derive_v2 must not collide with per-pair derive_storage_key_v2"
+        );
+    }
+
+    /// Different seeds must produce different keys.
+    #[test]
+    fn derive_v2_different_seeds_produce_different_keys() {
+        let k1 = derive_v2(&[0x01u8; 32]);
+        let k2 = derive_v2(&[0x02u8; 32]);
+        assert_ne!(k1, k2);
     }
 
     /// `derive_storage_key_v1` (free function) and `DeviceKeypair::local_enc_key`

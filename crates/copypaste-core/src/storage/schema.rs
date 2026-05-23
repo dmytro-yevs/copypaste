@@ -27,7 +27,10 @@ pub enum SchemaError {
 ///   * 4 → 5 (beta.6 merge): added two UNIQUE INDEXes — `content_hash`+minute
 ///     bucket for TOCTOU dedup, `item_id` for sync replay protection.
 ///     See [`V5_INDEXES_SQL`] / `schema_v2.sql`.
-pub const SCHEMA_VERSION: i64 = 5;
+///   * 5 → 6 (wave1a-atomic): added `migration_state` table for resumable
+///     v4 key-rotation sweep tracking. Seeds the initial row so
+///     `Database::migration_state()` always returns a valid state.
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -152,6 +155,35 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         script.push('\n');
     }
 
+    if current_version < 6 {
+        // Migration v6 (wave1a-atomic): create `migration_state` table for
+        // resumable v4 key-rotation sweep tracking.
+        //
+        // Seed the row with completed_at already set when there are no
+        // key_version=1 rows (fresh install or database already clean).
+        // This prevents the gate in insert_item from blocking writes on a
+        // brand-new database that has nothing to sweep.
+        //
+        // For upgrades from an earlier schema that may have key_version=1
+        // rows, completed_at is left NULL so the daemon startup sweep runs.
+        script.push_str(
+            "CREATE TABLE IF NOT EXISTS migration_state (\n\
+             key                     TEXT PRIMARY KEY,\n\
+             key_version_in_progress INTEGER,\n\
+             last_processed_id       INTEGER NOT NULL DEFAULT 0,\n\
+             started_at              INTEGER,\n\
+             completed_at            INTEGER\n\
+             );\n\
+             INSERT OR IGNORE INTO migration_state \
+             (key, key_version_in_progress, last_processed_id, started_at, completed_at) \
+             VALUES (\n\
+               'v4-key-version-sweep', 2, 0, strftime('%s','now'),\n\
+               CASE WHEN (SELECT COUNT(*) FROM clipboard_items WHERE key_version = 1) = 0\n\
+                    THEN strftime('%s','now') ELSE NULL END\n\
+             );\n",
+        );
+    }
+
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));
     script.push_str("COMMIT;\n");
 
@@ -271,6 +303,30 @@ mod tests {
             .expect("v4 schema must include key_version column");
         assert_eq!(kv.1.to_uppercase(), "INTEGER");
         assert_eq!(kv.2, 1, "key_version must be NOT NULL");
+    }
+
+    #[test]
+    fn fresh_db_has_migration_state_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_migrations(&conn).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='migration_state'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "migration_state table must be created by v6 migration");
+
+        // The seed row must be present.
+        let row_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM migration_state WHERE key = 'v4-key-version-sweep'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(row_count, 1, "seed row must be inserted by v6 migration");
     }
 
     #[test]

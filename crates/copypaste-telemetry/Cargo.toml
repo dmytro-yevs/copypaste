@@ -15,6 +15,10 @@ tracing = { workspace = true }
 # PII scrubber patterns. Kept crate-local (not workspace) so the telemetry
 # crate's privacy surface owns its dependency boundary explicitly.
 regex = "1"
+# NFKC normalisation runs ahead of every regex pattern in the scrubber so
+# Unicode-equivalent homoglyphs (fullwidth digits, Greek omicron in an email
+# local part, etc.) cannot bypass the ASCII-shaped patterns.
+unicode-normalization = { workspace = true }
 # Sentry SDK — crate-local, NOT promoted to workspace so the telemetry
 # crate's outbound-network dependency stays isolated.
 # default-features disabled to avoid pulling reqwest's full feature set;

@@ -27,6 +27,14 @@ class ClipboardRepository(context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("copypaste_items", Context.MODE_PRIVATE)
 
+    /**
+     * Guard for read-modify-write on the comma-joined "item_ids" index.
+     * SharedPreferences is process-wide, so without this lock two coroutines
+     * (UI delete + service insert) can both read the same baseline list and
+     * the loser's update silently drops the winner's entry. See HIGH-8.
+     */
+    private val idsWriteLock = Any()
+
     suspend fun getItems(limit: Int = 50): List<ClipboardItem> = withContext(Dispatchers.IO) {
         val ids = storedIds().takeLast(limit)
         ids.mapNotNull { id ->
@@ -36,40 +44,58 @@ class ClipboardRepository(context: Context) {
     }
 
     suspend fun deleteItem(id: String): Boolean = withContext(Dispatchers.IO) {
-        val ids = storedIds().toMutableList()
-        if (!ids.remove(id)) return@withContext false
-        prefs.edit()
-            .remove("item_$id")
-            .putString("item_ids", ids.joinToString(","))
-            .apply()
-        true
+        synchronized(idsWriteLock) {
+            val ids = storedIds().toMutableList()
+            if (!ids.remove(id)) return@synchronized false
+            prefs.edit()
+                .remove("item_$id")
+                .putString("item_ids", ids.joinToString(","))
+                .apply()
+            true
+        }
     }
 
     /**
      * Encrypt [plaintext] with [key] and persist. Returns false when the text
      * is sensitive (checked via UniFFI or skipped when unavailable).
+     *
+     * The new UUID is generated BEFORE encryption so it can be bound into the
+     * AEAD AAD on the v0.3 schema (see [encryptText]). The same id is also
+     * used as the SharedPreferences storage key.
      */
     suspend fun storeItem(plaintext: String, key: ByteArray): Boolean = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext false
 
-        val sensitive = try { isSensitive(plaintext) } catch (_: UnsatisfiedLinkError) { false }
+        val sensitive = try {
+            isSensitive(plaintext)
+        } catch (_: UnsatisfiedLinkError) {
+            false
+        }
         if (sensitive) return@withContext false
 
+        val id = UUID.randomUUID().toString()
         val blob = try {
-            encryptText(plaintext.toByteArray(Charsets.UTF_8), key)
+            encryptText(id, plaintext.toByteArray(Charsets.UTF_8), key)
+        } catch (e: IllegalStateException) {
+            Log.d(TAG, "UniFFI unavailable (${e.message}) — using local AES-GCM fallback")
+            localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
         } catch (_: UnsatisfiedLinkError) {
-            Log.d(TAG, "UniFFI unavailable — using local AES-GCM fallback")
+            // Defensive — the bindings throw IllegalStateException, but a
+            // future change could surface UnsatisfiedLinkError directly.
+            Log.d(TAG, "UniFFI unavailable (UnsatisfiedLinkError) — using local AES-GCM fallback")
             localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
         }
 
-        val id = UUID.randomUUID().toString()
         val encoded = encodeItem(blob, plaintext.length)
-        val ids = storedIds().toMutableList().also { it.add(id) }
-
-        prefs.edit()
-            .putString("item_$id", encoded)
-            .putString("item_ids", ids.joinToString(","))
-            .apply()
+        // ── HIGH-8: synchronize the read-modify-write so concurrent writers
+        // cannot clobber each other's entries in the comma-joined index.
+        synchronized(idsWriteLock) {
+            val ids = storedIds().toMutableList().also { it.add(id) }
+            prefs.edit()
+                .putString("item_$id", encoded)
+                .putString("item_ids", ids.joinToString(","))
+                .apply()
+        }
 
         Log.d(TAG, "Stored item $id (${plaintext.length} chars)")
         true

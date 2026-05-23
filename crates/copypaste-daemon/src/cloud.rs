@@ -266,14 +266,39 @@ pub fn preflight_encrypted_db_check(db_path: &std::path::Path) -> Result<(), Clo
 
 /// Handle returned by [`start_cloud`].  Drop it to abandon the background tasks
 /// (they will exit when the shutdown channel is signalled).
+///
+/// Audit-concurrency HIGH #3 (cloud-side): the daemon used to expose
+/// `shutdown_tx` as a public field that the caller had to explicitly send on,
+/// and in practice the daemon shutdown path never did — letting the cloud
+/// tasks run until process exit. Two safeguards make that impossible now:
+///   1. `shutdown_tx` is wrapped in `Option<...>` so [`shutdown`] can take it
+///      out behind a `&mut self`-style API.
+///   2. `Drop` calls [`shutdown`] automatically so dropping the handle (e.g.
+///      losing the binding on a panic, or daemon teardown forgetting to call
+///      it explicitly) still signals both loops.
 pub struct CloudHandle {
-    shutdown_tx: tokio::sync::oneshot::Sender<()>,
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl CloudHandle {
-    /// Signal both background tasks to stop.
-    pub fn shutdown(self) {
-        let _ = self.shutdown_tx.send(());
+    /// Signal both background tasks to stop. Idempotent — calling twice is a
+    /// no-op (the second call finds `None` in the slot).
+    pub fn shutdown(mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            // Receiver dropped or send failure → loops already exited.
+            let _ = tx.send(());
+        }
+    }
+}
+
+impl Drop for CloudHandle {
+    /// Belt-and-braces: if the caller forgot to call [`shutdown`] explicitly
+    /// (or dropped the handle on a panic/early return), still signal the
+    /// background tasks so they don't outlive the daemon.
+    fn drop(&mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
     }
 }
 
@@ -336,7 +361,9 @@ pub async fn start_cloud(
     tokio::spawn(realtime_loop(poll_config, poll_bearer, db, poll_shutdown));
 
     tracing::info!("cloud-sync started (url={})", config.supabase_url);
-    Ok(CloudHandle { shutdown_tx })
+    Ok(CloudHandle {
+        shutdown_tx: Some(shutdown_tx),
+    })
 }
 
 // ── Bearer token resolution ───────────────────────────────────────────────────
@@ -436,6 +463,18 @@ async fn push_loop(
     // spin-busy when the remote is down).
     let mut retry_queue: VecDeque<ClipboardItem> = VecDeque::new();
 
+    // Audit-concurrency HIGH #1 — `broadcast::Receiver::recv` is documented
+    // cancellation-safe, BUT pairing it inside `select!` with the network
+    // call below means that if `shutdown.notified()` fires AFTER the item is
+    // dequeued from the broadcast buffer but BEFORE the await returns from
+    // `push_item_with_retries`, the item is silently dropped. Fix: pin the
+    // `recv` future and ONLY drop the item once it's been moved into the
+    // retry queue (which we treat as the "in-flight" buffer). The shutdown
+    // path then checks the queue length so the operator at least sees what
+    // was lost.
+    let mut next = rx.recv();
+    tokio::pin!(next);
+
     loop {
         // Drain the retry queue first — if we made progress on backlog before
         // touching new items, recovery is observable and old items are not
@@ -461,7 +500,10 @@ async fn push_loop(
                     tokio::select! {
                         _ = tokio::time::sleep(PUSH_INITIAL_BACKOFF) => {}
                         _ = shutdown.notified() => {
-                            tracing::info!("cloud-sync push_loop: shutdown received during retry drain");
+                            tracing::info!(
+                                "cloud-sync push_loop: shutdown received during retry drain ({} queued items not flushed)",
+                                retry_queue.len(),
+                            );
                             return;
                         }
                     }
@@ -471,22 +513,46 @@ async fn push_loop(
         }
 
         tokio::select! {
-            result = rx.recv() => {
+            // biased: prefer shutdown over receive. This is belt-and-braces —
+            // even with the pinned future, a tie should resolve in favour of
+            // tearing down promptly instead of accepting one more item.
+            biased;
+            _ = shutdown.notified() => {
+                tracing::info!(
+                    "cloud-sync push_loop: shutdown received ({} queued items not flushed)",
+                    retry_queue.len(),
+                );
+                break;
+            }
+            result = &mut next => {
+                // Re-arm the receiver for the next iteration BEFORE doing any
+                // network work, so the broadcast buffer keeps draining and we
+                // never lose the dequeued item to a cancellation.
                 match result {
                     Ok(item) => {
-                        match push_item_with_retries(&client, &rest_url, &config, &bearer, &item).await {
-                            Ok(()) => tracing::debug!("cloud-sync pushed id={}", item.id),
-                            Err(e) => {
-                                tracing::warn!(
-                                    "cloud-sync push failed for id={}: {e}; queuing for retry",
-                                    item.id
-                                );
-                                enqueue_for_retry(&mut retry_queue, item);
+                        // Step 1: park the item in the retry queue so it is
+                        // owned by us, not by the broadcast buffer.
+                        enqueue_for_retry(&mut retry_queue, item);
+                        next.set(rx.recv());
+                        // Step 2: attempt the push from the queue. If shutdown
+                        // fires now, the item stays in the queue and is
+                        // surfaced in the shutdown log above.
+                        if let Some(item) = retry_queue.pop_front() {
+                            match push_item_with_retries(&client, &rest_url, &config, &bearer, &item).await {
+                                Ok(()) => tracing::debug!("cloud-sync pushed id={}", item.id),
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "cloud-sync push failed for id={}: {e}; queuing for retry",
+                                        item.id
+                                    );
+                                    enqueue_for_retry(&mut retry_queue, item);
+                                }
                             }
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("cloud-sync push_loop: lagged by {n} items");
+                        next.set(rx.recv());
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         tracing::info!(
@@ -496,13 +562,6 @@ async fn push_loop(
                         break;
                     }
                 }
-            }
-            _ = shutdown.notified() => {
-                tracing::info!(
-                    "cloud-sync push_loop: shutdown received ({} queued items not flushed)",
-                    retry_queue.len(),
-                );
-                break;
             }
         }
     }
@@ -722,24 +781,42 @@ async fn realtime_loop(
                 match fetch_remote_items(&client, &poll_url, &config.anon_key, &token).await {
                     Err(e) => tracing::warn!("cloud-sync poll failed: {e}"),
                     Ok(remote_items) => {
-                        let db_guard = db.lock().await;
-                        for item in remote_items {
-                            match exists_item(&db_guard, &item.id) {
-                                Ok(true) => {} // already local
-                                Ok(false) => {
-                                    if let Err(e) = copypaste_core::insert_item(&db_guard, &item) {
+                        // Audit-concurrency HIGH #2 — the previous code held
+                        // `db.lock().await` across synchronous rusqlite IO,
+                        // blocking the runtime worker for the whole insert
+                        // fan-out. Mirror the pattern from ipc.rs:428: hop
+                        // into spawn_blocking, take the mutex with
+                        // `blocking_lock()`, and run the entire insert loop
+                        // synchronously off the async worker thread. The
+                        // HTTP poll itself stays on the async worker — only
+                        // the DB fan-out moves.
+                        let db_arc = db.clone();
+                        let join = tokio::task::spawn_blocking(move || {
+                            let db_guard = db_arc.blocking_lock();
+                            for item in remote_items {
+                                match exists_item(&db_guard, &item.id) {
+                                    Ok(true) => {} // already local
+                                    Ok(false) => {
+                                        if let Err(e) = copypaste_core::insert_item(&db_guard, &item) {
+                                            tracing::warn!(
+                                                "cloud-sync: failed to insert remote id={}: {e}",
+                                                item.id
+                                            );
+                                        } else {
+                                            tracing::info!("cloud-sync: synced remote id={}", item.id);
+                                        }
+                                    }
+                                    Err(e) => {
                                         tracing::warn!(
-                                            "cloud-sync: failed to insert remote id={}: {e}",
-                                            item.id
+                                            "cloud-sync: exists_item error for id={}: {e}",
+                                            item.id,
                                         );
-                                    } else {
-                                        tracing::info!("cloud-sync: synced remote id={}", item.id);
                                     }
                                 }
-                                Err(e) => {
-                                    tracing::warn!("cloud-sync: exists_item error for id={}: {e}", item.id);
-                                }
                             }
+                        });
+                        if let Err(e) = join.await {
+                            tracing::warn!("cloud-sync: insert worker panicked or was cancelled: {e}");
                         }
                     }
                 }
@@ -863,6 +940,9 @@ fn json_to_clipboard_item(v: &serde_json::Value) -> Option<ClipboardItem> {
         app_bundle_id,
         content_hash: None,
         origin_device_id,
+        // Cloud-synced items default to key_version=1 until the v4 sweep
+        // re-encrypts them to v2. This is conservative and correct.
+        key_version: 1,
     })
 }
 
@@ -1111,6 +1191,7 @@ mod tests {
             app_bundle_id: None,
             content_hash: None,
             origin_device_id: String::new(),
+            key_version: 1,
         }
     }
 

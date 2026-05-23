@@ -53,6 +53,16 @@ pub enum EncryptError {
     /// gracefully (chunk the input, reject the request, etc.).
     #[error("AEAD cipher failed: {0}")]
     CipherFailed(String),
+    /// The row's `key_version` column carries a value that no current code
+    /// path knows how to decrypt. Typically indicates a forward-compatibility
+    /// gap: the row was written by a newer build and the current binary needs
+    /// to be upgraded.
+    ///
+    /// MUST NOT panic — surfaces as a hard error at the IPC layer
+    /// (mapped to `auth_failed` error code) so the caller can handle it
+    /// gracefully. Never silently falls through to v1 or v2 decrypt logic.
+    #[error("Unknown key_version: {0}")]
+    UnknownKeyVersion(u8),
 }
 
 /// Build the canonical AEAD AAD for a clipboard item:
@@ -140,6 +150,43 @@ pub fn decrypt_item_with_aad(
     cipher
         .decrypt(&nonce_x, payload)
         .map_err(|_| EncryptError::AuthFailed)
+}
+
+/// Decrypt a clipboard item, dispatching on `key_version` to select the
+/// correct key and AAD format.
+///
+/// | `key_version` | Key    | AAD format                         |
+/// |---------------|--------|------------------------------------|
+/// | 1             | v1 key | `build_item_aad(item_id, 3)`       |
+/// | 2             | v2 key | `build_item_aad_v2(item_id, 4, 2)` |
+/// | other         | —      | `Err(UnknownKeyVersion(v))`        |
+///
+/// Callers supply BOTH `v1_key` and `v2_key` so this function can select the
+/// right one without requiring the caller to know the version ahead of time.
+/// On `key_version = 2` the `v1_key` argument is ignored.
+///
+/// # Errors
+/// - `AuthFailed` — ciphertext, nonce, or key is wrong for the version
+/// - `UnknownKeyVersion(v)` — `key_version` is not 1 or 2
+pub fn decrypt_item_by_version(
+    key_version: u8,
+    v1_key: &[u8; 32],
+    v2_key: &[u8; 32],
+    item_id: &str,
+    nonce: &[u8; NONCE_SIZE],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, EncryptError> {
+    match key_version {
+        1 => {
+            let aad = build_item_aad(item_id, AAD_SCHEMA_VERSION);
+            decrypt_item_with_aad(ciphertext, nonce, v1_key, &aad)
+        }
+        2 => {
+            let aad = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, 2);
+            decrypt_item_with_aad(ciphertext, nonce, v2_key, &aad)
+        }
+        v => Err(EncryptError::UnknownKeyVersion(v)),
+    }
 }
 
 /// Encrypt with XChaCha20-Poly1305 and no AAD (legacy/back-compat).
@@ -328,5 +375,87 @@ mod tests {
     #[test]
     fn aad_schema_version_v4_constant_is_4() {
         assert_eq!(AAD_SCHEMA_VERSION_V4, 4);
+    }
+
+    // -------------------------------------------------------------------------
+    // wave1a-atomic: UnknownKeyVersion + decrypt_item_by_version dispatcher
+    // -------------------------------------------------------------------------
+
+    /// T4 (golden-file): verify `build_item_aad_v2` produces exact bytes so
+    /// future AAD schema changes surface as a test failure before they corrupt
+    /// on-disk rows.
+    #[test]
+    fn build_item_aad_v2_golden_bytes() {
+        // AAD for key_version=2 item "item-abc" at schema version 4:
+        // b"item-abc|4|2"
+        let aad = build_item_aad_v2("item-abc", AAD_SCHEMA_VERSION_V4, 2);
+        assert_eq!(aad, b"item-abc|4|2");
+
+        // AAD for key_version=1 item at schema version 3 (legacy):
+        // b"item-abc|3"
+        let aad_v1 = build_item_aad("item-abc", AAD_SCHEMA_VERSION);
+        assert_eq!(aad_v1, b"item-abc|3");
+    }
+
+    /// `decrypt_item_by_version` dispatches to v1 path for key_version=1.
+    #[test]
+    fn decrypt_item_by_version_v1_roundtrip() {
+        let v1_key = [0x11u8; 32];
+        let v2_key = [0x22u8; 32];
+        let item_id = "item-v1-test";
+        let aad = build_item_aad(item_id, AAD_SCHEMA_VERSION);
+        let (nonce, ct) = encrypt_item_with_aad(b"hello v1", &v1_key, &aad).unwrap();
+        let pt = decrypt_item_by_version(1, &v1_key, &v2_key, item_id, &nonce, &ct).unwrap();
+        assert_eq!(pt, b"hello v1");
+    }
+
+    /// `decrypt_item_by_version` dispatches to v2 path for key_version=2.
+    #[test]
+    fn decrypt_item_by_version_v2_roundtrip() {
+        let v1_key = [0x33u8; 32];
+        let v2_key = [0x44u8; 32];
+        let item_id = "item-v2-test";
+        let aad = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, 2);
+        let (nonce, ct) = encrypt_item_with_aad(b"hello v2", &v2_key, &aad).unwrap();
+        let pt = decrypt_item_by_version(2, &v1_key, &v2_key, item_id, &nonce, &ct).unwrap();
+        assert_eq!(pt, b"hello v2");
+    }
+
+    /// Corrupt `key_version=255` must return `UnknownKeyVersion(255)`, not panic.
+    #[test]
+    fn decrypt_item_by_version_unknown_returns_error_not_panic() {
+        let v1_key = [0x55u8; 32];
+        let v2_key = [0x66u8; 32];
+        let nonce = [0u8; NONCE_SIZE];
+        let ct = b"garbage";
+        let result = decrypt_item_by_version(255, &v1_key, &v2_key, "item-x", &nonce, ct);
+        assert!(
+            matches!(result, Err(EncryptError::UnknownKeyVersion(255))),
+            "key_version=255 must return UnknownKeyVersion(255), got {:?}",
+            result
+        );
+    }
+
+    /// key_version=0 is also unknown — must return UnknownKeyVersion(0).
+    #[test]
+    fn decrypt_item_by_version_zero_returns_unknown() {
+        let v1_key = [0x77u8; 32];
+        let v2_key = [0x88u8; 32];
+        let nonce = [0u8; NONCE_SIZE];
+        let result = decrypt_item_by_version(0, &v1_key, &v2_key, "item-y", &nonce, b"ct");
+        assert!(matches!(result, Err(EncryptError::UnknownKeyVersion(0))));
+    }
+
+    /// `UnknownKeyVersion` must format without panicking.
+    #[test]
+    fn unknown_key_version_formats_without_panic() {
+        for v in [0u8, 3, 42, 100, 200, 255] {
+            let e = EncryptError::UnknownKeyVersion(v);
+            let s = e.to_string();
+            assert!(
+                s.contains(&v.to_string()),
+                "error string must include key_version value"
+            );
+        }
     }
 }

@@ -1,4 +1,6 @@
-use axum::extract::{Path, State};
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -21,6 +23,7 @@ use crate::state::AppState;
 /// - 429 Too Many Requests — per-device registration rate limit (5/min) tripped
 pub async fn register(
     State(state): State<AppState>,
+    connect_info: Option<ConnectInfo<SocketAddr>>,
     Json(body): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<RegisterResponse>), Response> {
     // Validate device_id is a valid UUID (basic format check).
@@ -28,28 +31,6 @@ pub async fn register(
         return Err(
             RelayError::BadRequest("device_id must be a valid UUID".to_string()).into_response(),
         );
-    }
-
-    // Per-device rate limit (security MEDIUM #13). Runs *after* UUID format
-    // validation (so malformed IDs don't pollute the limiter map) but *before*
-    // base64 decoding (to keep the rejected-request cost low). The limiter
-    // lives inside `RelayStore` so each test process gets its own state.
-    {
-        let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(retry_after) = store.check_registration_rate_limit(&body.device_id) {
-            let body = serde_json::json!({
-                "error": "too many registration attempts for this device_id",
-                "code": "RATE_LIMITED",
-                "retry_after_secs": retry_after,
-            });
-            let resp = (
-                StatusCode::TOO_MANY_REQUESTS,
-                [(axum::http::header::RETRY_AFTER, retry_after.to_string())],
-                Json(body),
-            )
-                .into_response();
-            return Err(resp);
-        }
     }
 
     // Validate device_name is non-empty and within reasonable length.
@@ -77,6 +58,36 @@ pub async fn register(
             key_bytes.len()
         ))
         .into_response());
+    }
+
+    // Per-(ip, device) rate limit (HIGH #5 / MEDIUM #13).
+    //
+    // Runs *after* full payload validation so the limiter map never grows
+    // from probes that the handler would reject anyway — and is keyed by
+    // `(client_ip, device_id)` so a `device_id`-only enumeration probe
+    // from an attacker IP cannot collide with the bucket the legitimate
+    // owner builds up from a different IP. When `ConnectInfo` is absent
+    // (tests using `tower::ServiceExt::oneshot`) the IP becomes `None`,
+    // preserving the previous per-device-only fallback for that path.
+    let client_ip = connect_info.map(|ConnectInfo(addr)| addr.ip());
+    {
+        let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
+        if let Err(retry_after) =
+            store.check_registration_rate_limit(client_ip, &body.device_id)
+        {
+            let body = serde_json::json!({
+                "error": "too many registration attempts",
+                "code": "RATE_LIMITED",
+                "retry_after_secs": retry_after,
+            });
+            let resp = (
+                StatusCode::TOO_MANY_REQUESTS,
+                [(axum::http::header::RETRY_AFTER, retry_after.to_string())],
+                Json(body),
+            )
+                .into_response();
+            return Err(resp);
+        }
     }
 
     // Survive mutex poisoning (security INFO #21): if another thread panicked

@@ -52,6 +52,9 @@ fn relay_router(state: AppState, config: RelayConfig) -> axum::Router {
         .layer(axum::extract::DefaultBodyLimit::max(
             config.max_item_bytes + 4096,
         ))
+        // Mirror the production router (HIGH #2): inject RelayConfig so
+        // `items::push` can read `max_item_bytes` from it.
+        .layer(axum::Extension(config))
 }
 
 // ---------------------------------------------------------------------------

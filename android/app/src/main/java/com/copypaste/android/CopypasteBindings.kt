@@ -28,8 +28,8 @@ data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {
 
 /** Mirrors `CopypasteError` in copypaste_android.udl */
 sealed class CopypasteException(message: String) : Exception(message) {
-    class EncryptionFailed : CopypasteException("EncryptionFailed")
-    class DecryptionFailed : CopypasteException("DecryptionFailed")
+    class EncryptionFailed(detail: String = "EncryptionFailed") : CopypasteException(detail)
+    class DecryptionFailed(detail: String = "DecryptionFailed") : CopypasteException(detail)
     class DatabaseError(detail: String) : CopypasteException("DatabaseError: $detail")
     class InvalidKeyLength : CopypasteException("InvalidKeyLength")
 }
@@ -50,15 +50,21 @@ init {
 }
 
 // ---------------------------------------------------------------------------
-// JNI declarations — signatures match UniFFI scaffolding output.
+// JNI declarations — signatures match UniFFI scaffolding output for ABI 3.
 // These are only called when isNativeLibraryLoaded == true.
+//
+// CRITICAL: every signature MUST match the UDL exactly. The Rust side
+// (`crates/copypaste-android/src/lib.rs`) binds `item_id` into the AEAD AAD,
+// and `open_database` takes a 32-byte `key`. A sig mismatch will cause SIGABRT
+// or — worse — silently corrupt the AAD so legitimate ciphertext fails to
+// decrypt across reinstalls.
 // ---------------------------------------------------------------------------
 
-private external fun uniffiEncryptText(bytes: ByteArray, key: ByteArray): EncryptedBlob
-private external fun uniffiDecryptText(ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray
+private external fun uniffiEncryptText(itemId: String, bytes: ByteArray, key: ByteArray): EncryptedBlob
+private external fun uniffiDecryptText(itemId: String, ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray
 private external fun uniffiIsSensitive(text: String): Boolean
 private external fun uniffiSensitiveKind(text: String): String?
-private external fun uniffiOpenDatabase(path: String): Long
+private external fun uniffiOpenDatabase(path: String, key: ByteArray): Long
 private external fun uniffiCloseDatabase(handle: Long)
 private external fun uniffiAddClipboardItem(dbPath: String, key: ByteArray, text: String): String
 private external fun uniffiGetHistoryCount(dbPath: String, key: ByteArray): Long
@@ -72,36 +78,52 @@ private external fun uniffiStartPairing(): String
 // ---------------------------------------------------------------------------
 
 /**
- * Encrypts [bytes] with [key] (32 bytes, AES-256-GCM).
+ * Encrypts [bytes] with [key] (32 bytes, AES-256-GCM). [itemId] is bound into
+ * the AEAD AAD (v0.3 schema) and MUST be persisted alongside the ciphertext
+ * — pass the same value back to [decryptText] verbatim or decryption will fail.
+ *
  * Throws [CopypasteException.EncryptionFailed] on error.
+ *
+ * When the native library is unavailable this function throws
+ * [IllegalStateException] rather than returning plaintext, so callers can fall
+ * back to a Kotlin-side AES path explicitly (see [ClipboardRepository]). It is
+ * NEVER safe for a function named `encryptText` to silently emit plaintext —
+ * doing so would surface as a PII leak the moment a build accidentally ships
+ * without the .so.
  */
-@Throws(CopypasteException::class)
-fun encryptText(bytes: ByteArray, key: ByteArray): EncryptedBlob {
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun encryptText(itemId: String, bytes: ByteArray, key: ByteArray): EncryptedBlob {
     if (!isNativeLibraryLoaded) {
-        Log.w(TAG, "encryptText: stub — native library not loaded")
-        return EncryptedBlob(nonce = ByteArray(12), ciphertext = bytes)
+        Log.w(TAG, "encryptText: native library not loaded — refusing to return plaintext")
+        throw IllegalStateException("copypaste_android native library not loaded; encryptText is unavailable")
     }
     return try {
-        uniffiEncryptText(bytes, key)
+        uniffiEncryptText(itemId, bytes, key)
     } catch (e: Exception) {
-        throw CopypasteException.EncryptionFailed()
+        Log.w(TAG, "encryptText: native call failed: ${e.message}", e)
+        throw CopypasteException.EncryptionFailed(e.message ?: "native encrypt failed")
     }
 }
 
 /**
- * Decrypts [ciphertext] using [nonce] and [key].
- * Throws [CopypasteException.DecryptionFailed] on error.
+ * Decrypts [ciphertext] using [nonce] and [key]. [itemId] MUST match the value
+ * passed to [encryptText] when the ciphertext was produced — the v0.3 schema
+ * binds it into the AAD.
+ *
+ * Throws [CopypasteException.DecryptionFailed] on error, [IllegalStateException]
+ * when the native library is unavailable.
  */
-@Throws(CopypasteException::class)
-fun decryptText(ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray {
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun decryptText(itemId: String, ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray {
     if (!isNativeLibraryLoaded) {
-        Log.w(TAG, "decryptText: stub — native library not loaded")
-        return ciphertext
+        Log.w(TAG, "decryptText: native library not loaded — refusing to fabricate plaintext")
+        throw IllegalStateException("copypaste_android native library not loaded; decryptText is unavailable")
     }
     return try {
-        uniffiDecryptText(ciphertext, nonce, key)
+        uniffiDecryptText(itemId, ciphertext, nonce, key)
     } catch (e: Exception) {
-        throw CopypasteException.DecryptionFailed()
+        Log.w(TAG, "decryptText: native call failed: ${e.message}", e)
+        throw CopypasteException.DecryptionFailed(e.message ?: "native decrypt failed")
     }
 }
 
@@ -128,17 +150,21 @@ fun sensitiveKind(text: String): String? {
 }
 
 /**
- * Opens an SQLite database at [path] and returns a handle.
+ * Opens an encrypted SQLite database at [path] using the 32-byte [key] and
+ * returns an opaque handle. The Rust UDL contract requires the key — passing
+ * an arbitrary array does NOT work; it must be the same 32 bytes used to
+ * encrypt the database originally (typically derived from Android Keystore).
+ *
  * Throws [CopypasteException.DatabaseError] on failure.
  */
 @Throws(CopypasteException::class)
-fun openDatabase(path: String): Long {
+fun openDatabase(path: String, key: ByteArray): Long {
     if (!isNativeLibraryLoaded) {
         Log.w(TAG, "openDatabase: stub — returns -1")
         return -1L
     }
     return try {
-        uniffiOpenDatabase(path)
+        uniffiOpenDatabase(path, key)
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "unknown")
     }

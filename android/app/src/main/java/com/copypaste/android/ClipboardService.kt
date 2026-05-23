@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -43,6 +44,18 @@ class ClipboardService : Service() {
     private lateinit var clipboardManager: ClipboardManager
     private lateinit var syncManager: SyncManager
 
+    // HIGH-7: refresh the notification whenever a UI-side write flips a flag
+    // the service cares about (capture pause, sync toggle). Retained as a
+    // field so SharedPreferences' weak reference does not collect it.
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        when (key) {
+            "capture_enabled" -> refreshNotification(this)
+            // sync_enabled, relay_url etc. are read fresh on each capture
+            // so no explicit re-read is needed here.
+            else -> Unit
+        }
+    }
+
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         // primaryClip is non-null from background only on API 26-28
         val clip = clipboardManager.primaryClip ?: return@OnPrimaryClipChangedListener
@@ -62,10 +75,28 @@ class ClipboardService : Service() {
 
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         ensureChannel(this)
+        settings.observe(prefsListener)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification(this))
+        // HIGH-6: API 34+ throws ForegroundServiceStartNotAllowedException when
+        // the app is in a state that disallows promotion (e.g. started from a
+        // disallowed background context). API 31+ can also throw
+        // SecurityException under stricter battery-optimisation profiles.
+        // A failure here is non-fatal — log it, stop the service, and let
+        // the UI's in-activity clipListener (MainActivity) keep working while
+        // the user is foregrounded. Crashing here would kill the JVM and
+        // break the app immediately on devices with strict policies.
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification(this))
+        } catch (e: Exception) {
+            Log.w(
+                TAG,
+                "startForeground rejected (${e.javaClass.simpleName}: ${e.message}) — stopping service"
+            )
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         // Listener must be registered on the main thread (framework requirement)
         Handler(Looper.getMainLooper()).post {
@@ -145,13 +176,20 @@ class ClipboardService : Service() {
 
     private suspend fun notifySyncManager(plaintext: String, key: ByteArray) {
         try {
+            // Generate the item id BEFORE encrypting so the same id can be
+            // bound into the AEAD AAD and forwarded to the relay. A mismatch
+            // would cause the receiver to fail decryption silently.
+            val itemId = java.util.UUID.randomUUID().toString()
             val blob = try {
-                encryptText(plaintext.toByteArray(Charsets.UTF_8), key)
+                encryptText(itemId, plaintext.toByteArray(Charsets.UTF_8), key)
+            } catch (e: IllegalStateException) {
+                Log.d(TAG, "Native encryptText unavailable (${e.message}) — local AES")
+                ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
             } catch (_: UnsatisfiedLinkError) {
                 ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
             }
             val lamportTs = System.currentTimeMillis()
-            syncManager.uploadItem(blob.ciphertext, blob.nonce, "text/plain", lamportTs)
+            syncManager.uploadItem(itemId, blob.ciphertext, blob.nonce, "text/plain", lamportTs)
         } catch (e: Exception) {
             Log.w(TAG, "SyncManager upload failed: ${e.message}")
         }
@@ -159,6 +197,7 @@ class ClipboardService : Service() {
 
     override fun onDestroy() {
         clipboardManager.removePrimaryClipChangedListener(clipListener)
+        settings.stopObserving(prefsListener)
         scope.cancel()
         super.onDestroy()
     }

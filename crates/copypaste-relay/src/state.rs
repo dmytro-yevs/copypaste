@@ -1,5 +1,6 @@
 use std::cmp::Reverse;
 use std::collections::{HashMap, VecDeque};
+use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -79,12 +80,28 @@ pub struct RelayStore {
     pub devices: HashMap<String, DeviceRecord>,
     /// Per-device inbox for the wall-clock push/pull sync protocol.
     pub sync_items: HashMap<String, Vec<SyncItem>>,
-    /// Monotonically increasing counter used to assign IDs to sync items.
-    next_sync_id: i64,
-    /// Rolling window of registration attempts keyed by `device_id`.
-    /// Used to enforce per-device registration rate limit (security MEDIUM #13)
-    /// orthogonal to the per-IP `tower_governor` limiter.
-    reg_attempts: HashMap<String, VecDeque<Instant>>,
+    /// Per-device monotonically increasing counter used to assign IDs to
+    /// sync items. Keying by `device_id` (rather than a single global
+    /// counter) avoids cross-restart ID collisions for a given device:
+    /// on the first push for a device after restart we seed this counter
+    /// from `MAX(item.id) + 1` over that device's inbox (security HIGH #3).
+    ///
+    /// `i64` matches the wire/DB representation; we use `checked_add` on
+    /// allocation to convert overflow into a server error instead of an
+    /// unchecked-arithmetic panic.
+    next_sync_id_per_device: HashMap<String, i64>,
+    /// Rolling window of registration attempts keyed by `(client_ip, device_id)`.
+    /// Used to enforce a per-device registration rate limit (MEDIUM #13)
+    /// orthogonal to the per-IP `tower_governor` limiter. Keying by the
+    /// tuple closes the enumeration oracle (HIGH #5): a vanilla device-id
+    /// probe from an attacker IP no longer leaves a `device_id`-only key
+    /// in the map that signals "this id has been seen".
+    ///
+    /// `client_ip` is `None` when the relay is exercised without a real
+    /// transport (unit/integration tests, `tower::ServiceExt::oneshot`).
+    /// Tests share a single bucket per device id in that mode, matching
+    /// the previous behaviour.
+    reg_attempts: HashMap<(Option<IpAddr>, String), VecDeque<Instant>>,
 
     // -----------------------------------------------------------------------
     // Prometheus metrics counters (see api/metrics.rs)
@@ -104,7 +121,7 @@ impl RelayStore {
         Self {
             devices: HashMap::new(),
             sync_items: HashMap::new(),
-            next_sync_id: 1,
+            next_sync_id_per_device: HashMap::new(),
             reg_attempts: HashMap::new(),
             items_total: Arc::new(AtomicU64::new(0)),
             evictions_total: Arc::new(AtomicU64::new(0)),
@@ -131,16 +148,27 @@ impl RelayStore {
     // Per-device registration rate limiter (security MEDIUM #13)
     // -----------------------------------------------------------------------
 
-    /// Record a registration attempt for `device_id` and return
-    /// `Err(retry_after_secs)` when the per-device rate-limit window
+    /// Record a registration attempt for `(client_ip, device_id)` and return
+    /// `Err(retry_after_secs)` when the per-(ip, device) rate-limit window
     /// is exhausted (`REG_LIMIT_MAX_ATTEMPTS` attempts within
     /// `REG_LIMIT_WINDOW`).
     ///
     /// This is independent of the per-IP `tower_governor` limiter installed
     /// in `routes/mod.rs`: it blocks an attacker who has obtained a victim's
     /// `device_id` (but not the bearer token) from flooding re-registrations
-    /// regardless of source IP.
-    pub fn check_registration_rate_limit(&mut self, device_id: &str) -> Result<(), u64> {
+    /// of that specific id from a single source IP. Keying by the tuple
+    /// (HIGH #5) avoids leaking "this device id is known to the limiter"
+    /// across source IPs.
+    ///
+    /// Callers should invoke this **only after** the request payload has
+    /// passed full validation (UUID parse, base64 key, key length, device
+    /// name) so the limiter never grows from probes that the handler would
+    /// have rejected anyway.
+    pub fn check_registration_rate_limit(
+        &mut self,
+        client_ip: Option<IpAddr>,
+        device_id: &str,
+    ) -> Result<(), u64> {
         let now = Instant::now();
 
         // Opportunistic global eviction when the map grows too large.
@@ -151,7 +179,10 @@ impl RelayStore {
             });
         }
 
-        let deque = self.reg_attempts.entry(device_id.to_string()).or_default();
+        let deque = self
+            .reg_attempts
+            .entry((client_ip, device_id.to_string()))
+            .or_default();
         // Drop attempts that fell out of the rolling window.
         while let Some(front) = deque.front() {
             if now.duration_since(*front) >= REG_LIMIT_WINDOW {
@@ -332,8 +363,27 @@ impl RelayStore {
             return Err(RelayError::PayloadTooLarge);
         }
 
-        let id = self.next_sync_id;
-        self.next_sync_id += 1;
+        // Per-device counter, seeded from the inbox on first push so a
+        // server restart cannot re-issue an id another item in the same
+        // device's inbox already holds (security HIGH #3).
+        let counter = self
+            .next_sync_id_per_device
+            .entry(device_id.to_string())
+            .or_insert_with(|| {
+                self.sync_items
+                    .get(device_id)
+                    .and_then(|inbox| inbox.iter().map(|i| i.id).max())
+                    .map(|m| m.saturating_add(1))
+                    .unwrap_or(1)
+                    .max(1)
+            });
+        let id = *counter;
+        // `checked_add` so an id-counter overflow returns a server error
+        // instead of an unchecked-arithmetic panic (security HIGH #3).
+        *counter = counter.checked_add(1).ok_or_else(|| {
+            tracing::warn!(device_id, "sync id counter overflow");
+            RelayError::Internal("sync id counter exhausted".into())
+        })?;
 
         let inserted_at_unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -432,6 +482,7 @@ impl RelayStore {
         for id in &inactive_ids {
             self.devices.remove(id);
             self.sync_items.remove(id);
+            self.next_sync_id_per_device.remove(id);
         }
         count
     }

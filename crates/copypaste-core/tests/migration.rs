@@ -32,7 +32,8 @@ use tempfile::tempdir;
 /// v4: adds key_version column (HKDF v1→v2 re-encrypt sweep).
 /// v5: adds idx_dedup_hash_minute (TOCTOU dedup) +
 ///     idx_clipboard_item_id (sync replay dedup). See schema_v2.sql.
-const CURRENT_SCHEMA_VERSION: i64 = 5;
+/// v6: adds migration_state table for resumable v4 key-rotation tracking.
+const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 /// v1 schema (the exact contents of src/storage/schema_v1.sql, inlined because
 /// the file is `include_str!`'d into the crate and not accessible from

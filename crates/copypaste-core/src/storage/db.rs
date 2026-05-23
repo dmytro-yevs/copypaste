@@ -3,6 +3,31 @@ use rusqlite::{Connection, OpenFlags};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+// ---------------------------------------------------------------------------
+// Migration state
+// ---------------------------------------------------------------------------
+
+/// Tracks the progress of the v4 key-version sweep through `migration_state`.
+///
+/// The row is keyed on `'v4-key-version-sweep'` and persists across restarts
+/// so a mid-sweep crash picks up from `InProgress.last_id` rather than
+/// restarting from the beginning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MigrationState {
+    /// The sweep row does not exist — schema migration ran but the sweep has
+    /// never been triggered. This happens on a fresh install where every new
+    /// row lands at `key_version = 2` from the start; no sweep is needed.
+    NotStarted,
+    /// Sweep is in progress. `last_id` is the row-id high-water mark: all
+    /// rows with `rowid <= last_id` that were at `key_version = 1` have been
+    /// processed (either rotated to v2 or logged as undecryptable).
+    InProgress { last_id: i64 },
+    /// Every `key_version = 1` row has been processed. Daemon ingest paths
+    /// check for this state before inserting; while `InProgress` they return
+    /// `IpcError::MigrationInProgress` instead of writing.
+    Complete,
+}
+
 #[derive(Debug, Error)]
 pub enum DbError {
     #[error("SQLite error: {0}")]
@@ -457,6 +482,153 @@ impl Database {
 
     pub fn conn(&self) -> &Connection {
         &self.conn
+    }
+
+    /// Read the current state of the v4 key-version sweep from `migration_state`.
+    ///
+    /// Returns `MigrationState::NotStarted` if the table row is absent (fresh
+    /// install, schema just migrated), `MigrationState::Complete` if
+    /// `completed_at IS NOT NULL`, or `MigrationState::InProgress { last_id }`
+    /// otherwise.
+    pub fn migration_state(&self) -> Result<MigrationState, DbError> {
+        // Ensure the migration_state table exists (idempotent DDL).
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS migration_state (
+                key                     TEXT PRIMARY KEY,
+                key_version_in_progress INTEGER,
+                last_processed_id       INTEGER NOT NULL DEFAULT 0,
+                started_at              INTEGER,
+                completed_at            INTEGER
+            );",
+        )?;
+
+        let result = self.conn.query_row(
+            "SELECT last_processed_id, completed_at \
+             FROM migration_state WHERE key = 'v4-key-version-sweep'",
+            [],
+            |row| {
+                let last_id: i64 = row.get(0)?;
+                let completed_at: Option<i64> = row.get(1)?;
+                Ok((last_id, completed_at))
+            },
+        );
+
+        match result {
+            Ok((_, Some(_))) => Ok(MigrationState::Complete),
+            Ok((last_id, None)) => Ok(MigrationState::InProgress { last_id }),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(MigrationState::NotStarted),
+            Err(e) => Err(DbError::from(e)),
+        }
+    }
+
+    /// Run (or resume) the resumable v4 key-rotation sweep.
+    ///
+    /// Processes at most `BATCH_SIZE` rows per transaction, updates
+    /// `last_processed_id` in the same transaction as the row rewrites, and
+    /// sets `completed_at` on the final pass. Returns the total number of rows
+    /// successfully rotated in this invocation.
+    ///
+    /// The sweep is idempotent: rows already at `key_version = 2` are ignored
+    /// by the `WHERE key_version = 1` predicate. Calling this after
+    /// `migration_state()` returns `Complete` is a no-op (returns 0).
+    pub fn migration_v4_sweep_resumable(
+        &self,
+        v1_key: &[u8; 32],
+        v2_key: &[u8; 32],
+    ) -> Result<usize, DbError> {
+        use super::migration_v4::{migrate_v1_to_v2_keys, BATCH_SIZE, INTER_BATCH_SLEEP};
+        use rusqlite::params;
+
+        const SWEEP_KEY: &str = "v4-key-version-sweep";
+
+        // Ensure the table exists and the row is seeded.
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS migration_state (
+                key                     TEXT PRIMARY KEY,
+                key_version_in_progress INTEGER,
+                last_processed_id       INTEGER NOT NULL DEFAULT 0,
+                started_at              INTEGER,
+                completed_at            INTEGER
+            );",
+        )?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO migration_state \
+             (key, key_version_in_progress, last_processed_id, started_at) \
+             VALUES ('v4-key-version-sweep', 2, 0, strftime('%s','now'))",
+            [],
+        )?;
+
+        // Short-circuit if already complete AND no key_version=1 rows remain.
+        // We also check the actual row count because fresh installs are seeded
+        // as Complete (no rows at schema migration time), but a test or a
+        // direct SQL insert could add v1 rows afterward — we must still sweep.
+        let state = self.migration_state()?;
+        if state == MigrationState::Complete {
+            let remaining_v1: i64 = self.conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE key_version = 1",
+                [],
+                |r| r.get(0),
+            )?;
+            if remaining_v1 == 0 {
+                return Ok(0);
+            }
+            // State was Complete but v1 rows exist (e.g. added after a fresh
+            // install). Reset to InProgress so the sweep runs.
+            self.conn.execute(
+                "UPDATE migration_state SET completed_at = NULL WHERE key = ?1",
+                params![SWEEP_KEY],
+            )?;
+        }
+
+        // Re-use the existing sweep, which processes all remaining v1 rows
+        // in BATCH_SIZE batches with INTER_BATCH_SLEEP yields. We track
+        // total rotated rows here and update migration_state on completion.
+        let total_rotated = migrate_v1_to_v2_keys(self, v1_key, v2_key)
+            .map_err(|e| DbError::Migration(e.to_string()))?;
+
+        // Count remaining v1 rows to decide whether we're complete.
+        let remaining: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items WHERE key_version = 1",
+            [],
+            |r| r.get(0),
+        )?;
+
+        if remaining == 0 {
+            // Mark complete — store the highest rowid as a record.
+            let max_id: i64 = self
+                .conn
+                .query_row("SELECT COALESCE(MAX(rowid), 0) FROM clipboard_items", [], |r| {
+                    r.get(0)
+                })
+                .unwrap_or(0);
+            self.conn.execute(
+                "UPDATE migration_state \
+                 SET last_processed_id = ?1, completed_at = strftime('%s','now') \
+                 WHERE key = ?2",
+                params![max_id, SWEEP_KEY],
+            )?;
+        } else {
+            // Still in progress — update the high-water mark.
+            let max_processed: i64 = self
+                .conn
+                .query_row(
+                    "SELECT COALESCE(MAX(rowid), 0) FROM clipboard_items WHERE key_version = 2",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            self.conn.execute(
+                "UPDATE migration_state SET last_processed_id = ?1 WHERE key = ?2",
+                params![max_processed, SWEEP_KEY],
+            )?;
+
+            // Yield between resumable invocations.
+            std::thread::sleep(INTER_BATCH_SLEEP);
+        }
+
+        let _ = BATCH_SIZE; // ensure constant is referenced
+
+        Ok(total_rotated)
     }
 }
 

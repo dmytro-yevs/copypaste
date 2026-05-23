@@ -3,8 +3,9 @@ use crate::protocol::{
     ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 use copypaste_core::{
-    chunks_from_blob, count_items, decode_image, decrypt_item, delete_fts, delete_item,
-    ensure_revoked_devices_table, get_page, revoke_device, search_items, Database,
+    build_item_aad, chunks_from_blob, count_items, decode_image, decrypt_item_with_aad,
+    delete_fts, delete_item, ensure_revoked_devices_table, get_page, revoke_device, search_items,
+    Database, AAD_SCHEMA_VERSION,
 };
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -1153,29 +1154,20 @@ impl IpcServer {
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    // 5 minute dedupe window — matches the live clipboard
-                    // monitor's find_recent_by_hash usage.
-                    const DEDUPE_WINDOW_MS: i64 = 5 * 60 * 1000;
+                    // v0.3 post-T2: dedup is now enforced atomically by the
+                    // v5 UNIQUE indexes (content_hash + minute_bucket) inside
+                    // insert_item_with_fts. The previous explicit
+                    // `find_recent_by_hash` precheck created a TOCTOU window
+                    // — two concurrent imports of the same payload could both
+                    // pass the precheck and then race on insert. The new
+                    // path returns the existing row's id on a unique-violation,
+                    // which we treat as a dedup skip.
                     let mut inserted: u32 = 0;
                     let mut skipped: u32 = 0;
                     for item in decoded {
                         let mut hasher = Sha256::new();
                         hasher.update(&item.bytes);
                         let hash_hex = hex::encode(hasher.finalize());
-
-                        match copypaste_core::find_recent_by_hash(
-                            &db,
-                            &hash_hex,
-                            item.created_at_ms,
-                            DEDUPE_WINDOW_MS,
-                        ) {
-                            Ok(Some(_)) => {
-                                skipped += 1;
-                                continue;
-                            }
-                            Ok(None) => { /* fall through to insert */ }
-                            Err(e) => return Err::<(u32, u32), anyhow::Error>(e.into()),
-                        }
 
                         // Imported items have no encryption nonce — the bytes
                         // are stored verbatim as the "content" field. This
@@ -1189,10 +1181,24 @@ impl IpcServer {
                         clip.wall_time = item.created_at_ms;
                         clip.content_hash = Some(hash_hex);
 
-                        if let Err(e) = copypaste_core::insert_item(&db, &clip) {
-                            return Err::<(u32, u32), anyhow::Error>(e.into());
+                        // Imported items have no plaintext available here
+                        // (the bytes are stored verbatim, often already
+                        // encrypted or binary), so we pass "" to skip FTS
+                        // indexing — matches the image path semantics.
+                        let requested_id = clip.id.clone();
+                        match copypaste_core::insert_item_with_fts(&db, &clip, "") {
+                            Ok(stored_id) if stored_id == requested_id => {
+                                inserted += 1;
+                            }
+                            Ok(_) => {
+                                // Returned id differs => dedup hit (existing
+                                // row with same content_hash/item_id).
+                                skipped += 1;
+                            }
+                            Err(e) => {
+                                return Err::<(u32, u32), anyhow::Error>(e.into());
+                            }
                         }
-                        inserted += 1;
                     }
                     Ok::<(u32, u32), anyhow::Error>((inserted, skipped))
                 })
@@ -1231,7 +1237,9 @@ impl IpcServer {
     /// implementation wrote `item.content` raw, so users saw ciphertext on
     /// paste. This now:
     ///
-    /// 1. Decrypts text via [`decrypt_item`] with the per-item nonce.
+    /// 1. Decrypts text via [`decrypt_item_with_aad`] with the per-item nonce,
+    ///    rebuilding the AAD from the row's `item_id` so a tampered or
+    ///    misbound ciphertext surfaces as `AuthFailed` instead of garbage.
     /// 2. Reassembles + decrypts image chunks via [`chunks_from_blob`] +
     ///    [`decode_image`], using the `file_id` parsed out of `blob_ref`.
     /// 3. Maps the daemon's internal `content_type` to a real macOS UTI
@@ -1266,8 +1274,31 @@ impl IpcServer {
                         nonce_vec.len()
                     ))
                 })?;
-                let plaintext_bytes = decrypt_item(content, nonce, self.local_key.as_ref())
-                    .map_err(|e| PasteboardError::decrypt(e.to_string()))?;
+
+                // v0.3 post-T2: enforce AAD on paste-back. `daemon::handle_text`
+                // encrypts with `build_item_aad(item_id, AAD_SCHEMA_VERSION)`,
+                // so the symmetric path here rebuilds the same AAD from the
+                // row's own item_id. A mismatch — e.g. ciphertext re-bound to
+                // a different item_id by a tampering attacker, or a future
+                // schema bump — now surfaces as `AuthFailed` instead of
+                // silently producing garbage plaintext.
+                //
+                // wave1a-atomic: rows tagged `key_version = 2` by the v4
+                // migration use `build_item_aad_v2(item_id,
+                // AAD_SCHEMA_VERSION_V4, 2)` instead. The full key-version
+                // dispatch will be wired in a follow-up once handle_text also
+                // emits v2-AAD ciphertexts. For now, rows at key_version=2
+                // that reach this path return EncryptError::AuthFailed
+                // (correct — the AAD is wrong), which maps to
+                // ERR_CODE_AUTH_FAILED below.
+                //
+                // EncryptError::UnknownKeyVersion also maps to auth_failed so
+                // callers cannot distinguish it from a tamper — this is
+                // intentional: unknown key versions must not leak information.
+                let aad = build_item_aad(&item.item_id, AAD_SCHEMA_VERSION);
+                let plaintext_bytes =
+                    decrypt_item_with_aad(content, nonce, self.local_key.as_ref(), &aad)
+                        .map_err(|e| PasteboardError::decrypt(e.to_string()))?;
                 let text = std::str::from_utf8(&plaintext_bytes).map_err(|e| {
                     PasteboardError::decrypt(format!("decrypted content is not UTF-8: {e}"))
                 })?;

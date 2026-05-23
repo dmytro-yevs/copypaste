@@ -345,11 +345,13 @@ fn main() -> Result<()> {
                 };
                 let result = load_history_page(&socket_path, PAGE_SIZE, offset);
                 let state_for_apply = Arc::clone(&state);
-                let _ = slint::invoke_from_event_loop(move || {
+                if let Err(e) = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
                         apply_history_result(&win, &state_for_apply, result, offset);
                     }
-                });
+                }) {
+                    tracing::debug!(error = %e, "ui update dropped during event-loop shutdown");
+                }
             });
         });
     }
@@ -367,7 +369,7 @@ fn main() -> Result<()> {
             let id_str = id.to_string();
             std::thread::spawn(move || {
                 let result = paste_item(&socket_path, &id_str);
-                let _ = slint::invoke_from_event_loop(move || {
+                if let Err(e) = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
                         match result {
                             Ok(_) => {
@@ -381,7 +383,9 @@ fn main() -> Result<()> {
                             Err(e) => win.set_status_text(format!("Paste failed: {e}").into()),
                         }
                     }
-                });
+                }) {
+                    tracing::debug!(error = %e, "ui update dropped during event-loop shutdown");
+                }
             });
         });
     }
@@ -403,7 +407,7 @@ fn main() -> Result<()> {
                     IpcClient::connect(&socket_path)
                         .map_err(|e| format!("daemon offline: {e}"))
                         .and_then(|mut c| c.get_settings().map_err(|e| e.to_string()));
-                let _ = slint::invoke_from_event_loop(move || {
+                if let Err(e) = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
                         match result {
                             Ok(settings) => win.set_status_text(
@@ -417,7 +421,9 @@ fn main() -> Result<()> {
                             Err(e) => win.set_status_text(format!("Settings error: {e}").into()),
                         }
                     }
-                });
+                }) {
+                    tracing::debug!(error = %e, "ui update dropped during event-loop shutdown");
+                }
             });
         });
     }
@@ -502,11 +508,13 @@ fn main() -> Result<()> {
                 };
                 let result = load_history_page(&socket_path, PAGE_SIZE, candidate_offset);
                 let state_for_apply = Arc::clone(&state);
-                let _ = slint::invoke_from_event_loop(move || {
+                if let Err(e) = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
                         apply_history_result(&win, &state_for_apply, result, candidate_offset);
                     }
-                });
+                }) {
+                    tracing::debug!(error = %e, "ui update dropped during event-loop shutdown");
+                }
             });
         });
     }
@@ -540,11 +548,13 @@ fn main() -> Result<()> {
                 };
                 let result = load_history_page(&socket_path, PAGE_SIZE, candidate_offset);
                 let state_for_apply = Arc::clone(&state);
-                let _ = slint::invoke_from_event_loop(move || {
+                if let Err(e) = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
                         apply_history_result(&win, &state_for_apply, result, candidate_offset);
                     }
-                });
+                }) {
+                    tracing::debug!(error = %e, "ui update dropped during event-loop shutdown");
+                }
             });
         });
     }
@@ -599,11 +609,13 @@ fn main() -> Result<()> {
             };
             let result = load_history_page(&socket_path, PAGE_SIZE, offset);
             let state_for_apply = Arc::clone(&state_clone);
-            let _ = slint::invoke_from_event_loop(move || {
+            if let Err(e) = slint::invoke_from_event_loop(move || {
                 if let Some(win) = window_weak.upgrade() {
                     apply_history_result(&win, &state_for_apply, result, offset);
                 }
-            });
+            }) {
+                tracing::debug!(error = %e, "ui update dropped during event-loop shutdown");
+            }
         });
     }
 
@@ -819,9 +831,11 @@ fn spawn_tray_recents_refresh(state: Arc<Mutex<AppState>>) {
                     return;
                 }
             };
-            let _ = slint::invoke_from_event_loop(move || {
+            if let Err(e) = slint::invoke_from_event_loop(move || {
                 update_recents(recents);
-            });
+            }) {
+                tracing::debug!(error = %e, "ui update dropped during event-loop shutdown");
+            }
         });
     };
 

@@ -73,6 +73,10 @@ pub const ERR_CODE_INTERNAL_ERROR: &str = "internal_error";
 /// Client sent a `protocol_version` outside the daemon's supported range.
 /// Surface as an upgrade prompt — DO NOT retry the request. See ADR-007.
 pub const ERR_CODE_VERSION_MISMATCH: &str = "version_mismatch";
+/// The v4 key-rotation sweep is still in progress. Ingest paths return this
+/// error rather than writing new items to avoid mixing key versions during the
+/// sweep. Clients should back off and retry after a short delay.
+pub const ERR_CODE_MIGRATION_IN_PROGRESS: &str = "migration_in_progress";
 
 #[derive(Debug, Serialize)]
 pub struct Response {
