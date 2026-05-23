@@ -166,7 +166,11 @@ impl SyncEngine {
 
         let peer_hello = recv_message(stream).await?;
         let (peer_device_id, peer_clock) = match peer_hello {
-            Message::Hello { device_id, clock, item_count } => {
+            Message::Hello {
+                device_id,
+                clock,
+                item_count,
+            } => {
                 info!(
                     "peer HELLO device={} clock={} items={}",
                     device_id, clock, item_count
@@ -186,8 +190,10 @@ impl SyncEngine {
 
         // --- HAVE exchange ---
         // Build a map of id → lamport_ts for local items (for conflict detection).
-        let local_clock_map: HashMap<String, i64> =
-            local_items.iter().map(|i| (i.id.clone(), i.lamport_ts)).collect();
+        let local_clock_map: HashMap<String, i64> = local_items
+            .iter()
+            .map(|i| (i.id.clone(), i.lamport_ts))
+            .collect();
         let local_ids: HashSet<&String> = local_clock_map.keys().collect();
 
         let my_have = Message::Have {
@@ -261,7 +267,13 @@ impl SyncEngine {
         );
 
         // --- WANT exchange ---
-        send_message(stream, &Message::Want { item_ids: we_want.clone() }).await?;
+        send_message(
+            stream,
+            &Message::Want {
+                item_ids: we_want.clone(),
+            },
+        )
+        .await?;
 
         let peer_want_msg = recv_message(stream).await?;
         let items_peer_wants: Vec<String> = match peer_want_msg {
@@ -282,7 +294,13 @@ impl SyncEngine {
             .collect();
 
         result.items_sent = items_to_send.len();
-        send_message(stream, &Message::Items { items: items_to_send }).await?;
+        send_message(
+            stream,
+            &Message::Items {
+                items: items_to_send,
+            },
+        )
+        .await?;
         debug!("sent {} items to peer", result.items_sent);
 
         // --- Receive items from peer ---
@@ -351,7 +369,9 @@ impl SyncEngine {
         // Record peer's last known clock.
         self.peer_clocks.insert(
             peer_device_id,
-            PeerState { last_clock: peer_clock },
+            PeerState {
+                last_clock: peer_clock,
+            },
         );
 
         info!(
@@ -575,7 +595,10 @@ mod tests {
 
         // Engine A's clock should have advanced past B's initial value (50).
         // After observe(50): max(0, 50) + 1 = 51 (minimum).
-        assert!(engine_a.clock.get() >= 51, "clock should advance past peer's value");
+        assert!(
+            engine_a.clock.get() >= 51,
+            "clock should advance past peer's value"
+        );
     }
 
     #[tokio::test]

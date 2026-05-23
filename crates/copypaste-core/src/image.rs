@@ -195,7 +195,8 @@ pub fn chunks_from_blob(blob: &[u8]) -> Result<Vec<EncryptedChunk>, ImageError> 
         if pos + 4 > blob.len() {
             return Err(ImageError::Decode("truncated blob (wire length)".into()));
         }
-        let wire_len = u32::from_be_bytes([blob[pos], blob[pos + 1], blob[pos + 2], blob[pos + 3]]) as usize;
+        let wire_len =
+            u32::from_be_bytes([blob[pos], blob[pos + 1], blob[pos + 2], blob[pos + 3]]) as usize;
         pos += 4;
 
         if pos + wire_len > blob.len() {
@@ -210,7 +211,9 @@ pub fn chunks_from_blob(blob: &[u8]) -> Result<Vec<EncryptedChunk>, ImageError> 
         }
         let version = wire[0];
         if version != CHUNK_FORMAT_VERSION {
-            return Err(ImageError::Decode(format!("unknown chunk version {version}")));
+            return Err(ImageError::Decode(format!(
+                "unknown chunk version {version}"
+            )));
         }
         let chunk_index = u32::from_be_bytes([wire[1], wire[2], wire[3], wire[4]]);
         let is_final = wire[5] != 0;
@@ -273,7 +276,10 @@ mod tests {
     fn random_bytes_return_decode_error() {
         let garbage = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02, 0x03];
         let err = decode_clipboard_image(&garbage).unwrap_err();
-        assert!(matches!(err, ImageError::Decode(_) | ImageError::UnsupportedFormat));
+        assert!(matches!(
+            err,
+            ImageError::Decode(_) | ImageError::UnsupportedFormat
+        ));
     }
 
     #[test]
@@ -400,9 +406,7 @@ mod tests {
     /// Build a synthetic RGB image of `(w, h)` and return its PNG bytes.
     fn synthetic_png(w: u32, h: u32) -> Vec<u8> {
         use image::{ImageBuffer, Rgb};
-        let img = ImageBuffer::from_fn(w, h, |x, y| {
-            Rgb([(x % 255) as u8, (y % 255) as u8, 128u8])
-        });
+        let img = ImageBuffer::from_fn(w, h, |x, y| Rgb([(x % 255) as u8, (y % 255) as u8, 128u8]));
         encode_as_png(&DynamicImage::ImageRgb8(img)).expect("encode synthetic PNG")
     }
 

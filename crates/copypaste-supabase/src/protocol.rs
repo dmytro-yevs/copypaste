@@ -123,23 +123,22 @@ impl ChangeEvent {
         let data = payload.get("data").unwrap_or(payload);
 
         let change_type_str = data.get("type")?.as_str()?;
-        let change_type: ChangeType = serde_json::from_value(
-            Value::String(change_type_str.to_uppercase())
-        ).ok()?;
+        let change_type: ChangeType =
+            serde_json::from_value(Value::String(change_type_str.to_uppercase())).ok()?;
 
-        let table = data.get("table")
+        let table = data
+            .get("table")
             .and_then(|v| v.as_str())
             .unwrap_or("clipboard_items")
             .to_owned();
 
-        let record = data.get("record")
+        let record = data
+            .get("record")
             .or_else(|| data.get("new"))
             .cloned()
             .unwrap_or(Value::Null);
 
-        let old_record = data.get("old_record")
-            .or_else(|| data.get("old"))
-            .cloned();
+        let old_record = data.get("old_record").or_else(|| data.get("old")).cloned();
 
         Some(Self {
             change_type,
@@ -186,7 +185,11 @@ mod tests {
         let msg = PhoenixMessage::heartbeat("1");
         let wire = msg.to_wire().expect("serialise");
         let arr: Vec<Value> = serde_json::from_str(&wire).expect("parse as array");
-        assert_eq!(arr.len(), 5, "Phoenix wire format must be a 5-element array");
+        assert_eq!(
+            arr.len(),
+            5,
+            "Phoenix wire format must be a 5-element array"
+        );
     }
 
     #[test]
@@ -216,8 +219,8 @@ mod tests {
                 "old_record": null
             }
         });
-        let ev = ChangeEvent::from_payload("realtime:clipboard_items", &payload)
-            .expect("should parse");
+        let ev =
+            ChangeEvent::from_payload("realtime:clipboard_items", &payload).expect("should parse");
 
         assert_eq!(ev.change_type, ChangeType::Insert);
         assert_eq!(ev.table, "clipboard_items");
@@ -235,8 +238,8 @@ mod tests {
                 "old_record": { "id": "xyz" }
             }
         });
-        let ev = ChangeEvent::from_payload("realtime:clipboard_items", &payload)
-            .expect("should parse");
+        let ev =
+            ChangeEvent::from_payload("realtime:clipboard_items", &payload).expect("should parse");
 
         assert_eq!(ev.change_type, ChangeType::Delete);
         let old = ev.old_record.expect("old_record present");

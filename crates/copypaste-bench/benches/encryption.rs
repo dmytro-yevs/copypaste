@@ -85,9 +85,8 @@ fn bench_roundtrip(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(size as u64));
         group.bench_with_input(BenchmarkId::from_parameter(label), &plaintext, |b, p| {
             b.iter(|| {
-                let (n, ct) =
-                    encrypt_item_with_aad(black_box(p), black_box(&KEY), black_box(&aad))
-                        .expect("encrypt");
+                let (n, ct) = encrypt_item_with_aad(black_box(p), black_box(&KEY), black_box(&aad))
+                    .expect("encrypt");
                 let pt = decrypt_item_with_aad(
                     black_box(&ct),
                     black_box(&n),

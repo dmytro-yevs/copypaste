@@ -494,8 +494,7 @@ mod tests {
             let cfg = config_dir();
             // macOS data + config both live under Application Support.
             assert!(
-                d.to_string_lossy()
-                    .contains("Library/Application Support"),
+                d.to_string_lossy().contains("Library/Application Support"),
                 "macOS data_dir should be under Application Support: {}",
                 d.display()
             );
@@ -515,7 +514,10 @@ mod tests {
                 "macOS log_dir should be under Library/Logs: {}",
                 l.display()
             );
-            assert!(d.ends_with(APP_NAME), "macOS data should end with {APP_NAME}");
+            assert!(
+                d.ends_with(APP_NAME),
+                "macOS data should end with {APP_NAME}"
+            );
         }
 
         #[cfg(all(unix, not(target_os = "macos")))]

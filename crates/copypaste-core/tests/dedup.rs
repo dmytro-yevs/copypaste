@@ -21,9 +21,7 @@
 //! so the production code path (SQLCipher + migrations + index) is exercised
 //! end to end.
 
-use copypaste_core::{
-    count_items, find_recent_by_hash, insert_item, ClipboardItem, Database,
-};
+use copypaste_core::{count_items, find_recent_by_hash, insert_item, ClipboardItem, Database};
 use sha2::{Digest, Sha256};
 use tempfile::tempdir;
 
@@ -155,8 +153,20 @@ fn different_content_different_hash_creates_two_rows() {
     assert_eq!(count_items(&db).unwrap(), 2);
 
     // Each hash resolves to its own row.
-    let hit_a = find_recent_by_hash(&db, a.content_hash.as_ref().unwrap(), now + 50, DEDUP_WINDOW_MS).unwrap();
-    let hit_b = find_recent_by_hash(&db, b.content_hash.as_ref().unwrap(), now + 50, DEDUP_WINDOW_MS).unwrap();
+    let hit_a = find_recent_by_hash(
+        &db,
+        a.content_hash.as_ref().unwrap(),
+        now + 50,
+        DEDUP_WINDOW_MS,
+    )
+    .unwrap();
+    let hit_b = find_recent_by_hash(
+        &db,
+        b.content_hash.as_ref().unwrap(),
+        now + 50,
+        DEDUP_WINDOW_MS,
+    )
+    .unwrap();
     assert_eq!(hit_a.as_deref(), Some(a.id.as_str()));
     assert_eq!(hit_b.as_deref(), Some(b.id.as_str()));
 }
@@ -212,7 +222,9 @@ fn find_recent_by_hash_returns_within_dedup_window() {
     // Inside the 60s window → hit.
     let inside = t_insert + DEDUP_WINDOW_MS - 1;
     assert_eq!(
-        find_recent_by_hash(&db, &hash, inside, DEDUP_WINDOW_MS).unwrap().as_deref(),
+        find_recent_by_hash(&db, &hash, inside, DEDUP_WINDOW_MS)
+            .unwrap()
+            .as_deref(),
         Some(id.as_str()),
         "lookup inside dedup window must hit"
     );
@@ -221,7 +233,9 @@ fn find_recent_by_hash_returns_within_dedup_window() {
     // because the comparison is `>=`.
     let boundary = t_insert + DEDUP_WINDOW_MS;
     assert_eq!(
-        find_recent_by_hash(&db, &hash, boundary, DEDUP_WINDOW_MS).unwrap().as_deref(),
+        find_recent_by_hash(&db, &hash, boundary, DEDUP_WINDOW_MS)
+            .unwrap()
+            .as_deref(),
         Some(id.as_str()),
         "lookup at boundary (wall_time == cutoff) must hit"
     );
@@ -229,7 +243,9 @@ fn find_recent_by_hash_returns_within_dedup_window() {
     // One ms past the boundary → miss.
     let outside = t_insert + DEDUP_WINDOW_MS + 1;
     assert!(
-        find_recent_by_hash(&db, &hash, outside, DEDUP_WINDOW_MS).unwrap().is_none(),
+        find_recent_by_hash(&db, &hash, outside, DEDUP_WINDOW_MS)
+            .unwrap()
+            .is_none(),
         "lookup past dedup window must miss"
     );
 
@@ -237,7 +253,9 @@ fn find_recent_by_hash_returns_within_dedup_window() {
     let tight_window = 5_000_i64;
     let later = t_insert + tight_window + 1;
     assert!(
-        find_recent_by_hash(&db, &hash, later, tight_window).unwrap().is_none(),
+        find_recent_by_hash(&db, &hash, later, tight_window)
+            .unwrap()
+            .is_none(),
         "tight window must miss older entry"
     );
 }

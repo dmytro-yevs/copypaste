@@ -1,6 +1,6 @@
+use super::patterns::{pattern_category, pattern_confidence, pattern_name, pattern_set, patterns};
 use std::ops::Range;
 use unicode_normalization::UnicodeNormalization;
-use super::patterns::{pattern_set, pattern_name, pattern_category, pattern_confidence, patterns};
 
 /// NFKC-normalise input so Unicode bypass tricks (full-width AKIA, ZWJ in JWTs,
 /// compatibility ligatures) collapse to their ASCII canonical form before regex matching.
@@ -31,7 +31,9 @@ fn is_credential_value_strong(value: &str) -> bool {
         match b {
             b'A'..=b'Z' | b'a'..=b'z' => has_letter = true,
             b'0'..=b'9' => has_digit = true,
-            b'!' | b'@' | b'#' | b'$' | b'%' | b'^' | b'&' | b'*' | b'+' | b'/' | b'=' => has_special = true,
+            b'!' | b'@' | b'#' | b'$' | b'%' | b'^' | b'&' | b'*' | b'+' | b'/' | b'=' => {
+                has_special = true
+            }
             _ => {}
         }
     }
@@ -40,7 +42,12 @@ fn is_credential_value_strong(value: &str) -> bool {
 
 /// Returns true when a given pattern index produced a match that should be discarded
 /// (e.g. a `generic_password_kv` match whose captured value is too weak to be a secret).
-fn match_is_false_positive(pattern_idx: usize, full_match: &str, text: &str, range: &Range<usize>) -> bool {
+fn match_is_false_positive(
+    pattern_idx: usize,
+    full_match: &str,
+    text: &str,
+    range: &Range<usize>,
+) -> bool {
     if pattern_name(pattern_idx) != "generic_password_kv" {
         return false;
     }
@@ -92,7 +99,9 @@ pub struct PatternMatch {
 pub struct SensitiveDetector;
 
 impl SensitiveDetector {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
     /// Return every pattern match found in `text`, with byte ranges and confidence.
     ///
@@ -130,7 +139,10 @@ impl SensitiveDetector {
             return false;
         }
         // Cheap path: if any non-fp-prone pattern hit, we're done.
-        if matches.iter().any(|&i| pattern_name(i) != "generic_password_kv") {
+        if matches
+            .iter()
+            .any(|&i| pattern_name(i) != "generic_password_kv")
+        {
             return true;
         }
         // Only generic_password_kv candidates remain — validate at least one is strong.
@@ -145,21 +157,40 @@ impl SensitiveDetector {
     /// Returns the highest-confidence match, if any.
     pub fn highest_confidence(&self, text: &str) -> Option<PatternMatch> {
         self.detect(text).into_iter().max_by(|a, b| {
-            a.confidence.partial_cmp(&b.confidence).unwrap_or(std::cmp::Ordering::Equal)
+            a.confidence
+                .partial_cmp(&b.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
         })
     }
 }
 
 /// Validate a credit card number using the Luhn algorithm.
 pub fn luhn_valid(s: &str) -> bool {
-    let digits: Vec<u32> = s.chars()
+    let digits: Vec<u32> = s
+        .chars()
         .filter(|c| c.is_ascii_digit())
         .map(|c| c.to_digit(10).unwrap())
         .collect();
-    if digits.len() < 13 || digits.len() > 19 { return false; }
-    let sum: u32 = digits.iter().rev().enumerate().map(|(i, &d)| {
-        if i % 2 == 1 { let v = d * 2; if v > 9 { v - 9 } else { v } } else { d }
-    }).sum();
+    if digits.len() < 13 || digits.len() > 19 {
+        return false;
+    }
+    let sum: u32 = digits
+        .iter()
+        .rev()
+        .enumerate()
+        .map(|(i, &d)| {
+            if i % 2 == 1 {
+                let v = d * 2;
+                if v > 9 {
+                    v - 9
+                } else {
+                    v
+                }
+            } else {
+                d
+            }
+        })
+        .sum();
     sum % 10 == 0
 }
 
@@ -203,14 +234,27 @@ static SENSITIVE_APP_BUNDLE_IDS: &[&str] = &[
 /// (e.g. a password manager). Match is case-insensitive substring on the lowercased input.
 pub fn is_sensitive_app(app_bundle_id: &str) -> bool {
     let lower = app_bundle_id.to_lowercase();
-    SENSITIVE_APP_BUNDLE_IDS.iter().any(|&known| lower.contains(known))
+    SENSITIVE_APP_BUNDLE_IDS
+        .iter()
+        .any(|&known| lower.contains(known))
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SensitiveKind {
-    AwsKey, GitHubToken, OpenAIKey, AnthropicKey, StripeKey,
-    NpmToken, PyPIToken, SlackToken, VaultToken, GcpToken,
-    SshPrivateKey, Jwt, CreditCard, Other(String),
+    AwsKey,
+    GitHubToken,
+    OpenAIKey,
+    AnthropicKey,
+    StripeKey,
+    NpmToken,
+    PyPIToken,
+    SlackToken,
+    VaultToken,
+    GcpToken,
+    SshPrivateKey,
+    Jwt,
+    CreditCard,
+    Other(String),
 }
 
 impl SensitiveKind {
@@ -256,12 +300,31 @@ pub fn detect(text: &str) -> Option<SensitiveKind> {
 }
 
 fn is_luhn_valid_card(s: &str) -> bool {
-    let digits: Vec<u32> = s.chars().filter(|c| c.is_ascii_digit())
-        .map(|c| c.to_digit(10).unwrap()).collect();
-    if digits.len() < 13 || digits.len() > 19 { return false; }
-    let sum: u32 = digits.iter().rev().enumerate().map(|(i, &d)| {
-        if i % 2 == 1 { let v = d * 2; if v > 9 { v - 9 } else { v } } else { d }
-    }).sum();
+    let digits: Vec<u32> = s
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .map(|c| c.to_digit(10).unwrap())
+        .collect();
+    if digits.len() < 13 || digits.len() > 19 {
+        return false;
+    }
+    let sum: u32 = digits
+        .iter()
+        .rev()
+        .enumerate()
+        .map(|(i, &d)| {
+            if i % 2 == 1 {
+                let v = d * 2;
+                if v > 9 {
+                    v - 9
+                } else {
+                    v
+                }
+            } else {
+                d
+            }
+        })
+        .sum();
     sum % 10 == 0
 }
 
@@ -270,40 +333,74 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_aws_access_key() { assert!(detect("AKIAIOSFODNN7EXAMPLE").is_some()); }
+    fn detects_aws_access_key() {
+        assert!(detect("AKIAIOSFODNN7EXAMPLE").is_some());
+    }
     #[test]
-    fn detects_temporary_aws_key() { assert!(detect("ASIAIOSFODNN7EXAMPLE1234").is_some()); }
+    fn detects_temporary_aws_key() {
+        assert!(detect("ASIAIOSFODNN7EXAMPLE1234").is_some());
+    }
     #[test]
-    fn detects_github_classic_pat() { assert!(detect(&("ghp_".to_string() + &"A".repeat(36))).is_some()); }
+    fn detects_github_classic_pat() {
+        assert!(detect(&("ghp_".to_string() + &"A".repeat(36))).is_some());
+    }
     #[test]
-    fn detects_github_fine_grained_pat() { assert!(detect(&format!("github_pat_{}_{}", "A".repeat(22), "B".repeat(59))).is_some()); }
+    fn detects_github_fine_grained_pat() {
+        assert!(detect(&format!("github_pat_{}_{}", "A".repeat(22), "B".repeat(59))).is_some());
+    }
     #[test]
-    fn detects_openai_key() { assert!(detect(&("sk-proj-".to_string() + &"A".repeat(48))).is_some()); }
+    fn detects_openai_key() {
+        assert!(detect(&("sk-proj-".to_string() + &"A".repeat(48))).is_some());
+    }
     #[test]
-    fn detects_anthropic_key() { assert!(detect(&("sk-ant-api03-".to_string() + &"A".repeat(80))).is_some()); }
+    fn detects_anthropic_key() {
+        assert!(detect(&("sk-ant-api03-".to_string() + &"A".repeat(80))).is_some());
+    }
     #[test]
-    fn detects_jwt() { assert!(detect("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c").is_some()); }
+    fn detects_jwt() {
+        assert!(detect(
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        )
+        .is_some());
+    }
     #[test]
-    fn detects_ssh_private_key() { assert!(detect("-----BEGIN RSA PRIVATE KEY-----\nMIIEo...").is_some()); }
+    fn detects_ssh_private_key() {
+        assert!(detect("-----BEGIN RSA PRIVATE KEY-----\nMIIEo...").is_some());
+    }
     #[test]
-    fn detects_openssh_private_key() { assert!(detect("-----BEGIN OPENSSH PRIVATE KEY-----\nMIIEo...").is_some()); }
+    fn detects_openssh_private_key() {
+        assert!(detect("-----BEGIN OPENSSH PRIVATE KEY-----\nMIIEo...").is_some());
+    }
     #[test]
-    fn detects_stripe_live_key() { assert!(detect(&("sk_live_".to_string() + &"A".repeat(24))).is_some()); }
+    fn detects_stripe_live_key() {
+        assert!(detect(&("sk_live_".to_string() + &"A".repeat(24))).is_some());
+    }
     #[test]
-    fn detects_npm_token() { assert!(detect(&("npm_".to_string() + &"A".repeat(36))).is_some()); }
+    fn detects_npm_token() {
+        assert!(detect(&("npm_".to_string() + &"A".repeat(36))).is_some());
+    }
     #[test]
-    fn no_false_positive_on_lorem_ipsum() { assert!(detect("Lorem ipsum dolor sit amet, consectetur adipiscing elit.").is_none()); }
+    fn no_false_positive_on_lorem_ipsum() {
+        assert!(detect("Lorem ipsum dolor sit amet, consectetur adipiscing elit.").is_none());
+    }
     #[test]
-    fn no_false_positive_on_short_code() { assert!(detect(r#"fn main() { println!("Hello, world!"); }"#).is_none()); }
+    fn no_false_positive_on_short_code() {
+        assert!(detect(r#"fn main() { println!("Hello, world!"); }"#).is_none());
+    }
     #[test]
-    fn credit_card_detected_short_line_only() { assert!(detect("4111111111111111").is_some()); }
+    fn credit_card_detected_short_line_only() {
+        assert!(detect("4111111111111111").is_some());
+    }
     #[test]
     fn detects_slack_bot_token() {
         assert!(detect("xoxb-17653285717-17653285718-AbCdEfGhIjKlMnOpQrStUvWx").is_some());
     }
     #[test]
     fn detects_slack_webhook() {
-        assert!(detect("https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX").is_some());
+        assert!(detect(
+            "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+        )
+        .is_some());
     }
     #[test]
     fn detects_stripe_webhook_secret() {
@@ -318,12 +415,19 @@ mod tests {
         assert!(detect("ghs_16C7e42F292c6912E7710c838347Ae178B4a").is_some());
     }
     #[test]
-    #[cfg_attr(debug_assertions, ignore = "regex perf test only meaningful in release builds")]
+    #[cfg_attr(
+        debug_assertions,
+        ignore = "regex perf test only meaningful in release builds"
+    )]
     fn pattern_match_completes_in_5ms_on_10mb_text() {
         let big = "a".repeat(10_000_000);
         let start = std::time::Instant::now();
         let _ = detect(&big);
-        assert!(start.elapsed().as_millis() < 500, "took {}ms", start.elapsed().as_millis());
+        assert!(
+            start.elapsed().as_millis() < 500,
+            "took {}ms",
+            start.elapsed().as_millis()
+        );
     }
 
     // --- is_sensitive_app tests ---
@@ -391,7 +495,8 @@ mod tests {
         // Note: ZWJ (U+200D) is a control char and NFKC keeps it in many cases;
         // but `eyJ` prefix is ASCII and the regex still matches on the surrounding bytes.
         // Use NFKC normalisation to demonstrate it doesn't break detection of clean JWTs.
-        let clean = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        let clean =
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
         assert!(detect(clean).is_some());
     }
 

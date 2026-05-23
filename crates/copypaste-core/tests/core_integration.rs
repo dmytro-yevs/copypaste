@@ -27,12 +27,21 @@ fn full_encrypt_store_retrieve_decrypt_flow() {
     let pages = get_page(&db, 10, 0).unwrap();
     assert_eq!(pages.len(), 1);
     let stored = &pages[0];
-    let nonce_arr: [u8; NONCE_SIZE] = stored.content_nonce.as_ref().unwrap()
-        .as_slice().try_into().unwrap();
+    let nonce_arr: [u8; NONCE_SIZE] = stored
+        .content_nonce
+        .as_ref()
+        .unwrap()
+        .as_slice()
+        .try_into()
+        .unwrap();
     let stored_aad = build_item_aad(&stored.id, AAD_SCHEMA_VERSION);
-    let decrypted =
-        decrypt_item_with_aad(stored.content.as_ref().unwrap(), &nonce_arr, &enc_key, &stored_aad)
-            .unwrap();
+    let decrypted = decrypt_item_with_aad(
+        stored.content.as_ref().unwrap(),
+        &nonce_arr,
+        &enc_key,
+        &stored_aad,
+    )
+    .unwrap();
     assert_eq!(decrypted, plaintext);
 }
 

@@ -29,11 +29,8 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(Mutex::new(relay_store));
 
     // Background TTL evictor — see ADR-009 (in-memory store + periodic prune).
-    let _evictor = store::spawn_ttl_evictor(
-        state.clone(),
-        config.sync_ttl_secs,
-        TTL_EVICTOR_TICK_SECS,
-    );
+    let _evictor =
+        store::spawn_ttl_evictor(state.clone(), config.sync_ttl_secs, TTL_EVICTOR_TICK_SECS);
 
     let app = routes::relay_router(state, config.clone());
 

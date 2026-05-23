@@ -68,10 +68,22 @@ async fn subscribe_message_format_matches_phoenix_wire() {
     // Element 3 (event) is phx_join.
     assert_eq!(arr[3].as_str(), Some(PhoenixEvent::JOIN));
     // join_ref / msg_ref are present (non-null).
-    assert!(arr[0].is_string(), "join_ref must be a string, got {}", arr[0]);
-    assert!(arr[1].is_string(), "msg_ref must be a string, got {}", arr[1]);
+    assert!(
+        arr[0].is_string(),
+        "join_ref must be a string, got {}",
+        arr[0]
+    );
+    assert!(
+        arr[1].is_string(),
+        "msg_ref must be a string, got {}",
+        arr[1]
+    );
     // Payload is an object (Phoenix expects an object, even if empty).
-    assert!(arr[4].is_object(), "payload must be an object, got {}", arr[4]);
+    assert!(
+        arr[4].is_object(),
+        "payload must be an object, got {}",
+        arr[4]
+    );
 }
 
 /// Symmetric round-trip — `PhoenixMessage::from_wire` of the join frame yields

@@ -101,14 +101,21 @@ fn sigkill_recovers_lamport() {
     // and assert it loaded the persisted value. For now, simply assert the
     // state directory survived the crash and contains a DB file.
     let db_present = std::fs::read_dir(&state)
-        .map(|rd| rd.flatten().any(|e| e.file_name().to_string_lossy().contains(".db")))
+        .map(|rd| {
+            rd.flatten()
+                .any(|e| e.file_name().to_string_lossy().contains(".db"))
+        })
         .unwrap_or(false);
 
     // Clean shutdown of round-2 daemon — avoid zombie processes in CI.
     let _ = child2.kill();
     let _ = child2.wait();
 
-    assert!(db_present, "expected DB file to survive SIGKILL in {:?}", state);
+    assert!(
+        db_present,
+        "expected DB file to survive SIGKILL in {:?}",
+        state
+    );
 }
 
 /// SIGTERM mid-sync → no half-written items in DB.

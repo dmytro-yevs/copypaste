@@ -94,8 +94,12 @@ fn macos_uid<R: CommandRunner>(runner: &mut R) -> Result<u32> {
 }
 
 fn user_plist_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
-    let home = fs.home_dir().ok_or_else(|| anyhow!("could not determine $HOME"))?;
-    Ok(home.join(USER_LAUNCH_AGENTS_DIR).join(format!("{LAUNCHD_LABEL}.plist")))
+    let home = fs
+        .home_dir()
+        .ok_or_else(|| anyhow!("could not determine $HOME"))?;
+    Ok(home
+        .join(USER_LAUNCH_AGENTS_DIR)
+        .join(format!("{LAUNCHD_LABEL}.plist")))
 }
 
 fn packaged_plist_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
@@ -118,7 +122,11 @@ fn macos_start<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Result
     let domain = format!("gui/{uid}");
     let out = runner.run(
         "launchctl",
-        &["bootstrap".into(), OsString::from(&domain), plist.clone().into_os_string()],
+        &[
+            "bootstrap".into(),
+            OsString::from(&domain),
+            plist.clone().into_os_string(),
+        ],
     )?;
     if !out.success {
         bail!("launchctl bootstrap failed: {}", out.stderr.trim());
@@ -270,7 +278,10 @@ mod tests {
                 ("launchctl".into(), "bootout".into()),
                 (true, String::new(), String::new()),
             );
-            Self { calls: Vec::new(), responses }
+            Self {
+                calls: Vec::new(),
+                responses,
+            }
         }
     }
 
@@ -288,12 +299,16 @@ mod tests {
                 program.to_string(),
                 args_str.first().cloned().unwrap_or_default(),
             );
-            let (success, stdout, stderr) = self
-                .responses
-                .get(&key)
-                .cloned()
-                .unwrap_or((true, String::new(), String::new()));
-            Ok(CommandOutput { success, stdout, stderr })
+            let (success, stdout, stderr) =
+                self.responses
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or((true, String::new(), String::new()));
+            Ok(CommandOutput {
+                success,
+                stdout,
+                stderr,
+            })
         }
     }
 
@@ -362,7 +377,12 @@ mod tests {
         dispatch(DaemonAction::Start, &mut runner, &mut fs).expect("start should succeed");
 
         // Expect: `id -u` then `launchctl bootstrap gui/501 <plist>`
-        assert_eq!(runner.calls.len(), 2, "expected 2 shell-outs, got {:?}", runner.calls);
+        assert_eq!(
+            runner.calls.len(),
+            2,
+            "expected 2 shell-outs, got {:?}",
+            runner.calls
+        );
         assert_eq!(runner.calls[0].program, "id");
         assert_eq!(runner.calls[0].args, vec!["-u"]);
 
@@ -378,15 +398,17 @@ mod tests {
         let mut runner = MockRunner::new();
         let mut fs = MockFs::new().with_existing(expected_plist());
 
-        dispatch(DaemonAction::Uninstall, &mut runner, &mut fs)
-            .expect("uninstall should succeed");
+        dispatch(DaemonAction::Uninstall, &mut runner, &mut fs).expect("uninstall should succeed");
 
         // bootout must have been attempted
-        let bootout_called = runner
-            .calls
-            .iter()
-            .any(|c| c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootout"));
-        assert!(bootout_called, "expected launchctl bootout, got {:?}", runner.calls);
+        let bootout_called = runner.calls.iter().any(|c| {
+            c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootout")
+        });
+        assert!(
+            bootout_called,
+            "expected launchctl bootout, got {:?}",
+            runner.calls
+        );
 
         // plist must have been removed
         assert_eq!(fs.removed, vec![expected_plist()]);
@@ -401,7 +423,9 @@ mod tests {
             .expect_err("non-macos must return error");
         let msg = err.to_string();
         assert!(
-            msg.contains("not yet wired") || msg.contains("not yet implemented") || msg.contains("unsupported"),
+            msg.contains("not yet wired")
+                || msg.contains("not yet implemented")
+                || msg.contains("unsupported"),
             "expected clear platform error, got: {msg}"
         );
     }
@@ -426,7 +450,10 @@ mod tests {
         let mut fs = MockFs::new(); // plist not registered as existing
         let err = dispatch(DaemonAction::Start, &mut runner, &mut fs)
             .expect_err("start must fail when plist missing");
-        assert!(err.to_string().contains("install"), "expected install hint, got: {err}");
+        assert!(
+            err.to_string().contains("install"),
+            "expected install hint, got: {err}"
+        );
     }
 
     #[cfg(target_os = "macos")]

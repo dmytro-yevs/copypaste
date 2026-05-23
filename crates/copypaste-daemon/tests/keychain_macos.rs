@@ -51,7 +51,10 @@ fn cleanup(service: &str, account: &str) {
     match delete_generic_password(service, account) {
         Ok(()) => {}
         Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {}
-        Err(e) => panic!("cleanup failed for {service}/{account}: {e:?} code={}", e.code()),
+        Err(e) => panic!(
+            "cleanup failed for {service}/{account}: {e:?} code={}",
+            e.code()
+        ),
     }
 }
 
@@ -152,7 +155,6 @@ fn delete_key_idempotent() {
     }
 
     // And a get on a deleted item must now report not-found.
-    let err = get_generic_password(&service, &account)
-        .expect_err("get after delete must fail");
+    let err = get_generic_password(&service, &account).expect_err("get after delete must fail");
     assert_eq!(err.code(), ERR_SEC_ITEM_NOT_FOUND);
 }

@@ -63,10 +63,7 @@ extern "C" {
         itemRef: SecKeychainItemRef,
         accessRef: *mut SecAccessRef,
     ) -> OSStatus;
-    fn SecAccessCopyACLList(
-        accessRef: SecAccessRef,
-        aclList: *mut CFArrayRef,
-    ) -> OSStatus;
+    fn SecAccessCopyACLList(accessRef: SecAccessRef, aclList: *mut CFArrayRef) -> OSStatus;
     fn SecACLCopyContents(
         acl: CFTypeRef,
         applicationList: *mut CFArrayRef,
@@ -120,7 +117,10 @@ fn acl_digests_for(service: &str, account: &str) -> Vec<Vec<u8>> {
 
     let mut access_ref: SecAccessRef = ptr::null_mut();
     let st = unsafe { SecKeychainItemCopyAccess(item_ref, &mut access_ref) };
-    assert_eq!(st, ERR_SEC_SUCCESS, "SecKeychainItemCopyAccess failed: {st}");
+    assert_eq!(
+        st, ERR_SEC_SUCCESS,
+        "SecKeychainItemCopyAccess failed: {st}"
+    );
 
     let mut acl_array: CFArrayRef = ptr::null_mut();
     let st = unsafe { SecAccessCopyACLList(access_ref, &mut acl_array) };
@@ -135,9 +135,7 @@ fn acl_digests_for(service: &str, account: &str) -> Vec<Vec<u8>> {
         let mut app_list: CFArrayRef = ptr::null_mut();
         let mut description: CFStringRef = ptr::null();
         let mut sel: u32 = 0;
-        let st = unsafe {
-            SecACLCopyContents(*acl, &mut app_list, &mut description, &mut sel)
-        };
+        let st = unsafe { SecACLCopyContents(*acl, &mut app_list, &mut description, &mut sel) };
         if st != ERR_SEC_SUCCESS || app_list.is_null() {
             if !description.is_null() {
                 unsafe { CFRelease(description as CFTypeRef) };
@@ -331,8 +329,7 @@ fn acl_includes_three_copypaste_binaries() {
     let paths = vec![self_path.clone(), self_path.clone(), self_path];
 
     let secret: [u8; 32] = [0x33; 32];
-    store_with_acl_at(&service, &account, &secret, &paths)
-        .expect("store_with_acl_at must succeed");
+    store_with_acl_at(&service, &account, &secret, &paths).expect("store_with_acl_at must succeed");
 
     let digests = acl_digests_for(&service, &account);
     assert_eq!(

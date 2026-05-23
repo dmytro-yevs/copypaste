@@ -45,8 +45,7 @@ fn seed_old_logs(dir: &std::path::Path, prefix: &str, count: usize) {
     // Use ISO-like date stamps in the past so they sort before "today".
     for i in 0..count {
         let path = dir.join(format!("{prefix}.2024-01-{:02}.log", i + 1));
-        std::fs::write(&path, b"stale log line from a previous day\n")
-            .expect("seed write");
+        std::fs::write(&path, b"stale log line from a previous day\n").expect("seed write");
     }
 }
 
@@ -67,8 +66,7 @@ fn rotation_retention_bounds_on_disk_count() {
     );
 
     {
-        let _guard =
-            init_with_file_rotation_kind(log_dir, prefix, Rotation::DAILY, max_files);
+        let _guard = init_with_file_rotation_kind(log_dir, prefix, Rotation::DAILY, max_files);
 
         // Emit several lines to ensure the file is actually opened and the
         // appender registers it in its rotation list.

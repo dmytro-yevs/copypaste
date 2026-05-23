@@ -20,9 +20,7 @@
 // for now the bench builds the import payload directly as `serde_json::Value`,
 // which is exactly the shape that goes over the wire today.
 use copypaste_ipc::{Request, Response, PROTOCOL_VERSION};
-use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use serde_json::json;
 
 // ---------------------------------------------------------------------------
@@ -203,8 +201,7 @@ fn bench_roundtrip(c: &mut Criterion) {
                     let rq2: Request = serde_json::from_slice(&rb).expect("de req");
                     // See bench_deserialize: Response cannot deserialize from
                     // non-`'static` bytes — deserialize into Value instead.
-                    let rs2: serde_json::Value =
-                        serde_json::from_slice(&sb).expect("de resp");
+                    let rs2: serde_json::Value = serde_json::from_slice(&sb).expect("de resp");
                     black_box((rq2, rs2));
                 });
             },

@@ -89,7 +89,10 @@ pub fn encrypt_chunks(
             let mut nonce_bytes = [0u8; NONCE_SIZE];
             rand::thread_rng().fill_bytes(&mut nonce_bytes);
             let nonce = XNonce::from(nonce_bytes);
-            let payload = Payload { msg: chunk, aad: &aad };
+            let payload = Payload {
+                msg: chunk,
+                aad: &aad,
+            };
             let ciphertext = cipher
                 .encrypt(&nonce, payload)
                 .expect("XChaCha20-Poly1305 chunk encryption cannot fail");

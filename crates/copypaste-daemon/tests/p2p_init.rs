@@ -88,8 +88,7 @@ async fn p2p_init_yields_discovery_and_transport() {
     let tmp = TempDir::new().expect("tempdir");
     let _guard = std::env::set_current_dir(tmp.path()).ok();
 
-    let state = init_stand_in(0, "test-device", "Test Device")
-        .expect("init must succeed");
+    let state = init_stand_in(0, "test-device", "Test Device").expect("init must succeed");
 
     // ── "mdns_handle present" → discovery service constructed and registered.
     // DiscoveryService has no public liveness probe before `start()`, but the
@@ -102,12 +101,19 @@ async fn p2p_init_yields_discovery_and_transport() {
 
     // ── "tls_acceptor present" → PeerTransport built with a self-signed cert.
     let fp = state.transport.fingerprint();
-    assert!(!fp.is_empty(), "transport must expose a non-empty cert fingerprint");
+    assert!(
+        !fp.is_empty(),
+        "transport must expose a non-empty cert fingerprint"
+    );
     assert!(
         fp.chars().all(|c| c.is_ascii_hexdigit()),
         "fingerprint must be hex (SHA-256 of cert DER), got: {fp}"
     );
-    assert!(fp.len() >= 32, "fingerprint must be at least 32 hex chars, got {} chars", fp.len());
+    assert!(
+        fp.len() >= 32,
+        "fingerprint must be at least 32 hex chars, got {} chars",
+        fp.len()
+    );
 }
 
 /// Contract: dropping `P2pState` must be clean — no panics, no hangs,

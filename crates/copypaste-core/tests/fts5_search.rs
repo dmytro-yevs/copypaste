@@ -8,9 +8,7 @@
 //! and exercises the public `insert_item` + `upsert_fts` + `search_items`
 //! surface — matching how the daemon writes the index in production.
 
-use copypaste_core::{
-    insert_item, search_items, upsert_fts, ClipboardItem, Database,
-};
+use copypaste_core::{insert_item, search_items, upsert_fts, ClipboardItem, Database};
 use tempfile::tempdir;
 
 /// Open a fresh encrypted DB in a temp dir. The key is deterministic per-test
@@ -67,7 +65,11 @@ fn search_phrase_match_with_quotes() {
 
     let results = search_items(&db, "\"bar baz\"", 10).expect("search");
 
-    assert_eq!(results.len(), 1, "phrase '\"bar baz\"' must match only adjacent occurrence");
+    assert_eq!(
+        results.len(),
+        1,
+        "phrase '\"bar baz\"' must match only adjacent occurrence"
+    );
     assert_eq!(results[0].id, id_match);
 }
 
@@ -102,16 +104,16 @@ fn search_rank_ordering_bm25() {
     // The document with the most frequent occurrence of "rust" relative to its
     // length should outrank the others.
     let (_dir, db) = fresh_db();
-    let id_strong = insert_with_text(&db, 1, "rust rust rust rust");        // highest relevance
-    let id_medium = insert_with_text(&db, 2, "rust rust language");          // medium
-    let id_weak   = insert_with_text(&db, 3, "rust language tutorial guide");// weakest
+    let id_strong = insert_with_text(&db, 1, "rust rust rust rust"); // highest relevance
+    let id_medium = insert_with_text(&db, 2, "rust rust language"); // medium
+    let id_weak = insert_with_text(&db, 3, "rust language tutorial guide"); // weakest
 
     let results = search_items(&db, "rust", 10).expect("search");
 
     assert_eq!(results.len(), 3, "all three docs contain 'rust'");
     // Strongest match must be first; weakest must be last.
     assert_eq!(results[0].id, id_strong, "highest-density doc must rank #1");
-    assert_eq!(results[2].id, id_weak,   "lowest-density doc must rank #3");
+    assert_eq!(results[2].id, id_weak, "lowest-density doc must rank #3");
     // Sanity: medium doc sits between the two extremes.
     assert_eq!(results[1].id, id_medium);
 }
@@ -146,11 +148,10 @@ fn search_special_chars_escaped_safely() {
     // Table must still exist with its single row.
     let still_there: i64 = db
         .conn()
-        .query_row(
-            "SELECT COUNT(*) FROM clipboard_items",
-            [],
-            |r| r.get(0),
-        )
+        .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
         .expect("clipboard_items must still be queryable");
-    assert_eq!(still_there, 1, "adversarial query must not affect base table");
+    assert_eq!(
+        still_there, 1,
+        "adversarial query must not affect base table"
+    );
 }

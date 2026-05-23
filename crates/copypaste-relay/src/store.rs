@@ -31,11 +31,7 @@ use crate::state::AppState;
 /// nothing).
 ///
 /// Returns the [`JoinHandle`] so the caller can keep or abort the task.
-pub fn spawn_ttl_evictor(
-    state: AppState,
-    ttl_secs: u64,
-    tick_secs: u64,
-) -> JoinHandle<()> {
+pub fn spawn_ttl_evictor(state: AppState, ttl_secs: u64, tick_secs: u64) -> JoinHandle<()> {
     let tick = std::time::Duration::from_secs(tick_secs.max(1));
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(tick);
@@ -52,11 +48,7 @@ pub fn spawn_ttl_evictor(
                 store.prune_expired(now_unix, ttl_secs)
             };
             if evicted > 0 {
-                tracing::debug!(
-                    evicted,
-                    ttl_secs,
-                    "relay TTL evictor pruned expired items"
-                );
+                tracing::debug!(evicted, ttl_secs, "relay TTL evictor pruned expired items");
             }
         }
     })

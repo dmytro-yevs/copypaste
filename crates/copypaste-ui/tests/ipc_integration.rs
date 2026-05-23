@@ -61,7 +61,10 @@ fn history_page_parses_items() {
 fn history_page_empty_returns_zero_total() {
     let dir = tempdir().unwrap();
     let sock = dir.path().join("hp_empty.sock");
-    mock_daemon(&sock, r#"{"id":"ui-1","ok":true,"data":{"total":0,"items":[]}}"#);
+    mock_daemon(
+        &sock,
+        r#"{"id":"ui-1","ok":true,"data":{"total":0,"items":[]}}"#,
+    );
 
     use std::os::unix::net::UnixStream;
     let mut stream = UnixStream::connect(&sock).unwrap();
@@ -90,7 +93,9 @@ fn paste_success_returns_ok() {
 
     use std::os::unix::net::UnixStream;
     let mut stream = UnixStream::connect(&sock).unwrap();
-    stream.write_all(b"{\"id\":\"ui-1\",\"method\":\"paste\",\"params\":{\"id\":\"abc-001\"}}\n").unwrap();
+    stream
+        .write_all(b"{\"id\":\"ui-1\",\"method\":\"paste\",\"params\":{\"id\":\"abc-001\"}}\n")
+        .unwrap();
 
     let mut reader = BufReader::new(&stream);
     let mut line = String::new();
@@ -112,7 +117,9 @@ fn paste_unknown_id_returns_error() {
 
     use std::os::unix::net::UnixStream;
     let mut stream = UnixStream::connect(&sock).unwrap();
-    stream.write_all(b"{\"id\":\"ui-1\",\"method\":\"paste\",\"params\":{\"id\":\"bad-id\"}}\n").unwrap();
+    stream
+        .write_all(b"{\"id\":\"ui-1\",\"method\":\"paste\",\"params\":{\"id\":\"bad-id\"}}\n")
+        .unwrap();
 
     let mut reader = BufReader::new(&stream);
     let mut line = String::new();
@@ -134,7 +141,9 @@ fn paste_missing_id_param_returns_error() {
 
     use std::os::unix::net::UnixStream;
     let mut stream = UnixStream::connect(&sock).unwrap();
-    stream.write_all(b"{\"id\":\"ui-1\",\"method\":\"paste\",\"params\":{}}\n").unwrap();
+    stream
+        .write_all(b"{\"id\":\"ui-1\",\"method\":\"paste\",\"params\":{}}\n")
+        .unwrap();
 
     let mut reader = BufReader::new(&stream);
     let mut line = String::new();
@@ -153,7 +162,10 @@ fn connect_fails_when_daemon_offline() {
     let sock = dir.path().join("nonexistent.sock");
     // No mock daemon started — socket doesn't exist
     use std::os::unix::net::UnixStream;
-    assert!(UnixStream::connect(&sock).is_err(), "should fail with no daemon");
+    assert!(
+        UnixStream::connect(&sock).is_err(),
+        "should fail with no daemon"
+    );
 }
 
 // --- format_wall_time (tested via ipc_client unit tests, verified here for integration) ---

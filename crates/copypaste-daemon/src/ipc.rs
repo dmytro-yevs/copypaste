@@ -1,15 +1,15 @@
+use crate::protocol::{
+    Request, Response, CURRENT_PROTOCOL_VERSION, ERR_CODE_INTERNAL_ERROR,
+    ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, MIN_SUPPORTED_PROTOCOL_VERSION,
+};
+use copypaste_core::{count_items, delete_fts, delete_item, get_page, search_items, Database};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
-use copypaste_core::{Database, get_page, delete_item, delete_fts, count_items, search_items};
-use crate::protocol::{
-    CURRENT_PROTOCOL_VERSION, ERR_CODE_INTERNAL_ERROR, ERR_CODE_INVALID_ARGUMENT,
-    ERR_CODE_IPC_NOT_READY, MIN_SUPPORTED_PROTOCOL_VERSION, Request, Response,
-};
 
 /// Maximum size of a single IPC request line. Clients exceeding this receive
 /// an error response and have their connection closed. Prevents OOM from a
@@ -154,7 +154,9 @@ fn is_valid_fingerprint(fp: &str) -> bool {
     if groups.is_empty() {
         return false;
     }
-    groups.iter().all(|g| g.len() == 2 && g.chars().all(|c| c.is_ascii_hexdigit()))
+    groups
+        .iter()
+        .all(|g| g.len() == 2 && g.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 pub struct IpcServer {
@@ -187,7 +189,11 @@ impl IpcServer {
         private_mode: Arc<AtomicBool>,
         ready: Arc<AtomicBool>,
     ) -> Self {
-        Self { db, private_mode, ready }
+        Self {
+            db,
+            private_mode,
+            ready,
+        }
     }
 
     /// Returns true if a request to `method` requires the backing database.
@@ -218,10 +224,7 @@ impl IpcServer {
         if let Some(parent) = socket_path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)?;
-                let _ = std::fs::set_permissions(
-                    parent,
-                    std::fs::Permissions::from_mode(0o700),
-                );
+                let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
             }
         }
 
@@ -351,9 +354,7 @@ impl IpcServer {
                 ERR_CODE_INVALID_ARGUMENT,
                 format!(
                     "unsupported protocol version {} (daemon supports {}..={})",
-                    req.protocol_version,
-                    MIN_SUPPORTED_PROTOCOL_VERSION,
-                    CURRENT_PROTOCOL_VERSION
+                    req.protocol_version, MIN_SUPPORTED_PROTOCOL_VERSION, CURRENT_PROTOCOL_VERSION
                 ),
             );
         }
@@ -370,28 +371,43 @@ impl IpcServer {
 
         match req.method.as_str() {
             "list" => {
-                let raw_limit = req.params.get("limit")
-                    .and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+                let raw_limit = req
+                    .params
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(50) as usize;
                 let limit = raw_limit.min(MAX_PAGE);
-                let offset = req.params.get("offset")
-                    .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let offset = req
+                    .params
+                    .get("offset")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     let items = get_page(&db, limit, offset)?;
                     let total = count_items(&db).unwrap_or(0);
                     Ok::<_, anyhow::Error>((items, total))
-                }).await;
+                })
+                .await;
                 match join {
                     Ok(Ok((items, total))) => {
-                        let json_items: Vec<_> = items.iter().map(|item| serde_json::json!({
-                            "id": item.id,
-                            "content_type": item.content_type,
-                            "is_sensitive": item.is_sensitive,
-                            "wall_time": item.wall_time,
-                            "lamport_ts": item.lamport_ts,
-                        })).collect();
-                        Response::ok(req.id, serde_json::json!({"items": json_items, "total": total}))
+                        let json_items: Vec<_> = items
+                            .iter()
+                            .map(|item| {
+                                serde_json::json!({
+                                    "id": item.id,
+                                    "content_type": item.content_type,
+                                    "is_sensitive": item.is_sensitive,
+                                    "wall_time": item.wall_time,
+                                    "lamport_ts": item.lamport_ts,
+                                })
+                            })
+                            .collect();
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({"items": json_items, "total": total}),
+                        )
                     }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
@@ -414,7 +430,8 @@ impl IpcServer {
                     // Best-effort FTS cleanup; surface as warning, not failure
                     let fts = delete_fts(&db, &id_for_task);
                     (del, fts)
-                }).await;
+                })
+                .await;
                 match join {
                     Ok((Ok(_), fts_res)) => {
                         if let Err(e) = fts_res {
@@ -435,7 +452,8 @@ impl IpcServer {
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     count_items(&db)
-                }).await;
+                })
+                .await;
                 match join {
                     Ok(Ok(n)) => Response::ok(req.id, serde_json::json!({"count": n})),
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
@@ -451,7 +469,8 @@ impl IpcServer {
                     Some(s) => s.to_string(),
                     None => return Response::err(req.id, "missing param: query"),
                 };
-                let limit = req.params
+                let limit = req
+                    .params
                     .get("limit")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(20) as usize;
@@ -460,18 +479,21 @@ impl IpcServer {
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     search_items(&db, &query, limit)
-                }).await;
+                })
+                .await;
                 match join {
                     Ok(Ok(items)) => {
                         let json_items: Vec<_> = items
                             .iter()
-                            .map(|item| serde_json::json!({
-                                "id": item.id,
-                                "content_type": item.content_type,
-                                "is_sensitive": item.is_sensitive,
-                                "wall_time": item.wall_time,
-                                "lamport_ts": item.lamport_ts,
-                            }))
+                            .map(|item| {
+                                serde_json::json!({
+                                    "id": item.id,
+                                    "content_type": item.content_type,
+                                    "is_sensitive": item.is_sensitive,
+                                    "wall_time": item.wall_time,
+                                    "lamport_ts": item.lamport_ts,
+                                })
+                            })
                             .collect();
                         Response::ok(req.id, serde_json::json!({"items": json_items}))
                     }
@@ -494,14 +516,18 @@ impl IpcServer {
                     let db = db_arc.blocking_lock();
                     let items = copypaste_core::get_page(&db, 1000, 0)?;
                     Ok::<_, anyhow::Error>(items.into_iter().find(|i| i.id == id_for_task))
-                }).await;
+                })
+                .await;
                 match join {
                     Ok(Ok(Some(item))) => match Self::write_to_pasteboard(&item) {
-                        Ok(()) => Response::ok(req.id, serde_json::json!({
-                            "id": item.id,
-                            "content_type": item.content_type,
-                            "written": true,
-                        })),
+                        Ok(()) => Response::ok(
+                            req.id,
+                            serde_json::json!({
+                                "id": item.id,
+                                "content_type": item.content_type,
+                                "written": true,
+                            }),
+                        ),
                         Err(e) => Response::err(req.id, format!("pasteboard write failed: {e}")),
                     },
                     Ok(Ok(None)) => Response::err(req.id, format!("item not found: {id}")),
@@ -531,7 +557,8 @@ impl IpcServer {
                         }
                     }
                     count
-                }).await;
+                })
+                .await;
                 match join {
                     Ok(count) => Response::ok(req.id, serde_json::json!({"deleted": count})),
                     Err(e) => Response::err_with_code(
@@ -550,13 +577,17 @@ impl IpcServer {
                     let sample = copypaste_core::get_page(&db, 1000, 0).unwrap_or_default();
                     let sensitive_count = sample.iter().filter(|i| i.is_sensitive).count() as i64;
                     (total, sensitive_count)
-                }).await;
+                })
+                .await;
                 match join {
-                    Ok((total, sensitive_count)) => Response::ok(req.id, serde_json::json!({
-                        "total_items": total,
-                        "sensitive_items": sensitive_count,
-                        "version": "1"
-                    })),
+                    Ok((total, sensitive_count)) => Response::ok(
+                        req.id,
+                        serde_json::json!({
+                            "total_items": total,
+                            "sensitive_items": sensitive_count,
+                            "version": "1"
+                        }),
+                    ),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -575,9 +606,12 @@ impl IpcServer {
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     copypaste_core::pin_item(&db, &id_for_task)
-                }).await;
+                })
+                .await;
                 match join {
-                    Ok(Ok(())) => Response::ok(req.id, serde_json::json!({"pinned": true, "id": id})),
+                    Ok(Ok(())) => {
+                        Response::ok(req.id, serde_json::json!({"pinned": true, "id": id}))
+                    }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
@@ -588,33 +622,47 @@ impl IpcServer {
             }
             "history_page" => {
                 // Paginated history with content preview — used by UI (HistoryWindow)
-                let raw_limit = req.params.get("limit")
-                    .and_then(|v| v.as_u64()).unwrap_or(50) as usize;
+                let raw_limit = req
+                    .params
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(50) as usize;
                 let limit = raw_limit.min(MAX_PAGE);
-                let offset = req.params.get("offset")
-                    .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let offset = req
+                    .params
+                    .get("offset")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     let items = get_page(&db, limit, offset)?;
                     let total = count_items(&db).unwrap_or(0);
                     Ok::<_, anyhow::Error>((items, total))
-                }).await;
+                })
+                .await;
                 match join {
                     Ok(Ok((items, total))) => {
-                        let json_items: Vec<_> = items.iter().map(|item| {
-                            // Build a safe text preview (first 120 chars of content, no decryption)
-                            let preview = format!("[{} — id:{}]", item.content_type, &item.id[..8]);
-                            serde_json::json!({
-                                "id": item.id,
-                                "content_type": item.content_type,
-                                "is_sensitive": item.is_sensitive,
-                                "wall_time": item.wall_time,
-                                "lamport_ts": item.lamport_ts,
-                                "preview": preview,
+                        let json_items: Vec<_> = items
+                            .iter()
+                            .map(|item| {
+                                // Build a safe text preview (first 120 chars of content, no decryption)
+                                let preview =
+                                    format!("[{} — id:{}]", item.content_type, &item.id[..8]);
+                                serde_json::json!({
+                                    "id": item.id,
+                                    "content_type": item.content_type,
+                                    "is_sensitive": item.is_sensitive,
+                                    "wall_time": item.wall_time,
+                                    "lamport_ts": item.lamport_ts,
+                                    "preview": preview,
+                                })
                             })
-                        }).collect();
-                        Response::ok(req.id, serde_json::json!({"items": json_items, "total": total}))
+                            .collect();
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({"items": json_items, "total": total}),
+                        )
                     }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
@@ -668,13 +716,15 @@ impl IpcServer {
             }
             "status" => {
                 let enabled = self.private_mode.load(Ordering::Relaxed);
-                Response::ok(req.id, serde_json::json!({"status": "running", "private_mode": enabled}))
+                Response::ok(
+                    req.id,
+                    serde_json::json!({"status": "running", "private_mode": enabled}),
+                )
             }
 
             // ------------------------------------------------------------------
             // P2P IPC methods
             // ------------------------------------------------------------------
-
             "get_own_fingerprint" => {
                 // Use a stable device identifier: SHA-256 of the machine UUID
                 // (placeholder implementation — real keychain cert used in Phase 5+).
@@ -685,8 +735,7 @@ impl IpcServer {
                 // device gets a stable, unique-enough fingerprint.
                 let hostname = std::env::var("HOSTNAME")
                     .or_else(|_| {
-                        std::fs::read_to_string("/etc/hostname")
-                            .map(|s| s.trim().to_string())
+                        std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string())
                     })
                     .unwrap_or_else(|_| "localhost".to_string());
 
@@ -707,12 +756,10 @@ impl IpcServer {
                 Response::ok(req.id, serde_json::json!({ "fingerprint": fingerprint }))
             }
 
-            "list_peers" => {
-                match load_peers() {
-                    Ok(peers) => Response::ok(req.id, serde_json::json!({ "peers": peers })),
-                    Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
-                }
-            }
+            "list_peers" => match load_peers() {
+                Ok(peers) => Response::ok(req.id, serde_json::json!({ "peers": peers })),
+                Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
+            },
 
             "pair_peer" => {
                 let fingerprint = match req.params.get("fingerprint").and_then(|v| v.as_str()) {
@@ -725,7 +772,10 @@ impl IpcServer {
                 };
 
                 if !is_valid_fingerprint(&fingerprint) {
-                    return Response::err(req.id, format!("invalid fingerprint format: {fingerprint}"));
+                    return Response::err(
+                        req.id,
+                        format!("invalid fingerprint format: {fingerprint}"),
+                    );
                 }
 
                 match load_peers() {
@@ -738,7 +788,10 @@ impl IpcServer {
                                 .unwrap_or(false)
                         });
                         if already_paired {
-                            return Response::err(req.id, format!("peer already paired: {fingerprint}"));
+                            return Response::err(
+                                req.id,
+                                format!("peer already paired: {fingerprint}"),
+                            );
                         }
 
                         let added_at = std::time::SystemTime::now()
@@ -779,7 +832,10 @@ impl IpcServer {
                         let removed = peers.len() < before_len;
 
                         match save_peers(&peers) {
-                            Ok(_) => Response::ok(req.id, serde_json::json!({ "ok": true, "removed": removed })),
+                            Ok(_) => Response::ok(
+                                req.id,
+                                serde_json::json!({ "ok": true, "removed": removed }),
+                            ),
                             Err(e) => Response::err(req.id, format!("failed to save peers: {e}")),
                         }
                     }
@@ -802,21 +858,26 @@ impl IpcServer {
             // still performs argument validation so callers exercise the
             // full request/response path.
             "pair_peer_with_password" => {
-                let peer_fingerprint = match req.params.get("peer_fingerprint").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "missing peer_fingerprint",
-                    ),
-                };
+                let peer_fingerprint =
+                    match req.params.get("peer_fingerprint").and_then(|v| v.as_str()) {
+                        Some(s) => s.to_string(),
+                        None => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                "missing peer_fingerprint",
+                            )
+                        }
+                    };
                 let password = match req.params.get("password").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
-                    None => return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "missing password",
-                    ),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing password",
+                        )
+                    }
                 };
 
                 if !is_valid_fingerprint(&peer_fingerprint) {
@@ -835,10 +896,7 @@ impl IpcServer {
                     );
                 }
 
-                Response::not_implemented(
-                    req.id,
-                    "pair-peer-with-password",
-                )
+                Response::not_implemented(req.id, "pair-peer-with-password")
             }
 
             // ----------------------------------------------------------------
@@ -990,11 +1048,8 @@ impl IpcServer {
                         // keeps the import path round-trip-safe.
                         // lamport_ts = 0 is a deliberate "imported, unknown
                         // origin" sentinel; sync will reassign on first push.
-                        let mut clip = copypaste_core::ClipboardItem::new_text(
-                            item.bytes,
-                            Vec::new(),
-                            0,
-                        );
+                        let mut clip =
+                            copypaste_core::ClipboardItem::new_text(item.bytes, Vec::new(), 0);
                         clip.content_type = item.content_type;
                         clip.wall_time = item.created_at_ms;
                         clip.content_hash = Some(hash_hex);
@@ -1123,7 +1178,10 @@ mod tests {
         start_test_server(&sock).await;
 
         let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream.write_all(b"{\"id\":\"1\",\"method\":\"status\"}\n").await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"1\",\"method\":\"status\"}\n")
+            .await
+            .unwrap();
         let mut lines = BufReader::new(&mut stream).lines();
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -1138,7 +1196,10 @@ mod tests {
         start_test_server(&sock).await;
 
         let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream.write_all(b"{\"id\":\"2\",\"method\":\"list\"}\n").await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"2\",\"method\":\"list\"}\n")
+            .await
+            .unwrap();
         let mut lines = BufReader::new(&mut stream).lines();
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -1153,7 +1214,10 @@ mod tests {
         start_test_server(&sock).await;
 
         let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream.write_all(b"{\"id\":\"3\",\"method\":\"bogus\"}\n").await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"3\",\"method\":\"bogus\"}\n")
+            .await
+            .unwrap();
         let mut lines = BufReader::new(&mut stream).lines();
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -1186,7 +1250,10 @@ mod tests {
         assert_eq!(resp["error_code"], "invalid_argument");
         assert_eq!(resp["protocol_version"], CURRENT_PROTOCOL_VERSION);
         assert!(
-            resp["error"].as_str().unwrap().contains("unsupported protocol version"),
+            resp["error"]
+                .as_str()
+                .unwrap()
+                .contains("unsupported protocol version"),
             "expected version-mismatch message, got: {}",
             resp["error"]
         );
@@ -1254,7 +1321,10 @@ mod tests {
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
-        assert!(resp["error"].as_str().unwrap().contains("missing param: query"));
+        assert!(resp["error"]
+            .as_str()
+            .unwrap()
+            .contains("missing param: query"));
     }
 
     #[tokio::test]
@@ -1263,7 +1333,10 @@ mod tests {
         let sock = dir.path().join("copy_test.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream.write_all(b"{\"id\":\"1\",\"method\":\"copy\",\"params\":{\"id\":\"nonexistent\"}}\n").await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"1\",\"method\":\"copy\",\"params\":{\"id\":\"nonexistent\"}}\n")
+            .await
+            .unwrap();
         let mut lines = BufReader::new(&mut stream).lines();
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -1276,12 +1349,18 @@ mod tests {
         let sock = dir.path().join("copy_missing_param.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream.write_all(b"{\"id\":\"2\",\"method\":\"copy\",\"params\":{}}\n").await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"2\",\"method\":\"copy\",\"params\":{}}\n")
+            .await
+            .unwrap();
         let mut lines = BufReader::new(&mut stream).lines();
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
-        assert!(resp["error"].as_str().unwrap().contains("missing param: id"));
+        assert!(resp["error"]
+            .as_str()
+            .unwrap()
+            .contains("missing param: id"));
     }
 
     #[tokio::test]
@@ -1290,7 +1369,10 @@ mod tests {
         let sock = dir.path().join("stats.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream.write_all(b"{\"id\":\"1\",\"method\":\"stats\"}\n").await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"1\",\"method\":\"stats\"}\n")
+            .await
+            .unwrap();
         let mut lines = BufReader::new(&mut stream).lines();
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -1304,7 +1386,10 @@ mod tests {
         let sock = dir.path().join("del_all.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream.write_all(b"{\"id\":\"1\",\"method\":\"delete_all\"}\n").await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"1\",\"method\":\"delete_all\"}\n")
+            .await
+            .unwrap();
         let mut lines = BufReader::new(&mut stream).lines();
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -1320,7 +1405,10 @@ mod tests {
         let sock = dir.path().join("pm_get_default.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream.write_all(b"{\"id\":\"1\",\"method\":\"get_private_mode\"}\n").await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"1\",\"method\":\"get_private_mode\"}\n")
+            .await
+            .unwrap();
         let mut lines = BufReader::new(&mut stream).lines();
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -1420,7 +1508,10 @@ mod tests {
         let sock = dir.path().join("status_pm.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream.write_all(b"{\"id\":\"1\",\"method\":\"status\"}\n").await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"1\",\"method\":\"status\"}\n")
+            .await
+            .unwrap();
         let mut lines = BufReader::new(&mut stream).lines();
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -1440,7 +1531,9 @@ mod tests {
 
         let mut stream = UnixStream::connect(&sock).await.unwrap();
         stream
-            .write_all(b"{\"id\":\"1\",\"method\":\"set_private_mode\",\"params\":{\"enabled\":true}}\n")
+            .write_all(
+                b"{\"id\":\"1\",\"method\":\"set_private_mode\",\"params\":{\"enabled\":true}}\n",
+            )
             .await
             .unwrap();
         let mut lines = BufReader::new(&mut stream).lines();
@@ -1504,7 +1597,10 @@ mod tests {
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
-        assert!(resp["error"].as_str().unwrap().contains("missing param: id"));
+        assert!(resp["error"]
+            .as_str()
+            .unwrap()
+            .contains("missing param: id"));
     }
 
     #[tokio::test]
@@ -1514,7 +1610,9 @@ mod tests {
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
         stream
-            .write_all(b"{\"id\":\"p2\",\"method\":\"paste\",\"params\":{\"id\":\"nonexistent-id\"}}\n")
+            .write_all(
+                b"{\"id\":\"p2\",\"method\":\"paste\",\"params\":{\"id\":\"nonexistent-id\"}}\n",
+            )
             .await
             .unwrap();
         let mut lines = BufReader::new(&mut stream).lines();
@@ -1547,7 +1645,8 @@ mod tests {
         let meta = std::fs::metadata(&sock).expect("socket file should exist");
         let mode = meta.permissions().mode() & 0o777;
         assert_eq!(
-            mode, 0o600,
+            mode,
+            0o600,
             "socket {} has mode {:o}, expected 0600",
             sock.display(),
             mode
@@ -1638,9 +1737,7 @@ mod tests {
 
     /// Spawn an IpcServer whose readiness flag starts `false`, returning
     /// the socket path and the flag handle so the test can flip it.
-    async fn start_not_ready_server(
-        socket_path: &std::path::Path,
-    ) -> Arc<AtomicBool> {
+    async fn start_not_ready_server(socket_path: &std::path::Path) -> Arc<AtomicBool> {
         let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
         let private_mode = Arc::new(AtomicBool::new(false));
         let ready = Arc::new(AtomicBool::new(false));
@@ -1669,9 +1766,8 @@ mod tests {
             ("delete_all", "{}"),
         ] {
             let mut stream = UnixStream::connect(&sock).await.unwrap();
-            let req = format!(
-                "{{\"id\":\"nr-{method}\",\"method\":\"{method}\",\"params\":{params}}}\n"
-            );
+            let req =
+                format!("{{\"id\":\"nr-{method}\",\"method\":\"{method}\",\"params\":{params}}}\n");
             stream.write_all(req.as_bytes()).await.unwrap();
             let mut lines = BufReader::new(&mut stream).lines();
             let line = lines.next_line().await.unwrap().unwrap();
@@ -1732,7 +1828,10 @@ mod tests {
         let mut lines = BufReader::new(&mut stream).lines();
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(resp["ok"], true, "list with limit=5000 should be ok: {resp}");
+        assert_eq!(
+            resp["ok"], true,
+            "list with limit=5000 should be ok: {resp}"
+        );
         let items = resp["data"]["items"].as_array().unwrap();
         assert!(
             items.len() <= 1000,
@@ -1932,12 +2031,19 @@ mod tests {
         }
 
         // Missing peer_fingerprint → invalid_argument
-        let resp = call(&sock, r#"{"id":"p1","method":"pair_peer_with_password","params":{"password":"hunter22"}}"#).await;
+        let resp = call(
+            &sock,
+            r#"{"id":"p1","method":"pair_peer_with_password","params":{"password":"hunter22"}}"#,
+        )
+        .await;
         assert_eq!(resp["ok"], false, "missing peer_fingerprint must fail");
         assert_eq!(resp["error_code"], "invalid_argument");
 
         // Missing password → invalid_argument
-        let valid_fp = std::iter::repeat("ab").take(32).collect::<Vec<_>>().join(":");
+        let valid_fp = std::iter::repeat("ab")
+            .take(32)
+            .collect::<Vec<_>>()
+            .join(":");
         let body = format!(
             r#"{{"id":"p2","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{valid_fp}"}}}}"#
         );

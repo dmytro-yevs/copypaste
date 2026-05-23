@@ -23,7 +23,7 @@
 //! alternative pattern (it's pseudo-random ciphertext); we only assert the
 //! plaintext header is absent.
 
-use copypaste_core::storage::{Database, insert_item, ClipboardItem, DbError};
+use copypaste_core::storage::{insert_item, ClipboardItem, Database, DbError};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
@@ -171,7 +171,8 @@ fn db_file_starts_with_sqlite_format_header_only_if_unencrypted() {
     );
     let enc_prefix = &enc_bytes[..16];
     assert_ne!(
-        enc_prefix, &SQLITE_HEADER[..],
+        enc_prefix,
+        &SQLITE_HEADER[..],
         "encrypted DB file MUST NOT start with the plaintext 'SQLite format 3\\0' header — \
          header leak indicates page 1 is not encrypted"
     );
@@ -183,10 +184,14 @@ fn db_file_starts_with_sqlite_format_header_only_if_unencrypted() {
     {
         let conn = rusqlite::Connection::open(&plain_path).unwrap();
         // Trigger header materialization by creating any table.
-        conn.execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES (1);").unwrap();
+        conn.execute_batch("CREATE TABLE t(x); INSERT INTO t VALUES (1);")
+            .unwrap();
     }
     let plain_bytes = fs::read(&plain_path).unwrap();
-    assert!(plain_bytes.len() >= 16, "plain SQLite file should have a header");
+    assert!(
+        plain_bytes.len() >= 16,
+        "plain SQLite file should have a header"
+    );
     assert_eq!(
         &plain_bytes[..16],
         &SQLITE_HEADER[..],

@@ -1,7 +1,7 @@
+use super::schema::{apply_migrations, SchemaError};
 use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
 use thiserror::Error;
-use super::schema::{apply_migrations, SchemaError};
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -72,18 +72,13 @@ impl Database {
                 // On success → plaintext → migrate.
                 // On failure → wrong key → propagate original error.
                 drop(conn);
-                let probe = Connection::open_with_flags(
-                    path,
-                    OpenFlags::SQLITE_OPEN_READ_WRITE,
-                );
+                let probe = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE);
                 match probe {
                     Ok(plain_conn) => {
                         let schema_ok = plain_conn
-                            .query_row(
-                                "SELECT COUNT(*) FROM sqlite_master",
-                                [],
-                                |r| r.get::<_, i64>(0),
-                            )
+                            .query_row("SELECT COUNT(*) FROM sqlite_master", [], |r| {
+                                r.get::<_, i64>(0)
+                            })
                             .is_ok();
                         drop(plain_conn);
                         if schema_ok {

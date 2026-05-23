@@ -115,7 +115,13 @@ fn simultaneous_edit_same_id_higher_lamport_wins() {
 
     // Symmetric: lower remote Lamport must lose even with newer wall time.
     let local2 = local_item("item-X", 20, 100, b"local-v3");
-    let remote2 = wire_item("item-X", 5, 9_999_999, "peer-B", Some(b"remote-v4".to_vec()));
+    let remote2 = wire_item(
+        "item-X",
+        5,
+        9_999_999,
+        "peer-B",
+        Some(b"remote-v4".to_vec()),
+    );
     assert_eq!(
         resolve(&local2, &remote2),
         MergeOutcome::KeepLocal,

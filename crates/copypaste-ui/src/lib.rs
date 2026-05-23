@@ -19,20 +19,19 @@ pub mod tray_menu;
 pub mod updater;
 pub mod windows;
 
+pub use fingerprint::{
+    format_fingerprint, format_fingerprint_long, format_fingerprint_short,
+    format_fingerprint_truncated, is_valid_fingerprint,
+};
 pub use settings::{AppSettings, HistoryLimit, PairedDevice};
 pub use tray_menu::{
-    MenuEntry, RecentItem, TrayAction, TrayMenuHandle, TrayMenuState,
-    MAX_PREVIEW_CHARS, MAX_RECENT_ITEMS,
-};
-pub use windows::{SettingsWindowHandle, PairWindowHandle, SearchableHistoryItem, filter_history_items};
-pub use fingerprint::{
-    format_fingerprint,
-    format_fingerprint_short,
-    format_fingerprint_long,
-    format_fingerprint_truncated,
-    is_valid_fingerprint,
+    MenuEntry, RecentItem, TrayAction, TrayMenuHandle, TrayMenuState, MAX_PREVIEW_CHARS,
+    MAX_RECENT_ITEMS,
 };
 pub use updater::{
     apply_update, check_for_update, CommandRunner, SystemRunner, UpdateInfo, UpdateStatus,
     CHECK_INTERVAL,
+};
+pub use windows::{
+    filter_history_items, PairWindowHandle, SearchableHistoryItem, SettingsWindowHandle,
 };

@@ -19,8 +19,7 @@
 use std::sync::Arc;
 
 use copypaste_telemetry::{
-    ErrorReporter, NoopReporter, OsTag, PiiScrubber, ReportConsent, ReportableError,
-    SentryReporter,
+    ErrorReporter, NoopReporter, OsTag, PiiScrubber, ReportConsent, ReportableError, SentryReporter,
 };
 
 fn sample_event() -> ReportableError {
@@ -139,8 +138,8 @@ fn panic_during_report_does_not_propagate() {
     let reporter = reporter_for_test(ReportConsent::EnabledFull);
 
     let pathological = ReportableError::new(
-        "",                                  // empty crate name
-        "",                                  // empty version
+        "", // empty crate name
+        "", // empty version
         "\x00\x01control\nchars\r\n\t".to_string() + &"x".repeat(8192),
         OsTag::Unknown,
     );

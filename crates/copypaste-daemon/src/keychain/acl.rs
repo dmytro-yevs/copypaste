@@ -109,10 +109,7 @@ extern "C" {
         accessRef: *mut SecAccessRef,
     ) -> OSStatus;
 
-    fn SecAccessCopyACLList(
-        accessRef: SecAccessRef,
-        aclList: *mut CFArrayRef,
-    ) -> OSStatus;
+    fn SecAccessCopyACLList(accessRef: SecAccessRef, aclList: *mut CFArrayRef) -> OSStatus;
 
     fn SecACLCopyContents(
         acl: CFTypeRef,
@@ -161,14 +158,12 @@ pub(crate) const ERR_SEC_ITEM_NOT_FOUND: OSStatus = -25300;
 /// invariant we always include.
 pub fn trusted_binary_paths() -> Result<Vec<PathBuf>, KeychainError> {
     let self_path = std::env::current_exe().map_err(KeychainError::Io)?;
-    let parent = self_path
-        .parent()
-        .ok_or_else(|| {
-            KeychainError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "current_exe has no parent directory",
-            ))
-        })?;
+    let parent = self_path.parent().ok_or_else(|| {
+        KeychainError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "current_exe has no parent directory",
+        ))
+    })?;
 
     let candidates = ["copypaste-daemon", "copypaste", "copypaste-ui"];
     let mut paths: Vec<PathBuf> = Vec::with_capacity(candidates.len());
@@ -212,9 +207,7 @@ fn build_access(descriptor: &str, paths: &[PathBuf]) -> Result<SecAccessRef, Key
             let c_path = CString::new(path.as_os_str().as_encoded_bytes())
                 .map_err(|_| KeychainError::AclPathEncoding)?;
             let mut app: SecTrustedApplicationRef = ptr::null_mut();
-            let status = unsafe {
-                SecTrustedApplicationCreateFromPath(c_path.as_ptr(), &mut app)
-            };
+            let status = unsafe { SecTrustedApplicationCreateFromPath(c_path.as_ptr(), &mut app) };
             if status != ERR_SEC_SUCCESS {
                 return Err(KeychainError::OsStatus {
                     op: "SecTrustedApplicationCreateFromPath",
@@ -410,9 +403,7 @@ pub fn current_acl_app_digests() -> Result<Vec<Vec<u8>>, KeychainError> {
 /// Returns `Ok(true)` if a rotation was performed, `Ok(false)` if the ACL
 /// was already correct (or no entry exists yet — first run).
 pub fn rotate_acl_to_current_install() -> Result<bool, KeychainError> {
-    use security_framework::passwords::{
-        delete_generic_password, get_generic_password,
-    };
+    use security_framework::passwords::{delete_generic_password, get_generic_password};
 
     let secret_bytes = match get_generic_password(SERVICE, ACCOUNT) {
         Ok(b) => b,

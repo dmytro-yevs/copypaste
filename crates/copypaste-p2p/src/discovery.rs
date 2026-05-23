@@ -22,10 +22,11 @@ use crate::rate_limit::MdnsRateLimiter;
 /// guard and log a warning so the issue surfaces in production telemetry.
 #[inline]
 fn lock_safe<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e: PoisonError<MutexGuard<'_, T>>| {
-        warn!("recovering from poisoned mutex in discovery service");
-        e.into_inner()
-    })
+    m.lock()
+        .unwrap_or_else(|e: PoisonError<MutexGuard<'_, T>>| {
+            warn!("recovering from poisoned mutex in discovery service");
+            e.into_inner()
+        })
 }
 
 /// Service type used for mDNS-SD advertisement and browsing.
@@ -165,8 +166,7 @@ impl DiscoveryService {
     /// Returns a [`JoinHandle`] that can be awaited or aborted for graceful
     /// shutdown.
     pub async fn start(&self) -> Result<JoinHandle<()>, DiscoveryError> {
-        let daemon = ServiceDaemon::new()
-            .map_err(|e| DiscoveryError::Daemon(e.to_string()))?;
+        let daemon = ServiceDaemon::new().map_err(|e| DiscoveryError::Daemon(e.to_string()))?;
 
         // Advertise own service if registration was provided.
         let reg_opt = lock_safe(&self.registration).clone();
@@ -222,11 +222,7 @@ impl DiscoveryService {
     // ── private helpers ──────────────────────────────────────────────────────
 
     /// Announce own service on the local network.
-    fn advertise(
-        &self,
-        daemon: &ServiceDaemon,
-        reg: &Registration,
-    ) -> Result<(), DiscoveryError> {
+    fn advertise(&self, daemon: &ServiceDaemon, reg: &Registration) -> Result<(), DiscoveryError> {
         // Instance name: sanitized device name + first 8 chars of device_id.
         let id_short = &reg.device_id[..reg.device_id.len().min(8)];
         let instance_name = format!("{}.{}", sanitize_label(&reg.device_name), id_short);
@@ -245,7 +241,7 @@ impl DiscoveryService {
             SERVICE_TYPE,
             &instance_name,
             &hostname,
-            (),  // let mdns-sd discover addresses from all interfaces
+            (), // let mdns-sd discover addresses from all interfaces
             reg.port,
             &properties[..],
         )
@@ -347,8 +343,7 @@ fn handle_event(
                 info!(device_id = %peer.device_id, "mDNS peer lost");
                 drop(peers);
 
-                let callbacks: Vec<PeerLostCallback> =
-                    lock_safe(on_lost).iter().cloned().collect();
+                let callbacks: Vec<PeerLostCallback> = lock_safe(on_lost).iter().cloned().collect();
                 for cb in callbacks.iter() {
                     cb(peer.device_id.clone());
                 }
@@ -412,7 +407,13 @@ fn scoped_ip_to_ip_addr(scoped: &ScopedIp) -> IpAddr {
 fn sanitize_label(s: &str) -> String {
     let sanitized: String = s
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     sanitized.trim_matches('-').to_string()
 }
@@ -464,17 +465,26 @@ mod tests {
 
     #[test]
     fn peer_info_equality() {
-        assert_eq!(make_peer("aabb", "Alice", 51515), make_peer("aabb", "Alice", 51515));
+        assert_eq!(
+            make_peer("aabb", "Alice", 51515),
+            make_peer("aabb", "Alice", 51515)
+        );
     }
 
     #[test]
     fn peer_info_inequality_on_port() {
-        assert_ne!(make_peer("aabb", "Alice", 51515), make_peer("aabb", "Alice", 9999));
+        assert_ne!(
+            make_peer("aabb", "Alice", 51515),
+            make_peer("aabb", "Alice", 9999)
+        );
     }
 
     #[test]
     fn peer_info_inequality_on_device_id() {
-        assert_ne!(make_peer("aabb", "Alice", 51515), make_peer("1122", "Alice", 51515));
+        assert_ne!(
+            make_peer("aabb", "Alice", 51515),
+            make_peer("1122", "Alice", 51515)
+        );
     }
 
     // ── DiscoveryService construction ────────────────────────────────────────
@@ -589,10 +599,12 @@ mod tests {
 
     #[test]
     fn peer_added_to_known_peers() {
-        let known: Arc<Mutex<HashMap<String, PeerInfo>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let known: Arc<Mutex<HashMap<String, PeerInfo>>> = Arc::new(Mutex::new(HashMap::new()));
         let peer = make_peer("aabbccdd", "Alice", 51515);
-        known.lock().unwrap().insert("alice.local.".to_string(), peer.clone());
+        known
+            .lock()
+            .unwrap()
+            .insert("alice.local.".to_string(), peer.clone());
 
         let peers = known.lock().unwrap();
         assert_eq!(peers.len(), 1);
@@ -601,10 +613,12 @@ mod tests {
 
     #[test]
     fn peer_removed_from_known_peers() {
-        let known: Arc<Mutex<HashMap<String, PeerInfo>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let known: Arc<Mutex<HashMap<String, PeerInfo>>> = Arc::new(Mutex::new(HashMap::new()));
         let peer = make_peer("aabbccdd", "Alice", 51515);
-        known.lock().unwrap().insert("alice.local.".to_string(), peer);
+        known
+            .lock()
+            .unwrap()
+            .insert("alice.local.".to_string(), peer);
 
         let removed = known.lock().unwrap().remove("alice.local.");
         assert!(removed.is_some());
@@ -613,8 +627,7 @@ mod tests {
 
     #[test]
     fn duplicate_peer_does_not_increase_count() {
-        let known: Arc<Mutex<HashMap<String, PeerInfo>>> =
-            Arc::new(Mutex::new(HashMap::new()));
+        let known: Arc<Mutex<HashMap<String, PeerInfo>>> = Arc::new(Mutex::new(HashMap::new()));
         let peer = make_peer("aabbccdd", "Alice", 51515);
         let fullname = "alice.local.".to_string();
         known.lock().unwrap().insert(fullname.clone(), peer.clone());
@@ -626,10 +639,7 @@ mod tests {
 
     #[test]
     fn ipv4_addresses_sort_before_ipv6() {
-        let mut addrs: Vec<IpAddr> = vec![
-            "::1".parse().unwrap(),
-            "127.0.0.1".parse().unwrap(),
-        ];
+        let mut addrs: Vec<IpAddr> = vec!["::1".parse().unwrap(), "127.0.0.1".parse().unwrap()];
         addrs.sort_unstable_by_key(|a| (a.is_ipv6(), a.to_string()));
         assert!(!addrs[0].is_ipv6());
         assert!(addrs[1].is_ipv6());
@@ -661,7 +671,8 @@ mod tests {
             found_clone.lock().unwrap().push(peer);
         });
 
-        svc.register(59999, "cafebabe00000000", "IntegrationTest").unwrap();
+        svc.register(59999, "cafebabe00000000", "IntegrationTest")
+            .unwrap();
         let handle = svc.start().await.unwrap();
 
         // Give mDNS time to propagate.

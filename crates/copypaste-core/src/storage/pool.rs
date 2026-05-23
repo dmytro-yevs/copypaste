@@ -49,11 +49,7 @@ fn key_hex(key: &[u8; 32]) -> String {
 /// Note: this constructor does **not** run schema migrations. Either run
 /// `Database::open()` once first on the same path (it will apply migrations),
 /// or call the schema module directly on a borrowed connection.
-pub fn open_pool(
-    path: &Path,
-    key: &[u8; 32],
-    max_size: u32,
-) -> Result<SqlitePool, PoolError> {
+pub fn open_pool(path: &Path, key: &[u8; 32], max_size: u32) -> Result<SqlitePool, PoolError> {
     let key_hex = key_hex(key);
     let manager = SqliteConnectionManager::file(path).with_init(move |conn| {
         // SQLCipher requirement: key pragma MUST be the very first statement
@@ -180,7 +176,10 @@ mod tests {
         let mode: String = conn
             .query_row("PRAGMA journal_mode", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(mode, "wal", "WAL journal mode must be applied via with_init");
+        assert_eq!(
+            mode, "wal",
+            "WAL journal mode must be applied via with_init"
+        );
 
         // SQLCipher version pragma round-trips only on encrypted connections.
         let cipher_version: Result<String, _> =

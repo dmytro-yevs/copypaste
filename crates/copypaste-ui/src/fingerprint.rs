@@ -28,7 +28,11 @@ pub fn format_fingerprint(hex: &str, max_pairs: usize) -> String {
     clean
         .as_bytes()
         .chunks(2)
-        .take(if max_pairs == 0 { usize::MAX } else { max_pairs })
+        .take(if max_pairs == 0 {
+            usize::MAX
+        } else {
+            max_pairs
+        })
         .map(|pair| std::str::from_utf8(pair).unwrap_or("??"))
         .collect::<Vec<_>>()
         .join(":")

@@ -1,6 +1,6 @@
-use anyhow::Result;
 use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
+use anyhow::Result;
 use std::path::Path;
 
 pub fn run(socket_path: &Path, query: &str, limit: u64) -> Result<()> {
@@ -13,7 +13,8 @@ pub fn run(socket_path: &Path, query: &str, limit: u64) -> Result<()> {
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
-    let items = resp.data
+    let items = resp
+        .data
         .as_ref()
         .and_then(|d| d["items"].as_array())
         .map(|a| a.as_slice())
@@ -52,11 +53,13 @@ fn format_unix_ms(ms: i64) -> String {
     rem -= y1 * 365;
     let year = y400 * 400 + y100 * 100 + y4 * 4 + y1 + 1970;
     let leap = (y1 == 3 && !(y100 == 3 && y4 == 0)) as i64;
-    let months = [31i64,28+leap,31,30,31,30,31,31,30,31,30,31];
+    let months = [31i64, 28 + leap, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     let mut month = 1i64;
     let mut day = rem + 1;
     for mlen in &months {
-        if day <= *mlen { break; }
+        if day <= *mlen {
+            break;
+        }
         day -= mlen;
         month += 1;
     }

@@ -129,11 +129,7 @@ impl PeerTransport {
     }
 
     /// Create a transport from existing DER-encoded certificate and private key.
-    pub fn from_cert(
-        cert_der: Vec<u8>,
-        key_der: Vec<u8>,
-        peers: PairedPeers,
-    ) -> Self {
+    pub fn from_cert(cert_der: Vec<u8>, key_der: Vec<u8>, peers: PairedPeers) -> Self {
         let own_fingerprint = fingerprint_of(&cert_der);
         Self {
             own_cert_der: cert_der,
@@ -162,22 +158,18 @@ impl PeerTransport {
         let (tcp_stream, peer_addr) = listener.accept().await?;
         tracing::debug!(peer_addr = %peer_addr, "incoming TCP connection");
 
-        let tls_stream = match tokio::time::timeout(
-            TLS_HANDSHAKE_TIMEOUT,
-            acceptor.accept(tcp_stream),
-        )
-        .await
-        {
-            Ok(res) => res?,
-            Err(_elapsed) => {
-                tracing::warn!(
-                    peer_addr = %peer_addr,
-                    timeout = ?TLS_HANDSHAKE_TIMEOUT,
-                    "TLS server handshake timed out"
-                );
-                return Err(TransportError::HandshakeTimeout);
-            }
-        };
+        let tls_stream =
+            match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(tcp_stream)).await {
+                Ok(res) => res?,
+                Err(_elapsed) => {
+                    tracing::warn!(
+                        peer_addr = %peer_addr,
+                        timeout = ?TLS_HANDSHAKE_TIMEOUT,
+                        "TLS server handshake timed out"
+                    );
+                    return Err(TransportError::HandshakeTimeout);
+                }
+            };
 
         // Extract and verify the peer's certificate fingerprint.
         let peer_fp = peer_fingerprint_server(&tls_stream)?;
@@ -203,28 +195,24 @@ impl PeerTransport {
         let client_config = self.build_client_config(expected_fingerprint)?;
         let connector = TlsConnector::from(Arc::new(client_config));
 
-        let tcp_stream = match tokio::time::timeout(
-            TLS_HANDSHAKE_TIMEOUT,
-            TcpStream::connect(addr),
-        )
-        .await
-        {
-            Ok(res) => res?,
-            Err(_elapsed) => {
-                tracing::warn!(
-                    peer_addr = %addr,
-                    timeout = ?TLS_HANDSHAKE_TIMEOUT,
-                    "TCP connect timed out before TLS handshake"
-                );
-                return Err(TransportError::HandshakeTimeout);
-            }
-        };
+        let tcp_stream =
+            match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, TcpStream::connect(addr)).await {
+                Ok(res) => res?,
+                Err(_elapsed) => {
+                    tracing::warn!(
+                        peer_addr = %addr,
+                        timeout = ?TLS_HANDSHAKE_TIMEOUT,
+                        "TCP connect timed out before TLS handshake"
+                    );
+                    return Err(TransportError::HandshakeTimeout);
+                }
+            };
         tracing::debug!(peer_addr = %addr, "TCP connection established");
 
         // rustls requires a ServerName even for mutual-TLS peer-to-peer.
         // We use a fixed placeholder since identity is verified by fingerprint.
-        let server_name = ServerName::try_from("copypaste.peer")
-            .expect("static server name is always valid");
+        let server_name =
+            ServerName::try_from("copypaste.peer").expect("static server name is always valid");
 
         let tls_stream = match tokio::time::timeout(
             TLS_HANDSHAKE_TIMEOUT,
@@ -323,16 +311,10 @@ mod tests {
         let mut client_peers = PairedPeers::new();
         client_peers.add(server_fp.clone(), "server-device");
 
-        let server_transport = PeerTransport::from_cert(
-            server_cert.cert_der,
-            server_cert.key_der,
-            server_peers,
-        );
-        let client_transport = PeerTransport::from_cert(
-            client_cert.cert_der,
-            client_cert.key_der,
-            client_peers,
-        );
+        let server_transport =
+            PeerTransport::from_cert(server_cert.cert_der, server_cert.key_der, server_peers);
+        let client_transport =
+            PeerTransport::from_cert(client_cert.cert_der, client_cert.key_der, client_peers);
 
         // Bind on a random loopback port.
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -365,11 +347,8 @@ mod tests {
 
         let server_transport =
             PeerTransport::from_cert(server_cert.cert_der, server_cert.key_der, server_peers);
-        let client_transport = PeerTransport::from_cert(
-            unknown_cert.cert_der,
-            unknown_cert.key_der,
-            client_peers,
-        );
+        let client_transport =
+            PeerTransport::from_cert(unknown_cert.cert_der, unknown_cert.key_der, client_peers);
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();

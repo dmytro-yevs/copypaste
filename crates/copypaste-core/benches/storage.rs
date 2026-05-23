@@ -1,4 +1,4 @@
-use copypaste_core::{Database, ClipboardItem, insert_item, upsert_fts, search_items};
+use copypaste_core::{insert_item, search_items, upsert_fts, ClipboardItem, Database};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn make_item(lamport: i64) -> ClipboardItem {
@@ -25,8 +25,7 @@ fn bench_fts5_search(c: &mut Criterion) {
     // Build a corpus of 1 000 items with varied search text.
     let db = Database::open_in_memory().unwrap();
     let words = [
-        "apple", "banana", "cherry", "delta", "echo",
-        "foxtrot", "golf", "hotel", "india", "juliet",
+        "apple", "banana", "cherry", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet",
     ];
     for i in 0..1000i64 {
         let item = make_item(i);

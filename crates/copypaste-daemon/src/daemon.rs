@@ -1,18 +1,18 @@
-use std::sync::Arc;
+#[cfg(unix)]
+use crate::ipc::IpcServer;
+use crate::{
+    clipboard::{ClipboardContent, ClipboardMonitor},
+    p2p, paths,
+};
+use copypaste_core::{
+    build_item_aad, chunks_to_blob, detect, encode_image, encrypt_item_with_aad, insert_item,
+    upsert_fts, AppConfig, ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION,
+};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::time::interval;
-use copypaste_core::{
-    AppConfig, Database, DeviceKeypair,
-    encrypt_item_with_aad, build_item_aad, AAD_SCHEMA_VERSION,
-    insert_item, upsert_fts, ClipboardItem,
-    encode_image, chunks_to_blob,
-    detect,
-};
-use crate::{clipboard::{ClipboardContent, ClipboardMonitor}, p2p, paths};
-#[cfg(unix)]
-use crate::ipc::IpcServer;
 
 // Beta W2.2 (arch-1): sync orchestrator that wires `copypaste-sync` into the
 // daemon. Declared at crate root in `lib.rs` (`pub mod sync_orch;`); we
@@ -59,8 +59,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
 
     let db_path = paths::db_path();
     let db = Arc::new(Mutex::new(
-        Database::open(&db_path, &local_key)
-            .map_err(|e| anyhow::anyhow!("Database: {e}"))?
+        Database::open(&db_path, &local_key).map_err(|e| anyhow::anyhow!("Database: {e}"))?,
     ));
     tracing::info!("database opened at {}", db_path.display());
 
@@ -89,49 +88,50 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(64);
 
     // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
-    let _p2p_handle: Option<p2p::P2pHandle> = if std::env::var("COPYPASTE_P2P").as_deref() == Ok("1") {
-        // Persistent device_id: regenerating on every restart would break P2P
-        // pairing and cloud peer recognition (arch LOW #24). Read from disk,
-        // creating + writing a fresh UUID v4 on first run.
-        let device_id = match load_or_create_device_id() {
-            Ok(id) => id,
-            Err(e) => {
-                tracing::warn!("device_id load/create failed ({e}); using ephemeral UUID");
-                uuid::Uuid::new_v4()
-            }
-        };
-        let device_name = std::env::var("HOSTNAME")
-            .or_else(|_| std::env::var("COMPUTERNAME"))
-            .unwrap_or_else(|_| "CopyPaste".to_string());
+    let _p2p_handle: Option<p2p::P2pHandle> =
+        if std::env::var("COPYPASTE_P2P").as_deref() == Ok("1") {
+            // Persistent device_id: regenerating on every restart would break P2P
+            // pairing and cloud peer recognition (arch LOW #24). Read from disk,
+            // creating + writing a fresh UUID v4 on first run.
+            let device_id = match load_or_create_device_id() {
+                Ok(id) => id,
+                Err(e) => {
+                    tracing::warn!("device_id load/create failed ({e}); using ephemeral UUID");
+                    uuid::Uuid::new_v4()
+                }
+            };
+            let device_name = std::env::var("HOSTNAME")
+                .or_else(|_| std::env::var("COMPUTERNAME"))
+                .unwrap_or_else(|_| "CopyPaste".to_string());
 
-        let p2p_config = p2p::P2pConfig {
-            listen_port: 0,
-            device_name,
-            enabled: true,
-        };
+            let p2p_config = p2p::P2pConfig {
+                listen_port: 0,
+                device_name,
+                enabled: true,
+            };
 
-        match p2p::start_p2p(
-            p2p_config,
-            db.clone(),
-            device_id,
-            local_key,
-            new_item_tx.subscribe(),
-        )
-        .await
-        {
-            Ok(handle) => {
-                tracing::info!(port = handle.actual_port, "P2P subsystem running");
-                Some(handle)
+            match p2p::start_p2p(
+                p2p_config,
+                db.clone(),
+                device_id,
+                local_key,
+                new_item_tx.subscribe(),
+            )
+            .await
+            {
+                Ok(handle) => {
+                    tracing::info!(port = handle.actual_port, "P2P subsystem running");
+                    Some(handle)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to start P2P subsystem: {e}");
+                    None
+                }
             }
-            Err(e) => {
-                tracing::warn!("Failed to start P2P subsystem: {e}");
-                None
-            }
-        }
-    } else {
-        tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
-        None
-    };
+        } else {
+            tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
+            None
+        };
 
     // Beta W2.2 (arch-1): start the sync orchestrator.
     //
@@ -144,10 +144,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // owns its own subscriber loop, see `p2p::subscriber_loop`). Sending into
     // a channel whose receiver is dropped is harmless: `outbound_tx.send`
     // returns `Err`, which the orchestrator logs at debug and continues.
-    let (sync_outbound_tx, _sync_outbound_rx) =
-        mpsc::channel::<copypaste_sync::WireItem>(64);
-    let (_sync_incoming_tx, sync_incoming_rx) =
-        mpsc::channel::<copypaste_sync::WireItem>(64);
+    let (sync_outbound_tx, _sync_outbound_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
+    let (_sync_incoming_tx, sync_incoming_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
     let sync_device_id = uuid::Uuid::new_v4().to_string();
     let sync_db = db.clone();
     let sync_rx = new_item_tx.subscribe();
@@ -175,7 +173,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // Start optional cloud-sync if credentials are present.
     #[cfg(feature = "cloud-sync")]
     let _cloud_handle = {
-        use crate::cloud::{CloudConfig, start_cloud};
+        use crate::cloud::{start_cloud, CloudConfig};
         if let Some(cloud_cfg) = CloudConfig::from_env() {
             tracing::info!("cloud-sync: SUPABASE_URL found, starting cloud orchestrator");
             // Subscribe a new receiver from the existing sender.
@@ -399,9 +397,7 @@ async fn handle_text(
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_millis() as i64;
-        item.expires_at = Some(
-            now_ms + (config.sensitive_ttl_local_secs as i64 * 1000),
-        );
+        item.expires_at = Some(now_ms + (config.sensitive_ttl_local_secs as i64 * 1000));
     }
 
     let db_guard = db.lock().await;
@@ -438,13 +434,15 @@ async fn handle_image(
             let blob = chunks_to_blob(&chunks);
             let meta_json = format!(
                 r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
-                meta.width, meta.height, meta.original_size, meta.chunk_count,
-                meta.file_id
+                meta.width, meta.height, meta.original_size, meta.chunk_count, meta.file_id
             );
             let item = ClipboardItem::new_image(blob, meta_json, 0);
             tracing::debug!(
                 "image encoded: {}x{} px, {} chunks, original_size={}",
-                meta.width, meta.height, meta.chunk_count, meta.original_size
+                meta.width,
+                meta.height,
+                meta.chunk_count,
+                meta.original_size
             );
 
             let db_guard = db.lock().await;
@@ -479,7 +477,11 @@ fn prune_history(db: &Database, config: &AppConfig) {
             for old in &oldest {
                 let _ = copypaste_core::delete_item(db, &old.id);
             }
-            tracing::debug!("pruned {} items over history_limit={}", excess, config.history_limit);
+            tracing::debug!(
+                "pruned {} items over history_limit={}",
+                excess,
+                config.history_limit
+            );
         }
     }
 }
@@ -593,10 +595,15 @@ mod tests {
         // so parallel tests don't collide on the value, and we restore the
         // previous value after the test.
         let prev = std::env::var_os("COPYPASTE_DEVICE_ID_PATH");
-        unsafe { std::env::set_var("COPYPASTE_DEVICE_ID_PATH", &path); }
+        unsafe {
+            std::env::set_var("COPYPASTE_DEVICE_ID_PATH", &path);
+        }
 
         let first = load_or_create_device_id().expect("first call must succeed");
-        assert!(path.exists(), "device_id file must be written on first call");
+        assert!(
+            path.exists(),
+            "device_id file must be written on first call"
+        );
 
         let second = load_or_create_device_id().expect("second call must succeed");
 

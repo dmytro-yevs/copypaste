@@ -58,16 +58,17 @@ fn enumerate_interfaces_returns_loopback() {
         "expected at least one network interface; got none"
     );
 
-    let has_loopback = ifaces.iter().any(|iface| {
-        match iface.ip() {
-            IpAddr::V4(v4) => v4.is_loopback(),
-            IpAddr::V6(v6) => v6.is_loopback(),
-        }
+    let has_loopback = ifaces.iter().any(|iface| match iface.ip() {
+        IpAddr::V4(v4) => v4.is_loopback(),
+        IpAddr::V6(v6) => v6.is_loopback(),
     });
     assert!(
         has_loopback,
         "expected loopback interface (127.0.0.1 or ::1) among: {:?}",
-        ifaces.iter().map(|i| (i.name.clone(), i.ip())).collect::<Vec<_>>()
+        ifaces
+            .iter()
+            .map(|i| (i.name.clone(), i.ip()))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -85,11 +86,26 @@ fn ipv4_link_local_filter_includes_169_254_range() {
     let just_above = Ipv4Addr::new(169, 255, 0, 0);
 
     assert!(is_ipv4_link_local(ll), "169.254.10.20 must be link-local");
-    assert!(is_ipv4_link_local(edge_low), "169.254.0.0 must be link-local");
-    assert!(is_ipv4_link_local(edge_high), "169.254.255.255 must be link-local");
-    assert!(!is_ipv4_link_local(not_ll), "192.168.1.1 must NOT be link-local");
-    assert!(!is_ipv4_link_local(just_below), "169.253/16 must NOT be link-local");
-    assert!(!is_ipv4_link_local(just_above), "169.255/16 must NOT be link-local");
+    assert!(
+        is_ipv4_link_local(edge_low),
+        "169.254.0.0 must be link-local"
+    );
+    assert!(
+        is_ipv4_link_local(edge_high),
+        "169.254.255.255 must be link-local"
+    );
+    assert!(
+        !is_ipv4_link_local(not_ll),
+        "192.168.1.1 must NOT be link-local"
+    );
+    assert!(
+        !is_ipv4_link_local(just_below),
+        "169.253/16 must NOT be link-local"
+    );
+    assert!(
+        !is_ipv4_link_local(just_above),
+        "169.255/16 must NOT be link-local"
+    );
 
     // Cross-check against the std library's own classification.
     assert!(ll.is_link_local());
@@ -107,10 +123,19 @@ fn ipv6_link_local_filter_includes_fe80_range() {
     let just_above: Ipv6Addr = "fec0::1".parse().unwrap();
 
     assert!(is_ipv6_link_local(ll), "fe80::1 must be link-local");
-    assert!(is_ipv6_link_local(ll_high), "febf::/10-top must be link-local");
-    assert!(!is_ipv6_link_local(not_ll), "2001:db8::1 must NOT be link-local");
+    assert!(
+        is_ipv6_link_local(ll_high),
+        "febf::/10-top must be link-local"
+    );
+    assert!(
+        !is_ipv6_link_local(not_ll),
+        "2001:db8::1 must NOT be link-local"
+    );
     assert!(!is_ipv6_link_local(loopback), "::1 must NOT be link-local");
-    assert!(!is_ipv6_link_local(just_above), "fec0::1 must NOT be link-local");
+    assert!(
+        !is_ipv6_link_local(just_above),
+        "fec0::1 must NOT be link-local"
+    );
 }
 
 // ── 4. multicast_group_join_loopback_succeeds ────────────────────────────────
@@ -136,8 +161,8 @@ fn multicast_group_join_loopback_succeeds_ipv4() {
 #[test]
 #[ignore]
 fn multicast_group_join_loopback_succeeds_ipv6() {
-    let sock = UdpSocket::bind(SocketAddr::from(([0u16; 8], 0)))
-        .expect("UDP bind on [::]:0 must succeed");
+    let sock =
+        UdpSocket::bind(SocketAddr::from(([0u16; 8], 0))).expect("UDP bind on [::]:0 must succeed");
     let mdns_v6: Ipv6Addr = "ff02::fb".parse().unwrap();
     // interface index 0 = let the kernel choose; on most hosts this maps
     // to the default interface or loopback depending on configuration.
@@ -220,5 +245,8 @@ fn skipped_when_no_network_present_returns_empty_not_error() {
 
     // Simulated "OK but empty" — also valid.
     let empty_ok = enumerate_with(|| Ok(Vec::new()));
-    assert!(empty_ok.is_empty(), "explicit empty Ok must yield empty Vec");
+    assert!(
+        empty_ok.is_empty(),
+        "explicit empty Ok must yield empty Vec"
+    );
 }

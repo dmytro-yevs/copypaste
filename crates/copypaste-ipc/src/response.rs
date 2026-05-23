@@ -123,8 +123,7 @@ mod tests {
         let back: Request = serde_json::from_str(&s).unwrap();
         assert_eq!(req, back);
         // params default applies when absent on the wire
-        let minimal: Request =
-            serde_json::from_str(r#"{"id":7,"method":"ping"}"#).unwrap();
+        let minimal: Request = serde_json::from_str(r#"{"id":7,"method":"ping"}"#).unwrap();
         assert_eq!(minimal.id, 7);
         assert_eq!(minimal.method, "ping");
         assert_eq!(minimal.params, serde_json::Value::Null);

@@ -23,9 +23,7 @@
 //! compiling — that is the correct tradeoff for a perf harness.
 
 use clap::{Parser, Subcommand};
-use criterion::{
-    black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput,
-};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 
 // ---------------------------------------------------------------------------
 // Local CLI mirror — shape-faithful to crates/copypaste-cli/src/main.rs

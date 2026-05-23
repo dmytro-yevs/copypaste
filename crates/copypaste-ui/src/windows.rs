@@ -5,8 +5,8 @@ use slint::{ComponentHandle, Model, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::settings::{AppSettings, HistoryLimit, PairedDevice};
 use crate::fingerprint::{format_fingerprint_long, format_fingerprint_truncated};
+use crate::settings::{AppSettings, HistoryLimit, PairedDevice};
 
 // Pull in the generated Slint components (SettingsWindow, PairWindow, etc.)
 slint::include_modules!();
@@ -264,10 +264,7 @@ impl SettingsWindowHandle {
     /// * `Err(msg)` — the initial load failed. The window is still shown
     ///   with its constructor defaults; the message is painted into
     ///   `sync-status-msg` so the user sees why the form is empty.
-    pub fn wire_to_ipc<I: SettingsIpc + 'static>(
-        &self,
-        ipc: Rc<RefCell<I>>,
-    ) -> Result<(), String> {
+    pub fn wire_to_ipc<I: SettingsIpc + 'static>(&self, ipc: Rc<RefCell<I>>) -> Result<(), String> {
         // --- Initial load -----------------------------------------------------
         // Failing the initial load must not prevent the window from opening:
         // we surface the error inline so the user can still hit "Save" with
@@ -354,11 +351,7 @@ pub fn pair_window_empty_hint(peer_count: usize) -> Option<(&'static str, &'stat
 ///   `image_preview_label(Some(1920), Some(1080), Some(452_000))`
 ///     → `"Image  1920×1080 · 441 KB"`
 ///   `image_preview_label(None, None, None)` → `"Image"`
-pub fn image_preview_label(
-    width: Option<u32>,
-    height: Option<u32>,
-    bytes: Option<u64>,
-) -> String {
+pub fn image_preview_label(width: Option<u32>, height: Option<u32>, bytes: Option<u64>) -> String {
     let mut out = String::from("Image");
     if let (Some(w), Some(h)) = (width, height) {
         out.push_str(&format!("  {w}×{h}"));
@@ -456,7 +449,8 @@ impl PairWindowHandle {
 
     /// Update the own fingerprint displayed (call after key generation completes).
     pub fn set_own_fingerprint(&self, raw_hex: &str) {
-        self.window.set_own_fingerprint(format_fingerprint_long(raw_hex).into());
+        self.window
+            .set_own_fingerprint(format_fingerprint_long(raw_hex).into());
     }
 
     /// Replace the paired device list entirely.
@@ -472,7 +466,8 @@ impl PairWindowHandle {
 
     /// Clear the status message.
     pub fn clear_status(&self) {
-        self.window.set_status_message(slint::SharedString::default());
+        self.window
+            .set_status_message(slint::SharedString::default());
     }
 
     /// Register a callback invoked when "Pair" is clicked.
@@ -525,7 +520,6 @@ impl PairWindowHandle {
         self.window.run()
     }
 }
-
 
 /// Beta W3.2 — minimum number of Unicode scalars required for a PAKE
 /// pairing password. Mirrors `IpcClient::MIN_PAIR_PASSWORD_LEN` and the
@@ -585,7 +579,10 @@ mod tests {
     fn image_preview_label_dimensions_only() {
         let s = image_preview_label(Some(64), Some(32), None);
         assert!(s.contains("64×32"), "dimensions only: {s}");
-        assert!(!s.contains('·'), "no size separator when bytes missing: {s}");
+        assert!(
+            !s.contains('·'),
+            "no size separator when bytes missing: {s}"
+        );
     }
 
     #[test]
@@ -629,7 +626,9 @@ mod tests {
 
     struct StubItem(&'static str);
     impl SearchableHistoryItem for StubItem {
-        fn preview(&self) -> &str { self.0 }
+        fn preview(&self) -> &str {
+            self.0
+        }
     }
 
     #[test]
@@ -672,11 +671,19 @@ mod tests {
             StubItem("nothing"),
         ];
         let upper = filter_history_items(&items, "WORLD");
-        assert_eq!(upper.len(), 1, "uppercase query must match lowercase preview");
+        assert_eq!(
+            upper.len(),
+            1,
+            "uppercase query must match lowercase preview"
+        );
         assert_eq!(upper[0].preview(), "Hello World");
 
         let lower = filter_history_items(&items, "rust");
-        assert_eq!(lower.len(), 1, "lowercase query must match uppercase preview");
+        assert_eq!(
+            lower.len(),
+            1,
+            "lowercase query must match uppercase preview"
+        );
         assert_eq!(lower[0].preview(), "RUST is FUN");
     }
 
@@ -732,7 +739,11 @@ mod tests {
         };
 
         let ok_status = perform_save(&mut ipc, &edited);
-        assert_eq!(ipc.saved.len(), 1, "save_settings must be called exactly once");
+        assert_eq!(
+            ipc.saved.len(),
+            1,
+            "save_settings must be called exactly once"
+        );
         let recorded = &ipc.saved[0];
         assert!(recorded.launch_at_login);
         assert!(recorded.private_mode);
@@ -740,7 +751,10 @@ mod tests {
         assert_eq!(recorded.supabase_url, "https://x.supabase.co");
         assert_eq!(recorded.supabase_key, "anon");
         assert_eq!(recorded.device_name, "Beta Mac");
-        assert!(!ok_status.is_error, "successful save must not mark status as error");
+        assert!(
+            !ok_status.is_error,
+            "successful save must not mark status as error"
+        );
         assert!(
             ok_status.message.contains("saved"),
             "success message should mention 'saved', got: {}",
@@ -750,7 +764,10 @@ mod tests {
         // Failure path: error message reaches the UI verbatim and is flagged.
         ipc.next_save = Some(Err("daemon offline".into()));
         let err_status = perform_save(&mut ipc, &edited);
-        assert!(err_status.is_error, "failed save must flag the status as an error");
+        assert!(
+            err_status.is_error,
+            "failed save must flag the status as an error"
+        );
         assert!(
             err_status.message.contains("daemon offline"),
             "error message must include the IPC failure reason, got: {}",
@@ -760,7 +777,10 @@ mod tests {
         // Clear-history path uses the same dispatch shape — sanity-check it
         // here so a future split of the helpers doesn't silently drift.
         let cleared_status = perform_clear_history(&mut ipc);
-        assert_eq!(ipc.cleared, 1, "delete_all_history must be invoked once per click");
+        assert_eq!(
+            ipc.cleared, 1,
+            "delete_all_history must be invoked once per click"
+        );
         assert!(!cleared_status.is_error);
     }
 
@@ -783,8 +803,14 @@ mod tests {
         ipc.next_get = Some(Ok(stored.clone()));
 
         let (loaded, err_status) = perform_initial_load(&mut ipc);
-        assert_eq!(ipc.get_calls, 1, "get_settings must be called exactly once on open");
-        assert!(err_status.is_none(), "successful load must not emit an error status");
+        assert_eq!(
+            ipc.get_calls, 1,
+            "get_settings must be called exactly once on open"
+        );
+        assert!(
+            err_status.is_none(),
+            "successful load must not emit an error status"
+        );
         let got = loaded.expect("successful load yields the settings the window will apply");
         assert_eq!(got.launch_at_login, stored.launch_at_login);
         assert_eq!(got.private_mode, stored.private_mode);
@@ -799,7 +825,10 @@ mod tests {
             ..MockIpc::default()
         };
         let (loaded, err_status) = perform_initial_load(&mut bad_ipc);
-        assert!(loaded.is_none(), "failed load must NOT supply settings — window keeps its defaults");
+        assert!(
+            loaded.is_none(),
+            "failed load must NOT supply settings — window keeps its defaults"
+        );
         let status = err_status.expect("failed load must yield an error status");
         assert!(status.is_error);
         assert!(

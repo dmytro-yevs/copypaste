@@ -62,7 +62,10 @@ pub fn encrypt_item_with_aad(
     let mut nonce_bytes = [0u8; NONCE_SIZE];
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = XNonce::from(nonce_bytes);
-    let payload = Payload { msg: plaintext, aad };
+    let payload = Payload {
+        msg: plaintext,
+        aad,
+    };
     let ciphertext = cipher
         .encrypt(&nonce, payload)
         .map_err(|e| EncryptError::CipherFailed(e.to_string()))?;
@@ -87,7 +90,10 @@ pub fn decrypt_item_with_aad(
 ) -> Result<Vec<u8>, EncryptError> {
     let cipher = XChaCha20Poly1305::new(key.into());
     let nonce_x = XNonce::from(*nonce);
-    let payload = Payload { msg: ciphertext, aad };
+    let payload = Payload {
+        msg: ciphertext,
+        aad,
+    };
     cipher
         .decrypt(&nonce_x, payload)
         .map_err(|_| EncryptError::AuthFailed)

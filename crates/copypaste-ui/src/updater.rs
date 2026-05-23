@@ -250,10 +250,10 @@ mod tests {
 
     impl CommandRunner for MockRunner {
         fn run(&self, cmd: &str, args: &[&str]) -> io::Result<Output> {
-            self.calls
-                .lock()
-                .unwrap()
-                .push((cmd.to_string(), args.iter().map(|s| s.to_string()).collect()));
+            self.calls.lock().unwrap().push((
+                cmd.to_string(),
+                args.iter().map(|s| s.to_string()).collect(),
+            ));
             let mut r = self.responses.lock().unwrap();
             if r.is_empty() {
                 return Err(io::Error::other("no more responses"));
@@ -305,7 +305,10 @@ mod tests {
         let calls = runner.calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "brew");
-        assert_eq!(calls[0].1, vec!["outdated", "--cask", "copypaste", "--json=v2"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["outdated", "--cask", "copypaste", "--json=v2"]
+        );
     }
 
     #[test]
@@ -387,8 +390,7 @@ mod tests {
         assert_eq!(calls[1].1.len(), 2);
         assert_eq!(calls[1].1[0], "bootout");
         assert!(
-            calls[1].1[1].starts_with("gui/")
-                && calls[1].1[1].ends_with("/com.copypaste.daemon"),
+            calls[1].1[1].starts_with("gui/") && calls[1].1[1].ends_with("/com.copypaste.daemon"),
             "unexpected bootout target: {}",
             calls[1].1[1]
         );
@@ -396,7 +398,10 @@ mod tests {
 
     #[test]
     fn apply_update_propagates_brew_failure() {
-        let runner = MockRunner::new(vec![err_output(1, "Error: Cask 'copypaste' is not installed")]);
+        let runner = MockRunner::new(vec![err_output(
+            1,
+            "Error: Cask 'copypaste' is not installed",
+        )]);
         let err = apply_update(&runner).expect_err("should fail");
         assert!(err.contains("brew upgrade failed"), "err = {err}");
     }

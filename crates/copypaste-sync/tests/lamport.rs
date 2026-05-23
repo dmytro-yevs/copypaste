@@ -16,8 +16,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use copypaste_core::storage::items::ClipboardItem;
-use copypaste_sync::{resolve, LamportClock, MergeOutcome};
 use copypaste_sync::protocol::WireItem;
+use copypaste_sync::{resolve, LamportClock, MergeOutcome};
 use tokio::sync::Mutex;
 
 // ---------------------------------------------------------------------------

@@ -54,7 +54,8 @@ async fn mtls_handshake_with_matching_certs_succeeds() {
 
     let (listener, addr) = bind_loopback().await;
 
-    let (srv_res, cli_res) = tokio::join!(server.accept(&listener), client.connect(addr, &server_fp));
+    let (srv_res, cli_res) =
+        tokio::join!(server.accept(&listener), client.connect(addr, &server_fp));
 
     let (peer_addr, _srv_stream) = srv_res.expect("server accept succeeds");
     let _cli_stream = cli_res.expect("client connect succeeds");
@@ -193,7 +194,10 @@ async fn fingerprint_pinning_matches() {
     let fp_from_helper = cert.fingerprint();
     let fp_from_der = fingerprint_of(&cert.cert_der);
 
-    assert_eq!(fp_from_helper, fp_from_der, "two fingerprint paths must agree");
+    assert_eq!(
+        fp_from_helper, fp_from_der,
+        "two fingerprint paths must agree"
+    );
     assert_eq!(fp_from_helper.len(), 64, "SHA-256 hex must be 64 chars");
     assert!(
         fp_from_helper.chars().all(|c| c.is_ascii_hexdigit()),

@@ -17,8 +17,8 @@
 //! verify the rotation property end-to-end via the public API.
 
 use copypaste_core::{
-    build_item_aad, decrypt_item_with_aad, encrypt_item_with_aad,
-    DeviceKeypair, AAD_SCHEMA_VERSION, NONCE_SIZE,
+    build_item_aad, decrypt_item_with_aad, encrypt_item_with_aad, DeviceKeypair,
+    AAD_SCHEMA_VERSION, NONCE_SIZE,
 };
 use hkdf::Hkdf;
 use sha2::Sha256;

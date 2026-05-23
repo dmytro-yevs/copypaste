@@ -91,11 +91,7 @@ where
 
 /// Wait until at least one `ServiceRemoved` event arrives for `fullname`
 /// or the window elapses. Returns `true` if removal was observed.
-async fn wait_for_removal(
-    rx: &Receiver<ServiceEvent>,
-    fullname: &str,
-    window: Duration,
-) -> bool {
+async fn wait_for_removal(rx: &Receiver<ServiceEvent>, fullname: &str, window: Duration) -> bool {
     let deadline = tokio::time::Instant::now() + window;
     loop {
         let now = tokio::time::Instant::now();
@@ -131,21 +127,10 @@ fn make_service_info(
     device_name: &str,
 ) -> ServiceInfo {
     let hostname = format!("{instance}.local.");
-    let props: [(&str, &str); 3] = [
-        ("v", "1"),
-        ("did", device_id),
-        ("name", device_name),
-    ];
-    ServiceInfo::new(
-        service_type,
-        instance,
-        &hostname,
-        "",
-        port,
-        &props[..],
-    )
-    .expect("ServiceInfo construction must succeed for valid inputs")
-    .enable_addr_auto()
+    let props: [(&str, &str); 3] = [("v", "1"), ("did", device_id), ("name", device_name)];
+    ServiceInfo::new(service_type, instance, &hostname, "", port, &props[..])
+        .expect("ServiceInfo construction must succeed for valid inputs")
+        .enable_addr_auto()
 }
 
 // ─── tests ───────────────────────────────────────────────────────────────────
@@ -207,14 +192,17 @@ async fn deregister_removes_service_from_browse_results() {
     let rx = daemon.browse(&service_type).expect("browse must succeed");
 
     // First, wait until it appears.
-    let resolved = collect_resolved(&rx, Duration::from_secs(3), |svc| svc.fullname == fullname).await;
+    let resolved =
+        collect_resolved(&rx, Duration::from_secs(3), |svc| svc.fullname == fullname).await;
     assert!(
         !resolved.is_empty(),
         "service must be discovered before we can test removal"
     );
 
     // Unregister and wait for the removal notification.
-    let _ = daemon.unregister(&fullname).expect("unregister must succeed");
+    let _ = daemon
+        .unregister(&fullname)
+        .expect("unregister must succeed");
 
     // 2-second grace window per the task spec; bump to 4s here to keep
     // the test resilient on slower machines without changing semantics.
@@ -243,22 +231,28 @@ async fn two_instances_discover_each_other_on_same_machine() {
     let info_a = make_service_info(&service_type, "peerA", 60001, "1111111111111111", "Alpha");
     let fullname_a = info_a.get_fullname().to_string();
     daemon_a.register(info_a).expect("A: register must succeed");
-    let rx_a = daemon_a.browse(&service_type).expect("A: browse must succeed");
+    let rx_a = daemon_a
+        .browse(&service_type)
+        .expect("A: browse must succeed");
 
     // Instance B.
     let daemon_b = ServiceDaemon::new().expect("daemon B must start");
     let info_b = make_service_info(&service_type, "peerB", 60002, "2222222222222222", "Bravo");
     let fullname_b = info_b.get_fullname().to_string();
     daemon_b.register(info_b).expect("B: register must succeed");
-    let rx_b = daemon_b.browse(&service_type).expect("B: browse must succeed");
+    let rx_b = daemon_b
+        .browse(&service_type)
+        .expect("B: browse must succeed");
 
     // Each side must see the *other* — not just itself.
     let fullname_b_for_a = fullname_b.clone();
     let fullname_a_for_b = fullname_a.clone();
 
     let (seen_b_on_a, seen_a_on_b) = tokio::join!(
-        collect_resolved(&rx_a, Duration::from_secs(5), move |svc| svc.fullname == fullname_b_for_a),
-        collect_resolved(&rx_b, Duration::from_secs(5), move |svc| svc.fullname == fullname_a_for_b),
+        collect_resolved(&rx_a, Duration::from_secs(5), move |svc| svc.fullname
+            == fullname_b_for_a),
+        collect_resolved(&rx_b, Duration::from_secs(5), move |svc| svc.fullname
+            == fullname_a_for_b),
     );
 
     assert!(

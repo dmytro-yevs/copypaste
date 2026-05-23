@@ -58,10 +58,10 @@ impl TrayAction {
     /// `tray-icon::MenuId`-style string keys.
     pub fn id(self) -> &'static str {
         match self {
-            TrayAction::ShowHistory  => "show_history",
-            TrayAction::PairDevice   => "pair_device",
+            TrayAction::ShowHistory => "show_history",
+            TrayAction::PairDevice => "pair_device",
             TrayAction::OpenSettings => "open_settings",
-            TrayAction::Quit         => "quit",
+            TrayAction::Quit => "quit",
         }
     }
 
@@ -69,10 +69,10 @@ impl TrayAction {
     /// localisation is out of scope for the beta.
     pub fn label(self) -> &'static str {
         match self {
-            TrayAction::ShowHistory  => "Show History",
-            TrayAction::PairDevice   => "Pair Device...",
+            TrayAction::ShowHistory => "Show History",
+            TrayAction::PairDevice => "Pair Device...",
             TrayAction::OpenSettings => "Settings...",
-            TrayAction::Quit         => "Quit",
+            TrayAction::Quit => "Quit",
         }
     }
 }
@@ -124,7 +124,9 @@ pub struct TrayMenuState {
 
 impl TrayMenuState {
     pub fn new() -> Self {
-        Self { recents: Vec::new() }
+        Self {
+            recents: Vec::new(),
+        }
     }
 
     /// Replace the recents snapshot, clamping at [`MAX_RECENT_ITEMS`].
@@ -166,23 +168,23 @@ type RecentCb = Box<dyn Fn(&str) + 'static>;
 /// be (re)registered after construction without needing `&mut self` — the
 /// renderer thread only needs a shared reference.
 pub struct TrayMenuHandle {
-    state:           RefCell<TrayMenuState>,
+    state: RefCell<TrayMenuState>,
     on_show_history: RefCell<Option<ActionCb>>,
-    on_pair_device:  RefCell<Option<ActionCb>>,
-    on_open_settings:RefCell<Option<ActionCb>>,
-    on_quit:         RefCell<Option<ActionCb>>,
+    on_pair_device: RefCell<Option<ActionCb>>,
+    on_open_settings: RefCell<Option<ActionCb>>,
+    on_quit: RefCell<Option<ActionCb>>,
     on_recent_click: RefCell<Option<RecentCb>>,
 }
 
 impl TrayMenuHandle {
     pub fn new() -> Rc<Self> {
         Rc::new(Self {
-            state:            RefCell::new(TrayMenuState::new()),
-            on_show_history:  RefCell::new(None),
-            on_pair_device:   RefCell::new(None),
+            state: RefCell::new(TrayMenuState::new()),
+            on_show_history: RefCell::new(None),
+            on_pair_device: RefCell::new(None),
             on_open_settings: RefCell::new(None),
-            on_quit:          RefCell::new(None),
-            on_recent_click:  RefCell::new(None),
+            on_quit: RefCell::new(None),
+            on_recent_click: RefCell::new(None),
         })
     }
 
@@ -230,10 +232,10 @@ impl TrayMenuHandle {
     /// otherwise (so the caller can fall back to a default).
     pub fn dispatch(&self, action: TrayAction) -> bool {
         let slot = match action {
-            TrayAction::ShowHistory  => &self.on_show_history,
-            TrayAction::PairDevice   => &self.on_pair_device,
+            TrayAction::ShowHistory => &self.on_show_history,
+            TrayAction::PairDevice => &self.on_pair_device,
             TrayAction::OpenSettings => &self.on_open_settings,
-            TrayAction::Quit         => &self.on_quit,
+            TrayAction::Quit => &self.on_quit,
         };
         if let Some(cb) = slot.borrow().as_ref() {
             cb();
@@ -271,7 +273,13 @@ fn truncate_preview(s: &str) -> String {
     // Collapse newlines/tabs to spaces — the tray menu is one-line per item.
     let flat: String = s
         .chars()
-        .map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c })
+        .map(|c| {
+            if c == '\n' || c == '\r' || c == '\t' {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
 
     let char_count = flat.chars().count();
@@ -298,12 +306,25 @@ mod tests {
         let entries = state.build();
 
         // Show History, Recent submenu, Pair, Settings, Separator, Quit
-        assert_eq!(entries.len(), 6, "menu must have exactly 6 top-level entries");
+        assert_eq!(
+            entries.len(),
+            6,
+            "menu must have exactly 6 top-level entries"
+        );
 
-        assert!(matches!(entries[0], MenuEntry::Action(TrayAction::ShowHistory)));
+        assert!(matches!(
+            entries[0],
+            MenuEntry::Action(TrayAction::ShowHistory)
+        ));
         assert!(matches!(entries[1], MenuEntry::RecentSubmenu(_)));
-        assert!(matches!(entries[2], MenuEntry::Action(TrayAction::PairDevice)));
-        assert!(matches!(entries[3], MenuEntry::Action(TrayAction::OpenSettings)));
+        assert!(matches!(
+            entries[2],
+            MenuEntry::Action(TrayAction::PairDevice)
+        ));
+        assert!(matches!(
+            entries[3],
+            MenuEntry::Action(TrayAction::OpenSettings)
+        ));
         assert!(matches!(entries[4], MenuEntry::Separator));
         assert!(matches!(entries[5], MenuEntry::Action(TrayAction::Quit)));
     }
@@ -325,7 +346,10 @@ mod tests {
             TrayAction::OpenSettings.id(),
             TrayAction::Quit.id(),
         ];
-        assert_eq!(ids, ["show_history", "pair_device", "open_settings", "quit"]);
+        assert_eq!(
+            ids,
+            ["show_history", "pair_device", "open_settings", "quit"]
+        );
         // Unique
         let mut sorted = ids.to_vec();
         sorted.sort_unstable();
@@ -438,7 +462,11 @@ mod tests {
         assert!(handle.dispatch(TrayAction::OpenSettings));
         assert!(handle.dispatch(TrayAction::Quit));
 
-        assert_eq!(hits.get(), 0b1111, "every registered callback must have fired exactly once");
+        assert_eq!(
+            hits.get(),
+            0b1111,
+            "every registered callback must have fired exactly once"
+        );
     }
 
     #[test]
@@ -450,7 +478,10 @@ mod tests {
         let f = Rc::clone(&fired);
         handle.on_recent_click(move |_id| f.set(true));
 
-        assert!(!handle.dispatch_recent("unknown"), "stale ids must not dispatch");
+        assert!(
+            !handle.dispatch_recent("unknown"),
+            "stale ids must not dispatch"
+        );
         assert!(!fired.get(), "callback must not fire for unknown id");
 
         assert!(handle.dispatch_recent("known"));

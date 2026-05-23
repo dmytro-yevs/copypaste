@@ -83,13 +83,14 @@ impl PiiScrubber {
             // digests, API keys with hex encoding. 32+ hex chars catches
             // MD5 and up. We allow optional dashes inside to match UUIDs.
             Pattern {
-                re: Regex::new(r"(?i)\b[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12,}\b")
-                    .expect("uuid/hex pattern is valid"),
+                re: Regex::new(
+                    r"(?i)\b[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12,}\b",
+                )
+                .expect("uuid/hex pattern is valid"),
                 replacement: "<REDACTED-HEX>",
             },
             Pattern {
-                re: Regex::new(r"\b[0-9a-fA-F]{32,}\b")
-                    .expect("hex32 pattern is valid"),
+                re: Regex::new(r"\b[0-9a-fA-F]{32,}\b").expect("hex32 pattern is valid"),
                 replacement: "<REDACTED-HEX>",
             },
             // JWT-like: three base64url segments separated by '.'. Each
@@ -117,8 +118,7 @@ impl PiiScrubber {
             // IPv4 — four 1-3 digit groups. We do not enforce 0-255 bounds
             // because we'd rather over-match than under-match.
             Pattern {
-                re: Regex::new(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-                    .expect("ipv4 pattern is valid"),
+                re: Regex::new(r"\b(?:\d{1,3}\.){3}\d{1,3}\b").expect("ipv4 pattern is valid"),
                 replacement: "<REDACTED-IP>",
             },
             // IPv6 — requires at least two `:` separators so we don't eat
@@ -133,13 +133,11 @@ impl PiiScrubber {
             // of the path (which is often the useful debugging signal)
             // survives.
             Pattern {
-                re: Regex::new(r"/Users/[^/\s]+/")
-                    .expect("macos home pattern is valid"),
+                re: Regex::new(r"/Users/[^/\s]+/").expect("macos home pattern is valid"),
                 replacement: "~/",
             },
             Pattern {
-                re: Regex::new(r"/home/[^/\s]+/")
-                    .expect("linux home pattern is valid"),
+                re: Regex::new(r"/home/[^/\s]+/").expect("linux home pattern is valid"),
                 replacement: "~/",
             },
         ];
@@ -206,8 +204,10 @@ mod tests {
     #[test]
     fn empty_scrubber_is_passthrough() {
         let s = PiiScrubber::empty();
-        assert_eq!(s.scrub("anything goes /Users/alice/x foo@bar.com"),
-                   "anything goes /Users/alice/x foo@bar.com");
+        assert_eq!(
+            s.scrub("anything goes /Users/alice/x foo@bar.com"),
+            "anything goes /Users/alice/x foo@bar.com"
+        );
     }
 
     #[test]

@@ -139,10 +139,7 @@ impl MdnsRateLimiter {
     // ── internal helpers ────────────────────────────────────────────────
 
     fn cleanup_if_due(&self, now: Instant) {
-        let mut last = self
-            .last_cleanup
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut last = self.last_cleanup.lock().unwrap_or_else(|e| e.into_inner());
         let due = match *last {
             Some(t) => now.saturating_duration_since(t) >= CLEANUP_INTERVAL,
             None => true, // first call seeds the timer; cheap to sweep an empty map

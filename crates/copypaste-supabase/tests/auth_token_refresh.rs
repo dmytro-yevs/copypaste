@@ -169,9 +169,7 @@ async fn refresh_failure_propagates_invalid_refresh_token() {
     let _m = mockito::mock("POST", "/auth/v1/token?grant_type=refresh_token")
         .with_status(400)
         .with_header("content-type", "application/json")
-        .with_body(
-            r#"{"error":"invalid_grant","error_description":"Invalid refresh_token"}"#,
-        )
+        .with_body(r#"{"error":"invalid_grant","error_description":"Invalid refresh_token"}"#)
         .create();
 
     let client = AuthClient::new(server_url(), "anon-key");
@@ -223,7 +221,10 @@ async fn store_reflects_refreshed_session() {
     let first = client.sign_in("u@example.com", "pass").await.unwrap();
     assert_eq!(first.refresh_token, "rt-first");
     assert_eq!(
-        client.current_session().expect("session stored").refresh_token,
+        client
+            .current_session()
+            .expect("session stored")
+            .refresh_token,
         "rt-first"
     );
 

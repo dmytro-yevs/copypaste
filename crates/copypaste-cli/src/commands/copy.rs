@@ -1,5 +1,5 @@
-use anyhow::{anyhow, bail, Result};
 use crate::ipc::IpcClient;
+use anyhow::{anyhow, bail, Result};
 use std::path::Path;
 
 /// Run the `copy` command.
@@ -72,7 +72,10 @@ pub fn cmd_list(socket_path: &Path, limit: u64) -> Result<()> {
         } else {
             ""
         };
-        println!("{:<5}  {:<38}  {:<8}  {}{}", idx, id, ctype, time_str, sensitive);
+        println!(
+            "{:<5}  {:<38}  {:<8}  {}{}",
+            idx, id, ctype, time_str, sensitive
+        );
     }
 
     println!();
@@ -91,10 +94,16 @@ pub fn cmd_copy_by_index(socket_path: &Path, n: u64, limit: u64) -> Result<()> {
 
     let idx = (n - 1) as usize;
     let item = items.get(idx).ok_or_else(|| {
-        anyhow!("index {} out of range (history has {} items)", n, items.len())
+        anyhow!(
+            "index {} out of range (history has {} items)",
+            n,
+            items.len()
+        )
     })?;
 
-    let uuid = item["id"].as_str().ok_or_else(|| anyhow!("item has no id"))?;
+    let uuid = item["id"]
+        .as_str()
+        .ok_or_else(|| anyhow!("item has no id"))?;
     cmd_copy_by_id(socket_path, uuid)
 }
 
@@ -209,8 +218,20 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
         year += 1;
     }
     let leap = is_leap(year);
-    let month_days: [u64; 12] =
-        [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u64;
     for &md in &month_days {
         if remaining < md {
@@ -300,11 +321,8 @@ mod tests {
         thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
                 let mut buf = String::new();
-                std::io::BufRead::read_line(
-                    &mut std::io::BufReader::new(&stream),
-                    &mut buf,
-                )
-                .unwrap();
+                std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut buf)
+                    .unwrap();
                 stream.write_all(response_json.as_bytes()).unwrap();
                 stream.write_all(b"\n").unwrap();
             }
@@ -312,21 +330,14 @@ mod tests {
     }
 
     /// Spawn a fake daemon that serves two sequential connections.
-    fn mock_server_two(
-        socket_path: &Path,
-        first: &'static str,
-        second: &'static str,
-    ) {
+    fn mock_server_two(socket_path: &Path, first: &'static str, second: &'static str) {
         let listener = UnixListener::bind(socket_path).unwrap();
         thread::spawn(move || {
             for resp in [first, second] {
                 if let Ok((mut stream, _)) = listener.accept() {
                     let mut buf = String::new();
-                    std::io::BufRead::read_line(
-                        &mut std::io::BufReader::new(&stream),
-                        &mut buf,
-                    )
-                    .unwrap();
+                    std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut buf)
+                        .unwrap();
                     stream.write_all(resp.as_bytes()).unwrap();
                     stream.write_all(b"\n").unwrap();
                 }
@@ -448,10 +459,7 @@ mod tests {
     fn fetch_history_daemon_error_propagates() {
         let dir = tempdir().unwrap();
         let sock = dir.path().join("hist_err.sock");
-        mock_server_once(
-            &sock,
-            r#"{"id":"1","ok":false,"error":"db corrupted"}"#,
-        );
+        mock_server_once(&sock, r#"{"id":"1","ok":false,"error":"db corrupted"}"#);
         let res = fetch_history(&sock, 50);
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("db corrupted"));

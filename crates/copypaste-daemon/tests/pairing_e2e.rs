@@ -104,21 +104,10 @@ fn advertise_for_test(
     display_name: &str,
 ) -> String {
     let hostname = format!("{instance}.local.");
-    let props: [(&str, &str); 3] = [
-        ("v", "1"),
-        ("did", fingerprint),
-        ("name", display_name),
-    ];
-    let info = ServiceInfo::new(
-        service_type,
-        instance,
-        &hostname,
-        "",
-        port,
-        &props[..],
-    )
-    .expect("ServiceInfo construction must succeed for valid inputs")
-    .enable_addr_auto();
+    let props: [(&str, &str); 3] = [("v", "1"), ("did", fingerprint), ("name", display_name)];
+    let info = ServiceInfo::new(service_type, instance, &hostname, "", port, &props[..])
+        .expect("ServiceInfo construction must succeed for valid inputs")
+        .enable_addr_auto();
     let fullname = info.get_fullname().to_string();
     daemon
         .register(info)
@@ -176,7 +165,10 @@ async fn read_frame(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
     let len = u32::from_be_bytes(len_bytes) as usize;
     // Cap inbound frames at 64 KiB to keep the test bounded even if the
     // remote side desyncs and sends a huge length prefix.
-    assert!(len <= 64 * 1024, "test frame exceeds 64 KiB cap ({len} bytes)");
+    assert!(
+        len <= 64 * 1024,
+        "test frame exceeds 64 KiB cap ({len} bytes)"
+    );
     let mut body = vec![0u8; len];
     stream.read_exact(&mut body).await?;
     Ok(body)
@@ -238,8 +230,7 @@ async fn initiator_handshake(
 ) -> Result<(String, SessionKey), Box<dyn std::error::Error + Send + Sync>> {
     let mut stream = TcpStream::connect(addr).await?;
 
-    let (client, msg1) = PakeInitiator::new(password)
-        .map_err(|e| format!("initiator.new: {e}"))?;
+    let (client, msg1) = PakeInitiator::new(password).map_err(|e| format!("initiator.new: {e}"))?;
 
     // Frame 1 → our OPAQUE start, then frame 2 → our fingerprint.
     write_frame(&mut stream, &msg1).await?;
@@ -298,14 +289,8 @@ async fn run_pairing(
     let (listener_a, port_a) = bind_loopback().await;
 
     let daemon_a = ServiceDaemon::new().map_err(|e| format!("daemon A: {e}"))?;
-    let fullname_a = advertise_for_test(
-        &daemon_a,
-        &service_type,
-        "peer-a",
-        port_a,
-        &fp_a,
-        "Peer A",
-    );
+    let fullname_a =
+        advertise_for_test(&daemon_a, &service_type, "peer-a", port_a, &fp_a, "Peer A");
 
     // ── B: browse for A ───────────────────────────────────────────────────────
     let daemon_b = ServiceDaemon::new().map_err(|e| format!("daemon B: {e}"))?;
@@ -336,8 +321,8 @@ async fn run_pairing(
     // In production this lands as a `pair_peer` IPC call that runs OPAQUE
     // registration once, then persists the file in SQLCipher. Here we
     // register synchronously since the handshake is the only consumer.
-    let password_file = PasswordFile::register(a_password)
-        .map_err(|e| format!("PasswordFile::register: {e}"))?;
+    let password_file =
+        PasswordFile::register(a_password).map_err(|e| format!("PasswordFile::register: {e}"))?;
 
     // ── spawn responder (A) + initiator (B) concurrently ──────────────────────
     let fp_a_for_responder = fp_a.clone();
@@ -362,10 +347,9 @@ async fn run_pairing(
 
     // Bound the whole exchange so a stalled handshake fails fast instead of
     // hanging the test runner.
-    let join = timeout(
-        Duration::from_secs(15),
-        async { tokio::join!(responder_task, initiator_task) },
-    )
+    let join = timeout(Duration::from_secs(15), async {
+        tokio::join!(responder_task, initiator_task)
+    })
     .await
     .map_err(|_| "handshake exceeded 15s timeout")?;
     let (resp_join, init_join) = join;
@@ -422,7 +406,10 @@ async fn two_local_peers_full_pairing_flow_succeeds() {
 
     let fp_a = state_a.transport.fingerprint().to_string();
     let fp_b = state_b.transport.fingerprint().to_string();
-    assert_ne!(fp_a, fp_b, "two fresh inits must yield distinct fingerprints");
+    assert_ne!(
+        fp_a, fp_b,
+        "two fresh inits must yield distinct fingerprints"
+    );
 
     // Pre-condition: neither side knows the other.
     assert!(
@@ -471,7 +458,7 @@ async fn pairing_wrong_password_fails_no_pair_persisted() {
     let result = run_pairing(
         &state_a,
         &state_b,
-        PAIR_PASSWORD,         // A registers with the real password
+        PAIR_PASSWORD,                         // A registers with the real password
         "completely-different-wrong-password", // B types something else
     )
     .await;

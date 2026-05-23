@@ -170,9 +170,8 @@ impl SentryReporter {
     ) -> Result<Self, TelemetryError> {
         // Parse the DSN up-front so a malformed value surfaces as a typed
         // error rather than a silent panic deep inside `sentry::init`.
-        let dsn_parsed: sentry::types::Dsn = dsn
-            .parse()
-            .map_err(|e: sentry::types::ParseDsnError| {
+        let dsn_parsed: sentry::types::Dsn =
+            dsn.parse().map_err(|e: sentry::types::ParseDsnError| {
                 TelemetryError::BackendError(format!("invalid Sentry DSN: {e}"))
             })?;
 
@@ -319,11 +318,8 @@ mod tests {
     fn init_with_dsn_disabled_returns_noop() {
         // A valid DSN structurally — we never reach the transport because
         // consent is Disabled.
-        let r = init_with_dsn(
-            ReportConsent::Disabled,
-            "https://public@sentry.example/1",
-        )
-        .expect("disabled init never fails");
+        let r = init_with_dsn(ReportConsent::Disabled, "https://public@sentry.example/1")
+            .expect("disabled init never fails");
         let evt = ReportableError::new(
             "copypaste-core",
             "0.3.0-dev",

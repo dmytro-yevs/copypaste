@@ -1,8 +1,8 @@
 use hkdf::Hkdf;
 use sha2::Sha256;
+use thiserror::Error;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::ZeroizeOnDrop;
-use thiserror::Error;
 
 /// Versioned HKDF salt. Bumping the version (v1 -> v2) deterministically
 /// rotates every derived key, providing a clean break for future protocol
@@ -36,21 +36,31 @@ impl DeviceKeypair {
         Ok(Self { secret, public })
     }
 
-    pub fn public_key_bytes(&self) -> [u8; 32] { *self.public.as_bytes() }
+    pub fn public_key_bytes(&self) -> [u8; 32] {
+        *self.public.as_bytes()
+    }
 
-    pub fn secret_key_bytes(&self) -> [u8; 32] { self.secret.to_bytes() }
+    pub fn secret_key_bytes(&self) -> [u8; 32] {
+        self.secret.to_bytes()
+    }
 
     pub fn ecdh(&self, peer_public_bytes: &[u8; 32]) -> [u8; 32] {
         let peer = PublicKey::from(*peer_public_bytes);
         *self.secret.diffie_hellman(&peer).as_bytes()
     }
 
-    pub fn derive_enc_key(&self, peer_public_bytes: &[u8; 32], sender_id: &str, recipient_id: &str) -> [u8; 32] {
+    pub fn derive_enc_key(
+        &self,
+        peer_public_bytes: &[u8; 32],
+        sender_id: &str,
+        recipient_id: &str,
+    ) -> [u8; 32] {
         let raw_secret = self.ecdh(peer_public_bytes);
         let info = format!("copypaste-v1|{}|{}", sender_id, recipient_id);
         let hk = Hkdf::<Sha256>::new(Some(HKDF_SALT_V1), &raw_secret);
         let mut enc_key = [0u8; 32];
-        hk.expand(info.as_bytes(), &mut enc_key).expect("HKDF expand 32 bytes always succeeds");
+        hk.expand(info.as_bytes(), &mut enc_key)
+            .expect("HKDF expand 32 bytes always succeeds");
         enc_key
     }
 
@@ -87,7 +97,10 @@ mod tests {
     fn ecdh_shared_secret_is_symmetric() {
         let alice = DeviceKeypair::generate();
         let bob = DeviceKeypair::generate();
-        assert_eq!(alice.ecdh(&bob.public_key_bytes()), bob.ecdh(&alice.public_key_bytes()));
+        assert_eq!(
+            alice.ecdh(&bob.public_key_bytes()),
+            bob.ecdh(&alice.public_key_bytes())
+        );
     }
 
     #[test]

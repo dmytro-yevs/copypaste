@@ -91,7 +91,6 @@ fn stage_v1_plaintext(path: &std::path::Path) {
     drop(conn);
 }
 
-
 /// Helper: read `PRAGMA user_version` via the open `Database`.
 fn user_version(db: &Database) -> i64 {
     db.conn()
@@ -437,9 +436,7 @@ fn migrate_v2_to_v3_adds_origin_device_id_column_with_empty_default() {
     // integration suite, not at the schema layer. This test pins the v3
     // schema delta + backfill semantics, which is what the merge tie-break
     // depends on.
-    use copypaste_core::storage::items::{
-        backfill_origin_device_id, insert_item, ClipboardItem,
-    };
+    use copypaste_core::storage::items::{backfill_origin_device_id, insert_item, ClipboardItem};
 
     let db = Database::open_in_memory().expect("fresh v3 in-memory DB");
 

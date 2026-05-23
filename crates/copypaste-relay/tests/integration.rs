@@ -12,6 +12,8 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use tower::ServiceExt;
 
+#[path = "../src/auth.rs"]
+mod auth;
 #[path = "../src/config.rs"]
 mod config;
 #[path = "../src/error.rs"]
@@ -20,16 +22,14 @@ mod error;
 mod models;
 #[path = "../src/quota.rs"]
 mod quota;
-#[path = "../src/state.rs"]
-mod state;
-#[path = "../src/auth.rs"]
-mod auth;
-#[path = "../src/routes/health.rs"]
-mod routes_health;
 #[path = "../src/routes/devices.rs"]
 mod routes_devices;
+#[path = "../src/routes/health.rs"]
+mod routes_health;
 #[path = "../src/routes/items.rs"]
 mod routes_items;
+#[path = "../src/state.rs"]
+mod state;
 
 use config::RelayConfig;
 use state::{AppState, RelayStore};
@@ -221,7 +221,9 @@ async fn test_push_and_pull_roundtrip() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key()).unwrap().0
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+            .unwrap()
+            .0
     };
 
     // Push an item.
@@ -241,8 +243,12 @@ async fn test_push_and_pull_roundtrip() {
     assert!(id >= 1);
 
     // Pull it back.
-    let (pull_status, pull_body) =
-        get_json(app.clone(), &format!("/devices/{DEVICE_A}/items"), Some(&a_token)).await;
+    let (pull_status, pull_body) = get_json(
+        app.clone(),
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&a_token),
+    )
+    .await;
     assert_eq!(pull_status, StatusCode::OK);
     let items = pull_body.as_array().unwrap();
     assert_eq!(items.len(), 1);
@@ -271,7 +277,9 @@ async fn test_pull_since_wall_time() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key()).unwrap().0
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+            .unwrap()
+            .0
     };
 
     for wt in [1000u64, 2000, 3000] {
@@ -303,7 +311,9 @@ async fn test_push_invalid_content_type_is_400() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key()).unwrap().0
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+            .unwrap()
+            .0
     };
     let (status, _) = post_json(
         app,
@@ -320,13 +330,10 @@ async fn test_delete_nonexistent_item_is_404() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key()).unwrap().0
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+            .unwrap()
+            .0
     };
-    let del_status = delete_req(
-        app,
-        &format!("/devices/{DEVICE_A}/items/9999"),
-        &a_token,
-    )
-    .await;
+    let del_status = delete_req(app, &format!("/devices/{DEVICE_A}/items/9999"), &a_token).await;
     assert_eq!(del_status, StatusCode::NOT_FOUND);
 }

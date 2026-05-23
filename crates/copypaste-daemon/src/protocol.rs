@@ -140,7 +140,11 @@ impl Response {
     /// Convenience wrapper for unimplemented methods (cloud-sync stubs, etc.).
     /// Always sets `error_code = "not_implemented"`.
     pub fn not_implemented(id: impl Into<String>, feature: &'static str) -> Self {
-        Self::err_with_code(id, ERR_CODE_NOT_IMPLEMENTED, format!("not implemented: {feature}"))
+        Self::err_with_code(
+            id,
+            ERR_CODE_NOT_IMPLEMENTED,
+            format!("not implemented: {feature}"),
+        )
     }
 }
 
@@ -225,12 +229,18 @@ mod tests {
         let ok = Response::ok("v3", serde_json::json!({}));
         assert_eq!(ok.protocol_version, CURRENT_PROTOCOL_VERSION);
         let ok_s = serde_json::to_string(&ok).unwrap();
-        assert!(ok_s.contains(&format!("\"protocol_version\":{}", CURRENT_PROTOCOL_VERSION)));
+        assert!(ok_s.contains(&format!(
+            "\"protocol_version\":{}",
+            CURRENT_PROTOCOL_VERSION
+        )));
 
         let err = Response::err_with_code("v4", ERR_CODE_VERSION_MISMATCH, "bad version");
         assert_eq!(err.protocol_version, CURRENT_PROTOCOL_VERSION);
         let err_s = serde_json::to_string(&err).unwrap();
-        assert!(err_s.contains(&format!("\"protocol_version\":{}", CURRENT_PROTOCOL_VERSION)));
+        assert!(err_s.contains(&format!(
+            "\"protocol_version\":{}",
+            CURRENT_PROTOCOL_VERSION
+        )));
         assert!(err_s.contains("\"error_code\":\"version_mismatch\""));
     }
 }

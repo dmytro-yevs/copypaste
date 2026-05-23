@@ -39,7 +39,10 @@ pub struct PeerCertVerifier {
 impl PeerCertVerifier {
     /// Server-side: accept any fingerprint that is in the `PairedPeers` map.
     pub fn new(peers: Arc<PairedPeers>) -> Self {
-        Self { peers, expected: None }
+        Self {
+            peers,
+            expected: None,
+        }
     }
 
     /// Client-side: accept exactly `expected_fingerprint` (which must also be

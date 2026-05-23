@@ -183,10 +183,25 @@ fn main() {
         Commands::Count => commands::count::run(&socket),
         Commands::Delete { id } => commands::delete::run(&socket, &id),
         Commands::Search { query, limit } => commands::search::run(&socket, &query, limit),
-        Commands::Copy { index, id, search, list, limit } => {
-            commands::copy::run(&socket, index, id.as_deref(), search.as_deref(), list, limit)
-        }
-        Commands::Export { limit, output, force } => commands::export::run(&socket, limit, output.as_deref(), force),
+        Commands::Copy {
+            index,
+            id,
+            search,
+            list,
+            limit,
+        } => commands::copy::run(
+            &socket,
+            index,
+            id.as_deref(),
+            search.as_deref(),
+            list,
+            limit,
+        ),
+        Commands::Export {
+            limit,
+            output,
+            force,
+        } => commands::export::run(&socket, limit, output.as_deref(), force),
         Commands::Watch { interval } => commands::watch::run(&socket, interval),
         Commands::Clear { force } => commands::clear::run(&socket, force),
         Commands::Stats => commands::stats::run(&socket),
@@ -211,13 +226,21 @@ fn main() {
         Commands::Backup { output, dry_run } => {
             commands::backup::run_backup(&socket, output.as_deref(), dry_run)
         }
-        Commands::Restore { path, force, dry_run } => {
-            commands::backup::run_restore(&socket, &path, force, dry_run)
-        }
-        Commands::Vacuum { dry_run, reindex_only } => commands::vacuum::run(
+        Commands::Restore {
+            path,
+            force,
+            dry_run,
+        } => commands::backup::run_restore(&socket, &path, force, dry_run),
+        Commands::Vacuum {
+            dry_run,
+            reindex_only,
+        } => commands::vacuum::run(
             &socket,
             paths::db_path(),
-            commands::vacuum::Plan { dry_run, reindex_only },
+            commands::vacuum::Plan {
+                dry_run,
+                reindex_only,
+            },
         ),
     };
 

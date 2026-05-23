@@ -98,8 +98,8 @@ pub fn init() -> LogGuard {
     };
 
     // Stderr layer: compact human-readable, no ANSI colours (for systemd/launchd).
-    let stderr_filter = EnvFilter::try_from_env("COPYPASTE_LOG")
-        .unwrap_or_else(|_| EnvFilter::new(default_filter));
+    let stderr_filter =
+        EnvFilter::try_from_env("COPYPASTE_LOG").unwrap_or_else(|_| EnvFilter::new(default_filter));
 
     let stderr_layer = fmt::layer()
         .compact()
@@ -278,9 +278,8 @@ mod tests {
         // try_from_env on an env var that doesn't exist should return Err, and
         // we fall back to the default string — verify that chain works.
         // We use a var name that certainly isn't set.
-        let filter =
-            tracing_subscriber::EnvFilter::try_from_env("COPYPASTE_LOG_NONEXISTENT_VAR")
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("copypaste=info,warn"));
+        let filter = tracing_subscriber::EnvFilter::try_from_env("COPYPASTE_LOG_NONEXISTENT_VAR")
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("copypaste=info,warn"));
         drop(filter);
     }
 }

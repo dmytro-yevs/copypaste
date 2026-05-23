@@ -1,6 +1,10 @@
 // Permit dead code — many IPC methods are stubs for future UI features.
 #![allow(dead_code)]
 
+use anyhow::{anyhow, Context, Result};
+use copypaste_ipc::ErrorCode;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 /// Synchronous IPC client for the copypaste-daemon Unix socket.
 ///
 /// Protocol: newline-delimited JSON.
@@ -9,10 +13,6 @@
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use anyhow::{anyhow, Context, Result};
-use copypaste_ipc::ErrorCode;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 // ---------------------------------------------------------------------------
 // IpcError
@@ -214,12 +214,16 @@ impl IpcClient {
             return Err(anyhow!("daemon closed connection without response"));
         }
 
-        let v: Value = serde_json::from_str(resp_line.trim())
-            .context("invalid JSON from daemon")?;
+        let v: Value =
+            serde_json::from_str(resp_line.trim()).context("invalid JSON from daemon")?;
 
         Ok(IpcResponse {
             ok: v["ok"].as_bool().unwrap_or(false),
-            data: if v["data"].is_null() { None } else { Some(v["data"].clone()) },
+            data: if v["data"].is_null() {
+                None
+            } else {
+                Some(v["data"].clone())
+            },
             error: v["error"].as_str().map(str::to_owned),
             // W3.3: parse the machine-readable `error_code` if the daemon
             // attached one. Unknown / missing codes collapse to `None` so
@@ -241,10 +245,13 @@ impl IpcClient {
     pub fn history_page(&mut self, limit: u64, offset: u64) -> Result<HistoryPage> {
         // server enforces MAX_PAGE=1000
         let effective_limit = build_history_limit(limit);
-        let resp = self.call("history_page", serde_json::json!({
-            "limit": effective_limit,
-            "offset": offset,
-        }))?;
+        let resp = self.call(
+            "history_page",
+            serde_json::json!({
+                "limit": effective_limit,
+                "offset": offset,
+            }),
+        )?;
 
         if !resp.ok {
             return Err(anyhow!(
@@ -307,16 +314,15 @@ impl IpcClient {
             ));
         }
         let data = resp.data.unwrap_or(Value::Null);
-        let settings: AppSettings = serde_json::from_value(data)
-            .context("invalid AppSettings JSON from daemon")?;
+        let settings: AppSettings =
+            serde_json::from_value(data).context("invalid AppSettings JSON from daemon")?;
         Ok(settings)
     }
 
     /// Persist application configuration via the daemon.
     #[allow(dead_code)]
     pub fn save_settings(&mut self, settings: &AppSettings) -> Result<()> {
-        let params = serde_json::to_value(settings)
-            .context("failed to serialize AppSettings")?;
+        let params = serde_json::to_value(settings).context("failed to serialize AppSettings")?;
         let resp = self.call("set_config", params)?;
         if resp.ok {
             Ok(())
@@ -375,10 +381,13 @@ impl IpcClient {
     /// Returns `Ok(())` immediately; actual pairing is async and not yet implemented.
     pub fn pair_peer(&mut self, fingerprint: &str, name: &str) -> Result<()> {
         // TODO: connect once daemon implements PAKE handshake
-        let resp = self.call("pair_peer", serde_json::json!({
-            "fingerprint": fingerprint,
-            "name": name,
-        }))?;
+        let resp = self.call(
+            "pair_peer",
+            serde_json::json!({
+                "fingerprint": fingerprint,
+                "name": name,
+            }),
+        )?;
         if resp.ok {
             Ok(())
         } else {
@@ -392,9 +401,12 @@ impl IpcClient {
     /// Remove a paired peer by fingerprint.
     pub fn unpair_peer(&mut self, fingerprint: &str) -> Result<()> {
         // TODO: connect once daemon implements p2p peer storage
-        let resp = self.call("unpair_peer", serde_json::json!({
-            "fingerprint": fingerprint,
-        }))?;
+        let resp = self.call(
+            "unpair_peer",
+            serde_json::json!({
+                "fingerprint": fingerprint,
+            }),
+        )?;
         if resp.ok {
             Ok(())
         } else {
@@ -414,10 +426,13 @@ impl IpcClient {
     /// Returns `Ok(())` immediately; actual sign-in is a stub until Supabase is wired.
     pub fn cloud_sign_in(&mut self, email: &str, password: &str) -> Result<()> {
         // TODO: connect once daemon has Supabase auth integration
-        let resp = self.call("cloud_sign_in", serde_json::json!({
-            "email": email,
-            "password": password,
-        }))?;
+        let resp = self.call(
+            "cloud_sign_in",
+            serde_json::json!({
+                "email": email,
+                "password": password,
+            }),
+        )?;
         if resp.ok {
             Ok(())
         } else {
@@ -619,7 +634,9 @@ mod tests {
         // an empty-state hint instead of crashing.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nonexistent.sock");
-        let err = IpcClient::connect(&path).err().expect("expected connect failure");
+        let err = IpcClient::connect(&path)
+            .err()
+            .expect("expected connect failure");
 
         // The anyhow::Error must carry our typed IpcError::DaemonOffline.
         let typed = err
@@ -650,7 +667,11 @@ mod tests {
         // server-side enforcement added in Wave 2.3.
         assert_eq!(build_history_limit(1), 1, "small limit untouched");
         assert_eq!(build_history_limit(50), 50, "default page untouched");
-        assert_eq!(build_history_limit(1000), 1000, "exactly MAX_PAGE untouched");
+        assert_eq!(
+            build_history_limit(1000),
+            1000,
+            "exactly MAX_PAGE untouched"
+        );
         assert_eq!(
             build_history_limit(1001),
             1000,
@@ -685,24 +706,33 @@ mod tests {
         // missing / unknown codes (forward-compat for older daemons).
         type Case = (Option<ErrorCode>, &'static str, fn(&IpcError) -> bool);
         let cases: &[Case] = &[
-            (Some(ErrorCode::NotImplemented), "cloud sync",
-                |e| matches!(e, IpcError::NotImplemented(_))),
-            (Some(ErrorCode::AuthFailed), "bad password",
-                |e| matches!(e, IpcError::AuthFailed(_))),
-            (Some(ErrorCode::NotFound), "item missing",
-                |e| matches!(e, IpcError::NotFound(_))),
-            (Some(ErrorCode::InvalidArgument), "bad param",
-                |e| matches!(e, IpcError::InvalidArgument(_))),
-            (Some(ErrorCode::IpcNotReady), "db booting",
-                |e| matches!(e, IpcError::IpcNotReady(_))),
-            (Some(ErrorCode::RateLimited), "slow down",
-                |e| matches!(e, IpcError::RateLimited(_))),
-            (Some(ErrorCode::VersionMismatch), "bump client",
-                |e| matches!(e, IpcError::VersionMismatch(_))),
-            (Some(ErrorCode::InternalError), "panic",
-                |e| matches!(e, IpcError::Daemon(_, Some(ErrorCode::InternalError)))),
-            (None, "legacy err",
-                |e| matches!(e, IpcError::Daemon(_, None))),
+            (Some(ErrorCode::NotImplemented), "cloud sync", |e| {
+                matches!(e, IpcError::NotImplemented(_))
+            }),
+            (Some(ErrorCode::AuthFailed), "bad password", |e| {
+                matches!(e, IpcError::AuthFailed(_))
+            }),
+            (Some(ErrorCode::NotFound), "item missing", |e| {
+                matches!(e, IpcError::NotFound(_))
+            }),
+            (Some(ErrorCode::InvalidArgument), "bad param", |e| {
+                matches!(e, IpcError::InvalidArgument(_))
+            }),
+            (Some(ErrorCode::IpcNotReady), "db booting", |e| {
+                matches!(e, IpcError::IpcNotReady(_))
+            }),
+            (Some(ErrorCode::RateLimited), "slow down", |e| {
+                matches!(e, IpcError::RateLimited(_))
+            }),
+            (Some(ErrorCode::VersionMismatch), "bump client", |e| {
+                matches!(e, IpcError::VersionMismatch(_))
+            }),
+            (Some(ErrorCode::InternalError), "panic", |e| {
+                matches!(e, IpcError::Daemon(_, Some(ErrorCode::InternalError)))
+            }),
+            (None, "legacy err", |e| {
+                matches!(e, IpcError::Daemon(_, None))
+            }),
         ];
 
         for (code, msg, check) in cases {
@@ -730,16 +760,14 @@ mod tests {
         assert_eq!(parsed_code, Some(ErrorCode::NotImplemented));
 
         // Unknown code collapses to None (forward-compat).
-        let v2: Value = serde_json::from_str(
-            r#"{"id":1,"ok":false,"error":"x","error_code":"future_code"}"#,
-        )
-        .unwrap();
+        let v2: Value =
+            serde_json::from_str(r#"{"id":1,"ok":false,"error":"x","error_code":"future_code"}"#)
+                .unwrap();
         let parsed_code = v2["error_code"].as_str().and_then(ErrorCode::parse);
         assert_eq!(parsed_code, None);
 
         // Missing field collapses to None (legacy daemon, no regression).
-        let v3: Value =
-            serde_json::from_str(r#"{"id":1,"ok":false,"error":"x"}"#).unwrap();
+        let v3: Value = serde_json::from_str(r#"{"id":1,"ok":false,"error":"x"}"#).unwrap();
         let parsed_code = v3["error_code"].as_str().and_then(ErrorCode::parse);
         assert_eq!(parsed_code, None);
     }
@@ -754,7 +782,10 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let s2: AppSettings = serde_json::from_str(&json).unwrap();
         assert!(s2.p2p_enabled);
-        assert_eq!(s2.supabase_url.as_deref(), Some("https://example.supabase.co"));
+        assert_eq!(
+            s2.supabase_url.as_deref(),
+            Some("https://example.supabase.co")
+        );
         assert_eq!(s2.supabase_anon_key.as_deref(), Some("key123"));
     }
 
@@ -780,10 +811,22 @@ mod tests {
         // avoids a useless round-trip; the daemon check is the source of
         // truth so a malicious client cannot bypass it.
         assert!(!IpcClient::is_valid_pair_password(""), "empty rejected");
-        assert!(!IpcClient::is_valid_pair_password("ab"), "too short rejected");
-        assert!(!IpcClient::is_valid_pair_password("12345"), "5 chars rejected");
-        assert!(IpcClient::is_valid_pair_password("123456"), "exactly 6 chars accepted");
-        assert!(IpcClient::is_valid_pair_password("hunter22"), "longer accepted");
+        assert!(
+            !IpcClient::is_valid_pair_password("ab"),
+            "too short rejected"
+        );
+        assert!(
+            !IpcClient::is_valid_pair_password("12345"),
+            "5 chars rejected"
+        );
+        assert!(
+            IpcClient::is_valid_pair_password("123456"),
+            "exactly 6 chars accepted"
+        );
+        assert!(
+            IpcClient::is_valid_pair_password("hunter22"),
+            "longer accepted"
+        );
         // Multibyte: 6 Unicode scalars regardless of UTF-8 byte length.
         assert!(
             IpcClient::is_valid_pair_password("парол1"),
@@ -794,7 +837,8 @@ mod tests {
             "3-scalar password must be rejected even if multibyte UTF-8"
         );
         assert_eq!(
-            IpcClient::MIN_PAIR_PASSWORD_LEN, 6,
+            IpcClient::MIN_PAIR_PASSWORD_LEN,
+            6,
             "constant must stay in sync with the daemon-side check"
         );
     }

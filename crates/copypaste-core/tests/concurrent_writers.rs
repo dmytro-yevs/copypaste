@@ -17,9 +17,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use copypaste_core::{
-    count_items, insert_item, ClipboardItem, Database,
-};
+use copypaste_core::{count_items, insert_item, ClipboardItem, Database};
 use tempfile::tempdir;
 use tokio::sync::Mutex;
 
@@ -44,11 +42,7 @@ async fn concurrent_writers_no_lost_updates() {
         let db = Arc::clone(&shared);
         let handle = tokio::spawn(async move {
             for lamport in 1..=INSERTS_PER_WRITER {
-                let mut item = ClipboardItem::new_text(
-                    vec![0u8; 16],
-                    vec![0u8; 24],
-                    lamport,
-                );
+                let mut item = ClipboardItem::new_text(vec![0u8; 16], vec![0u8; 24], lamport);
                 item.app_bundle_id = Some(device.to_string());
                 // Hold the mutex only for the single insert; this is exactly
                 // how the daemon serialises writes across subsystems.

@@ -39,8 +39,8 @@
 //!     on busy CI hosts while still flagging an O(n) regression in the hot
 //!     path (e.g. accidental allocation explosion or lock contention).
 
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -66,7 +66,9 @@ async fn boot_server() -> (Arc<Mutex<Database>>, tempfile::TempDir, std::path::P
         .unwrap_or(0);
     let sock = dir.path().join(format!("h-{suffix}.sock"));
 
-    let db = Arc::new(Mutex::new(Database::open_in_memory().expect("in-memory DB")));
+    let db = Arc::new(Mutex::new(
+        Database::open_in_memory().expect("in-memory DB"),
+    ));
     let private_mode = Arc::new(AtomicBool::new(false));
     let server = IpcServer::new(db.clone(), private_mode);
     let sock_for_task = sock.clone();
@@ -288,7 +290,5 @@ async fn repeated_status_under_1ms_after_warmup() {
         "total elapsed {elapsed:?} exceeds 2s budget for {N} status calls"
     );
 
-    eprintln!(
-        "[health::repeated_status] {N} calls in {elapsed:?} (avg {avg_us} µs)"
-    );
+    eprintln!("[health::repeated_status] {N} calls in {elapsed:?} (avg {avg_us} µs)");
 }

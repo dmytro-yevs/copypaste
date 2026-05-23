@@ -128,7 +128,10 @@ impl CloudConfig {
         if !is_https_url(&trimmed) {
             return Err(CloudError::InsecureUrl(supabase_url));
         }
-        Ok(Self { supabase_url: trimmed, anon_key })
+        Ok(Self {
+            supabase_url: trimmed,
+            anon_key,
+        })
     }
 }
 
@@ -146,7 +149,9 @@ fn is_https_url(s: &str) -> bool {
     }
     let rest = &s[8..];
     // Must have at least one non-`/` character (a host).
-    rest.chars().next().is_some_and(|c| c != '/' && !c.is_whitespace())
+    rest.chars()
+        .next()
+        .is_some_and(|c| c != '/' && !c.is_whitespace())
 }
 
 // ── Pre-flight checks ─────────────────────────────────────────────────────────
@@ -235,7 +240,7 @@ pub fn preflight_encrypted_db_check(db_path: &std::path::Path) -> Result<(), Clo
     };
     let mut buf = [0u8; 16];
     match f.read(&mut buf) {
-        Ok(0) => Ok(()), // empty file, treat as fresh
+        Ok(0) => Ok(()),           // empty file, treat as fresh
         Ok(n) if n < 16 => Ok(()), // partial write or truncated — still safe-ish (not a real DB)
         Ok(_) => {
             // Either plain SQLite ("SQLite format 3\0") or SQLCipher (encrypted
@@ -317,7 +322,12 @@ pub async fn start_cloud(
     let push_config = config.clone();
     let push_bearer = bearer.clone();
     let push_shutdown = shutdown.clone();
-    tokio::spawn(push_loop(push_config, push_bearer, new_item_rx, push_shutdown));
+    tokio::spawn(push_loop(
+        push_config,
+        push_bearer,
+        new_item_rx,
+        push_shutdown,
+    ));
 
     // Task B: poll Supabase REST for remote items and insert unknown ones locally.
     let poll_config = config.clone();
@@ -433,7 +443,10 @@ async fn push_loop(
         if let Some(item) = retry_queue.pop_front() {
             match push_item_with_retries(&client, &rest_url, &config, &bearer, &item).await {
                 Ok(()) => {
-                    tracing::info!("cloud-sync flushed queued id={} (retry queue drained one)", item.id);
+                    tracing::info!(
+                        "cloud-sync flushed queued id={} (retry queue drained one)",
+                        item.id
+                    );
                     continue;
                 }
                 Err(e) => {
@@ -817,12 +830,8 @@ fn json_to_clipboard_item(v: &serde_json::Value) -> Option<ClipboardItem> {
     let item_id = v["item_id"].as_str().unwrap_or(&id).to_owned();
     let content_type = v["content_type"].as_str().unwrap_or("text").to_owned();
 
-    let content = v["content"]
-        .as_str()
-        .and_then(|s| b64.decode(s).ok());
-    let content_nonce = v["content_nonce"]
-        .as_str()
-        .and_then(|s| b64.decode(s).ok());
+    let content = v["content"].as_str().and_then(|s| b64.decode(s).ok());
+    let content_nonce = v["content_nonce"].as_str().and_then(|s| b64.decode(s).ok());
 
     let blob_ref = v["blob_ref"].as_str().map(str::to_owned);
     let is_sensitive = v["is_sensitive"].as_bool().unwrap_or(false);
@@ -1021,7 +1030,9 @@ mod tests {
             attempts.set(attempts.get() + 1);
             Ok(())
         };
-        probe_with_retry(probe).await.expect("first-attempt success");
+        probe_with_retry(probe)
+            .await
+            .expect("first-attempt success");
         assert_eq!(attempts.get(), 1, "must not retry after success");
     }
 
@@ -1051,7 +1062,10 @@ mod tests {
         f.write_all(&[0u8; 100]).unwrap();
         let err = preflight_encrypted_db_check(&path)
             .expect_err("existing SQLite DB must block ephemeral-key path");
-        assert!(matches!(err, CloudError::EncryptedDbRequiresPersistentKey(_)));
+        assert!(matches!(
+            err,
+            CloudError::EncryptedDbRequiresPersistentKey(_)
+        ));
     }
 
     #[test]
@@ -1066,7 +1080,10 @@ mod tests {
         f.write_all(&[0xADu8; 200]).unwrap();
         let err = preflight_encrypted_db_check(&path)
             .expect_err("existing encrypted DB must also block ephemeral key");
-        assert!(matches!(err, CloudError::EncryptedDbRequiresPersistentKey(_)));
+        assert!(matches!(
+            err,
+            CloudError::EncryptedDbRequiresPersistentKey(_)
+        ));
     }
 
     // ── Wave 2.7 push reliability (#19/#20/#21) ───────────────────────────────
@@ -1200,7 +1217,10 @@ mod tests {
         .await
         .expect("must not hang");
 
-        assert!(result.is_ok(), "401 must trigger refresh + retry; got: {result:?}");
+        assert!(
+            result.is_ok(),
+            "401 must trigger refresh + retry; got: {result:?}"
+        );
         m_401.assert();
         m_ok.assert();
 
@@ -1247,7 +1267,10 @@ mod tests {
         .expect("must not hang");
         let elapsed = start.elapsed();
 
-        assert!(result.is_ok(), "429 + Retry-After must succeed on retry; got: {result:?}");
+        assert!(
+            result.is_ok(),
+            "429 + Retry-After must succeed on retry; got: {result:?}"
+        );
         m_429.assert();
         m_ok.assert();
 
@@ -1282,7 +1305,10 @@ mod tests {
             "integer seconds parsed"
         );
 
-        h.insert(RETRY_AFTER, HeaderValue::from_static("Wed, 21 Oct 2026 07:28:00 GMT"));
+        h.insert(
+            RETRY_AFTER,
+            HeaderValue::from_static("Wed, 21 Oct 2026 07:28:00 GMT"),
+        );
         assert_eq!(
             parse_retry_after_secs(&h),
             None,
@@ -1380,7 +1406,10 @@ mod tests {
             .collect();
         let redacted = format!("len={}, prefix={}", len, prefix_hex);
 
-        assert!(redacted.contains("len="), "redacted form must carry length: {redacted}");
+        assert!(
+            redacted.contains("len="),
+            "redacted form must carry length: {redacted}"
+        );
         assert!(
             redacted.contains("prefix="),
             "redacted form must carry hex fingerprint: {redacted}"
@@ -1389,8 +1418,15 @@ mod tests {
             !redacted.contains("PLAINTEXT-SECRET"),
             "redaction failed — payload leaked into log line: {redacted}"
         );
-        assert!(len > 16, "test payload must exceed 16 bytes for truncation check");
-        assert_eq!(prefix_hex.len(), 32, "hex prefix must be 16 bytes = 32 chars");
+        assert!(
+            len > 16,
+            "test payload must exceed 16 bytes for truncation check"
+        );
+        assert_eq!(
+            prefix_hex.len(),
+            32,
+            "hex prefix must be 16 bytes = 32 chars"
+        );
     }
 
     /// The bounded-retry queue must evict the oldest entry when at capacity,
@@ -1404,7 +1440,11 @@ mod tests {
         for i in 0..(PUSH_RETRY_QUEUE_CAP + 5) {
             enqueue_for_retry(&mut q, test_item(&format!("item-{i}")));
         }
-        assert_eq!(q.len(), PUSH_RETRY_QUEUE_CAP, "queue must cap at PUSH_RETRY_QUEUE_CAP");
+        assert_eq!(
+            q.len(),
+            PUSH_RETRY_QUEUE_CAP,
+            "queue must cap at PUSH_RETRY_QUEUE_CAP"
+        );
         // Front of queue should now be `item-5` (the first 5 were evicted).
         assert_eq!(q.front().expect("non-empty").id, "item-5");
     }
