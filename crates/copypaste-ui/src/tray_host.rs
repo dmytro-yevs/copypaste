@@ -25,7 +25,9 @@
 //! Errors are degraded — if the platform refuses to register a tray (CI,
 //! headless run) we log a warning and return without panicking so the UI
 //! still functions as a window-only app.
-#![cfg(target_os = "macos")]
+//
+// Gating: the module is declared as `#[cfg(target_os = "macos")] pub mod
+// tray_host;` in `lib.rs`, so we don't need an inner `#![cfg(...)]` here.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
