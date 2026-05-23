@@ -67,9 +67,17 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     }
 
     // Broadcast channel: carries newly-inserted clipboard items to any
-    // subscriber (P2P sync, cloud-sync, future extensions). Capacity 64 — lagging
-    // receivers drop oldest items and log a warning.
-    let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(64);
+    // subscriber (P2P sync, cloud-sync, future extensions).
+    //
+    // Capacity 256 (bumped from 64 — audit HIGH #8). The earlier 64-slot
+    // buffer was too small for clipboard bursts (e.g. a rapid `pbcopy` loop
+    // or a P2P peer momentarily backpressured by network jitter): subscribers
+    // would receive `RecvError::Lagged` and silently drop items.
+    //
+    // Subscriber loops (p2p::subscriber_loop, cloud orchestrator, sync_orch)
+    // still need to log `Lagged(n)` themselves — owned by the subsystems that
+    // hold the receivers, not this file.
+    let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(256);
 
     // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
     let _p2p_handle: Option<p2p::P2pHandle> =
@@ -130,7 +138,25 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // returns `Err`, which the orchestrator logs at debug and continues.
     let (sync_outbound_tx, _sync_outbound_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
     let (_sync_incoming_tx, sync_incoming_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
-    let sync_device_id = uuid::Uuid::new_v4().to_string();
+    // Persistent sync_device_id (audit HIGH #13).
+    //
+    // Previously this was `Uuid::new_v4().to_string()` on every startup,
+    // which broke sync orchestrator correlation: peers saw a brand-new
+    // device on every restart and could not deduplicate items by origin.
+    //
+    // We reuse the same on-disk identifier the P2P branch already loads
+    // via `load_or_create_device_id` so the daemon presents a single
+    // stable identity across the local-clipboard / P2P / sync surfaces.
+    let sync_device_id = match load_or_create_device_id() {
+        Ok(id) => id.to_string(),
+        Err(e) => {
+            tracing::warn!(
+                "sync_device_id load/create failed ({e}); falling back to ephemeral UUID — \
+                 sync orchestrator will treat this run as a new device"
+            );
+            uuid::Uuid::new_v4().to_string()
+        }
+    };
     let sync_db = db.clone();
     let sync_rx = new_item_tx.subscribe();
     let _sync_handle = tokio::spawn(async move {
