@@ -1328,6 +1328,7 @@ dependencies = [
  "copypaste-core",
  "copypaste-p2p",
  "copypaste-supabase",
+ "copypaste-sync",
  "dirs 5.0.1",
  "hex",
  "home",

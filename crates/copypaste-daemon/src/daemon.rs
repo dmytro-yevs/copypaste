@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::time::interval;
 use copypaste_core::{
     AppConfig, Database, DeviceKeypair,
@@ -12,6 +12,12 @@ use copypaste_core::{
 use crate::{clipboard::{ClipboardContent, ClipboardMonitor}, p2p, paths};
 #[cfg(unix)]
 use crate::ipc::IpcServer;
+
+// Beta W2.2 (arch-1): sync orchestrator that wires `copypaste-sync` into the
+// daemon. Declared inline here because `main.rs` is owned by another worker
+// in this beta wave and we cannot add a top-level `mod sync_orch;` there.
+#[path = "sync_orch.rs"]
+pub mod sync_orch;
 
 /// Run the daemon until `Ctrl+C` / `SIGTERM` is received.
 ///
@@ -109,6 +115,45 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
         None
     };
+
+    // Beta W2.2 (arch-1): start the sync orchestrator.
+    //
+    // The orchestrator owns the bridge between the local clipboard broadcast
+    // channel and the peer transport(s). We always spawn it — even when P2P
+    // is disabled — because the inbound side may still receive items from the
+    // cloud-sync path once that worker (W2.3) wires its incoming sender in.
+    //
+    // For now the outbound side has no live consumer (the P2P subsystem still
+    // owns its own subscriber loop, see `p2p::subscriber_loop`). Sending into
+    // a channel whose receiver is dropped is harmless: `outbound_tx.send`
+    // returns `Err`, which the orchestrator logs at debug and continues.
+    let (sync_outbound_tx, _sync_outbound_rx) =
+        mpsc::channel::<copypaste_sync::WireItem>(64);
+    let (_sync_incoming_tx, sync_incoming_rx) =
+        mpsc::channel::<copypaste_sync::WireItem>(64);
+    let sync_device_id = uuid::Uuid::new_v4().to_string();
+    let sync_db = db.clone();
+    let sync_rx = new_item_tx.subscribe();
+    let _sync_handle = tokio::spawn(async move {
+        if let Err(e) = sync_orch::run(
+            sync_db,
+            sync_rx,
+            sync_incoming_rx,
+            sync_outbound_tx,
+            sync_device_id,
+        )
+        .await
+        {
+            tracing::warn!("sync orchestrator exited with error: {e}");
+        }
+    });
+    // Keep the local channel endpoints alive across shutdown — dropping the
+    // inbound sender would close the orchestrator's incoming side prematurely,
+    // and dropping the outbound receiver would cause every local item to log
+    // a debug message. The transport worker will own its own clones once
+    // integration lands.
+    let _keep_alive_sync_incoming = _sync_incoming_tx;
+    let _keep_alive_sync_outbound = _sync_outbound_rx;
 
     // Start optional cloud-sync if credentials are present.
     #[cfg(feature = "cloud-sync")]
