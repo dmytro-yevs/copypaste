@@ -114,8 +114,7 @@ fn load_icon() -> Option<tray_icon::Icon> {
     }
 
     // Fallback: 22×22 grey RGBA pixels.
-    let grey: Vec<u8> = std::iter::repeat([0x88u8, 0x88, 0x88, 0xffu8])
-        .take(22 * 22)
+    let grey: Vec<u8> = std::iter::repeat_n([0x88u8, 0x88, 0x88, 0xffu8], 22 * 22)
         .flatten()
         .collect();
     match tray_icon::Icon::from_rgba(grey, 22, 22) {
