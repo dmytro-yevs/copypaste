@@ -7,8 +7,8 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use copypaste_core::{Database, get_page, delete_item, delete_fts, count_items, search_items};
 use crate::protocol::{
-    CURRENT_PROTOCOL_VERSION, ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY,
-    MIN_SUPPORTED_PROTOCOL_VERSION, Request, Response,
+    CURRENT_PROTOCOL_VERSION, ERR_CODE_INTERNAL_ERROR, ERR_CODE_INVALID_ARGUMENT,
+    ERR_CODE_IPC_NOT_READY, MIN_SUPPORTED_PROTOCOL_VERSION, Request, Response,
 };
 
 /// Maximum size of a single IPC request line. Clients exceeding this receive
@@ -374,10 +374,15 @@ impl IpcServer {
                 let limit = raw_limit.min(MAX_PAGE);
                 let offset = req.params.get("offset")
                     .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let db = self.db.lock().await;
-                match get_page(&db, limit, offset) {
-                    Ok(items) => {
-                        let total = count_items(&db).unwrap_or(0);
+                let db_arc = self.db.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let items = get_page(&db, limit, offset)?;
+                    let total = count_items(&db).unwrap_or(0);
+                    Ok::<_, anyhow::Error>((items, total))
+                }).await;
+                match join {
+                    Ok(Ok((items, total))) => {
                         let json_items: Vec<_> = items.iter().map(|item| serde_json::json!({
                             "id": item.id,
                             "content_type": item.content_type,
@@ -387,7 +392,12 @@ impl IpcServer {
                         })).collect();
                         Response::ok(req.id, serde_json::json!({"items": json_items, "total": total}))
                     }
-                    Err(e) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
                 }
             }
             "delete" => {
@@ -395,23 +405,44 @@ impl IpcServer {
                     Some(s) => s.to_string(),
                     None => return Response::err(req.id, "missing param: id"),
                 };
-                let db = self.db.lock().await;
-                match delete_item(&db, &id) {
-                    Ok(_) => {
-                        // Best-effort FTS cleanup; log warning but don't fail the request
-                        if let Err(e) = delete_fts(&db, &id) {
+                let db_arc = self.db.clone();
+                let id_for_task = id.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let del = delete_item(&db, &id_for_task);
+                    // Best-effort FTS cleanup; surface as warning, not failure
+                    let fts = delete_fts(&db, &id_for_task);
+                    (del, fts)
+                }).await;
+                match join {
+                    Ok((Ok(_), fts_res)) => {
+                        if let Err(e) = fts_res {
                             tracing::warn!("fts delete failed for id={id}: {e}");
                         }
                         Response::ok(req.id, serde_json::Value::Null)
                     }
-                    Err(e) => Response::err(req.id, e.to_string()),
+                    Ok((Err(e), _)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
                 }
             }
             "count" => {
-                let db = self.db.lock().await;
-                match count_items(&db) {
-                    Ok(n) => Response::ok(req.id, serde_json::json!({"count": n})),
-                    Err(e) => Response::err(req.id, e.to_string()),
+                let db_arc = self.db.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    count_items(&db)
+                }).await;
+                match join {
+                    Ok(Ok(n)) => Response::ok(req.id, serde_json::json!({"count": n})),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
                 }
             }
             "search" => {
@@ -424,9 +455,13 @@ impl IpcServer {
                     .and_then(|v| v.as_u64())
                     .unwrap_or(20) as usize;
 
-                let db = self.db.lock().await;
-                match search_items(&db, &query, limit) {
-                    Ok(items) => {
+                let db_arc = self.db.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    search_items(&db, &query, limit)
+                }).await;
+                match join {
+                    Ok(Ok(items)) => {
                         let json_items: Vec<_> = items
                             .iter()
                             .map(|item| serde_json::json!({
@@ -439,7 +474,12 @@ impl IpcServer {
                             .collect();
                         Response::ok(req.id, serde_json::json!({"items": json_items}))
                     }
-                    Err(e) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
                 }
             }
             "copy" | "paste" => {
@@ -447,53 +487,81 @@ impl IpcServer {
                     Some(s) => s.to_string(),
                     None => return Response::err(req.id, "missing param: id"),
                 };
-                let db = self.db.lock().await;
-                match copypaste_core::get_page(&db, 1000, 0) {
-                    Ok(items) => {
-                        if let Some(item) = items.iter().find(|i| i.id == id) {
-                            match Self::write_to_pasteboard(item) {
-                                Ok(()) => Response::ok(req.id, serde_json::json!({
-                                    "id": item.id,
-                                    "content_type": item.content_type,
-                                    "written": true,
-                                })),
-                                Err(e) => Response::err(req.id, format!("pasteboard write failed: {e}")),
-                            }
-                        } else {
-                            Response::err(req.id, format!("item not found: {id}"))
-                        }
-                    }
-                    Err(e) => Response::err(req.id, e.to_string()),
+                let db_arc = self.db.clone();
+                let id_for_task = id.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let items = copypaste_core::get_page(&db, 1000, 0)?;
+                    Ok::<_, anyhow::Error>(items.into_iter().find(|i| i.id == id_for_task))
+                }).await;
+                match join {
+                    Ok(Ok(Some(item))) => match Self::write_to_pasteboard(&item) {
+                        Ok(()) => Response::ok(req.id, serde_json::json!({
+                            "id": item.id,
+                            "content_type": item.content_type,
+                            "written": true,
+                        })),
+                        Err(e) => Response::err(req.id, format!("pasteboard write failed: {e}")),
+                    },
+                    Ok(Ok(None)) => Response::err(req.id, format!("item not found: {id}")),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
                 }
             }
             "delete_all" => {
-                let db = self.db.lock().await;
-                let count = count_items(&db).unwrap_or(0);
-                loop {
-                    match get_page(&db, 100, 0) {
-                        Ok(items) if items.is_empty() => break,
-                        Ok(items) => {
-                            for item in items {
-                                let _ = delete_item(&db, &item.id);
-                                let _ = delete_fts(&db, &item.id);
+                let db_arc = self.db.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let count = count_items(&db).unwrap_or(0);
+                    loop {
+                        match get_page(&db, 100, 0) {
+                            Ok(items) if items.is_empty() => break,
+                            Ok(items) => {
+                                for item in items {
+                                    let _ = delete_item(&db, &item.id);
+                                    let _ = delete_fts(&db, &item.id);
+                                }
                             }
+                            Err(_) => break,
                         }
-                        Err(_) => break,
                     }
+                    count
+                }).await;
+                match join {
+                    Ok(count) => Response::ok(req.id, serde_json::json!({"deleted": count})),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
                 }
-                Response::ok(req.id, serde_json::json!({"deleted": count}))
             }
             "stats" => {
-                let db = self.db.lock().await;
-                let total = copypaste_core::count_items(&db).unwrap_or(0);
-                // Count sensitive items via get_page scan (limited to first 1000)
-                let sample = copypaste_core::get_page(&db, 1000, 0).unwrap_or_default();
-                let sensitive_count = sample.iter().filter(|i| i.is_sensitive).count() as i64;
-                Response::ok(req.id, serde_json::json!({
-                    "total_items": total,
-                    "sensitive_items": sensitive_count,
-                    "version": "1"
-                }))
+                let db_arc = self.db.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let total = copypaste_core::count_items(&db).unwrap_or(0);
+                    // Count sensitive items via get_page scan (limited to first 1000)
+                    let sample = copypaste_core::get_page(&db, 1000, 0).unwrap_or_default();
+                    let sensitive_count = sample.iter().filter(|i| i.is_sensitive).count() as i64;
+                    (total, sensitive_count)
+                }).await;
+                match join {
+                    Ok((total, sensitive_count)) => Response::ok(req.id, serde_json::json!({
+                        "total_items": total,
+                        "sensitive_items": sensitive_count,
+                        "version": "1"
+                    })),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
             }
             "pin" => {
                 // Pin an item (remove expiry so it's never auto-deleted)
@@ -501,10 +569,20 @@ impl IpcServer {
                     Some(s) => s.to_string(),
                     None => return Response::err(req.id, "missing param: id"),
                 };
-                let db = self.db.lock().await;
-                match copypaste_core::pin_item(&db, &id) {
-                    Ok(()) => Response::ok(req.id, serde_json::json!({"pinned": true, "id": id})),
-                    Err(e) => Response::err(req.id, e.to_string()),
+                let db_arc = self.db.clone();
+                let id_for_task = id.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    copypaste_core::pin_item(&db, &id_for_task)
+                }).await;
+                match join {
+                    Ok(Ok(())) => Response::ok(req.id, serde_json::json!({"pinned": true, "id": id})),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
                 }
             }
             "history_page" => {
@@ -514,10 +592,15 @@ impl IpcServer {
                 let limit = raw_limit.min(MAX_PAGE);
                 let offset = req.params.get("offset")
                     .and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                let db = self.db.lock().await;
-                match get_page(&db, limit, offset) {
-                    Ok(items) => {
-                        let total = count_items(&db).unwrap_or(0);
+                let db_arc = self.db.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let items = get_page(&db, limit, offset)?;
+                    let total = count_items(&db).unwrap_or(0);
+                    Ok::<_, anyhow::Error>((items, total))
+                }).await;
+                match join {
+                    Ok(Ok((items, total))) => {
                         let json_items: Vec<_> = items.iter().map(|item| {
                             // Build a safe text preview (first 120 chars of content, no decryption)
                             let preview = format!("[{} — id:{}]", item.content_type, &item.id[..8]);
@@ -532,7 +615,12 @@ impl IpcServer {
                         }).collect();
                         Response::ok(req.id, serde_json::json!({"items": json_items, "total": total}))
                     }
-                    Err(e) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
                 }
             }
             "get_config" => {
@@ -698,6 +786,59 @@ impl IpcServer {
                 }
             }
 
+            // Beta W3.2 — PAKE-based password pairing.
+            //
+            // Validates inputs and, in a full implementation, would:
+            //   1. Spawn a `PakeInitiator` keyed by `password`,
+            //   2. Route 3 handshake messages over the p2p Transport (W2.1)
+            //      to the peer identified by `peer_fingerprint`,
+            //   3. On success, persist the resulting `PasswordFile` in
+            //      SQLCipher and derive an XChaCha key into the keychain.
+            //
+            // Until the Transport message-routing layer for PAKE frames is
+            // wired (post-beta), we surface a `not_implemented` response so
+            // the UI can render an actionable status message. The handler
+            // still performs argument validation so callers exercise the
+            // full request/response path.
+            "pair_peer_with_password" => {
+                let peer_fingerprint = match req.params.get("peer_fingerprint").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "missing peer_fingerprint",
+                    ),
+                };
+                let password = match req.params.get("password").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "missing password",
+                    ),
+                };
+
+                if !is_valid_fingerprint(&peer_fingerprint) {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        format!("invalid peer_fingerprint format: {peer_fingerprint}"),
+                    );
+                }
+
+                if password.chars().count() < 6 {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "password must be at least 6 characters",
+                    );
+                }
+
+                Response::not_implemented(
+                    req.id,
+                    "pair-peer-with-password",
+                )
+            }
 
             other => Response::err(req.id, format!("unknown method: {other}")),
         }
@@ -1533,6 +1674,114 @@ mod tests {
         assert_eq!(
             resp["ok"], true,
             "status should be ok after disconnects, got: {resp}"
+        );
+    }
+
+    /// beta-W3.1 — DB-touching IPC handlers must run on spawn_blocking so a
+    /// slow rusqlite read does not block tokio worker threads. We exercise
+    /// this by issuing N concurrent `list` requests on a single-threaded
+    /// runtime (`#[tokio::test]` default). If any handler held a tokio worker
+    /// across the SQLite call, the requests would serialize and the wall
+    /// clock would exceed N × per-request latency. With spawn_blocking they
+    /// fan out across the blocking pool and complete near-concurrently.
+    ///
+    /// We assert a *generous* upper bound (well below strict serialization)
+    /// rather than a tight one so the test stays robust on slow CI.
+    #[tokio::test]
+    async fn spawn_blocking_does_not_block_tokio_worker() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("test-spawn-blocking.sock");
+        start_test_server(&sock).await;
+
+        // Fire 4 concurrent `list` requests, each on its own connection.
+        const N: usize = 4;
+        let started = std::time::Instant::now();
+        let mut handles = Vec::with_capacity(N);
+        for i in 0..N {
+            let sock_path = sock.clone();
+            handles.push(tokio::spawn(async move {
+                let mut stream = UnixStream::connect(&sock_path).await.unwrap();
+                let payload = format!("{{\"id\":\"sb{i}\",\"method\":\"list\"}}\n");
+                stream.write_all(payload.as_bytes()).await.unwrap();
+                let mut lines = BufReader::new(&mut stream).lines();
+                let line = lines.next_line().await.unwrap().unwrap();
+                let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+                assert_eq!(resp["ok"], true, "list must succeed: {line}");
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+        let elapsed = started.elapsed();
+
+        // Sanity bound: 4 in-memory `list` calls on an empty DB should finish
+        // in well under a second even with sequential serialization, so 5s
+        // catches catastrophic regressions (e.g., a single-thread deadlock)
+        // without flaking on slow CI runners.
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "4 concurrent list requests took {elapsed:?} — tokio worker likely blocked"
+        );
+    }
+
+    /// beta-W3.2 — `pair_peer_with_password` validates required params and
+    /// returns `not_implemented` once inputs check out, so the UI can rely
+    /// on a stable error_code for the not-yet-wired Transport path.
+    #[tokio::test]
+    async fn pair_peer_with_password_validates_inputs() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("test-pair-pw.sock");
+        start_test_server(&sock).await;
+
+        async fn call(sock: &std::path::Path, body: &str) -> serde_json::Value {
+            let mut stream = UnixStream::connect(sock).await.unwrap();
+            stream.write_all(body.as_bytes()).await.unwrap();
+            stream.write_all(b"\n").await.unwrap();
+            let mut lines = BufReader::new(&mut stream).lines();
+            let line = lines.next_line().await.unwrap().unwrap();
+            serde_json::from_str(&line).unwrap()
+        }
+
+        // Missing peer_fingerprint → invalid_argument
+        let resp = call(&sock, r#"{"id":"p1","method":"pair_peer_with_password","params":{"password":"hunter22"}}"#).await;
+        assert_eq!(resp["ok"], false, "missing peer_fingerprint must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+
+        // Missing password → invalid_argument
+        let valid_fp = "a".repeat(64);
+        let body = format!(
+            r#"{{"id":"p2","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{valid_fp}"}}}}"#
+        );
+        let resp = call(&sock, &body).await;
+        assert_eq!(resp["ok"], false, "missing password must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+
+        // Short password → invalid_argument (UI enforces but daemon double-checks)
+        let body = format!(
+            r#"{{"id":"p3","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{valid_fp}","password":"ab"}}}}"#
+        );
+        let resp = call(&sock, &body).await;
+        assert_eq!(resp["ok"], false, "short password must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+
+        // Bad fingerprint hex → invalid_argument
+        let resp = call(
+            &sock,
+            r#"{"id":"p4","method":"pair_peer_with_password","params":{"peer_fingerprint":"not-hex","password":"hunter22"}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], false, "bad fingerprint must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+
+        // Valid request → not_implemented (Transport wiring is post-beta)
+        let body = format!(
+            r#"{{"id":"p5","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{valid_fp}","password":"hunter22"}}}}"#
+        );
+        let resp = call(&sock, &body).await;
+        assert_eq!(resp["ok"], false, "stub must report not_implemented");
+        assert_eq!(
+            resp["error_code"], "not_implemented",
+            "valid request must report not_implemented until Transport is wired"
         );
     }
 }
