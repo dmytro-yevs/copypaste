@@ -122,12 +122,25 @@ impl PiiScrubber {
                 re: Regex::new(r"\b(?:\d{1,3}\.){3}\d{1,3}\b").expect("ipv4 pattern is valid"),
                 replacement: "<REDACTED-IP>",
             },
-            // IPv6 — requires at least two `:` separators so we don't eat
-            // ratios or timestamps. Allows `::` compression.
+            // IPv6 — we anchor on ASCII non-hex non-colon boundaries
+            // rather than `\b` because `:` itself is not a word character —
+            // the original `\b::` form matched erratically depending on
+            // what surrounded the colons. The boundary chars are captured
+            // into `$1`/`$2` so the replacement preserves them.
+            //
+            // We accept any run that contains at least two `:` separators
+            // and only [0-9a-fA-F:] in between, which is permissive enough
+            // to catch compressed forms like `fe80::1ff:fe23:4567:890a` and
+            // `::1` without writing the full RFC 4291 grammar. The leading
+            // boundary group prevents matching inside a longer
+            // alphanumeric run (e.g. a hash that happens to contain
+            // colons in a different schema).
             Pattern {
-                re: Regex::new(r"\b(?:[0-9a-fA-F]{1,4}:){2,7}[0-9a-fA-F]{0,4}\b|::1\b|::\b")
-                    .expect("ipv6 pattern is valid"),
-                replacement: "<REDACTED-IP>",
+                re: Regex::new(
+                    r"(^|[^0-9a-fA-F:])([0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7})($|[^0-9a-fA-F:])",
+                )
+                .expect("ipv6 pattern is valid"),
+                replacement: "$1<REDACTED-IP>$3",
             },
             // Home directory prefixes: macOS `/Users/<name>/…` and Linux
             // `/home/<name>/…`. We collapse to `~/` so the structural part

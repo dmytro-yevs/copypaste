@@ -2,7 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- MED-12: Clipboard monitoring is not "data sync" per Play policy.
+         FGS_SPECIAL_USE is the correct category for niche FGS purposes that
+         don't fit dataSync / mediaPlayback / location etc. The Play Store
+         requires a property element on the <service> declaring the use case. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
@@ -37,7 +41,14 @@
 
         <service android:name=".ClipboardService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <!-- Required by Play policy for FGS_SPECIAL_USE: explain the
+                 niche purpose so reviewers and the Android Vitals tooling
+                 can confirm the category is not abused. -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="clipboard_history_capture" />
+        </service>
 
         <receiver android:name=".CaptureControlReceiver"
             android:exported="false">
