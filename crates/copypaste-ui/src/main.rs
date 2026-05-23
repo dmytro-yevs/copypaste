@@ -14,6 +14,7 @@ mod ipc_client;
 use anyhow::Result;
 use ipc_client::{format_wall_time, IpcClient};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -61,6 +62,67 @@ impl AppState {
 impl copypaste_ui::windows::SearchableHistoryItem for ipc_client::HistoryEntry {
     fn preview(&self) -> &str {
         &self.preview
+    }
+}
+
+/// Per-command in-flight flags.
+///
+/// beta.5 Bug-3 (unbounded thread spawn): every Refresh / Next / Prev
+/// click previously did `std::thread::spawn`. Spamming Next or holding
+/// ⌘R produced one OS thread per event plus an interleaving race in
+/// which a stale IPC response clobbered a newer one via
+/// `invoke_from_event_loop`. We coalesce duplicate clicks by reserving
+/// one in-flight slot per command — a click that arrives while the slot
+/// is taken is dropped on the floor.
+///
+/// Search is intentionally NOT covered: it filters the cached page
+/// synchronously on the UI thread (no IPC, no spawn) and de-duping
+/// keystrokes here would just add latency.
+#[derive(Clone)]
+struct InFlight {
+    refresh: Arc<AtomicBool>,
+    next_page: Arc<AtomicBool>,
+    prev_page: Arc<AtomicBool>,
+}
+
+impl InFlight {
+    fn new() -> Self {
+        Self {
+            refresh: Arc::new(AtomicBool::new(false)),
+            next_page: Arc::new(AtomicBool::new(false)),
+            prev_page: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+/// RAII guard that clears an `AtomicBool` on drop.
+///
+/// Used to ensure the in-flight flag is released even if the spawned
+/// worker panics partway through. Without this, a single panic in
+/// `load_history_page` would leave the flag stuck at `true` forever
+/// and the corresponding button would silently stop responding for
+/// the rest of the session.
+///
+/// Holds an `Arc<AtomicBool>` (not a borrow) so the guard can be
+/// moved into the spawned worker thread.
+struct InFlightGuard {
+    flag: Arc<AtomicBool>,
+}
+
+impl InFlightGuard {
+    /// Try to take ownership of the in-flight slot.
+    /// Returns `None` if the slot is already taken (caller should drop
+    /// the click on the floor).
+    fn acquire(flag: Arc<AtomicBool>) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()
+            .map(|_| Self { flag })
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::Release);
     }
 }
 
@@ -120,6 +182,8 @@ fn main() -> Result<()> {
 
     let window = HistoryWindow::new()?;
     let state = Arc::new(Mutex::new(AppState::new()));
+    // Per-command in-flight flags — see `InFlight` doc-comment.
+    let in_flight = InFlight::new();
 
     // Beta hot-fix: on macOS, install the Launch Agent plist + bootstrap the
     // daemon in the background so the user does not have to run
@@ -189,10 +253,19 @@ fn main() -> Result<()> {
     {
         let window_weak = window.as_weak();
         let state = Arc::clone(&state);
+        let in_flight_refresh = Arc::clone(&in_flight.refresh);
         window.on_refresh_requested(move || {
+            // beta.5 Bug-3: drop the click if a refresh is already
+            // running. Without this, holding ⌘R fired one thread per
+            // event and the older response could clobber the newer one
+            // via `invoke_from_event_loop`.
+            let Some(guard) = InFlightGuard::acquire(Arc::clone(&in_flight_refresh)) else {
+                return;
+            };
             let window_weak = window_weak.clone();
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
+                let _guard = guard; // released on thread exit (incl. panic)
                 let (socket_path, offset) = {
                     let s = lock_or_recover(&state);
                     (s.socket_path.clone(), s.current_offset)
@@ -327,10 +400,16 @@ fn main() -> Result<()> {
     {
         let window_weak = window.as_weak();
         let state = Arc::clone(&state);
+        let in_flight_next = Arc::clone(&in_flight.next_page);
         window.on_load_next_page(move || {
+            // beta.5 Bug-3: coalesce duplicate Next clicks — see InFlight doc.
+            let Some(guard) = InFlightGuard::acquire(Arc::clone(&in_flight_next)) else {
+                return;
+            };
             let window_weak = window_weak.clone();
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
+                let _guard = guard;
                 let (socket_path, candidate_offset) = {
                     let s = lock_or_recover(&state);
                     // Refuse to advance past the last known page. The
@@ -365,10 +444,16 @@ fn main() -> Result<()> {
     {
         let window_weak = window.as_weak();
         let state = Arc::clone(&state);
+        let in_flight_prev = Arc::clone(&in_flight.prev_page);
         window.on_load_prev_page(move || {
+            // beta.5 Bug-3: coalesce duplicate Prev clicks — see InFlight doc.
+            let Some(guard) = InFlightGuard::acquire(Arc::clone(&in_flight_prev)) else {
+                return;
+            };
             let window_weak = window_weak.clone();
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
+                let _guard = guard;
                 let (socket_path, candidate_offset) = {
                     let s = lock_or_recover(&state);
                     (
