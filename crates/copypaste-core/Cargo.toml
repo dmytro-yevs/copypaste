@@ -34,6 +34,11 @@ criterion.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 hkdf.workspace = true
 sha2.workspace = true
+# Extra image format decoders enabled only for the test binary (feature
+# unification keeps these out of prod builds because production `image`
+# dep above is pinned to ["png", "tiff"]). Used by tests/image_formats.rs
+# to round-trip JPEG / GIF synthetic fixtures.
+image = { version = ">=0.25, <0.25.10", default-features = false, features = ["png", "tiff", "jpeg", "gif"] }
 
 [[bench]]
 name = "crypto"
