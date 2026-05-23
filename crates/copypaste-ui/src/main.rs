@@ -68,6 +68,28 @@ fn main() -> Result<()> {
     let window = HistoryWindow::new()?;
     let state = Arc::new(Mutex::new(AppState::new()));
 
+    // v0.3: install the macOS menu-bar tray BEFORE Slint takes over the main
+    // run loop. The tray host registers a slint::Timer that polls menu events
+    // on the UI thread, so we never spin a competing native run loop.
+    // Failure is non-fatal — log + continue as a window-only app.
+    #[cfg(target_os = "macos")]
+    {
+        let window_weak = window.as_weak();
+        let on_open_history: copypaste_ui::tray_host::ActionCb = Box::new(move || {
+            if let Some(win) = window_weak.upgrade() {
+                win.show().ok();
+            }
+        });
+        let callbacks = copypaste_ui::tray_host::TrayCallbacks {
+            on_open_history: Some(on_open_history),
+            on_open_preferences: None,
+            on_quit: None, // default = slint::quit_event_loop()
+        };
+        if let Err(e) = copypaste_ui::tray_host::install(callbacks) {
+            eprintln!("[tray] install failed: {e} — running without menu-bar tray");
+        }
+    }
+
     // --- Wire: refresh-requested ---
     {
         let window_weak = window.as_weak();

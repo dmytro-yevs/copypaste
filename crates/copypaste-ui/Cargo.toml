@@ -21,6 +21,16 @@ home.workspace = true
 # runtime msgid lookup against `.mo` catalogs under `lang/<locale>/LC_MESSAGES`.
 slint = { workspace = true, features = ["gettext"] }
 copypaste-ipc = { path = "../copypaste-ipc" }
+tracing.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Tray host moved from copypaste-daemon to copypaste-ui in v0.3 — daemon is
+# spawned by launchd and cannot reliably create an NSApp main run loop, so
+# the menu-bar icon now lives in the Slint UI process (which already runs
+# an NSApp event loop via slint::run_event_loop).
+tray-icon = "0.19"
+png = "0.17"
 
 [build-dependencies]
 slint-build.workspace = true

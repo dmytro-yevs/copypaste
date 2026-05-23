@@ -16,6 +16,11 @@
 pub mod fingerprint;
 pub mod settings;
 pub mod tray_menu;
+// macOS-only live tray host (NSStatusItem). Lives in the UI process because
+// the daemon is started by launchd and cannot run an NSApp main loop; the
+// Slint UI already drives one. See `tray_host.rs` module docs.
+#[cfg(target_os = "macos")]
+pub mod tray_host;
 pub mod updater;
 pub mod windows;
 
