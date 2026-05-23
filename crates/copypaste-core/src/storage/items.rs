@@ -128,6 +128,13 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
 /// Wrapping both writes in `Connection::unchecked_transaction()` makes
 /// the pair atomic: either both succeed and are visible, or neither is.
 ///
+/// Returns the `id` of the inserted row. If a UNIQUE constraint fires
+/// on either `item_id` or the v4 `idx_dedup_hash_minute` index (a race
+/// between two ingest events that both saw "no recent row"), we treat
+/// it as successful dedup: re-query the existing row by `content_hash`
+/// or `item_id` and return its id. The caller then sees the same id it
+/// would have seen had `find_recent_by_hash` won the race.
+///
 /// `plaintext_for_fts` is the already-decrypted text the caller wants
 /// indexed for search. Pass an empty string to skip FTS indexing (e.g.
 /// for image items that have no searchable text — though in practice
@@ -141,13 +148,13 @@ pub fn insert_item_with_fts(
     db: &Database,
     item: &ClipboardItem,
     plaintext_for_fts: &str,
-) -> Result<(), ItemsError> {
+) -> Result<String, ItemsError> {
     let conn = db.conn();
     // `unchecked_transaction` lets us run a tx over a `&Connection`
     // (vs. `transaction()` which needs `&mut Connection`). It's safe
     // here because `&Database` already serialises external access.
     let tx = conn.unchecked_transaction()?;
-    tx.execute(
+    let insert_res = tx.execute(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
@@ -169,7 +176,29 @@ pub fn insert_item_with_fts(
             item.content_hash,
             item.origin_device_id,
         ],
-    )?;
+    );
+
+    if let Err(e) = insert_res {
+        // SQLITE_CONSTRAINT_UNIQUE on idx_dedup_hash_minute or
+        // idx_clipboard_item_id (added in v4) — treat as successful
+        // dedup. Roll back the open tx FIRST so the read-only re-query
+        // sees the committed state, then return the existing row's id.
+        let is_unique_violation = matches!(
+            &e,
+            rusqlite::Error::SqliteFailure(err, _)
+                if err.code == rusqlite::ErrorCode::ConstraintViolation
+        );
+        if is_unique_violation {
+            drop(tx); // auto-rollback
+            if let Some(id) = lookup_existing_id(db, item)? {
+                return Ok(id);
+            }
+            // Constraint fired but we can't find an existing row —
+            // surface the original error rather than silently lying.
+        }
+        return Err(ItemsError::Sqlite(e));
+    }
+
     if !plaintext_for_fts.is_empty() {
         // FTS5 does not support ON CONFLICT; DELETE + INSERT is the
         // upsert pattern. The DELETE is a no-op for a brand-new row but
@@ -185,7 +214,44 @@ pub fn insert_item_with_fts(
         )?;
     }
     tx.commit()?;
-    Ok(())
+    Ok(item.id.clone())
+}
+
+/// Find the id of an existing row that conflicts with `item` on one of
+/// the v4 UNIQUE indexes. Tries `content_hash` first (the more common
+/// race — two clipboard events for the same string within a minute),
+/// then falls back to `item_id` (sync replay). Returns `None` if no
+/// matching row is visible, in which case the caller should surface the
+/// original constraint error.
+fn lookup_existing_id(
+    db: &Database,
+    item: &ClipboardItem,
+) -> Result<Option<String>, ItemsError> {
+    if let Some(hash) = &item.content_hash {
+        let minute_bucket = item.wall_time / 60;
+        let by_hash = db.conn().query_row(
+            "SELECT id FROM clipboard_items
+             WHERE content_hash = ?1 AND (wall_time / 60) = ?2
+             ORDER BY wall_time DESC LIMIT 1",
+            params![hash, minute_bucket],
+            |row| row.get::<_, String>(0),
+        );
+        match by_hash {
+            Ok(id) => return Ok(Some(id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => {}
+            Err(e) => return Err(ItemsError::Sqlite(e)),
+        }
+    }
+    let by_item_id = db.conn().query_row(
+        "SELECT id FROM clipboard_items WHERE item_id = ?1",
+        params![item.item_id],
+        |row| row.get::<_, String>(0),
+    );
+    match by_item_id {
+        Ok(id) => Ok(Some(id)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(ItemsError::Sqlite(e)),
+    }
 }
 
 /// Stamp `origin_device_id` on every row that currently carries the empty
@@ -607,7 +673,8 @@ mod tests {
         let item = make_item(1);
         let id = item.id.clone();
 
-        insert_item_with_fts(&db, &item, "hello clipboard world").unwrap();
+        let returned = insert_item_with_fts(&db, &item, "hello clipboard world").unwrap();
+        assert_eq!(returned, id, "fresh insert returns the supplied id");
 
         let row_count: i64 = db
             .conn()
@@ -642,7 +709,8 @@ mod tests {
         let item = make_item(1);
         let id = item.id.clone();
 
-        insert_item_with_fts(&db, &item, "").unwrap();
+        let returned = insert_item_with_fts(&db, &item, "").unwrap();
+        assert_eq!(returned, id);
 
         let row_count: i64 = db
             .conn()
@@ -663,6 +731,55 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fts_count, 0, "FTS row skipped for empty plaintext");
+    }
+
+    #[test]
+    fn insert_item_with_fts_dedup_returns_existing_id_on_hash_race() {
+        let db = Database::open_in_memory().unwrap();
+
+        // First insert: stamped with a content_hash.
+        let mut first = make_item(1);
+        first.content_hash = Some("abc123".to_string());
+        first.wall_time = 60_000; // bucket = 60_000 / 60 = 1000
+        let first_id = insert_item_with_fts(&db, &first, "hello").unwrap();
+
+        // Second insert: distinct logical id but same hash AND same
+        // minute bucket → idx_dedup_hash_minute fires.
+        let mut second = make_item(2);
+        second.content_hash = Some("abc123".to_string());
+        second.wall_time = 60_059; // 60_059 / 60 = 1000 (same bucket)
+        let returned = insert_item_with_fts(&db, &second, "hello again").unwrap();
+
+        assert_eq!(
+            returned, first_id,
+            "dedup race must return the existing row's id, not the new one"
+        );
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "second insert must not create a duplicate row");
+    }
+
+    #[test]
+    fn insert_item_with_fts_dedup_returns_existing_id_on_item_id_race() {
+        let db = Database::open_in_memory().unwrap();
+
+        let first = make_item(1);
+        let first_id = insert_item_with_fts(&db, &first, "").unwrap();
+
+        // Sync replay: peer re-broadcasts the same item_id with a new
+        // logical id. idx_clipboard_item_id fires.
+        let mut second = make_item(2);
+        second.item_id = first.item_id.clone();
+        let returned = insert_item_with_fts(&db, &second, "").unwrap();
+
+        assert_eq!(returned, first_id);
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]

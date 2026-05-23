@@ -16,10 +16,11 @@ pub enum SchemaError {
     Downgrade { found: i64, expected: i64 },
 }
 
-/// Current on-disk schema version. Bumped from 2 → 3 when the
-/// `origin_device_id` column was added to `clipboard_items` to back the LWW
-/// merge tie-break (see `copypaste-sync::merge::resolve`).
-pub const SCHEMA_VERSION: i64 = 3;
+/// Current on-disk schema version. Bumped from 3 → 4 when the v4
+/// migration added two UNIQUE INDEXes to `clipboard_items` to close TOCTOU
+/// dedup races (`content_hash` + minute bucket) and prevent sync replay
+/// double-inserts (`item_id`). See `schema_v2.sql`.
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -34,6 +35,15 @@ pub(crate) const V1_SCHEMA_SQL: &str = include_str!("schema_v1.sql");
 pub(crate) const V3_ALTER_SQL: &str = "\
 ALTER TABLE clipboard_items \
     ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';\n";
+
+/// v4 step — add two UNIQUE INDEXes (`content_hash`+minute-bucket for
+/// TOCTOU dedup, `item_id` for sync replay protection). Kept in a
+/// dedicated SQL file so future schema additions stay readable.
+///
+/// Naming note: the file is `schema_v2.sql` for historical reasons
+/// (the originally-planned numbering was schema-file v2, not user_version
+/// v2). The schema bump it implements is user_version 3 → 4.
+pub(crate) const V4_INDEXES_SQL: &str = include_str!("schema_v2.sql");
 
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
@@ -104,6 +114,14 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // `items::backfill_origin_device_id` after open to stamp the local
         // device UUID onto any rows still carrying the empty default.
         script.push_str(V3_ALTER_SQL);
+    }
+
+    if current_version < 4 {
+        // Migration v4: two UNIQUE INDEXes. CREATE INDEX IF NOT EXISTS is
+        // idempotent so the step is safe to re-run during partial-rollout
+        // testing. See schema_v2.sql for the rationale on each index.
+        script.push_str(V4_INDEXES_SQL);
+        script.push('\n');
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));
