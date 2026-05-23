@@ -33,6 +33,7 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -269,6 +270,17 @@ impl TrayMenu {
 
 // ── Public entry point ──────────────────────────────────────────────────────
 
+/// Outcome of an off-thread `launchctl bootstrap`/`bootout` job, posted
+/// back to the UI thread via [`TrayRuntime::launchd_rx`] and applied by
+/// [`drain_events`] on the next tick.
+struct LaunchdResult {
+    /// What the user requested: `true` = install, `false` = uninstall.
+    want: bool,
+    /// `Ok(())` on success, otherwise the error rendered as a String — owned
+    /// `String` is `Send` without ceremony, unlike `std::io::Error`.
+    outcome: Result<(), String>,
+}
+
 /// Mutable state held on the main thread between event-loop ticks.
 struct TrayRuntime {
     _tray: TrayIcon,
@@ -279,6 +291,18 @@ struct TrayRuntime {
     /// Set when the user picks Quit. Latched so subsequent ticks can stop
     /// polling and forward the quit to Slint via the callback (if any).
     quit_latch: Arc<AtomicBool>,
+    /// `true` while a `launchctl bootstrap`/`bootout` job is running on a
+    /// background thread. Debounces repeated clicks on "Launch at Login" —
+    /// `launchctl` can take seconds and a second concurrent invocation
+    /// would race with the first.
+    launchd_in_flight: bool,
+    /// Sender half handed to each worker thread doing the blocking
+    /// `Command::status()`. Cloned on dispatch; kept here so it stays
+    /// alive for the lifetime of the tray runtime.
+    launchd_tx: Sender<LaunchdResult>,
+    /// Receiver drained by [`drain_events`] each tick — applies the
+    /// result and re-enables the menu item.
+    launchd_rx: Receiver<LaunchdResult>,
 }
 
 /// Build the tray icon, register a Slint timer that drains tray menu events
@@ -300,6 +324,8 @@ pub fn install(callbacks: TrayCallbacks) -> Result<(), TrayHostError> {
     }
     let tray = builder.build()?;
 
+    let (launchd_tx, launchd_rx) = mpsc::channel::<LaunchdResult>();
+
     let runtime = Rc::new(RefCell::new(TrayRuntime {
         _tray: tray,
         menu,
@@ -307,6 +333,9 @@ pub fn install(callbacks: TrayCallbacks) -> Result<(), TrayHostError> {
         launch_at_login,
         callbacks,
         quit_latch: Arc::new(AtomicBool::new(false)),
+        launchd_in_flight: false,
+        launchd_tx,
+        launchd_rx,
     }));
 
     // Slint timer ticks on the UI thread; safe to read menu events here.
@@ -330,6 +359,11 @@ pub fn install(callbacks: TrayCallbacks) -> Result<(), TrayHostError> {
 }
 
 fn drain_events(runtime: &Rc<RefCell<TrayRuntime>>) {
+    // Apply any pending results from off-thread launchd jobs *first*. Done
+    // in its own scope so no `RefMut<TrayRuntime>` is held while we
+    // subsequently dispatch user callbacks.
+    apply_pending_launchd_results(runtime);
+
     let menu_channel = MenuEvent::receiver();
     while let Ok(event) = menu_channel.try_recv() {
         // For every event we first mutate any pure runtime state inside a
@@ -358,20 +392,30 @@ fn drain_events(runtime: &Rc<RefCell<TrayRuntime>>) {
                 tracing::info!("tray: private_mode={}", rt.private_mode);
             }
             ID_LAUNCH_AT_LOGIN => {
-                let want = !runtime.borrow().launch_at_login;
-                let result = if want { launchd_install() } else { launchd_uninstall() };
-                let mut rt = runtime.borrow_mut();
-                match result {
-                    Ok(()) => {
-                        rt.launch_at_login = want;
-                        let label = if want { "Launch at Login  ✓" } else { "Launch at Login" };
-                        rt.menu.launch_at_login.set_text(label);
-                        tracing::info!("tray: launch_at_login={}", want);
+                // `launchctl bootstrap`/`bootout` can take several seconds
+                // on a cold launchd. Running it inline froze the Slint
+                // tick (and therefore the whole UI) mid-frame. Spawn a
+                // worker thread and update the menu when it reports back
+                // via the mpsc channel drained by
+                // `apply_pending_launchd_results` on the next tick.
+                let want = {
+                    let mut rt = runtime.borrow_mut();
+                    if rt.launchd_in_flight {
+                        // Debounce: a previous toggle is still running.
+                        // The menu item is also disabled below, so this
+                        // path only fires if the user races a click
+                        // through before the disable lands.
+                        tracing::debug!("tray: launchd toggle ignored (in flight)");
+                        continue;
                     }
-                    Err(e) => {
-                        tracing::error!(error = %e, want, "tray: launchd toggle failed");
-                    }
-                }
+                    let want = !rt.launch_at_login;
+                    rt.launchd_in_flight = true;
+                    // Disable the menu item while the worker is running so
+                    // the user can't queue duplicate launchctl invocations.
+                    rt.menu.launch_at_login.set_enabled(false);
+                    want
+                };
+                spawn_launchd_toggle(runtime, want);
             }
             ID_PREFERENCES => invoke_callback(runtime, |c| &mut c.on_open_preferences),
             ID_QUIT => {
@@ -425,6 +469,63 @@ where
     let slot = selector(&mut rt.callbacks);
     if slot.is_none() {
         *slot = Some(cb);
+    }
+}
+
+/// Spawn a worker thread that runs the blocking `copypaste daemon
+/// install|uninstall` CLI. The result is posted to `launchd_tx` for the
+/// next [`drain_events`] tick to apply on the UI thread. Replaces the
+/// previous inline `Command::status()` call, which blocked the Slint
+/// event loop for the duration of `launchctl bootstrap` (seconds).
+fn spawn_launchd_toggle(runtime: &Rc<RefCell<TrayRuntime>>, want: bool) {
+    let tx = runtime.borrow().launchd_tx.clone();
+    std::thread::spawn(move || {
+        let outcome = if want { launchd_install() } else { launchd_uninstall() };
+        let payload = LaunchdResult {
+            want,
+            outcome: outcome.map_err(|e| e.to_string()),
+        };
+        if let Err(e) = tx.send(payload) {
+            // Receiver was dropped — runtime is gone (app shutdown). Best
+            // effort: log so we notice if this fires during normal use.
+            tracing::warn!(error = %e, "tray: launchd result channel closed");
+        }
+    });
+}
+
+/// Drain any pending [`LaunchdResult`]s posted from worker threads, apply
+/// them to `TrayRuntime`, and re-enable the "Launch at Login" menu item.
+fn apply_pending_launchd_results(runtime: &Rc<RefCell<TrayRuntime>>) {
+    // Pull results out of the receiver under an immutable borrow first so
+    // we never hold the channel borrow longer than necessary. No user
+    // callbacks fire inside this function — the RefMut below stays
+    // confined.
+    let results: Vec<LaunchdResult> = {
+        let rt = runtime.borrow();
+        let mut out = Vec::new();
+        while let Ok(r) = rt.launchd_rx.try_recv() {
+            out.push(r);
+        }
+        out
+    };
+    if results.is_empty() {
+        return;
+    }
+    let mut rt = runtime.borrow_mut();
+    for r in results {
+        match r.outcome {
+            Ok(()) => {
+                rt.launch_at_login = r.want;
+                let label = if r.want { "Launch at Login  ✓" } else { "Launch at Login" };
+                rt.menu.launch_at_login.set_text(label);
+                tracing::info!("tray: launch_at_login={}", r.want);
+            }
+            Err(e) => {
+                tracing::error!(error = %e, want = r.want, "tray: launchd toggle failed");
+            }
+        }
+        rt.launchd_in_flight = false;
+        rt.menu.launch_at_login.set_enabled(true);
     }
 }
 
