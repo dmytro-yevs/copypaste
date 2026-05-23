@@ -119,12 +119,61 @@ fn user_plist_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
     Ok(home.join(USER_LAUNCH_AGENTS_DIR).join(format!("{LAUNCHD_LABEL}.plist")))
 }
 
+/// Discover the source plist that should be copied into
+/// `~/Library/LaunchAgents/`. Search order, returning the FIRST hit:
+///
+///   1. `<exe>/../../Resources/com.copypaste.daemon.plist` — packaged install,
+///      i.e. `/Applications/CopyPaste.app/Contents/MacOS/copypaste` →
+///      `/Applications/CopyPaste.app/Contents/Resources/...`.
+///   2. `<exe>/../../../packaging/macos/com.copypaste.daemon.plist` — dev path
+///      when running `target/release/copypaste` from a checkout
+///      (`target/release/copypaste` → `<repo>/packaging/macos/...`).
+///   3. `<cwd>/packaging/macos/com.copypaste.daemon.plist` — repo-relative
+///      fallback for `cargo run -- daemon install` style invocations.
+///
+/// If none exist, return a clear error listing all candidates so the user
+/// can pinpoint the actual path issue rather than chasing "file not found".
 fn packaged_plist_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
-    // Resolve relative to current working dir — `copypaste daemon install` is expected
-    // to be run from the repo root during dev. In packaged installs the user just
-    // copies the plist manually.
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    // Candidate 1 — inside the .app bundle (production install).
+    if let Ok(exe) = fs.current_exe() {
+        if let Some(bundle_resources) = exe
+            .parent()                 // .../Contents/MacOS
+            .and_then(Path::parent)   // .../Contents
+        {
+            candidates.push(bundle_resources.join("Resources").join("com.copypaste.daemon.plist"));
+        }
+
+        // Candidate 2 — dev path: target/release/copypaste → repo/packaging/macos/...
+        if let Some(repo_root) = exe
+            .parent()                 // target/release
+            .and_then(Path::parent)   // target
+            .and_then(Path::parent)   // repo root
+        {
+            candidates.push(repo_root.join(PACKAGED_PLIST_RELATIVE));
+        }
+    }
+
+    // Candidate 3 — repo-relative fallback (CWD heuristic).
     let cwd = fs.current_dir()?;
-    Ok(cwd.join(PACKAGED_PLIST_RELATIVE))
+    candidates.push(cwd.join(PACKAGED_PLIST_RELATIVE));
+
+    for cand in &candidates {
+        if fs.exists(cand) {
+            return Ok(cand.clone());
+        }
+    }
+
+    let pretty = candidates
+        .iter()
+        .map(|p| format!("  - {}", p.display()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    bail!(
+        "packaged plist not found. Looked in:\n{pretty}\n\
+         If you're running from a checkout, run from the repo root or build the .app bundle."
+    )
 }
 
 /// Translate raw `launchctl` failure text into actionable advice.
@@ -132,15 +181,40 @@ fn packaged_plist_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
 /// Launchctl prints things like `Bootstrap failed: 5: Input/output error` —
 /// useless for non-launchd-experts. We recognise the common codes and replace
 /// the message; otherwise we pass through the original + a diagnostic hint.
+///
+/// Reference for codes (see `man launchctl`, `<sys/errno.h>`, and the launchd
+/// source `launch.h`):
+///   - 5   = EIO ("Input/output error") — bootstrap genuinely failed. Most
+///     common cause on macOS user agents: label is on the *disabled* list
+///     (`launchctl disable gui/<UID>/<label>`), so `bootstrap` refuses to
+///     load it. Fix: `launchctl enable gui/<UID>/<label>` first.
+///   - 36  = ENOENT-ish in launchctl ("Could not find service") — service is
+///     not loaded in the target domain.
+///   - 37  = ALREADY_BOOTSTRAPPED — the canonical "already running" code. Treat
+///     as success.
+///   - 125 = "Domain does not support specified action" — wrong domain (almost
+///     always: ran with `sudo`, so domain became `gui/0`).
 fn friendly_launchctl_error(uid: u32, op: &str, stderr: &str) -> String {
     let s = stderr.trim();
-    // Error 5 = "Input/output error" — usually "service already loaded"
-    if s.contains(": 5:") || s.contains("Input/output error") {
-        return "daemon already running (launchctl error 5). \
+    // Error 37 = ALREADY_BOOTSTRAPPED — the correct "already loaded" code.
+    if s.contains(": 37:") || s.contains("service already loaded") || s.contains("already bootstrapped") {
+        return "daemon already running (launchctl error 37, ALREADY_BOOTSTRAPPED). \
                 Run `copypaste daemon restart` if you want to reload it."
             .to_string();
     }
-    // Error 36 = "Operation now in progress" / "service not loaded"
+    // Error 5 = EIO / "Input/output error" — bootstrap genuinely failed.
+    // After we started calling `launchctl enable` before every `bootstrap`,
+    // this should be rare; when it does happen it usually means the service
+    // is still on the disabled list or the plist is structurally invalid.
+    if s.contains(": 5:") || s.contains("Input/output error") {
+        return format!(
+            "launchctl {op} failed (error 5, Input/output error). \
+             The service may still be on launchd's disabled list. \
+             Try: `launchctl enable gui/{uid}/{LAUNCHD_LABEL}` then retry. \
+             If that fails, run `launchctl print-disabled gui/{uid}` to confirm."
+        );
+    }
+    // Error 36 = "Could not find service" — service not loaded in target domain.
     if s.contains(": 36:") || s.contains("Could not find service") {
         return "daemon not running (launchctl error 36).".to_string();
     }
@@ -155,6 +229,21 @@ fn friendly_launchctl_error(uid: u32, op: &str, stderr: &str) -> String {
         "launchctl {op} failed: {s}. \
          Try `launchctl print gui/{uid}/{LAUNCHD_LABEL}` to diagnose."
     )
+}
+
+/// Ensure the launchd label is on the *enabled* list for the user's GUI
+/// domain. `launchctl enable` is idempotent: if the label is already enabled
+/// it returns 0; if it's on the disabled list (because of a prior
+/// `launchctl bootout` or `launchctl disable`), this moves it back to enabled
+/// so the subsequent `bootstrap` won't fail with error 5.
+///
+/// We deliberately ignore the exit code — `enable` can fail for harmless
+/// reasons (e.g. the label has never been seen by launchd yet) and any real
+/// problem will surface when `bootstrap` runs.
+fn enable_launchd_label<R: CommandRunner>(runner: &mut R, uid: u32) -> Result<()> {
+    let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
+    let _ = runner.run("launchctl", &["enable".into(), OsString::from(&target)])?;
+    Ok(())
 }
 
 fn macos_start<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Result<()> {
@@ -185,6 +274,13 @@ fn macos_start<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Result
         );
         return Ok(());
     }
+
+    // CRITICAL: re-enable the label before bootstrap. A previous `launchctl
+    // bootout` (or `launchctl disable`) leaves the label on launchd's
+    // *disabled* list; the subsequent `bootstrap` would then fail with
+    // "Bootstrap failed: 5: Input/output error". `enable` is idempotent so
+    // it's safe to call unconditionally on every start.
+    enable_launchd_label(runner, uid)?;
 
     let domain = format!("gui/{uid}");
     let out = runner.run(
@@ -217,7 +313,9 @@ fn macos_stop<R: CommandRunner>(runner: &mut R) -> Result<()> {
 }
 
 fn macos_install<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Result<()> {
-    let src = packaged_plist_path(fs)?;
+    // Note: do NOT resolve the source plist here — `packaged_plist_path` bails
+    // when no candidate exists. If the dst already has the plist, we don't
+    // need the src at all, so resolve lazily below.
     let dst = user_plist_path(fs)?;
     let uid = macos_uid(runner)?;
 
@@ -245,19 +343,45 @@ fn macos_install<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Resu
 
     // Need the source if we have to copy.
     if !plist_present {
-        if !fs.exists(&src) {
-            bail!(
-                "packaged plist not found at {}. Run from the repo root.",
-                src.display()
-            );
-        }
+        // Resolve src lazily — only when we actually need to copy. This way
+        // an existing-but-not-loaded install can still run `install` without
+        // requiring the packaged plist to be discoverable.
+        let src = packaged_plist_path(fs)?;
         if let Some(parent) = dst.parent() {
             fs.create_dir_all(parent)?;
         }
-        fs.copy(&src, &dst)?;
+        // Substitute `/Users/USERNAME` placeholder in the bundled plist with the
+        // real `$HOME` — otherwise launchd tries to write logs to a path that
+        // doesn't exist and the daemon fails silently. This mirrors what
+        // `scripts/launchd/install-agent.sh` does via `sed`.
+        let raw = fs.read_to_string(&src)?;
+        let home = fs
+            .home_dir()
+            .ok_or_else(|| anyhow!("could not determine $HOME"))?;
+        let rendered = raw.replace("/Users/USERNAME", &home.display().to_string());
+        fs.write(&dst, &rendered)?;
         eprintln!("installed plist to {}", dst.display());
     } else {
-        eprintln!("plist already present at {} (skipping copy)", dst.display());
+        // Even when the plist is already present, double-check we didn't ship a
+        // pre-substituted version with the placeholder still in place (older
+        // installs left this artefact). Re-render in-place if so.
+        if let Ok(existing) = fs.read_to_string(&dst) {
+            if existing.contains("/Users/USERNAME") {
+                let home = fs
+                    .home_dir()
+                    .ok_or_else(|| anyhow!("could not determine $HOME"))?;
+                let rendered = existing.replace("/Users/USERNAME", &home.display().to_string());
+                fs.write(&dst, &rendered)?;
+                eprintln!(
+                    "re-rendered stale plist at {} (USERNAME placeholder)",
+                    dst.display()
+                );
+            } else {
+                eprintln!("plist already present at {} (skipping copy)", dst.display());
+            }
+        } else {
+            eprintln!("plist already present at {} (skipping copy)", dst.display());
+        }
     }
 
     // Plist is on disk now; if not yet loaded, bootstrap it.
@@ -295,10 +419,12 @@ pub(crate) trait CommandRunner {
 pub(crate) trait FsOps {
     fn home_dir(&self) -> Option<PathBuf>;
     fn current_dir(&self) -> Result<PathBuf>;
+    fn current_exe(&self) -> Result<PathBuf>;
     fn exists(&self, path: &Path) -> bool;
     fn create_dir_all(&mut self, path: &Path) -> Result<()>;
-    fn copy(&mut self, from: &Path, to: &Path) -> Result<()>;
     fn remove_file(&mut self, path: &Path) -> Result<()>;
+    fn read_to_string(&self, path: &Path) -> Result<String>;
+    fn write(&mut self, path: &Path, content: &str) -> Result<()>;
 }
 
 #[derive(Default)]
@@ -324,6 +450,9 @@ impl FsOps for SystemFs {
     fn current_dir(&self) -> Result<PathBuf> {
         Ok(std::env::current_dir()?)
     }
+    fn current_exe(&self) -> Result<PathBuf> {
+        Ok(std::env::current_exe()?)
+    }
     fn exists(&self, path: &Path) -> bool {
         path.exists()
     }
@@ -331,12 +460,15 @@ impl FsOps for SystemFs {
         std::fs::create_dir_all(path)?;
         Ok(())
     }
-    fn copy(&mut self, from: &Path, to: &Path) -> Result<()> {
-        std::fs::copy(from, to)?;
-        Ok(())
-    }
     fn remove_file(&mut self, path: &Path) -> Result<()> {
         std::fs::remove_file(path)?;
+        Ok(())
+    }
+    fn read_to_string(&self, path: &Path) -> Result<String> {
+        Ok(std::fs::read_to_string(path)?)
+    }
+    fn write(&mut self, path: &Path, content: &str) -> Result<()> {
+        std::fs::write(path, content)?;
         Ok(())
     }
 }
@@ -431,25 +563,43 @@ mod tests {
     struct MockFs {
         home: PathBuf,
         cwd: PathBuf,
+        exe: PathBuf,
         existing: HashSet<PathBuf>,
         created_dirs: Vec<PathBuf>,
-        copies: Vec<(PathBuf, PathBuf)>,
         removed: Vec<PathBuf>,
+        files: std::collections::HashMap<PathBuf, String>,
     }
 
     impl MockFs {
+        #[allow(dead_code)]
         fn new() -> Self {
             Self {
                 home: PathBuf::from("/Users/test"),
                 cwd: PathBuf::from("/repo"),
+                // Default: pretend we're running from target/release/copypaste
+                // in a repo at `/repo`, so the dev-path candidate resolves to
+                // `/repo/packaging/macos/com.copypaste.daemon.plist`.
+                exe: PathBuf::from("/repo/target/release/copypaste"),
                 existing: HashSet::new(),
                 created_dirs: Vec::new(),
-                copies: Vec::new(),
                 removed: Vec::new(),
+                files: std::collections::HashMap::new(),
             }
         }
         fn with_existing(mut self, p: impl Into<PathBuf>) -> Self {
             self.existing.insert(p.into());
+            self
+        }
+        #[allow(dead_code)]
+        fn with_file(mut self, p: impl Into<PathBuf>, content: impl Into<String>) -> Self {
+            let p = p.into();
+            self.existing.insert(p.clone());
+            self.files.insert(p, content.into());
+            self
+        }
+        #[allow(dead_code)]
+        fn with_exe(mut self, exe: impl Into<PathBuf>) -> Self {
+            self.exe = exe.into();
             self
         }
     }
@@ -461,6 +611,9 @@ mod tests {
         fn current_dir(&self) -> Result<PathBuf> {
             Ok(self.cwd.clone())
         }
+        fn current_exe(&self) -> Result<PathBuf> {
+            Ok(self.exe.clone())
+        }
         fn exists(&self, path: &Path) -> bool {
             self.existing.contains(path)
         }
@@ -468,14 +621,21 @@ mod tests {
             self.created_dirs.push(path.to_path_buf());
             Ok(())
         }
-        fn copy(&mut self, from: &Path, to: &Path) -> Result<()> {
-            self.copies.push((from.to_path_buf(), to.to_path_buf()));
-            self.existing.insert(to.to_path_buf());
-            Ok(())
-        }
         fn remove_file(&mut self, path: &Path) -> Result<()> {
             self.removed.push(path.to_path_buf());
             self.existing.remove(path);
+            self.files.remove(path);
+            Ok(())
+        }
+        fn read_to_string(&self, path: &Path) -> Result<String> {
+            self.files
+                .get(path)
+                .cloned()
+                .ok_or_else(|| anyhow!("file not seeded: {}", path.display()))
+        }
+        fn write(&mut self, path: &Path, content: &str) -> Result<()> {
+            self.existing.insert(path.to_path_buf());
+            self.files.insert(path.to_path_buf(), content.to_string());
             Ok(())
         }
     }
@@ -492,9 +652,10 @@ mod tests {
 
         dispatch(DaemonAction::Start, &mut runner, &mut fs).expect("start should succeed");
 
-        // Expect: `id -u`, `launchctl print gui/501/...` (idempotency probe), then
-        // `launchctl bootstrap gui/501 <plist>`.
-        assert_eq!(runner.calls.len(), 3, "expected 3 shell-outs, got {:?}", runner.calls);
+        // Expect: `id -u`, `launchctl print gui/501/...` (idempotency probe),
+        // `launchctl enable gui/501/...` (re-enable in case label was disabled),
+        // then `launchctl bootstrap gui/501 <plist>`.
+        assert_eq!(runner.calls.len(), 4, "expected 4 shell-outs, got {:?}", runner.calls);
         assert_eq!(runner.calls[0].program, "id");
         assert_eq!(runner.calls[0].args, vec!["-u"]);
 
@@ -503,9 +664,13 @@ mod tests {
         assert_eq!(runner.calls[1].args[1], "gui/501/com.copypaste.daemon");
 
         assert_eq!(runner.calls[2].program, "launchctl");
-        assert_eq!(runner.calls[2].args[0], "bootstrap");
-        assert_eq!(runner.calls[2].args[1], "gui/501");
-        assert_eq!(runner.calls[2].args[2], expected_plist().to_string_lossy());
+        assert_eq!(runner.calls[2].args[0], "enable");
+        assert_eq!(runner.calls[2].args[1], "gui/501/com.copypaste.daemon");
+
+        assert_eq!(runner.calls[3].program, "launchctl");
+        assert_eq!(runner.calls[3].args[0], "bootstrap");
+        assert_eq!(runner.calls[3].args[1], "gui/501");
+        assert_eq!(runner.calls[3].args[2], expected_plist().to_string_lossy());
     }
 
     #[cfg(target_os = "macos")]
@@ -572,19 +737,68 @@ mod tests {
     fn daemon_install_copies_plist_then_bootstraps() {
         let mut runner = MockRunner::new();
         let src = PathBuf::from("/repo/packaging/macos/com.copypaste.daemon.plist");
-        let mut fs = MockFs::new().with_existing(src.clone());
+        let plist_template = r#"<?xml version="1.0"?>
+<plist><dict>
+    <key>StandardOutPath</key>
+    <string>/Users/USERNAME/Library/Logs/CopyPaste/daemon.out.log</string>
+</dict></plist>"#;
+        let mut fs = MockFs::new().with_file(src.clone(), plist_template);
 
         dispatch(DaemonAction::Install, &mut runner, &mut fs).expect("install ok");
 
-        assert_eq!(fs.copies.len(), 1);
-        assert_eq!(fs.copies[0].0, src);
-        assert_eq!(fs.copies[0].1, expected_plist());
+        // Install now reads+substitutes+writes (not raw copy) so we verify the
+        // destination file contents instead of the copies vector.
+        let written = fs
+            .files
+            .get(&expected_plist())
+            .expect("plist must be written to destination");
+        assert!(
+            !written.contains("/Users/USERNAME"),
+            "USERNAME placeholder must be substituted, got: {written}"
+        );
+        assert!(
+            written.contains("/Users/test/Library/Logs/CopyPaste"),
+            "expected substituted $HOME ({}), got: {written}",
+            "/Users/test"
+        );
+
         // bootstrap must follow
         let bootstrap_called = runner
             .calls
             .iter()
             .any(|c| c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
         assert!(bootstrap_called);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn install_re_renders_stale_plist_with_username_placeholder() {
+        // Plist already at destination but contains the unsubstituted
+        // `/Users/USERNAME` token (older installs). The install command must
+        // rewrite it in-place rather than skipping.
+        let mut runner = MockRunner::new();
+        let stale = r#"<?xml version="1.0"?>
+<plist><dict>
+    <key>StandardOutPath</key>
+    <string>/Users/USERNAME/Library/Logs/CopyPaste/daemon.out.log</string>
+</dict></plist>"#;
+        let mut fs = MockFs::new().with_file(expected_plist(), stale);
+        // launchctl print default = not loaded → install will fall through to bootstrap.
+
+        dispatch(DaemonAction::Install, &mut runner, &mut fs).expect("install ok");
+
+        let written = fs
+            .files
+            .get(&expected_plist())
+            .expect("plist must still exist after re-render");
+        assert!(
+            !written.contains("/Users/USERNAME"),
+            "stale USERNAME placeholder must be re-rendered, got: {written}"
+        );
+        assert!(
+            written.contains("/Users/test/Library/Logs/CopyPaste"),
+            "expected substituted $HOME, got: {written}"
+        );
     }
 
     // -----------------------------------------------------------------------------
@@ -625,8 +839,12 @@ mod tests {
         dispatch(DaemonAction::Install, &mut runner, &mut fs)
             .expect("install must succeed as no-op when already installed+loaded");
 
-        // No copy should have happened.
-        assert!(fs.copies.is_empty(), "no copy expected, got {:?}", fs.copies);
+        // No write should have happened (file was already present + loaded).
+        assert!(
+            fs.files.is_empty(),
+            "no write expected when already-installed+loaded, got {:?}",
+            fs.files.keys().collect::<Vec<_>>()
+        );
         // No bootstrap either.
         let bootstrap_called = runner
             .calls
@@ -646,7 +864,13 @@ mod tests {
         dispatch(DaemonAction::Install, &mut runner, &mut fs)
             .expect("install ok when plist present but not loaded");
 
-        assert!(fs.copies.is_empty(), "expected no copy, got {:?}", fs.copies);
+        // Plist was already present (via `with_existing`, no file content seeded),
+        // so no fresh write should have occurred — install must short-circuit the copy.
+        assert!(
+            fs.files.is_empty(),
+            "expected no write, got {:?}",
+            fs.files.keys().collect::<Vec<_>>()
+        );
         let bootstrap_called = runner
             .calls
             .iter()
@@ -694,15 +918,36 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn error_5_translates_to_already_running_message() {
+    fn error_5_translates_to_bootstrap_failed_with_enable_hint() {
+        // Error 5 is bootstrap genuine failure (most often: label on disabled
+        // list). Should mention the enable hint, NOT "already running".
         let msg = friendly_launchctl_error(
             501,
             "bootstrap",
             "Bootstrap failed: 5: Input/output error",
         );
         assert!(
+            !msg.to_lowercase().contains("already running"),
+            "error 5 must NOT be classified as 'already running', got: {msg}"
+        );
+        assert!(
+            msg.to_lowercase().contains("disabled") || msg.contains("launchctl enable"),
+            "expected 'enable' hint for error 5, got: {msg}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn error_37_translates_to_already_running_message() {
+        // Error 37 = ALREADY_BOOTSTRAPPED is the canonical "already loaded".
+        let msg = friendly_launchctl_error(
+            501,
+            "bootstrap",
+            "Bootstrap failed: 37: Operation already in progress",
+        );
+        assert!(
             msg.to_lowercase().contains("already running"),
-            "expected friendly 'already running' text, got: {msg}"
+            "expected friendly 'already running' text for error 37, got: {msg}"
         );
     }
 
@@ -778,4 +1023,138 @@ mod tests {
             .any(|c| c.args.first().map(|s| s.as_str()) == Some("bootout"));
         assert!(bootout_called, "expected bootout, got: {:?}", runner.calls);
     }
+
+    // -----------------------------------------------------------------------------
+    // Beta hotfix #2: `launchctl enable` must be called before every bootstrap so
+    // the daemon can recover even when the label is on launchd's disabled list.
+    // -----------------------------------------------------------------------------
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn start_calls_enable_before_bootstrap() {
+        let mut runner = MockRunner::new();
+        let mut fs = MockFs::new().with_existing(expected_plist());
+
+        dispatch(DaemonAction::Start, &mut runner, &mut fs).expect("start ok");
+
+        // Find positions of `enable` and `bootstrap` in launchctl call order.
+        let enable_idx = runner.calls.iter().position(|c| {
+            c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("enable")
+        });
+        let bootstrap_idx = runner.calls.iter().position(|c| {
+            c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootstrap")
+        });
+        let enable_i = enable_idx.expect("enable must be called");
+        let bootstrap_i = bootstrap_idx.expect("bootstrap must be called");
+        assert!(
+            enable_i < bootstrap_i,
+            "enable must precede bootstrap, got calls: {:?}",
+            runner.calls
+        );
+
+        // Enable must target the full gui/<uid>/<label> path.
+        let enable_call = &runner.calls[enable_i];
+        assert_eq!(enable_call.args[0], "enable");
+        assert_eq!(enable_call.args[1], "gui/501/com.copypaste.daemon");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn enable_failure_does_not_abort_start() {
+        // `launchctl enable` failures are ignored — they can happen for benign
+        // reasons (label never seen by launchd yet) and any real problem will
+        // surface on the subsequent `bootstrap` call.
+        let mut runner = MockRunner::new();
+        runner.set_response("launchctl", "enable", false, "", "some enable error");
+        let mut fs = MockFs::new().with_existing(expected_plist());
+
+        dispatch(DaemonAction::Start, &mut runner, &mut fs)
+            .expect("start must not abort when enable fails");
+
+        // bootstrap must still have been attempted.
+        let bootstrap_called = runner
+            .calls
+            .iter()
+            .any(|c| c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
+        assert!(bootstrap_called, "expected bootstrap to proceed despite enable failure");
+    }
+
+    // -----------------------------------------------------------------------------
+    // Beta hotfix #3: `daemon install` discovers plist via current_exe
+    // (production .app bundle path) and falls back to dev / cwd paths.
+    // -----------------------------------------------------------------------------
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn daemon_install_finds_plist_in_app_bundle() {
+        // Simulate /Applications/CopyPaste.app layout.
+        let exe = PathBuf::from("/Applications/CopyPaste.app/Contents/MacOS/copypaste");
+        let bundle_plist = PathBuf::from(
+            "/Applications/CopyPaste.app/Contents/Resources/com.copypaste.daemon.plist",
+        );
+        let mut runner = MockRunner::new();
+        let mut fs = MockFs::new()
+            .with_exe(exe)
+            .with_file(bundle_plist.clone(), SAMPLE_PLIST_FOR_INSTALL);
+
+        dispatch(DaemonAction::Install, &mut runner, &mut fs).expect("install ok");
+
+        // Must have read from the bundle plist and written to user LaunchAgents.
+        let written = fs
+            .files
+            .get(&expected_plist())
+            .expect("plist must be written to user LaunchAgents");
+        assert!(
+            !written.contains("/Users/USERNAME"),
+            "USERNAME placeholder must be substituted, got: {written}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn daemon_install_finds_plist_via_repo_fallback() {
+        // Dev path: target/release/copypaste — exe-derived candidate 2 hits
+        // /repo/packaging/macos/com.copypaste.daemon.plist.
+        let mut runner = MockRunner::new();
+        let mut fs = MockFs::new().with_file(
+            "/repo/packaging/macos/com.copypaste.daemon.plist",
+            SAMPLE_PLIST_FOR_INSTALL,
+        );
+
+        dispatch(DaemonAction::Install, &mut runner, &mut fs).expect("install ok from dev path");
+
+        assert!(
+            fs.files.contains_key(&expected_plist()),
+            "plist must be installed at user LaunchAgents, got: {:?}",
+            fs.files.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn daemon_install_reports_clear_error_when_no_plist_anywhere() {
+        // No plist seeded at any candidate path — must bail with a message
+        // listing the paths it checked.
+        let mut runner = MockRunner::new();
+        let mut fs = MockFs::new();
+
+        let err = dispatch(DaemonAction::Install, &mut runner, &mut fs)
+            .expect_err("install must fail when no plist exists anywhere");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("not found") && msg.contains("Looked in"),
+            "expected 'not found / Looked in' error, got: {msg}"
+        );
+        // Must enumerate at least the cwd-relative candidate.
+        assert!(
+            msg.contains("packaging/macos/com.copypaste.daemon.plist"),
+            "expected cwd candidate in error, got: {msg}"
+        );
+    }
+
+    const SAMPLE_PLIST_FOR_INSTALL: &str = r#"<?xml version="1.0"?>
+<plist><dict>
+    <key>StandardOutPath</key>
+    <string>/Users/USERNAME/Library/Logs/CopyPaste/daemon.out.log</string>
+</dict></plist>"#;
 }
