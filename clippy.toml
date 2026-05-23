@@ -1,6 +1,6 @@
 # Workspace-wide clippy configuration.
 # Sets lint thresholds without making them stricter than defaults.
 
-msrv = "1.86"
+msrv = "1.89"
 too-many-arguments-threshold = 8
 type-complexity-threshold = 250

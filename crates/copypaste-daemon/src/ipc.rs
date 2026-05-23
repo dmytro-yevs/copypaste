@@ -1253,8 +1253,8 @@ impl PasteboardError {
 /// `{:?}` debug formatting of the byte array).
 #[cfg(target_os = "macos")]
 fn parse_image_file_id(meta_json: &str) -> Result<[u8; 16], String> {
-    let value: serde_json::Value = serde_json::from_str(meta_json)
-        .map_err(|e| format!("image meta_json parse error: {e}"))?;
+    let value: serde_json::Value =
+        serde_json::from_str(meta_json).map_err(|e| format!("image meta_json parse error: {e}"))?;
     let arr = value
         .get("file_id")
         .and_then(|v| v.as_array())

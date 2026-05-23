@@ -138,7 +138,7 @@ pub fn encrypt_item_with_aad(
 /// binding — see `AAD_SCHEMA_VERSION` TODO note above.
 ///
 /// Every successful fallback hit is logged at `warn!` level, rate-limited
-/// to ~1 line per 100 calls via [`LEGACY_AAD_FALLBACK_HITS`] so a bulk
+/// to ~1 line per 100 calls via an internal counter so a bulk
 /// migration cannot DoS the log file.
 pub fn decrypt_item_with_aad(
     ciphertext: &[u8],
@@ -171,7 +171,7 @@ pub fn decrypt_item_with_aad(
             match cipher.decrypt(&nonce_x, legacy) {
                 Ok(pt) => {
                     let hits = LEGACY_AAD_FALLBACK_HITS.fetch_add(1, Ordering::Relaxed);
-                    if hits % 100 == 0 {
+                    if hits.is_multiple_of(100) {
                         tracing::warn!(
                             total_hits = hits + 1,
                             "legacy empty-AAD decryption used — will be disabled in v0.3 \

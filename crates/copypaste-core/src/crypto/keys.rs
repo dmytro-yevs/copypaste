@@ -61,7 +61,7 @@ impl DeviceKeypair {
         *buf
     }
 
-    /// Returns the raw 32-byte X25519 secret wrapped in [`Zeroizing`] so
+    /// Returns the raw 32-byte X25519 secret wrapped in [`zeroize::Zeroizing`] so
     /// the bytes are scrubbed when the returned value is dropped.
     ///
     /// Prefer this over [`Self::secret_key_bytes`] for any new code path
@@ -89,7 +89,7 @@ impl DeviceKeypair {
         *buf
     }
 
-    /// Returns the raw 32-byte ECDH shared secret wrapped in [`Zeroizing`].
+    /// Returns the raw 32-byte ECDH shared secret wrapped in [`zeroize::Zeroizing`].
     /// See [`Self::secret_key_bytes_zeroizing`] for the migration story.
     pub fn ecdh_zeroizing(&self, peer_public_bytes: &[u8; 32]) -> zeroize::Zeroizing<[u8; 32]> {
         let peer = PublicKey::from(*peer_public_bytes);

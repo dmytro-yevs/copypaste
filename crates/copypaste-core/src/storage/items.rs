@@ -204,10 +204,7 @@ pub fn insert_item_with_fts(
         // upsert pattern. The DELETE is a no-op for a brand-new row but
         // keeps this fn correct if a caller ever re-uses it for an
         // update path.
-        tx.execute(
-            "DELETE FROM clipboard_fts WHERE id = ?1",
-            params![item.id],
-        )?;
+        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![item.id])?;
         tx.execute(
             "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, ?2)",
             params![item.id, plaintext_for_fts],
@@ -223,10 +220,7 @@ pub fn insert_item_with_fts(
 /// then falls back to `item_id` (sync replay). Returns `None` if no
 /// matching row is visible, in which case the caller should surface the
 /// original constraint error.
-fn lookup_existing_id(
-    db: &Database,
-    item: &ClipboardItem,
-) -> Result<Option<String>, ItemsError> {
+fn lookup_existing_id(db: &Database, item: &ClipboardItem) -> Result<Option<String>, ItemsError> {
     if let Some(hash) = &item.content_hash {
         let minute_bucket = item.wall_time / 60;
         let by_hash = db.conn().query_row(

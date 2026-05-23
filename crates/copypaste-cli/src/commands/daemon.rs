@@ -452,7 +452,10 @@ fn macos_uninstall<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Re
             // plist still gets removed on the user's behalf.
             match fs.remove_file(&sock) {
                 Ok(()) => eprintln!("removed stale IPC socket at {}", sock.display()),
-                Err(e) => eprintln!("warning: could not remove socket at {}: {e}", sock.display()),
+                Err(e) => eprintln!(
+                    "warning: could not remove socket at {}: {e}",
+                    sock.display()
+                ),
             }
         }
     }
@@ -783,8 +786,7 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn daemon_uninstall_removes_leftover_socket() {
-        let socket =
-            PathBuf::from("/Users/test/Library/Application Support/CopyPaste/daemon.sock");
+        let socket = PathBuf::from("/Users/test/Library/Application Support/CopyPaste/daemon.sock");
         let mut runner = MockRunner::new();
         runner.set_response("launchctl", "print", true, "", "");
         let mut fs = MockFs::new()

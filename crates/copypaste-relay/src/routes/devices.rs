@@ -162,7 +162,7 @@ fn epoch_to_date(mut secs: u64) -> (u32, u32, u32, u32, u32, u32) {
     days -= year_1 * 365;
 
     let year = (year_400 * 400 + year_100 * 100 + year_4 * 4 + year_1 + 1970) as u32;
-    let leap = (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)) as u64;
+    let leap = (year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))) as u64;
 
     let month_days: [u64; 12] = [31, 28 + leap, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     let mut month = 1u32;

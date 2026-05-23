@@ -98,9 +98,7 @@ fn launchd_plist_path() -> Option<PathBuf> {
 }
 
 fn launchd_is_installed() -> bool {
-    launchd_plist_path()
-        .map(|p| p.exists())
-        .unwrap_or(false)
+    launchd_plist_path().map(|p| p.exists()).unwrap_or(false)
 }
 
 /// Locate the `copypaste` CLI binary next to the running UI binary. Falls
@@ -196,9 +194,7 @@ fn decode_png_rgba(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
             .chunks_exact(3)
             .flat_map(|c| [c[0], c[1], c[2], 0xff])
             .collect(),
-        png::ColorType::Grayscale => {
-            raw.iter().flat_map(|&g| [g, g, g, 0xff]).collect()
-        }
+        png::ColorType::Grayscale => raw.iter().flat_map(|&g| [g, g, g, 0xff]).collect(),
         png::ColorType::GrayscaleAlpha => raw
             .chunks_exact(2)
             .flat_map(|c| [c[0], c[0], c[0], c[1]])
@@ -217,10 +213,7 @@ struct TrayMenu {
 }
 
 impl TrayMenu {
-    fn build(
-        private_mode_on: bool,
-        launch_at_login_on: bool,
-    ) -> Result<Self, TrayHostError> {
+    fn build(private_mode_on: bool, launch_at_login_on: bool) -> Result<Self, TrayHostError> {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             Self::build_inner(private_mode_on, launch_at_login_on)
         }))
@@ -228,21 +221,26 @@ impl TrayMenu {
         .and_then(|inner| inner)
     }
 
-    fn build_inner(
-        private_mode_on: bool,
-        launch_at_login_on: bool,
-    ) -> Result<Self, TrayHostError> {
+    fn build_inner(private_mode_on: bool, launch_at_login_on: bool) -> Result<Self, TrayHostError> {
         let title = MenuItem::with_id("title", "CopyPaste", false, None);
         let open_history = MenuItem::with_id(ID_OPEN_HISTORY, "Open History", true, None);
         let private_mode = MenuItem::with_id(
             ID_PRIVATE_MODE,
-            if private_mode_on { "Private Mode  ✓" } else { "Private Mode" },
+            if private_mode_on {
+                "Private Mode  ✓"
+            } else {
+                "Private Mode"
+            },
             true,
             None,
         );
         let launch_at_login = MenuItem::with_id(
             ID_LAUNCH_AT_LOGIN,
-            if launch_at_login_on { "Launch at Login  ✓" } else { "Launch at Login" },
+            if launch_at_login_on {
+                "Launch at Login  ✓"
+            } else {
+                "Launch at Login"
+            },
             true,
             None,
         );
@@ -396,7 +394,11 @@ fn drain_events(runtime: &Rc<RefCell<TrayRuntime>>) {
                 // confined to this arm.
                 let mut rt = runtime.borrow_mut();
                 rt.private_mode = !rt.private_mode;
-                let label = if rt.private_mode { "Private Mode  ✓" } else { "Private Mode" };
+                let label = if rt.private_mode {
+                    "Private Mode  ✓"
+                } else {
+                    "Private Mode"
+                };
                 rt.menu.private_mode.set_text(label);
                 tracing::info!("tray: private_mode={}", rt.private_mode);
             }
@@ -428,10 +430,7 @@ fn drain_events(runtime: &Rc<RefCell<TrayRuntime>>) {
             }
             ID_PREFERENCES => invoke_callback(runtime, |c| &mut c.on_open_preferences),
             ID_QUIT => {
-                runtime
-                    .borrow()
-                    .quit_latch
-                    .store(true, Ordering::Relaxed);
+                runtime.borrow().quit_latch.store(true, Ordering::Relaxed);
                 let cb = runtime.borrow_mut().callbacks.on_quit.take();
                 match cb {
                     Some(cb) => {
@@ -489,7 +488,11 @@ where
 fn spawn_launchd_toggle(runtime: &Rc<RefCell<TrayRuntime>>, want: bool) {
     let tx = runtime.borrow().launchd_tx.clone();
     std::thread::spawn(move || {
-        let outcome = if want { launchd_install() } else { launchd_uninstall() };
+        let outcome = if want {
+            launchd_install()
+        } else {
+            launchd_uninstall()
+        };
         let payload = LaunchdResult {
             want,
             outcome: outcome.map_err(|e| e.to_string()),
@@ -525,7 +528,11 @@ fn apply_pending_launchd_results(runtime: &Rc<RefCell<TrayRuntime>>) {
         match r.outcome {
             Ok(()) => {
                 rt.launch_at_login = r.want;
-                let label = if r.want { "Launch at Login  ✓" } else { "Launch at Login" };
+                let label = if r.want {
+                    "Launch at Login  ✓"
+                } else {
+                    "Launch at Login"
+                };
                 rt.menu.launch_at_login.set_text(label);
                 tracing::info!("tray: launch_at_login={}", r.want);
             }
@@ -562,9 +569,7 @@ mod tests {
             enc.set_depth(png::BitDepth::Eight);
             let mut writer = enc.write_header().expect("encode header");
             // 2x2 = 4 px × 4 bytes RGBA = 16 bytes
-            writer
-                .write_image_data(&[0xff; 16])
-                .expect("encode pixels");
+            writer.write_image_data(&[0xff; 16]).expect("encode pixels");
         }
         let (rgba, w, h) = decode_png_rgba(&buf).expect("decode round-trip");
         assert_eq!((w, h), (2, 2));

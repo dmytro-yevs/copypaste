@@ -107,9 +107,9 @@ fn checkpoint_with_retry(conn: &Connection) -> Result<(), DbError> {
             std::thread::sleep(BACKOFF);
         }
     }
-    Err(DbError::CheckpointFailed(
-        last_err.unwrap_or_else(|| "unknown checkpoint failure".to_string()),
-    ))
+    Err(DbError::CheckpointFailed(last_err.unwrap_or_else(|| {
+        "unknown checkpoint failure".to_string()
+    })))
 }
 
 pub struct Database {

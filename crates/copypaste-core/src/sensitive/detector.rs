@@ -194,7 +194,7 @@ pub fn luhn_valid(s: &str) -> bool {
             }
         })
         .sum();
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 // ── is_sensitive_app ──────────────────────────────────────────────────────────
@@ -372,7 +372,7 @@ fn luhn_valid_strict(s: &str) -> bool {
             }
         })
         .sum();
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 #[cfg(test)]
@@ -428,7 +428,8 @@ mod tests {
     #[test]
     fn detects_putty_user_key_file() {
         // Audit MED #5 — PuTTY `.ppk` header.
-        let blob = "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: imported-from-openssh\n";
+        let blob =
+            "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: imported-from-openssh\n";
         let kind = detect(blob).expect("should detect PuTTY key");
         assert!(matches!(kind, SensitiveKind::SshPrivateKey));
     }
