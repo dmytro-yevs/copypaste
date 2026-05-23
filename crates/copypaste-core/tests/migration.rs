@@ -24,6 +24,23 @@ use copypaste_core::Database;
 use rusqlite::Connection;
 use tempfile::tempdir;
 
+/// T3: Schema rollback test — v5 migration interrupted mid-batch.
+///
+/// Requires the `migration_state` table (from wave1a) to be merged before this
+/// can be implemented. Marked `#[ignore]` so CI skips it.
+#[tokio::test]
+#[ignore = "requires migration harness — see wave1a T3 scope"]
+async fn test_schema_rollback_v5_mid_batch() {
+    // T3: Open DB with v4 schema, start v5 migration, kill mid-batch, reopen, verify resumable.
+    // Steps:
+    //   1. Open a DB at schema v4 (force user_version = 4).
+    //   2. Begin a v5 migration transaction and partially apply it (insert some rows).
+    //   3. Simulate a crash (drop connection without committing).
+    //   4. Reopen the DB and assert it can resume/complete v5 migration cleanly.
+    //   5. Verify no data was lost and the schema is at v5.
+    todo!("implement after wave1a migration_state table is merged")
+}
+
 /// Mirror of `copypaste-core/src/storage/schema.rs::SCHEMA_VERSION`.
 /// Kept in-sync manually because the module is private. Bumping
 /// SCHEMA_VERSION in src/ MUST be accompanied by bumping this and adding

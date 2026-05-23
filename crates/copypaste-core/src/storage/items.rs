@@ -427,42 +427,67 @@ pub fn delete_fts(db: &Database, id: &str) -> Result<(), ItemsError> {
 ///
 /// Since the sanitized string is passed as a bound parameter (not
 /// interpolated into SQL), SQL injection via MATCH is not possible even
-/// without sanitization. This layer defends against malformed FTS5 query
-/// syntax that could cause SQLITE_ERROR or unexpected result sets.
-fn sanitize_fts_query(raw: &str) -> String {
-    let sanitized: String = raw
+/// Sanitize a raw user query into a safe FTS5 MATCH expression (S8 whitelist tokenizer).
+///
+/// Strategy:
+/// - Strip every character that is not alphanumeric, `_`, `-`, `"`, `*`, or whitespace.
+/// - If the cleaned query contains a quoted phrase (starts with `"` and ends with `"`),
+///   pass it through as-is (FTS5 phrase queries are safe once other operators are stripped).
+/// - Otherwise split on whitespace into individual tokens, discard empty tokens, join with
+///   ` AND ` so all terms must appear, and append `*` to the last token for prefix search.
+/// - Return `None` if no valid tokens remain after filtering (caller returns empty results).
+///
+/// This is a whitelist approach: only known-safe characters pass through, preventing
+/// FTS5 operator injection (e.g. `NOT`, `OR`, `NEAR`, column filters).
+fn sanitize_fts5_query(raw: &str) -> Option<String> {
+    // Keep only alphanum, underscore, hyphen, quote, asterisk, and whitespace.
+    let cleaned: String = raw
         .chars()
-        .filter(|c| {
-            c.is_alphabetic()
-                || c.is_numeric()
-                || *c == '_'
-                || *c == '-'
-                || *c == ' '
-                || *c == '"'
-                || *c == '*'
+        .filter(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '"' | '*' | ' ' | '\t'))
+        .collect();
+
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Pass through quoted phrases and explicit prefix queries unchanged.
+    // A quoted phrase looks like `"foo bar"` — starts and ends with a double-quote.
+    if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() > 1)
+        || trimmed.ends_with('*')
+    {
+        return Some(trimmed.to_string());
+    }
+
+    // Multi-word input: split into tokens, join with AND, suffix-prefix the last token.
+    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    // tokens is non-empty because trimmed is non-empty.
+    let last_idx = tokens.len() - 1;
+    let parts: Vec<String> = tokens
+        .iter()
+        .enumerate()
+        .map(|(i, tok)| {
+            if i == last_idx {
+                format!("{tok}*")
+            } else {
+                (*tok).to_string()
+            }
         })
         .collect();
-    let trimmed = sanitized.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    // Only append `*` for prefix search if the query doesn't already end
-    // with `"` (closing a phrase) or `*` (explicit prefix).
-    if trimmed.ends_with('"') || trimmed.ends_with('*') {
-        trimmed.to_string()
-    } else {
-        format!("{trimmed}*")
-    }
+
+    Some(parts.join(" AND "))
 }
 
 /// Search clipboard items by full-text query.
+///
 /// Returns up to `limit` full `ClipboardItem` rows ordered by FTS5 rank (best match first).
 ///
-/// Two-phase fetch: (1) query FTS5 for matching IDs ordered by rank, (2) fetch full rows from
-/// clipboard_items by IN-list, then re-sort in Rust to restore FTS rank order.
+/// Implementation: single SQL JOIN between `clipboard_fts` and `clipboard_items` — eliminates
+/// the previous two-phase N+1 fetch (FTS ID list → dynamic IN-list → Rust re-sort).
+/// `prepare_cached` reuses the compiled statement across repeated calls on the same connection.
 ///
-/// The query is sanitized to `[a-zA-Z0-9_ -]*` before being passed to FTS5 to prevent
-/// injection through MATCH operator special syntax.
+/// The query is sanitized via `sanitize_fts5_query` (S8 whitelist tokenizer) before being
+/// passed to the FTS5 MATCH operator to prevent operator injection.
 pub fn search_items(
     db: &Database,
     query: &str,
@@ -472,46 +497,28 @@ pub fn search_items(
         return Ok(vec![]);
     }
 
-    let safe_query = sanitize_fts_query(query);
-    if safe_query.is_empty() {
-        return Ok(vec![]);
-    }
+    let safe_query = match sanitize_fts5_query(query) {
+        Some(q) => q,
+        None => return Ok(vec![]),
+    };
 
-    // Phase 1: collect matching IDs ordered by FTS5 rank
-    let mut fts_stmt = db.conn().prepare(
-        "SELECT id FROM clipboard_fts WHERE content_text MATCH ?1 ORDER BY rank LIMIT ?2",
+    // Single JOIN: FTS5 drives rank order; clipboard_items supplies full row data.
+    // `fts.id` is the UNINDEXED text UUID column (matches `clipboard_items.id`).
+    // `prepare_cached` avoids re-compiling the statement on every call.
+    let mut stmt = db.conn().prepare_cached(
+        "SELECT ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref,
+                ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at,
+                ci.app_bundle_id, ci.content_hash, ci.origin_device_id
+         FROM clipboard_fts fts
+         JOIN clipboard_items ci ON ci.id = fts.id
+         WHERE clipboard_fts MATCH ?1
+         ORDER BY rank
+         LIMIT ?2",
     )?;
-    let ids: Vec<String> = fts_stmt
-        .query_map(params![safe_query, limit as i64], |row| row.get(0))?
+
+    let rows: Vec<ClipboardItem> = stmt
+        .query_map(params![safe_query, limit as i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
-
-    if ids.is_empty() {
-        return Ok(vec![]);
-    }
-
-    // Phase 2: fetch full rows from clipboard_items using a dynamic IN-list.
-    // Each placeholder is a separate `?` bound via params_from_iter.
-    let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-    let sql = format!(
-        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
-                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id
-         FROM clipboard_items
-         WHERE id IN ({})",
-        placeholders,
-    );
-
-    let mut stmt = db.conn().prepare(&sql)?;
-    let mut rows: Vec<ClipboardItem> = stmt
-        .query_map(rusqlite::params_from_iter(ids.iter()), row_to_item)?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    // Re-sort to match FTS5 rank order (IN-list returns rows in storage order)
-    rows.sort_by_key(|item| {
-        ids.iter()
-            .position(|id| id == &item.id)
-            .unwrap_or(usize::MAX)
-    });
 
     Ok(rows)
 }
