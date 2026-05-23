@@ -201,7 +201,7 @@ fn max_dimension_clamp() {
     // must still produce w<=bound, h<=bound, h>=1.
     let wide = synth_rgb_png(4096, 32);
     let (_, w, h) = thumbnail(&wide, 64, 64).expect("wide thumb");
-    assert!(w <= 64 && h <= 64 && h >= 1, "got {w}x{h}");
+    assert!(w <= 64 && (1..=64).contains(&h), "got {w}x{h}");
 }
 
 #[test]
