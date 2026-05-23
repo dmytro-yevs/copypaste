@@ -41,6 +41,8 @@ serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 # Patterns
 regex = "1.10"
+# Unicode normalisation (NFKC for sensitive-detector bypass guards)
+unicode-normalization = "0.1"
 # Logging
 tracing = "0.1"
 # Errors
