@@ -14,6 +14,37 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // ---------------------------------------------------------------------------
+// IpcError
+// ---------------------------------------------------------------------------
+
+/// Structured connection errors. Exposed so callers can detect a missing
+/// daemon (vs. a protocol/IO failure) and show a friendly empty-state.
+#[derive(Debug)]
+pub enum IpcError {
+    /// The daemon socket file does not exist or refused the connection —
+    /// the daemon is most likely not running. Carries the socket path that
+    /// was attempted so the UI can include it in the empty-state text.
+    DaemonOffline(std::path::PathBuf),
+    /// Any other IO error while connecting.
+    Io(std::io::Error),
+}
+
+impl std::fmt::Display for IpcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IpcError::DaemonOffline(path) => write!(
+                f,
+                "Daemon not running. Start with `copypaste daemon start` (socket: {}).",
+                path.display()
+            ),
+            IpcError::Io(e) => write!(f, "IPC error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for IpcError {}
+
+// ---------------------------------------------------------------------------
 // Wire types
 // ---------------------------------------------------------------------------
 
@@ -77,13 +108,29 @@ pub struct IpcClient {
     stream: UnixStream,
 }
 
+/// Server-side page limit enforced by the daemon for `history_page`.
+/// Mirrored here so the UI can clamp `limit` before sending the request.
+/// Source: see Wave 2.3 — `daemon` rejects pages larger than `MAX_PAGE`.
+pub const MAX_PAGE: u64 = 1000;
+
 impl IpcClient {
     /// Connect to the daemon Unix socket.
-    /// Returns an error if the daemon is not running or the socket does not exist.
+    ///
+    /// Returns [`IpcError::DaemonOffline`] when the socket file is missing
+    /// or the connection is refused (the common case when the daemon has
+    /// not been started yet). The UI surface translates this into an
+    /// empty-state hint instead of crashing.
     pub fn connect(socket_path: &Path) -> Result<Self> {
-        let stream = UnixStream::connect(socket_path)
-            .with_context(|| format!("daemon not running (socket: {})", socket_path.display()))?;
-        Ok(Self { stream })
+        match UnixStream::connect(socket_path) {
+            Ok(stream) => Ok(Self { stream }),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::NotFound
+                    || e.kind() == std::io::ErrorKind::ConnectionRefused =>
+            {
+                Err(IpcError::DaemonOffline(socket_path.to_path_buf()).into())
+            }
+            Err(e) => Err(IpcError::Io(e).into()),
+        }
     }
 
     fn call(&mut self, method: &str, params: Value) -> Result<IpcResponse> {
@@ -123,9 +170,16 @@ impl IpcClient {
     // -----------------------------------------------------------------------
 
     /// Fetch a page of clipboard history from the daemon.
+    ///
+    /// `limit` is clamped to [`MAX_PAGE`] before the request is sent —
+    /// the server enforces `MAX_PAGE=1000` and would reject anything larger
+    /// (see Wave 2.3). Clamping client-side avoids a round-trip error and
+    /// keeps the UI responsive when callers ask for an entire 10k+ history.
     pub fn history_page(&mut self, limit: u64, offset: u64) -> Result<HistoryPage> {
+        // server enforces MAX_PAGE=1000
+        let effective_limit = build_history_limit(limit);
         let resp = self.call("history_page", serde_json::json!({
-            "limit": limit,
+            "limit": effective_limit,
             "offset": offset,
         }))?;
 
@@ -327,6 +381,23 @@ impl IpcClient {
 }
 
 // ---------------------------------------------------------------------------
+// Request builders (kept free-standing for unit testing without a daemon)
+// ---------------------------------------------------------------------------
+
+/// Clamp a caller-supplied page limit to the server's [`MAX_PAGE`].
+///
+/// A `limit` of `0` falls through unchanged so the daemon can return its own
+/// "missing/invalid limit" error; only oversize values are capped.
+#[inline]
+pub fn build_history_limit(limit: u64) -> u64 {
+    if limit > MAX_PAGE {
+        MAX_PAGE
+    } else {
+        limit
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Time formatting helpers
 // ---------------------------------------------------------------------------
 
@@ -421,6 +492,64 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("nonexistent.sock");
         assert!(IpcClient::connect(&path).is_err());
+    }
+
+    #[test]
+    fn ipc_client_returns_error_on_daemon_offline() {
+        // Wave 3.1 fix #25: HistoryWindow opening before daemon socket
+        // must surface a typed DaemonOffline error so the UI can show
+        // an empty-state hint instead of crashing.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nonexistent.sock");
+        let err = IpcClient::connect(&path).err().expect("expected connect failure");
+
+        // The anyhow::Error must carry our typed IpcError::DaemonOffline.
+        let typed = err
+            .downcast_ref::<IpcError>()
+            .expect("expected IpcError on offline daemon");
+        match typed {
+            IpcError::DaemonOffline(p) => assert_eq!(p, &path),
+            other => panic!("expected DaemonOffline, got {other:?}"),
+        }
+
+        // The displayed message must contain the user-actionable hint so
+        // the empty-state in the HistoryWindow reads naturally.
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Daemon not running"),
+            "missing user hint, got: {msg}"
+        );
+        assert!(
+            msg.contains("copypaste daemon start"),
+            "missing recovery command, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn history_request_limit_capped_at_1000() {
+        // Wave 3.1 fix #26: even if the UI requests 10k+ items, the
+        // builder must cap `limit` at MAX_PAGE=1000 to match the
+        // server-side enforcement added in Wave 2.3.
+        assert_eq!(build_history_limit(1), 1, "small limit untouched");
+        assert_eq!(build_history_limit(50), 50, "default page untouched");
+        assert_eq!(build_history_limit(1000), 1000, "exactly MAX_PAGE untouched");
+        assert_eq!(
+            build_history_limit(1001),
+            1000,
+            "just-over limit clamped to MAX_PAGE"
+        );
+        assert_eq!(
+            build_history_limit(10_000),
+            1000,
+            "10k items clamped to MAX_PAGE"
+        );
+        assert_eq!(
+            build_history_limit(u64::MAX),
+            1000,
+            "u64::MAX clamped to MAX_PAGE"
+        );
+        // Zero falls through so the daemon can issue its own validation error.
+        assert_eq!(build_history_limit(0), 0, "zero passes through");
     }
 
     #[test]

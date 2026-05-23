@@ -20,6 +20,9 @@ use ipc_client::{IpcClient, format_wall_time};
 // Include generated Slint bindings.
 slint::include_modules!();
 
+// server enforces MAX_PAGE=1000 (see ipc_client::MAX_PAGE / Wave 2.3);
+// PAGE_SIZE is well under that, but ipc_client::history_page() also clamps
+// at MAX_PAGE so any future bump here stays safe.
 const PAGE_SIZE: u64 = 50;
 
 /// Application state shared between callbacks.
@@ -224,6 +227,12 @@ fn paste_item(socket_path: &std::path::Path, id: &str) -> std::result::Result<St
 }
 
 /// Apply a `history_page` result to the Slint window.
+///
+/// Wave 3.1 fix #25: when the daemon is offline (socket missing or refused),
+/// surface an empty-state hint with the recovery command instead of the raw
+/// IO error string. The HistoryWindow renders the "No clipboard items..."
+/// placeholder whenever `items` is empty, so we just clear the list and put
+/// the actionable message in the status line.
 fn apply_history_result(
     win: &HistoryWindow,
     result: std::result::Result<ipc_client::HistoryPage, String>,
@@ -232,8 +241,14 @@ fn apply_history_result(
     win.set_loading(false);
     match result {
         Err(e) => {
-            win.set_status_text(format!("Error: {e}").into());
+            let msg = if e.contains("Daemon not running") || e.contains("daemon offline") {
+                "Daemon not running. Start with `copypaste daemon start`.".to_string()
+            } else {
+                format!("Error: {e}")
+            };
+            win.set_status_text(msg.into());
             win.set_items(Default::default());
+            win.set_total_count(0);
         }
         Ok(page) => {
             let count = page.items.len() as u64;

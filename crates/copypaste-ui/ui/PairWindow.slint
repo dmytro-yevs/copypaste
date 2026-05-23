@@ -191,14 +191,28 @@ export component PairWindow inherits Window {
                         border-color: #313244;
                         border-width: 1px;
                         padding: 16px;
-                        height: 52px;
+                        min-height: 96px;
 
-                        Text {
-                            text: "No paired devices yet";
-                            color: #585b70;
-                            font-size: 13px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 6px;
+                            padding: 8px;
+
+                            Text {
+                                text: "No peers discovered.";
+                                color: #cdd6f4;
+                                font-size: 13px;
+                                font-weight: 600;
+                                horizontal-alignment: center;
+                            }
+
+                            Text {
+                                text: "Ensure other device is on same Wi-Fi and running CopyPaste.";
+                                color: #6c7086;
+                                font-size: 12px;
+                                horizontal-alignment: center;
+                                wrap: word-wrap;
+                            }
                         }
                     }
 

@@ -1,7 +1,7 @@
 // windows.rs — Rust handles for SettingsWindow and PairWindow
 // Wraps the Slint-generated component types with ergonomic constructors and callback wiring.
 
-use slint::{ComponentHandle, VecModel};
+use slint::{ComponentHandle, Model, VecModel};
 use std::rc::Rc;
 
 use crate::settings::{AppSettings, HistoryLimit, PairedDevice};
@@ -102,6 +102,25 @@ impl SettingsWindowHandle {
     }
 }
 
+// ── Empty-state hint helpers (Wave 3.1) ────────────────────────────────────────
+
+/// The empty-state hint shown in the PairWindow when no peers are paired.
+/// Returned as a `(title, hint)` pair so tests can verify both lines without
+/// driving the Slint component.
+///
+/// `peer_count == 0` → user-facing troubleshooting hint.
+/// `peer_count >  0` → `(None, None)` indicating the list itself should render.
+pub fn pair_window_empty_hint(peer_count: usize) -> Option<(&'static str, &'static str)> {
+    if peer_count == 0 {
+        Some((
+            "No peers discovered.",
+            "Ensure other device is on same Wi-Fi and running CopyPaste.",
+        ))
+    } else {
+        None
+    }
+}
+
 // ── PairWindow ─────────────────────────────────────────────────────────────────
 
 /// A live handle to the PairWindow.
@@ -163,6 +182,13 @@ impl PairWindowHandle {
         self.window.on_pair(move |fp| cb(fp.to_string()));
     }
 
+    /// Return the user-facing empty-state hint for the current peer list, if any.
+    /// Convenience wrapper over [`pair_window_empty_hint`] for callers that
+    /// already hold a window handle.
+    pub fn empty_hint(&self) -> Option<(&'static str, &'static str)> {
+        pair_window_empty_hint(self.window.get_paired_devices().row_count())
+    }
+
     /// Register a callback invoked when "Remove" is clicked on a paired device.
     /// Receives the full fingerprint of the device to remove.
     pub fn on_remove_peer<F: Fn(String) + 'static>(&self, cb: F) {
@@ -187,5 +213,43 @@ impl PairWindowHandle {
     /// Run the event loop (blocks until window closes).
     pub fn run(&self) -> Result<(), slint::PlatformError> {
         self.window.run()
+    }
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pair_window_empty_peer_list_renders_hint_text() {
+        // Wave 3.1 fix #27: an empty peer list must yield a troubleshooting
+        // hint with both a title and a guidance line — not just silence.
+        let hint = pair_window_empty_hint(0).expect("empty list must produce a hint");
+        let (title, body) = hint;
+
+        assert!(
+            title.contains("No peers"),
+            "title should mention no peers, got: {title}"
+        );
+        assert!(
+            body.contains("Wi-Fi") && body.contains("CopyPaste"),
+            "body must reference Wi-Fi + CopyPaste so the user knows what to check, got: {body}"
+        );
+        // The Slint footprint stays in sync with the helper, so the rendered
+        // hint matches exactly what we assert here.
+    }
+
+    #[test]
+    fn pair_window_with_peers_skips_hint() {
+        assert!(
+            pair_window_empty_hint(1).is_none(),
+            "non-empty peer list must not render the empty-state hint"
+        );
+        assert!(
+            pair_window_empty_hint(42).is_none(),
+            "large peer list must not render the empty-state hint"
+        );
     }
 }
