@@ -21,9 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust 1.86 (with llvm-tools-preview)
-        uses: dtolnay/rust-toolchain@1.86.0
+      - name: Install Rust (stable) (with llvm-tools-preview)
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: stable
           components: llvm-tools-preview
 
       - name: Rust cache

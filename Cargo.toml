@@ -19,7 +19,9 @@ members = [
 [workspace.package]
 version = "0.2.0-beta.0"
 edition = "2021"
-rust-version = "1.86"
+# Metadata only — we follow stable (see rust-toolchain.toml). 1.89 is the
+# current Cargo.lock-implied floor (smol_str 0.3.6). Bump when lockfile bumps.
+rust-version = "1.89"
 authors = ["CopyPaste"]
 license = "MIT OR Apache-2.0"
 description = "Encrypted clipboard manager for macOS/Android/Windows"
@@ -84,8 +86,9 @@ anyhow = "1"
 clap = { version = ">=4.0, <4.5.40", features = ["derive"] }
 # Base64 encoding
 base64 = "0.22"
-# HTTP client (pin <0.12 retained for rustls/hyper API stability; MSRV=1.86)
-reqwest = { version = ">=0.11, <0.12", default-features = false, features = ["json", "rustls-tls"] }
+# HTTP client. Old `<0.12` ceiling dropped now we follow stable. 0.12 pulls
+# rustls 0.23 + rustls-webpki 0.103 (closes RUSTSEC-2026-0098/0099/0104).
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
 # WebSocket (pinned <=0.23 for tokio 1.x API stability; MSRV=1.86)
