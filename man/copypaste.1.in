@@ -1,0 +1,83 @@
+.\" Man page template for copypaste(1).
+.\" Generated/updated by scripts/gen-manpage.sh — DO NOT EDIT THE GENERATED .1 BY HAND.
+.\" Placeholders: @VERSION@, @DATE@, @COMMANDS@
+.TH COPYPASTE 1 "@DATE@" "CopyPaste @VERSION@" "User Commands"
+.SH NAME
+copypaste \- clipboard history CLI for the CopyPaste daemon
+.SH SYNOPSIS
+.B copypaste
+.RI [ COMMAND ]
+.RI [ OPTIONS ]
+.SH DESCRIPTION
+.B copypaste
+is the command-line interface to the CopyPaste clipboard-history daemon.
+It connects to the running daemon over a local Unix socket and lets you
+inspect, search, copy, export, import, and clear clipboard history,
+toggle private (pause) mode, and watch new items in real time.
+.PP
+The daemon must be running for most commands to succeed.
+See \fBcopypastectl\fR(1) or the project README for daemon management.
+.SH OPTIONS
+.TP
+.B \-h, \-\-help
+Print help for \fBcopypaste\fR or a specific subcommand.
+.TP
+.B \-V, \-\-version
+Print version information and exit.
+.SH COMMANDS
+@COMMANDS@
+.SH EXAMPLES
+.TP
+List the 20 most recent clipboard items:
+.B copypaste list --limit 20
+.TP
+Search history for "password":
+.B copypaste search password
+.TP
+Copy the most recent item back to the system clipboard:
+.B copypaste copy 1
+.TP
+Copy by UUID:
+.B copypaste copy --id 8f3e1c2a-...
+.TP
+Export the last 1000 items to JSON:
+.B copypaste export --output history.json
+.TP
+Pause recording (private mode):
+.B copypaste private on
+.TP
+Watch for new items in real time:
+.B copypaste watch --interval 1000
+.SH FILES
+.TP
+.I $XDG_RUNTIME_DIR/copypaste.sock
+Unix socket used to talk to the daemon (Linux).
+.TP
+.I $TMPDIR/copypaste.sock
+Unix socket on macOS.
+.TP
+.I $XDG_DATA_HOME/copypaste/history.db
+SQLite database storing clipboard history.
+.TP
+.I $XDG_CONFIG_HOME/copypaste/config.toml
+Optional user configuration.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Generic error (daemon unreachable, invalid argument, I/O failure, etc.).
+A human-readable message is printed to standard error.
+.SH SEE ALSO
+.BR copypastectl (1),
+.BR pbcopy (1),
+.BR pbpaste (1),
+.BR xclip (1),
+.BR wl-copy (1)
+.PP
+Project homepage: https://github.com/dmytroyevs/copypaste
+.SH BUGS
+Report issues at https://github.com/dmytroyevs/copypaste/issues
+.SH AUTHORS
+The CopyPaste contributors.

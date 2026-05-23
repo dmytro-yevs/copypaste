@@ -71,6 +71,10 @@ path = "tests/sync_orch_integration.rs"
 name = "p2p_init"
 path = "tests/p2p_init.rs"
 
+[[test]]
+name = "keychain_macos"
+path = "tests/keychain_macos.rs"
+
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"
@@ -84,3 +88,12 @@ copypaste-p2p = { path = "../copypaste-p2p" }
 # tests live under `#[cfg(all(test, feature = "cloud-sync"))]`, so this dep
 # is only pulled in when the feature is built.
 mockito = "0.31"
+# Beta-bonus keychain tests — serialize Keychain Services access (process-global).
+# Cross-platform crate; gated at test level via `#[cfg(target_os = "macos")]`.
+serial_test = "3"
+
+# Beta-bonus keychain tests need direct access to set/get/delete primitives
+# (the wrapper uses a hardcoded SERVICE/ACCOUNT so tests use unique account
+# names to avoid clobbering the user's real device key entry).
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+security-framework.workspace = true
