@@ -71,6 +71,9 @@ enum Commands {
         limit: u64,
         #[arg(long, short)]
         output: Option<String>,
+        /// Overwrite the output file if it already exists
+        #[arg(long, short)]
+        force: bool,
     },
     /// Watch clipboard in real-time (prints new items as they arrive)
     Watch {
@@ -96,6 +99,55 @@ enum Commands {
         #[command(subcommand)]
         action: PrivateAction,
     },
+    /// Pin a clipboard item by ID (removes its TTL so it is never auto-deleted)
+    Pin {
+        /// Item ID (UUID)
+        id: String,
+    },
+    /// Unpin a clipboard item by ID (restores normal retention)
+    Unpin {
+        /// Item ID (UUID)
+        id: String,
+    },
+    /// Manage the background daemon (start/stop/restart/install/uninstall)
+    Daemon {
+        #[command(subcommand)]
+        action: DaemonAction,
+    },
+    /// Create an encrypted SQLCipher backup of the local database
+    Backup {
+        /// Directory to write the backup file into (default: <repo>/backups)
+        #[arg(long, short)]
+        output: Option<String>,
+        /// Show what would happen without touching disk
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Restore the local database from a SQLCipher backup file
+    Restore {
+        /// Path to the backup file (.db.enc)
+        path: String,
+        /// Delete the existing live DB instead of renaming it aside
+        #[arg(long)]
+        force: bool,
+        /// Show what would happen without touching disk
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DaemonAction {
+    /// Start the daemon via the installed launchd plist
+    Start,
+    /// Stop the daemon (launchctl bootout)
+    Stop,
+    /// Restart the daemon (bootout + bootstrap)
+    Restart,
+    /// Copy the packaged plist into ~/Library/LaunchAgents/ and start the daemon
+    Install,
+    /// Stop the daemon and remove the plist from ~/Library/LaunchAgents/
+    Uninstall,
 }
 
 #[derive(Subcommand)]
@@ -121,7 +173,7 @@ fn main() {
         Commands::Copy { index, id, search, list, limit } => {
             commands::copy::run(&socket, index, id.as_deref(), search.as_deref(), list, limit)
         }
-        Commands::Export { limit, output } => commands::export::run(&socket, limit, output.as_deref()),
+        Commands::Export { limit, output, force } => commands::export::run(&socket, limit, output.as_deref(), force),
         Commands::Watch { interval } => commands::watch::run(&socket, interval),
         Commands::Clear { force } => commands::clear::run(&socket, force),
         Commands::Stats => commands::stats::run(&socket),
@@ -131,6 +183,24 @@ fn main() {
             PrivateAction::Off => commands::private::run(&socket, false),
             PrivateAction::Status => commands::private::run_get(&socket),
         },
+        Commands::Pin { id } => commands::pin::run_pin(&socket, &id),
+        Commands::Unpin { id } => commands::pin::run_unpin(&socket, &id),
+        Commands::Daemon { action } => {
+            let act = match action {
+                DaemonAction::Start => commands::daemon::DaemonAction::Start,
+                DaemonAction::Stop => commands::daemon::DaemonAction::Stop,
+                DaemonAction::Restart => commands::daemon::DaemonAction::Restart,
+                DaemonAction::Install => commands::daemon::DaemonAction::Install,
+                DaemonAction::Uninstall => commands::daemon::DaemonAction::Uninstall,
+            };
+            commands::daemon::run(act)
+        }
+        Commands::Backup { output, dry_run } => {
+            commands::backup::run_backup(&socket, output.as_deref(), dry_run)
+        }
+        Commands::Restore { path, force, dry_run } => {
+            commands::backup::run_restore(&socket, &path, force, dry_run)
+        }
     };
 
     if let Err(e) = result {
