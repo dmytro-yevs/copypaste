@@ -33,6 +33,12 @@ struct AppState {
     /// from the daemon. Cached so the `search-changed` callback can
     /// re-filter without a second IPC round-trip per keystroke.
     last_page_items: Vec<ipc_client::HistoryEntry>,
+    /// Most recent `page.total` reported by the daemon, or `None` before
+    /// the first successful `history_page` reply. Used by
+    /// `on_load_next_page` to refuse advancing past the last page (the
+    /// daemon returns an empty slice for out-of-range offsets, which
+    /// previously left the UI on a blank "Showing 51-50 of 50" row).
+    last_known_total: Option<u64>,
 }
 
 impl AppState {
@@ -44,6 +50,7 @@ impl AppState {
             socket_path,
             current_offset: 0,
             last_page_items: Vec::new(),
+            last_known_total: None,
         }
     }
 }
@@ -304,6 +311,19 @@ fn main() -> Result<()> {
     }
 
     // --- Wire: load-next-page ---
+    //
+    // beta.5 Bug-1/2 fix: previously this handler advanced
+    // `state.current_offset` *before* awaiting the IPC reply. Two failure
+    // modes followed:
+    //   - past-end:  no guard against `current + PAGE_SIZE >= total`,
+    //                so spamming Next walked into "Showing 51-50 of 50".
+    //   - on-error:  if the daemon returned Err, the offset stayed bumped
+    //                and the next Refresh fetched the wrong page.
+    //
+    // New shape: compute the candidate offset locally, refuse the
+    // request if the cached `last_known_total` says we're already on
+    // the last page, and let `apply_history_result` commit the offset
+    // to `AppState` only on Ok.
     {
         let window_weak = window.as_weak();
         let state = Arc::clone(&state);
@@ -311,18 +331,24 @@ fn main() -> Result<()> {
             let window_weak = window_weak.clone();
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
-                let (socket_path, new_offset) = {
-                    let mut s = lock_or_recover(&state);
-                    let socket = s.socket_path.clone();
-                    let offset = s.current_offset + PAGE_SIZE;
-                    s.current_offset = offset;
-                    (socket, offset)
+                let (socket_path, candidate_offset) = {
+                    let s = lock_or_recover(&state);
+                    // Refuse to advance past the last known page. The
+                    // guard is best-effort — before the first successful
+                    // load `last_known_total` is None and we let the
+                    // request through so the daemon can populate it.
+                    if let Some(total) = s.last_known_total {
+                        if s.current_offset + PAGE_SIZE >= total {
+                            return;
+                        }
+                    }
+                    (s.socket_path.clone(), s.current_offset + PAGE_SIZE)
                 };
-                let result = load_history_page(&socket_path, PAGE_SIZE, new_offset);
+                let result = load_history_page(&socket_path, PAGE_SIZE, candidate_offset);
                 let state_for_apply = Arc::clone(&state);
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
-                        apply_history_result(&win, &state_for_apply, result, new_offset);
+                        apply_history_result(&win, &state_for_apply, result, candidate_offset);
                     }
                 });
             });
@@ -330,6 +356,12 @@ fn main() -> Result<()> {
     }
 
     // --- Wire: load-prev-page ---
+    //
+    // beta.5 Bug-2 fix (mirror of load-next-page): keep `current_offset`
+    // stable until `apply_history_result` confirms the daemon returned a
+    // page. On Err the previously-mutated offset would otherwise leave
+    // the UI looking at the wrong window of history after a subsequent
+    // Refresh.
     {
         let window_weak = window.as_weak();
         let state = Arc::clone(&state);
@@ -337,17 +369,18 @@ fn main() -> Result<()> {
             let window_weak = window_weak.clone();
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
-                let (socket_path, new_offset) = {
-                    let mut s = lock_or_recover(&state);
-                    let offset = s.current_offset.saturating_sub(PAGE_SIZE);
-                    s.current_offset = offset;
-                    (s.socket_path.clone(), offset)
+                let (socket_path, candidate_offset) = {
+                    let s = lock_or_recover(&state);
+                    (
+                        s.socket_path.clone(),
+                        s.current_offset.saturating_sub(PAGE_SIZE),
+                    )
                 };
-                let result = load_history_page(&socket_path, PAGE_SIZE, new_offset);
+                let result = load_history_page(&socket_path, PAGE_SIZE, candidate_offset);
                 let state_for_apply = Arc::clone(&state);
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
-                        apply_history_result(&win, &state_for_apply, result, new_offset);
+                        apply_history_result(&win, &state_for_apply, result, candidate_offset);
                     }
                 });
             });
@@ -476,6 +509,12 @@ fn entry_to_slint_item(entry: &ipc_client::HistoryEntry) -> HistoryItem {
 /// the `search-changed` callback can re-filter without another IPC call.
 /// A pending search query is re-applied on top of the new page so the
 /// user's filter survives a refresh / pagination event.
+///
+/// beta.5 Bug-1/2: this is the single point where `state.current_offset`
+/// and `state.last_known_total` are written. Callers compute the candidate
+/// offset they want to display and pass it as `offset`; we commit it to
+/// state only on the Ok branch so an IPC error never advances or rewinds
+/// the user's view.
 fn apply_history_result(
     win: &HistoryWindow,
     state: &Arc<Mutex<AppState>>,
@@ -519,9 +558,18 @@ fn apply_history_result(
             win.set_status_text(status.into());
             win.set_total_count(page.total as i32);
 
-            // Cache the entries for the debounced search filter.
+            // Cache the entries for the debounced search filter, commit
+            // the new page offset to state (Bug-2: callers do not mutate
+            // `current_offset` until we confirm Ok), and record
+            // `page.total` so the next `on_load_next_page` can guard
+            // against advancing past the end (Bug-1).
             let query = win.get_search_query().to_string();
-            lock_or_recover(state).last_page_items = page.items.clone();
+            {
+                let mut s = lock_or_recover(state);
+                s.last_page_items = page.items.clone();
+                s.current_offset = offset;
+                s.last_known_total = Some(page.total);
+            }
 
             // Wave 3.4: image rows ship without inline pixels for now.
             // `thumb_width == 0` tells the Slint row to render the "IMG"
