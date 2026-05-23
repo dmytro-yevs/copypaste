@@ -37,6 +37,23 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         config.history_limit
     );
 
+    // v0.3 (THREAT-MODEL OI-4): upgrade the Keychain entry's ACL on first
+    // launch after install/upgrade.  Idempotent + best-effort — a failure
+    // here (e.g. user denied a Keychain prompt) must not block the daemon
+    // because the entry is still usable, just with the legacy unrestricted
+    // ACL.  The next launch retries automatically.
+    #[cfg(target_os = "macos")]
+    {
+        match crate::keychain::acl::rotate_acl_to_current_install() {
+            Ok(true) => tracing::info!("Keychain ACL rotated to current install"),
+            Ok(false) => tracing::debug!("Keychain ACL already current"),
+            Err(e) => tracing::warn!(
+                error = %e,
+                "Keychain ACL rotation failed — entry still usable with legacy ACL"
+            ),
+        }
+    }
+
     let local_key = load_local_key();
     tracing::info!("local encryption key ready");
 

@@ -3,12 +3,15 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[cfg(target_os = "macos")]
-use security_framework::passwords::{delete_generic_password, get_generic_password, set_generic_password};
-#[cfg(target_os = "macos")]
 use security_framework::base::Error as SfError;
+#[cfg(target_os = "macos")]
+use security_framework::passwords::{delete_generic_password, get_generic_password};
 
-const SERVICE: &str = "com.copypaste.daemon";
-const ACCOUNT: &str = "device-secret-key";
+#[cfg(target_os = "macos")]
+pub mod acl;
+
+pub(crate) const SERVICE: &str = "com.copypaste.daemon";
+pub(crate) const ACCOUNT: &str = "device-secret-key";
 
 /// Compute the canonical device fingerprint from a raw public key.
 ///
@@ -37,9 +40,29 @@ pub enum KeychainError {
     Unsupported,
     #[error("Core key error: {0}")]
     Key(#[from] copypaste_core::KeyError),
+    // ── v0.3 ACL surface (macOS only) ──────────────────────────────────────
+    #[cfg(target_os = "macos")]
+    #[error("Keychain ACL trust list is empty — refusing to create unrestricted entry")]
+    AclEmpty,
+    #[cfg(target_os = "macos")]
+    #[error("Cannot encode binary path for Keychain ACL (interior NUL byte)")]
+    AclPathEncoding,
+    #[cfg(target_os = "macos")]
+    #[error("Security.framework call {op} failed with OSStatus {code}")]
+    OsStatus { op: &'static str, code: i32 },
+    #[cfg(target_os = "macos")]
+    #[error("Filesystem I/O: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Load device keypair from Keychain, or generate and store a new one.
+///
+/// On v0.3 macOS builds, freshly created entries are written with an ACL
+/// pinned to the three CopyPaste binaries (see [`acl::store_with_acl`]).
+/// Pre-existing v0.2 entries without an ACL are upgraded by
+/// [`acl::rotate_acl_to_current_install`], which is called once at daemon
+/// startup separately from this function so that the rotation latency does
+/// not block per-component reads.
 pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
     #[cfg(target_os = "macos")]
     {
@@ -53,10 +76,17 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
             }
             Err(_) => {
                 let kp = DeviceKeypair::generate();
-                set_generic_password(SERVICE, ACCOUNT, &kp.secret_key_bytes())?;
+                let secret = kp.secret_key_bytes();
+                // v0.3: create with ACL pinned to the current install.
+                let trusted = acl::trusted_binary_paths()?;
+                acl::store_with_acl(&secret, &trusted)?;
                 let fp = own_fingerprint(&kp.public_key_bytes());
                 // Log only the short prefix to keep full fingerprint out of info logs.
-                tracing::info!("Generated new device keypair; fingerprint_prefix={}", &fp[..23]);
+                tracing::info!(
+                    acl_apps = trusted.len(),
+                    "Generated new device keypair with ACL; fingerprint_prefix={}",
+                    &fp[..23]
+                );
                 tracing::debug!("full device fingerprint={}", fp);
                 Ok(kp)
             }

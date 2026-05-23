@@ -50,6 +50,12 @@ objc2.workspace = true
 objc2-foundation.workspace = true
 objc2-app-kit.workspace = true
 security-framework.workspace = true
+# v0.3 Keychain ACL (THREAT-MODEL OI-4): security-framework 2.x does not bind
+# SecAccessCreate / SecTrustedApplicationCreateFromPath / SecKeychainItem*,
+# so the ACL layer in src/keychain/acl.rs drops to raw FFI and needs the
+# CFString / CFArray / CFData wrappers shipped by core-foundation 0.9 (the
+# version the rest of the security-framework chain already pulls in).
+core-foundation = "0.9"
 # Tray icon — macOS native NSStatusItem
 tray-icon = "0.19"
 # PNG decoding for the tray icon asset
@@ -76,6 +82,13 @@ path = "tests/p2p_init.rs"
 [[test]]
 name = "keychain_macos"
 path = "tests/keychain_macos.rs"
+
+# v0.3 (THREAT-MODEL OI-4): Keychain ACL enforcement smoke tests.  Gated to
+# macOS at the source level; all tests are `#[ignore]` because they mutate
+# the user's real login keychain (no in-memory shim exists for SecAccess*).
+[[test]]
+name = "keychain_acl"
+path = "tests/keychain_acl.rs"
 
 # Beta-bonus: IPC status/health endpoint tests (version, monotonic uptime
 # proxy, history count via stats, daemon-not-running typed error, throughput
