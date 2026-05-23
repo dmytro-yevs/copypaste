@@ -1,4 +1,4 @@
-.PHONY: build release bundle dmg test smoke-test bench check fmt clippy install-daemon install uninstall clean android-so
+.PHONY: build release bundle dmg test smoke-test bench check fmt clippy install-daemon install uninstall clean android-so android-docker android-docker-clean-cache
 
 build:
 	cargo build --workspace
@@ -75,6 +75,21 @@ android-so:
 		exit 1; \
 	}
 	cargo ndk -t arm64-v8a -t x86_64 -o android/app/src/main/jniLibs build -p copypaste-android
+
+# Build Android .so via the cached Docker builder image.
+# Uses the named volumes wired in docker-compose.yml so the cargo target,
+# crates.io registry, sccache and ccache all persist across runs.
+# Cold build (first time):  ~5-10 min on amd64-xlarge (image pre-bakes openssl+sqlcipher).
+# Warm build (code change):  ~1-2 min (target dir + sccache hits).
+# Re-run after image rebuild: cache hits where compiler hash matches.
+android-docker:
+	docker compose --profile build build android
+	docker compose --profile build run --rm android
+
+# Wipe just the cargo target + sccache + ccache volumes (registry kept).
+# Use when bisecting cache poisoning or rust toolchain version skew.
+android-docker-clean-cache:
+	-docker volume rm copypaste_cargo-android-target copypaste_sccache-android copypaste_ccache-android
 
 # Run daemon with debug logging
 dev-daemon:
