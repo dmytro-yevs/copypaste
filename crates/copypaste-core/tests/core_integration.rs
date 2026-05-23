@@ -12,9 +12,16 @@ fn full_encrypt_store_retrieve_decrypt_flow() {
     let enc_key = alice.derive_enc_key(&bob.public_key_bytes(), "alice-id", "bob-id");
 
     let plaintext = b"Secret clipboard content";
-    let (nonce, ciphertext) = encrypt_item(plaintext, &enc_key).unwrap();
 
-    let item = ClipboardItem::new_text(ciphertext.clone(), nonce.to_vec(), 1);
+    // Build a stub item first so we have its UUID — that uuid is bound
+    // into the AAD before encryption, then the encrypted payload replaces
+    // the stub content. This mirrors the production flow where the row id
+    // is generated, then content is encrypted with AAD = (id, schema).
+    let mut item = ClipboardItem::new_text(Vec::new(), Vec::new(), 1);
+    let aad = build_item_aad(&item.id, AAD_SCHEMA_VERSION);
+    let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &enc_key, &aad).unwrap();
+    item.content = Some(ciphertext);
+    item.content_nonce = Some(nonce.to_vec());
     insert_item(&db, &item).unwrap();
 
     let pages = get_page(&db, 10, 0).unwrap();
@@ -22,7 +29,10 @@ fn full_encrypt_store_retrieve_decrypt_flow() {
     let stored = &pages[0];
     let nonce_arr: [u8; NONCE_SIZE] = stored.content_nonce.as_ref().unwrap()
         .as_slice().try_into().unwrap();
-    let decrypted = decrypt_item(stored.content.as_ref().unwrap(), &nonce_arr, &enc_key).unwrap();
+    let stored_aad = build_item_aad(&stored.id, AAD_SCHEMA_VERSION);
+    let decrypted =
+        decrypt_item_with_aad(stored.content.as_ref().unwrap(), &nonce_arr, &enc_key, &stored_aad)
+            .unwrap();
     assert_eq!(decrypted, plaintext);
 }
 

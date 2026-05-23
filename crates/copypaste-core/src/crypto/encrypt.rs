@@ -17,9 +17,6 @@ pub const TAG_SIZE: usize = 16;
 ///
 /// Re-exported via `pub use crypto::encrypt::AAD_SCHEMA_VERSION` so storage
 /// callers can pass it to `build_item_aad` without hard-coding `3` everywhere.
-///
-/// TODO(v0.3): remove legacy empty-AAD fallback in `decrypt_item_with_aad`
-/// once the entire row population has been re-encrypted with AAD.
 pub const AAD_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Error)]
@@ -77,13 +74,11 @@ pub fn encrypt_item_with_aad(
 /// Returns plaintext on success or `EncryptError::AuthFailed` if the
 /// ciphertext, nonce, key, or AAD has been tampered with / is wrong.
 ///
-/// Legacy fallback (v0.2 → v0.3 transition): if decryption with the
-/// supplied `aad` fails AND `aad` is non-empty, retry once with an
-/// empty AAD. This lets us decrypt rows written by the pre-AAD
-/// (`encrypt_item`) code path without forcing a migration. The fallback
-/// MUST be removed in v0.3 once the full row population has been
-/// re-encrypted under the new AAD binding — see `AAD_SCHEMA_VERSION`
-/// TODO note above.
+/// **v0.3 breaking change:** the legacy empty-AAD fallback (v0.2 → v0.3
+/// bridge) has been removed. Callers MUST pass the exact AAD that was
+/// supplied to `encrypt_item_with_aad`. v0.2 ciphertexts produced without
+/// AAD will no longer decrypt — run `copypaste migrate v3` BEFORE upgrading
+/// to backfill AAD across the row population.
 pub fn decrypt_item_with_aad(
     ciphertext: &[u8],
     nonce: &[u8; NONCE_SIZE],
@@ -93,46 +88,9 @@ pub fn decrypt_item_with_aad(
     let cipher = XChaCha20Poly1305::new(key.into());
     let nonce_x = XNonce::from(*nonce);
     let payload = Payload { msg: ciphertext, aad };
-    match cipher.decrypt(&nonce_x, payload) {
-        Ok(pt) => Ok(pt),
-        Err(_) if !aad.is_empty() => {
-            // Legacy row written by pre-AAD `encrypt_item`. Retry with
-            // empty AAD. TODO(v0.3): drop this fallback path.
-            let legacy = Payload {
-                msg: ciphertext,
-                aad: &[][..],
-            };
-            cipher
-                .decrypt(&nonce_x, legacy)
-                .map_err(|_| EncryptError::AuthFailed)
-        }
-        Err(_) => Err(EncryptError::AuthFailed),
-    }
-}
-
-/// Encrypt with XChaCha20-Poly1305 and no AAD (legacy/back-compat).
-///
-/// Equivalent to `encrypt_item_with_aad(plaintext, key, &[])`. New call
-/// sites SHOULD use `encrypt_item_with_aad` and pass an AAD bound to
-/// the row's `(item_id, schema_version)` — see `build_item_aad`.
-pub fn encrypt_item(
-    plaintext: &[u8],
-    key: &[u8; 32],
-) -> Result<([u8; NONCE_SIZE], Vec<u8>), EncryptError> {
-    encrypt_item_with_aad(plaintext, key, &[])
-}
-
-/// Decrypt with XChaCha20-Poly1305 and no AAD (legacy/back-compat).
-///
-/// Equivalent to `decrypt_item_with_aad(ciphertext, nonce, key, &[])`.
-/// For ciphertexts produced by `encrypt_item_with_aad` with non-empty
-/// AAD, call `decrypt_item_with_aad` with the matching AAD.
-pub fn decrypt_item(
-    ciphertext: &[u8],
-    nonce: &[u8; NONCE_SIZE],
-    key: &[u8; 32],
-) -> Result<Vec<u8>, EncryptError> {
-    decrypt_item_with_aad(ciphertext, nonce, key, &[])
+    cipher
+        .decrypt(&nonce_x, payload)
+        .map_err(|_| EncryptError::AuthFailed)
 }
 
 #[cfg(test)]
@@ -143,45 +101,54 @@ mod tests {
         [0x42u8; 32]
     }
 
+    fn test_aad() -> Vec<u8> {
+        build_item_aad("test-item", AAD_SCHEMA_VERSION)
+    }
+
     #[test]
     fn encrypt_decrypt_roundtrip() {
         let key = test_key();
+        let aad = test_aad();
         let plaintext = b"Hello, clipboard!";
-        let (nonce, ciphertext) = encrypt_item(plaintext, &key).unwrap();
-        let decrypted = decrypt_item(&ciphertext, &nonce, &key).unwrap();
+        let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &aad).unwrap();
+        let decrypted = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 
     #[test]
     fn different_plaintexts_produce_different_nonces() {
         let key = test_key();
-        let (n1, _) = encrypt_item(b"aaa", &key).unwrap();
-        let (n2, _) = encrypt_item(b"aaa", &key).unwrap();
+        let aad = test_aad();
+        let (n1, _) = encrypt_item_with_aad(b"aaa", &key, &aad).unwrap();
+        let (n2, _) = encrypt_item_with_aad(b"aaa", &key, &aad).unwrap();
         assert_ne!(n1, n2);
     }
 
     #[test]
     fn tampered_ciphertext_fails_decryption() {
         let key = test_key();
-        let (nonce, mut ciphertext) = encrypt_item(b"secret", &key).unwrap();
+        let aad = test_aad();
+        let (nonce, mut ciphertext) = encrypt_item_with_aad(b"secret", &key, &aad).unwrap();
         ciphertext[0] ^= 0xFF;
-        assert!(decrypt_item(&ciphertext, &nonce, &key).is_err());
+        assert!(decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad).is_err());
     }
 
     #[test]
     fn empty_plaintext_encrypts_and_decrypts() {
         let key = test_key();
-        let (nonce, ciphertext) = encrypt_item(b"", &key).unwrap();
-        let decrypted = decrypt_item(&ciphertext, &nonce, &key).unwrap();
+        let aad = test_aad();
+        let (nonce, ciphertext) = encrypt_item_with_aad(b"", &key, &aad).unwrap();
+        let decrypted = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad).unwrap();
         assert_eq!(decrypted, b"");
     }
 
     #[test]
     fn large_plaintext_1mb_roundtrip() {
         let key = test_key();
+        let aad = test_aad();
         let plaintext = vec![0xABu8; 1_000_000];
-        let (nonce, ciphertext) = encrypt_item(&plaintext, &key).unwrap();
-        let decrypted = decrypt_item(&ciphertext, &nonce, &key).unwrap();
+        let (nonce, ciphertext) = encrypt_item_with_aad(&plaintext, &key, &aad).unwrap();
+        let decrypted = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 
@@ -190,21 +157,22 @@ mod tests {
     /// allocate >256 GiB to hit the real ChaCha20-Poly1305 limit in CI,
     /// so we exercise the happy path *and* a forced-error path via a
     /// crafted decryption call (which uses the same error-mapping pattern).
-    /// The structural fact this test pins is: `encrypt_item` returns
+    /// The structural fact this test pins is: `encrypt_item_with_aad` returns
     /// `Result` — the API can no longer panic at the call site.
     #[test]
     fn encrypt_returns_error_not_panic_on_oversized() {
         let key = test_key();
+        let aad = test_aad();
 
         // Happy path: returns Ok
-        let ok = encrypt_item(b"normal input", &key);
+        let ok = encrypt_item_with_aad(b"normal input", &key, &aad);
         assert!(ok.is_ok(), "small input must succeed");
 
         // The signature itself is the guarantee: callers handle errors via `?`
         // instead of unwinding the stack on adversarial input. We assert the
         // type-level contract: the function returns Result, not a raw tuple.
         let result: Result<([u8; NONCE_SIZE], Vec<u8>), EncryptError> =
-            encrypt_item(b"x", &key);
+            encrypt_item_with_aad(b"x", &key, &aad);
         assert!(result.is_ok());
 
         // And the error variant exists and formats sensibly.

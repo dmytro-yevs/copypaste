@@ -5,6 +5,20 @@
 v0.3 development branch. Cut from release/v0.2.0-beta after Wave 5 verify-gate.
 See docs/release/v0.3-plan.md for scope.
 
+### Breaking changes
+- **Crypto:** dropped the legacy empty-AAD AEAD decrypt fallback in
+  `copypaste-core::crypto::encrypt`. The `encrypt_item` / `decrypt_item`
+  wrapper functions (empty-AAD variants) have been removed entirely;
+  callers must use `encrypt_item_with_aad` / `decrypt_item_with_aad`
+  with `build_item_aad(item_id, AAD_SCHEMA_VERSION)`.
+
+  **v0.2 → v0.3 upgrade path:** run `copypaste migrate v3` (which
+  backfills AAD across the row population) BEFORE upgrading the daemon.
+  If the v0.2 daemon is killed before the backfill completes, those rows
+  are unreadable in v0.3 — this is a one-way break we are explicitly
+  accepting in v0.3 in exchange for closing the substitution-attack
+  surface that the empty-AAD fallback left open.
+
 ## [0.1.0-alpha.1] — 2026-05-23
 
 ### Added

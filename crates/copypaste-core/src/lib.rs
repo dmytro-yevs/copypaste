@@ -9,7 +9,7 @@ pub mod storage;
 pub use config::AppConfig;
 pub use crypto::{DeviceKeypair, KeyError};
 pub use crypto::encrypt::{
-    build_item_aad, decrypt_item, decrypt_item_with_aad, encrypt_item, encrypt_item_with_aad,
+    build_item_aad, decrypt_item_with_aad, encrypt_item_with_aad,
     EncryptError, AAD_SCHEMA_VERSION, NONCE_SIZE,
 };
 pub use crypto::chunks::{encrypt_chunks, decrypt_chunks, EncryptedChunk, ChunkError};

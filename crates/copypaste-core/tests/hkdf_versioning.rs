@@ -16,7 +16,10 @@
 //! We re-derive the HKDF independently using the documented salt bytes to
 //! verify the rotation property end-to-end via the public API.
 
-use copypaste_core::{DeviceKeypair, NONCE_SIZE, decrypt_item, encrypt_item};
+use copypaste_core::{
+    build_item_aad, decrypt_item_with_aad, encrypt_item_with_aad,
+    DeviceKeypair, AAD_SCHEMA_VERSION, NONCE_SIZE,
+};
 use hkdf::Hkdf;
 use sha2::Sha256;
 
@@ -145,9 +148,10 @@ fn key_length_matches_xchacha_requirement_32_bytes() {
 
     // Round-trip sanity: the derived key actually works with the AEAD layer.
     let plaintext = b"hkdf-versioning-roundtrip";
-    let (nonce, ct) = encrypt_item(plaintext, &net_key).unwrap();
+    let aad = build_item_aad("hkdf-roundtrip", AAD_SCHEMA_VERSION);
+    let (nonce, ct) = encrypt_item_with_aad(plaintext, &net_key, &aad).unwrap();
     assert_eq!(nonce.len(), NONCE_SIZE);
-    let pt = decrypt_item(&ct, &nonce, &net_key).unwrap();
+    let pt = decrypt_item_with_aad(&ct, &nonce, &net_key, &aad).unwrap();
     assert_eq!(pt, plaintext);
 }
 
@@ -184,17 +188,18 @@ fn migration_old_v1_ciphertext_decryptable_with_v1_key_only() {
     let v2_key = derive_with_salt(&alice, &bob_pub, "alice", "bob", HKDF_SALT_V2_CANDIDATE);
 
     let plaintext = b"legacy v1 ciphertext";
-    let (nonce, ct) = encrypt_item(plaintext, &v1_key).unwrap();
+    let aad = build_item_aad("hkdf-migration", AAD_SCHEMA_VERSION);
+    let (nonce, ct) = encrypt_item_with_aad(plaintext, &v1_key, &aad).unwrap();
 
     // Sanity: v1 key decrypts the v1 ciphertext.
-    let pt = decrypt_item(&ct, &nonce, &v1_key).unwrap();
+    let pt = decrypt_item_with_aad(&ct, &nonce, &v1_key, &aad).unwrap();
     assert_eq!(pt, plaintext);
 
     // The real contract: v2 key MUST NOT decrypt v1 ciphertext (auth tag
     // mismatch). This is what forces a migration step rather than a silent
     // key swap.
     assert!(
-        decrypt_item(&ct, &nonce, &v2_key).is_err(),
+        decrypt_item_with_aad(&ct, &nonce, &v2_key, &aad).is_err(),
         "v2-derived key must NOT decrypt v1-derived ciphertext — \
          a migration step is mandatory"
     );
@@ -202,6 +207,6 @@ fn migration_old_v1_ciphertext_decryptable_with_v1_key_only() {
     // TODO: once `migrate_ciphertext_v1_to_v2` exists, assert:
     //   let (new_ct, new_nonce) =
     //       migrate_ciphertext_v1_to_v2(&ct, &nonce, &v1_key, &v2_key).unwrap();
-    //   assert_eq!(decrypt_item(&new_ct, &new_nonce, &v2_key).unwrap(), plaintext);
-    //   assert!(decrypt_item(&new_ct, &new_nonce, &v1_key).is_err());
+    //   assert_eq!(decrypt_item_with_aad(&new_ct, &new_nonce, &v2_key, &aad).unwrap(), plaintext);
+    //   assert!(decrypt_item_with_aad(&new_ct, &new_nonce, &v1_key, &aad).is_err());
 }

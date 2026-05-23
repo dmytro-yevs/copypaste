@@ -1,4 +1,5 @@
-//! AEAD tamper-detection tests for XChaCha20-Poly1305 (`encrypt_item` / `decrypt_item`).
+//! AEAD tamper-detection tests for XChaCha20-Poly1305
+//! (`encrypt_item_with_aad` / `decrypt_item_with_aad`).
 //!
 //! Verifies the authenticated-encryption guarantees of the wrapper in
 //! `copypaste-core::crypto::encrypt`:
@@ -15,16 +16,16 @@
 //!   other plaintext — the random per-message nonce binds the ciphertext to
 //!   that nonce.
 //!
-//! AAD binding (beta security hardening): the AEAD layer now also exposes
-//! `encrypt_item_with_aad` / `decrypt_item_with_aad`, which authenticate an
+//! AAD binding (v0.3 security contract): the AEAD layer authenticates an
 //! Associated Data string bound to the row's `(item_id, schema_version)`.
-//! The three trailing tests in this file pin:
-//!   * `aad_swap_fails`        — ciphertext bound to row A cannot be replayed into row B
-//!   * `aad_match_succeeds`    — matching AAD round-trips cleanly
-//!   * `legacy_empty_aad_fallback` — pre-AAD ciphertext still decrypts (v0.2→v0.3 bridge)
+//! The trailing AAD tests in this file pin:
+//!   * `aad_swap_fails`            — ciphertext bound to row A cannot be replayed into row B
+//!   * `aad_match_succeeds`        — matching AAD round-trips cleanly
+//!   * `decrypt_without_aad_fails` — v0.3 explicitly drops the v0.2 empty-AAD fallback;
+//!     pre-v0.3 ciphertexts no longer decrypt cleanly.
 
 use copypaste_core::{
-    build_item_aad, decrypt_item, decrypt_item_with_aad, encrypt_item, encrypt_item_with_aad,
+    build_item_aad, decrypt_item_with_aad, encrypt_item_with_aad,
     EncryptError, AAD_SCHEMA_VERSION, NONCE_SIZE,
 };
 
@@ -38,20 +39,29 @@ fn key_b() -> [u8; 32] {
     [0x22u8; 32]
 }
 
+/// Default AAD used by the legacy-style round-trip tests below. Each test
+/// uses a unique item_id so any future cross-test bleed would be detected
+/// by the AAD binding itself.
+fn aad_for(item_id: &str) -> Vec<u8> {
+    build_item_aad(item_id, AAD_SCHEMA_VERSION)
+}
+
 #[test]
 fn decrypt_unmodified_ciphertext_succeeds() {
     let key = key_a();
+    let aad = aad_for("decrypt_unmodified");
     let plaintext = b"hello clipboard";
-    let (nonce, ciphertext) = encrypt_item(plaintext, &key).expect("encrypt");
-    let decrypted = decrypt_item(&ciphertext, &nonce, &key).expect("decrypt");
+    let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &aad).expect("encrypt");
+    let decrypted = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad).expect("decrypt");
     assert_eq!(decrypted, plaintext);
 }
 
 #[test]
 fn bit_flip_in_ciphertext_body_returns_error() {
     let key = key_a();
+    let aad = aad_for("body_flip");
     let plaintext = b"sensitive payload that is longer than the tag";
-    let (nonce, mut ciphertext) = encrypt_item(plaintext, &key).expect("encrypt");
+    let (nonce, mut ciphertext) = encrypt_item_with_aad(plaintext, &key, &aad).expect("encrypt");
 
     // Body = everything before the trailing 16-byte tag. Flip a bit in the
     // middle of the body.
@@ -59,7 +69,7 @@ fn bit_flip_in_ciphertext_body_returns_error() {
     let body_idx = (ciphertext.len() - TAG_SIZE) / 2;
     ciphertext[body_idx] ^= 0x01;
 
-    let result = decrypt_item(&ciphertext, &nonce, &key);
+    let result = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad);
     assert!(matches!(result, Err(EncryptError::AuthFailed)),
         "expected AuthFailed for body bit-flip, got {:?}", result);
 }
@@ -67,12 +77,13 @@ fn bit_flip_in_ciphertext_body_returns_error() {
 #[test]
 fn bit_flip_in_nonce_returns_error() {
     let key = key_a();
+    let aad = aad_for("nonce_flip");
     let plaintext = b"nonce-bound message";
-    let (mut nonce, ciphertext) = encrypt_item(plaintext, &key).expect("encrypt");
+    let (mut nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &aad).expect("encrypt");
 
     nonce[0] ^= 0x01;
 
-    let result = decrypt_item(&ciphertext, &nonce, &key);
+    let result = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad);
     assert!(matches!(result, Err(EncryptError::AuthFailed)),
         "expected AuthFailed for nonce bit-flip, got {:?}", result);
 }
@@ -80,15 +91,16 @@ fn bit_flip_in_nonce_returns_error() {
 #[test]
 fn bit_flip_in_auth_tag_returns_error() {
     let key = key_a();
+    let aad = aad_for("tag_flip");
     let plaintext = b"tag-protected message";
-    let (nonce, mut ciphertext) = encrypt_item(plaintext, &key).expect("encrypt");
+    let (nonce, mut ciphertext) = encrypt_item_with_aad(plaintext, &key, &aad).expect("encrypt");
 
     // Last 16 bytes of the AEAD output are the Poly1305 tag.
     let len = ciphertext.len();
     assert!(len >= TAG_SIZE);
     ciphertext[len - 1] ^= 0x80;
 
-    let result = decrypt_item(&ciphertext, &nonce, &key);
+    let result = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad);
     assert!(matches!(result, Err(EncryptError::AuthFailed)),
         "expected AuthFailed for tag bit-flip, got {:?}", result);
 }
@@ -96,13 +108,14 @@ fn bit_flip_in_auth_tag_returns_error() {
 #[test]
 fn truncated_ciphertext_returns_error_not_panic() {
     let key = key_a();
+    let aad = aad_for("truncated");
     let plaintext = b"truncate me please";
-    let (nonce, mut ciphertext) = encrypt_item(plaintext, &key).expect("encrypt");
+    let (nonce, mut ciphertext) = encrypt_item_with_aad(plaintext, &key, &aad).expect("encrypt");
 
     // Drop the last byte — this corrupts the Poly1305 tag length.
     ciphertext.pop();
 
-    let result = decrypt_item(&ciphertext, &nonce, &key);
+    let result = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad);
     assert!(matches!(result, Err(EncryptError::AuthFailed)),
         "truncated ciphertext must return Err, not panic; got {:?}", result);
 }
@@ -112,10 +125,11 @@ fn truncated_below_tag_size_returns_error_not_panic() {
     // Even more aggressive: trim ciphertext down to less than TAG_SIZE bytes.
     // The AEAD layer must reject this cleanly without panicking.
     let key = key_a();
-    let (nonce, _ciphertext) = encrypt_item(b"x", &key).expect("encrypt");
+    let aad = aad_for("truncated_sub_tag");
+    let (nonce, _ciphertext) = encrypt_item_with_aad(b"x", &key, &aad).expect("encrypt");
 
     let stub = vec![0u8; TAG_SIZE - 1];
-    let result = decrypt_item(&stub, &nonce, &key);
+    let result = decrypt_item_with_aad(&stub, &nonce, &key, &aad);
     assert!(matches!(result, Err(EncryptError::AuthFailed)),
         "sub-tag-size ciphertext must return Err; got {:?}", result);
 }
@@ -127,33 +141,35 @@ fn swapped_two_ciphertexts_same_key_decrypts_to_other_plaintext() {
     // ciphertext "decrypts to the other plaintext" under the wrong nonce.
     // This pins the property that nonce-pairing is enforced.
     let key = key_a();
+    let aad = aad_for("nonce_swap");
     let pt_a = b"AAAAAAAAAAAAAAAA";
     let pt_b = b"BBBBBBBBBBBBBBBB";
 
-    let (nonce_a, ct_a) = encrypt_item(pt_a, &key).expect("encrypt a");
-    let (nonce_b, ct_b) = encrypt_item(pt_b, &key).expect("encrypt b");
+    let (nonce_a, ct_a) = encrypt_item_with_aad(pt_a, &key, &aad).expect("encrypt a");
+    let (nonce_b, ct_b) = encrypt_item_with_aad(pt_b, &key, &aad).expect("encrypt b");
 
     assert_ne!(nonce_a, nonce_b, "fresh nonces must differ");
 
     // Cross-pair: wrong nonce must NOT yield the other plaintext.
-    let cross_1 = decrypt_item(&ct_a, &nonce_b, &key);
-    let cross_2 = decrypt_item(&ct_b, &nonce_a, &key);
+    let cross_1 = decrypt_item_with_aad(&ct_a, &nonce_b, &key, &aad);
+    let cross_2 = decrypt_item_with_aad(&ct_b, &nonce_a, &key, &aad);
     assert!(matches!(cross_1, Err(EncryptError::AuthFailed)),
         "ct_a + nonce_b must fail; got {:?}", cross_1);
     assert!(matches!(cross_2, Err(EncryptError::AuthFailed)),
         "ct_b + nonce_a must fail; got {:?}", cross_2);
 
     // Correct pairing still works.
-    assert_eq!(decrypt_item(&ct_a, &nonce_a, &key).unwrap(), pt_a);
-    assert_eq!(decrypt_item(&ct_b, &nonce_b, &key).unwrap(), pt_b);
+    assert_eq!(decrypt_item_with_aad(&ct_a, &nonce_a, &key, &aad).unwrap(), pt_a);
+    assert_eq!(decrypt_item_with_aad(&ct_b, &nonce_b, &key, &aad).unwrap(), pt_b);
 }
 
 #[test]
 fn wrong_key_returns_error() {
+    let aad = aad_for("wrong_key");
     let plaintext = b"only key A can read this";
-    let (nonce, ciphertext) = encrypt_item(plaintext, &key_a()).expect("encrypt");
+    let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key_a(), &aad).expect("encrypt");
 
-    let result = decrypt_item(&ciphertext, &nonce, &key_b());
+    let result = decrypt_item_with_aad(&ciphertext, &nonce, &key_b(), &aad);
     assert!(matches!(result, Err(EncryptError::AuthFailed)),
         "expected AuthFailed for wrong key, got {:?}", result);
 }
@@ -161,14 +177,15 @@ fn wrong_key_returns_error() {
 #[test]
 fn empty_plaintext_encrypts_decrypts_correctly() {
     let key = key_a();
-    let (nonce, ciphertext) = encrypt_item(b"", &key).expect("encrypt empty");
+    let aad = aad_for("empty_plaintext");
+    let (nonce, ciphertext) = encrypt_item_with_aad(b"", &key, &aad).expect("encrypt empty");
 
     // Even empty plaintext produces a 16-byte tag.
     assert_eq!(ciphertext.len(), TAG_SIZE,
         "empty plaintext ciphertext must equal tag size");
     assert_eq!(nonce.len(), NONCE_SIZE);
 
-    let decrypted = decrypt_item(&ciphertext, &nonce, &key).expect("decrypt empty");
+    let decrypted = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad).expect("decrypt empty");
     assert!(decrypted.is_empty());
 }
 
@@ -177,22 +194,23 @@ fn every_byte_flip_in_tag_is_detected() {
     // Stronger guarantee: any single-byte flip anywhere in the tag must be
     // rejected. Iterates the full 16-byte tag region.
     let key = key_a();
+    let aad = aad_for("tag_fuzz");
     let plaintext = b"per-byte tag fuzz";
-    let (nonce, ciphertext) = encrypt_item(plaintext, &key).expect("encrypt");
+    let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &aad).expect("encrypt");
     let len = ciphertext.len();
     assert!(len >= TAG_SIZE);
 
     for offset in (len - TAG_SIZE)..len {
         let mut tampered = ciphertext.clone();
         tampered[offset] ^= 0xFF;
-        let result = decrypt_item(&tampered, &nonce, &key);
+        let result = decrypt_item_with_aad(&tampered, &nonce, &key, &aad);
         assert!(matches!(result, Err(EncryptError::AuthFailed)),
             "flip at tag offset {} must fail, got {:?}", offset, result);
     }
 }
 
 // ---------------------------------------------------------------------------
-// AAD binding (beta security hardening): bind ciphertext to (item_id, schema).
+// AAD binding (v0.3 security contract): bind ciphertext to (item_id, schema).
 // ---------------------------------------------------------------------------
 
 /// Ciphertext encrypted with AAD "A" must NOT decrypt under AAD "B" — this is
@@ -231,7 +249,7 @@ fn aad_swap_fails() {
     );
 }
 
-/// Same AAD on both ends round-trips cleanly — the happy path for the new
+/// Same AAD on both ends round-trips cleanly — the happy path for the
 /// per-item binding contract.
 #[test]
 fn aad_match_succeeds() {
@@ -253,35 +271,35 @@ fn aad_match_succeeds() {
     assert_eq!(decrypted_again, plaintext);
 }
 
-/// Legacy rows written by the pre-AAD `encrypt_item` path (empty AAD) MUST
-/// still decrypt when read back through the new `decrypt_item_with_aad`
-/// surface — the v0.2→v0.3 bridge. The fallback only triggers when the
-/// strict-AAD attempt fails AND the supplied AAD is non-empty.
+/// v0.3 breaking change: rows written by the pre-AAD v0.2 path (empty AAD) MUST
+/// NO LONGER decrypt under the new strict-AAD decrypt surface. v0.2 → v0.3
+/// upgrade path is: run `copypaste migrate v3` (which backfills AAD across the
+/// row population) BEFORE upgrading the daemon. If the v0.2 daemon is killed
+/// before the backfill completes, those rows are unreadable in v0.3 — that is
+/// the one-way break we are explicitly accepting in v0.3.
 #[test]
-fn legacy_empty_aad_fallback() {
+fn decrypt_without_aad_fails() {
     let key = key_a();
-    let plaintext = b"row written before AAD landed";
+    let plaintext = b"row written by v0.2 with empty AAD";
 
-    // Pre-AAD path: legacy producer.
-    let (nonce, ciphertext) = encrypt_item(plaintext, &key).expect("legacy encrypt");
+    // Simulate a v0.2 ciphertext: encrypted with empty AAD.
+    let empty_aad: &[u8] = &[];
+    let (nonce, ciphertext) =
+        encrypt_item_with_aad(plaintext, &key, empty_aad).expect("simulate v0.2 encrypt");
 
-    // Post-AAD reader: tries new AAD, falls back to empty AAD on failure.
-    let aad = build_item_aad("legacy-row-uuid", 3);
-    let decrypted =
-        decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad).expect("legacy fallback decrypt");
-    assert_eq!(decrypted, plaintext);
-
-    // Also pin the inverse: a NEW ciphertext (encrypted with real AAD) must
-    // NOT silently decrypt under a *different* item's AAD just because the
-    // fallback exists. The fallback retries with empty AAD, which still
-    // does not match the real AAD, so the call must still fail.
-    let real_aad = build_item_aad("real-item", 3);
-    let other_aad = build_item_aad("attacker-item", 3);
-    let (n2, ct2) = encrypt_item_with_aad(b"protected", &key, &real_aad).expect("encrypt");
-    let result = decrypt_item_with_aad(&ct2, &n2, &key, &other_aad);
+    // v0.3 reader: reconstructs AAD from (item_id, schema_version). The
+    // legacy empty-AAD fallback is GONE, so the strict-AAD decrypt MUST fail.
+    let v3_aad = build_item_aad("legacy-row-uuid", AAD_SCHEMA_VERSION);
+    let result = decrypt_item_with_aad(&ciphertext, &nonce, &key, &v3_aad);
     assert!(
         matches!(result, Err(EncryptError::AuthFailed)),
-        "fallback path must not weaken AAD enforcement; got {:?}",
+        "v0.3 must reject v0.2 empty-AAD ciphertexts (legacy fallback removed); got {:?}",
         result,
     );
+
+    // Sanity: the same ciphertext still decrypts when the caller supplies
+    // the original empty AAD — proves the failure above is specifically the
+    // AAD mismatch, not key/nonce corruption.
+    let sanity = decrypt_item_with_aad(&ciphertext, &nonce, &key, empty_aad);
+    assert_eq!(sanity.unwrap(), plaintext);
 }
