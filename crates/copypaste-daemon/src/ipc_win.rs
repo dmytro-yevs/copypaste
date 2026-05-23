@@ -1,5 +1,12 @@
 //! Windows named-pipe IPC server skeleton (beta-bonus).
 //!
+//! **FROZEN 2026-05-23.** Windows is out of scope for v0.3+ — see
+//! `docs/adr/ADR-012-windows-frozen-homebrew-only.md`. This module is
+//! retained verbatim as reference material so the eventual thaw does
+//! not have to re-derive the protocol shim; it is not compiled by any
+//! active configuration (the daemon's `mod` declaration is already
+//! `#[cfg(windows)]` and no CI target builds it). Do not delete.
+//!
 //! This module mirrors the line-delimited JSON request/response protocol
 //! implemented for Unix domain sockets in [`crate::ipc`], but uses Windows
 //! named pipes via [`tokio::net::windows::named_pipe`].

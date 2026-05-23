@@ -1,6 +1,12 @@
 //! Windows platform backend — stub for Phase 5a implementation.
 //! Clipboard: Win32 AddClipboardFormatListener (WM_CLIPBOARDUPDATE)
 //! Keystore: DPAPI CryptProtectData/CryptUnprotectData
+//!
+//! **FROZEN 2026-05-23.** Windows is out of scope for v0.3+ — see
+//! `docs/adr/ADR-012-windows-frozen-homebrew-only.md`. Stubs retained
+//! so the trait impls keep the workspace's `cfg(windows)` reachable
+//! when (eventually) thawed; not compiled by any active CI target.
+//! Do not delete.
 
 use super::{ClipboardBackend, ClipboardEvent, KeystoreBackend};
 
