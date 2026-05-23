@@ -4,6 +4,33 @@ use std::sync::OnceLock;
 static PATTERN_SET: OnceLock<RegexSet> = OnceLock::new();
 static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
 
+/// Eagerly compile all sensitive-data regex patterns and the companion
+/// `RegexSet`. Must be called once before any detection function runs.
+///
+/// Returns an error if any pattern string is invalid. Subsequent calls
+/// are a no-op (OnceLock ensures the patterns are compiled at most once).
+///
+/// Called automatically by `Database::open()` so callers that go through
+/// the normal DB path get patterns validated at startup rather than
+/// panicking on first clipboard scan.
+pub fn init_patterns() -> Result<(), regex::Error> {
+    // Compile the RegexSet first — it validates all pattern strings.
+    if PATTERN_SET.get().is_none() {
+        let set = RegexSet::new(RAW_PATTERNS.iter().map(|(_, p, _, _)| *p))?;
+        let _ = PATTERN_SET.set(set); // ignore if already set by a racing thread
+    }
+    // Compile the individual Regex vec.
+    if PATTERNS.get().is_none() {
+        let pats: Result<Vec<Regex>, regex::Error> = RAW_PATTERNS
+            .iter()
+            .map(|(_, p, _, _)| Regex::new(p))
+            .collect();
+        let _ = PATTERNS.set(pats?); // ignore if already set by a racing thread
+    }
+    Ok(())
+}
+
+
 /// (name, raw_regex, category_index, confidence)
 /// category_index: 0=Credential, 1=Financial, 2=PersonalId, 3=Infrastructure
 pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[

@@ -6,8 +6,7 @@ use crate::{
 };
 use copypaste_core::{
     build_item_aad, chunks_to_blob, detect, encode_image, encrypt_item_with_aad,
-    insert_item_with_fts, AppConfig, ClipboardItem, Database, DeviceKeypair,
-    AAD_SCHEMA_VERSION,
+    insert_item_with_fts, AppConfig, ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
