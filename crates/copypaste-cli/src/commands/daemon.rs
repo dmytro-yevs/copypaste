@@ -22,7 +22,7 @@ const USER_LAUNCH_AGENTS_DIR: &str = "Library/LaunchAgents";
 /// Public subcommand entry point. Dispatches to platform-specific logic via the
 /// default `SystemRunner` (which actually shells out).
 pub fn run(action: DaemonAction) -> Result<()> {
-    let mut runner = SystemRunner::default();
+    let mut runner = SystemRunner;
     let mut fs = SystemFs;
     dispatch(action, &mut runner, &mut fs)
 }
