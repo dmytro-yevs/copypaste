@@ -87,7 +87,7 @@ fn sigkill_recovers_lamport() {
     let _ = status;
 
     // Round 2 — verify state recovered.
-    let _child2 = Command::new(&bin)
+    let mut child2 = Command::new(&bin)
         .env("COPYPASTE_STATE_DIR", &state)
         .env("COPYPASTE_TEST_MODE", "1")
         .stdout(Stdio::null())
@@ -103,6 +103,11 @@ fn sigkill_recovers_lamport() {
     let db_present = std::fs::read_dir(&state)
         .map(|rd| rd.flatten().any(|e| e.file_name().to_string_lossy().contains(".db")))
         .unwrap_or(false);
+
+    // Clean shutdown of round-2 daemon — avoid zombie processes in CI.
+    let _ = child2.kill();
+    let _ = child2.wait();
+
     assert!(db_present, "expected DB file to survive SIGKILL in {:?}", state);
 }
 

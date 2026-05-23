@@ -351,7 +351,7 @@ async fn register_device_per_device_rate_limited() {
         .parse::<u64>()
         .expect("Retry-After must be an integer number of seconds");
     assert!(
-        retry_after >= 1 && retry_after <= 60,
+        (1..=60).contains(&retry_after),
         "Retry-After must be between 1 and 60 seconds, got {retry_after}",
     );
 }
