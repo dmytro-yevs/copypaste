@@ -14,7 +14,7 @@ crate-type = ["rlib"]
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
 # Certificate generation: rcgen 0.12 works on Rust 1.65+
-rcgen = { version = "0.12", default-features = false, features = ["ring"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }
 # Framed message transport
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1"
