@@ -90,6 +90,9 @@ msgstr "Налаштування"
 msgid "Next →"
 msgstr "Далі →"
 
+msgid "← Prev"
+msgstr "← Назад"
+
 # -- Labels and fields ----------------------------------------------------
 
 msgid "Anon Key"
@@ -183,3 +186,19 @@ msgstr "Перемкнути приватний режим"
 
 msgid "IMG"
 msgstr "ЗОБР"
+
+# -- Plural forms (ngettext) ---------------------------------------------
+# Ukrainian uses 3 plural forms: [0]=1,21,31…; [1]=2-4,22-24…; [2]=5-20,25-30…
+# Footer total in history_window.slint
+msgid "{n} item total"
+msgid_plural "{n} items total"
+msgstr[0] "{n} елемент усього"
+msgstr[1] "{n} елементи усього"
+msgstr[2] "{n} елементів усього"
+
+# History-size dropdown labels in SettingsWindow.slint
+msgid "{n} item"
+msgid_plural "{n} items"
+msgstr[0] "{n} елемент"
+msgstr[1] "{n} елементи"
+msgstr[2] "{n} елементів"

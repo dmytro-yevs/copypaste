@@ -61,6 +61,12 @@ services:
     profiles:
       - build
 
+  # FROZEN 2026-05-23 — Windows is out of scope for v0.3+ (see ADR-012).
+  # `scripts/build-windows.sh` is a no-op shim; this service is preserved
+  # as reference material so reverting the freeze does not require
+  # recreating the compose entry. Moved off the `build` profile so
+  # `docker compose --profile build run` no longer picks it up. Bring up
+  # explicitly with `--profile frozen-windows` only when thawing.
   windows:
     build:
       context: .
@@ -75,7 +81,7 @@ services:
       - IN_DOCKER=1
     command: ["bash", "scripts/build-windows.sh", "x86_64"]
     profiles:
-      - build
+      - frozen-windows
 
   linux:
     build:

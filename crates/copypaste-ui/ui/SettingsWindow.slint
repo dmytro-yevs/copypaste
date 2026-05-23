@@ -125,14 +125,13 @@ export component SettingsWindow inherits Window {
                             alignment: space-between;
                             FieldLabel { text: @tr("History Size"); }
                             Text {
-                                // TODO(i18n): "50 items" / "100 items" / "500 items" need
-                                // plural-aware msgids (ngettext). Wrap "Unlimited" which
-                                // already exists in lang/*.po; defer the numeric labels
-                                // until plural support lands.
-                                text: root.history-size == 0   ? @tr("Unlimited")
-                                    : root.history-size == 50  ? "50 items"
-                                    : root.history-size == 500 ? "500 items"
-                                    : "100 items";
+                                // i18n: ngettext-aware count. Single msgid+msgid_plural
+                                // ("{n} item" / "{n} items") covers all numeric dropdown
+                                // options (50/100/500). gettext selects the right form
+                                // per the .po Plural-Forms header (en: 2, uk: 3).
+                                text: root.history-size == 0
+                                    ? @tr("Unlimited")
+                                    : @tr("{n} item" | "{n} items" % root.history-size);
                                 color: #a6adc8;
                                 font-size: 13px;
                                 vertical-alignment: center;

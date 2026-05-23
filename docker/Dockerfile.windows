@@ -1,5 +1,14 @@
 # syntax=docker/dockerfile:1.6
 #
+# FROZEN 2026-05-23 — Windows is out of scope for v0.3+. See
+#   docs/release/v0.3-plan.md
+#   docs/adr/ADR-012-windows-frozen-homebrew-only.md
+# This Dockerfile is preserved as reference material for a future thaw.
+# It is not invoked by any active workflow (the `windows` service in
+# docker-compose.yml is also frozen) and `scripts/build-windows.sh` is
+# a no-op shim. Do not "fix" this file's drift without first reverting
+# the freeze decision.
+#
 # Docker image for cross-compiling copypaste-daemon for Windows x86_64
 # from Linux via mingw-w64. No Windows host required.
 #

@@ -3,13 +3,20 @@
 One-command builds for all supported platforms. Outputs land in `builds/`
 (gitignored), one subdirectory per `<os>-<arch>`.
 
+## Supported platforms
+
+macOS (arm64 + x86_64 + universal) and Android (arm64-v8a + armeabi-v7a).
+**Windows is FROZEN as of 2026-05-23** — see
+[`docs/adr/ADR-012-windows-frozen-homebrew-only.md`](../../docs/adr/ADR-012-windows-frozen-homebrew-only.md).
+The Windows toolchain, container image, and `build-windows.sh` script are
+retained as a no-op shim plus reference material for an eventual thaw.
+
 ## Quick start
 
 ```bash
 bash scripts/build-all.sh             # all platforms (missing toolchains skipped)
 bash scripts/build-all.sh macos       # macOS only (arm64 + x86_64 + universal)
 bash scripts/build-all.sh android     # Android only (arm64-v8a + armeabi-v7a)
-bash scripts/build-all.sh windows     # Windows x86_64 (best-effort)
 ```
 
 Individual per-platform scripts:
@@ -17,7 +24,6 @@ Individual per-platform scripts:
 ```bash
 bash scripts/build-macos.sh arm64           # or x86_64, universal
 bash scripts/build-android-pkg.sh arm64-v8a # or armeabi-v7a, x86_64, x86
-bash scripts/build-windows.sh x86_64
 ```
 
 ## Output layout
@@ -36,10 +42,8 @@ builds/
 │   └── copypaste
 ├── android-arm64-v8a/
 │   └── libcopypaste_android.so
-├── android-armeabi-v7a/
-│   └── libcopypaste_android.so
-└── windows-x86_64/
-    └── copypaste-daemon.exe   (best-effort)
+└── android-armeabi-v7a/
+    └── libcopypaste_android.so
 ```
 
 ## Required toolchains
@@ -52,7 +56,6 @@ platforms to skip rather than abort the whole run.
 ```bash
 rustup target add aarch64-apple-darwin
 rustup target add x86_64-apple-darwin
-rustup target add x86_64-pc-windows-gnu
 rustup target add aarch64-linux-android
 rustup target add armv7-linux-androideabi
 ```
@@ -64,14 +67,6 @@ cargo install cargo-ndk
 # Install Android NDK via Android Studio SDK Manager (or sdkmanager CLI),
 # then export:
 export ANDROID_NDK_HOME="$HOME/Library/Android/sdk/ndk/<version>"
-```
-
-### Windows cross-compile (mingw-w64)
-
-```bash
-brew install mingw-w64    # macOS
-# OR
-sudo apt install mingw-w64  # Linux
 ```
 
 ## Notes per platform
@@ -93,13 +88,12 @@ sudo apt install mingw-w64  # Linux
   writes `.so` to `android/app/src/main/jniLibs/<abi>/` and regenerates UniFFI
   Kotlin bindings. Use that one when developing the Android app.
 
-### Windows
+### Windows (FROZEN)
 
-- Cross-compile via mingw-w64 is **best-effort**. The daemon's IPC layer
-  currently has only a stub for Windows; link errors are expected.
-- For production Windows builds, use a real Windows host or MSVC toolchain.
-- When the build fails it is reported as `SKIP` in the summary, not a hard
-  error — so `build-all.sh` finishes for other platforms.
+- `scripts/build-windows.sh` is a no-op shim that exits 0 with a notice.
+- `docker/Dockerfile.windows` and the `windows` docker-compose service are
+  preserved but inert. No CI job builds them.
+- Thaw requires reverting ADR-012.
 
 ## Bash compatibility
 
@@ -110,5 +104,4 @@ no associative arrays. Verify with:
 bash -n scripts/build-all.sh
 bash -n scripts/build-macos.sh
 bash -n scripts/build-android-pkg.sh
-bash -n scripts/build-windows.sh
 ```

@@ -249,18 +249,21 @@ export component HistoryWindow inherits Window {
             height: 32px;
 
             Button {
-                // TODO(i18n): "← Prev" composite not in lang/*.po — add a
-                // matching msgid (or split arrow into a separate Text) before
-                // wrapping in @tr.
-                text: "← Prev";
+                // i18n: mirror of "Next →" — single composite msgid covers
+                // both arrow + label so translators can flip glyph placement
+                // for RTL locales if needed.
+                text: @tr("← Prev");
                 clicked => { load-prev-page(); }
             }
 
             Text {
-                // TODO(i18n): pluralisation needed — Slint's @tr does not yet
-                // expose ngettext. Defer until a singular/plural helper lands;
-                // leave the English template visible across locales for now.
-                text: total-count > 0 ? total-count + " items total" : "";
+                // i18n: Slint 1.8 `@tr` plural form — singular | plural % count.
+                // Use {n} in both forms to interpolate the count expression.
+                // gettext picks msgstr[0..N-1] per the .po Plural-Forms header
+                // (en: 2 forms, uk: 3 forms).
+                text: total-count > 0
+                    ? @tr("{n} item total" | "{n} items total" % total-count)
+                    : "";
                 color: #6c7086;
                 font-size: 11px;
                 horizontal-alignment: center;

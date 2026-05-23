@@ -4,11 +4,13 @@
 #   bash scripts/build-all.sh             # all platforms (skips missing toolchains)
 #   bash scripts/build-all.sh macos       # only macOS (arm64 + x86_64 + universal)
 #   bash scripts/build-all.sh android     # only Android (arm64-v8a + armeabi-v7a)
-#   bash scripts/build-all.sh windows     # only Windows x86_64 (best-effort)
 #
-#   bash scripts/build-all.sh --docker [android|windows|linux|all]
+#   bash scripts/build-all.sh --docker [android|linux|all]
 #     Delegates non-macOS builds to Docker containers (no host pollution).
 #     macOS still runs on host (Apple SDK cannot run in Linux container).
+#
+# Windows: FROZEN 2026-05-23 (ADR-012). The `windows` arm is accepted and
+# emits a notice but does not invoke any build steps.
 #
 # Note: uses plain if-cascade for bash 3.2 compatibility (macOS default shell).
 set -euo pipefail
@@ -28,9 +30,13 @@ PLATFORM="${PLATFORM:-all}"
 
 if [[ "$USE_DOCKER" == "true" ]]; then
   case "$PLATFORM" in
-    android|windows|linux|all)
+    android|linux|all)
       echo "==> Delegating $PLATFORM build to Docker"
       exec bash scripts/build-in-docker.sh "$PLATFORM"
+      ;;
+    windows)
+      echo "Windows is frozen as of 2026-05-23 (ADR-012). Skipping Docker build."
+      exit 0
       ;;
     macos)
       echo "!! --docker not applicable to macOS (Apple SDK is host-only)."
@@ -60,10 +66,14 @@ run_step() {
 }
 
 case "$PLATFORM" in
-  all|macos|android|windows) ;;
+  all|macos|android) ;;
+  windows)
+    echo "Windows is frozen as of 2026-05-23 (ADR-012). No build steps to run."
+    exit 0
+    ;;
   *)
     echo "Unknown platform: $PLATFORM"
-    echo "Usage: $0 [all|macos|android|windows]"
+    echo "Usage: $0 [all|macos|android]     (windows is frozen — ADR-012)"
     exit 1
     ;;
 esac
@@ -79,10 +89,6 @@ fi
 if [[ "$PLATFORM" == "all" || "$PLATFORM" == "android" ]]; then
   run_step "Android arm64-v8a"    bash scripts/build-android-pkg.sh arm64-v8a
   run_step "Android armeabi-v7a"  bash scripts/build-android-pkg.sh armeabi-v7a
-fi
-
-if [[ "$PLATFORM" == "all" || "$PLATFORM" == "windows" ]]; then
-  run_step "Windows x86_64 (best-effort)" bash scripts/build-windows.sh x86_64
 fi
 
 echo ""

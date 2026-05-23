@@ -3,12 +3,15 @@
 #
 # Usage:
 #   bash scripts/build-in-docker.sh android      # Android arm64-v8a
-#   bash scripts/build-in-docker.sh windows      # Windows x86_64 (best-effort)
 #   bash scripts/build-in-docker.sh linux        # Linux musl (sanity only — frozen runtime)
-#   bash scripts/build-in-docker.sh all          # All three (non-macOS)
+#   bash scripts/build-in-docker.sh all          # All non-macOS targets
 #
 # macOS: docker cannot run Apple SDK. Use host:
 #   bash scripts/build-all.sh macos
+#
+# Windows: FROZEN 2026-05-23 (see docs/adr/ADR-012). The `windows` arm is
+# accepted but immediately exits 0 with a notice; the Docker image is not
+# built and `scripts/build-windows.sh` is a no-op shim.
 #
 # Outputs are written to ./builds/<platform>-<arch>/ via bind mount.
 set -euo pipefail
@@ -40,12 +43,16 @@ run_one() {
 }
 
 case "$PLATFORM" in
-  android|windows|linux)
+  windows)
+    echo "Windows is frozen as of 2026-05-23 (ADR-012). See docs/release/v0.3-plan.md."
+    exit 0
+    ;;
+  android|linux)
     run_one "$PLATFORM"
     ;;
   all)
     rc=0
-    for p in android windows linux; do
+    for p in android linux; do
       run_one "$p" || { echo "(skipped: $p failed — continuing)"; rc=1; }
     done
     exit "$rc"
@@ -56,7 +63,7 @@ case "$PLATFORM" in
     ;;
   *)
     echo "Unknown platform: $PLATFORM"
-    echo "Usage: $0 [android|windows|linux|all]"
+    echo "Usage: $0 [android|linux|all]    (windows is frozen — ADR-012)"
     echo ""
     echo "macOS builds run on host: bash scripts/build-all.sh macos"
     exit 1

@@ -95,6 +95,9 @@ msgstr "Settings"
 msgid "Next →"
 msgstr "Next →"
 
+msgid "← Prev"
+msgstr "← Prev"
+
 # -- Labels and fields ----------------------------------------------------
 
 msgid "Anon Key"
@@ -188,3 +191,16 @@ msgstr "Toggle private"
 
 msgid "IMG"
 msgstr "IMG"
+
+# -- Plural forms (ngettext) ---------------------------------------------
+# Footer total in history_window.slint
+msgid "{n} item total"
+msgid_plural "{n} items total"
+msgstr[0] "{n} item total"
+msgstr[1] "{n} items total"
+
+# History-size dropdown labels in SettingsWindow.slint
+msgid "{n} item"
+msgid_plural "{n} items"
+msgstr[0] "{n} item"
+msgstr[1] "{n} items"
