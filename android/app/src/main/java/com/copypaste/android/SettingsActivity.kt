@@ -61,6 +61,7 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
 
     var syncEnabled by remember { mutableStateOf(settings.syncEnabled) }
     var showWarnings by remember { mutableStateOf(settings.showSensitiveWarnings) }
+    var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
     var settingsError by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val errorTemplate = stringResource(R.string.error_settings_save)
@@ -126,6 +127,22 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
                         settings.showSensitiveWarnings = it
                     } catch (e: Exception) {
                         showWarnings = previous
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                }
+            )
+            HorizontalDivider()
+            SettingsRow(
+                title = stringResource(R.string.setting_mask_sensitive_title),
+                subtitle = stringResource(R.string.setting_mask_sensitive_subtitle),
+                checked = maskSensitive,
+                onCheckedChange = {
+                    val previous = maskSensitive
+                    maskSensitive = it
+                    try {
+                        settings.maskSensitiveContent = it
+                    } catch (e: Exception) {
+                        maskSensitive = previous
                         settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }

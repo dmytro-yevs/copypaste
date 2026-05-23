@@ -30,13 +30,32 @@
     <string name="setting_sync_enabled_subtitle">Sync clipboard items with paired devices via the relay.</string>
     <string name="setting_sensitive_warnings_title">Warn on Sensitive Data</string>
     <string name="setting_sensitive_warnings_subtitle">Show a toast when card numbers or tokens are skipped.</string>
+    <string name="setting_mask_sensitive_title">Mask Sensitive Content</string>
+    <string name="setting_mask_sensitive_subtitle">Hide preview text for items flagged as sensitive. Tap an item to reveal for 5 seconds.</string>
     <string name="setting_relay_url_label">Relay URL</string>
     <string name="setting_device_id_label">Device ID</string>
+
+    <!-- History — sensitive marker -->
+    <string name="sensitive_preview_mask">••••••</string>
+    <string name="sensitive_badge_label">Sensitive</string>
+    <string name="cd_sensitive_item">Sensitive content — preview hidden</string>
+
+    <!-- Foreground service notification -->
+    <string name="notif_channel_service_name">Clipboard Monitoring</string>
+    <string name="notif_channel_service_description">Persistent notification while CopyPaste is monitoring the clipboard.</string>
+    <string name="notif_title_active">CopyPaste — Active</string>
+    <string name="notif_title_paused">CopyPaste — Paused</string>
+    <string name="notif_content_today">%1$d items captured today</string>
+    <string name="notif_content_paused">Capture paused. Tap Resume to continue.</string>
+    <string name="notif_action_pause">Pause</string>
+    <string name="notif_action_resume">Resume</string>
+    <string name="notif_action_open">Open</string>
 
     <!-- Content descriptions -->
     <string name="cd_back">Back</string>
     <string name="cd_refresh">Refresh</string>
     <string name="cd_delete">Delete item</string>
+    <string name="cd_sensitive_icon">Sensitive content marker</string>
 
     <!-- Error / status -->
     <string name="error_generic">Failed: %1$s</string>

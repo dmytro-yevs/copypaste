@@ -14,10 +14,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -35,13 +39,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
 
@@ -165,6 +175,8 @@ private fun HistoryList(
     padding: PaddingValues,
     onDelete: (String) -> Unit
 ) {
+    val ctx = LocalContext.current
+    val maskSensitive = remember { Settings(ctx).maskSensitiveContent }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -173,27 +185,84 @@ private fun HistoryList(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items(items, key = { it.id }) { item ->
-            HistoryRow(item, onDelete)
+            HistoryRow(item = item, maskSensitive = maskSensitive, onDelete = onDelete)
         }
     }
 }
 
+/**
+ * v0.3 T4 polish: rows for sensitive items get a lock badge, a muted background
+ * tint, and (when [maskSensitive] is true) their preview is replaced with
+ * bullets. Tap an item to temporarily reveal the masked preview for 5 seconds.
+ *
+ * Sensitivity is determined per-item:
+ *  * [ClipboardItem.isSensitive] if the repository / native side already
+ *    flagged it (e.g. a peer-synced item that arrived pre-flagged), or
+ *  * [isSensitive] re-detection at render time — covers locally-stored items
+ *    whose `isSensitive` field is always `false` because the storage path
+ *    filters sensitive content before insert (see [ClipboardRepository]).
+ */
 @Composable
-private fun HistoryRow(item: ClipboardItem, onDelete: (String) -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
+private fun HistoryRow(
+    item: ClipboardItem,
+    maskSensitive: Boolean,
+    onDelete: (String) -> Unit
+) {
+    // Re-detect on display so the marker still shows for incoming-synced items
+    // or anything that bypassed the storage-side filter. Cheap on the snippet
+    // length we keep (≤80 chars).
+    val detectedSensitive = remember(item.id, item.snippet) {
+        if (item.isSensitive) true
+        else try { isSensitive(item.snippet) } catch (_: UnsatisfiedLinkError) { false }
+    }
+
+    var revealed by remember(item.id) { mutableStateOf(false) }
+    LaunchedEffect(revealed) {
+        if (revealed) {
+            delay(5_000L)
+            revealed = false
+        }
+    }
+
+    val cardColor = if (detectedSensitive) {
+        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+
+    val sensitiveCd = stringResource(R.string.cd_sensitive_item)
+    val maskString = stringResource(R.string.sensitive_preview_mask)
+
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .then(
+            if (detectedSensitive && maskSensitive) {
+                Modifier
+                    .clickable { revealed = !revealed }
+                    .semantics { contentDescription = sensitiveCd }
+            } else Modifier
         )
+
+    Card(
+        modifier = rowModifier,
+        colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
+            if (detectedSensitive) {
+                SensitiveBadge()
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val display = when {
+                    detectedSensitive && maskSensitive && !revealed -> maskString
+                    item.snippet.isBlank() -> "(empty)"
+                    else -> item.snippet
+                }
                 Text(
-                    text = item.snippet.ifBlank { "(empty)" },
+                    text = display,
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -212,6 +281,33 @@ private fun HistoryRow(item: ClipboardItem, onDelete: (String) -> Unit) {
             )
         }
     }
+}
+
+@Composable
+private fun SensitiveBadge() {
+    AssistChip(
+        onClick = {},
+        enabled = false,
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Filled.Lock,
+                contentDescription = stringResource(R.string.cd_sensitive_icon),
+                tint = MaterialTheme.colorScheme.error
+            )
+        },
+        label = {
+            Text(
+                text = stringResource(R.string.sensitive_badge_label),
+                style = MaterialTheme.typography.labelSmall
+            )
+        },
+        colors = AssistChipDefaults.assistChipColors(
+            disabledContainerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+            disabledLabelColor = MaterialTheme.colorScheme.onErrorContainer,
+            disabledLeadingIconContentColor = MaterialTheme.colorScheme.error
+        ),
+        modifier = Modifier.padding(bottom = 6.dp)
+    )
 }
 
 private fun formatTime(ms: Long): String =

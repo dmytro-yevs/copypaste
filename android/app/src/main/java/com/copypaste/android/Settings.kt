@@ -30,6 +30,24 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("show_sensitive_warnings", true)
         set(v) = prefs.edit().putBoolean("show_sensitive_warnings", v).apply()
 
+    /**
+     * When true (default), preview text for items flagged as sensitive is
+     * replaced with bullet placeholders in the history list. Tap-to-reveal
+     * briefly unmasks the item (handled in the UI layer).
+     */
+    var maskSensitiveContent: Boolean
+        get() = prefs.getBoolean("mask_sensitive_content", true)
+        set(v) = prefs.edit().putBoolean("mask_sensitive_content", v).apply()
+
+    /**
+     * When true (default), the foreground service is actively monitoring the
+     * clipboard. Toggled by the notification's Pause/Resume action; consumed
+     * by [ClipboardService] before storing each detected change.
+     */
+    var captureEnabled: Boolean
+        get() = prefs.getBoolean("capture_enabled", true)
+        set(v) = prefs.edit().putBoolean("capture_enabled", v).apply()
+
     var maxHistoryItems: Int
         get() = prefs.getInt("max_history_items", 1000)
         set(v) = prefs.edit().putInt("max_history_items", v).apply()
