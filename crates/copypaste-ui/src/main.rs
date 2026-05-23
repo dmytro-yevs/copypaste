@@ -121,13 +121,35 @@ fn main() -> Result<()> {
                 win.show().ok();
             }
         });
+        // v0.3 T3: tray "Recent items" row click → paste via IPC. The
+        // closure spawns a worker thread so we never block the UI on the
+        // daemon socket (paste involves a write + ack).
+        let paste_socket = {
+            let s = state.lock().unwrap();
+            s.socket_path.clone()
+        };
+        let on_paste_item: copypaste_ui::tray_host::PasteCb = Box::new(move |id: &str| {
+            let socket = paste_socket.clone();
+            let id_owned = id.to_string();
+            std::thread::spawn(move || {
+                if let Err(e) = paste_item(&socket, &id_owned) {
+                    tracing::warn!(error = %e, id = %id_owned, "tray paste failed");
+                }
+            });
+        });
         let callbacks = copypaste_ui::tray_host::TrayCallbacks {
             on_open_history: Some(on_open_history),
             on_open_preferences: None,
             on_quit: None, // default = slint::quit_event_loop()
+            on_paste_item: Some(on_paste_item),
         };
         if let Err(e) = copypaste_ui::tray_host::install(callbacks) {
             eprintln!("[tray] install failed: {e} — running without menu-bar tray");
+        } else {
+            // v0.3 T3: prime the tray with current history immediately and
+            // then refresh on a slint::Timer so changes show up without
+            // requiring the user to open the history window first.
+            spawn_tray_recents_refresh(Arc::clone(&state));
         }
     }
 
@@ -384,6 +406,72 @@ fn load_history_page(
 fn paste_item(socket_path: &std::path::Path, id: &str) -> std::result::Result<String, String> {
     let mut client = IpcClient::connect(socket_path).map_err(|e| format!("daemon offline: {e}"))?;
     client.paste(id).map_err(|e| e.to_string())
+}
+
+/// v0.3 T3: keep the tray's "Recent items" block in sync with the daemon.
+///
+/// Polls `history_page(MAX_TRAY_RECENTS, 0)` every `TRAY_REFRESH_INTERVAL`
+/// from a Slint timer on the UI thread, then hands the result to
+/// `tray_host::update_recents` (which mutates muda menu state — must run
+/// main-thread on macOS).
+///
+/// The IPC call itself runs synchronously inside the timer tick because
+/// (a) it's bounded at MAX_TRAY_RECENTS rows so latency is in the low
+/// milliseconds, and (b) `slint::Image` types on the row Vec aren't
+/// involved here — the tray only needs id/preview/wall_time/type, all
+/// `Send`. If profiling shows hitches we can move the read off-thread
+/// and post-back via `invoke_from_event_loop`.
+#[cfg(target_os = "macos")]
+fn spawn_tray_recents_refresh(state: Arc<Mutex<AppState>>) {
+    use copypaste_ui::tray_host::{update_recents, RecentTrayItem, MAX_TRAY_RECENTS};
+
+    // Refresh cadence — 5s is fast enough to feel live without burning
+    // socket bandwidth. The IPC server is a single-threaded unix socket
+    // so we keep concurrent reads modest.
+    const TRAY_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
+    let refresh = move || {
+        let socket = {
+            let Ok(s) = state.lock() else { return };
+            s.socket_path.clone()
+        };
+        // Off-thread fetch so the tick stays cheap; post results back via
+        // invoke_from_event_loop because `update_recents` is main-thread-
+        // only on macOS (muda::Menu).
+        std::thread::spawn(move || {
+            let result = load_history_page(&socket, MAX_TRAY_RECENTS as u64, 0);
+            let recents: Vec<RecentTrayItem> = match result {
+                Ok(page) => page
+                    .items
+                    .into_iter()
+                    .map(|e| RecentTrayItem {
+                        id: e.id,
+                        content_type: e.content_type,
+                        preview: e.preview,
+                        wall_time_ms: e.wall_time,
+                    })
+                    .collect(),
+                Err(e) => {
+                    tracing::debug!(error = %e, "tray refresh: history_page failed");
+                    return;
+                }
+            };
+            let _ = slint::invoke_from_event_loop(move || {
+                update_recents(recents);
+            });
+        });
+    };
+
+    // Prime once immediately so the first menu open shows real history.
+    refresh();
+
+    // Repeating timer on the Slint event loop.
+    let timer = slint::Timer::default();
+    timer.start(slint::TimerMode::Repeated, TRAY_REFRESH_INTERVAL, move || {
+        refresh();
+    });
+    // Leak so the timer outlives this scope.
+    std::mem::forget(timer);
 }
 
 /// Convert a daemon-side history entry into the Slint row struct.
