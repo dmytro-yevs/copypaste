@@ -4,8 +4,8 @@ use crate::protocol::{
 };
 use copypaste_core::{
     build_item_aad, chunks_from_blob, count_items, decode_image, decrypt_item_with_aad,
-    delete_fts, delete_item, ensure_revoked_devices_table, get_page, revoke_device, search_items,
-    Database, AAD_SCHEMA_VERSION,
+    delete_fts, delete_item, ensure_revoked_devices_table, fetch_text_preview, get_page,
+    revoke_device, search_items, Database, AAD_SCHEMA_VERSION,
 };
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -688,27 +688,39 @@ impl IpcServer {
                     let db = db_arc.blocking_lock();
                     let items = get_page(&db, limit, offset)?;
                     let total = count_items(&db).unwrap_or(0);
-                    Ok::<_, anyhow::Error>((items, total))
+                    // Build previews inside the blocking task while `db` is
+                    // still held.  Text items: read from the FTS5 plaintext
+                    // index (capped at MAX_PREVIEW_BYTES = 1 KiB).
+                    // Image items: return a placeholder (full preview in v0.4).
+                    // Sensitive items: never expose plaintext in list view.
+                    let json_items: Vec<serde_json::Value> = items
+                        .iter()
+                        .map(|item| {
+                            let preview = if item.is_sensitive {
+                                format!("[sensitive — id:{}]", &item.id[..8])
+                            } else if item.content_type == "text" {
+                                fetch_text_preview(&db, &item.id)
+                                    .unwrap_or(None)
+                                    .unwrap_or_else(|| format!("[text — id:{}]", &item.id[..8]))
+                            } else {
+                                // image (and any future non-text type)
+                                format!("[image — id:{}]", &item.id[..8])
+                            };
+                            serde_json::json!({
+                                "id": item.id,
+                                "content_type": item.content_type,
+                                "is_sensitive": item.is_sensitive,
+                                "wall_time": item.wall_time,
+                                "lamport_ts": item.lamport_ts,
+                                "preview": preview,
+                            })
+                        })
+                        .collect();
+                    Ok::<_, anyhow::Error>((json_items, total))
                 })
                 .await;
                 match join {
-                    Ok(Ok((items, total))) => {
-                        let json_items: Vec<_> = items
-                            .iter()
-                            .map(|item| {
-                                // Build a safe text preview (first 120 chars of content, no decryption)
-                                let preview =
-                                    format!("[{} — id:{}]", item.content_type, &item.id[..8]);
-                                serde_json::json!({
-                                    "id": item.id,
-                                    "content_type": item.content_type,
-                                    "is_sensitive": item.is_sensitive,
-                                    "wall_time": item.wall_time,
-                                    "lamport_ts": item.lamport_ts,
-                                    "preview": preview,
-                                })
-                            })
-                            .collect();
+                    Ok(Ok((json_items, total))) => {
                         Response::ok(
                             req.id,
                             serde_json::json!({"items": json_items, "total": total}),
