@@ -32,7 +32,7 @@ pub enum ChunkError {
     PrematureFinal { position: u32, total: u32 },
 }
 
-/// Build AAD: "CHUNK_FORMAT_V1\0"[16] || file_id[16] || chunk_index[4:BE] || total_chunks[4:BE] || is_final[1]
+/// Build AAD: `"CHUNK_FORMAT_V1\0"[16] || file_id[16] || chunk_index[4:BE] || total_chunks[4:BE] || is_final[1]`
 fn build_aad(file_id: &[u8; 16], chunk_index: u32, total_chunks: u32, is_final: bool) -> Vec<u8> {
     let mut aad = Vec::with_capacity(16 + 16 + 4 + 4 + 1);
     aad.extend_from_slice(b"CHUNK_FORMAT_V1\0");
