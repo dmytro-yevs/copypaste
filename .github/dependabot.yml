@@ -1,25 +1,33 @@
 version: 2
 updates:
-  # Rust workspace — weekly
+  # Rust workspace — monthly, batched
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
       day: "monday"
       time: "06:00"
       timezone: "Etc/UTC"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 3
+    rebase-strategy: "disabled"
+    assignees:
+      - "dmytro-yevs"
     labels:
       - "dependencies"
       - "rust"
     commit-message:
       prefix: "chore(deps)"
       include: "scope"
+    pull-request-branch-name:
+      separator: "-"
     groups:
       rust-minor-and-patch:
         update-types:
           - "minor"
           - "patch"
+      rust-major:
+        update-types:
+          - "major"
 
   # GitHub Actions — monthly
   - package-ecosystem: "github-actions"
@@ -29,13 +37,18 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "Etc/UTC"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
+    rebase-strategy: "disabled"
+    assignees:
+      - "dmytro-yevs"
     labels:
       - "dependencies"
       - "ci"
     commit-message:
       prefix: "chore(ci)"
       include: "scope"
+    pull-request-branch-name:
+      separator: "-"
 
   # Android Gradle deps — monthly
   - package-ecosystem: "gradle"
@@ -45,10 +58,15 @@ updates:
       day: "monday"
       time: "06:00"
       timezone: "Etc/UTC"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 2
+    rebase-strategy: "disabled"
+    assignees:
+      - "dmytro-yevs"
     labels:
       - "dependencies"
       - "android"
     commit-message:
       prefix: "chore(deps-android)"
       include: "scope"
+    pull-request-branch-name:
+      separator: "-"
