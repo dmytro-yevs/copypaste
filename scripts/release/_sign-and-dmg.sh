@@ -17,6 +17,8 @@ cd "$REPO_ROOT"
 
 APP_DIR="dist/CopyPaste.app"
 ENTITLEMENTS="scripts/macos/entitlements.plist"
+# All release artefacts live in dist/ only — never target/release/.
+mkdir -p dist
 OUT_DMG="dist/CopyPaste-v${VERSION}-macos-${ARCH}.dmg"
 
 if [[ ! -d "$APP_DIR" ]]; then

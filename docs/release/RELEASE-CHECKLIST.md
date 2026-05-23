@@ -7,6 +7,27 @@ Replace `vX.Y.Z[-pre.N]` below with the target tag for the current cut.
 
 ---
 
+## 0. Release artefacts location (read first)
+
+**All release artefacts live in `<repo>/dist/` only.** `target/` is for cargo
+intermediates, never for shipped artefacts. Build scripts must output finished
+`.dmg` / `.apk` / `.zip` to `dist/` together with a matching `.sha256`.
+
+Canonical filename:
+
+```
+CopyPaste-v<full-version>-<platform>-<arch>.<ext>
+CopyPaste-v<full-version>-<platform>-<arch>.<ext>.sha256
+```
+
+See [`dist/README.md`](../../dist/README.md) for the full convention,
+allowed token values, and which build scripts write which artefact.
+
+If you ever find a shipped artefact under `target/release/` or `builds/`,
+that is a build-script bug — fix the script, do not copy by hand.
+
+---
+
 ## 1. Pre-flight (T-7 days)
 
 - [ ] **Scope freeze.** Confirm the milestone scope with maintainers. No new

@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # build-dmg-ci.sh — package release binaries into a signed .app, then a .dmg.
 #
-# Usage: scripts/release/build-dmg-ci.sh <version>
+# Usage: scripts/release/build-dmg-ci.sh <version> [arch]
+#   <arch> defaults to host arch (arm64 on Apple Silicon, x86_64 on Intel).
 #
 # Preconditions:
 #   - `cargo build --release --workspace` has already been run.
 #   - macOS host with codesign + hdiutil (i.e. a real Mac runner).
 #
-# Output: target/release/CopyPaste-<version>.dmg
+# Output: dist/CopyPaste-v<version>-macos-<arch>.dmg + .sha256
+#         (All release artefacts live in dist/ only — never target/release/.)
 #
 # Signing: ad-hoc (`--sign -`) with hardened runtime + entitlements.
 # This is good enough for self-distribution and Homebrew Cask without
@@ -17,9 +19,22 @@ set -euo pipefail
 
 VERSION="${1:-}"
 if [[ -z "$VERSION" ]]; then
-    echo "ERROR: version required. Usage: $0 <version>" >&2
+    echo "ERROR: version required. Usage: $0 <version> [arch:arm64|x86_64]" >&2
     exit 1
 fi
+
+ARCH="${2:-}"
+if [[ -z "$ARCH" ]]; then
+    case "$(uname -m)" in
+        arm64)  ARCH="arm64"  ;;
+        x86_64) ARCH="x86_64" ;;
+        *)      echo "ERROR: cannot infer arch from $(uname -m); pass arch explicitly" >&2; exit 1 ;;
+    esac
+fi
+case "$ARCH" in
+    arm64|x86_64) ;;
+    *) echo "ERROR: arch must be arm64 or x86_64 (got: $ARCH)" >&2; exit 1 ;;
+esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -46,7 +61,8 @@ APP_NAME="CopyPaste"
 DIST_DIR="dist"
 APP_DIR="${DIST_DIR}/${APP_NAME}.app"
 ENTITLEMENTS="scripts/macos/entitlements.plist"
-OUT_DMG="target/release/${APP_NAME}-${VERSION}.dmg"
+mkdir -p "$DIST_DIR"
+OUT_DMG="${DIST_DIR}/${APP_NAME}-v${VERSION}-macos-${ARCH}.dmg"
 
 if [[ ! -f "$ENTITLEMENTS" ]]; then
     echo "ERROR: entitlements file not found: $ENTITLEMENTS" >&2
@@ -101,7 +117,7 @@ mkdir -p "$(dirname "$OUT_DMG")"
 if [[ -x "scripts/make_dmg.sh" ]]; then
     echo "==> Building DMG via scripts/make_dmg.sh $VERSION"
     bash scripts/make_dmg.sh "$VERSION"
-    # make_dmg.sh writes to dist/CopyPaste-<version>.dmg; relocate to target/release/.
+    # make_dmg.sh writes to dist/CopyPaste-<version>.dmg; rename to canonical form.
     SRC_DMG="${DIST_DIR}/${APP_NAME}-${VERSION}.dmg"
     if [[ ! -f "$SRC_DMG" ]]; then
         echo "ERROR: expected $SRC_DMG after make_dmg.sh; not found." >&2
@@ -112,12 +128,17 @@ else
     echo "==> Building DMG via hdiutil → $OUT_DMG"
     rm -f "$OUT_DMG"
     hdiutil create \
-        -volname "${APP_NAME}" \
+        -volname "${APP_NAME} v${VERSION}" \
         -srcfolder "$APP_DIR" \
         -ov -format UDZO \
         "$OUT_DMG"
 fi
 
+# 5) SHA256 alongside.
+echo "==> SHA256"
+shasum -a 256 "$OUT_DMG" > "${OUT_DMG}.sha256"
+cat "${OUT_DMG}.sha256"
+
 echo
 echo "Built: $OUT_DMG"
-ls -lh "$OUT_DMG"
+ls -lh "$OUT_DMG" "${OUT_DMG}.sha256"
