@@ -57,8 +57,10 @@ target before the tag is cut.
       smaller than `target/release/` debug-info builds).
 - [ ] **Android** via `bash scripts/build-in-docker.sh android`. APK/AAB
       installs on a clean emulator and launches without crashes.
-- [ ] **Windows mingw** via `bash scripts/build-in-docker.sh windows`. Resulting
-      `.exe` launches under Wine or on a clean Windows VM.
+- [ ] **(Windows: SKIP)** Frozen as of 2026-05-23 — see ADR-012. `build-windows.sh`
+      is a no-op shim and the nightly/CI Windows jobs are removed. Do not
+      reintroduce a Windows build verification step until the freeze is
+      lifted in a follow-up ADR.
 - [ ] **Binary size check vs baseline.** Compare against the previous tag.
       Record any regression >10% in the release notes and open a follow-up
       issue if not justified by feature work. Confirm the `release-strip`

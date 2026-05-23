@@ -1,9 +1,12 @@
 # Nightly build pipeline - beta-bonus
 #
-# Builds .dmg / .aar(.apk) / .exe artifacts every night at 06:00 UTC and on
+# Builds .dmg and .aar/.apk artifacts every night at 06:00 UTC and on
 # manual dispatch. Independent of release.yml - no tagging, no checksum gen,
 # no Homebrew cask updates. Purpose: catch regressions in container images
 # and macOS host build path before they bite a real release.
+#
+# Windows builds frozen 2026-05-23 (see ADR-012); see comment above the
+# removed nightly-windows job below.
 #
 # Each platform job has continue-on-error: true so one broken target does
 # not mask successful builds on the others. nightly-summary aggregates the
@@ -157,62 +160,14 @@ jobs:
           echo "status=${JOB_STATUS}" >> "$GITHUB_OUTPUT"
           echo "artifact=copypaste-nightly-android-${NIGHTLY_DATE}" >> "$GITHUB_OUTPUT"
 
-  nightly-windows:
-    name: Nightly Windows (x86_64)
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    outputs:
-      status: ${{ steps.outcome.outputs.status }}
-      artifact: ${{ steps.outcome.outputs.artifact }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Compute nightly date
-        id: date
-        run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-
-      - name: Build Windows container image
-        run: docker compose --profile build build windows
-
-      - name: Run Windows build
-        run: docker compose --profile build run --rm windows
-
-      - name: Stage artifacts
-        id: stage
-        run: |
-          mkdir -p nightly-out
-          shopt -s nullglob
-          found=0
-          for f in builds/windows-*/*.exe; do
-            cp "$f" "nightly-out/"
-            found=1
-          done
-          if [ "$found" = "0" ]; then
-            echo "::warning::No .exe produced under builds/windows-*/"
-          fi
-          ls -la nightly-out/ || true
-
-      - name: Upload Windows nightly artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: copypaste-nightly-windows-${{ steps.date.outputs.date }}
-          path: nightly-out/*.exe
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Record outcome
-        id: outcome
-        if: always()
-        env:
-          NIGHTLY_DATE: ${{ steps.date.outputs.date }}
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          echo "status=${JOB_STATUS}" >> "$GITHUB_OUTPUT"
-          echo "artifact=copypaste-nightly-windows-${NIGHTLY_DATE}" >> "$GITHUB_OUTPUT"
+  # Windows nightly removed 2026-05-23: Windows frozen for v0.3+ (see ADR-012).
+  # Re-add this job and the Windows entry under nightly-summary when Windows
+  # is thawed. Container image (docker/Dockerfile.windows) and build script
+  # (scripts/build-windows.sh) are retained as frozen reference material.
 
   nightly-summary:
     name: Nightly summary
-    needs: [nightly-macos, nightly-android, nightly-windows]
+    needs: [nightly-macos, nightly-android]
     if: always()
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -226,8 +181,6 @@ jobs:
           MAC_ARTIFACT: ${{ needs.nightly-macos.outputs.artifact }}
           AND_RESULT: ${{ needs.nightly-android.result }}
           AND_ARTIFACT: ${{ needs.nightly-android.outputs.artifact }}
-          WIN_RESULT: ${{ needs.nightly-windows.result }}
-          WIN_ARTIFACT: ${{ needs.nightly-windows.outputs.artifact }}
           RUN_NUMBER: ${{ github.run_number }}
           RUN_ID: ${{ github.run_id }}
           SERVER_URL: ${{ github.server_url }}
@@ -242,7 +195,6 @@ jobs:
             echo "|----------|--------|----------|"
             echo "| macOS arm64    | ${MAC_RESULT} | ${MAC_ARTIFACT} |"
             echo "| Android arm64  | ${AND_RESULT} | ${AND_ARTIFACT} |"
-            echo "| Windows x86_64 | ${WIN_RESULT} | ${WIN_ARTIFACT} |"
             echo ""
             echo "Artifacts (14-day retention): [Run #${RUN_NUMBER}](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})"
             echo "NIGHTLY_EOF"
@@ -257,7 +209,6 @@ jobs:
         env:
           MAC_RESULT: ${{ needs.nightly-macos.result }}
           AND_RESULT: ${{ needs.nightly-android.result }}
-          WIN_RESULT: ${{ needs.nightly-windows.result }}
         run: |
           DATE_UTC="$(date -u +%Y-%m-%d)"
           {
@@ -267,5 +218,4 @@ jobs:
             echo "|----------|--------|"
             echo "| macOS arm64    | ${MAC_RESULT} |"
             echo "| Android arm64  | ${AND_RESULT} |"
-            echo "| Windows x86_64 | ${WIN_RESULT} |"
           } >> "$GITHUB_STEP_SUMMARY"

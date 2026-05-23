@@ -1,6 +1,17 @@
 # CopyPaste
 
-Cross-platform clipboard sync with end-to-end encryption.
+End-to-end encrypted clipboard sync for macOS and Android.
+
+## Supported platforms
+
+- **macOS** — arm64 (Apple Silicon) and x86_64 (Intel); install via
+  Homebrew Cask (see `docs/release/brew-tap-setup.md`).
+- **Android** — arm64-v8a; UniFFI bindings ship as an `.aar`.
+
+Windows is **frozen** as of 2026-05-23 — see
+[`docs/adr/ADR-012-windows-frozen-homebrew-only.md`](docs/adr/ADR-012-windows-frozen-homebrew-only.md)
+and [`docs/release/v0.3-plan.md`](docs/release/v0.3-plan.md). Windows users
+can run the daemon under WSL2 or wait for the freeze to be lifted; no ETA.
 
 ## Architecture
 
@@ -85,6 +96,5 @@ This is an early alpha. Known limitations:
 - **Cloud sync (Supabase) is integration-tested only:** end-to-end push/pull requires valid `SUPABASE_URL`/`SUPABASE_ANON_KEY` and the schema migration applied to your project.
 - **Relay is in-memory only:** the optional `copypaste-relay` service does not persist devices or items across restart. Use only for testing.
 - **IPC protocol is unversioned:** the daemon, CLI, and UI must be built from the same commit. Mixed versions may break silently.
-- **Windows daemon is a stub:** named-pipe IPC scaffolding exists but the daemon does not run on Windows yet.
 - **Android is preview only:** UniFFI bindings + a Kotlin skeleton exist, but no signed APK is validated end-to-end.
 - **No code signing or notarisation yet.** macOS builds are unsigned.

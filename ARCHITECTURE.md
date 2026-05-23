@@ -128,7 +128,8 @@ WAL mode + 8 MB cache. Schema versioned via `PRAGMA user_version`.
 
 - **Slint UI (ADR-005)**: `copypaste-ui` uses Slint for native rendering — no WebView,
   no JS toolchain, ~2 MB binary, <100 ms cold start, zero idle CPU thanks to
-  retained-mode rendering. Same `.slint` files render on macOS and Windows.
+  retained-mode rendering. macOS-only as of v0.3 (Windows port is frozen —
+  see ADR-012); the same `.slint` files remain portable for a future thaw.
 - **Lamport timestamps**: logical clock on `ClipboardItem` enables conflict-free ordering across
   devices without wall-clock trust.
 - **Fan-out at relay**: relay writes each uploaded item into every other registered device's
