@@ -196,9 +196,14 @@ fn main() -> Result<()> {
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
                         match result {
-                            Ok(_) => win.set_status_text(
-                                format!("Pasted: {}", &id_str[..8.min(id_str.len())]).into(),
-                            ),
+                            Ok(_) => {
+                                // beta.5 fix: `&id_str[..8.min(id_str.len())]` slices by
+                                // bytes and panics when the 8th byte falls inside a
+                                // multi-byte UTF-8 codepoint. Use a char-based take so
+                                // any well-formed `String` works, regardless of script.
+                                let short: String = id_str.chars().take(8).collect();
+                                win.set_status_text(format!("Pasted: {short}").into());
+                            }
                             Err(e) => win.set_status_text(format!("Paste failed: {e}").into()),
                         }
                     }
