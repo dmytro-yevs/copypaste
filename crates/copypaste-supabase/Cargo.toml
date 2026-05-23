@@ -11,11 +11,9 @@ path = "src/lib.rs"
 crate-type = ["rlib"]
 
 [dependencies]
-# Auth (GoTrue HTTP client)
-# Local override of workspace reqwest 0.11 → 0.12 to close
-# RUSTSEC-2026-0098/0099/0104 (rustls-webpki via old rustls 0.21 chain).
-# reqwest 0.12 pulls rustls 0.23 + rustls-webpki 0.103 which are unaffected.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Auth (GoTrue HTTP client). Now uses workspace pin (0.12) — formerly a local
+# override to close RUSTSEC-2026-0098/0099/0104; workspace was bumped 2026-05-23.
+reqwest = { workspace = true }
 # Realtime (Phoenix Channel WebSocket)
 tokio-tungstenite = { workspace = true }
 futures-util = "0.3"
