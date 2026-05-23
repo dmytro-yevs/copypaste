@@ -12,7 +12,10 @@ crate-type = ["rlib"]
 
 [dependencies]
 # Auth (GoTrue HTTP client)
-reqwest = { workspace = true }
+# Local override of workspace reqwest 0.11 → 0.12 to close
+# RUSTSEC-2026-0098/0099/0104 (rustls-webpki via old rustls 0.21 chain).
+# reqwest 0.12 pulls rustls 0.23 + rustls-webpki 0.103 which are unaffected.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Realtime (Phoenix Channel WebSocket)
 tokio-tungstenite = { workspace = true }
 futures-util = "0.3"
