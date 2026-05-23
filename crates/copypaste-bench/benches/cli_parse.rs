@@ -133,9 +133,11 @@ fn argv_daemon_start() -> Vec<String> {
 // Benches
 // ---------------------------------------------------------------------------
 
+type ArgvBuilder = fn() -> Vec<String>;
+
 fn bench_parse_each(c: &mut Criterion) {
     let mut group = c.benchmark_group("cli_parse_each");
-    let fixtures: &[(&str, fn() -> Vec<String>)] = &[
+    let fixtures: &[(&str, ArgvBuilder)] = &[
         ("pin", argv_pin),
         ("history", argv_history),
         ("export", argv_export),
