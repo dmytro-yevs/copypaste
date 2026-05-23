@@ -50,6 +50,18 @@ objc2.workspace = true
 objc2-foundation.workspace = true
 objc2-app-kit.workspace = true
 security-framework.workspace = true
+# Audit HIGH #2: keychain.rs hand-builds the SecItemAdd dict to attach
+# kSecAttrAccessControl + kSecAttrSynchronizable=false (security-framework
+# 2.x has no high-level wrapper for accessibility on generic_password).
+# All three deps are already transitive via security-framework — pinning
+# them as direct deps so the FFI calls compile against a stable range.
+core-foundation = "0.9"
+core-foundation-sys = "0.8"
+security-framework-sys = "2"
+# Audit MED #4: read-path Vec<u8> from get_generic_password is wrapped in
+# Zeroizing so the heap buffer holding the device secret is scrubbed the
+# moment it falls out of scope.
+zeroize = { version = "1.7", features = ["derive"] }
 # tray-icon + png moved to copypaste-ui::tray_host (the daemon process
 # is launched by launchd and cannot host an NSApplication main run loop on
 # macOS, which tray-icon / muda::Menu both require).
