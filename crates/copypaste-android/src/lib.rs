@@ -2,7 +2,9 @@
 
 uniffi::include_scaffolding!("copypaste_android");
 
+pub mod panic_boundary;
 pub mod version;
+pub use panic_boundary::PanicError;
 pub use version::{check_compatibility, core_version, uniffi_abi_version, VersionError, UNIFFI_ABI_VERSION};
 
 use copypaste_core::{
@@ -24,6 +26,19 @@ pub enum CopypasteError {
     DatabaseError { message: String },
     #[error("Invalid key length: expected 32")]
     InvalidKeyLength,
+    /// v0.3 (OI-7): a Rust panic was caught at the FFI boundary by
+    /// [`panic_boundary::catch_result`]. Carries the panic message so Kotlin
+    /// can log/surface it instead of seeing a JVM-killing abort.
+    #[error("Panicked: {message}")]
+    Panicked { message: String },
+}
+
+impl From<PanicError> for CopypasteError {
+    fn from(p: PanicError) -> Self {
+        match p {
+            PanicError::Panicked(message) => CopypasteError::Panicked { message },
+        }
+    }
 }
 
 pub struct EncryptedBlob {
@@ -40,11 +55,13 @@ pub fn encrypt_text(
     bytes: &[u8],
     key: &[u8],
 ) -> Result<EncryptedBlob, CopypasteError> {
-    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
-    let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
-    let (nonce, ciphertext) = encrypt_item_with_aad(bytes, &key_arr, &aad)
-        .map_err(|_| CopypasteError::EncryptionFailed)?;
-    Ok(EncryptedBlob { nonce: nonce.to_vec(), ciphertext })
+    panic_boundary::catch_result(|| {
+        let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+        let (nonce, ciphertext) = encrypt_item_with_aad(bytes, &key_arr, &aad)
+            .map_err(|_| CopypasteError::EncryptionFailed)?;
+        Ok(EncryptedBlob { nonce: nonce.to_vec(), ciphertext })
+    })
 }
 
 /// v0.3: `item_id` MUST match the value used during `encrypt_text` — see the
@@ -55,12 +72,14 @@ pub fn decrypt_text(
     nonce: &[u8],
     key: &[u8],
 ) -> Result<Vec<u8>, CopypasteError> {
-    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
-    let nonce_arr: [u8; NONCE_SIZE] = nonce.try_into()
-        .map_err(|_| CopypasteError::DecryptionFailed { message: "wrong nonce length".into() })?;
-    let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
-    decrypt_item_with_aad(ciphertext, &nonce_arr, &key_arr, &aad)
-        .map_err(|e| CopypasteError::DecryptionFailed { message: e.to_string() })
+    panic_boundary::catch_result(|| {
+        let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let nonce_arr: [u8; NONCE_SIZE] = nonce.try_into()
+            .map_err(|_| CopypasteError::DecryptionFailed { message: "wrong nonce length".into() })?;
+        let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+        decrypt_item_with_aad(ciphertext, &nonce_arr, &key_arr, &aad)
+            .map_err(|e| CopypasteError::DecryptionFailed { message: e.to_string() })
+    })
 }
 
 pub fn is_sensitive(text: String) -> bool {
@@ -82,12 +101,16 @@ fn db_handles() -> &'static Mutex<HashMap<u64, copypaste_core::Database>> {
 /// Open (or create) an encrypted SQLite database at `path` using the 32-byte `key`.
 /// Returns an opaque handle for subsequent calls.
 pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
-    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
-    let db = copypaste_core::Database::open(std::path::Path::new(&path), &key_arr)
-        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
-    let handle = NEXT_HANDLE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    db_handles().lock().unwrap().insert(handle, db);
-    Ok(handle)
+    panic_boundary::catch_result(|| {
+        let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let db = copypaste_core::Database::open(std::path::Path::new(&path), &key_arr)
+            .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+        let handle = NEXT_HANDLE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // `.lock().unwrap()` on a poisoned mutex would panic — catch_result
+        // turns that into CopypasteError::Panicked instead of aborting the JVM.
+        db_handles().lock().unwrap().insert(handle, db);
+        Ok(handle)
+    })
 }
 
 pub fn close_database(handle: u64) {
@@ -116,39 +139,41 @@ pub fn add_clipboard_item(
     key: &[u8],
     text: String,
 ) -> Result<String, CopypasteError> {
-    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+    panic_boundary::catch_result(|| {
+        let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
 
-    // Skip sensitive content (caller-visible: empty string return).
-    if detect(&text).is_some() {
-        return Ok(String::new());
-    }
+        // Skip sensitive content (caller-visible: empty string return).
+        if detect(&text).is_some() {
+            return Ok(String::new());
+        }
 
-    let db = copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr)
-        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+        let db = copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr)
+            .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
 
-    // v0.3: pre-generate item_id so the AAD baked into the ciphertext matches
-    // the value persisted in the row — decryption later rebuilds the AAD from
-    // the stored item_id (AAD_SCHEMA_VERSION = 3). Legacy empty-AAD fallback
-    // was removed in 1c55e57.
-    let item_id = uuid::Uuid::new_v4().to_string();
-    let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
-    let (nonce, ciphertext) = encrypt_item_with_aad(text.as_bytes(), &key_arr, &aad)
-        .map_err(|_| CopypasteError::EncryptionFailed)?;
+        // v0.3: pre-generate item_id so the AAD baked into the ciphertext matches
+        // the value persisted in the row — decryption later rebuilds the AAD from
+        // the stored item_id (AAD_SCHEMA_VERSION = 3). Legacy empty-AAD fallback
+        // was removed in 1c55e57.
+        let item_id = uuid::Uuid::new_v4().to_string();
+        let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+        let (nonce, ciphertext) = encrypt_item_with_aad(text.as_bytes(), &key_arr, &aad)
+            .map_err(|_| CopypasteError::EncryptionFailed)?;
 
-    let lamport_ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+        let lamport_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
 
-    let mut item =
-        copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport_ts);
-    item.item_id = item_id;
-    let id = item.id.clone();
+        let mut item =
+            copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport_ts);
+        item.item_id = item_id;
+        let id = item.id.clone();
 
-    copypaste_core::insert_item(&db, &item)
-        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+        copypaste_core::insert_item(&db, &item)
+            .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
 
-    Ok(id)
+        Ok(id)
+    })
 }
 
 #[cfg(not(feature = "android-uniffi-live"))]
@@ -157,25 +182,31 @@ pub fn add_clipboard_item(
     key: &[u8],
     _text: String,
 ) -> Result<String, CopypasteError> {
-    // Validate key shape to mirror the live path's error surface.
-    let _: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
-    Ok("stub-uniffi-not-live".to_string())
+    panic_boundary::catch_result(|| {
+        // Validate key shape to mirror the live path's error surface.
+        let _: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+        Ok("stub-uniffi-not-live".to_string())
+    })
 }
 
 #[cfg(feature = "android-uniffi-live")]
 pub fn get_history_count(db_path: String, key: &[u8]) -> Result<u64, CopypasteError> {
-    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
-    let db = copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr)
-        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
-    let n = copypaste_core::count_items(&db)
-        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
-    Ok(n.max(0) as u64)
+    panic_boundary::catch_result(|| {
+        let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let db = copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr)
+            .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+        let n = copypaste_core::count_items(&db)
+            .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+        Ok(n.max(0) as u64)
+    })
 }
 
 #[cfg(not(feature = "android-uniffi-live"))]
 pub fn get_history_count(_db_path: String, key: &[u8]) -> Result<u64, CopypasteError> {
-    let _: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
-    Ok(0)
+    panic_boundary::catch_result(|| {
+        let _: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+        Ok(0)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +245,25 @@ mod tests {
             matches!(err, CopypasteError::DecryptionFailed { .. }),
             "expected DecryptionFailed, got {err:?}"
         );
+    }
+
+    /// v0.3 OI-7: a panic raised inside a wrapped UniFFI body must surface
+    /// as `CopypasteError::Panicked` (via the `From<PanicError>` impl) rather
+    /// than aborting the process.
+    #[test]
+    fn panic_boundary_converts_to_copypaste_panicked() {
+        let result: Result<(), CopypasteError> = panic_boundary::catch_result(|| {
+            panic!("synthetic panic inside FFI body");
+        });
+        match result {
+            Err(CopypasteError::Panicked { message }) => {
+                assert!(
+                    message.contains("synthetic panic inside FFI body"),
+                    "expected panic message in error, got: {message}"
+                );
+            }
+            other => panic!("expected CopypasteError::Panicked, got {other:?}"),
+        }
     }
 
     #[test]

@@ -48,6 +48,11 @@ interface CopypasteError {
   DecryptionFailed(string message);
   DatabaseError(string message);
   InvalidKeyLength();
+  // v0.3 (OI-7): a Rust panic was caught at the FFI boundary by
+  // panic_boundary::catch_result. The message carries the panic payload's
+  // string form. Kotlin should log + show a generic error to the user
+  // (panics signal a Rust-side bug, not user error).
+  Panicked(string message);
 };
 
 [Error]

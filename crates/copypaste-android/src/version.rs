@@ -15,7 +15,14 @@
 /// `item_id: String` parameter for AEAD AAD binding (commit 1c55e57 dropped
 /// the legacy empty-AAD fallback). Kotlin generated against ABI 1 will fail
 /// `check_compatibility` and must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 2;
+///
+/// **v0.3 (ABI 3):** `CopypasteError` gained a `Panicked { message }`
+/// variant (THREAT-MODEL OI-7). UniFFI-exported functions now wrap their
+/// bodies with `panic_boundary::catch_result`, so Rust panics that
+/// previously aborted the JVM are now reported as
+/// `CopypasteError::Panicked` instead. Kotlin generated against ABI 2 is
+/// missing the new error variant and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 3;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).
