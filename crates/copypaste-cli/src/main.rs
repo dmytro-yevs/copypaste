@@ -116,7 +116,7 @@ enum Commands {
     },
     /// Create an encrypted SQLCipher backup of the local database
     Backup {
-        /// Directory to write the backup file into (default: <repo>/backups)
+        /// Directory to write the backup file into (default: `<repo>/backups`)
         #[arg(long, short)]
         output: Option<String>,
         /// Show what would happen without touching disk

@@ -23,20 +23,11 @@ env:
 jobs:
   build-android-ndk:
     name: Build Android .so (cargo-ndk)
-    # Native amd64 larger runner (16 GB RAM, 4x CPU). Avoids Rosetta
-    # emulation on Apple Silicon self-hosted setups (5-10x overhead) and
-    # roughly halves NDK link time vs ubuntu-latest. Switch back to
-    # `ubuntu-latest` if `ubuntu-latest-xlarge` is not provisioned for the
-    # org (paid GitHub larger runner). See docs/release/build-perf.md.
-    runs-on: ubuntu-latest-xlarge
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
 
-      # Toolchain comes from rust-toolchain.toml (channel = "stable").
-
-
-      # Anti-spiral: stop chasing transitive-dep MSRV bumps.
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@master
         with:

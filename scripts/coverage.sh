@@ -173,6 +173,6 @@ if [[ -n "$THRESHOLD" ]]; then
 fi
 
 info "Done."
-[[ $HTML -eq 1 ]] && info "Open: $OUTPUT_DIR/html/index.html"
-[[ $LCOV -eq 1 ]] && info "LCOV:  $OUTPUT_DIR/lcov.info"
-[[ $JSON -eq 1 ]] && info "JSON:  $OUTPUT_DIR/summary.json"
+if [[ $HTML -eq 1 ]]; then info "Open: $OUTPUT_DIR/html/index.html"; fi
+if [[ $LCOV -eq 1 ]]; then info "LCOV:  $OUTPUT_DIR/lcov.info"; fi
+if [[ $JSON -eq 1 ]]; then info "JSON:  $OUTPUT_DIR/summary.json"; fi

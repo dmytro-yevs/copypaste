@@ -2,25 +2,24 @@
 # Creates CopyPaste.app bundle from cargo release build.
 #
 # Usage: scripts/make_app_bundle.sh <version> [target-triple]
-#   <version>       e.g. 0.3.0-dev.1
+#   <version>       e.g. 0.2.0-beta.1
 #   [target-triple] aarch64-apple-darwin (default) or x86_64-apple-darwin
 #
 # Reads from: target/<triple>/release/{copypaste,copypaste-daemon,copypaste-ui,copypaste-relay}
 #   (falls back to target/release/ when --target was not used)
 # Writes to:  dist/CopyPaste.app
 #
-# Bundle layout (canonical for v0.3):
+# Bundle layout (canonical for beta):
 #   Contents/MacOS/copypaste-ui       (CFBundleExecutable — what `open` runs)
 #   Contents/MacOS/copypaste-daemon   (launched via launchd plist)
 #   Contents/MacOS/copypaste          (CLI wrapper)
 #   Contents/MacOS/copypaste-relay    (HTTP relay server)
 #   Contents/Resources/AppIcon.icns
 #   Contents/Resources/com.copypaste.daemon.plist  (LaunchAgent template — USERNAME substituted at install time)
-#   Contents/Resources/icons/tray-icon*.png        (tray-icon host probes here)
 #   Contents/Info.plist               (CFBundleExecutable = copypaste-ui, LSUIElement = true)
 set -euo pipefail
 
-VERSION="${1:-0.3.0-dev.1}"
+VERSION="${1:-0.2.0-beta.1}"
 TRIPLE="${2:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -64,9 +63,9 @@ else
 fi
 
 # Tray icons — bundle the menu-bar PNGs into Contents/Resources/icons/.
-# The tray host (UI process on v0.3) probes for `tray-icon.png` next to the
-# binary or under `../Resources/icons/`. Without these files the tray fell
-# back to a 22×22 grey placeholder on the v0.2.0-beta.1 DMG.
+# The tray host (daemon on beta) looks for `tray-icon.png` next to the binary
+# or under `../Resources/icons/`. Without these files the tray fell back to a
+# 22×22 grey placeholder in v0.2.0-beta.1. Fixed for v0.2.0-beta.2+.
 TRAY_SRC_DIR="crates/copypaste-ui/assets"
 if [[ -d "$TRAY_SRC_DIR" ]] && ls "$TRAY_SRC_DIR"/tray-icon-*.png >/dev/null 2>&1; then
     mkdir -p "$CONTENTS/Resources/icons"
@@ -90,8 +89,7 @@ else
 fi
 
 # Info.plist — CFBundleExecutable points at the UI binary so `open CopyPaste.app`
-# launches the Slint window (which also hosts the menu-bar tray icon on macOS),
-# then autostarts the daemon via launchd.
+# launches the Slint window, which then autostarts the daemon via launchd.
 # LSUIElement=true keeps the app out of the Dock (menu-bar-only style).
 cat > "$CONTENTS/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>

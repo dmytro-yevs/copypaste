@@ -85,18 +85,21 @@ jobs:
         # runner's download/extract steps. Strip recursively from the DMG
         # and any staged .app so Gatekeeper does not warn on first launch
         # after Homebrew Cask install. See ADR-010.
+        # All release artefacts live in dist/ (see ADR-012, db8578a).
         run: |
-          if [ -f target/release/CopyPaste.dmg ]; then
-            xattr -cr target/release/CopyPaste.dmg || true
+          if compgen -G "dist/*.dmg" > /dev/null; then
+            xattr -cr dist/*.dmg || true
           fi
           if [ -d dist/CopyPaste.app ]; then
             xattr -cr dist/CopyPaste.app || true
           fi
 
       - name: Verify checksum (W1.4 script)
+        # build-dmg-ci.sh emits each artefact's .sha256 alongside it in dist/.
+        # verify-checksum.sh then aggregates all dist/*.dmg into dist/SHA256SUMS.
         run: |
           if [ -f scripts/release/verify-checksum.sh ]; then
-            bash scripts/release/verify-checksum.sh
+            bash scripts/release/verify-checksum.sh dist
           else
             echo "::error::scripts/release/verify-checksum.sh missing — W1.4 not delivered yet"
             exit 1
@@ -107,8 +110,9 @@ jobs:
         with:
           name: CopyPaste-${{ steps.ver.outputs.version }}-macos-arm64
           path: |
-            target/release/CopyPaste.dmg
-            target/release/SHA256SUMS
+            dist/*.dmg
+            dist/*.dmg.sha256
+            dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 14
 
@@ -118,7 +122,8 @@ jobs:
         with:
           tag_name: ${{ steps.ver.outputs.version }}
           files: |
-            target/release/CopyPaste.dmg
-            target/release/SHA256SUMS
+            dist/*.dmg
+            dist/*.dmg.sha256
+            dist/SHA256SUMS
           generate_release_notes: true
           prerelease: ${{ contains(steps.ver.outputs.version, '-alpha') || contains(steps.ver.outputs.version, '-beta') || contains(steps.ver.outputs.version, '-rc') }}

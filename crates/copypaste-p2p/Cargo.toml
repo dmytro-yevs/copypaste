@@ -1,6 +1,7 @@
 [package]
 name = "copypaste-p2p"
 version.workspace = true
+license.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "P2P mutual-TLS transport + mDNS-SD peer discovery for CopyPaste"
@@ -31,17 +32,12 @@ opaque-ke = { version = "3.0", default-features = false, features = ["ristretto2
 argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
 # generic-array — required by opaque-ke message types
 generic-array = "0.14"
-# RNG for OPAQUE — `OsRng` lives in `rand_core` (re-exported via `rand`)
-rand = { workspace = true }
 # HKDF for SessionKey -> XChaCha20 key derivation (ADR-001)
 hkdf = { workspace = true }
 # Error handling
 thiserror.workspace = true
-anyhow.workspace = true
 # Logging
 tracing.workspace = true
-# Serialization
-serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

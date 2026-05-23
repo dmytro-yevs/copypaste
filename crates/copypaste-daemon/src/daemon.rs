@@ -29,6 +29,7 @@ pub async fn run() -> anyhow::Result<()> {
 /// Run the daemon until `Ctrl+C`, `SIGTERM`, or `quit_flag` is set.
 ///
 /// On macOS the tray icon sets `quit_flag` when the user clicks Quit.
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()> {
     let config = load_config();
     tracing::info!(

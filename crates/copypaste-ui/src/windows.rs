@@ -478,7 +478,7 @@ impl PairWindowHandle {
     /// Register a callback invoked when "Pair with Password" is clicked.
     /// Receives `(peer_fingerprint, password)`. The closure is responsible
     /// for calling `IpcClient::pair_with_password` and surfacing the
-    /// daemon's success/error status back into the UI via [`set_status`].
+    /// daemon's success/error status back into the UI via [`Self::set_status`].
     ///
     /// Beta W3.2 — wires the new Slint `pair-with-password(string, string)`
     /// callback added to `PairWindow.slint`.
@@ -503,7 +503,8 @@ impl PairWindowHandle {
     /// T4 (v0.3) — register a callback invoked when the user confirms the
     /// revoke dialog. Receives the full fingerprint of the peer to revoke.
     ///
-    /// Callers should route this to [`crate::ipc_client::IpcClient::revoke_peer`]
+    /// Callers should route this to `crate::ipc_client::IpcClient::revoke_peer`
+    /// (defined in the `copypaste-ui` binary, not exported by the library)
     /// rather than `unpair_peer`: the former additionally writes a row to
     /// the SQLite `revoked_devices` audit table consumed by the v1.0
     /// cryptographic revocation protocol.

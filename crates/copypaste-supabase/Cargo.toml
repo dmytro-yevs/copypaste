@@ -1,6 +1,7 @@
 [package]
 name = "copypaste-supabase"
 version.workspace = true
+license.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Supabase GoTrue auth + Realtime WebSocket client for CopyPaste"
@@ -23,10 +24,10 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-uuid.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "rt", "macros", "time", "sync"] }
 # mockito 0.31 supports Rust 1.75 and doesn't require edition 2024 deps
 mockito = "0.31"
 tokio-test = "0.4"
+serial_test = "3"

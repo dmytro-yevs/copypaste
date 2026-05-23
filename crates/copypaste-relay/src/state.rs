@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -257,7 +258,7 @@ impl RelayStore {
     /// Register a new device using the default tier (`Tier::Free`).
     ///
     /// Returns `(bearer_token, expires_at_unix)` on success.
-    /// Convenience wrapper over [`register_device_with_tier`].
+    /// Convenience wrapper over [`Self::register_device_with_tier`].
     pub fn register_device(
         &mut self,
         device_id: String,
@@ -442,7 +443,7 @@ impl RelayStore {
     #[allow(dead_code)]
     pub fn list_devices(&self) -> Vec<String> {
         let mut records: Vec<&DeviceRecord> = self.devices.values().collect();
-        records.sort_by(|a, b| b.registered_at.cmp(&a.registered_at));
+        records.sort_by_key(|r| Reverse(r.registered_at));
         records
             .into_iter()
             .take(100)
@@ -462,7 +463,7 @@ impl RelayStore {
     ///
     /// Returns the number of items evicted (across all device inboxes).
     /// Empty inboxes are NOT removed — devices keep their registration
-    /// regardless of inbox activity (see [`cleanup_inactive_devices`] for
+    /// regardless of inbox activity (see [`Self::cleanup_inactive_devices`] for
     /// device-record pruning).
     #[allow(dead_code)]
     pub fn prune_expired(&mut self, now_unix: u64, ttl_secs: u64) -> usize {

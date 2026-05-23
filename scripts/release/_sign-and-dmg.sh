@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Local ad-hoc sign + DMG build helper (worker-invoked).
+# Local ad-hoc sign + DMG build helper for beta release (worker-invoked).
 # Usage: scripts/release/_sign-and-dmg.sh <version> <arch>
 #   <arch> = arm64 | x86_64
 #
@@ -31,10 +31,11 @@ cd "$REPO_ROOT"
 
 APP_DIR="dist/CopyPaste.app"
 ENTITLEMENTS="scripts/macos/entitlements.plist"
+# All release artefacts live in dist/ only — never target/release/.
 mkdir -p dist
 OUT_DMG="dist/CopyPaste-v${VERSION}-macos-${ARCH}.dmg"
 
-# 1) Build .app bundle via the canonical helper (includes UI + relay + plist + icon + tray icons).
+# 1) Build .app bundle via the canonical helper (includes UI + relay + plist + icon).
 echo "==> Building $APP_DIR for $TRIPLE"
 bash scripts/make_app_bundle.sh "$VERSION" "$TRIPLE"
 

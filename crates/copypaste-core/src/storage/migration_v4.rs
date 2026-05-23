@@ -4,7 +4,7 @@
 //! ## Background
 //!
 //! Schema v4 adds a `key_version` column to `clipboard_items` (see
-//! [`super::schema::V4_ALTER_SQL`]). Rows that existed prior to the migration
+//! `super::schema::V4_ALTER_SQL`). Rows that existed prior to the migration
 //! are marked `key_version = 1`; rows freshly inserted via
 //! [`super::items::insert_item`] are marked `key_version = 2`.
 //!

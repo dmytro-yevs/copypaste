@@ -1292,6 +1292,7 @@ name = "copypaste-android"
 version = "0.3.0-dev"
 dependencies = [
  "copypaste-core",
+ "rusqlite",
  "tempfile",
  "thiserror 1.0.69",
  "uniffi",
@@ -1317,7 +1318,6 @@ name = "copypaste-cli"
 version = "0.3.0-dev"
 dependencies = [
  "anyhow",
- "base64",
  "clap",
  "copypaste-core",
  "copypaste-ipc",
@@ -1373,7 +1373,6 @@ dependencies = [
  "dirs 5.0.1",
  "hex",
  "home",
- "image 0.25.9",
  "mdns-sd",
  "mockito",
  "objc2 0.5.2",
@@ -1401,14 +1400,12 @@ version = "0.3.0-dev"
 dependencies = [
  "serde",
  "serde_json",
- "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "copypaste-p2p"
 version = "0.3.0-dev"
 dependencies = [
- "anyhow",
  "argon2",
  "bytes",
  "futures-util",
@@ -1418,10 +1415,8 @@ dependencies = [
  "if-addrs",
  "mdns-sd",
  "opaque-ke",
- "rand 0.8.6",
  "rcgen",
  "rustls",
- "serde",
  "sha2",
  "thiserror 1.0.69",
  "tokio",
@@ -1438,13 +1433,11 @@ dependencies = [
  "anyhow",
  "axum",
  "base64",
- "hex",
  "http-body-util",
  "hyper",
  "rand 0.8.6",
  "serde",
  "serde_json",
- "sha2",
  "subtle",
  "thiserror 1.0.69",
  "tokio",
@@ -1464,12 +1457,12 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serial_test",
  "thiserror 1.0.69",
  "tokio",
  "tokio-test",
  "tokio-tungstenite",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -1479,10 +1472,8 @@ dependencies = [
  "copypaste-core",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -3997,6 +3988,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
 dependencies = [
  "cc",
+ "openssl-sys",
  "pkg-config",
  "vcpkg",
 ]
@@ -4880,6 +4872,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
+name = "openssl-src"
+version = "300.6.0+3.6.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8e8cbfd3a4a8c8f089147fd7aaa33cf8c7450c4d09f8f80698a0cf093abeff4"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "openssl-sys"
 version = "0.9.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4887,6 +4888,7 @@ checksum = "f28a22dc7140cda5f096e5e7724a6962ca81a7f8bfd2979f9b18c11af56318c4"
 dependencies = [
  "cc",
  "libc",
+ "openssl-src",
  "pkg-config",
  "vcpkg",
 ]

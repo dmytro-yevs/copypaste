@@ -58,6 +58,27 @@ impl copypaste_ui::windows::SearchableHistoryItem for ipc_client::HistoryEntry {
 }
 
 fn main() -> Result<()> {
+    // Beta hot-fix: on macOS, install the Launch Agent plist + bootstrap the
+    // daemon in the background so the user does not have to run
+    // `copypaste daemon install && copypaste daemon start` after a fresh DMG
+    // install. Runs in a dedicated thread — UI rendering must NOT block on
+    // launchctl. See `crates/copypaste-ui/src/autostart.rs` for the flow.
+    #[cfg(target_os = "macos")]
+    std::thread::spawn(|| match copypaste_ui::autostart::ensure_daemon_running() {
+        Ok(copypaste_ui::autostart::DaemonStatus::AlreadyRunning) => {
+            eprintln!("[autostart] daemon already running");
+        }
+        Ok(copypaste_ui::autostart::DaemonStatus::Started) => {
+            eprintln!("[autostart] daemon started via launchctl");
+        }
+        Ok(copypaste_ui::autostart::DaemonStatus::FailedToStart(reason)) => {
+            eprintln!("[autostart] daemon failed to start: {reason}");
+        }
+        Err(e) => {
+            eprintln!("[autostart] error: {e}");
+        }
+    });
+
     // Beta-bonus i18n: bind the gettext domain (auto-set from CARGO_PKG_NAME =
     // "copypaste-ui" by slint-build) to the `lang/` catalog directory shipped
     // with the crate. At runtime Slint resolves `@tr("…")` against
