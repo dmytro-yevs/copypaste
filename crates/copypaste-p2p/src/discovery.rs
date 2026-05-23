@@ -12,6 +12,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use crate::error::DiscoveryError;
+use crate::rate_limit::MdnsRateLimiter;
 
 /// Lock a `Mutex` even if a previous holder panicked.
 ///
@@ -80,6 +81,9 @@ pub struct DiscoveryService {
     known_peers: Arc<Mutex<HashMap<String, PeerInfo>>>,
     /// Port and identity used to advertise own service.
     registration: Arc<Mutex<Option<Registration>>>,
+    /// Per-source-IP token bucket guarding inbound `ServiceResolved` events
+    /// from mDNS flood (THREAT-MODEL OI-3). See [`MdnsRateLimiter`].
+    rate_limiter: Arc<MdnsRateLimiter>,
 }
 
 #[derive(Clone)]
@@ -97,7 +101,14 @@ impl DiscoveryService {
             on_lost: Arc::new(Mutex::new(Vec::new())),
             known_peers: Arc::new(Mutex::new(HashMap::new())),
             registration: Arc::new(Mutex::new(None)),
+            rate_limiter: Arc::new(MdnsRateLimiter::new()),
         }
+    }
+
+    /// Return a clone of the rate-limiter handle. Exposed for tests and
+    /// metrics endpoints; production callers normally do not need it.
+    pub fn rate_limiter(&self) -> Arc<MdnsRateLimiter> {
+        Arc::clone(&self.rate_limiter)
     }
 
     /// Register a callback that fires whenever a new peer is resolved.
@@ -171,6 +182,7 @@ impl DiscoveryService {
         let on_found = Arc::clone(&self.on_found);
         let on_lost = Arc::clone(&self.on_lost);
         let known_peers = Arc::clone(&self.known_peers);
+        let rate_limiter = Arc::clone(&self.rate_limiter);
         let own_id: Option<String> = reg_opt.map(|r| r.device_id);
 
         let handle = tokio::spawn(async move {
@@ -181,7 +193,14 @@ impl DiscoveryService {
                 // recv_async() integrates with tokio without blocking executor threads.
                 match receiver.recv_async().await {
                     Ok(event) => {
-                        handle_event(event, &own_id, &known_peers, &on_found, &on_lost);
+                        handle_event(
+                            event,
+                            &own_id,
+                            &known_peers,
+                            &on_found,
+                            &on_lost,
+                            &rate_limiter,
+                        );
                     }
                     Err(e) => {
                         // Channel closed — daemon shut down.
@@ -264,6 +283,7 @@ fn handle_event(
     known_peers: &Arc<Mutex<HashMap<String, PeerInfo>>>,
     on_found: &Arc<Mutex<Vec<PeerFoundCallback>>>,
     on_lost: &Arc<Mutex<Vec<PeerLostCallback>>>,
+    rate_limiter: &Arc<MdnsRateLimiter>,
 ) {
     match event {
         ServiceEvent::ServiceResolved(resolved) => {
@@ -272,6 +292,16 @@ fn handle_event(
                 if own_id.as_deref() == Some(peer.device_id.as_str()) {
                     debug!(device_id = %peer.device_id, "Ignoring own mDNS advertisement");
                     return;
+                }
+
+                // OI-3 mitigation: rate-limit per source IP. We key off the
+                // first resolved address since mdns-sd merges multi-interface
+                // records into one event. Drop = silent denial-of-response;
+                // the limiter emits trace + sampled warn telemetry itself.
+                if let Some(source_ip) = peer.ip_addrs.first().copied() {
+                    if !rate_limiter.try_admit(source_ip) {
+                        return;
+                    }
                 }
 
                 let fullname = resolved.fullname.clone();
