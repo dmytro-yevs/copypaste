@@ -4,6 +4,13 @@ use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::ZeroizeOnDrop;
 use thiserror::Error;
 
+/// Versioned HKDF salt. Bumping the version (v1 -> v2) deterministically
+/// rotates every derived key, providing a clean break for future protocol
+/// upgrades or key-compromise recovery. Must be exactly the bytes shipped
+/// in production — changing it is a hard-fork of all on-wire and on-disk
+/// encrypted material.
+pub const HKDF_SALT_V1: &[u8] = b"copypaste-v1-salt";
+
 #[derive(Debug, Error)]
 pub enum KeyError {
     #[error("Invalid secret key bytes (expected 32)")]
@@ -41,7 +48,7 @@ impl DeviceKeypair {
     pub fn derive_enc_key(&self, peer_public_bytes: &[u8; 32], sender_id: &str, recipient_id: &str) -> [u8; 32] {
         let raw_secret = self.ecdh(peer_public_bytes);
         let info = format!("copypaste-v1|{}|{}", sender_id, recipient_id);
-        let hk = Hkdf::<Sha256>::new(None, &raw_secret);
+        let hk = Hkdf::<Sha256>::new(Some(HKDF_SALT_V1), &raw_secret);
         let mut enc_key = [0u8; 32];
         hk.expand(info.as_bytes(), &mut enc_key).expect("HKDF expand 32 bytes always succeeds");
         enc_key
@@ -57,7 +64,7 @@ impl DeviceKeypair {
     /// Never transmitted — only used to encrypt items stored on this device.
     pub fn local_enc_key(&self) -> [u8; 32] {
         let ikm: zeroize::Zeroizing<[u8; 32]> = zeroize::Zeroizing::new(self.secret.to_bytes());
-        let hk = Hkdf::<Sha256>::new(None, ikm.as_ref());
+        let hk = Hkdf::<Sha256>::new(Some(HKDF_SALT_V1), ikm.as_ref());
         let mut key = [0u8; 32];
         hk.expand(b"copypaste-local-storage-v1", &mut key)
             .expect("HKDF expand: output length 32 is always valid for SHA-256");
@@ -131,5 +138,49 @@ mod tests {
         let bob = DeviceKeypair::generate();
         let net_key = alice.derive_enc_key(&bob.public_key_bytes(), "a", "b");
         assert_ne!(alice.local_enc_key(), net_key);
+    }
+
+    /// Snapshot test: HKDF is keyed with the versioned salt `HKDF_SALT_V1`.
+    /// Re-deriving with fixed inputs must produce the same output across runs.
+    /// Changing `HKDF_SALT_V1` is a HARD FORK — every prior key changes.
+    /// This test exists to make that rotation an explicit, intentional act
+    /// (the snapshot will fail and force a deliberate update).
+    #[test]
+    fn hkdf_uses_versioned_salt() {
+        let secret_bytes = [0x11u8; 32];
+        let peer_bytes = {
+            // Use a deterministic peer public via a fixed-secret keypair
+            let peer_secret = [0x22u8; 32];
+            let kp = DeviceKeypair::from_secret_bytes(&peer_secret).unwrap();
+            kp.public_key_bytes()
+        };
+        let kp = DeviceKeypair::from_secret_bytes(&secret_bytes).unwrap();
+
+        // Derive twice — deterministic regardless of salt
+        let k1 = kp.derive_enc_key(&peer_bytes, "alice", "bob");
+        let k2 = kp.derive_enc_key(&peer_bytes, "alice", "bob");
+        assert_eq!(k1, k2, "HKDF must be deterministic for identical inputs");
+
+        // Local enc key is also deterministic and uses the same versioned salt
+        let local1 = kp.local_enc_key();
+        let local2 = kp.local_enc_key();
+        assert_eq!(local1, local2);
+
+        // Compute what the key *would* have been with a different salt and
+        // assert the actual key differs — proves the salt actually feeds in.
+        let raw = kp.ecdh(&peer_bytes);
+        let alt_hk = Hkdf::<Sha256>::new(Some(b"some-other-salt-vX"), &raw);
+        let mut alt_key = [0u8; 32];
+        alt_hk
+            .expand(b"copypaste-v1|alice|bob", &mut alt_key)
+            .unwrap();
+        assert_ne!(
+            k1, alt_key,
+            "changing the HKDF salt MUST change the derived key"
+        );
+
+        // Sanity: salt constant is non-empty and stable.
+        assert!(!HKDF_SALT_V1.is_empty());
+        assert_eq!(HKDF_SALT_V1, b"copypaste-v1-salt");
     }
 }

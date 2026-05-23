@@ -16,6 +16,20 @@ pub enum ChunkError {
     TruncatedStream { expected: u32, got: u32 },
     #[error("Empty chunk stream")]
     Empty,
+    /// Edge-case audit high #14: a chunk is missing from the *middle* of the
+    /// stream (not just truncated at the end). Detected when a chunk's
+    /// declared `chunk_index` does not match its position in the sequence,
+    /// or when `is_final` appears before the last position.
+    #[error("Missing chunk at position {position}: expected index {expected}, got {got}")]
+    MissingChunk {
+        position: u32,
+        expected: u32,
+        got: u32,
+    },
+    /// A non-final chunk was found at a position other than the last —
+    /// indicates either reordering or a missing tail.
+    #[error("Premature final chunk at position {position} of {total}")]
+    PrematureFinal { position: u32, total: u32 },
 }
 
 /// Build AAD: "CHUNK_FORMAT_V1\0"[16] || file_id[16] || chunk_index[4:BE] || total_chunks[4:BE] || is_final[1]
@@ -108,12 +122,35 @@ pub fn decrypt_chunks(
         });
     }
 
-    let mut plaintext = Vec::new();
+    // Audit high #14 — gap detection pass.
+    // We must validate the structural integrity of the chunk *sequence*
+    // BEFORE attempting AEAD decryption. Otherwise a missing-middle gap
+    // surfaces as `AuthFailed` (because the per-chunk AAD encodes the
+    // original `total_chunks` and the missing-chunk variant shifts every
+    // later chunk's expected position), which is opaque and prevents the
+    // caller from requesting a targeted re-send of the specific lost index.
     for (i, chunk) in chunks.iter().enumerate() {
         let idx = i as u32;
         if chunk.chunk_index != idx {
-            return Err(ChunkError::AuthFailed { index: idx });
+            return Err(ChunkError::MissingChunk {
+                position: idx,
+                expected: idx,
+                got: chunk.chunk_index,
+            });
         }
+        // A chunk that claims `is_final` but isn't actually the last entry
+        // means the tail was dropped — gap at the end of the sequence.
+        if chunk.is_final && idx != total - 1 {
+            return Err(ChunkError::PrematureFinal {
+                position: idx,
+                total,
+            });
+        }
+    }
+
+    let mut plaintext = Vec::new();
+    for (i, chunk) in chunks.iter().enumerate() {
+        let idx = i as u32;
         let aad = build_aad(file_id, idx, total, chunk.is_final);
         let nonce = XNonce::from(chunk.nonce);
         let payload = Payload {
@@ -197,5 +234,38 @@ mod tests {
         let chunks = encrypt_chunks(b"test", &key, &file_id, 64 * 1024);
         let wire = chunks[0].to_wire();
         assert_eq!(wire[0], CHUNK_FORMAT_VERSION);
+    }
+
+    /// Edge-case audit high #14: dropping a chunk in the *middle* of a
+    /// multi-chunk stream (not the tail) must fail decryption with the
+    /// dedicated `MissingChunk` error — distinct from `AuthFailed` so
+    /// callers can request a targeted re-send of the missing index.
+    #[test]
+    fn gap_in_middle_fails_decryption() {
+        let key = test_key();
+        let file_id = test_file_id();
+        // 5 chunks of 4 bytes each — encrypt 20-byte payload with chunk_size=4.
+        let data = b"AAAABBBBCCCCDDDDEEEE";
+        let mut chunks = encrypt_chunks(data, &key, &file_id, 4);
+        assert_eq!(chunks.len(), 5);
+
+        // Drop chunk at index 2 — now we have [0, 1, 3, 4] in positions
+        // [0, 1, 2, 3], so position 2 holds a chunk with chunk_index=3.
+        chunks.remove(2);
+        assert_eq!(chunks.len(), 4);
+
+        let err = decrypt_chunks(&chunks, &key, &file_id).unwrap_err();
+        match err {
+            ChunkError::MissingChunk {
+                position,
+                expected,
+                got,
+            } => {
+                assert_eq!(position, 2);
+                assert_eq!(expected, 2);
+                assert_eq!(got, 3);
+            }
+            other => panic!("expected MissingChunk, got {other:?}"),
+        }
     }
 }
