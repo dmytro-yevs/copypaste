@@ -11,27 +11,71 @@
 # may fail. This is expected and not a Docker issue — see
 # scripts/build-windows.sh for the same caveat on host builds.
 
-FROM rust:1.75-slim-bookworm
+FROM rust:1.89-slim-bookworm
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# ----- Layer 1: system deps (mingw-w64 cross toolchain) ----------------------
+# ----- Layer 1: system deps (mingw-w64 cross toolchain + sqlcipher build) ----
+# - mingw-w64       : Windows GNU cross toolchain (gcc/ld/ar)
+# - pkg-config      : generic build glue
+# - perl, make, tcl : required by rusqlite's `bundled-sqlcipher` feature
+#                     (sqlcipher amalgamation is generated via tcl scripts)
+# - zip             : packaging the final release archive in-container
+# - patch           : occasionally needed by cc-rs vendored sources
+# - ca-certificates : crates.io TLS
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         mingw-w64 \
         pkg-config \
+        perl \
+        make \
+        tcl \
+        patch \
+        zip \
+        wget \
+        xz-utils \
         && rm -rf /var/lib/apt/lists/*
+
+# ----- Layer 1b: prebuilt mingw-w64 OpenSSL (needed by sqlcipher) ------------
+# Pull a mingw-w64 build of OpenSSL from MSYS2 (mingw-w64-x86_64-openssl pkg).
+# We only need the headers + static crypto lib + DLLs; we don't need a full
+# msys2 sysroot. The package is a tar.zst inside MSYS2's repo. We extract just
+# what we need into /usr/x86_64-w64-mingw32/.
+ARG MSYS2_OPENSSL_VER=3.6.2-2
+ARG MSYS2_MIRROR=https://mirror.msys2.org/mingw/mingw64
+RUN set -eux; \
+    apt-get update && apt-get install -y --no-install-recommends zstd && rm -rf /var/lib/apt/lists/*; \
+    cd /tmp; \
+    PKG="mingw-w64-x86_64-openssl-${MSYS2_OPENSSL_VER}-any.pkg.tar.zst"; \
+    wget -q "${MSYS2_MIRROR}/${PKG}" -O ssl.pkg.tar.zst; \
+    mkdir -p ssl-extract && cd ssl-extract; \
+    zstd -d ../ssl.pkg.tar.zst -o ssl.tar; \
+    tar -xf ssl.tar; \
+    cp -r mingw64/include/* /usr/x86_64-w64-mingw32/include/; \
+    cp -r mingw64/lib/* /usr/x86_64-w64-mingw32/lib/; \
+    cp -r mingw64/bin/*.dll /usr/x86_64-w64-mingw32/bin/ 2>/dev/null || true; \
+    cd / && rm -rf /tmp/ssl-extract /tmp/ssl.pkg.tar.zst; \
+    ls /usr/x86_64-w64-mingw32/include/openssl/crypto.h && \
+    ls /usr/x86_64-w64-mingw32/lib/libcrypto.dll.a
 
 # ----- Layer 2: Rust target + linker config ----------------------------------
 RUN rustup target add x86_64-pc-windows-gnu
 
 # Tell cargo to use mingw-w64's gcc for the Windows gnu target.
 RUN mkdir -p /root/.cargo && \
-    printf '[target.x86_64-pc-windows-gnu]\nlinker = "x86_64-w64-mingw32-gcc"\nar = "x86_64-w64-mingw32-ar"\n' \
+    printf '[target.x86_64-pc-windows-gnu]\nlinker = "x86_64-w64-mingw32-gcc"\nar = "x86_64-w64-mingw32-ar"\n\n[env]\nCC_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-gcc"\nCXX_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-g++"\nAR_x86_64_pc_windows_gnu = "x86_64-w64-mingw32-ar"\nCFLAGS_x86_64_pc_windows_gnu = "-I/usr/x86_64-w64-mingw32/include"\nRUSTFLAGS = "-L /usr/x86_64-w64-mingw32/lib"\n' \
     > /root/.cargo/config.toml
 
-# Sanity: linker present.
-RUN x86_64-w64-mingw32-gcc --version | head -1
+# Sqlcipher / openssl-sys env so build scripts find the mingw openssl.
+ENV OPENSSL_DIR=/usr/x86_64-w64-mingw32 \
+    OPENSSL_INCLUDE_DIR=/usr/x86_64-w64-mingw32/include \
+    OPENSSL_LIB_DIR=/usr/x86_64-w64-mingw32/lib \
+    PKG_CONFIG_ALLOW_CROSS=1 \
+    PKG_CONFIG_PATH=/usr/x86_64-w64-mingw32/lib/pkgconfig
+
+# Sanity: linker + tcl present (sqlcipher needs tclsh at build time).
+RUN x86_64-w64-mingw32-gcc --version | head -1 && \
+    which tclsh && echo 'puts [info patchlevel]' | tclsh
 
 WORKDIR /workspace
 
