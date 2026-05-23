@@ -29,6 +29,7 @@
 //! `scrubber_is_idempotent` integration test).
 
 use regex::Regex;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::error::ReportableError;
 
@@ -162,10 +163,21 @@ impl PiiScrubber {
 
     /// Apply every pattern in order and return the scrubbed copy.
     ///
-    /// Pure function: no I/O, no allocation beyond the returned `String`
-    /// (and intermediate buffers internal to [`Regex::replace_all`]).
+    /// The input is first normalised to NFKC. Without this step an attacker
+    /// (or, more commonly, a copy-pasted log line) can bypass the regex
+    /// patterns with Unicode-equivalent characters that *look* like ASCII
+    /// but do not match the ASCII regex class — e.g. fullwidth Latin letters
+    /// (U+FF21 'Ａ' vs U+0041 'A'), Greek small letter omicron in place of
+    /// Latin 'o' inside an email's local part, or compatibility forms of
+    /// digits. NFKC collapses those to their canonical ASCII equivalents
+    /// before pattern matching so the existing regex set covers them.
+    ///
+    /// Pure function: no I/O, no allocation beyond the normalised input and
+    /// the returned `String` (and intermediate buffers internal to
+    /// [`Regex::replace_all`]).
     pub fn scrub(&self, input: &str) -> String {
-        let mut out = std::borrow::Cow::Borrowed(input);
+        let normalised: String = input.nfkc().collect();
+        let mut out = std::borrow::Cow::Owned(normalised);
         for p in &self.patterns {
             // `replace_all` only allocates when there is at least one
             // match, so pass-through strings stay cheap.

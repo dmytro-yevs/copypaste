@@ -207,6 +207,36 @@ impl SentryReporter {
             _guard: None,
         }
     }
+
+    /// Discard queued events without flushing and tear down the Sentry
+    /// transport.
+    ///
+    /// This is the correct response to a user revoking telemetry consent at
+    /// runtime: dropping the [`SentryReporter`] alone would cause the held
+    /// [`sentry::ClientInitGuard`] to flush already-queued events to the
+    /// transport on `Drop`, contradicting the user's intent. Calling
+    /// `shutdown_without_flush` first closes the global client with a
+    /// zero-duration timeout so queued events are dropped on the floor; the
+    /// subsequent `Drop` of `self` is then a no-op.
+    ///
+    /// Returns `true` when a live client was closed, `false` when the SDK
+    /// was not initialised (e.g. test reporter, or already shut down).
+    ///
+    /// After this call the reporter is inert — further [`Self::report`]
+    /// invocations still consult the `consent` flag (and are typically also
+    /// `Disabled` once the caller toggles), but even an erroneous attempt
+    /// to send would find no transport on the hub.
+    pub fn shutdown_without_flush(&self) -> bool {
+        // Zero timeout = drop the queue. `Hub::current().client()` returns
+        // an `Arc<Client>` if a client is installed; `close` consumes the
+        // client on the hub and returns `true` on a clean shutdown.
+        if let Some(client) = sentry::Hub::current().client() {
+            client.close(Some(std::time::Duration::ZERO));
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl ErrorReporter for SentryReporter {

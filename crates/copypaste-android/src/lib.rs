@@ -136,7 +136,15 @@ pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
 }
 
 pub fn close_database(handle: u64) {
-    db_handles().lock().unwrap().remove(&handle);
+    // A poisoned mutex on the global handle table would otherwise abort the
+    // JVM via `unwrap()`. Wrapping in `catch_result` converts that into a
+    // `Result::Err(PanicError)` we then deliberately discard — `close_database`
+    // is declared as void in the UDL and Kotlin callers cannot signal a
+    // failure path, but at minimum we keep the process alive.
+    let _ = panic_boundary::catch_result(|| {
+        db_handles().lock().unwrap().remove(&handle);
+        Ok::<(), CopypasteError>(())
+    });
 }
 
 // ---------------------------------------------------------------------------
