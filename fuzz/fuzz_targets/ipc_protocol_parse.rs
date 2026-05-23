@@ -21,14 +21,19 @@ fuzz_target!(|data: &[u8]| {
     // the same panic-safety contract.
     //
     // `Response::error_code` is typed `Option<&'static str>` (the daemon
-    // only ever sets it from `ERR_CODE_*` string literals, which already
-    // have `'static` lifetime). That field's `Deserialize<'de>` impl
-    // requires the input to outlive `'static`, so we cannot hand it a
-    // `&[u8]` whose lifetime is bound to the fuzz iteration. The standard
-    // workaround in fuzz harnesses is to leak a heap copy: the leaked
-    // bytes have `'static` lifetime, which satisfies the bound. Each
-    // iteration leaks ~|data| bytes — acceptable because libFuzzer caps
-    // run length and the process is short-lived.
-    let leaked: &'static [u8] = Box::leak(data.to_vec().into_boxed_slice());
-    let _ = serde_json::from_slice::<copypaste_ipc::Response>(leaked);
+    // only ever sets it from `ERR_CODE_*` string literals). serde's
+    // `Deserialize<'de>` for that field requires the input slice to
+    // outlive `'static`, which a fuzz `&[u8]` cannot. Promote the slice
+    // to `'static` via a heap allocation, run the parse, then drop the
+    // allocation — LeakSanitizer in libFuzzer would otherwise fail the
+    // run. Because the field type is `&'static str`, serde never actually
+    // borrows from the input on success (an arbitrary string slice can't
+    // satisfy `'static`, so the only valid decode is `None`/absent);
+    // therefore the box is safe to free once `from_slice` returns.
+    let raw: *mut [u8] = Box::into_raw(data.to_vec().into_boxed_slice());
+    // SAFETY: `raw` was just produced from `Box::into_raw` and is not
+    // aliased; the reference's lifetime ends before we reclaim the box.
+    let _ = serde_json::from_slice::<copypaste_ipc::Response>(unsafe { &*raw });
+    // SAFETY: reclaiming the same allocation we leaked above.
+    unsafe { drop(Box::from_raw(raw)) };
 });
