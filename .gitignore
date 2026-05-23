@@ -1,5 +1,6 @@
 # Build artifacts
 /target/
+/dist/
 
 # Multi-platform build outputs (per-platform binaries).
 # Ignore everything under builds/ EXCEPT .gitkeep so the directory is tracked.
