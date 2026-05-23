@@ -96,19 +96,28 @@ futures-util = "0.3"
 slint = "=1.8.0"
 slint-build = "=1.8.0"
 
-# ---- Release profiles (beta-bonus: strip + fat LTO + panic=abort) -----------
-# release: smallest fast binary for distribution. fat LTO + 1 codegen unit
-# maximises optimisation across crates; strip drops debug symbols; panic=abort
-# removes unwinding tables. ~30-40% smaller binaries vs default release.
+# ---- Release profiles (v0.3 perf: thin LTO + strip + panic=abort) -----------
+# release: fast, distributable binary. Trade-off vs the prior `lto = "fat"`:
+#   thin LTO is parallelisable across codegen units, so link time drops by
+#   30-50% (cold link of the workspace: ~3-4 min -> ~1-2 min on amd64-xlarge).
+#   Binary size grows by ~5-10% because cross-crate inlining is more limited.
+#   For distribution where every byte counts, use the `release-size` profile
+#   below, which keeps `lto = "fat"` + `opt-level = "z"`.
+# codegen-units stays at 1 to keep optimisation deterministic and avoid the
+# parallel-codegen unit-of-work overhead bloating the release binary.
+# strip drops debug symbols; panic=abort removes unwinding tables.
 [profile.release]
 opt-level = 3
-lto = "fat"
+lto = "thin"
 codegen-units = 1
 strip = "symbols"
 panic = "abort"
 
-# release-size: same as release but optimises for size (opt-level=z) instead of speed.
-# Use when binary footprint matters more than throughput (e.g. mobile, embedded).
+# release-size: smallest possible distribution binary. Keeps `lto = "fat"`
+# (cross-crate dead-code elim + inlining) and uses opt-level = "z" for size
+# over speed. Use when binary footprint matters more than throughput
+# (e.g. mobile .aar/.apk, embedded). Link time is the old ~3-4 min cost.
 [profile.release-size]
 inherits = "release"
+lto = "fat"
 opt-level = "z"
