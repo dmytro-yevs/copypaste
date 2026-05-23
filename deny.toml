@@ -9,7 +9,29 @@ targets = [
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 version = 2
-ignore = []
+ignore = [
+    # proc-macro-error 1.0.4 unmaintained.
+    # Transitive via tray-icon -> muda/libappindicator -> gtk -> glib-macros/gtk3-macros.
+    # No safe upgrade upstream. Revisit when tray-icon migrates off gtk3.
+    "RUSTSEC-2024-0370",
+    # gtk-rs GTK3 bindings unmaintained (atk, gdk, gdk-pixbuf, gdk-sys, gio,
+    # gtk, gtk-sys, pango). Transitive via tray-icon -> libappindicator -> gtk.
+    # No safe upgrade upstream until tray-icon migrates off gtk3.
+    "RUSTSEC-2024-0412",
+    "RUSTSEC-2024-0413",
+    "RUSTSEC-2024-0415",
+    "RUSTSEC-2024-0416",
+    "RUSTSEC-2024-0418",
+    "RUSTSEC-2024-0419",
+    "RUSTSEC-2024-0420",
+    # paste 1.0.x unmaintained. Transitive via slint render stack.
+    # No safe upgrade upstream.
+    "RUSTSEC-2024-0436",
+    # bincode 1.3.3 unmaintained (team disbanded after harassment incident).
+    # Transitive via ruflo/agentdb dependencies. v1 is considered feature-complete
+    # upstream; migration to alternatives (postcard, rkyv) is non-trivial.
+    "RUSTSEC-2025-0141",
+]
 
 [licenses]
 version = 2
@@ -23,13 +45,12 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
-    "Unicode-DFS-2016",
     "Unicode-3.0",
     "Zlib",
-    "OpenSSL",
     "MPL-2.0",
-    "BSL-1.0",        # Boost Software License — clipboard-win (transitive via slint)
-    "CC0-1.0",        # public-domain dedication used by a few transitives
+    "BSL-1.0",                # Boost Software License — clipboard-win (transitive via slint)
+    "CC0-1.0",                # public-domain dedication used by a few transitives
+    "CDLA-Permissive-2.0",    # webpki-roots (transitive via reqwest/hyper-rustls in copypaste-supabase)
 ]
 confidence-threshold = 0.8
 
@@ -38,12 +59,6 @@ confidence-threshold = 0.8
 # `exceptions` whitelists the LicenseRef strings on a per-crate basis.
 [[licenses.exceptions]]
 name = "slint"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "i-slint-backend-android-activity"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "i-slint-backend-linuxkms"
 allow = ["LicenseRef-Slint-Royalty-free-2.0"]
 [[licenses.exceptions]]
 name = "i-slint-backend-qt"
@@ -68,9 +83,6 @@ name = "i-slint-core-macros"
 allow = ["LicenseRef-Slint-Royalty-free-2.0"]
 [[licenses.exceptions]]
 name = "i-slint-renderer-femtovg"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "i-slint-renderer-skia"
 allow = ["LicenseRef-Slint-Royalty-free-2.0"]
 [[licenses.exceptions]]
 name = "slint-build"
