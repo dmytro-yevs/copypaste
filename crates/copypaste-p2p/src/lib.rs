@@ -65,6 +65,9 @@ pub use transport::{
 pub use discovery::{DiscoveryService, PeerInfo, SERVICE_TYPE};
 pub use error::DiscoveryError;
 
+// Convenient top-level re-exports — PAKE pairing (ADR-008).
+pub use pake::{PakeError, PakeInitiator, PakeResponder, PasswordFile, SessionKey};
+
 
 /// Default TCP port for P2P direct connections.
 pub const DEFAULT_P2P_PORT: u16 = 51515;

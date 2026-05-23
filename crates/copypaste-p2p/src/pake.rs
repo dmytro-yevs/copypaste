@@ -19,11 +19,53 @@
 //!   | == both sides hold the same SessionKey == |
 //! ```
 //!
-//! Real implementation lands in **Wave 2.4**. This file ships the public API
-//! skeleton + ciphersuite type so downstream crates can start wiring
-//! pairing UX against stable type signatures.
+//! # Persisted state
+//!
+//! Successful pairing produces a [`PasswordFile`] that the responder must
+//! persist (encrypted at rest in SQLCipher: `paired_peers.pake_password_file
+//! BLOB`). The first byte is a version tag (`0x01`) so future PAKE migrations
+//! can co-exist on the same row. The remaining bytes are the concatenation
+//! of `ServerSetup` (server's long-term OPAQUE key) and `ServerRegistration`
+//! (per-peer envelope) — both required to run `ServerLogin::start` later.
 
+use argon2::Argon2;
+use generic_array::GenericArray;
+use hkdf::Hkdf;
+use opaque_ke::ciphersuite::CipherSuite;
+use opaque_ke::rand::rngs::OsRng;
+use opaque_ke::{
+    ClientLogin, ClientLoginFinishParameters, ClientRegistration,
+    ClientRegistrationFinishParameters, CredentialFinalization, CredentialRequest,
+    CredentialResponse, RegistrationRequest, RegistrationResponse, RegistrationUpload,
+    ServerLogin, ServerLoginStartParameters, ServerRegistration, ServerSetup,
+};
+use sha2::Sha256;
 use thiserror::Error;
+
+/// Wire-format version tag for [`PasswordFile`] serialisation.
+///
+/// `0x01` = opaque-ke 3.0, Ristretto255 + Argon2 (default) + TripleDH KE.
+/// Bump on any ciphersuite / serialisation change.
+const PASSWORD_FILE_VERSION: u8 = 0x01;
+
+/// Stable per-pairing "user" identifier passed into OPAQUE.
+///
+/// OPAQUE binds a `username` (server-side credential identifier) into the
+/// envelope. In CopyPaste pairing there is exactly one credential per
+/// `PasswordFile`, so the identifier is a fixed sentinel — peer identity is
+/// already enforced by the surrounding TLS certificate-fingerprint pinning.
+const PAIRING_USERNAME: &[u8] = b"copypaste-pair";
+
+/// OPAQUE ciphersuite — Ristretto255 OPRF + KeGroup, TripleDH key exchange,
+/// Argon2id KSF. Chosen in ADR-008.
+struct CopypasteCipherSuite;
+
+impl CipherSuite for CopypasteCipherSuite {
+    type OprfCs = opaque_ke::Ristretto255;
+    type KeGroup = opaque_ke::Ristretto255;
+    type KeyExchange = opaque_ke::key_exchange::tripledh::TripleDh;
+    type Ksf = Argon2<'static>;
+}
 
 /// Errors that can occur during a PAKE handshake.
 #[derive(Debug, Error)]
@@ -61,25 +103,150 @@ impl SessionKey {
     pub fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
+
+    /// Derive a 32-byte XChaCha20-Poly1305 key from this session key via
+    /// HKDF-SHA256, mixing in a caller-supplied `salt` (per ADR-001 chunked
+    /// encryption — each chunk / envelope gets a fresh subkey).
+    ///
+    /// The info string `"copypaste-xchacha20-key-v1"` domain-separates this
+    /// derivation from any future use of the same `SessionKey`.
+    pub fn derive_xchacha_key(&self, salt: &[u8]) -> [u8; 32] {
+        let hk = Hkdf::<Sha256>::new(Some(salt), &self.0);
+        let mut out = [0u8; 32];
+        hk.expand(b"copypaste-xchacha20-key-v1", &mut out)
+            .expect("32 bytes is well within HKDF-SHA256 output limit");
+        out
+    }
 }
 
 /// Server-side password material derived during initial registration.
 ///
 /// Persisted in SQLCipher (`paired_peers.pake_password_file BLOB`). First
 /// byte is a version tag (`0x01` for opaque-ke 3.0 / Ristretto255-Argon2)
-/// so future PAKE migrations can co-exist on the same row.
+/// followed by a 2-byte big-endian length of the `ServerSetup` blob, then
+/// `ServerSetup` bytes, then `ServerRegistration` bytes (length implied by
+/// remaining slice). Both are required to drive `ServerLogin::start`.
+#[derive(Clone)]
 pub struct PasswordFile {
-    /// Versioned serialised opaque-ke `ServerRegistration` blob.
+    /// Versioned serialised blob — see struct docs for layout.
     pub serialized: Vec<u8>,
+}
+
+impl PasswordFile {
+    /// Perform a one-time OPAQUE registration for `password` and produce the
+    /// persistable [`PasswordFile`]. Runs the full 3-message registration
+    /// flow locally (single party plays both roles) because pairing UX is
+    /// "set the same code on both devices, then handshake".
+    pub fn register(password: &str) -> Result<Self, PakeError> {
+        let mut rng = OsRng;
+
+        // 1. Server long-term setup (per-peer in our model — small enough,
+        //    and rotating it on re-pair is the desired behaviour).
+        let server_setup = ServerSetup::<CopypasteCipherSuite>::new(&mut rng);
+
+        // 2. Client registration start.
+        let client_start =
+            ClientRegistration::<CopypasteCipherSuite>::start(&mut rng, password.as_bytes())
+                .map_err(|e| PakeError::Protocol(format!("client reg start: {e}")))?;
+        let reg_req_bytes = client_start.message.serialize();
+
+        // 3. Server registration start.
+        let reg_req = RegistrationRequest::deserialize(&reg_req_bytes)
+            .map_err(|e| PakeError::WireFormat(format!("reg request: {e}")))?;
+        let server_start = ServerRegistration::<CopypasteCipherSuite>::start(
+            &server_setup,
+            reg_req,
+            PAIRING_USERNAME,
+        )
+        .map_err(|e| PakeError::Protocol(format!("server reg start: {e}")))?;
+        let reg_resp_bytes = server_start.message.serialize();
+
+        // 4. Client registration finish.
+        let reg_resp = RegistrationResponse::deserialize(&reg_resp_bytes)
+            .map_err(|e| PakeError::WireFormat(format!("reg response: {e}")))?;
+        let client_finish = client_start
+            .state
+            .finish(
+                &mut rng,
+                password.as_bytes(),
+                reg_resp,
+                ClientRegistrationFinishParameters::default(),
+            )
+            .map_err(|e| PakeError::Protocol(format!("client reg finish: {e}")))?;
+        let upload_bytes = client_finish.message.serialize();
+
+        // 5. Server registration finalise.
+        let upload = RegistrationUpload::<CopypasteCipherSuite>::deserialize(&upload_bytes)
+            .map_err(|e| PakeError::WireFormat(format!("reg upload: {e}")))?;
+        let password_file_inner = ServerRegistration::<CopypasteCipherSuite>::finish(upload);
+
+        // 6. Pack: [version u8][setup_len u16 BE][setup][registration]
+        let setup_bytes = server_setup.serialize();
+        let reg_bytes = password_file_inner.serialize();
+        let setup_len: u16 = setup_bytes
+            .len()
+            .try_into()
+            .map_err(|_| PakeError::Protocol("server setup > 64 KiB".into()))?;
+
+        let mut serialized =
+            Vec::with_capacity(1 + 2 + setup_bytes.len() + reg_bytes.len());
+        serialized.push(PASSWORD_FILE_VERSION);
+        serialized.extend_from_slice(&setup_len.to_be_bytes());
+        serialized.extend_from_slice(&setup_bytes);
+        serialized.extend_from_slice(&reg_bytes);
+
+        Ok(Self { serialized })
+    }
+
+    /// Parse the persisted blob back into the two opaque-ke components.
+    fn decode(
+        &self,
+    ) -> Result<
+        (
+            ServerSetup<CopypasteCipherSuite>,
+            ServerRegistration<CopypasteCipherSuite>,
+        ),
+        PakeError,
+    > {
+        if self.serialized.is_empty() {
+            return Err(PakeError::WireFormat("empty password file".into()));
+        }
+        if self.serialized[0] != PASSWORD_FILE_VERSION {
+            return Err(PakeError::WireFormat(format!(
+                "unsupported version: 0x{:02x}",
+                self.serialized[0]
+            )));
+        }
+        if self.serialized.len() < 3 {
+            return Err(PakeError::WireFormat("truncated header".into()));
+        }
+        let setup_len = u16::from_be_bytes([self.serialized[1], self.serialized[2]]) as usize;
+        let body = &self.serialized[3..];
+        if body.len() < setup_len {
+            return Err(PakeError::WireFormat("truncated ServerSetup".into()));
+        }
+        let (setup_bytes, reg_bytes) = body.split_at(setup_len);
+
+        let server_setup = ServerSetup::<CopypasteCipherSuite>::deserialize(setup_bytes)
+            .map_err(|e| PakeError::WireFormat(format!("ServerSetup deserialize: {e}")))?;
+        let server_reg = ServerRegistration::<CopypasteCipherSuite>::deserialize(reg_bytes)
+            .map_err(|e| PakeError::WireFormat(format!("ServerRegistration deserialize: {e}")))?;
+        Ok((server_setup, server_reg))
+    }
 }
 
 /// Initiator (client) side of the PAKE handshake.
 ///
 /// Holds the in-flight `opaque_ke::ClientLogin` state between `new` and
-/// `finish`. Drop the value to abort the handshake (state is zeroized).
+/// `finish`. Drop the value to abort the handshake (state is zeroized on
+/// drop by opaque-ke).
 pub struct PakeInitiator {
-    // Wave 2.4: `state: ClientLogin<DefaultCipherSuite>`
-    _private: (),
+    state: ClientLogin<CopypasteCipherSuite>,
+    /// Password is needed again at `finish` time (OPAQUE PRF re-evaluation).
+    /// Zeroed explicitly inside [`PakeInitiator::finish`] before being
+    /// dropped. The `state` field zeroizes itself on drop via opaque-ke's
+    /// `derive-where(zeroize-on-drop)` attribute.
+    password: Vec<u8>,
 }
 
 impl PakeInitiator {
@@ -87,15 +254,48 @@ impl PakeInitiator {
     /// password. Returns `(Self, message_to_send)` — send the bytes to the
     /// responder over the framed transport, then call [`Self::finish`] with
     /// the response.
-    pub fn new(_password: &str) -> Result<(Self, Vec<u8>), PakeError> {
-        unimplemented!("Wave 2.4: implement full opaque-ke ClientLogin::start flow")
+    pub fn new(password: &str) -> Result<(Self, Vec<u8>), PakeError> {
+        let mut rng = OsRng;
+        let start = ClientLogin::<CopypasteCipherSuite>::start(&mut rng, password.as_bytes())
+            .map_err(|e| PakeError::Protocol(format!("client login start: {e}")))?;
+        let msg = start.message.serialize().to_vec();
+        Ok((
+            Self {
+                state: start.state,
+                password: password.as_bytes().to_vec(),
+            },
+            msg,
+        ))
     }
 
     /// Step 3: client receives the server's response and derives the
-    /// session key. Consumes `self` because the handshake state is
-    /// single-use.
-    pub fn finish(self, _server_message: &[u8]) -> Result<SessionKey, PakeError> {
-        unimplemented!("Wave 2.4: implement opaque-ke ClientLogin::finish flow")
+    /// session key. Returns `(session_key, message_to_send_to_server)` — the
+    /// server needs the final message to confirm and reach the same key.
+    /// Consumes `self` because the handshake state is single-use.
+    pub fn finish(self, server_message: &[u8]) -> Result<(SessionKey, Vec<u8>), PakeError> {
+        let resp = CredentialResponse::deserialize(server_message)
+            .map_err(|e| PakeError::WireFormat(format!("CredentialResponse: {e}")))?;
+
+        let Self { state, password } = self;
+        let result = state.finish(
+            &password,
+            resp,
+            ClientLoginFinishParameters::default(),
+        );
+        // Zero the password copy now that we are done with it.
+        let mut pw = password;
+        for b in pw.iter_mut() {
+            *b = 0;
+        }
+
+        let finish = result.map_err(|e| match e {
+            opaque_ke::errors::ProtocolError::InvalidLoginError => PakeError::InvalidPassword,
+            other => PakeError::Protocol(format!("client login finish: {other}")),
+        })?;
+
+        let key = session_key_to_array(finish.session_key.as_slice())?;
+        let outbound = finish.message.serialize().to_vec();
+        Ok((SessionKey(key), outbound))
     }
 }
 
@@ -104,8 +304,7 @@ impl PakeInitiator {
 /// Holds the in-flight `opaque_ke::ServerLogin` state between `respond` and
 /// `finish`. Drop the value to abort the handshake (state is zeroized).
 pub struct PakeResponder {
-    // Wave 2.4: `state: ServerLogin<DefaultCipherSuite>`
-    _private: (),
+    state: ServerLogin<CopypasteCipherSuite>,
 }
 
 impl PakeResponder {
@@ -113,41 +312,148 @@ impl PakeResponder {
     /// Requires the persisted [`PasswordFile`] for the peer being paired.
     /// Returns `(Self, message_to_send)`.
     pub fn respond(
-        _password_file: &PasswordFile,
-        _client_message: &[u8],
+        password_file: &PasswordFile,
+        client_message: &[u8],
     ) -> Result<(Self, Vec<u8>), PakeError> {
-        unimplemented!("Wave 2.4: implement opaque-ke ServerLogin::start flow")
+        let (server_setup, server_reg) = password_file.decode()?;
+        let mut rng = OsRng;
+        let cred_req = CredentialRequest::deserialize(client_message)
+            .map_err(|e| PakeError::WireFormat(format!("CredentialRequest: {e}")))?;
+        let start = ServerLogin::start(
+            &mut rng,
+            &server_setup,
+            Some(server_reg),
+            cred_req,
+            PAIRING_USERNAME,
+            ServerLoginStartParameters::default(),
+        )
+        .map_err(|e| PakeError::Protocol(format!("server login start: {e}")))?;
+        let msg = start.message.serialize().to_vec();
+        Ok((Self { state: start.state }, msg))
     }
 
     /// Step 4 (server side): after receiving the client's final
     /// authenticator, finalise and derive the session key.
-    pub fn finish(self, _client_final: &[u8]) -> Result<SessionKey, PakeError> {
-        unimplemented!("Wave 2.4: implement opaque-ke ServerLogin::finish flow")
+    pub fn finish(self, client_final: &[u8]) -> Result<SessionKey, PakeError> {
+        let fin = CredentialFinalization::deserialize(client_final)
+            .map_err(|e| PakeError::WireFormat(format!("CredentialFinalization: {e}")))?;
+        let result = self
+            .state
+            .finish(fin)
+            .map_err(|e| match e {
+                opaque_ke::errors::ProtocolError::InvalidLoginError => PakeError::InvalidPassword,
+                other => PakeError::Protocol(format!("server login finish: {other}")),
+            })?;
+        let key = session_key_to_array(result.session_key.as_slice())?;
+        Ok(SessionKey(key))
     }
+}
+
+/// Convert opaque-ke's variable-width `session_key` `GenericArray` view into
+/// our fixed 32-byte key. For the Ristretto255-TripleDH ciphersuite the
+/// output is exactly 64 bytes (two SHA-512 chaining values); we HKDF-extract
+/// it down to 32 bytes for storage uniformity.
+fn session_key_to_array(raw: &[u8]) -> Result<[u8; 32], PakeError> {
+    if raw.is_empty() {
+        return Err(PakeError::Protocol("empty session key".into()));
+    }
+    let hk = Hkdf::<Sha256>::new(Some(b"copypaste-pake-session-v1"), raw);
+    let mut out = [0u8; 32];
+    hk.expand(b"session-key", &mut out)
+        .map_err(|e| PakeError::Protocol(format!("hkdf expand: {e}")))?;
+    // Touch the `generic-array` import so it's kept for future direct
+    // `GenericArray<u8, N>` interop without re-adding the dep.
+    let _ = core::marker::PhantomData::<GenericArray<u8, generic_array::typenum::U32>>;
+    Ok(out)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// End-to-end OPAQUE handshake — both sides must converge on the same
+    /// 32-byte SessionKey when the password matches.
     #[test]
-    fn pake_module_compiles() {
-        // Smoke test — confirms the public API surface is well-formed.
-        // Full handshake round-trip lands in Wave 2.4.
-        let key = SessionKey([0u8; 32]);
-        assert_eq!(key.as_bytes().len(), 32);
+    fn pake_full_handshake_succeeds_with_correct_password() {
+        let password = "correct horse battery staple";
+        let pf = PasswordFile::register(password).expect("register");
 
-        let pf = PasswordFile {
-            serialized: vec![0x01],
-        };
-        assert_eq!(pf.serialized[0], 0x01, "version tag must be 0x01");
+        let (client, msg1) = PakeInitiator::new(password).expect("client new");
+        let (server, msg2) = PakeResponder::respond(&pf, &msg1).expect("server respond");
+        let (client_key, msg3) = client.finish(&msg2).expect("client finish");
+        let server_key = server.finish(&msg3).expect("server finish");
+
+        assert_eq!(
+            client_key.as_bytes(),
+            server_key.as_bytes(),
+            "both sides must derive the same session key"
+        );
     }
 
+    /// Wrong-password attempt must fail — and must fail on the client's side
+    /// (the OPAQUE security guarantee).
+    #[test]
+    fn pake_fails_with_wrong_password() {
+        let pf = PasswordFile::register("the-right-one").expect("register");
+
+        let (client, msg1) = PakeInitiator::new("the-wrong-one").expect("client new");
+        let (server, msg2) =
+            PakeResponder::respond(&pf, &msg1).expect("server respond proceeds");
+        // Client `finish` is the first place OPAQUE detects mismatch — it
+        // surfaces `InvalidPassword` because the OPRF output doesn't decrypt
+        // the envelope.
+        let client_res = client.finish(&msg2);
+        assert!(
+            matches!(client_res, Err(PakeError::InvalidPassword)),
+            "expected InvalidPassword, got {:?}",
+            client_res.as_ref().err()
+        );
+
+        // And even if a malicious client forged a finalization message, the
+        // server must also reject. Feed garbage of the right shape.
+        let garbage = vec![0u8; 128];
+        let server_res = server.finish(&garbage);
+        assert!(server_res.is_err(), "server must reject forged finalization");
+    }
+
+    /// HKDF subkey derivation must be deterministic and salt-separated.
+    #[test]
+    fn session_key_derives_distinct_chacha_keys_for_different_salts() {
+        let sk = SessionKey([0x42; 32]);
+        let k1 = sk.derive_xchacha_key(b"chunk-0001");
+        let k2 = sk.derive_xchacha_key(b"chunk-0002");
+        let k1_again = sk.derive_xchacha_key(b"chunk-0001");
+
+        assert_eq!(k1, k1_again, "derivation must be deterministic");
+        assert_ne!(k1, k2, "different salts must yield different keys");
+        assert_eq!(k1.len(), 32);
+    }
+
+    /// PasswordFile must roundtrip through its serialized form and still
+    /// drive a successful handshake.
+    #[test]
+    fn password_file_serialize_roundtrip() {
+        let password = "roundtrip-pw-2026";
+        let pf = PasswordFile::register(password).expect("register");
+
+        let blob = pf.serialized.clone();
+        assert_eq!(blob[0], PASSWORD_FILE_VERSION, "version tag preserved");
+        drop(pf);
+
+        let pf2 = PasswordFile { serialized: blob };
+        let (client, msg1) = PakeInitiator::new(password).expect("client new");
+        let (server, msg2) =
+            PakeResponder::respond(&pf2, &msg1).expect("server respond from reloaded pf");
+        let (client_key, msg3) = client.finish(&msg2).expect("client finish");
+        let server_key = server.finish(&msg3).expect("server finish");
+        assert_eq!(client_key.as_bytes(), server_key.as_bytes());
+    }
+
+    /// Sanity: PakeError display strings.
     #[test]
     fn pake_error_displays() {
         let err = PakeError::InvalidPassword;
         assert_eq!(err.to_string(), "invalid password");
-
         let err = PakeError::Protocol("oprf failed".into());
         assert!(err.to_string().contains("oprf failed"));
     }
