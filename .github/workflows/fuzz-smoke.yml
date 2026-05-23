@@ -32,6 +32,8 @@ jobs:
           - ipc_protocol_parse
           - image_decode
           - sync_event_decode
+          - aead_decrypt
+          - snapshot_parse
 
     env:
       FUZZ_TARGET: ${{ matrix.target }}

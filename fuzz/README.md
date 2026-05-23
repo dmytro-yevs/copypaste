@@ -1,16 +1,19 @@
 # copypaste-fuzz — coverage-guided fuzz harness
 
-Three libFuzzer targets that hammer the wire/decoder surfaces a malicious or
+Five libFuzzer targets that hammer the wire/decoder surfaces a malicious or
 buggy peer can reach:
 
-| Target                | Decoder under test                                   | Reachable from                |
-|-----------------------|------------------------------------------------------|-------------------------------|
-| `ipc_protocol_parse`  | `copypaste_ipc::{Request, Response}` (JSON)          | local UDS (UI / CLI → daemon) |
-| `image_decode`        | `copypaste_core::image::thumbnail` (PNG / TIFF)      | clipboard contents            |
-| `sync_event_decode`   | `copypaste_sync::protocol::Message::decode` (JSON)   | remote P2P peer               |
+| Target                | Decoder under test                                              | Reachable from                |
+|-----------------------|-----------------------------------------------------------------|-------------------------------|
+| `ipc_protocol_parse`  | `copypaste_ipc::{Request, Response}` (JSON)                     | local UDS (UI / CLI → daemon) |
+| `image_decode`        | `copypaste_core::image::thumbnail` (PNG / TIFF)                 | clipboard contents            |
+| `sync_event_decode`   | `copypaste_sync::protocol::Message::decode` (JSON)              | remote P2P peer               |
+| `aead_decrypt`        | `copypaste_core::decrypt_item_with_aad` (XChaCha20-Poly1305)    | tampered DB row, P2P peer     |
+| `snapshot_parse`      | `copypaste_ipc::types::ImportItem` snapshot dumps (JSON)        | CLI `import` file, UDS        |
 
 The invariant for every target is the same: **no panics, no aborts**. Errors
-returned via `Result::Err` are the expected outcome for malformed input.
+returned via `Result::Err` (or `EncryptError::AuthFailed` for AEAD) are the
+expected outcome for malformed / adversarial input.
 
 ## Why not a workspace member?
 
@@ -37,6 +40,8 @@ cargo +nightly fuzz build --fuzz-dir fuzz
 cargo +nightly fuzz run ipc_protocol_parse  --fuzz-dir fuzz -- -max_total_time=60
 cargo +nightly fuzz run image_decode        --fuzz-dir fuzz -- -max_total_time=60
 cargo +nightly fuzz run sync_event_decode   --fuzz-dir fuzz -- -max_total_time=60
+cargo +nightly fuzz run aead_decrypt        --fuzz-dir fuzz -- -max_total_time=60
+cargo +nightly fuzz run snapshot_parse      --fuzz-dir fuzz -- -max_total_time=60
 ```
 
 A crash drops a reproducer into `fuzz/artifacts/<target>/crash-*`. Replay it
