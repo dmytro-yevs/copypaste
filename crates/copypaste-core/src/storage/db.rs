@@ -177,9 +177,33 @@ impl Database {
 
         drop(plaintext_conn);
 
+        // Crash-safety: fsync the tmp file's contents to disk BEFORE the
+        // rename. Without this, a power-cut between DETACH and rename can
+        // leave a zero-length destination after recovery (the rename
+        // completes from the page cache, but the data pages were never
+        // flushed).
+        std::fs::File::open(&tmp_path)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| DbError::Migration(format!("fsync tmp: {e}")))?;
+
         // Atomically replace the plaintext file with the encrypted copy.
         std::fs::rename(&tmp_path, path)
             .map_err(|e| DbError::Migration(format!("rename tmp->original: {e}")))?;
+
+        // fsync the parent directory so the rename itself is durable. On
+        // POSIX a rename is only crash-safe if the containing directory is
+        // synced. Platforms that disallow fsync on a directory (Windows,
+        // some FUSE setups) return EISDIR / EACCES / EINVAL — best-effort
+        // only on those.
+        if let Some(parent) = path.parent() {
+            // An empty parent ("") means current dir — `File::open("")` errors
+            // on most platforms, so guard against it.
+            if !parent.as_os_str().is_empty() {
+                if let Ok(dir) = std::fs::File::open(parent) {
+                    let _ = dir.sync_all();
+                }
+            }
+        }
 
         Ok(())
     }
