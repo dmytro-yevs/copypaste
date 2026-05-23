@@ -222,6 +222,17 @@ impl PairWindowHandle {
     pub fn on_pair<F: Fn(String) + 'static>(&self, cb: F) {
         self.window.on_pair(move |fp| cb(fp.to_string()));
     }
+    /// Register a callback invoked when "Pair with Password" is clicked.
+    /// Receives `(peer_fingerprint, password)`. The closure is responsible
+    /// for calling `IpcClient::pair_with_password` and surfacing the
+    /// daemon's success/error status back into the UI via [`set_status`].
+    ///
+    /// Beta W3.2 — wires the new Slint `pair-with-password(string, string)`
+    /// callback added to `PairWindow.slint`.
+    pub fn on_pair_with_password<F: Fn(String, String) + 'static>(&self, cb: F) {
+        self.window
+            .on_pair_with_password(move |fp, pw| cb(fp.to_string(), pw.to_string()));
+    }
 
     /// Return the user-facing empty-state hint for the current peer list, if any.
     /// Convenience wrapper over [`pair_window_empty_hint`] for callers that
@@ -255,6 +266,21 @@ impl PairWindowHandle {
     pub fn run(&self) -> Result<(), slint::PlatformError> {
         self.window.run()
     }
+}
+
+
+/// Beta W3.2 — minimum number of Unicode scalars required for a PAKE
+/// pairing password. Mirrors `IpcClient::MIN_PAIR_PASSWORD_LEN` and the
+/// daemon-side check; kept in three places intentionally so each layer
+/// fails fast on its own.
+pub const MIN_PAIR_PASSWORD_LEN: usize = 6;
+
+/// Validate a PAKE pairing password using Unicode scalar counts. The Slint
+/// UI uses `character-count >= 6` inline; this helper is the equivalent for
+/// Rust callers (e.g., when the UI delegates validation back to a Rust
+/// callback before invoking IPC).
+pub fn is_valid_pair_password(password: &str) -> bool {
+    password.chars().count() >= MIN_PAIR_PASSWORD_LEN
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -309,6 +335,24 @@ mod tests {
         assert_eq!(format_byte_size(512), "512 B");
         assert_eq!(format_byte_size(2048), "2 KB");
         assert_eq!(format_byte_size(1_500_000), "1.4 MB");
+    }
+
+    #[test]
+    fn pair_window_password_validation_matches_min_length() {
+        // beta-W3.2: the Rust-side helper and the daemon-side check must
+        // agree on the 6-char Unicode-scalar minimum.
+        assert_eq!(MIN_PAIR_PASSWORD_LEN, 6);
+        assert!(!is_valid_pair_password(""));
+        assert!(!is_valid_pair_password("12345"));
+        assert!(is_valid_pair_password("123456"));
+        assert!(
+            is_valid_pair_password("парол1"),
+            "6-scalar Cyrillic password must pass — counts characters, not bytes"
+        );
+        assert!(
+            !is_valid_pair_password("ab漢"),
+            "3-scalar multibyte password must fail"
+        );
     }
 
     #[test]

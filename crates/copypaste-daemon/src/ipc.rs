@@ -1748,7 +1748,7 @@ mod tests {
         assert_eq!(resp["error_code"], "invalid_argument");
 
         // Missing password → invalid_argument
-        let valid_fp = "a".repeat(64);
+        let valid_fp = std::iter::repeat("ab").take(32).collect::<Vec<_>>().join(":");
         let body = format!(
             r#"{{"id":"p2","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{valid_fp}"}}}}"#
         );

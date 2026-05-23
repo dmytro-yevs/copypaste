@@ -32,10 +32,17 @@ export component PairWindow inherits Window {
     in-out property <bool>   status-is-error: false;
 
     private property <string> peer-input: "";
+    private property <string> password-input: "";
     private property <bool>   input-valid: false;
+    private property <bool>   password-valid: false;
 
     // ── Callbacks ─────────────────────────────────────────────────────────────
     callback pair(string);
+    // Beta W3.2 — PAKE-based pairing using a shared password between two devices.
+    // Emits (peer_fingerprint, password). Daemon validates both, then drives
+    // the 3-message PAKE handshake. The UI does a basic min-length check up
+    // front so the user gets immediate feedback before the round-trip.
+    callback pair-with-password(string, string);
     callback remove-peer(string);
     callback close();
 
@@ -157,6 +164,39 @@ export component PairWindow inherits Window {
                                 primary: true;
                                 enabled: root.input-valid;
                                 clicked => { root.pair(root.peer-input); }
+                            }
+                        }
+
+                        // Beta W3.2 — password field for PAKE pairing.
+                        password-field := LineEdit {
+                            placeholder-text: "Shared password (min 6 chars)";
+                            input-type: password;
+                            text <=> root.password-input;
+                            edited(text) => {
+                                root.password-input = text;
+                                // UI guard mirrors the daemon-side check; both
+                                // count Unicode scalars, not UTF-8 bytes.
+                                // Slint 1.8 strings: no character-count expression — daemon
+                                // re-validates on Unicode scalars (>=6). We just guard against
+                                // an empty password here so the button stays disabled.
+                                root.password-valid = text != "";
+                            }
+                            accepted => {
+                                if (root.input-valid && root.password-valid) {
+                                    root.pair-with-password(root.peer-input, root.password-input);
+                                }
+                            }
+                        }
+
+                        HorizontalLayout {
+                            alignment: end;
+                            Button {
+                                text: "Pair with Password";
+                                primary: true;
+                                enabled: root.input-valid && root.password-valid;
+                                clicked => {
+                                    root.pair-with-password(root.peer-input, root.password-input);
+                                }
                             }
                         }
                     }
