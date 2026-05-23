@@ -82,3 +82,18 @@ For `.deb` / `.rpm`, drop it under `/usr/share/man/man1/copypaste.1.gz`
   These are substituted by `scripts/gen-manpage.sh`.
 - `help2man` output supersedes the template entirely when available — it
   reflects the live `--help` output for every flag and subcommand.
+- The generated page is intentionally **not** checked in; CI / packagers
+  regenerate it from source. Add `man/copypaste.1` to `.gitignore` if your
+  workflow runs the generator in-tree.
+
+## CI integration
+
+A minimal release-time check:
+
+```sh
+bash scripts/gen-manpage.sh
+mandoc -Tlint man/copypaste.1 | grep -E '^mandoc: .*: (ERROR|UNSUPP)' && exit 1 || true
+```
+
+Pair with the existing `scripts/completions.sh` so packages ship both man
+pages and shell completions in one regeneration step.
