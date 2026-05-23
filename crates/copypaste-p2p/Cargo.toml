@@ -43,8 +43,6 @@ thiserror.workspace = true
 tracing.workspace = true
 # Zeroize PAKE password buffers on drop (security MED #9)
 zeroize.workspace = true
-# Jitter on transient-connect retry (security MED #10)
-rand.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
