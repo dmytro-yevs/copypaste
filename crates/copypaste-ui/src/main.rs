@@ -214,6 +214,14 @@ fn main() -> Result<()> {
                 }
                 Ok(copypaste_ui::autostart::DaemonStatus::FailedToStart(reason)) => {
                     eprintln!("[autostart] daemon failed to start: {reason}");
+                    // beta.5 Bug-7: surface the failure to the user instead
+                    // of leaving them with the generic "Daemon not running"
+                    // placeholder. We piggy-back on the existing
+                    // `apply_history_result` Err branch (which already
+                    // formats `Error: {e}` into the status line and clears
+                    // the items list) by posting a synthetic error result
+                    // to the UI thread.
+                    report_autostart_failure(window_weak, state_for_autostart, reason);
                 }
                 Err(e) => {
                     eprintln!("[autostart] error: {e}");
@@ -539,6 +547,63 @@ fn ipc_error_to_string(e: &anyhow::Error) -> String {
 /// attempt fails and the UI shows "Daemon not running". Without an explicit
 /// post-autostart refresh, the user is stuck on the stale placeholder until
 /// they click Refresh manually.
+/// Surface a `DaemonStatus::FailedToStart(reason)` to the UI by posting
+/// a synthetic IPC error through [`apply_history_result`].
+///
+/// beta.5 Bug-7: the autostart worker previously only `eprintln!`-ed the
+/// reason, so the user saw the generic
+/// `Daemon not running. Start with \`copypaste daemon start\``
+/// placeholder with no hint about *why* launchctl could not bring the
+/// daemon up (missing plist, sandbox denial, dangling ProgramArguments
+/// path, etc.). Out of scope: adding a dedicated Slint property for
+/// the failure reason — we route the message through the existing
+/// `set_status_text` path so this fix stays main.rs-only.
+///
+/// We synthesise a `Result::Err` whose Display does NOT start with
+/// "Daemon not running" so the funnel in `apply_history_result` falls
+/// through to the verbatim `Error: {e}` branch. That branch also
+/// clears the items list and the cached `last_page_items` for us.
+#[cfg(target_os = "macos")]
+fn report_autostart_failure(
+    window_weak: slint::Weak<HistoryWindow>,
+    state: Arc<Mutex<AppState>>,
+    reason: String,
+) {
+    let offset = lock_or_recover(&state).current_offset;
+    let msg = format!("Daemon autostart failed: {reason}");
+    let result: std::result::Result<ipc_client::HistoryPage, String> = Err(msg);
+    let payload: Arc<Mutex<Option<std::result::Result<ipc_client::HistoryPage, String>>>> =
+        Arc::new(Mutex::new(Some(result)));
+
+    // Same retry shape as `refresh_history_after_autostart` — the
+    // failure handler can fire before `window.run()` installs the
+    // event loop and would otherwise be lost to `EventLoopError`.
+    for attempt in 0..3 {
+        let window_weak_attempt = window_weak.clone();
+        let state_for_apply = Arc::clone(&state);
+        let payload_for_attempt = Arc::clone(&payload);
+        let post = slint::invoke_from_event_loop(move || {
+            if let Some(win) = window_weak_attempt.upgrade() {
+                if let Some(result) = lock_or_recover(&payload_for_attempt).take() {
+                    apply_history_result(&win, &state_for_apply, result, offset);
+                }
+            }
+        });
+        match post {
+            Ok(()) => return,
+            Err(e) => {
+                eprintln!(
+                    "[autostart] failure-report attempt {} could not post to UI: {e}",
+                    attempt + 1
+                );
+                if attempt < 2 {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            }
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn refresh_history_after_autostart(
     window_weak: slint::Weak<HistoryWindow>,
