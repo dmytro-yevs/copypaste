@@ -13,6 +13,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::time::interval;
+// D1: CancellationToken for coordinated graceful shutdown across all tasks.
+use tokio_util::sync::CancellationToken;
 
 // Beta W2.2 (arch-1): sync orchestrator that wires `copypaste-sync` into the
 // daemon. Declared at crate root in `lib.rs` (`pub mod sync_orch;`); we
@@ -79,26 +81,33 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     #[cfg(not(target_os = "macos"))]
     let device_public_key_arc: Arc<[u8; 32]> = Arc::new([0u8; 32]);
 
+    // D1: create the process-wide cancellation token. Clones are passed to
+    // every long-running task; calling `shutdown_token.cancel()` on SIGINT/
+    // SIGTERM propagates to all of them simultaneously.
+    let shutdown_token = CancellationToken::new();
+
     // Shared private-mode flag: when true, the clipboard monitor skips recording.
     // This is set/cleared via the IPC `set_private_mode` command.
     let private_mode = Arc::new(AtomicBool::new(false));
 
     #[cfg(unix)]
     let socket_path = paths::socket_path();
+    // D2 (IPC): pass a token clone so the accept loop exits on shutdown.
     #[cfg(unix)]
-    {
+    let _ipc_handle = {
         let ipc_db = db.clone();
         let ipc_private_mode = private_mode.clone();
         let ipc_local_key = local_key_arc.clone();
         let ipc_device_pub = device_public_key_arc.clone();
         let socket_clone = socket_path.clone();
+        let ipc_shutdown = shutdown_token.clone();
         tokio::spawn(async move {
             let server = IpcServer::new(ipc_db, ipc_private_mode, ipc_local_key, ipc_device_pub);
-            if let Err(e) = server.serve(&socket_clone).await {
+            if let Err(e) = server.serve(&socket_clone, ipc_shutdown).await {
                 tracing::error!("IPC server error: {e}");
             }
-        });
-    }
+        })
+    };
 
     // Broadcast channel: carries newly-inserted clipboard items to any
     // subscriber (P2P sync, cloud-sync, future extensions).
@@ -193,13 +202,16 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     };
     let sync_db = db.clone();
     let sync_rx = new_item_tx.subscribe();
-    let _sync_handle = tokio::spawn(async move {
+    // D2 (sync_orch): pass a token clone so the orchestrator exits on shutdown.
+    let sync_shutdown = shutdown_token.clone();
+    let sync_handle = tokio::spawn(async move {
         if let Err(e) = sync_orch::run(
             sync_db,
             sync_rx,
             sync_incoming_rx,
             sync_outbound_tx,
             sync_device_id,
+            sync_shutdown,
         )
         .await
         {
@@ -260,6 +272,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             // Check tray quit flag before blocking on select
             if quit_flag.load(Ordering::Relaxed) {
                 tracing::info!("quit flag set, shutting down daemon");
+                // D3: ensure all tasks receive the cancellation signal even
+                // when the tray host (not a signal) triggers shutdown.
+                shutdown_token.cancel();
                 break;
             }
             tokio::select! {
@@ -309,11 +324,15 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down");
                     quit_flag.store(true, Ordering::Relaxed);
+                    // D3: broadcast shutdown to all tasks.
+                    shutdown_token.cancel();
                     break;
                 }
                 _ = sigterm.recv() => {
                     tracing::info!("SIGTERM received, shutting down");
                     quit_flag.store(true, Ordering::Relaxed);
+                    // D3: broadcast shutdown to all tasks.
+                    shutdown_token.cancel();
                     break;
                 }
             }
@@ -368,19 +387,42 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down");
+                    // D3: broadcast shutdown to all tasks.
+                    shutdown_token.cancel();
                     break;
                 }
                 #[cfg(unix)]
                 _ = sigterm.recv() => {
                     tracing::info!("SIGTERM received, shutting down");
+                    // D3: broadcast shutdown to all tasks.
+                    shutdown_token.cancel();
                     break;
                 }
             }
         }
     }
 
+    // D5: wait for long-running tasks to drain before cleaning up resources.
+    tracing::info!("waiting for subsystem tasks to finish...");
+    // sync_orch exits promptly (shutdown token was cancelled above).
+    let _ = sync_handle.await;
+    // IPC accept loop exits on shutdown token; join it now.
+    #[cfg(unix)]
+    let _ = _ipc_handle.await;
+    // P2P: signal shutdown via the oneshot sender then let the handle drop.
+    if let Some(p2p_handle) = _p2p_handle {
+        // P2pHandle::shutdown_tx is a oneshot; sending () requests graceful stop.
+        let _ = p2p_handle.shutdown_tx.send(());
+    }
+
     #[cfg(unix)]
     let _ = std::fs::remove_file(&socket_path);
+
+    // D5: log DB close — the Arc<Mutex<Database>> is dropped here once all
+    // task clones have been joined above, so SQLite will flush its WAL and
+    // close cleanly.
+    tracing::info!("database closing");
+    drop(db);
     tracing::info!("daemon stopped");
     Ok(())
 }

@@ -3,7 +3,6 @@ name = "copypaste-daemon"
 version.workspace = true
 license.workspace = true
 edition.workspace = true
-rust-version.workspace = true
 
 [lib]
 name = "copypaste_daemon"
@@ -24,6 +23,9 @@ copypaste-p2p = { path = "../copypaste-p2p" }
 # Beta W2.2 (arch-1): sync engine + protocol types used by sync_orch.rs.
 copypaste-sync = { path = "../copypaste-sync" }
 tokio.workspace = true
+# D1-D5 graceful shutdown: CancellationToken coordinates across IPC/sync/P2P tasks.
+# Already a transitive dep (0.7.x) — pinned here so the feature set is explicit.
+tokio-util = { version = "0.7", features = ["rt"] }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

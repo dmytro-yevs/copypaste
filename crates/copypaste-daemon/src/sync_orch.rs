@@ -21,6 +21,7 @@
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use copypaste_core::{insert_item, ClipboardItem, Database};
@@ -29,7 +30,8 @@ use copypaste_sync::{
     protocol::WireItem,
 };
 
-/// Run the sync orchestrator until both upstream channels close.
+/// Run the sync orchestrator until both upstream channels close or `shutdown`
+/// is cancelled.
 ///
 /// * `db` — shared handle to the local SQLite store.
 /// * `new_item_rx` — broadcast receiver from `daemon::run`; carries items
@@ -40,15 +42,17 @@ use copypaste_sync::{
 ///   locally-produced items to peers. A closed receiver is logged and
 ///   ignored — peers may simply not be connected.
 /// * `device_id` — UUID stamped as `origin_device_id` on outgoing items.
+/// * `shutdown` — D2: token cancelled by the daemon on SIGINT/SIGTERM so the
+///   orchestrator exits promptly instead of waiting for channels to drain.
 ///
-/// Returns `Ok(())` once both `new_item_rx` and `incoming_rx` are closed
-/// (typically during daemon shutdown).
+/// Returns `Ok(())` once both channels close or `shutdown` fires.
 pub async fn run(
     db: Arc<Mutex<Database>>,
     mut new_item_rx: broadcast::Receiver<ClipboardItem>,
     mut incoming_rx: mpsc::Receiver<WireItem>,
     outbound_tx: mpsc::Sender<WireItem>,
     device_id: String,
+    shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
     info!(%device_id, "sync orchestrator started");
 
@@ -57,6 +61,11 @@ pub async fn run(
 
     while !(local_closed && incoming_closed) {
         tokio::select! {
+            // D2: exit promptly on daemon-wide shutdown signal.
+            _ = shutdown.cancelled() => {
+                info!("sync orchestrator: shutdown signal received, stopping");
+                break;
+            }
             // Local clipboard → forward to transport for fan-out.
             local = new_item_rx.recv(), if !local_closed => {
                 match local {
@@ -198,6 +207,7 @@ mod tests {
         let (outbound_tx, _outbound_rx) = mpsc::channel::<WireItem>(8);
 
         let db_for_task = db.clone();
+        let shutdown = CancellationToken::new();
         let handle = tokio::spawn(async move {
             run(
                 db_for_task,
@@ -205,6 +215,7 @@ mod tests {
                 incoming_rx,
                 outbound_tx,
                 "local-device".to_string(),
+                shutdown,
             )
             .await
             .expect("orchestrator must finish cleanly");
@@ -241,6 +252,7 @@ mod tests {
         let (outbound_tx, mut outbound_rx) = mpsc::channel::<WireItem>(8);
 
         let db_for_task = db.clone();
+        let shutdown = CancellationToken::new();
         let handle = tokio::spawn(async move {
             run(
                 db_for_task,
@@ -248,6 +260,7 @@ mod tests {
                 incoming_rx,
                 outbound_tx,
                 "local-device".to_string(),
+                shutdown,
             )
             .await
             .expect("orchestrator must finish cleanly");
