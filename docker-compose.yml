@@ -4,10 +4,14 @@
 # Usage:
 #   docker compose build android         # build the image once (~5 min first time)
 #   docker compose run --rm android      # run the build
-#   docker compose run --rm windows
 #   docker compose run --rm linux
 #
-# Or via wrapper: bash scripts/build-in-docker.sh [android|windows|linux|all]
+# Or via wrapper: bash scripts/build-in-docker.sh [android|linux|all]
+#
+# Windows is FROZEN as of 2026-05-23 (see ADR-012). The `windows` service is
+# preserved under the `frozen-windows` profile as reference material; it is
+# not picked up by `--profile build` and the underlying build script is a
+# no-op shim. Do not invoke it without first reverting the freeze.
 #
 # Build outputs land in ./builds/<platform>-<arch>/ via the bind mount on
 # /workspace. Cargo registry + per-platform target dirs are kept in named
