@@ -17,8 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust 1.75 (with rustfmt)
-        uses: dtolnay/rust-toolchain@1.75.0
+      - name: Install Rust 1.85 (with rustfmt)
+        uses: dtolnay/rust-toolchain@1.85.0
         with:
           components: rustfmt
 
@@ -37,8 +37,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust 1.75 (with clippy)
-        uses: dtolnay/rust-toolchain@1.75.0
+      - name: Install Rust 1.85 (with clippy)
+        uses: dtolnay/rust-toolchain@1.85.0
         with:
           components: clippy
 
@@ -66,8 +66,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust 1.75
-        uses: dtolnay/rust-toolchain@1.75.0
+      - name: Install Rust 1.85
+        uses: dtolnay/rust-toolchain@1.85.0
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
