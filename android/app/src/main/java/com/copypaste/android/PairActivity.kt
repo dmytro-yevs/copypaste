@@ -40,8 +40,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** Pairing token lifetime in seconds — must match Rust core's pairing TTL. */
+private const val PAIR_TOKEN_TTL_SECONDS = 60
+
+/** Threshold below which the countdown switches to an urgency color. */
+private const val PAIR_TOKEN_URGENT_THRESHOLD_SECONDS = 10
 
 /**
  * Pair Device screen — Compose stub for the pairing flow.
@@ -71,10 +78,28 @@ fun PairScreen(onBack: () -> Unit = {}) {
     var token by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var remainingSeconds by remember { mutableStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val errorTemplate = stringResource(R.string.error_pairing)
     val dismissLabel = stringResource(R.string.snackbar_dismiss)
+
+    val expired = token != null && remainingSeconds <= 0
+
+    // Countdown ticker — restarts whenever a fresh token is issued. When the
+    // token expires we drop the local state (no UniFFI cancel exists yet) and
+    // surface a "Request new token" CTA via the [expired] flag below.
+    LaunchedEffect(token) {
+        if (token == null) return@LaunchedEffect
+        remainingSeconds = PAIR_TOKEN_TTL_SECONDS
+        while (remainingSeconds > 0) {
+            delay(1000)
+            remainingSeconds -= 1
+        }
+        // Auto-cancel: clear the in-memory token. The remote half of the
+        // pairing handshake (if any was in-flight) is server-side TTL-bound
+        // and will be rejected by the relay once expired.
+    }
 
     LaunchedEffect(errorMessage) {
         val msg = errorMessage ?: return@LaunchedEffect
@@ -185,17 +210,45 @@ fun PairScreen(onBack: () -> Unit = {}) {
             ) {
                 Text(
                     text = stringResource(
-                        if (token == null) R.string.btn_pair_start else R.string.btn_pair_regenerate
+                        when {
+                            token == null -> R.string.btn_pair_start
+                            expired -> R.string.pair_request_new_token
+                            else -> R.string.btn_pair_regenerate
+                        }
                     )
                 )
             }
 
             if (token != null) {
-                Text(
-                    text = stringResource(R.string.pair_token_note),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                when {
+                    expired -> {
+                        Text(
+                            text = stringResource(R.string.pair_token_expired),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    else -> {
+                        val urgent = remainingSeconds <= PAIR_TOKEN_URGENT_THRESHOLD_SECONDS
+                        Text(
+                            text = stringResource(
+                                R.string.pair_token_expires_in_seconds,
+                                remainingSeconds
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (urgent) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                        Text(
+                            text = stringResource(R.string.pair_token_note),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         }
     }

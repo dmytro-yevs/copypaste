@@ -21,6 +21,9 @@
     <string name="btn_pair_start">Start Pairing</string>
     <string name="btn_pair_regenerate">Regenerate Token</string>
     <string name="pair_token_note">Token expires in 60 seconds. Keep this screen visible.</string>
+    <string name="pair_token_expires_in_seconds">Expires in %1$d s</string>
+    <string name="pair_token_expired">Token expired — request a new one.</string>
+    <string name="pair_request_new_token">Request new token</string>
 
     <!-- Settings -->
     <string name="setting_sync_enabled_title">Enable Clipboard Sync</string>
