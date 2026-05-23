@@ -145,13 +145,20 @@ class ClipboardService : Service() {
 
     private suspend fun notifySyncManager(plaintext: String, key: ByteArray) {
         try {
+            // Generate the item id BEFORE encrypting so the same id can be
+            // bound into the AEAD AAD and forwarded to the relay. A mismatch
+            // would cause the receiver to fail decryption silently.
+            val itemId = java.util.UUID.randomUUID().toString()
             val blob = try {
-                encryptText(plaintext.toByteArray(Charsets.UTF_8), key)
+                encryptText(itemId, plaintext.toByteArray(Charsets.UTF_8), key)
+            } catch (e: IllegalStateException) {
+                Log.d(TAG, "Native encryptText unavailable (${e.message}) — local AES")
+                ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
             } catch (_: UnsatisfiedLinkError) {
                 ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
             }
             val lamportTs = System.currentTimeMillis()
-            syncManager.uploadItem(blob.ciphertext, blob.nonce, "text/plain", lamportTs)
+            syncManager.uploadItem(itemId, blob.ciphertext, blob.nonce, "text/plain", lamportTs)
         } catch (e: Exception) {
             Log.w(TAG, "SyncManager upload failed: ${e.message}")
         }
