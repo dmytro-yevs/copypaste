@@ -58,6 +58,24 @@ pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[
         0,
         0.99,
     ),
+    // Audit MED #5: original `ssh_private_key` only catches the
+    // `-----BEGIN ... PRIVATE KEY-----` PEM family. PKCS#8 encrypted keys
+    // and PuTTY's `.ppk` format use different headers and were silently
+    // ignored — add them as separate patterns so any of the three forms
+    // triggers detection. `(?m)` enables multiline mode so the `^`
+    // anchor matches at the start of any line in a clipboard blob.
+    (
+        "ssh_private_key_pkcs8_encrypted",
+        r"(?m)^-----BEGIN ENCRYPTED PRIVATE KEY-----",
+        0,
+        0.99,
+    ),
+    (
+        "ssh_private_key_putty",
+        r"(?m)^PuTTY-User-Key-File-[0-9]+:",
+        0,
+        0.99,
+    ),
     (
         "generic_bearer",
         r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{20,}",
@@ -75,8 +93,11 @@ pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[
         0.75,
     ),
     (
+        // Audit MED #5: anchor on `\b` so we don't match `eyJ` glued onto
+        // the tail of another identifier (e.g. `mykeyeyJabc.def.ghi`),
+        // cutting false positives without changing legitimate token hits.
         "jwt",
-        r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
+        r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",
         0,
         0.95,
     ),

@@ -270,7 +270,10 @@ impl SensitiveKind {
             "slack_bot" => Self::SlackToken,
             "hashicorp_vault" => Self::VaultToken,
             "gcp_oauth" => Self::GcpToken,
-            "ssh_private_key" => Self::SshPrivateKey,
+            // Audit MED #5: PKCS#8-encrypted and PuTTY variants share the
+            // same SshPrivateKey kind so callers (UI badge / log redactor)
+            // see a uniform "ssh key" classification regardless of format.
+            n if n.starts_with("ssh_private_key") => Self::SshPrivateKey,
             "jwt" => Self::Jwt,
             other => Self::Other(other.to_string()),
         }
@@ -370,6 +373,38 @@ mod tests {
     #[test]
     fn detects_openssh_private_key() {
         assert!(detect("-----BEGIN OPENSSH PRIVATE KEY-----\nMIIEo...").is_some());
+    }
+    #[test]
+    fn detects_pkcs8_encrypted_private_key() {
+        // Audit MED #5 — PKCS#8 encrypted form previously slipped through.
+        let blob = "garbage prefix\n-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFD...\n";
+        let kind = detect(blob).expect("should detect PKCS#8 encrypted key");
+        assert!(matches!(kind, SensitiveKind::SshPrivateKey));
+    }
+    #[test]
+    fn detects_putty_user_key_file() {
+        // Audit MED #5 — PuTTY `.ppk` header.
+        let blob = "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: imported-from-openssh\n";
+        let kind = detect(blob).expect("should detect PuTTY key");
+        assert!(matches!(kind, SensitiveKind::SshPrivateKey));
+    }
+    #[test]
+    fn jwt_word_boundary_anchors_match() {
+        // Audit MED #5 — `\b` anchor: real JWT in normal context detects.
+        let jwt =
+            "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        assert!(detect(jwt).is_some());
+        // A `eyJ`-prefixed garbage glued onto an identifier should NOT match
+        // as a JWT (we'd still detect bearer token from generic_bearer if
+        // present — here we use a non-bearer prefix to isolate the case).
+        let glued = "configsomethingeyJabc.def.ghi notajwt";
+        // Either no match at all OR not classified as Jwt — both are
+        // acceptable; pin "not Jwt" precisely.
+        let kind = detect(glued);
+        assert!(
+            !matches!(kind, Some(SensitiveKind::Jwt)),
+            "glued eyJ inside an identifier must not be classified as JWT"
+        );
     }
     #[test]
     fn detects_stripe_live_key() {
