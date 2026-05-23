@@ -8,8 +8,10 @@
 //! - `crate_version`: semver of that crate
 //! - `error_class`: a short, developer-chosen taxonomy string
 //!   (e.g. `"keychain.read_failed"`, `"ipc.parse_error"`)
-//! - `os`: high-level platform tag (`"macos"`, `"linux"`, `"windows"`,
-//!   `"android"`, `"ios"`, `"unknown"`). No version, no build, no hostname.
+//! - `os`: high-level platform tag (`"macos"`, `"windows"`, `"android"`,
+//!   `"unknown"`). No version, no build, no hostname.
+//!   Linux and iOS are frozen per platform policy and intentionally not
+//!   represented as distinct tags; those targets fall back to `unknown`.
 //!
 //! There is intentionally no free-form `message` field. Adding one is a
 //! deliberate decision that requires updating the privacy policy in
@@ -59,14 +61,10 @@ impl ReportableError {
 pub enum OsTag {
     /// Apple macOS.
     MacOs,
-    /// Any Linux distribution.
-    Linux,
     /// Microsoft Windows.
     Windows,
     /// Google Android.
     Android,
-    /// Apple iOS / iPadOS.
-    Ios,
     /// Could not be determined at compile time.
     Unknown,
 }
@@ -76,14 +74,10 @@ impl OsTag {
     pub const fn current() -> Self {
         if cfg!(target_os = "macos") {
             Self::MacOs
-        } else if cfg!(target_os = "linux") {
-            Self::Linux
         } else if cfg!(target_os = "windows") {
             Self::Windows
         } else if cfg!(target_os = "android") {
             Self::Android
-        } else if cfg!(target_os = "ios") {
-            Self::Ios
         } else {
             Self::Unknown
         }
