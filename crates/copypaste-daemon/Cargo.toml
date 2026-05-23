@@ -14,6 +14,8 @@ cloud-sync = ["reqwest", "base64"]
 
 [dependencies]
 copypaste-core = { path = "../copypaste-core" }
+# Beta W2.1 (arch-1): real P2P stack — mDNS-SD discovery + mTLS transport.
+copypaste-p2p = { path = "../copypaste-p2p" }
 image.workspace = true
 tokio.workspace = true
 serde.workspace = true
