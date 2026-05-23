@@ -311,8 +311,9 @@ mod tests {
         let c = ClipboardContent::SkippedBatch(7);
         assert_eq!(c.as_bytes(), &[] as &[u8]);
         assert_eq!(c.content_type(), "skipped_batch");
-        // Threshold is exposed for callers/tests.
-        assert!(SKIPPED_BATCH_THRESHOLD >= 3);
+        // Threshold is exposed for callers/tests. Use a const-eval check so
+        // clippy doesn't strip an always-true `assert!`.
+        const _: () = assert!(SKIPPED_BATCH_THRESHOLD >= 3);
     }
 
     /// edge HIGH #5 — rapid_change_skip_batch_logs.

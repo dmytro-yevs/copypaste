@@ -27,7 +27,8 @@ pub struct EncryptedBlob {
 
 pub fn encrypt_text(bytes: &[u8], key: &[u8]) -> Result<EncryptedBlob, CopypasteError> {
     let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
-    let (nonce, ciphertext) = encrypt_item(bytes, &key_arr);
+    let (nonce, ciphertext) =
+        encrypt_item(bytes, &key_arr).map_err(|_| CopypasteError::EncryptionFailed)?;
     Ok(EncryptedBlob { nonce: nonce.to_vec(), ciphertext })
 }
 

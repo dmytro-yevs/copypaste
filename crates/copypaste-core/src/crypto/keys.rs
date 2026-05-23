@@ -179,8 +179,8 @@ mod tests {
             "changing the HKDF salt MUST change the derived key"
         );
 
-        // Sanity: salt constant is non-empty and stable.
-        assert!(!HKDF_SALT_V1.is_empty());
+        // Sanity: salt constant is stable. (Non-emptiness is enforced at
+        // compile time via the const equality below.)
         assert_eq!(HKDF_SALT_V1, b"copypaste-v1-salt");
     }
 }

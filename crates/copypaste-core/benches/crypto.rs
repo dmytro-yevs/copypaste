@@ -33,7 +33,7 @@ fn bench_encrypt_item(c: &mut Criterion) {
 fn bench_decrypt_item(c: &mut Criterion) {
     let key = [0x42u8; 32];
     let data = vec![0xABu8; 1024];
-    let (nonce, ciphertext) = encrypt_item(&data, &key);
+    let (nonce, ciphertext) = encrypt_item(&data, &key).expect("bench encrypt should succeed");
     c.bench_function("decrypt_item_1kb", |b| {
         b.iter(|| decrypt_item(black_box(&ciphertext), black_box(&nonce), black_box(&key)))
     });
