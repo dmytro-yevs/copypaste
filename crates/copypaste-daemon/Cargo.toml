@@ -10,12 +10,14 @@ path = "src/main.rs"
 
 [features]
 # Enables Supabase cloud sync (requires SUPABASE_URL + SUPABASE_ANON_KEY env vars at runtime).
-cloud-sync = ["reqwest", "base64"]
+cloud-sync = ["reqwest", "base64", "copypaste-supabase"]
 
 [dependencies]
 copypaste-core = { path = "../copypaste-core" }
 # Beta W2.1 (arch-1): real P2P stack — mDNS-SD discovery + mTLS transport.
 copypaste-p2p = { path = "../copypaste-p2p" }
+# Beta W2.2 (arch-1): sync engine + protocol types used by sync_orch.rs.
+copypaste-sync = { path = "../copypaste-sync" }
 image.workspace = true
 tokio.workspace = true
 serde.workspace = true
@@ -34,6 +36,8 @@ rusqlite.workspace = true
 # cloud-sync feature: HTTP client for Supabase REST + Realtime, base64 encoding
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
 base64 = { version = "0.22", optional = true }
+# Beta W2.3 (arch-1): canonical Supabase client (auth + realtime).
+copypaste-supabase = { path = "../copypaste-supabase", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
