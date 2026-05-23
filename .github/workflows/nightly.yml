@@ -21,7 +21,7 @@
 #   actions/upload-artifact@v4
 #   dtolnay/rust-toolchain@stable
 #   Swatinem/rust-cache@v2
-#   peter-evans/commit-comment@v3
+#   peter-evans/commit-comment@v4
 
 name: Nightly
 
@@ -201,7 +201,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Post commit comment
-        uses: peter-evans/commit-comment@v3
+        uses: peter-evans/commit-comment@v4
         with:
           body: ${{ steps.body.outputs.body }}
 
