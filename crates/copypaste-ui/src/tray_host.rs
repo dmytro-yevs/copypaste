@@ -332,25 +332,35 @@ pub fn install(callbacks: TrayCallbacks) -> Result<(), TrayHostError> {
 fn drain_events(runtime: &Rc<RefCell<TrayRuntime>>) {
     let menu_channel = MenuEvent::receiver();
     while let Ok(event) = menu_channel.try_recv() {
-        let mut rt = runtime.borrow_mut();
+        // For every event we first mutate any pure runtime state inside a
+        // short-lived `RefMut`, then drop the borrow *before* invoking any
+        // user callback. Holding a `RefMut<TrayRuntime>` across user code
+        // panics `already borrowed` the moment that callback re-enters the
+        // runtime synchronously (e.g. an `on_quit` handler that touches
+        // another tray method).
+        //
+        // `ActionCb` is `Box<dyn Fn>` and not cloneable, so we use
+        // `Option::take` to move the callback OUT of the runtime, invoke
+        // it with no borrow held, then put it back. The window where the
+        // slot is `None` is bounded to one tick and re-entrancy simply
+        // sees `None` and no-ops — the correct behaviour.
         match event.id.0.as_str() {
-            ID_OPEN_HISTORY => {
-                if let Some(cb) = &rt.callbacks.on_open_history {
-                    cb();
-                }
-            }
+            ID_OPEN_HISTORY => invoke_callback(runtime, |c| &mut c.on_open_history),
             ID_PRIVATE_MODE => {
                 // TODO(v0.3.x): plumb Private Mode through an IPC method on
                 // the daemon. For now the UI just toggles the checkmark so
-                // the menu state is testable.
+                // the menu state is testable. No user callback — borrow is
+                // confined to this arm.
+                let mut rt = runtime.borrow_mut();
                 rt.private_mode = !rt.private_mode;
                 let label = if rt.private_mode { "Private Mode  ✓" } else { "Private Mode" };
                 rt.menu.private_mode.set_text(label);
                 tracing::info!("tray: private_mode={}", rt.private_mode);
             }
             ID_LAUNCH_AT_LOGIN => {
-                let want = !rt.launch_at_login;
+                let want = !runtime.borrow().launch_at_login;
                 let result = if want { launchd_install() } else { launchd_uninstall() };
+                let mut rt = runtime.borrow_mut();
                 match result {
                     Ok(()) => {
                         rt.launch_at_login = want;
@@ -363,24 +373,58 @@ fn drain_events(runtime: &Rc<RefCell<TrayRuntime>>) {
                     }
                 }
             }
-            ID_PREFERENCES => {
-                if let Some(cb) = &rt.callbacks.on_open_preferences {
-                    cb();
-                }
-            }
+            ID_PREFERENCES => invoke_callback(runtime, |c| &mut c.on_open_preferences),
             ID_QUIT => {
-                rt.quit_latch.store(true, Ordering::Relaxed);
-                if let Some(cb) = &rt.callbacks.on_quit {
-                    cb();
-                } else {
-                    // Default: cleanly shut down the Slint loop so `window.run()` returns.
-                    let _ = slint::quit_event_loop();
+                runtime
+                    .borrow()
+                    .quit_latch
+                    .store(true, Ordering::Relaxed);
+                let cb = runtime.borrow_mut().callbacks.on_quit.take();
+                match cb {
+                    Some(cb) => {
+                        cb();
+                        // Restore so a subsequent quit event still sees the
+                        // handler. If the callback already reassigned it
+                        // (unlikely), don't clobber.
+                        let mut rt = runtime.borrow_mut();
+                        if rt.callbacks.on_quit.is_none() {
+                            rt.callbacks.on_quit = Some(cb);
+                        }
+                    }
+                    None => {
+                        // Default: cleanly shut down the Slint loop so
+                        // `window.run()` returns.
+                        let _ = slint::quit_event_loop();
+                    }
                 }
             }
             other => {
                 tracing::debug!(id = other, "tray: unknown menu event id");
             }
         }
+    }
+}
+
+/// Temporarily move a callback OUT of `TrayRuntime`, invoke it with no
+/// borrow held, then restore it. The `selector` returns a `&mut
+/// Option<ActionCb>` pointing at the desired field. This is the only
+/// re-entrancy-safe way to call a `Box<dyn Fn>` stored inside a `RefCell`
+/// without panicking `already borrowed` when the callback synchronously
+/// touches the same runtime.
+fn invoke_callback<F>(runtime: &Rc<RefCell<TrayRuntime>>, selector: F)
+where
+    F: Fn(&mut TrayCallbacks) -> &mut Option<ActionCb>,
+{
+    let cb = {
+        let mut rt = runtime.borrow_mut();
+        selector(&mut rt.callbacks).take()
+    };
+    let Some(cb) = cb else { return };
+    cb();
+    let mut rt = runtime.borrow_mut();
+    let slot = selector(&mut rt.callbacks);
+    if slot.is_none() {
+        *slot = Some(cb);
     }
 }
 
