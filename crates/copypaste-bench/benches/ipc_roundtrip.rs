@@ -9,16 +9,17 @@
 //!   * **large**  — `Import { items: [..1000..] }` (bulk JSON-import payload)
 //!
 //! This crate is read-only against `copypaste-ipc` — we go through the public
-//! [`Request`] / [`Response`] / [`ImportItem`] types only, never poke
-//! at private serde internals.
+//! [`Request`] / [`Response`] types only, never poke at private serde
+//! internals.
 //!
 //! Reports both Bytes throughput (Criterion auto-derives MB/s) and Elements
 //! throughput (req/resp pairs per second) so the perf dashboard can answer
 //! "how many IPC calls per second can a single CPU push?" without manual math.
 
-// `ImportItem` will land in `copypaste-ipc::types` later in the beta wave —
-// for now the bench builds the import payload directly as `serde_json::Value`,
-// which is exactly the shape that goes over the wire today.
+// The bench builds the import payload directly as `serde_json::Value`, which
+// is exactly the shape that goes over the wire today. A typed `ImportItem`
+// was scoped for a later wave but is not currently planned; the untyped
+// value is the production contract.
 use copypaste_ipc::{Request, Response, PROTOCOL_VERSION};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use serde_json::json;

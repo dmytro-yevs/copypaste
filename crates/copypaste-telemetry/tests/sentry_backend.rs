@@ -27,7 +27,7 @@ fn sample_event() -> ReportableError {
         "copypaste-daemon",
         "0.3.0-dev",
         "ipc.parse_error",
-        OsTag::Linux,
+        OsTag::MacOs,
     )
 }
 
@@ -78,7 +78,7 @@ fn consent_enabled_sends_report() {
     assert!(msg.contains("copypaste-daemon"), "got: {msg:?}");
     assert!(msg.contains("0.3.0-dev"), "got: {msg:?}");
     assert!(msg.contains("ipc.parse_error"), "got: {msg:?}");
-    assert!(msg.contains("Linux"), "got: {msg:?}");
+    assert!(msg.contains("MacOs"), "got: {msg:?}");
 }
 
 #[test]

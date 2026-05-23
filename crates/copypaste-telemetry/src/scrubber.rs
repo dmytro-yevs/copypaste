@@ -217,13 +217,13 @@ mod tests {
             "copypaste-daemon",
             "0.3.0-dev",
             "alice@example.com failed login",
-            OsTag::Linux,
+            OsTag::MacOs,
         );
         let scrubbed = evt.scrubbed(&scrubber);
         assert!(scrubbed.error_class.contains("<REDACTED-EMAIL>"));
         assert!(!scrubbed.error_class.contains("alice@example.com"));
         assert_eq!(scrubbed.crate_name, "copypaste-daemon");
-        assert_eq!(scrubbed.os, OsTag::Linux);
+        assert_eq!(scrubbed.os, OsTag::MacOs);
     }
 
     #[test]

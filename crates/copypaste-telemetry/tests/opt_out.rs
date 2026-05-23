@@ -31,10 +31,8 @@ fn noop_swallows_every_os_tag() {
     let reporter = NoopReporter::new();
     for os in [
         OsTag::MacOs,
-        OsTag::Linux,
         OsTag::Windows,
         OsTag::Android,
-        OsTag::Ios,
         OsTag::Unknown,
     ] {
         let evt = ReportableError::new("c", "0.0.0", "class", os);

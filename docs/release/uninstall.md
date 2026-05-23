@@ -167,5 +167,3 @@ and bootout any matches with `launchctl bootout gui/$(id -u)/<label>`.
 
 - [`install.sh`](../../scripts/release/install.sh) — the installer being undone.
 - [`brew-tap-setup.md`](./brew-tap-setup.md) — Homebrew tap and cask details.
-- [`docs/migrations/alpha-to-beta.md`](../migrations/alpha-to-beta.md) — for
-  migrating an existing data directory rather than removing it.
