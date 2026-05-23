@@ -7,58 +7,77 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize)]
 pub struct RegisterRequest {
     pub device_id: String,
+    /// Human-readable device name (1-64 characters).
+    pub device_name: String,
     /// Base64-standard-encoded X25519 public key (must decode to exactly 32 bytes).
-    pub public_key: String,
+    /// Accepted as both `public_key_b64` (preferred) and `public_key` (legacy alias).
+    #[serde(alias = "public_key")]
+    pub public_key_b64: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct RegisterResponse {
     pub device_id: String,
-    pub bearer_token: String,
+    /// Opaque bearer token the device must use for all subsequent requests.
+    pub auth_token: String,
+    /// RFC-3339 timestamp after which the token expires (1 year from registration).
+    pub expires_at: String,
 }
 
 // ---------------------------------------------------------------------------
-// Items — upload
+// Device info
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Deserialize)]
-pub struct UploadRequest {
-    pub item_id: String,
-    pub ciphertext_b64: String,
-    pub nonce_b64: String,
-    pub sender_device_id: String,
-    pub lamport_ts: u64,
-    pub content_type: String,
-}
 
 #[derive(Debug, Serialize)]
-pub struct UploadResponse {
-    pub fanned_out_to: usize,
+pub struct DeviceInfoResponse {
+    pub device_id: String,
+    pub device_name: String,
+    pub public_key_b64: String,
+    pub registered_at: String,
+    pub expires_at: String,
 }
 
 // ---------------------------------------------------------------------------
-// Items — poll
+// Items — push (wall-clock sync protocol)
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RelayItemResponse {
-    pub item_id: String,
-    pub ciphertext_b64: String,
-    pub nonce_b64: String,
-    pub sender_device_id: String,
-    pub lamport_ts: u64,
-    pub content_type: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PollResponse {
-    pub items: Vec<RelayItemResponse>,
-}
-
+/// Request body for POST /devices/:id/items
 #[derive(Debug, Deserialize)]
-pub struct PollParams {
+pub struct PushRequest {
+    /// MIME-style content type: "text", "image", or "file".
+    pub content_type: String,
+    /// Encrypted payload, base64-standard encoded.
+    pub content_b64: String,
+    /// Sender wall-clock time (Unix epoch milliseconds).
+    pub wall_time: u64,
+}
+
+/// Response body for POST /devices/:id/items
+#[derive(Debug, Serialize)]
+pub struct PushResponse {
+    /// Auto-assigned integer ID for the stored item.
+    pub id: i64,
+}
+
+// ---------------------------------------------------------------------------
+// Items — pull (wall-clock sync protocol)
+// ---------------------------------------------------------------------------
+
+/// Single item returned by GET /devices/:id/items
+#[derive(Debug, Clone, Serialize)]
+pub struct PullItem {
+    pub id: i64,
+    pub content_type: String,
+    pub content_b64: String,
+    pub wall_time: u64,
+}
+
+/// Query params for GET /devices/:id/items?since=<wall_time>
+#[derive(Debug, Deserialize)]
+pub struct PullParams {
+    /// Return only items with wall_time > since (defaults to 0).
     #[serde(default)]
-    pub since_lamport: u64,
+    pub since: u64,
 }
 
 // ---------------------------------------------------------------------------

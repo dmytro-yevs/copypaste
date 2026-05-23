@@ -41,8 +41,25 @@ enum Commands {
     },
     /// Copy a clipboard item back to the system clipboard
     Copy {
-        /// Item ID (UUID)
-        id: String,
+        /// Position in history (1 = most recent). Mutually exclusive with --id and --search.
+        #[arg(value_name = "INDEX", conflicts_with_all = ["id", "search", "list"])]
+        index: Option<u64>,
+
+        /// Copy item by UUID.
+        #[arg(long, conflicts_with_all = ["index", "search", "list"])]
+        id: Option<String>,
+
+        /// Fuzzy-search history and copy the first match.
+        #[arg(long, value_name = "QUERY", conflicts_with_all = ["index", "id", "list"])]
+        search: Option<String>,
+
+        /// List recent history items (numbered) without copying.
+        #[arg(long, conflicts_with_all = ["index", "id", "search"])]
+        list: bool,
+
+        /// Number of items to consider for INDEX and --list (default: 50).
+        #[arg(long, default_value_t = 50)]
+        limit: u64,
     },
     /// Export clipboard history as JSON
     Export {
@@ -70,6 +87,21 @@ enum Commands {
         /// Path to JSON file
         file: String,
     },
+    /// Enable or disable private/pause mode (daemon stops recording new clipboard changes)
+    Private {
+        #[command(subcommand)]
+        action: PrivateAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PrivateAction {
+    /// Enable private mode — stop recording new clipboard changes
+    On,
+    /// Disable private mode — resume recording clipboard changes
+    Off,
+    /// Show current private mode state
+    Status,
 }
 
 fn main() {
@@ -82,12 +114,19 @@ fn main() {
         Commands::Count => commands::count::run(&socket),
         Commands::Delete { id } => commands::delete::run(&socket, &id),
         Commands::Search { query, limit } => commands::search::run(&socket, &query, limit),
-        Commands::Copy { id } => commands::copy::run(&socket, &id),
+        Commands::Copy { index, id, search, list, limit } => {
+            commands::copy::run(&socket, index, id.as_deref(), search.as_deref(), list, limit)
+        }
         Commands::Export { limit, output } => commands::export::run(&socket, limit, output.as_deref()),
         Commands::Watch { interval } => commands::watch::run(&socket, interval),
         Commands::Clear { force } => commands::clear::run(&socket, force),
         Commands::Stats => commands::stats::run(&socket),
         Commands::Import { file } => commands::import::run(&socket, &file),
+        Commands::Private { action } => match action {
+            PrivateAction::On => commands::private::run(&socket, true),
+            PrivateAction::Off => commands::private::run(&socket, false),
+            PrivateAction::Status => commands::private::run_get(&socket),
+        },
     };
 
     if let Err(e) = result {

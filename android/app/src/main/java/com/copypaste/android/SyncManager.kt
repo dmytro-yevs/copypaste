@@ -14,16 +14,16 @@ class SyncManager(
 ) {
     private var lastLamportTs: Long = 0
 
-    suspend fun syncIncoming(encryptionKey: ByteArray): List<ByteArray> =
+    suspend fun syncIncoming(encryptionKey: ByteArray): List<String> =
         withContext(Dispatchers.IO) {
             val items = relayClient.pollItems(deviceId, token, lastLamportTs)
             items.mapNotNull { item ->
                 try {
                     val ciphertext = Base64.decode(item.ciphertext, Base64.DEFAULT)
                     val nonce = Base64.decode(item.nonce, Base64.DEFAULT)
-                    // TODO: call decryptText(ciphertext, nonce, encryptionKey) via UniFFI
+                    val plainBytes = decryptText(ciphertext, nonce, encryptionKey)
                     lastLamportTs = maxOf(lastLamportTs, item.lamportTs)
-                    ciphertext // placeholder — return raw for now
+                    plainBytes.toString(Charsets.UTF_8)
                 } catch (e: Exception) { null }
             }
         }

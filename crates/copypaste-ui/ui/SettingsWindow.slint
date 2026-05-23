@@ -1,0 +1,345 @@
+// SettingsWindow.slint — CopyPaste settings screen
+// Sections: General, Sync, Shortcuts, About
+//
+// Slint 1.8 compatible. Tested with fluent-dark style.
+
+import { Button, CheckBox, LineEdit, ScrollView, Slider } from "std-widgets.slint";
+
+export struct ShortcutEntry {
+    action: string,
+    keys: string,
+}
+
+component SectionDivider inherits Rectangle {
+    height: 1px;
+    background: #313244;
+}
+
+component SectionTitle inherits Text {
+    font-size: 10px;
+    font-weight: 700;
+    color: #6c7086;
+}
+
+component FieldLabel inherits Text {
+    color: #cdd6f4;
+    font-size: 14px;
+}
+
+export component SettingsWindow inherits Window {
+    title: "CopyPaste — Settings";
+    preferred-width: 560px;
+    preferred-height: 620px;
+    min-width: 420px;
+    min-height: 500px;
+    background: #1e1e2e;
+
+    // ── Properties ────────────────────────────────────────────────────────────
+
+    in-out property <bool>  launch-at-login:  false;
+    in-out property <bool>  private-mode:     false;
+    in-out property <int>   history-size:     100;   // 0 = unlimited, 50, 100, 500
+
+    in-out property <string> supabase-url:    "";
+    in-out property <string> supabase-key:    "";
+    in-out property <bool>   sync-connected:  false;
+    in-out property <string> sync-status-msg: "Not connected";
+
+    in-out property <string> app-version:        "0.1.0";
+    in-out property <string> device-name:        "";
+    in-out property <string> device-fingerprint: "";
+
+    in property <[ShortcutEntry]> shortcuts: [
+        { action: "Show history",   keys: "Cmd+Shift+V" },
+        { action: "Copy selection", keys: "Cmd+C"       },
+        { action: "Clear history",  keys: "Cmd+Shift+Del" },
+        { action: "Toggle private", keys: "Cmd+Shift+P" },
+        { action: "Open settings",  keys: "Cmd+,"       },
+    ];
+
+    // ── Callbacks ─────────────────────────────────────────────────────────────
+    callback save();
+    callback clear-history();
+    callback connect-supabase(string, string);
+    callback disconnect-supabase();
+    callback close();
+
+    // ── Layout ────────────────────────────────────────────────────────────────
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // Title bar
+        Rectangle {
+            height: 48px;
+            background: #181825;
+
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 12px;
+                alignment: space-between;
+
+                Text {
+                    text: "Settings";
+                    font-size: 17px;
+                    font-weight: 700;
+                    color: #cdd6f4;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Scrollable content
+        ScrollView {
+            VerticalLayout {
+                padding: 24px;
+                spacing: 24px;
+
+                // ── General ────────────────────────────────────────────────
+                VerticalLayout {
+                    spacing: 14px;
+
+                    SectionTitle { text: "GENERAL"; }
+
+                    // Launch at Login
+                    HorizontalLayout {
+                        alignment: space-between;
+                        spacing: 8px;
+                        FieldLabel { text: "Launch at Login"; }
+                        CheckBox { checked <=> root.launch-at-login; }
+                    }
+
+                    // Private Mode
+                    HorizontalLayout {
+                        alignment: space-between;
+                        spacing: 8px;
+                        FieldLabel { text: "Private Mode"; }
+                        CheckBox { checked <=> root.private-mode; }
+                    }
+
+                    // History size
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        HorizontalLayout {
+                            alignment: space-between;
+                            FieldLabel { text: "History Size"; }
+                            Text {
+                                text: root.history-size == 0   ? "Unlimited"
+                                    : root.history-size == 50  ? "50 items"
+                                    : root.history-size == 500 ? "500 items"
+                                    : "100 items";
+                                color: #a6adc8;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Slider {
+                            minimum: 0;
+                            maximum: 3;
+                            value: root.history-size == 50  ? 0
+                                 : root.history-size == 100 ? 1
+                                 : root.history-size == 500 ? 2
+                                 : 3;
+                            changed(v) => {
+                                root.history-size =
+                                    v < 0.5 ? 50
+                                  : v < 1.5 ? 100
+                                  : v < 2.5 ? 500
+                                  : 0;
+                            }
+                        }
+                    }
+
+                    HorizontalLayout {
+                        alignment: end;
+                        Button {
+                            text: "Clear History";
+                            clicked => { root.clear-history(); }
+                        }
+                    }
+                }
+
+                SectionDivider { }
+
+                // ── Sync ───────────────────────────────────────────────────
+                VerticalLayout {
+                    spacing: 14px;
+
+                    SectionTitle { text: "SYNC"; }
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        FieldLabel { text: "Supabase URL"; }
+                        LineEdit {
+                            placeholder-text: "https://your-project.supabase.co";
+                            text <=> root.supabase-url;
+                            enabled: !root.sync-connected;
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        FieldLabel { text: "Anon Key"; }
+                        LineEdit {
+                            placeholder-text: "eyJ…";
+                            text <=> root.supabase-key;
+                            enabled: !root.sync-connected;
+                            input-type: password;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        alignment: space-between;
+                        spacing: 8px;
+
+                        HorizontalLayout {
+                            spacing: 8px;
+
+                            status-dot := Rectangle {
+                                width: 8px;
+                                height: 8px;
+                                border-radius: 4px;
+                                background: root.sync-connected ? #a6e3a1 : #f38ba8;
+                            }
+
+                            Text {
+                                text: root.sync-status-msg;
+                                color: #a6adc8;
+                                font-size: 13px;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Button {
+                            text: root.sync-connected ? "Disconnect" : "Connect";
+                            clicked => {
+                                if (root.sync-connected) {
+                                    root.disconnect-supabase();
+                                } else {
+                                    root.connect-supabase(root.supabase-url, root.supabase-key);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                SectionDivider { }
+
+                // ── Shortcuts ──────────────────────────────────────────────
+                VerticalLayout {
+                    spacing: 10px;
+
+                    SectionTitle { text: "SHORTCUTS"; }
+
+                    for entry in root.shortcuts: HorizontalLayout {
+                        alignment: space-between;
+                        spacing: 8px;
+                        padding-top: 3px;
+                        padding-bottom: 3px;
+
+                        Text {
+                            text: entry.action;
+                            color: #cdd6f4;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle {
+                            border-radius: 4px;
+                            background: #313244;
+                            padding: 4px;
+                            padding-left: 8px;
+                            padding-right: 8px;
+
+                            Text {
+                                text: entry.keys;
+                                color: #cdd6f4;
+                                font-size: 12px;
+                            }
+                        }
+                    }
+                }
+
+                SectionDivider { }
+
+                // ── About ──────────────────────────────────────────────────
+                VerticalLayout {
+                    spacing: 14px;
+
+                    SectionTitle { text: "ABOUT"; }
+
+                    HorizontalLayout {
+                        alignment: space-between;
+                        FieldLabel { text: "Version"; }
+                        Text {
+                            text: root.app-version;
+                            color: #a6adc8;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        FieldLabel { text: "Device Name"; }
+                        LineEdit {
+                            text <=> root.device-name;
+                            placeholder-text: "My Mac";
+                        }
+                    }
+
+                    VerticalLayout {
+                        spacing: 6px;
+                        FieldLabel { text: "Device Fingerprint"; }
+                        Rectangle {
+                            border-radius: 6px;
+                            background: #181825;
+                            border-width: 1px;
+                            border-color: #313244;
+                            padding: 10px;
+                            height: 36px;
+
+                            Text {
+                                text: root.device-fingerprint == "" ? "—" : root.device-fingerprint;
+                                color: #89b4fa;
+                                font-size: 12px;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { height: 8px; }
+            }
+        }
+
+        // ── Footer ─────────────────────────────────────────────────────────
+        Rectangle {
+            height: 60px;
+            background: #181825;
+            border-color: #313244;
+            border-width: 1px;
+
+            HorizontalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                alignment: end;
+                spacing: 12px;
+
+                Button {
+                    text: "Cancel";
+                    clicked => { root.close(); }
+                }
+
+                Button {
+                    text: "Save";
+                    primary: true;
+                    clicked => { root.save(); }
+                }
+            }
+        }
+    }
+}

@@ -5,14 +5,21 @@ members = [
     "crates/copypaste-daemon",
     "crates/copypaste-cli",
     "crates/copypaste-relay",
+    "crates/copypaste-p2p",
+    "crates/copypaste-sync",
+    "crates/copypaste-supabase",
+    "crates/copypaste-android",
+    "crates/copypaste-ui",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
 rust-version = "1.75"
 authors = ["CopyPaste"]
 license = "MIT OR Apache-2.0"
+description = "Encrypted clipboard manager for macOS/Android/Windows"
+repository = "https://github.com/dmytro/CopyPaste"
 
 [workspace.dependencies]
 # Crypto
@@ -23,13 +30,21 @@ sha2 = "0.10"
 zeroize = { version = "1.7", features = ["derive"] }
 rand = "0.8"
 hex = "0.4"
+# P2P TLS (pinned together to keep ring crypto provider consistent)
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
+rcgen = { version = "0.12", default-features = false, features = ["ring"] }
+# mDNS-SD service discovery
+mdns-sd = "0.19"
 # Storage
-rusqlite = { version = "0.31", features = ["bundled-sqlcipher", "backup"] }
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher", "backup"] }
 # Config
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 # Patterns
 regex = "1.10"
+# Unicode normalisation (NFKC for sensitive-detector bypass guards)
+unicode-normalization = "0.1"
 # Logging
 tracing = "0.1"
 # Errors
@@ -41,21 +56,38 @@ uuid = { version = ">=1.0, <1.21", features = ["v4"] }
 tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "macros", "signal", "sync", "time"] }
 # Serialization
 serde_json = "1"
+# Image processing
+# Pin >=0.25, <0.25.10 — 0.25.10 requires Rust 1.88 (MSRV is 1.75). 0.25.x fixes CVEs in 0.24.
+# Transitive `tiff` crate moves from 0.9 → 0.11 (also CVE-fixed).
+image = { version = ">=0.25, <0.25.10", default-features = false, features = ["png", "tiff"] }
 # macOS clipboard
 objc2 = "0.5"
-objc2-foundation = { version = "0.2", features = ["NSString"] }
-objc2-app-kit = { version = "0.2", features = ["NSPasteboard"] }
+objc2-foundation = { version = "0.2", features = ["NSString", "NSData"] }
+objc2-app-kit = { version = "0.2", features = ["NSPasteboard", "NSPasteboardItem"] }
 # macOS Keychain
 security-framework = "2"
 # Logging subscriber
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+# Rotating file appender for daemon logs
+tracing-appender = "0.2"
 # home dir (pinned <0.5.10 to avoid edition2024 requirement on Rust 1.75)
 home = "=0.5.9"
+# platform config / data dirs
+dirs = "5"
 # error handling
 anyhow = "1"
 # CLI argument parsing (pin <4.5.40 to stay below edition2024 dep chain on Rust 1.75)
 clap = { version = ">=4.0, <4.5.40", features = ["derive"] }
 # Base64 encoding
 base64 = "0.22"
+# HTTP client (pin <0.12 to stay on rustls/hyper compatible with Rust 1.75)
+reqwest = { version = ">=0.11, <0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
+# WebSocket (pinned <=0.23 to remain compatible with Rust 1.75 / tokio 1.x)
+tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
+# Async stream combinators
+futures-util = "0.3"
+# Slint GUI toolkit (1.8 required for export re-export and modern syntax)
+slint = "=1.8.0"
+slint-build = "=1.8.0"

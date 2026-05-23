@@ -12,7 +12,7 @@ fn full_encrypt_store_retrieve_decrypt_flow() {
     let enc_key = alice.derive_enc_key(&bob.public_key_bytes(), "alice-id", "bob-id");
 
     let plaintext = b"Secret clipboard content";
-    let (nonce, ciphertext) = encrypt_item(plaintext, &enc_key);
+    let (nonce, ciphertext) = encrypt_item(plaintext, &enc_key).unwrap();
 
     let item = ClipboardItem::new_text(ciphertext.clone(), nonce.to_vec(), 1);
     insert_item(&db, &item).unwrap();

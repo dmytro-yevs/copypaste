@@ -28,6 +28,8 @@ pub struct AppConfig {
     pub sync_ttl_secs: u64,
     pub sensitive_ttl_relay_secs: u64,
     pub sensitive_ttl_local_secs: u64,
+    /// Local auto-wipe TTL for sensitive items (seconds). Default: 30.
+    pub sensitive_ttl_secs: u64,
     pub image_quality: u8,
     pub sqlite_cache_mb: u32,
     pub encryption_chunk_kb: u32,
@@ -49,6 +51,7 @@ impl Default for AppConfig {
             sync_ttl_secs: SYNC_TTL_SECS,
             sensitive_ttl_relay_secs: SENSITIVE_TTL_RELAY_SECS,
             sensitive_ttl_local_secs: SENSITIVE_TTL_LOCAL_SECS,
+            sensitive_ttl_secs: SENSITIVE_TTL_SECS,
             image_quality: IMAGE_QUALITY,
             sqlite_cache_mb: SQLITE_CACHE_MB,
             encryption_chunk_kb: ENCRYPTION_CHUNK_KB,
@@ -76,10 +79,9 @@ impl AppConfig {
     fn clamp_values(&mut self) {
         self.poll_interval_ms = self
             .poll_interval_ms
-            .max(POLL_INTERVAL_MIN_MS)
-            .min(POLL_INTERVAL_MAX_MS);
-        self.image_quality = self.image_quality.min(100).max(1);
-        self.encryption_chunk_kb = self.encryption_chunk_kb.max(16).min(4096);
+            .clamp(POLL_INTERVAL_MIN_MS, POLL_INTERVAL_MAX_MS);
+        self.image_quality = self.image_quality.clamp(1, 100);
+        self.encryption_chunk_kb = self.encryption_chunk_kb.clamp(16, 4096);
     }
 }
 

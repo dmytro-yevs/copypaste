@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 use std::path::Path;
 
@@ -10,11 +11,7 @@ pub fn run(socket_path: &Path, limit: u64, offset: u64) -> Result<()> {
         "params": {"limit": limit, "offset": offset}
     });
     let resp = client.call(&req)?;
-
-    if !resp.ok {
-        eprintln!("error: {}", resp.error.unwrap_or_default());
-        std::process::exit(1);
-    }
+    exit_on_err(&resp);
 
     let data = resp.data.unwrap_or(serde_json::Value::Null);
     let total = data["total"].as_u64().unwrap_or(0);
@@ -25,7 +22,7 @@ pub fn run(socket_path: &Path, limit: u64, offset: u64) -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<38}  {:<12}  {:<10}  {}", "ID", "TYPE", "SENSITIVE", "TIME (UTC)");
+    println!("{:<38}  {:<12}  {:<10}  TIME (UTC)", "ID", "TYPE", "SENSITIVE");
     println!("{}", "-".repeat(90));
 
     for item in &items {

@@ -4,7 +4,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Benchmark
 
 fn bench_keypair(c: &mut Criterion) {
     c.bench_function("keypair_generate", |b| {
-        b.iter(|| DeviceKeypair::generate())
+        b.iter(DeviceKeypair::generate)
     });
 
     let kp = DeviceKeypair::generate();
@@ -33,7 +33,7 @@ fn bench_encrypt_item(c: &mut Criterion) {
 fn bench_decrypt_item(c: &mut Criterion) {
     let key = [0x42u8; 32];
     let data = vec![0xABu8; 1024];
-    let (nonce, ciphertext) = encrypt_item(&data, &key);
+    let (nonce, ciphertext) = encrypt_item(&data, &key).expect("bench encrypt should succeed");
     c.bench_function("decrypt_item_1kb", |b| {
         b.iter(|| decrypt_item(black_box(&ciphertext), black_box(&nonce), black_box(&key)))
     });
@@ -68,5 +68,32 @@ fn bench_sensitive_detect(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_keypair, bench_encrypt_item, bench_decrypt_item, bench_chunks, bench_sensitive_detect);
+/// Standalone 1 KB text-item encryption benchmark (throughput reference).
+fn bench_encrypt_1kb(c: &mut Criterion) {
+    let key = [0x42u8; 32];
+    let data = vec![0xABu8; 1024];
+    c.bench_function("bench_encrypt_1kb", |b| {
+        b.iter(|| encrypt_item(black_box(&data), black_box(&key)))
+    });
+}
+
+/// Standalone 1 MB binary-item encryption benchmark (throughput reference).
+fn bench_encrypt_1mb(c: &mut Criterion) {
+    let key = [0x42u8; 32];
+    let data = vec![0xABu8; 1_048_576];
+    c.bench_function("bench_encrypt_1mb", |b| {
+        b.iter(|| encrypt_item(black_box(&data), black_box(&key)))
+    });
+}
+
+criterion_group!(
+    benches,
+    bench_keypair,
+    bench_encrypt_item,
+    bench_decrypt_item,
+    bench_chunks,
+    bench_sensitive_detect,
+    bench_encrypt_1kb,
+    bench_encrypt_1mb,
+);
 criterion_main!(benches);

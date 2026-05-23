@@ -26,6 +26,12 @@ impl ClipboardBackend for MacosClipboardBackend {
         match self.monitor.poll() {
             Ok(Some(ClipboardContent::Text(text))) => Some(ClipboardEvent {
                 text: Some(text),
+                image_bytes: None,
+                source: ClipboardSource::General,
+            }),
+            Ok(Some(ClipboardContent::Image(bytes))) => Some(ClipboardEvent {
+                text: None,
+                image_bytes: Some(bytes),
                 source: ClipboardSource::General,
             }),
             _ => None,

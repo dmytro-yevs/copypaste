@@ -1,15 +1,22 @@
 [package]
 name = "copypaste-android"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Android JNI/UniFFI bindings for CopyPaste core"
 
 [lib]
 crate-type = ["cdylib"]
 name = "copypaste_android"
 
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+
 [dependencies]
 copypaste-core = { path = "../copypaste-core" }
-uniffi = { version = "0.27", features = ["bindgen"] }
+uniffi = { version = "0.27", features = ["bindgen", "cli"] }
 thiserror = "1"
 
 [build-dependencies]

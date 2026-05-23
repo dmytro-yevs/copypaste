@@ -8,22 +8,54 @@ rust-version.workspace = true
 name = "copypaste-daemon"
 path = "src/main.rs"
 
+[features]
+# Enables Supabase cloud sync (requires SUPABASE_URL + SUPABASE_ANON_KEY env vars at runtime).
+cloud-sync = ["reqwest", "base64"]
+
 [dependencies]
 copypaste-core = { path = "../copypaste-core" }
+image.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+tracing-appender.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 home.workspace = true
+sha2.workspace = true
+hex.workspace = true
+dirs.workspace = true
+uuid.workspace = true
+rusqlite.workspace = true
+# cloud-sync feature: HTTP client for Supabase REST + Realtime, base64 encoding
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
+base64 = { version = "0.22", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
 objc2-foundation.workspace = true
 objc2-app-kit.workspace = true
 security-framework.workspace = true
+# Tray icon — standalone (no Tauri required), macOS native NSStatusItem
+tray-icon = "0.19"
+# PNG decoding for the tray icon asset
+png = "0.17"
+
+[[test]]
+name = "integration_ipc"
+path = "tests/integration_ipc.rs"
+
+[[test]]
+name = "lifecycle"
+path = "tests/lifecycle.rs"
 
 [dev-dependencies]
 tempfile = "3"
+serde_json = "1"
+# mockito 0.31 supports Rust 1.75 and doesn't require edition 2024 deps;
+# used by cloud.rs Wave 2.7 tests (401/429/transient retry paths). These
+# tests live under `#[cfg(all(test, feature = "cloud-sync"))]`, so this dep
+# is only pulled in when the feature is built.
+mockito = "0.31"

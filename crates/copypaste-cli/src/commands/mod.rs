@@ -1,10 +1,12 @@
 pub mod clear;
+pub mod common;
 pub mod copy;
 pub mod count;
 pub mod delete;
 pub mod export;
 pub mod import;
 pub mod list;
+pub mod private;
 pub mod search;
 pub mod stats;
 pub mod status;

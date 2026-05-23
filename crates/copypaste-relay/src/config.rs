@@ -1,6 +1,7 @@
 /// Configuration for the relay server, loaded from environment variables
 /// with safe defaults for all fields.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct RelayConfig {
     /// TCP port to listen on (default: 8080)
     pub port: u16,
@@ -9,6 +10,7 @@ pub struct RelayConfig {
     /// Maximum allowed decoded size of a single ciphertext payload in bytes (default: 10 MiB)
     pub max_item_bytes: usize,
     /// Maximum number of items stored per device inbox (default: 1000)
+    #[allow(dead_code)]
     pub max_items_per_device: usize,
 }
 

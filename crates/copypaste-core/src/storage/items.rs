@@ -23,6 +23,10 @@ pub struct ClipboardItem {
     pub wall_time: i64,
     pub expires_at: Option<i64>,
     pub app_bundle_id: Option<String>,
+    /// SHA-256 hex digest of the raw (pre-encryption) content bytes.
+    /// Used for deduplication: skip insert if an identical hash was stored
+    /// within the last 60 seconds.
+    pub content_hash: Option<String>,
 }
 
 impl ClipboardItem {
@@ -44,6 +48,35 @@ impl ClipboardItem {
             wall_time: now,
             expires_at: None,
             app_bundle_id: None,
+            content_hash: None,
+        }
+    }
+
+    /// Create an image item whose content is an encrypted chunk blob.
+    ///
+    /// `encrypted_blob` is produced by `copypaste_core::chunks_to_blob`.
+    /// `image_meta_json` stores width/height/chunk_count/file_id as JSON in `blob_ref`.
+    /// The `content_nonce` field is left `None` because XChaCha20 nonces are stored
+    /// per-chunk inside the blob itself (no single item-level nonce needed).
+    pub fn new_image(encrypted_blob: Vec<u8>, image_meta_json: String, lamport_ts: i64) -> Self {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        Self {
+            id: Uuid::new_v4().to_string(),
+            item_id: Uuid::new_v4().to_string(),
+            content_type: "image".to_string(),
+            content: Some(encrypted_blob),
+            content_nonce: None,
+            blob_ref: Some(image_meta_json),
+            is_sensitive: false,
+            is_synced: false,
+            lamport_ts,
+            wall_time: now,
+            expires_at: None,
+            app_bundle_id: None,
+            content_hash: None,
         }
     }
 }
@@ -52,23 +85,50 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
     db.conn().execute(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
-          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+          content_hash)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
         params![
             item.id, item.item_id, item.content_type,
             item.content, item.content_nonce, item.blob_ref,
             item.is_sensitive as i64, item.is_synced as i64,
             item.lamport_ts, item.wall_time, item.expires_at,
-            item.app_bundle_id,
+            item.app_bundle_id, item.content_hash,
         ],
     )?;
     Ok(())
 }
 
+/// Find the id of an item with the given content hash stored within the last
+/// `within_ms` milliseconds. Returns `None` if no such item exists.
+///
+/// Used by the daemon to skip inserting duplicate clipboard content.
+pub fn find_recent_by_hash(
+    db: &Database,
+    hash: &str,
+    now_ms: i64,
+    within_ms: i64,
+) -> Result<Option<String>, ItemsError> {
+    let cutoff = now_ms - within_ms;
+    let result = db.conn().query_row(
+        "SELECT id FROM clipboard_items
+         WHERE content_hash = ?1 AND wall_time >= ?2
+         ORDER BY wall_time DESC LIMIT 1",
+        params![hash, cutoff],
+        |row| row.get::<_, String>(0),
+    );
+    match result {
+        Ok(id) => Ok(Some(id)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(ItemsError::Sqlite(e)),
+    }
+}
+
 pub fn get_page(db: &Database, limit: usize, offset: usize) -> Result<Vec<ClipboardItem>, ItemsError> {
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
-                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+                content_hash
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt.query_map(params![limit as i64, offset as i64], row_to_item)?
@@ -80,6 +140,17 @@ pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
     let changed = db.conn().execute(
         "DELETE FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1",
         params![now_ms],
+    )?;
+    Ok(changed)
+}
+
+/// Delete sensitive items whose `wall_time` is older than `sensitive_ttl_ms` milliseconds ago.
+/// This enforces a local auto-wipe TTL for items marked `is_sensitive = 1`.
+pub fn delete_sensitive_expired(db: &Database, now_ms: i64, sensitive_ttl_ms: i64) -> Result<usize, ItemsError> {
+    let threshold = now_ms - sensitive_ttl_ms;
+    let changed = db.conn().execute(
+        "DELETE FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1",
+        params![threshold],
     )?;
     Ok(changed)
 }
@@ -155,7 +226,8 @@ pub fn search_items(db: &Database, query: &str, limit: usize) -> Result<Vec<Clip
     let placeholders: String = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
     let sql = format!(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
-                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+                content_hash
          FROM clipboard_items
          WHERE id IN ({})",
         placeholders,
@@ -186,6 +258,7 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
         wall_time: row.get(9)?,
         expires_at: row.get(10)?,
         app_bundle_id: row.get(11)?,
+        content_hash: row.get(12)?,
     })
 }
 
@@ -355,6 +428,37 @@ mod tests {
 
         let results = search_items(&db, "common", 3).unwrap();
         assert_eq!(results.len(), 3);
+    }
+
+    #[test]
+    fn delete_sensitive_expired_removes_old_sensitive_items() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Sensitive item with old wall_time (should be deleted)
+        let mut old_sensitive = make_item(1);
+        old_sensitive.is_sensitive = true;
+        old_sensitive.wall_time = 1_000; // very old
+        insert_item(&db, &old_sensitive).unwrap();
+
+        // Sensitive item with recent wall_time (should be kept)
+        let mut new_sensitive = make_item(2);
+        new_sensitive.is_sensitive = true;
+        new_sensitive.wall_time = 100_000_000; // very recent relative to now_ms below
+        insert_item(&db, &new_sensitive).unwrap();
+
+        // Non-sensitive item with old wall_time (should NOT be deleted)
+        let mut old_plain = make_item(3);
+        old_plain.is_sensitive = false;
+        old_plain.wall_time = 1_000;
+        insert_item(&db, &old_plain).unwrap();
+
+        // now_ms = 200_000, ttl = 30_000 → threshold = 170_000
+        // old_sensitive.wall_time=1000 < 170_000 → deleted
+        // new_sensitive.wall_time=100_000_000 > 170_000 → kept
+        // old_plain.wall_time=1000 < 170_000 but not sensitive → kept
+        let removed = delete_sensitive_expired(&db, 200_000, 30_000).unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(count_items(&db).unwrap(), 2);
     }
 
     #[test]
