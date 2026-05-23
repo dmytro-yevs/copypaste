@@ -1,13 +1,17 @@
+pub mod backup;
 pub mod clear;
 pub mod common;
 pub mod copy;
 pub mod count;
+pub mod daemon;
 pub mod delete;
 pub mod export;
 pub mod import;
 pub mod list;
+pub mod pin;
 pub mod private;
 pub mod search;
 pub mod stats;
 pub mod status;
+pub mod vacuum;
 pub mod watch;

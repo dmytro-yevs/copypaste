@@ -134,6 +134,19 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Reclaim free pages (VACUUM) and rebuild indexes (REINDEX) in the local DB
+    ///
+    /// Daemon MUST be stopped first — VACUUM takes an exclusive lock.
+    /// Use `copypaste daemon stop` before running this, then `daemon start`
+    /// after. Typical reclaim: 10-40% after heavy churn.
+    Vacuum {
+        /// Print what would happen without modifying the database
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip VACUUM and only run REINDEX (faster, no disk-space requirement)
+        #[arg(long)]
+        reindex_only: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -201,6 +214,11 @@ fn main() {
         Commands::Restore { path, force, dry_run } => {
             commands::backup::run_restore(&socket, &path, force, dry_run)
         }
+        Commands::Vacuum { dry_run, reindex_only } => commands::vacuum::run(
+            &socket,
+            paths::db_path(),
+            commands::vacuum::Plan { dry_run, reindex_only },
+        ),
     };
 
     if let Err(e) = result {
