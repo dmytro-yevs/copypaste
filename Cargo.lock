@@ -1286,6 +1286,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "clap",
+ "copypaste-ipc",
  "home",
  "serde",
  "serde_json",
@@ -1446,6 +1447,7 @@ name = "copypaste-ui"
 version = "0.2.0-beta.0"
 dependencies = [
  "anyhow",
+ "copypaste-ipc",
  "home",
  "serde",
  "serde_json",

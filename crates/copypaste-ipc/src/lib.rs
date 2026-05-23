@@ -26,10 +26,12 @@
 #![deny(missing_docs)]
 #![deny(rust_2018_idioms)]
 
+pub mod error;
 pub mod request;
 pub mod response;
 pub mod types;
 
+pub use error::ErrorCode;
 pub use request::Request;
 pub use response::{
     Response, ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR, ERR_CODE_INVALID_ARGUMENT,

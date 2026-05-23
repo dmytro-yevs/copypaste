@@ -2,9 +2,14 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use anyhow::{anyhow, Context, Result};
+use copypaste_ipc::ErrorCode;
 use serde_json::Value;
 
 /// Minimal wire-level response. Mirrors protocol.rs in the daemon.
+///
+/// W3.3: gained an optional [`ErrorCode`] parsed from the daemon's
+/// `error_code` field. Existing fields are unchanged so prior call sites
+/// keep working.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct Response {
@@ -13,6 +18,9 @@ pub struct Response {
     pub ok: bool,
     pub data: Option<Value>,
     pub error: Option<String>,
+    /// Typed machine-readable error code, when the daemon attached one.
+    /// `None` on success and on legacy (untagged) error responses.
+    pub error_code: Option<ErrorCode>,
 }
 
 pub struct IpcClient {
@@ -56,6 +64,10 @@ impl IpcClient {
             ok: v["ok"].as_bool().unwrap_or(false),
             data: if v["data"].is_null() { None } else { Some(v["data"].clone()) },
             error: v["error"].as_str().map(|s| s.to_string()),
+            // W3.3: parse the machine-readable `error_code` if attached.
+            // Unknown / missing codes collapse to `None` so older daemons
+            // keep working unchanged.
+            error_code: v["error_code"].as_str().and_then(ErrorCode::from_str),
         })
     }
 }

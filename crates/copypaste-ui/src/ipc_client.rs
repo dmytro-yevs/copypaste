@@ -10,6 +10,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use anyhow::{anyhow, Context, Result};
+use copypaste_ipc::ErrorCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -19,6 +20,10 @@ use serde_json::Value;
 
 /// Structured connection errors. Exposed so callers can detect a missing
 /// daemon (vs. a protocol/IO failure) and show a friendly empty-state.
+///
+/// Beta wave W3.3 extends this enum with typed variants for daemon-side
+/// failures carrying a [`copypaste_ipc::ErrorCode`]. Existing variants are
+/// untouched (append-only) so prior call sites and tests keep working.
 #[derive(Debug)]
 pub enum IpcError {
     /// The daemon socket file does not exist or refused the connection —
@@ -27,6 +32,25 @@ pub enum IpcError {
     DaemonOffline(std::path::PathBuf),
     /// Any other IO error while connecting.
     Io(std::io::Error),
+    /// Daemon responded with `error_code = "not_implemented"`.
+    /// Carries the human-readable message for display.
+    NotImplemented(String),
+    /// Daemon responded with `error_code = "auth_failed"`.
+    AuthFailed(String),
+    /// Daemon responded with `error_code = "not_found"`.
+    NotFound(String),
+    /// Daemon responded with `error_code = "invalid_argument"`.
+    InvalidArgument(String),
+    /// Daemon responded with `error_code = "ipc_not_ready"`.
+    IpcNotReady(String),
+    /// Daemon responded with `error_code = "rate_limited"`.
+    RateLimited(String),
+    /// Daemon responded with `error_code = "version_mismatch"`.
+    VersionMismatch(String),
+    /// Daemon responded with `error_code = "internal_error"` or with no
+    /// recognised code at all. Carries the message and the parsed code
+    /// when one was supplied.
+    Daemon(String, Option<ErrorCode>),
 }
 
 impl std::fmt::Display for IpcError {
@@ -38,22 +62,57 @@ impl std::fmt::Display for IpcError {
                 path.display()
             ),
             IpcError::Io(e) => write!(f, "IPC error: {e}"),
+            IpcError::NotImplemented(m) => write!(f, "not implemented: {m}"),
+            IpcError::AuthFailed(m) => write!(f, "authentication failed: {m}"),
+            IpcError::NotFound(m) => write!(f, "not found: {m}"),
+            IpcError::InvalidArgument(m) => write!(f, "invalid argument: {m}"),
+            IpcError::IpcNotReady(m) => write!(f, "daemon not ready: {m}"),
+            IpcError::RateLimited(m) => write!(f, "rate limited: {m}"),
+            IpcError::VersionMismatch(m) => write!(f, "protocol version mismatch: {m}"),
+            IpcError::Daemon(m, Some(code)) => write!(f, "daemon error [{code}]: {m}"),
+            IpcError::Daemon(m, None) => write!(f, "daemon error: {m}"),
         }
     }
 }
 
 impl std::error::Error for IpcError {}
 
+impl IpcError {
+    /// Map a parsed `error_code` + message pair onto the typed variant.
+    /// Unknown / missing codes collapse to [`IpcError::Daemon`].
+    ///
+    /// Centralised so the same mapping is used everywhere a daemon failure
+    /// surfaces, and so adding a new code only requires touching one site.
+    pub fn from_code(code: Option<ErrorCode>, message: String) -> Self {
+        match code {
+            Some(ErrorCode::NotImplemented) => IpcError::NotImplemented(message),
+            Some(ErrorCode::AuthFailed) => IpcError::AuthFailed(message),
+            Some(ErrorCode::NotFound) => IpcError::NotFound(message),
+            Some(ErrorCode::InvalidArgument) => IpcError::InvalidArgument(message),
+            Some(ErrorCode::IpcNotReady) => IpcError::IpcNotReady(message),
+            Some(ErrorCode::RateLimited) => IpcError::RateLimited(message),
+            Some(ErrorCode::VersionMismatch) => IpcError::VersionMismatch(message),
+            other => IpcError::Daemon(message, other),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Wire types
 // ---------------------------------------------------------------------------
 
 /// Wire-level response from the daemon.
+///
+/// W3.3: gained an optional [`ErrorCode`] parsed from the daemon's
+/// `error_code` field. Existing fields are unchanged.
 #[derive(Debug)]
 pub struct IpcResponse {
     pub ok: bool,
     pub data: Option<Value>,
     pub error: Option<String>,
+    /// Typed machine-readable error code, when the daemon attached one.
+    /// `None` on success and on legacy (untagged) error responses.
+    pub error_code: Option<ErrorCode>,
 }
 
 /// A history item returned by `history_page`.
@@ -162,6 +221,10 @@ impl IpcClient {
             ok: v["ok"].as_bool().unwrap_or(false),
             data: if v["data"].is_null() { None } else { Some(v["data"].clone()) },
             error: v["error"].as_str().map(str::to_owned),
+            // W3.3: parse the machine-readable `error_code` if the daemon
+            // attached one. Unknown / missing codes collapse to `None` so
+            // older daemons keep working unchanged.
+            error_code: v["error_code"].as_str().and_then(ErrorCode::from_str),
         })
     }
 
@@ -378,6 +441,61 @@ impl IpcClient {
             ))
         }
     }
+
+    // -----------------------------------------------------------------------
+    // PAKE pairing (Beta W3.2)
+    // -----------------------------------------------------------------------
+
+    /// Initiate PAKE-based pairing with a peer using a shared password.
+    ///
+    /// Sends the `pair_peer_with_password` IPC method with `peer_fingerprint`
+    /// and `password` parameters. The daemon validates both inputs and (in a
+    /// full implementation) routes 3 PAKE handshake messages over the p2p
+    /// Transport. Until that wiring lands, valid requests return a typed
+    /// `not_implemented` error which callers surface in the UI status text.
+    pub fn pair_with_password(&mut self, peer_fingerprint: &str, password: &str) -> Result<()> {
+        let resp = self.call(
+            "pair_peer_with_password",
+            serde_json::json!({
+                "peer_fingerprint": peer_fingerprint,
+                "password": password,
+            }),
+        )?;
+        if resp.ok {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "pair_peer_with_password failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ))
+        }
+    }
+
+    /// Build the wire-level JSON for a `pair_peer_with_password` request.
+    /// Exposed for unit testing without a running daemon — the request
+    /// builder mirrors what [`pair_with_password`] sends so tests can assert
+    /// the method name and parameter shape.
+    pub fn build_pair_with_password_request(peer_fingerprint: &str, password: &str) -> Value {
+        serde_json::json!({
+            "id": "ui-1",
+            "method": "pair_peer_with_password",
+            "params": {
+                "peer_fingerprint": peer_fingerprint,
+                "password": password,
+            },
+        })
+    }
+
+    /// Minimum length required for a PAKE pairing password. Enforced in the
+    /// UI as a quick guard before round-tripping to the daemon (which also
+    /// double-checks); kept in one place so both layers agree.
+    pub const MIN_PAIR_PASSWORD_LEN: usize = 6;
+
+    /// Validate a password against [`MIN_PAIR_PASSWORD_LEN`] using Unicode
+    /// scalar counts so multibyte characters count as one.
+    pub fn is_valid_pair_password(password: &str) -> bool {
+        password.chars().count() >= Self::MIN_PAIR_PASSWORD_LEN
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -561,6 +679,71 @@ mod tests {
     }
 
     #[test]
+    fn typed_error_variant_from_response_code() {
+        // W3.3: `IpcError::from_code` must map every known ErrorCode onto
+        // its typed variant, and fall back to `Daemon(_, None)` for
+        // missing / unknown codes (forward-compat for older daemons).
+        let cases: &[(Option<ErrorCode>, &str, fn(&IpcError) -> bool)] = &[
+            (Some(ErrorCode::NotImplemented), "cloud sync",
+                |e| matches!(e, IpcError::NotImplemented(_))),
+            (Some(ErrorCode::AuthFailed), "bad password",
+                |e| matches!(e, IpcError::AuthFailed(_))),
+            (Some(ErrorCode::NotFound), "item missing",
+                |e| matches!(e, IpcError::NotFound(_))),
+            (Some(ErrorCode::InvalidArgument), "bad param",
+                |e| matches!(e, IpcError::InvalidArgument(_))),
+            (Some(ErrorCode::IpcNotReady), "db booting",
+                |e| matches!(e, IpcError::IpcNotReady(_))),
+            (Some(ErrorCode::RateLimited), "slow down",
+                |e| matches!(e, IpcError::RateLimited(_))),
+            (Some(ErrorCode::VersionMismatch), "bump client",
+                |e| matches!(e, IpcError::VersionMismatch(_))),
+            (Some(ErrorCode::InternalError), "panic",
+                |e| matches!(e, IpcError::Daemon(_, Some(ErrorCode::InternalError)))),
+            (None, "legacy err",
+                |e| matches!(e, IpcError::Daemon(_, None))),
+        ];
+
+        for (code, msg, check) in cases {
+            let err = IpcError::from_code(*code, (*msg).to_string());
+            assert!(check(&err), "wrong variant for code {code:?}: got {err:?}");
+            // Message must be preserved verbatim so the UI shows the
+            // daemon's wording rather than a generic placeholder.
+            assert!(
+                err.to_string().contains(msg),
+                "message lost for code {code:?}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn ipc_response_parses_error_code_field() {
+        // Round-trip a JSON-shaped Value through the same parsing logic
+        // `call()` uses for the `error_code` field, without needing a
+        // live daemon socket.
+        let v: Value = serde_json::from_str(
+            r#"{"id":1,"ok":false,"error":"nope","error_code":"not_implemented"}"#,
+        )
+        .unwrap();
+        let parsed_code = v["error_code"].as_str().and_then(ErrorCode::from_str);
+        assert_eq!(parsed_code, Some(ErrorCode::NotImplemented));
+
+        // Unknown code collapses to None (forward-compat).
+        let v2: Value = serde_json::from_str(
+            r#"{"id":1,"ok":false,"error":"x","error_code":"future_code"}"#,
+        )
+        .unwrap();
+        let parsed_code = v2["error_code"].as_str().and_then(ErrorCode::from_str);
+        assert_eq!(parsed_code, None);
+
+        // Missing field collapses to None (legacy daemon, no regression).
+        let v3: Value =
+            serde_json::from_str(r#"{"id":1,"ok":false,"error":"x"}"#).unwrap();
+        let parsed_code = v3["error_code"].as_str().and_then(ErrorCode::from_str);
+        assert_eq!(parsed_code, None);
+    }
+
+    #[test]
     fn app_settings_round_trip_json() {
         let s = AppSettings {
             p2p_enabled: true,
@@ -572,5 +755,46 @@ mod tests {
         assert!(s2.p2p_enabled);
         assert_eq!(s2.supabase_url.as_deref(), Some("https://example.supabase.co"));
         assert_eq!(s2.supabase_anon_key.as_deref(), Some("key123"));
+    }
+
+    #[test]
+    fn ipc_client_pair_with_password_sends_correct_method() {
+        // beta-W3.2: builder must use exactly `pair_peer_with_password` so
+        // the daemon dispatcher matches; both params must be present and
+        // verbatim — the daemon rejects missing/renamed fields.
+        let req = IpcClient::build_pair_with_password_request("abc123", "hunter22");
+        assert_eq!(req["method"], "pair_peer_with_password");
+        assert_eq!(req["params"]["peer_fingerprint"], "abc123");
+        assert_eq!(req["params"]["password"], "hunter22");
+        assert!(
+            req["id"].is_string(),
+            "every IPC request needs a string id for matching responses"
+        );
+    }
+
+    #[test]
+    fn pair_window_password_field_validates_min_length() {
+        // beta-W3.2: password must be at least MIN_PAIR_PASSWORD_LEN (6)
+        // chars. Both the UI and the daemon enforce this — the UI check
+        // avoids a useless round-trip; the daemon check is the source of
+        // truth so a malicious client cannot bypass it.
+        assert!(!IpcClient::is_valid_pair_password(""), "empty rejected");
+        assert!(!IpcClient::is_valid_pair_password("ab"), "too short rejected");
+        assert!(!IpcClient::is_valid_pair_password("12345"), "5 chars rejected");
+        assert!(IpcClient::is_valid_pair_password("123456"), "exactly 6 chars accepted");
+        assert!(IpcClient::is_valid_pair_password("hunter22"), "longer accepted");
+        // Multibyte: 6 Unicode scalars regardless of UTF-8 byte length.
+        assert!(
+            IpcClient::is_valid_pair_password("парол1"),
+            "Cyrillic 6-scalar password must be accepted (chars, not bytes)"
+        );
+        assert!(
+            !IpcClient::is_valid_pair_password("ab漢"),
+            "3-scalar password must be rejected even if multibyte UTF-8"
+        );
+        assert_eq!(
+            IpcClient::MIN_PAIR_PASSWORD_LEN, 6,
+            "constant must stay in sync with the daemon-side check"
+        );
     }
 }

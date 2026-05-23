@@ -15,6 +15,7 @@ serde_json.workspace = true
 anyhow.workspace = true
 home.workspace = true
 base64.workspace = true
+copypaste-ipc = { path = "../copypaste-ipc" }
 
 [dev-dependencies]
 tempfile = "3"
