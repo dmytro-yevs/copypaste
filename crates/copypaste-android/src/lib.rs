@@ -5,7 +5,10 @@ uniffi::include_scaffolding!("copypaste_android");
 pub mod version;
 pub use version::{check_compatibility, core_version, uniffi_abi_version, VersionError, UNIFFI_ABI_VERSION};
 
-use copypaste_core::{encrypt_item, decrypt_item, detect, NONCE_SIZE};
+use copypaste_core::{
+    build_item_aad, decrypt_item_with_aad, detect, encrypt_item_with_aad, AAD_SCHEMA_VERSION,
+    NONCE_SIZE,
+};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
@@ -28,18 +31,35 @@ pub struct EncryptedBlob {
     pub ciphertext: Vec<u8>,
 }
 
-pub fn encrypt_text(bytes: &[u8], key: &[u8]) -> Result<EncryptedBlob, CopypasteError> {
+/// v0.3: `item_id` is bound into the AEAD AAD alongside `AAD_SCHEMA_VERSION`.
+/// Kotlin callers MUST persist the same item_id alongside the ciphertext and
+/// pass it back to `decrypt_text` verbatim — a mismatch will fail decryption
+/// with `EncryptionFailed`. (Legacy empty-AAD fallback was removed in 1c55e57.)
+pub fn encrypt_text(
+    item_id: String,
+    bytes: &[u8],
+    key: &[u8],
+) -> Result<EncryptedBlob, CopypasteError> {
     let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
-    let (nonce, ciphertext) =
-        encrypt_item(bytes, &key_arr).map_err(|_| CopypasteError::EncryptionFailed)?;
+    let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+    let (nonce, ciphertext) = encrypt_item_with_aad(bytes, &key_arr, &aad)
+        .map_err(|_| CopypasteError::EncryptionFailed)?;
     Ok(EncryptedBlob { nonce: nonce.to_vec(), ciphertext })
 }
 
-pub fn decrypt_text(ciphertext: &[u8], nonce: &[u8], key: &[u8]) -> Result<Vec<u8>, CopypasteError> {
+/// v0.3: `item_id` MUST match the value used during `encrypt_text` — see the
+/// docstring on `encrypt_text` for the AAD binding rationale.
+pub fn decrypt_text(
+    item_id: String,
+    ciphertext: &[u8],
+    nonce: &[u8],
+    key: &[u8],
+) -> Result<Vec<u8>, CopypasteError> {
     let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
     let nonce_arr: [u8; NONCE_SIZE] = nonce.try_into()
         .map_err(|_| CopypasteError::DecryptionFailed { message: "wrong nonce length".into() })?;
-    decrypt_item(ciphertext, &nonce_arr, &key_arr)
+    let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+    decrypt_item_with_aad(ciphertext, &nonce_arr, &key_arr, &aad)
         .map_err(|e| CopypasteError::DecryptionFailed { message: e.to_string() })
 }
 
@@ -106,7 +126,13 @@ pub fn add_clipboard_item(
     let db = copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr)
         .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
 
-    let (nonce, ciphertext) = encrypt_item(text.as_bytes(), &key_arr)
+    // v0.3: pre-generate item_id so the AAD baked into the ciphertext matches
+    // the value persisted in the row — decryption later rebuilds the AAD from
+    // the stored item_id (AAD_SCHEMA_VERSION = 3). Legacy empty-AAD fallback
+    // was removed in 1c55e57.
+    let item_id = uuid::Uuid::new_v4().to_string();
+    let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+    let (nonce, ciphertext) = encrypt_item_with_aad(text.as_bytes(), &key_arr, &aad)
         .map_err(|_| CopypasteError::EncryptionFailed)?;
 
     let lamport_ts = std::time::SystemTime::now()
@@ -114,7 +140,9 @@ pub fn add_clipboard_item(
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
 
-    let item = copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport_ts);
+    let mut item =
+        copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport_ts);
+    item.item_id = item_id;
     let id = item.id.clone();
 
     copypaste_core::insert_item(&db, &item)
@@ -165,9 +193,27 @@ mod tests {
     #[test]
     fn encrypt_then_decrypt_roundtrips() {
         let key = test_key();
-        let blob = encrypt_text(b"hello android", &key).expect("encrypt");
-        let plaintext = decrypt_text(&blob.ciphertext, &blob.nonce, &key).expect("decrypt");
+        let item_id = "test-android-item".to_string();
+        let blob = encrypt_text(item_id.clone(), b"hello android", &key).expect("encrypt");
+        let plaintext = decrypt_text(item_id, &blob.ciphertext, &blob.nonce, &key)
+            .expect("decrypt");
         assert_eq!(plaintext, b"hello android");
+    }
+
+    /// v0.3 regression: ciphertext is bound to item_id via AAD — decrypting
+    /// with a different item_id must fail with `DecryptionFailed` rather than
+    /// silently returning plaintext (legacy empty-AAD fallback removed in
+    /// 1c55e57).
+    #[test]
+    fn decrypt_rejects_mismatched_item_id() {
+        let key = test_key();
+        let blob = encrypt_text("item-A".into(), b"secret", &key).expect("encrypt");
+        let err = decrypt_text("item-B".into(), &blob.ciphertext, &blob.nonce, &key)
+            .expect_err("mismatched item_id must reject");
+        assert!(
+            matches!(err, CopypasteError::DecryptionFailed { .. }),
+            "expected DecryptionFailed, got {err:?}"
+        );
     }
 
     #[test]

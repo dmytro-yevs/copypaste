@@ -1,9 +1,13 @@
 namespace copypaste_android {
+  // v0.3: `item_id` is bound into the AEAD AAD alongside the schema version.
+  // Kotlin callers MUST persist the same item_id with the ciphertext and pass
+  // it back to `decrypt_text` verbatim — a mismatch fails decryption with
+  // `EncryptionFailed`. Legacy empty-AAD fallback was removed in 1c55e57.
   [Throws=CopypasteError]
-  EncryptedBlob encrypt_text([ByRef] sequence<u8> bytes, [ByRef] sequence<u8> key);
+  EncryptedBlob encrypt_text(string item_id, [ByRef] sequence<u8> bytes, [ByRef] sequence<u8> key);
 
   [Throws=CopypasteError]
-  sequence<u8> decrypt_text([ByRef] sequence<u8> ciphertext, [ByRef] sequence<u8> nonce, [ByRef] sequence<u8> key);
+  sequence<u8> decrypt_text(string item_id, [ByRef] sequence<u8> ciphertext, [ByRef] sequence<u8> nonce, [ByRef] sequence<u8> key);
 
   boolean is_sensitive(string text);
 

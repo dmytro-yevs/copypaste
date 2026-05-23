@@ -26,6 +26,10 @@ android-uniffi-live = []
 copypaste-core = { path = "../copypaste-core" }
 uniffi = { version = "0.27", features = ["bindgen", "cli"] }
 thiserror = "1"
+# v0.3: needed by `add_clipboard_item` to pre-generate the item_id that's
+# bound into the AEAD AAD before encryption (legacy empty-AAD fallback was
+# removed in 1c55e57).
+uuid = { workspace = true }
 
 [build-dependencies]
 uniffi = { version = "0.27", features = ["build"] }

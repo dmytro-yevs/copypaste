@@ -10,7 +10,12 @@
 /// Increment this constant whenever the UDL (or any serialized data shape
 /// crossing the FFI boundary) changes in a way that is **not** backwards
 /// compatible with previously generated Kotlin bindings.
-pub const UNIFFI_ABI_VERSION: u32 = 1;
+///
+/// **v0.3 (ABI 2):** `encrypt_text` / `decrypt_text` gained a leading
+/// `item_id: String` parameter for AEAD AAD binding (commit 1c55e57 dropped
+/// the legacy empty-AAD fallback). Kotlin generated against ABI 1 will fail
+/// `check_compatibility` and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 2;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).
