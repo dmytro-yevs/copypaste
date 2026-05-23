@@ -207,6 +207,7 @@ impl IpcServer {
                 | "stats"
                 | "pin"
                 | "history_page"
+                | "import"
         )
     }
 
@@ -838,6 +839,194 @@ impl IpcServer {
                     req.id,
                     "pair-peer-with-password",
                 )
+            }
+
+            // ----------------------------------------------------------------
+            // `import` — bulk-insert items previously exported by another
+            // CopyPaste instance. The CLI sends a list of `ImportItem`
+            // records; each is hashed (SHA-256 of the decoded bytes) and
+            // deduplicated against rows inserted in the last 5 minutes.
+            //
+            // Request params:
+            //   {
+            //     "items": [
+            //       { "content_type": "text",
+            //         "content_bytes_b64": "...",
+            //         "created_at_ms": 1234567890,
+            //         "metadata": null | { ... } }
+            //     ]
+            //   }
+            //
+            // Response data:
+            //   { "inserted": <u32>, "skipped": <u32> }
+            //
+            // Errors:
+            //   * `invalid_argument` — missing `items`, missing required field,
+            //     or `content_bytes_b64` failed to decode.
+            //   * `internal_error` — SQLite failure or task panic.
+            // ----------------------------------------------------------------
+            "import" => {
+                use base64::Engine as _;
+                use sha2::{Digest, Sha256};
+
+                // 1. Parse params.items into Vec<ImportItem>.
+                let items_value = match req.params.get("items") {
+                    Some(v) => v,
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: items",
+                        );
+                    }
+                };
+                let raw_items: Vec<serde_json::Value> = match items_value.as_array() {
+                    Some(a) => a.clone(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "param 'items' must be an array",
+                        );
+                    }
+                };
+
+                // 2. Validate + decode each item up-front so a malformed entry
+                //    aborts the whole import with a clear error (rather than
+                //    silently skipping or partially inserting).
+                let b64 = base64::engine::general_purpose::STANDARD;
+                #[derive(Clone)]
+                struct DecodedImport {
+                    content_type: String,
+                    bytes: Vec<u8>,
+                    created_at_ms: i64,
+                    #[allow(dead_code)]
+                    metadata: Option<serde_json::Value>,
+                }
+                let mut decoded: Vec<DecodedImport> = Vec::with_capacity(raw_items.len());
+                for (idx, raw) in raw_items.iter().enumerate() {
+                    let content_type = match raw.get("content_type").and_then(|v| v.as_str()) {
+                        Some(s) => s.to_string(),
+                        None => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                format!("item[{idx}]: missing 'content_type'"),
+                            );
+                        }
+                    };
+                    let b64_str = match raw.get("content_bytes_b64").and_then(|v| v.as_str()) {
+                        Some(s) => s,
+                        None => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                format!("item[{idx}]: missing 'content_bytes_b64'"),
+                            );
+                        }
+                    };
+                    let bytes = match b64.decode(b64_str) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                format!("item[{idx}]: invalid base64 in 'content_bytes_b64': {e}"),
+                            );
+                        }
+                    };
+                    let created_at_ms = match raw.get("created_at_ms").and_then(|v| v.as_i64()) {
+                        Some(n) => n,
+                        None => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                format!("item[{idx}]: missing or non-integer 'created_at_ms'"),
+                            );
+                        }
+                    };
+                    let metadata = raw.get("metadata").cloned();
+                    decoded.push(DecodedImport {
+                        content_type,
+                        bytes,
+                        created_at_ms,
+                        metadata,
+                    });
+                }
+
+                // 3. Persist on the blocking pool — SQLite is sync.
+                //    For each item: hash; if a row with the same hash exists
+                //    within the dedupe window, skip; otherwise insert.
+                let db_arc = self.db.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    // 5 minute dedupe window — matches the live clipboard
+                    // monitor's find_recent_by_hash usage.
+                    const DEDUPE_WINDOW_MS: i64 = 5 * 60 * 1000;
+                    let mut inserted: u32 = 0;
+                    let mut skipped: u32 = 0;
+                    for item in decoded {
+                        let mut hasher = Sha256::new();
+                        hasher.update(&item.bytes);
+                        let hash_hex = hex::encode(hasher.finalize());
+
+                        match copypaste_core::find_recent_by_hash(
+                            &db,
+                            &hash_hex,
+                            item.created_at_ms,
+                            DEDUPE_WINDOW_MS,
+                        ) {
+                            Ok(Some(_)) => {
+                                skipped += 1;
+                                continue;
+                            }
+                            Ok(None) => { /* fall through to insert */ }
+                            Err(e) => return Err::<(u32, u32), anyhow::Error>(e.into()),
+                        }
+
+                        // Imported items have no encryption nonce — the bytes
+                        // are stored verbatim as the "content" field. This
+                        // mirrors how alpha-era exports were laid out and
+                        // keeps the import path round-trip-safe.
+                        // lamport_ts = 0 is a deliberate "imported, unknown
+                        // origin" sentinel; sync will reassign on first push.
+                        let mut clip = copypaste_core::ClipboardItem::new_text(
+                            item.bytes,
+                            Vec::new(),
+                            0,
+                        );
+                        clip.content_type = item.content_type;
+                        clip.wall_time = item.created_at_ms;
+                        clip.content_hash = Some(hash_hex);
+
+                        if let Err(e) = copypaste_core::insert_item(&db, &clip) {
+                            return Err::<(u32, u32), anyhow::Error>(e.into());
+                        }
+                        inserted += 1;
+                    }
+                    Ok::<(u32, u32), anyhow::Error>((inserted, skipped))
+                })
+                .await;
+
+                match join {
+                    Ok(Ok((inserted, skipped))) => Response::ok(
+                        req.id,
+                        serde_json::json!({
+                            "inserted": inserted,
+                            "skipped": skipped,
+                        }),
+                    ),
+                    Ok(Err(e)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("import failed: {e}"),
+                    ),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
             }
 
             other => Response::err(req.id, format!("unknown method: {other}")),

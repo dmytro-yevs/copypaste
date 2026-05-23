@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [features]
 # Enables Supabase cloud sync (requires SUPABASE_URL + SUPABASE_ANON_KEY env vars at runtime).
-cloud-sync = ["reqwest", "base64", "copypaste-supabase"]
+cloud-sync = ["reqwest", "copypaste-supabase"]
 
 [dependencies]
 copypaste-core = { path = "../copypaste-core" }
@@ -39,7 +39,9 @@ uuid.workspace = true
 rusqlite.workspace = true
 # cloud-sync feature: HTTP client for Supabase REST + Realtime, base64 encoding
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
-base64 = { version = "0.22", optional = true }
+# base64 is also required unconditionally for the `import` IPC method
+# (CLI sends content bytes as base64-encoded strings to keep the wire JSON-safe).
+base64 = { version = "0.22" }
 # Beta W2.3 (arch-1): canonical Supabase client (auth + realtime).
 copypaste-supabase = { path = "../copypaste-supabase", optional = true }
 
@@ -95,6 +97,12 @@ path = "tests/launchd_install.rs"
 [[test]]
 name = "pairing_e2e"
 path = "tests/pairing_e2e.rs"
+
+# Beta `daemon-import`: tests for the `import` IPC method (insert, dedupe,
+# empty input, malformed base64). See module docs in tests/import_handler.rs.
+[[test]]
+name = "import_handler"
+path = "tests/import_handler.rs"
 
 [dev-dependencies]
 tempfile = "3"
