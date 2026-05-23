@@ -1,3 +1,4 @@
+use std::cmp::Reverse;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -442,7 +443,7 @@ impl RelayStore {
     #[allow(dead_code)]
     pub fn list_devices(&self) -> Vec<String> {
         let mut records: Vec<&DeviceRecord> = self.devices.values().collect();
-        records.sort_by(|a, b| b.registered_at.cmp(&a.registered_at));
+        records.sort_by_key(|r| Reverse(r.registered_at));
         records
             .into_iter()
             .take(100)
