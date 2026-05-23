@@ -1,20 +1,125 @@
 use super::schema::{apply_migrations, SchemaError};
 use rusqlite::{Connection, OpenFlags};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum DbError {
     #[error("SQLite error: {0}")]
-    Sqlite(#[from] rusqlite::Error),
+    Sqlite(rusqlite::Error),
     #[error("Schema migration error: {0}")]
     Schema(#[from] SchemaError),
     #[error("Plaintext-to-encrypted migration failed: {0}")]
     Migration(String),
+    /// `PRAGMA wal_checkpoint(TRUNCATE)` could not flush the WAL within the
+    /// retry budget. Surfaced as a hard error before destructive operations
+    /// (e.g. `rekey`) so we never run them on a database whose WAL state
+    /// disagrees with the main file.
+    #[error("WAL checkpoint failed after retries: {0}")]
+    CheckpointFailed(String),
+    /// Underlying filesystem reported `SQLITE_FULL` (out of disk). Mapped
+    /// here so callers can surface a user-actionable message instead of an
+    /// opaque "sqlite error".
+    #[error("Disk full")]
+    DiskFull,
+    /// Underlying filesystem reported `SQLITE_READONLY` (e.g. APFS snapshot,
+    /// chmod 400, EROFS mount).
+    #[error("Database is read-only")]
+    ReadOnly,
+    /// `SQLITE_BUSY` / `SQLITE_LOCKED` after the per-connection
+    /// `busy_timeout` expired. Means real lock contention, not the silent
+    /// instant-failure mode that the missing-pragma bug used to surface.
+    #[error("Database is locked")]
+    Locked,
+}
+
+/// Promote well-known operational SQLite failures (`SQLITE_FULL`,
+/// `SQLITE_READONLY`, `SQLITE_BUSY`, `SQLITE_LOCKED`) to dedicated
+/// `DbError` variants so callers can surface user-actionable messages
+/// instead of an opaque "sqlite error". Anything else falls through to
+/// the generic `Sqlite` variant.
+///
+/// Implemented via `From` (rather than a free function) so existing call
+/// sites that use `?` on a `rusqlite::Result` keep compiling unchanged
+/// while now benefiting from the richer classification.
+impl From<rusqlite::Error> for DbError {
+    fn from(e: rusqlite::Error) -> Self {
+        if let rusqlite::Error::SqliteFailure(err, _) = &e {
+            use rusqlite::ErrorCode;
+            match err.code {
+                ErrorCode::DiskFull => return DbError::DiskFull,
+                ErrorCode::ReadOnly => return DbError::ReadOnly,
+                ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked => return DbError::Locked,
+                _ => {}
+            }
+        }
+        DbError::Sqlite(e)
+    }
+}
+
+/// Run `PRAGMA wal_checkpoint(TRUNCATE)` with bounded retry. A non-OK
+/// checkpoint result means the WAL still contains frames that were not
+/// merged into the main DB. For destructive operations (`rekey`) that's
+/// not acceptable, because the source data is then split between WAL and
+/// main file and `sqlcipher_export` would see only the main-file half.
+///
+/// We retry up to 3 times with 100 ms backoff. The per-connection
+/// `busy_timeout=5000` already handles SQLITE_BUSY at the FFI layer; this
+/// retry covers the case where the checkpoint *returns* OK at the FFI
+/// layer but reports `busy=1` in its result row (uncommitted writer).
+fn checkpoint_with_retry(conn: &Connection) -> Result<(), DbError> {
+    const MAX_ATTEMPTS: u32 = 3;
+    const BACKOFF: std::time::Duration = std::time::Duration::from_millis(100);
+
+    let mut last_err: Option<String> = None;
+    for attempt in 0..MAX_ATTEMPTS {
+        // `PRAGMA wal_checkpoint(TRUNCATE)` returns one row:
+        //   (busy, log_pages, checkpointed_pages)
+        // busy = 0 means the checkpoint completed cleanly.
+        let res = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, i64>(2)?,
+            ))
+        });
+        match res {
+            Ok((0, _, _)) => return Ok(()),
+            Ok((_busy, log, ckpt)) => {
+                // busy != 0 → WAL still has unmerged frames.
+                last_err = Some(format!(
+                    "checkpoint busy=1 (log_pages={log}, checkpointed={ckpt}) on attempt {}",
+                    attempt + 1
+                ));
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => {
+                // WAL not active — nothing to do.
+                return Ok(());
+            }
+            Err(e) => {
+                last_err = Some(format!(
+                    "checkpoint sqlite error on attempt {}: {e}",
+                    attempt + 1
+                ));
+            }
+        }
+        if attempt + 1 < MAX_ATTEMPTS {
+            std::thread::sleep(BACKOFF);
+        }
+    }
+    Err(DbError::CheckpointFailed(
+        last_err.unwrap_or_else(|| "unknown checkpoint failure".to_string()),
+    ))
 }
 
 pub struct Database {
     conn: Connection,
+    /// Filesystem path the connection was opened from. Required so
+    /// `rekey` can perform an atomic ATTACH-export-rename rebuild without
+    /// asking the caller to re-thread the path through.
+    /// `None` for `open_in_memory` connections, where `rekey` falls back
+    /// to `PRAGMA rekey` (volatile DB → a crash loses everything anyway).
+    path: Option<PathBuf>,
 }
 
 /// Format a 32-byte key as the hex string SQLCipher expects:
@@ -83,7 +188,10 @@ impl Database {
                 // get the same lock / FK behaviour as pooled callers.
                 conn.execute_batch(CONNECTION_PRAGMAS)?;
                 apply_migrations(&conn)?;
-                Ok(Self { conn })
+                Ok(Self {
+                    conn,
+                    path: Some(path.to_path_buf()),
+                })
             }
             Err(rusqlite::Error::SqliteFailure(err, msg))
                 if err.extended_code == rusqlite::ffi::SQLITE_NOTADB
@@ -114,7 +222,10 @@ impl Database {
                             enc.execute_batch(&key_pragma(key))?;
                             enc.execute_batch(CONNECTION_PRAGMAS)?;
                             apply_migrations(&enc)?;
-                            Ok(Self { conn: enc })
+                            Ok(Self {
+                                conn: enc,
+                                path: Some(path.to_path_buf()),
+                            })
                         } else {
                             // Both keyed and unkeyed probes fail → wrong key.
                             Err(DbError::Sqlite(rusqlite::Error::SqliteFailure(err, msg)))
@@ -215,27 +326,132 @@ impl Database {
     pub fn open_in_memory() -> Result<Self, DbError> {
         let conn = Connection::open_in_memory()?;
         apply_migrations(&conn)?;
-        Ok(Self { conn })
+        Ok(Self { conn, path: None })
     }
 
     /// Re-encrypt the database with a new key (key rotation).
     ///
-    /// Checkpoints the WAL journal first (required by SQLCipher when WAL mode is
-    /// active), then uses `PRAGMA rekey` to rewrite all pages in-place.
-    /// The new key is active for all subsequent connections.
+    /// **Why we do NOT use `PRAGMA rekey`**: `rekey` rewrites the database
+    /// pages in-place. If the process is interrupted (power cut, panic,
+    /// SIGKILL) mid-rewrite, the file ends up with a mix of old-key and
+    /// new-key pages — neither key can open it, and there is no automatic
+    /// recovery.
+    ///
+    /// Instead we mirror the `encrypt_existing` migration pattern:
+    ///   1. Force `wal_checkpoint(TRUNCATE)` with retry. Silently
+    ///      swallowing this would let the WAL diverge from the rebuilt
+    ///      file and corrupt the result.
+    ///   2. ATTACH a fresh tmp database under the NEW key.
+    ///   3. `sqlcipher_export` the live data into the tmp.
+    ///   4. Carry the source `user_version` across to the tmp (the export
+    ///      copies tables but not pragmas).
+    ///   5. DETACH, close the source connection, fsync tmp, atomic
+    ///      `rename` over the original, fsync parent dir.
+    ///   6. Re-open under the new key and replace `self.conn`.
+    ///
+    /// Crash-safety: at every point a power-cut leaves *either* the old
+    /// file (old key still works) or the new file (new key works), never
+    /// a half-rekeyed file.
     pub fn rekey(&mut self, new_key: &[u8; 32]) -> Result<(), DbError> {
         use std::fmt::Write;
 
-        // Checkpoint WAL so all pages are in the main file before rekey.
-        // Ignore errors — if WAL isn't active this is a no-op.
-        let _ = self.conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+        // In-memory connections have no path to atomically rename onto;
+        // fall back to PRAGMA rekey for those. They're crash-safe by
+        // virtue of being volatile — a crash loses the whole DB anyway.
+        let path = match self.path.clone() {
+            Some(p) => p,
+            None => {
+                checkpoint_with_retry(&self.conn)?;
+                let mut hex = String::with_capacity(64);
+                for b in new_key {
+                    write!(hex, "{:02x}", b).unwrap();
+                }
+                let sql = format!("PRAGMA rekey = \"x'{}'\"", hex);
+                self.conn.execute_batch(&sql)?;
+                return Ok(());
+            }
+        };
 
-        let mut hex = String::with_capacity(64);
+        // Step 1: force the WAL into the main file. Failing this would
+        // leave source data split between WAL and main, and the
+        // sqlcipher_export below would see only the main-file half.
+        checkpoint_with_retry(&self.conn)?;
+
+        // Step 2-3: ATTACH new-key tmp and export.
+        let tmp_path = path.with_extension("db.rekey-tmp");
+        let _ = std::fs::remove_file(&tmp_path);
+
+        let mut new_hex = String::with_capacity(64);
         for b in new_key {
-            write!(hex, "{:02x}", b).unwrap();
+            write!(new_hex, "{:02x}", b).unwrap();
         }
-        let sql = format!("PRAGMA rekey = \"x'{}'\"", hex);
-        self.conn.execute_batch(&sql)?;
+        let attach_sql = format!(
+            "ATTACH DATABASE '{}' AS rekeyed KEY \"x'{}'\"",
+            tmp_path.display(),
+            new_hex
+        );
+        self.conn
+            .execute_batch(&attach_sql)
+            .map_err(|e| DbError::Migration(format!("ATTACH rekeyed: {e}")))?;
+        self.conn
+            .execute_batch("SELECT sqlcipher_export('rekeyed')")
+            .map_err(|e| DbError::Migration(format!("sqlcipher_export(rekey): {e}")))?;
+
+        // Step 4: sqlcipher_export copies tables/indexes/triggers but NOT
+        // the user_version pragma. Carry it across explicitly so the
+        // re-open below doesn't think the rebuilt DB is at v0 and try to
+        // re-run every ALTER TABLE (which would fail with "duplicate
+        // column").
+        let src_version: i64 = self
+            .conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .map_err(|e| DbError::Migration(format!("read user_version: {e}")))?;
+        self.conn
+            .execute_batch(&format!("PRAGMA rekeyed.user_version = {src_version};"))
+            .map_err(|e| DbError::Migration(format!("set rekeyed.user_version: {e}")))?;
+
+        self.conn
+            .execute_batch("DETACH DATABASE rekeyed")
+            .map_err(|e| DbError::Migration(format!("DETACH rekeyed: {e}")))?;
+
+        // Step 5a: close the live conn so the OS will let us rename onto
+        // its file (Windows). The struct field can't be left moved-from,
+        // so swap in a throwaway in-memory conn as a placeholder.
+        let placeholder = Connection::open_in_memory()
+            .map_err(|e| DbError::Migration(format!("placeholder conn: {e}")))?;
+        let old_conn = std::mem::replace(&mut self.conn, placeholder);
+        drop(old_conn);
+
+        // Step 5b: fsync tmp → rename → fsync parent dir.
+        std::fs::File::open(&tmp_path)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| DbError::Migration(format!("fsync rekey tmp: {e}")))?;
+        std::fs::rename(&tmp_path, &path)
+            .map_err(|e| DbError::Migration(format!("rename rekey tmp->original: {e}")))?;
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                if let Ok(dir) = std::fs::File::open(parent) {
+                    let _ = dir.sync_all();
+                }
+            }
+        }
+
+        // Step 6: re-open under the new key. Mirrors the happy-path of
+        // `Self::open` but skips the plaintext-detection branch since we
+        // just wrote a properly-encrypted file.
+        let enc = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
+        )?;
+        enc.execute_batch(&key_pragma(new_key))?;
+        // Validate the new key actually opens the rebuilt file.
+        enc.query_row("SELECT COUNT(*) FROM sqlite_master", [], |r| {
+            r.get::<_, i64>(0)
+        })?;
+        enc.execute_batch(CONNECTION_PRAGMAS)?;
+        apply_migrations(&enc)?;
+        self.conn = enc;
+
         Ok(())
     }
 
