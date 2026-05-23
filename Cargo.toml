@@ -12,6 +12,7 @@ members = [
     "crates/copypaste-ui",
     "crates/copypaste-ipc",
     "crates/copypaste-config",
+    "crates/copypaste-bench",
 ]
 
 [workspace.package]

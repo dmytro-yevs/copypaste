@@ -1,0 +1,28 @@
+[package]
+name = "copypaste-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Beta-bonus criterion benchmark harness for CopyPaste"
+
+[dependencies]
+
+[dev-dependencies]
+copypaste-core = { path = "../copypaste-core" }
+criterion.workspace = true
+sha2.workspace = true
+# tempfile pinned to match copypaste-core dev-deps (Rust 1.75 MSRV).
+tempfile = ">=3.0, <3.14"
+
+[[bench]]
+name = "encryption"
+harness = false
+
+[[bench]]
+name = "storage"
+harness = false
+
+[[bench]]
+name = "hash"
+harness = false
