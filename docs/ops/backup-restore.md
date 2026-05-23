@@ -158,5 +158,3 @@ Before any risky operation (upgrade, schema migration, manual SQL on the DB):
 
 - `scripts/backup-db.sh` — source.
 - `scripts/restore-db.sh` — source.
-- `docs/migrations/alpha-to-beta.md` — schema migration workflow (different
-  concern, but also stops the daemon).
