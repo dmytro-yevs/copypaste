@@ -14,6 +14,11 @@ reproducibility, but is not the promoted install path.
 ### Features
 - **UI:** In-app auto-update via Homebrew Cask: daily check + notification +
   one-click upgrade. No Sparkle (Homebrew-only per ADR-012).
+- **Telemetry:** real Sentry SDK backend (opt-in, default `Disabled`). PII
+  scrubber runs pre-send; `send_default_pii=false`,
+  `traces_sample_rate=0.0`, `attach_stacktrace=false`. Disabled consent is
+  a true no-op (no SDK init, no network). `sentry` dep is crate-local —
+  not promoted to the workspace.
 
 ### Build infrastructure
 - Native amd64 CI runner for Android (`ubuntu-latest-xlarge`, no Rosetta).

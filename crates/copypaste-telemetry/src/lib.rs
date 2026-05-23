@@ -1,12 +1,12 @@
-//! `copypaste-telemetry` — opt-in, privacy-first error reporting (stub).
+//! `copypaste-telemetry` — opt-in, privacy-first error reporting.
 //!
 //! # Status
 //!
-//! 0.2-beta ships only the API surface and a no-op default. The
-//! [`SentryReporter`] (and any other backend) is intentionally a stub that
-//! returns [`TelemetryError::NotImplemented`] from [`ErrorReporter::report`]
-//! and is wired up in a later release. This lets downstream crates depend on
-//! the trait today without locking in a backend.
+//! 0.3-dev wires the real Sentry SDK behind [`SentryReporter`]. The default
+//! ([`ReportConsent::Disabled`]) still ships a [`NoopReporter`] and performs
+//! zero I/O; the network path is only reachable when the caller explicitly
+//! constructs a [`SentryReporter`] with a DSN **and** an `Enabled*` consent
+//! value.
 //!
 //! # Defaults
 //!
@@ -17,6 +17,21 @@
 //! - There is no implicit/automatic opt-in path. The caller (CLI / UI /
 //!   daemon) is responsible for surfacing a consent prompt and persisting
 //!   the choice. This crate never reads or writes any consent state.
+//! - The PII scrubber runs on every event *before* it reaches the Sentry
+//!   transport. With consent `Disabled` the report is dropped before the
+//!   scrubber too, so a disabled reporter is a true no-op.
+//!
+//! # Sentry SDK configuration
+//!
+//! When [`SentryReporter::new`] (or [`SentryReporter::with_scrubber`]) is
+//! used, the SDK is initialised with:
+//!
+//! - `send_default_pii = false` — Sentry's automatic IP / user-id capture is
+//!   off.
+//! - `traces_sample_rate = 0.0` — no performance tracing in beta.
+//! - `attach_stacktrace = false` — no implicit backtrace capture.
+//! - `release = sentry::release_name!()` — picked from `CARGO_PKG_VERSION` of
+//!   the crate that calls `init`, used only for grouping on the server.
 //!
 //! # Privacy
 //!
@@ -55,16 +70,16 @@ pub enum ReportConsent {
     EnabledFull,
 }
 
-/// Errors a reporter backend can surface. Stubs return
-/// [`Self::NotImplemented`] until the backend is wired up.
+/// Errors a reporter backend can surface.
 #[derive(Debug, Error)]
 pub enum TelemetryError {
     /// The backend exists in the type system but has no implementation yet.
+    /// Retained for API stability; the live Sentry backend never returns it.
     #[error("telemetry backend not implemented in this build")]
     NotImplemented,
-    /// The backend rejected the event (e.g. transport failure). Free-form
-    /// `String` so backends can include a static reason without dragging in
-    /// extra dependencies.
+    /// The backend rejected the event (e.g. transport failure, invalid DSN).
+    /// Free-form `String` so backends can include a static reason without
+    /// dragging in extra dependencies.
     #[error("telemetry backend failed: {0}")]
     BackendError(String),
 }
@@ -103,71 +118,172 @@ impl ErrorReporter for NoopReporter {
     }
 }
 
-/// Stub Sentry backend. Returns [`TelemetryError::NotImplemented`] from
-/// [`ErrorReporter::report`]. The constructor exists so downstream crates can
-/// pin to the type today; wiring lands in a later release.
+/// Live Sentry backend.
 ///
-/// Carries an [`Arc<PiiScrubber>`] so the redaction layer runs on every
-/// outbound event the moment a real backend lands. The stub still invokes
-/// the scrubber before tracing so any accidental PII in `error_class` is
-/// also kept out of local debug logs.
-#[derive(Debug, Clone)]
+/// Constructing a [`SentryReporter`] with [`Self::new`] (or
+/// [`Self::with_scrubber`]) initialises the `sentry` crate's global hub and
+/// holds the resulting [`sentry::ClientInitGuard`] for the lifetime of the
+/// reporter. Dropping the reporter flushes any in-flight events and shuts
+/// the transport down.
+///
+/// Every outbound report passes through [`PiiScrubber`] before reaching the
+/// transport. With [`ReportConsent::Disabled`] the report is dropped before
+/// the scrubber runs — the reporter then performs no work at all.
+///
+/// `SentryReporter` is *not* [`Clone`] because the underlying SDK guard owns
+/// the global client; share it behind an `Arc` if multiple owners are
+/// needed.
 pub struct SentryReporter {
     scrubber: Arc<PiiScrubber>,
+    consent: ReportConsent,
+    // The guard is `Option` so test constructors can omit it (the test
+    // harness in `sentry::test::with_captured_events` installs its own
+    // client on the current hub). The field is kept named `_guard` to
+    // signal that we hold it purely for its `Drop` side-effect.
+    _guard: Option<sentry::ClientInitGuard>,
 }
 
 impl SentryReporter {
-    /// Construct a stub [`SentryReporter`] with the default
-    /// [`PiiScrubber`]. Does not contact any network.
-    pub fn new() -> Self {
-        Self {
-            scrubber: Arc::new(PiiScrubber::default()),
-        }
+    /// Construct a [`SentryReporter`] that initialises the Sentry SDK with
+    /// the supplied DSN.
+    ///
+    /// The resulting client is configured to never auto-collect PII
+    /// (`send_default_pii = false`), to disable performance tracing
+    /// (`traces_sample_rate = 0.0`), and to never attach automatic
+    /// stacktraces. Holding the returned reporter keeps the global client
+    /// alive; dropping it flushes outstanding events and shuts the
+    /// transport down.
+    ///
+    /// Returns [`TelemetryError::BackendError`] if the SDK rejects the DSN
+    /// at construction time.
+    pub fn new(dsn: &str, consent: ReportConsent) -> Result<Self, TelemetryError> {
+        Self::with_scrubber(dsn, consent, Arc::new(PiiScrubber::default()))
     }
 
     /// Construct a [`SentryReporter`] with a caller-supplied scrubber. Use
     /// this when extra organisation-specific redaction patterns must be
     /// layered on top of the defaults.
-    pub fn with_scrubber(scrubber: Arc<PiiScrubber>) -> Self {
-        Self { scrubber }
-    }
-}
+    pub fn with_scrubber(
+        dsn: &str,
+        consent: ReportConsent,
+        scrubber: Arc<PiiScrubber>,
+    ) -> Result<Self, TelemetryError> {
+        // Parse the DSN up-front so a malformed value surfaces as a typed
+        // error rather than a silent panic deep inside `sentry::init`.
+        let dsn_parsed: sentry::types::Dsn = dsn
+            .parse()
+            .map_err(|e: sentry::types::ParseDsnError| {
+                TelemetryError::BackendError(format!("invalid Sentry DSN: {e}"))
+            })?;
 
-impl Default for SentryReporter {
-    fn default() -> Self {
-        Self::new()
+        let options = sentry::ClientOptions {
+            dsn: Some(dsn_parsed),
+            release: sentry::release_name!(),
+            // CRITICAL — privacy contract. None of these may flip without
+            // updating `docs/privacy/telemetry-policy.md` in the same
+            // commit.
+            send_default_pii: false,
+            traces_sample_rate: 0.0,
+            attach_stacktrace: false,
+            ..Default::default()
+        };
+
+        let guard = sentry::init(options);
+        Ok(Self {
+            scrubber,
+            consent,
+            _guard: Some(guard),
+        })
+    }
+
+    /// Construct a [`SentryReporter`] that does **not** initialise the
+    /// Sentry SDK. Intended exclusively for tests that wrap calls in
+    /// `sentry::test::with_captured_events` (which installs its own client
+    /// on the current hub). Production code MUST use [`Self::new`].
+    #[doc(hidden)]
+    pub fn for_testing(consent: ReportConsent, scrubber: Arc<PiiScrubber>) -> Self {
+        Self {
+            scrubber,
+            consent,
+            _guard: None,
+        }
     }
 }
 
 impl ErrorReporter for SentryReporter {
     fn report(&self, event: ReportableError) -> Result<(), TelemetryError> {
+        // Consent gate runs first — a disabled reporter performs zero work,
+        // not even scrubbing. This matches the privacy contract: the only
+        // observable difference between `Disabled` and a `NoopReporter`
+        // is the type name.
+        if matches!(self.consent, ReportConsent::Disabled) {
+            return Ok(());
+        }
+
         // Scrub *before* anything else touches the event so even the local
         // tracing line cannot accidentally surface raw PII to log sinks.
         let event = event.scrubbed(&self.scrubber);
-        // Trace at debug so accidental invocations during dev are visible
-        // without spamming production logs.
+
+        // Build the message body from the coarse, categorical fields on
+        // `ReportableError`. There is intentionally no free-form `context`
+        // / `message` field on the type — adding one requires a policy
+        // change (see `docs/privacy/telemetry-policy.md`).
+        let body = format!(
+            "{crate_name}@{crate_version} [{os:?}] {error_class}",
+            crate_name = event.crate_name,
+            crate_version = event.crate_version,
+            os = event.os,
+            error_class = event.error_class,
+        );
+
+        // `capture_message` is fire-and-forget; the SDK queues internally
+        // and the held guard flushes on drop. We swallow the returned UUID
+        // because the trait contract does not expose it.
+        let _ = sentry::capture_message(&body, sentry::Level::Error);
+
         tracing::debug!(
             crate_name = %event.crate_name,
             error_class = %event.error_class,
-            "SentryReporter stub invoked; not implemented in 0.2-beta"
+            "SentryReporter dispatched event"
         );
-        Err(TelemetryError::NotImplemented)
+        Ok(())
     }
 }
 
-/// Build a reporter for the given consent level.
+/// Build a reporter for the given consent level **without** initialising
+/// the Sentry SDK.
 ///
 /// Returns a boxed trait object so the caller can store it behind a single
 /// type regardless of the chosen backend. With [`ReportConsent::Disabled`]
-/// this is guaranteed to be a [`NoopReporter`] and to perform zero I/O.
+/// this returns a [`NoopReporter`] and performs zero I/O.
+///
+/// For any `Enabled*` consent value this still returns a [`NoopReporter`]
+/// because no DSN has been supplied. Use [`init_with_dsn`] (or construct a
+/// [`SentryReporter`] directly) to enable network reporting.
 pub fn init(consent: ReportConsent) -> Box<dyn ErrorReporter> {
+    let _ = consent; // future-proofing — variant may matter once minimal/full diverge
+    Box::new(NoopReporter::new())
+}
+
+/// Build a reporter for the given consent level, initialising the Sentry
+/// SDK with `dsn` if the user has opted in.
+///
+/// - [`ReportConsent::Disabled`] returns a [`NoopReporter`] regardless of
+///   the supplied DSN. No SDK initialisation happens, no network contact.
+/// - [`ReportConsent::EnabledMinimal`] / [`EnabledFull`](`ReportConsent::EnabledFull`)
+///   return a [`SentryReporter`] holding the SDK guard.
+///
+/// Returns [`TelemetryError::BackendError`] only when SDK initialisation
+/// fails (typically: malformed DSN).
+pub fn init_with_dsn(
+    consent: ReportConsent,
+    dsn: &str,
+) -> Result<Box<dyn ErrorReporter>, TelemetryError> {
     match consent {
-        ReportConsent::Disabled => Box::new(NoopReporter::new()),
-        // Both opt-in variants currently route to the stub Sentry backend.
-        // When a real backend lands, this match is the single place to swap
-        // implementations or to differentiate Minimal vs Full payloads.
+        ReportConsent::Disabled => Ok(Box::new(NoopReporter::new())),
         ReportConsent::EnabledMinimal | ReportConsent::EnabledFull => {
-            Box::new(SentryReporter::new())
+            let r = SentryReporter::new(dsn, consent)?;
+            Ok(Box::new(r))
         }
     }
 }
@@ -182,11 +298,35 @@ mod tests {
     }
 
     #[test]
-    fn init_disabled_returns_working_noop() {
-        let r = init(ReportConsent::Disabled);
+    fn init_without_dsn_returns_noop_for_any_consent() {
+        for consent in [
+            ReportConsent::Disabled,
+            ReportConsent::EnabledMinimal,
+            ReportConsent::EnabledFull,
+        ] {
+            let r = init(consent);
+            let evt = ReportableError::new(
+                "copypaste-core",
+                "0.3.0-dev",
+                "test.event",
+                OsTag::current(),
+            );
+            assert!(r.report(evt).is_ok());
+        }
+    }
+
+    #[test]
+    fn init_with_dsn_disabled_returns_noop() {
+        // A valid DSN structurally — we never reach the transport because
+        // consent is Disabled.
+        let r = init_with_dsn(
+            ReportConsent::Disabled,
+            "https://public@sentry.example/1",
+        )
+        .expect("disabled init never fails");
         let evt = ReportableError::new(
             "copypaste-core",
-            "0.2.0-beta.0",
+            "0.3.0-dev",
             "test.event",
             OsTag::current(),
         );
@@ -194,17 +334,14 @@ mod tests {
     }
 
     #[test]
-    fn init_enabled_returns_stub_that_errors() {
-        let r = init(ReportConsent::EnabledFull);
-        let evt = ReportableError::new(
-            "copypaste-core",
-            "0.2.0-beta.0",
-            "test.event",
-            OsTag::current(),
-        );
-        assert!(matches!(
-            r.report(evt),
-            Err(TelemetryError::NotImplemented)
-        ));
+    fn init_with_dsn_rejects_garbage() {
+        let result = init_with_dsn(ReportConsent::EnabledFull, "not-a-dsn");
+        // `Box<dyn ErrorReporter>` is not `Debug`, so we cannot use
+        // `expect_err`. Match on the discriminant directly.
+        match result {
+            Err(TelemetryError::BackendError(_)) => {}
+            Err(other) => panic!("expected BackendError, got {other:?}"),
+            Ok(_) => panic!("garbage DSN must be rejected"),
+        }
     }
 }

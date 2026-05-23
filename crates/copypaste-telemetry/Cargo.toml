@@ -15,3 +15,13 @@ tracing = { workspace = true }
 # PII scrubber patterns. Kept crate-local (not workspace) so the telemetry
 # crate's privacy surface owns its dependency boundary explicitly.
 regex = "1"
+# Sentry SDK — crate-local, NOT promoted to workspace so the telemetry
+# crate's outbound-network dependency stays isolated.
+# default-features disabled to avoid pulling reqwest's full feature set;
+# we re-enable only `transport` (reqwest + native-tls), `panic`, and `anyhow`.
+sentry = { version = "0.34", default-features = false, features = ["transport", "panic", "anyhow"] }
+
+[dev-dependencies]
+# `test` feature enables `sentry::test::with_captured_events` — required for
+# the in-memory transport used by `tests/sentry_backend.rs`.
+sentry = { version = "0.34", default-features = false, features = ["test"] }

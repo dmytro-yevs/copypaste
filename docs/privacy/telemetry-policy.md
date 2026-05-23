@@ -1,6 +1,6 @@
 # CopyPaste Telemetry Policy
 
-_Last updated: 2026-05-23 (0.2.0-beta)_
+_Last updated: 2026-05-23 (0.3.0-dev)_
 
 CopyPaste ships an **opt-in, privacy-first** error reporter. This document is
 the authoritative description of what the reporter does, what it sends, and
@@ -12,21 +12,24 @@ the user's rights. It binds the implementation in
 - Reporting is **OFF by default**. We never enable it for you.
 - We never send clipboard contents, file paths, device IDs, IPs, account
   emails, or any free-form text.
-- In 0.2-beta no events leave your machine at all — the Sentry backend is a
-  stub. The API surface ships so downstream crates can pin to it.
+- In 0.3-dev the real Sentry SDK is wired behind `SentryReporter`. It only
+  ever fires when the caller passes an `Enabled*` consent value **and** a
+  DSN. The default path (`init(consent)` with no DSN, or `Disabled` with a
+  DSN) still performs zero I/O.
 
 ## Defaults & consent
 
 The reporter accepts one of three consent values:
 
-| Value             | Behaviour in 0.2-beta                                            |
-|-------------------|------------------------------------------------------------------|
-| `Disabled`        | Default. Returns a `NoopReporter` that discards every event.     |
-| `EnabledMinimal`  | Returns a `SentryReporter` stub. Reports fail with `NotImplemented`. |
-| `EnabledFull`     | Same as `EnabledMinimal` in 0.2-beta; reserved for future fields.    |
+| Value             | Behaviour in 0.3-dev                                                                 |
+|-------------------|--------------------------------------------------------------------------------------|
+| `Disabled`        | Default. Returns a `NoopReporter` that discards every event. No SDK init, no network. |
+| `EnabledMinimal`  | Returns a `SentryReporter` that dispatches scrubbed events to the configured DSN.    |
+| `EnabledFull`     | Same wire shape as `EnabledMinimal` in 0.3-dev; reserved for future opt-in extras.   |
 
-A real backend will only ship in a later release. When it does, this
-document will be updated _before_ the code is enabled.
+`init(consent)` returns `NoopReporter` for every consent value because no
+DSN is supplied. Network reporting is only reachable via `init_with_dsn`
+(or by constructing `SentryReporter` directly) with an `Enabled*` consent.
 
 The user-facing surfaces (CLI, UI, daemon) are responsible for surfacing the
 consent prompt and persisting the choice. The crate itself never reads or
@@ -56,15 +59,60 @@ updating this policy first.
 - Crash stack traces, backtraces, or panic messages.
 - Network endpoint URLs.
 
+## Backend
+
+When `EnabledMinimal` or `EnabledFull` is selected **and** a DSN is
+provided, events are dispatched via the official `sentry` Rust SDK
+(v0.34, crate-local — not promoted to the workspace) to the configured
+Sentry endpoint (sentry.io SaaS, or any Sentry-compatible relay if the
+DSN points elsewhere).
+
+SDK configuration is locked at construction time:
+
+- `send_default_pii = false` — Sentry's automatic IP / user-id capture
+  is **off**.
+- `traces_sample_rate = 0.0` — no performance / tracing samples.
+- `attach_stacktrace = false` — no automatic backtrace capture.
+- `release = sentry::release_name!()` — server-side grouping only.
+
+The PII scrubber runs **before** the SDK is consulted. With
+`Disabled` the report is dropped before both the scrubber and the SDK,
+so a disabled reporter is observably a true no-op.
+
+## What is sent (wire shape)
+
+When opted in, each `report()` produces exactly one Sentry message of
+level `Error` with a body of the form:
+
+```
+<crate_name>@<crate_version> [<os>] <error_class>
+```
+
+That string is the entirety of the payload. Concretely:
+
+- `crate_name` — e.g. `copypaste-daemon`
+- `crate_version` — e.g. `0.3.0-dev`
+- `os` — coarse tag: `MacOs`, `Linux`, `Android`, `Ios`, `Unknown`
+  (Windows is frozen — see ADR-012). No version, no build, no hostname.
+- `error_class` — developer-defined taxonomy string, scrubbed through
+  `PiiScrubber` before send.
+
+No IP address, no user identifier, no timestamp at finer than the hour
+Sentry itself records server-side. No breadcrumbs, no contexts, no
+attachments.
+
 ## Retention & sharing
 
-Until the Sentry backend is implemented, retention is **N/A** because no
-data leaves the device. When the backend ships, this section will spell out:
-
-- Retention window (target: 30 days).
-- Storage location and provider.
-- Data subject rights (access, deletion).
-- Whether any sub-processor receives events.
+- **Storage**: Sentry SaaS (sentry.io) or the operator-configured
+  Sentry-compatible endpoint, indexed by the DSN.
+- **Retention window**: target 30 days. The exact retention is governed
+  by the Sentry project settings at the configured endpoint.
+- **Data subject rights**: because no user identifier is sent, deletion
+  requests must be scoped by time window or by the originating crate +
+  version combination. Reach out via the issue tracker.
+- **Sub-processors**: Sentry Inc. is the sole sub-processor when the
+  default sentry.io endpoint is used. Operators using a self-hosted
+  endpoint take on that responsibility themselves.
 
 ## PII scrubber
 
@@ -105,6 +153,7 @@ event without inspection or transmission.
 - PII scrubber: `crates/copypaste-telemetry/src/scrubber.rs`
 - Opt-out tests: `crates/copypaste-telemetry/tests/opt_out.rs`
 - PII scrubber tests: `crates/copypaste-telemetry/tests/pii_scrubber.rs`
+- Sentry backend tests: `crates/copypaste-telemetry/tests/sentry_backend.rs`
 
 If the source ever diverges from this document, the source wins and this
 document is a bug — please open an issue.
