@@ -23,7 +23,12 @@ env:
 jobs:
   build-android-ndk:
     name: Build Android .so (cargo-ndk)
-    runs-on: ubuntu-latest
+    # Native amd64 larger runner (16 GB RAM, 4x CPU). Avoids Rosetta
+    # emulation on Apple Silicon self-hosted setups (5-10x overhead) and
+    # roughly halves NDK link time vs ubuntu-latest. Switch back to
+    # `ubuntu-latest` if `ubuntu-latest-xlarge` is not provisioned for the
+    # org (paid GitHub larger runner). See docs/release/build-perf.md.
+    runs-on: ubuntu-latest-xlarge
 
     steps:
       - uses: actions/checkout@v4

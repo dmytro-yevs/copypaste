@@ -102,7 +102,11 @@ jobs:
 
   nightly-android:
     name: Nightly Android (arm64-v8a)
-    runs-on: ubuntu-latest
+    # Native amd64 larger runner (16 GB RAM, 4x CPU). Docker build of the
+    # Android NDK image + cargo cross-compile is RAM-heavy; the larger
+    # runner roughly halves cold build time. Falls back to `ubuntu-latest`
+    # if the larger runner is not provisioned. See docs/release/build-perf.md.
+    runs-on: ubuntu-latest-xlarge
     continue-on-error: true
     outputs:
       status: ${{ steps.outcome.outputs.status }}
