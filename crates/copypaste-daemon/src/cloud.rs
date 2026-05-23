@@ -436,6 +436,18 @@ async fn push_loop(
     // spin-busy when the remote is down).
     let mut retry_queue: VecDeque<ClipboardItem> = VecDeque::new();
 
+    // Audit-concurrency HIGH #1 — `broadcast::Receiver::recv` is documented
+    // cancellation-safe, BUT pairing it inside `select!` with the network
+    // call below means that if `shutdown.notified()` fires AFTER the item is
+    // dequeued from the broadcast buffer but BEFORE the await returns from
+    // `push_item_with_retries`, the item is silently dropped. Fix: pin the
+    // `recv` future and ONLY drop the item once it's been moved into the
+    // retry queue (which we treat as the "in-flight" buffer). The shutdown
+    // path then checks the queue length so the operator at least sees what
+    // was lost.
+    let mut next = rx.recv();
+    tokio::pin!(next);
+
     loop {
         // Drain the retry queue first — if we made progress on backlog before
         // touching new items, recovery is observable and old items are not
@@ -461,7 +473,10 @@ async fn push_loop(
                     tokio::select! {
                         _ = tokio::time::sleep(PUSH_INITIAL_BACKOFF) => {}
                         _ = shutdown.notified() => {
-                            tracing::info!("cloud-sync push_loop: shutdown received during retry drain");
+                            tracing::info!(
+                                "cloud-sync push_loop: shutdown received during retry drain ({} queued items not flushed)",
+                                retry_queue.len(),
+                            );
                             return;
                         }
                     }
@@ -471,22 +486,46 @@ async fn push_loop(
         }
 
         tokio::select! {
-            result = rx.recv() => {
+            // biased: prefer shutdown over receive. This is belt-and-braces —
+            // even with the pinned future, a tie should resolve in favour of
+            // tearing down promptly instead of accepting one more item.
+            biased;
+            _ = shutdown.notified() => {
+                tracing::info!(
+                    "cloud-sync push_loop: shutdown received ({} queued items not flushed)",
+                    retry_queue.len(),
+                );
+                break;
+            }
+            result = &mut next => {
+                // Re-arm the receiver for the next iteration BEFORE doing any
+                // network work, so the broadcast buffer keeps draining and we
+                // never lose the dequeued item to a cancellation.
                 match result {
                     Ok(item) => {
-                        match push_item_with_retries(&client, &rest_url, &config, &bearer, &item).await {
-                            Ok(()) => tracing::debug!("cloud-sync pushed id={}", item.id),
-                            Err(e) => {
-                                tracing::warn!(
-                                    "cloud-sync push failed for id={}: {e}; queuing for retry",
-                                    item.id
-                                );
-                                enqueue_for_retry(&mut retry_queue, item);
+                        // Step 1: park the item in the retry queue so it is
+                        // owned by us, not by the broadcast buffer.
+                        enqueue_for_retry(&mut retry_queue, item);
+                        next.set(rx.recv());
+                        // Step 2: attempt the push from the queue. If shutdown
+                        // fires now, the item stays in the queue and is
+                        // surfaced in the shutdown log above.
+                        if let Some(item) = retry_queue.pop_front() {
+                            match push_item_with_retries(&client, &rest_url, &config, &bearer, &item).await {
+                                Ok(()) => tracing::debug!("cloud-sync pushed id={}", item.id),
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "cloud-sync push failed for id={}: {e}; queuing for retry",
+                                        item.id
+                                    );
+                                    enqueue_for_retry(&mut retry_queue, item);
+                                }
                             }
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("cloud-sync push_loop: lagged by {n} items");
+                        next.set(rx.recv());
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         tracing::info!(
@@ -496,13 +535,6 @@ async fn push_loop(
                         break;
                     }
                 }
-            }
-            _ = shutdown.notified() => {
-                tracing::info!(
-                    "cloud-sync push_loop: shutdown received ({} queued items not flushed)",
-                    retry_queue.len(),
-                );
-                break;
             }
         }
     }
