@@ -1035,13 +1035,13 @@ impl IpcServer {
 
     /// Write a clipboard item's content back to NSPasteboard (macOS) or no-op on other platforms.
     fn write_to_pasteboard(item: &copypaste_core::ClipboardItem) -> Result<(), String> {
-        let content = match &item.content {
-            Some(bytes) => bytes,
-            None => return Err("item has no content".to_string()),
-        };
-
         #[cfg(target_os = "macos")]
         {
+            let content = match &item.content {
+                Some(bytes) => bytes,
+                None => return Err("item has no content".to_string()),
+            };
+
             use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
             use objc2_foundation::NSString;
 
