@@ -1,7 +1,9 @@
 mod schema;
 pub mod db;
 pub mod items;
+pub mod pool;
 pub use db::{Database, DbError};
+pub use pool::{open_pool, PoolError, SqlitePool};
 pub use items::{
     ClipboardItem, ItemsError,
     insert_item, get_page, delete_expired, delete_item, count_items,
