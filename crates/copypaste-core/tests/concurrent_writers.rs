@@ -53,7 +53,7 @@ async fn concurrent_writers_no_lost_updates() {
                 // Hold the mutex only for the single insert; this is exactly
                 // how the daemon serialises writes across subsystems.
                 let guard = db.lock().await;
-                insert_item(&*guard, &item).expect("insert under contention");
+                insert_item(&guard, &item).expect("insert under contention");
             }
         });
         handles.push(handle);
@@ -66,7 +66,7 @@ async fn concurrent_writers_no_lost_updates() {
     // --- Assertion 1: no lost updates ---
     let total = {
         let guard = shared.lock().await;
-        count_items(&*guard).expect("count")
+        count_items(&guard).expect("count")
     };
     assert_eq!(
         total,
