@@ -1,0 +1,22 @@
+# CodeOwners for CopyPaste
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-security/customizing-your-repository/about-code-owners
+#
+# Each line is a file pattern followed by one or more owners.
+# Later matches take precedence over earlier ones.
+
+# Default owner — required reviewer for everything
+*                                   @dmitriy-evseev
+
+# Build, CI, release tooling
+/.github/                           @dmitriy-evseev
+/scripts/                           @dmitriy-evseev
+/Cargo.toml                         @dmitriy-evseev
+/Cargo.lock                         @dmitriy-evseev
+
+# Architecture decision records
+/docs/adr/                          @dmitriy-evseev
+
+# Security-sensitive crates
+/crates/copypaste-core/src/crypto/  @dmitriy-evseev
+/crates/copypaste-daemon/           @dmitriy-evseev
+/crates/copypaste-relay/            @dmitriy-evseev

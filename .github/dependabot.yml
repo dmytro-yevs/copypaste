@@ -1,0 +1,54 @@
+version: 2
+updates:
+  # Rust workspace — weekly
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "rust"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      rust-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions — monthly
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+
+  # Android Gradle deps — monthly
+  - package-ecosystem: "gradle"
+    directory: "/android"
+    schedule:
+      interval: "monthly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "android"
+    commit-message:
+      prefix: "chore(deps-android)"
+      include: "scope"

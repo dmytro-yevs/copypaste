@@ -1,0 +1,102 @@
+name: Bug report
+description: Something in CopyPaste is broken or misbehaving
+title: "[bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The more detail you provide, the faster we can reproduce and fix it.
+
+        **Do not include clipboard contents, encryption keys, or other secrets in this issue.** Logs should be scrubbed before pasting.
+        For security issues, use the [private security advisory](https://github.com/dmityur/CopyPaste/security/advisories/new) instead.
+
+  - type: input
+    id: version
+    attributes:
+      label: CopyPaste version
+      description: Output of `copypaste --version` or short git SHA (`git rev-parse --short HEAD`).
+      placeholder: "v0.2.0-beta or a1b2c3d"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      description: Where did you hit the bug?
+      multiple: true
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Android
+        - Windows
+        - Linux
+        - Relay server
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      description: e.g. macOS 15.3, Android 14, Windows 11 23H2
+      placeholder: "macOS 15.3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal numbered steps that trigger the bug.
+      placeholder: |
+        1. Start daemon with `copypaste daemon`
+        2. Copy text on macOS
+        3. Open Android app, observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What happened instead? Include error messages verbatim.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: daemon-status
+    attributes:
+      label: Daemon status at time of bug
+      options:
+        - Running (foreground)
+        - Running (background / launchd / systemd)
+        - Not running
+        - Crashed
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Relevant lines from `/tmp/copypaste-daemon.log` (macOS), `logcat` (Android), or your platform's equivalent.
+        Strip clipboard contents, device IDs, and tokens before pasting.
+      render: shell
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Additional context
+      description: Screenshots, related issues, suspected commit, anything else.
