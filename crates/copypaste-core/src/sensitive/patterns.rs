@@ -29,7 +29,11 @@ pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[
     ("gcp_oauth",            r"GOCSPX-[A-Za-z0-9_-]{28}",                                                   0, 0.99),
     ("ssh_private_key",      r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |)?PRIVATE KEY-----",                    0, 0.99),
     ("generic_bearer",       r"(?i)\bBearer\s+[A-Za-z0-9\-._~+/]{20,}",                                    0, 0.80),
-    ("generic_password_kv",  r"(?i)(?:password|passwd|secret|api_key|apikey|auth_token)\s*[:=]\s*\S{6,}",  0, 0.75),
+    // generic_password_kv — captures key/value pairs; the matched value is post-validated
+    // by `is_credential_value_strong` to suppress FP on benign prose like
+    // "secret = foo" / "password: nope" / "// api_key=demo".
+    // The capture group around the value lets the validator inspect only the value bytes.
+    ("generic_password_kv",  r"(?i)(?:password|passwd|secret|api_key|apikey|auth_token)\s*[:=]\s*(\S{6,})",  0, 0.75),
     ("jwt",                  r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+",                        0, 0.95),
 
     // ── Financial ─────────────────────────────────────────────────────────────

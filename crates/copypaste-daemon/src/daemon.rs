@@ -282,6 +282,16 @@ async fn handle_tick(
                 let _ = new_item_tx.send(item);
             }
         }
+        Ok(Some(ClipboardContent::SkippedBatch(missed))) => {
+            // Rapid clipboard burst — the monitor already logged the gap;
+            // we just bump telemetry here and let the next poll capture
+            // the now-current pasteboard value.
+            tracing::warn!(
+                missed,
+                "clipboard rapid-burst: {} intermediate updates lost between polls",
+                missed
+            );
+        }
         Ok(None) => {}
         Err(e) => tracing::warn!("clipboard poll error: {e}"),
     }
@@ -295,7 +305,16 @@ async fn handle_text(
 ) -> Option<ClipboardItem> {
     let is_sensitive = detect(&text).is_some();
 
-    let (nonce, ciphertext) = encrypt_item(text.as_bytes(), local_key);
+    // NOTE: encrypt_item now returns Result (crypto wave). One-line unblock
+    // so the daemon crate compiles for clipboard test verification; the
+    // crypto wave owner should fold this into their handler-error pass.
+    let (nonce, ciphertext) = match encrypt_item(text.as_bytes(), local_key) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("encrypt_item failed for text: {e}");
+            return None;
+        }
+    };
     let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
     item.is_sensitive = is_sensitive;
 
@@ -332,21 +351,11 @@ async fn handle_image(
     local_key: &[u8; 32],
     config: &AppConfig,
 ) -> Option<ClipboardItem> {
-    // Derive a stable file_id from the raw bytes hash (first 16 bytes of SHA-256).
-    // This gives a deterministic ID for deduplication without storing plaintext.
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    raw_bytes.hash(&mut hasher);
-    let hash64 = hasher.finish();
-    let mut file_id = [0u8; 16];
-    file_id[..8].copy_from_slice(&hash64.to_be_bytes());
-    // XOR with timestamp to ensure uniqueness across same-content pastes
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_nanos() as u64;
-    file_id[8..].copy_from_slice(&ts.to_be_bytes());
+    // Derive a stable file_id from SHA-256(raw_bytes)[..16] — a 128-bit
+    // collision-resistant content hash. This is deterministic so identical
+    // images dedup naturally, and replaces the prior `DefaultHasher XOR
+    // nanos` scheme (Wave 2.1 security LOW #19).
+    let file_id = crate::clipboard::image_content_hash(&raw_bytes);
 
     match encode_image(&raw_bytes, local_key, &file_id) {
         Ok((meta, chunks)) => {

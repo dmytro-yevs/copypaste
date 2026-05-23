@@ -5,6 +5,7 @@ pub mod redact;
 pub use detector::{
     detect, is_sensitive_app,
     luhn_valid,
+    nfkc_normalize,
     PatternMatch,
     SensitiveCategory,
     SensitiveDetector,
