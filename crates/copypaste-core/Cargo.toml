@@ -32,6 +32,8 @@ image.workspace = true
 tempfile = ">=3.0, <3.14"
 criterion.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+hkdf.workspace = true
+sha2.workspace = true
 
 [[bench]]
 name = "crypto"
