@@ -28,6 +28,23 @@ fn key_pragma(key: &[u8; 32]) -> String {
     format!("PRAGMA key = \"x'{}'\"", hex)
 }
 
+/// Per-connection PRAGMAs that must follow `PRAGMA key`. These are NOT
+/// persisted to the database file — every fresh `Connection` must apply them
+/// again. Skipping these is the root cause of two production issues:
+///   * Missing `busy_timeout` ⇒ UI reader and daemon writer race instantly,
+///     surfacing as silent `SQLITE_BUSY`.
+///   * Missing `foreign_keys=ON` ⇒ ON DELETE CASCADE silently no-ops.
+///
+/// Keep this in sync with `pool::open_pool` and `schema::apply_migrations`
+/// — every code path that opens a SQLCipher connection must apply the same
+/// set so behaviour is uniform across UI reader, daemon writer, and the
+/// migration pass.
+pub(crate) const CONNECTION_PRAGMAS: &str = "\
+PRAGMA busy_timeout = 5000;\n\
+PRAGMA synchronous = NORMAL;\n\
+PRAGMA foreign_keys = ON;\n\
+PRAGMA temp_store = MEMORY;\n";
+
 impl Database {
     /// Open (or create) an encrypted database at `path`.
     ///
@@ -51,6 +68,12 @@ impl Database {
 
         // SQLCipher requirement: key pragma MUST be the very first statement.
         conn.execute_batch(&key_pragma(key))?;
+
+        // Per-connection pragmas (busy_timeout, synchronous, foreign_keys,
+        // temp_store). Run AFTER the key but BEFORE the validation read so
+        // single-connection callers (e.g. the daemon) get the same lock /
+        // foreign-key behaviour as pooled callers.
+        conn.execute_batch(CONNECTION_PRAGMAS)?;
 
         // Validate the key by reading the schema table.
         // With a correct key (or a newly-created empty file): returns 0 or N.
@@ -90,6 +113,7 @@ impl Database {
                                 OpenFlags::SQLITE_OPEN_READ_WRITE,
                             )?;
                             enc.execute_batch(&key_pragma(key))?;
+                            enc.execute_batch(CONNECTION_PRAGMAS)?;
                             apply_migrations(&enc)?;
                             Ok(Self { conn: enc })
                         } else {

@@ -48,9 +48,16 @@ ALTER TABLE clipboard_items \
 pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
     // Connection-level pragmas. These are NOT part of a migration and MUST
     // run before BEGIN (PRAGMA journal_mode is a no-op inside a transaction).
+    //
+    // Mirrors `db::CONNECTION_PRAGMAS` and `pool::open_pool`'s `with_init`
+    // — every code path that opens a connection must set these so behaviour
+    // is uniform across UI reader, daemon writer, and the migration pass.
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
     conn.execute_batch(&format!("PRAGMA cache_size=-{};", 8 * 1024))?;
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+    conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+    conn.execute_batch("PRAGMA synchronous=NORMAL;")?;
+    conn.execute_batch("PRAGMA temp_store=MEMORY;")?;
 
     let current_version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
