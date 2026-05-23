@@ -94,3 +94,20 @@ futures-util = "0.3"
 # Slint GUI toolkit (1.8 required for export re-export and modern syntax)
 slint = "=1.8.0"
 slint-build = "=1.8.0"
+
+# ---- Release profiles (beta-bonus: strip + fat LTO + panic=abort) -----------
+# release: smallest fast binary for distribution. fat LTO + 1 codegen unit
+# maximises optimisation across crates; strip drops debug symbols; panic=abort
+# removes unwinding tables. ~30-40% smaller binaries vs default release.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+# release-size: same as release but optimises for size (opt-level=z) instead of speed.
+# Use when binary footprint matters more than throughput (e.g. mobile, embedded).
+[profile.release-size]
+inherits = "release"
+opt-level = "z"
