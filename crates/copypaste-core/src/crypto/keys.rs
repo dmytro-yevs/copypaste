@@ -247,13 +247,13 @@ impl DeviceKeypair {
 
     /// Derives a 32-byte symmetric key for local-only storage from this device's secret.
     /// Never transmitted — only used to encrypt items stored on this device.
-    pub fn local_enc_key(&self) -> [u8; 32] {
+    pub fn local_enc_key(&self) -> zeroize::Zeroizing<[u8; 32]> {
         let ikm: zeroize::Zeroizing<[u8; 32]> = zeroize::Zeroizing::new(self.secret.to_bytes());
         let hk = Hkdf::<Sha256>::new(Some(HKDF_SALT_V1), ikm.as_ref());
         let mut key = [0u8; 32];
         hk.expand(b"copypaste-local-storage-v1", &mut key)
             .expect("HKDF expand: output length 32 is always valid for SHA-256");
-        key
+        zeroize::Zeroizing::new(key)
     }
 }
 
@@ -345,7 +345,7 @@ mod tests {
         let alice = DeviceKeypair::generate();
         let bob = DeviceKeypair::generate();
         let net_key = alice.derive_enc_key(&bob.public_key_bytes(), "a", "b");
-        assert_ne!(alice.local_enc_key(), net_key);
+        assert_ne!(*alice.local_enc_key(), net_key);
     }
 
     /// Snapshot test: HKDF is keyed with the versioned salt `HKDF_SALT_V1`.
@@ -531,6 +531,6 @@ mod tests {
         let secret = kp.secret_key_bytes();
         let instance_key = kp.local_enc_key();
         let free_fn_key = derive_storage_key_v1(&secret);
-        assert_eq!(instance_key, free_fn_key);
+        assert_eq!(*instance_key, free_fn_key);
     }
 }

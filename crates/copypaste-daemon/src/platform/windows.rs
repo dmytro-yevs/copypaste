@@ -31,7 +31,7 @@ pub struct WindowsKeystoreBackend;
 impl KeystoreBackend for WindowsKeystoreBackend {
     type Error = DpapiError;
 
-    fn load_or_create(&self, _service: &str, _account: &str) -> Result<[u8; 32], DpapiError> {
+    fn load_or_create(&self, _service: &str, _account: &str) -> Result<zeroize::Zeroizing<[u8; 32]>, DpapiError> {
         unimplemented!("Windows DPAPI keystore — Phase 5a")
     }
 

@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "lsp-rust": {
+      "type": "stdio",
+      "command": "/Users/dmytro/go/bin/mcp-language-server",
+      "args": [
+        "--workspace",
+        "/Users/dmytro/Documents/CopyPaste",
+        "--lsp",
+        "/Users/dmytro/.cargo/bin/rust-analyzer"
+      ],
+      "env": {}
+    }
+  }
+}

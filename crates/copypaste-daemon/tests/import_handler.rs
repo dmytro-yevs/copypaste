@@ -41,13 +41,13 @@ async fn start_server() -> (tempfile::TempDir, std::path::PathBuf) {
     let server = IpcServer::new(
         db,
         private_mode,
-        std::sync::Arc::new([0u8; 32]),
+        std::sync::Arc::new(zeroize::Zeroizing::new([0u8; 32])),
         std::sync::Arc::new([0u8; 32]),
     );
 
     let sock_for_task = sock.clone();
     tokio::spawn(async move {
-        server.serve(&sock_for_task).await.ok();
+        server.serve(&sock_for_task, tokio_util::sync::CancellationToken::new()).await.ok();
     });
 
     // Give the listener a moment to bind before the first connect attempt.

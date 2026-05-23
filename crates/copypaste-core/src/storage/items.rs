@@ -43,6 +43,14 @@ pub struct ClipboardItem {
     ///   2 = v2 HKDF family (HKDF-SHA512 + per-pair salt) — used for all new rows
     /// Rows at version 1 are swept to version 2 by `migration_v4_sweep_resumable`.
     pub key_version: u8,
+    /// Whether the item has been explicitly pinned by the user.
+    ///
+    /// Pinned items are excluded from both the TTL prune (`delete_expired`,
+    /// `delete_sensitive_expired`) and the history-limit prune
+    /// (`prune_history` in the daemon). Set via `pin_item`; cleared via
+    /// `unpin_item`. Schema version ≥ 7 stores this as `pinned INTEGER NOT
+    /// NULL DEFAULT 0` in `clipboard_items`.
+    pub pinned: bool,
 }
 
 impl ClipboardItem {
@@ -67,6 +75,7 @@ impl ClipboardItem {
             content_hash: None,
             origin_device_id: String::new(),
             key_version: ITEM_KEY_VERSION_CURRENT as u8,
+            pinned: false,
         }
     }
 
@@ -97,6 +106,7 @@ impl ClipboardItem {
             content_hash: None,
             origin_device_id: String::new(),
             key_version: ITEM_KEY_VERSION_CURRENT as u8,
+            pinned: false,
         }
     }
 }
@@ -121,8 +131,8 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+          content_hash, origin_device_id, key_version, pinned)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         params![
             item.id,
             item.item_id,
@@ -139,6 +149,7 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
             item.content_hash,
             item.origin_device_id,
             ITEM_KEY_VERSION_CURRENT,
+            item.pinned as i64,
         ],
     )?;
     Ok(())
@@ -195,8 +206,8 @@ pub fn insert_item_with_fts(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+          content_hash, origin_device_id, key_version, pinned)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         params![
             item.id,
             item.item_id,
@@ -213,6 +224,7 @@ pub fn insert_item_with_fts(
             item.content_hash,
             item.origin_device_id,
             ITEM_KEY_VERSION_CURRENT,
+            item.pinned as i64,
         ],
     );
 
@@ -331,7 +343,7 @@ pub fn get_page(
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version
+                content_hash, origin_device_id, key_version, pinned
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
@@ -359,7 +371,7 @@ pub fn get_page_meta(
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, NULL AS content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version
+                content_hash, origin_device_id, key_version, pinned
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
@@ -370,7 +382,7 @@ pub fn get_page_meta(
 
 pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
     let changed = db.conn().execute(
-        "DELETE FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1",
+        "DELETE FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1 AND pinned = 0",
         params![now_ms],
     )?;
     Ok(changed)
@@ -397,10 +409,24 @@ pub fn delete_item(db: &Database, id: &str) -> Result<(), ItemsError> {
     Ok(())
 }
 
-/// Remove expiry from an item so it's never auto-deleted.
+/// Pin an item so it is never auto-deleted by TTL or history-limit prunes.
+///
+/// Sets `pinned = 1` and clears `expires_at` so the item survives both
+/// `delete_expired` and `prune_history`.
 pub fn pin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
     db.conn().execute(
-        "UPDATE clipboard_items SET expires_at = NULL WHERE id = ?1",
+        "UPDATE clipboard_items SET pinned = 1, expires_at = NULL WHERE id = ?1",
+        rusqlite::params![id],
+    )?;
+    Ok(())
+}
+
+/// Unpin a previously pinned item, restoring normal TTL and history-limit
+/// behaviour. Sets `pinned = 0`; `expires_at` remains `NULL` unless the
+/// caller explicitly sets a new expiry.
+pub fn unpin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
+    db.conn().execute(
+        "UPDATE clipboard_items SET pinned = 0 WHERE id = ?1",
         rusqlite::params![id],
     )?;
     Ok(())
@@ -577,7 +603,7 @@ pub fn search_items(
     let mut stmt = db.conn().prepare_cached(
         "SELECT ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref,
                 ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at,
-                ci.app_bundle_id, ci.content_hash, ci.origin_device_id, ci.key_version
+                ci.app_bundle_id, ci.content_hash, ci.origin_device_id, ci.key_version, ci.pinned
          FROM clipboard_fts fts
          JOIN clipboard_items ci ON ci.id = fts.id
          WHERE clipboard_fts MATCH ?1
@@ -609,6 +635,7 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
         content_hash: row.get(12)?,
         origin_device_id: row.get(13)?,
         key_version: row.get::<_, i64>(14)? as u8,
+        pinned: row.get::<_, i64>(15)? != 0,
     })
 }
 

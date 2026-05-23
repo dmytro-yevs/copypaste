@@ -73,14 +73,14 @@ async fn boot_server() -> (Arc<Mutex<Database>>, tempfile::TempDir, std::path::P
     let server = IpcServer::new(
         db.clone(),
         private_mode,
-        std::sync::Arc::new([0u8; 32]),
+        std::sync::Arc::new(zeroize::Zeroizing::new([0u8; 32])),
         std::sync::Arc::new([0u8; 32]),
     );
     let sock_for_task = sock.clone();
     tokio::spawn(async move {
         // `serve()` returns Err on bind failure; tests fail fast via the
         // connect timeout below if that ever happens.
-        let _ = server.serve(&sock_for_task).await;
+        let _ = server.serve(&sock_for_task, tokio_util::sync::CancellationToken::new()).await;
     });
 
     // Wait until the socket is connectable so the first request isn't racing

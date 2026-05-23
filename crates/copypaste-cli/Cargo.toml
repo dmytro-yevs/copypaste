@@ -22,6 +22,7 @@ copypaste-ipc = { path = "../copypaste-ipc" }
 # us avoid an "IPC vacuum" method that would lock the daemon for seconds.
 copypaste-core = { path = "../copypaste-core" }
 rusqlite.workspace = true
+zeroize = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # beta-bonus (vacuum): fetch the device secret key from the macOS Keychain so

@@ -47,6 +47,7 @@ fi
 
 BIN_CLI="target/release/copypaste"
 BIN_DAEMON="target/release/copypaste-daemon"
+BIN_UI="target/release/copypaste-ui"
 
 if [[ ! -f "$BIN_CLI" ]]; then
     echo "ERROR: $BIN_CLI not found — run 'cargo build --release --workspace' first." >&2
@@ -54,6 +55,10 @@ if [[ ! -f "$BIN_CLI" ]]; then
 fi
 if [[ ! -f "$BIN_DAEMON" ]]; then
     echo "ERROR: $BIN_DAEMON not found — run 'cargo build --release --workspace' first." >&2
+    exit 1
+fi
+if [[ ! -f "$BIN_UI" ]]; then
+    echo "ERROR: $BIN_UI not found — run 'cargo build --release --workspace' first." >&2
     exit 1
 fi
 
@@ -77,6 +82,9 @@ else
     echo "==> Building minimal .app bundle in $APP_DIR"
     rm -rf "$APP_DIR"
     mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
+    # copypaste-ui is CFBundleExecutable — the process `open` launches.
+    # copypaste-daemon is a sibling binary started by the UI via launchd.
+    cp "$BIN_UI"     "$APP_DIR/Contents/MacOS/"
     cp "$BIN_DAEMON" "$APP_DIR/Contents/MacOS/"
     cp "$BIN_CLI"    "$APP_DIR/Contents/MacOS/"
     cat > "$APP_DIR/Contents/Info.plist" <<PLIST
@@ -87,7 +95,7 @@ else
   <key>CFBundleName</key><string>CopyPaste</string>
   <key>CFBundleVersion</key><string>${VERSION}</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-  <key>CFBundleExecutable</key><string>copypaste-daemon</string>
+  <key>CFBundleExecutable</key><string>copypaste-ui</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
@@ -126,12 +134,24 @@ if [[ -x "scripts/make_dmg.sh" ]]; then
     mv -f "$SRC_DMG" "$OUT_DMG"
 else
     echo "==> Building DMG via hdiutil → $OUT_DMG"
-    rm -f "$OUT_DMG"
+    # Two-step: stage with /Applications symlink → create writable → convert compressed.
+    STAGING_DIR="$(mktemp -d)"
+    trap 'rm -rf "$STAGING_DIR"' EXIT
+    cp -R "$APP_DIR" "$STAGING_DIR/"
+    # Strip quarantine so files baked into the DMG image carry no xattr.
+    # Without this, Finder propagates com.apple.quarantine to the /Applications
+    # copy on drag-install, causing Gatekeeper to block ad-hoc-signed binaries.
+    xattr -cr "$STAGING_DIR/CopyPaste.app" 2>/dev/null || true
+    ln -s /Applications "$STAGING_DIR/Applications"
+    RW_DMG="${OUT_DMG%.dmg}-rw.dmg"
+    rm -f "$OUT_DMG" "$RW_DMG"
     hdiutil create \
         -volname "${APP_NAME} v${VERSION}" \
-        -srcfolder "$APP_DIR" \
-        -ov -format UDZO \
-        "$OUT_DMG"
+        -srcfolder "$STAGING_DIR" \
+        -ov -format UDRW \
+        "$RW_DMG"
+    hdiutil convert "$RW_DMG" -format UDZO -o "$OUT_DMG" -ov
+    rm -f "$RW_DMG"
 fi
 
 # 5) SHA256 alongside.

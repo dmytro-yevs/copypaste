@@ -30,7 +30,11 @@ pub enum SchemaError {
 ///   * 5 → 6 (wave1a-atomic): added `migration_state` table for resumable
 ///     v4 key-rotation sweep tracking. Seeds the initial row so
 ///     `Database::migration_state()` always returns a valid state.
-pub const SCHEMA_VERSION: i64 = 6;
+///   * 6 → 7 (v0.3 pinned-fix): added `pinned` column to `clipboard_items`
+///     so explicitly pinned items are distinguishable from normal rows with
+///     `expires_at = NULL`. The TTL prune and history-limit prune both
+///     filter `WHERE pinned = 0` to guarantee pinned items are never deleted.
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -66,6 +70,19 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_key_version \
 ///
 /// SQL file kept as `schema_v2.sql` for historical reasons.
 pub(crate) const V5_INDEXES_SQL: &str = include_str!("schema_v2.sql");
+
+/// v7 ALTER step — add `pinned` column to `clipboard_items`.
+///
+/// `DEFAULT 0` means all existing rows are treated as unpinned, which is
+/// correct: items pinned under the old scheme (where `pin_item` only cleared
+/// `expires_at`) become re-pinnable via the updated `pin_item` call that now
+/// also sets `pinned = 1`. The `DEFAULT 0` here is exclusively for the
+/// existing-row backfill case.
+pub(crate) const V7_ALTER_SQL: &str = "\
+ALTER TABLE clipboard_items \
+    ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;\n\
+CREATE INDEX IF NOT EXISTS idx_clipboard_pinned \
+    ON clipboard_items(pinned) WHERE pinned = 1;\n";
 
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
@@ -178,6 +195,14 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
                     THEN strftime('%s','now') ELSE NULL END\n\
              );\n",
         );
+    }
+
+    if current_version < 7 {
+        // Migration v7 (v0.3 pinned-fix): add `pinned` column so explicitly
+        // pinned items survive both the TTL prune and the history-limit prune.
+        // `DEFAULT 0` backfills all existing rows as unpinned, which is safe:
+        // items were pinned only by clearing `expires_at`, so no data is lost.
+        script.push_str(V7_ALTER_SQL);
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));
@@ -365,6 +390,79 @@ mod tests {
             kv, 1,
             "pre-v4 rows must land on key_version=1 so the v1→v2 sweep can find them"
         );
+
+        let uv: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(uv, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn fresh_db_has_pinned_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_migrations(&conn).unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(clipboard_items)").unwrap();
+        let cols: Vec<(String, String, i64)> = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(1)?, // column name
+                    r.get::<_, String>(2)?, // declared type
+                    r.get::<_, i64>(3)?,    // notnull
+                ))
+            })
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        let pinned_col = cols
+            .iter()
+            .find(|c| c.0 == "pinned")
+            .expect("v7 schema must include pinned column");
+        assert_eq!(pinned_col.1.to_uppercase(), "INTEGER");
+        assert_eq!(pinned_col.2, 1, "pinned must be NOT NULL");
+    }
+
+    #[test]
+    fn v6_to_v7_migration_backfills_existing_rows_as_unpinned() {
+        // Simulate a v6 database (no pinned column), run migrations, and
+        // verify existing rows land on pinned=0 (the DEFAULT in V7_ALTER_SQL).
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Hand-build v6 state.
+        conn.execute_batch(V1_SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
+             ALTER TABLE clipboard_items ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';\n\
+             ALTER TABLE clipboard_items ADD COLUMN key_version INTEGER NOT NULL DEFAULT 1;\n\
+             CREATE TABLE IF NOT EXISTS migration_state (\
+               key TEXT PRIMARY KEY, key_version_in_progress INTEGER,\
+               last_processed_id INTEGER NOT NULL DEFAULT 0,\
+               started_at INTEGER, completed_at INTEGER);\n\
+             INSERT OR IGNORE INTO migration_state VALUES ('v4-key-version-sweep', 2, 0, 0, 0);",
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA user_version = 6;").unwrap();
+
+        // Insert a v6-era row (no pinned column yet).
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, lamport_ts, wall_time, origin_device_id, key_version) \
+             VALUES ('id-v6', 'item-v6', 'text', 1, 1000, '', 2)",
+            [],
+        )
+        .unwrap();
+
+        // Run apply_migrations → must add pinned column, DEFAULT 0 backfills.
+        apply_migrations(&conn).unwrap();
+
+        let pinned: i64 = conn
+            .query_row(
+                "SELECT pinned FROM clipboard_items WHERE id = 'id-v6'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(pinned, 0, "pre-v7 rows must land on pinned=0");
 
         let uv: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))

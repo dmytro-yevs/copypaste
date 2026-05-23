@@ -46,6 +46,7 @@ fn mk_local_with_device(
         content_hash: None,
         origin_device_id: device_id.to_string(),
         key_version: 1,
+        pinned: false,
     }
 }
 

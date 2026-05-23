@@ -1,36 +1,24 @@
 #!/usr/bin/env bash
 # gen-cask.sh — update Casks/copypaste.rb with new version + sha256.
 #
-# Usage: scripts/release/gen-cask.sh <version> <sha256>
+# Usage (CI — auto mode, called from release.yml after GitHub Release is created):
+#   scripts/release/gen-cask.sh
 #
-# Used by the release maintainer AFTER artefacts are uploaded to the GitHub
-# release. Prints a PR-ready diff and leaves the change uncommitted so the
-# maintainer can inspect before opening a PR against the Casks repo.
+# Usage (manual mode — maintainer supplies values explicitly):
+#   scripts/release/gen-cask.sh <version> <sha256>
 #
-# The cask file is owned by worktree W1.5; this script only edits two fields:
-#   version "<...>"
-#   sha256  "<...>"
+# Auto mode: discovers version from the latest GitHub Release tag, downloads
+# the DMG, computes its sha256, and updates Casks/copypaste.rb in place.
+# Requires: gh CLI authenticated, curl, shasum.
+#
+# Manual mode: <version> must be bare (no leading 'v'), <sha256> must be
+# 64 lowercase hex chars.
+#
+# After updating the cask the script prints a git diff. In CI it also
+# commits and pushes the change directly (GITHUB_ACTIONS=true).
 set -euo pipefail
 
-VERSION="${1:-}"
-SHA256="${2:-}"
-
-if [[ -z "$VERSION" || -z "$SHA256" ]]; then
-    echo "ERROR: usage: $0 <version> <sha256>" >&2
-    exit 1
-fi
-
-# Reject leading 'v' on version to keep cask string clean.
-if [[ "$VERSION" == v* ]]; then
-    echo "ERROR: pass version without leading 'v' (got: $VERSION)" >&2
-    exit 1
-fi
-
-# Validate sha256 shape: 64 lowercase hex chars.
-if [[ ! "$SHA256" =~ ^[a-f0-9]{64}$ ]]; then
-    echo "ERROR: sha256 must be 64 lowercase hex chars (got: $SHA256)" >&2
-    exit 1
-fi
+REPO="dmytro-yevs/copypaste"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -39,18 +27,78 @@ cd "$REPO_ROOT"
 CASK="Casks/copypaste.rb"
 if [[ ! -f "$CASK" ]]; then
     echo "ERROR: cask not found at $CASK" >&2
-    echo "       The cask file is owned by worktree W1.5. Run this only" >&2
-    echo "       after that work is merged." >&2
     exit 1
 fi
+
+# ── Resolve VERSION and SHA256 ────────────────────────────────────────────────
+
+if [[ $# -ge 2 ]]; then
+    # Manual mode: caller supplies version and sha256.
+    VERSION="${1}"
+    SHA256="${2}"
+
+    # Reject leading 'v' on version to keep cask string clean.
+    if [[ "$VERSION" == v* ]]; then
+        echo "ERROR: pass version without leading 'v' (got: $VERSION)" >&2
+        exit 1
+    fi
+
+    # Validate sha256 shape: 64 lowercase hex chars.
+    if [[ ! "$SHA256" =~ ^[a-f0-9]{64}$ ]]; then
+        echo "ERROR: sha256 must be 64 lowercase hex chars (got: $SHA256)" >&2
+        exit 1
+    fi
+
+else
+    # Auto mode: derive everything from the latest GitHub Release.
+    echo "==> Auto mode: fetching release info from github.com/${REPO}"
+
+    if ! command -v gh &>/dev/null; then
+        echo "ERROR: gh CLI not found — cannot auto-fetch release info" >&2
+        exit 1
+    fi
+
+    TAG="$(gh release view --repo "$REPO" --json tagName --jq '.tagName')"
+    if [[ -z "$TAG" ]]; then
+        echo "ERROR: could not determine latest release tag" >&2
+        exit 1
+    fi
+
+    # Strip leading 'v' for the cask version field.
+    VERSION="${TAG#v}"
+
+    # The CI DMG filename pattern:
+    #   build-dmg-ci.sh produces CopyPaste-v<tag>-macos-arm64.dmg
+    #   where <tag> already has the leading 'v', giving the double-vv prefix.
+    DMG_NAME="CopyPaste-v${TAG}-macos-arm64.dmg"
+    DMG_URL="$(gh release view --repo "$REPO" --json assets \
+        --jq --arg name "$DMG_NAME" '.assets[] | select(.name==$name) | .browserDownloadUrl')"
+
+    if [[ -z "$DMG_URL" ]]; then
+        echo "ERROR: asset '${DMG_NAME}' not found in release ${TAG}" >&2
+        echo "       Available assets:" >&2
+        gh release view --repo "$REPO" --json assets --jq '.assets[].name' >&2
+        exit 1
+    fi
+
+    echo "    tag     → ${TAG}"
+    echo "    version → ${VERSION}"
+    echo "    dmg url → ${DMG_URL}"
+    echo "==> Downloading DMG to compute sha256 ..."
+
+    TMP_DMG="$(mktemp /tmp/copypaste-XXXXXX.dmg)"
+    trap 'rm -f "$TMP_DMG"' EXIT
+    curl -fsSL --output "$TMP_DMG" "$DMG_URL"
+    SHA256="$(shasum -a 256 "$TMP_DMG" | awk '{print $1}')"
+    echo "    sha256  → ${SHA256}"
+fi
+
+# ── Apply changes to cask ─────────────────────────────────────────────────────
 
 echo "==> Updating $CASK"
 echo "    version → $VERSION"
 echo "    sha256  → $SHA256"
 
-# Edit version "...":  matches `  version "anything"` (Ruby DSL).
-# Edit sha256 "...":   matches `  sha256 "anything"`.
-# Use a portable sed invocation that works on BSD sed (macOS) and GNU sed.
 TMP="$(mktemp)"
 awk -v ver="$VERSION" -v sha="$SHA256" '
     {
@@ -58,7 +106,8 @@ awk -v ver="$VERSION" -v sha="$SHA256" '
             print m[1] "version \"" ver "\""
             next
         }
-        if (match($0, /^([[:space:]]*)sha256[[:space:]]+"[^"]*"/, m)) {
+        # Match sha256 literal string or sha256 :no_check (with optional comment).
+        if (match($0, /^([[:space:]]*)sha256[[:space:]]+/, m)) {
             print m[1] "sha256 \"" sha "\""
             next
         }
@@ -67,12 +116,12 @@ awk -v ver="$VERSION" -v sha="$SHA256" '
 ' "$CASK" > "$TMP"
 
 # Verify both fields actually changed.
-if ! grep -E "^[[:space:]]*version[[:space:]]+\"$VERSION\"" "$TMP" >/dev/null; then
+if ! grep -qE "^[[:space:]]*version[[:space:]]+\"$VERSION\"" "$TMP"; then
     echo "ERROR: failed to update version line in $CASK" >&2
     rm -f "$TMP"
     exit 1
 fi
-if ! grep -E "^[[:space:]]*sha256[[:space:]]+\"$SHA256\"" "$TMP" >/dev/null; then
+if ! grep -qE "^[[:space:]]*sha256[[:space:]]+\"$SHA256\"" "$TMP"; then
     echo "ERROR: failed to update sha256 line in $CASK" >&2
     rm -f "$TMP"
     exit 1
@@ -84,7 +133,20 @@ echo
 echo "==> Diff:"
 git --no-pager diff -- "$CASK" || true
 
-echo
-echo "Done. Review then commit:"
-echo "  git add $CASK"
-echo "  git commit -m \"chore(cask): bump to $VERSION\""
+# ── CI auto-commit ────────────────────────────────────────────────────────────
+
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+    echo
+    echo "==> CI mode: committing and pushing cask update ..."
+    git config user.name  "github-actions[bot]"
+    git config user.email "github-actions[bot]@users.noreply.github.com"
+    git add "$CASK"
+    git commit -m "chore(cask): bump to ${VERSION} [skip ci]"
+    git push
+    echo "Done."
+else
+    echo
+    echo "Done. Review then commit:"
+    echo "  git add $CASK"
+    echo "  git commit -m \"chore(cask): bump to $VERSION\""
+fi

@@ -82,6 +82,9 @@ pub fn wire_to_local(wire: WireItem) -> ClipboardItem {
         // Default to 1 so the v4 sweep treats received items conservatively
         // and re-encrypts them to v2 if needed.
         key_version: 1,
+        // Received items are never pinned by default; the user must pin them
+        // explicitly on this device after syncing.
+        pinned: false,
     }
 }
 
@@ -136,6 +139,7 @@ mod tests {
             content_hash: None,
             origin_device_id: "device-local".to_string(),
             key_version: 1,
+            pinned: false,
         }
     }
 

@@ -3,9 +3,9 @@ use crate::protocol::{
     ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 use copypaste_core::{
-    build_item_aad, chunks_from_blob, count_items, decode_image, decrypt_item_with_aad,
-    delete_fts, delete_item, ensure_revoked_devices_table, fetch_text_preview, get_page,
-    revoke_device, search_items, Database, AAD_SCHEMA_VERSION,
+    chunks_from_blob, count_items, decode_image, decrypt_item_by_version, delete_fts, delete_item,
+    derive_v2, ensure_revoked_devices_table, fetch_text_preview, get_page, revoke_device,
+    search_items, Database, EncryptError,
 };
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -174,7 +174,7 @@ pub struct IpcServer {
     /// NSPasteboard. Audit CRIT #1: previously the handler wrote raw
     /// ciphertext bytes back, so paste produced "content is not valid
     /// UTF-8" for text and garbage for images.
-    local_key: Arc<[u8; 32]>,
+    local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     /// Device public-key bytes — used by `get_own_fingerprint` to derive
     /// the canonical user-visible fingerprint (`keychain::own_fingerprint`).
     /// Audit HIGH #6: previously the handler used DefaultHasher(hostname,
@@ -191,7 +191,7 @@ impl IpcServer {
     pub fn new(
         db: Arc<Mutex<Database>>,
         private_mode: Arc<AtomicBool>,
-        local_key: Arc<[u8; 32]>,
+        local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
         device_public_key: Arc<[u8; 32]>,
     ) -> Self {
         Self {
@@ -211,7 +211,7 @@ impl IpcServer {
     pub fn new_with_ready(
         db: Arc<Mutex<Database>>,
         private_mode: Arc<AtomicBool>,
-        local_key: Arc<[u8; 32]>,
+        local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
         device_public_key: Arc<[u8; 32]>,
         ready: Arc<AtomicBool>,
     ) -> Self {
@@ -618,8 +618,12 @@ impl IpcServer {
                             Ok(items) if items.is_empty() => break,
                             Ok(items) => {
                                 for item in items {
-                                    let _ = delete_item(&db, &item.id);
-                                    let _ = delete_fts(&db, &item.id);
+                                    if let Err(e) = delete_item(&db, &item.id) {
+                                        tracing::error!("ipc: delete_item failed for id={}: {e}", &item.id);
+                                    }
+                                    if let Err(e) = delete_fts(&db, &item.id) {
+                                        tracing::error!("ipc: delete_fts failed for id={}: {e}", &item.id);
+                                    }
                                 }
                             }
                             Err(_) => break,
@@ -1306,30 +1310,49 @@ impl IpcServer {
                     ))
                 })?;
 
-                // v0.3 post-T2: enforce AAD on paste-back. `daemon::handle_text`
-                // encrypts with `build_item_aad(item_id, AAD_SCHEMA_VERSION)`,
-                // so the symmetric path here rebuilds the same AAD from the
-                // row's own item_id. A mismatch — e.g. ciphertext re-bound to
-                // a different item_id by a tampering attacker, or a future
-                // schema bump — now surfaces as `AuthFailed` instead of
-                // silently producing garbage plaintext.
+                // Dispatch decrypt on the row's key_version so ciphertexts
+                // produced under different HKDF key families are always
+                // decrypted with the matching key and AAD format:
                 //
-                // wave1a-atomic: rows tagged `key_version = 2` by the v4
-                // migration use `build_item_aad_v2(item_id,
-                // AAD_SCHEMA_VERSION_V4, 2)` instead. The full key-version
-                // dispatch will be wired in a follow-up once handle_text also
-                // emits v2-AAD ciphertexts. For now, rows at key_version=2
-                // that reach this path return EncryptError::AuthFailed
-                // (correct — the AAD is wrong), which maps to
-                // ERR_CODE_AUTH_FAILED below.
+                //   key_version = 1 → v1 key (local_enc_key / HKDF-SHA-256),
+                //                     AAD = build_item_aad(item_id, 3)
+                //   key_version = 2 → v2 key (derive_v2 / HKDF-SHA-512),
+                //                     AAD = build_item_aad_v2(item_id, 4, 2)
+                //   other           → UnknownKeyVersion → auth_failed error
                 //
-                // EncryptError::UnknownKeyVersion also maps to auth_failed so
-                // callers cannot distinguish it from a tamper — this is
-                // intentional: unknown key versions must not leak information.
-                let aad = build_item_aad(&item.item_id, AAD_SCHEMA_VERSION);
+                // Previously this always used the v1 AAD regardless of
+                // key_version, so any item written with key_version = 2 (the
+                // current default since ITEM_KEY_VERSION_CURRENT = 2) would
+                // fail with "authentication tag mismatch" on paste-back.
+                //
+                // Note: IpcServer only holds one key (local_key = v1 key from
+                // Keychain). key_version = 2 items are derived from the same
+                // seed via derive_v2; we derive it inline here so the server
+                // struct does not need a second Arc field.
+                let v1_key: [u8; 32] = **self.local_key;
+                let v2_key = derive_v2(&v1_key);
                 let plaintext_bytes =
-                    decrypt_item_with_aad(content, nonce, self.local_key.as_ref(), &aad)
-                        .map_err(|e| PasteboardError::decrypt(e.to_string()))?;
+                    decrypt_item_by_version(
+                        item.key_version,
+                        &v1_key,
+                        &v2_key,
+                        &item.item_id,
+                        nonce,
+                        content,
+                    )
+                    .map_err(|e| match e {
+                        EncryptError::AuthFailed | EncryptError::AadMismatch => {
+                            PasteboardError::decrypt(
+                                "Decryption failed: authentication tag mismatch".to_string(),
+                            )
+                        }
+                        EncryptError::UnknownKeyVersion(_) => PasteboardError::decrypt(
+                            "Item encrypted with a previous key — cannot be recovered. \
+                             Clear history to start fresh."
+                                .to_string(),
+                        ),
+                        other => PasteboardError::decrypt(other.to_string()),
+                    })?;
                 let text = std::str::from_utf8(&plaintext_bytes).map_err(|e| {
                     PasteboardError::decrypt(format!("decrypted content is not UTF-8: {e}"))
                 })?;
@@ -1358,7 +1381,7 @@ impl IpcServer {
                 let chunks = chunks_from_blob(content).map_err(|e| {
                     PasteboardError::other(format!("image chunks_from_blob failed: {e}"))
                 })?;
-                let png_bytes = decode_image(&chunks, self.local_key.as_ref(), &file_id)
+                let png_bytes = decode_image(&chunks, &**self.local_key, &file_id)
                     .map_err(|e| PasteboardError::decrypt(format!("image decode failed: {e}")))?;
 
                 unsafe {
@@ -1497,12 +1520,14 @@ mod tests {
         let private_mode = Arc::new(AtomicBool::new(initial_private_mode));
         // Dummy keys: in-process tests do not hit paste-back or fingerprint
         // surfaces — they only validate dispatch / state-machine behaviour.
-        let local_key = Arc::new([0u8; 32]);
+        let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
         let device_pub = Arc::new([0u8; 32]);
         let server = IpcServer::new(db, private_mode.clone(), local_key, device_pub);
         let path = socket_path.to_path_buf();
         tokio::spawn(async move {
-            server.serve(&path, CancellationToken::new()).await.ok();
+            if let Err(e) = server.serve(&path, CancellationToken::new()).await {
+                tracing::error!("ipc: server on {:?} exited with error: {e}", &path);
+            }
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         private_mode
@@ -2079,13 +2104,15 @@ mod tests {
         let private_mode = Arc::new(AtomicBool::new(false));
         let ready = Arc::new(AtomicBool::new(false));
         let ready_clone = ready.clone();
-        let local_key = Arc::new([0u8; 32]);
+        let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
         let device_pub = Arc::new([0u8; 32]);
         let server =
             IpcServer::new_with_ready(db, private_mode, local_key, device_pub, ready_clone);
         let path = socket_path.to_path_buf();
         tokio::spawn(async move {
-            server.serve(&path, CancellationToken::new()).await.ok();
+            if let Err(e) = server.serve(&path, CancellationToken::new()).await {
+                tracing::error!("ipc: server on {:?} exited with error: {e}", &path);
+            }
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         ready
@@ -2436,12 +2463,14 @@ mod tests {
         let server = IpcServer::new(
             db.clone(),
             private_mode,
-            Arc::new([0u8; 32]),
+            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
             Arc::new([0u8; 32]),
         );
         let sock_path = sock.clone();
         tokio::spawn(async move {
-            server.serve(&sock_path, CancellationToken::new()).await.ok();
+            if let Err(e) = server.serve(&sock_path, CancellationToken::new()).await {
+                tracing::error!("ipc: server on {:?} exited with error: {e}", &sock_path);
+            }
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 

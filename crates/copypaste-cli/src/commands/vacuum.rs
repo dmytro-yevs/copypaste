@@ -209,7 +209,7 @@ const KEYCHAIN_SERVICE: &str = "com.copypaste.daemon";
 const KEYCHAIN_ACCOUNT: &str = "device-secret-key";
 
 #[cfg(target_os = "macos")]
-fn load_db_key() -> Result<[u8; 32]> {
+fn load_db_key() -> Result<zeroize::Zeroizing<[u8; 32]>> {
     use copypaste_core::DeviceKeypair;
     use security_framework::passwords::get_generic_password;
 
@@ -229,7 +229,7 @@ fn load_db_key() -> Result<[u8; 32]> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn load_db_key() -> Result<[u8; 32]> {
+fn load_db_key() -> Result<zeroize::Zeroizing<[u8; 32]>> {
     Err(anyhow!(
         "vacuum currently requires macOS keychain access; \
          this platform is not yet supported"

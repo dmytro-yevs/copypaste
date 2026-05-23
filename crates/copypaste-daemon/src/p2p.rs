@@ -161,7 +161,7 @@ pub async fn start_p2p(
     config: P2pConfig,
     _db: Arc<Mutex<Database>>,
     device_id: uuid::Uuid,
-    _db_key: [u8; 32],
+    _db_key: zeroize::Zeroizing<[u8; 32]>,
     new_item_rx: broadcast::Receiver<ClipboardItem>,
 ) -> anyhow::Result<P2pHandle> {
     let bind_addr = format!("0.0.0.0:{}", config.listen_port);

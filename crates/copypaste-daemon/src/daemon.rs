@@ -57,13 +57,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         }
     }
 
-    let local_key = load_local_key();
-    let local_key_arc: Arc<[u8; 32]> = Arc::new(local_key);
+    let local_key_arc: Arc<zeroize::Zeroizing<[u8; 32]>> = Arc::new(load_local_key());
     tracing::info!("local encryption key ready");
 
     let db_path = paths::db_path();
     let db = Arc::new(Mutex::new(
-        Database::open(&db_path, &local_key).map_err(|e| anyhow::anyhow!("Database: {e}"))?,
+        Database::open(&db_path, &**local_key_arc).map_err(|e| anyhow::anyhow!("Database: {e}"))?,
     ));
     tracing::info!("database opened at {}", db_path.display());
 
@@ -149,7 +148,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 p2p_config,
                 db.clone(),
                 device_id,
-                local_key,
+                (*local_key_arc).clone(),
                 new_item_tx.subscribe(),
             )
             .await
@@ -279,7 +278,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode, &new_item_tx).await;
+                    handle_tick(&mut monitor, &db, &**local_key_arc, &config, &private_mode, &new_item_tx).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -351,7 +350,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key, &config, &private_mode, &new_item_tx).await;
+                    handle_tick(&mut monitor, &db, &**local_key_arc, &config, &private_mode, &new_item_tx).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -637,15 +636,12 @@ fn prune_history(db: &Database, config: &AppConfig) {
         // which was both N+1 and risked pruning the wrong page if the
         // pagination math drifted.
         //
-        // TODO(v0.3): the schema does not yet carry a dedicated `pinned`
-        // column — `pin_item` currently only clears `expires_at`, which is
-        // indistinguishable from a never-expiring default row. Once a real
-        // `pinned BOOLEAN` column lands, extend the WHERE clause with
-        // `AND (pinned = 0 OR pinned IS NULL)` so explicitly pinned items
-        // survive the prune.
+        // `pinned = 0` excludes explicitly pinned items so they are never
+        // deleted by the history-limit prune (schema v7, see `pin_item`).
         let res = db.conn().execute(
             "DELETE FROM clipboard_items WHERE id IN (
                 SELECT id FROM clipboard_items
+                WHERE pinned = 0
                 ORDER BY wall_time ASC
                 LIMIT ?1
             )",
@@ -664,7 +660,7 @@ fn prune_history(db: &Database, config: &AppConfig) {
 }
 
 #[tracing::instrument(name = "load_local_key")]
-fn load_local_key() -> [u8; 32] {
+fn load_local_key() -> zeroize::Zeroizing<[u8; 32]> {
     #[cfg(target_os = "macos")]
     {
         match crate::keychain::load_or_create() {

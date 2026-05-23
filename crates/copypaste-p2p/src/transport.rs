@@ -434,7 +434,7 @@ pub fn tls_channel_binder_server(
     let (_, conn) = stream.get_ref();
     let mut out = [0u8; 32];
     conn.export_keying_material(&mut out, TLS_CHANNEL_BINDING_LABEL.as_bytes(), None)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok(out)
 }
 
@@ -448,7 +448,7 @@ pub fn tls_channel_binder_client(
     let (_, conn) = stream.get_ref();
     let mut out = [0u8; 32];
     conn.export_keying_material(&mut out, TLS_CHANNEL_BINDING_LABEL.as_bytes(), None)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok(out)
 }
 

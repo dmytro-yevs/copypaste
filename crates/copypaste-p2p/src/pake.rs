@@ -96,6 +96,7 @@ pub enum PakeError {
 /// This is the seed for HKDF expansion to the XChaCha20-Poly1305 key used by
 /// the envelope (ADR-001). Wrapped in a newtype so it does not implement
 /// `Debug` / `Display` / `Serialize` by accident.
+#[derive(zeroize::ZeroizeOnDrop)]
 pub struct SessionKey(pub [u8; 32]);
 
 impl SessionKey {
@@ -159,13 +160,13 @@ impl SessionKey {
     ///
     /// Panics if `tls_binder` is empty (programming error — callers must
     /// not pass a zero-length slice).
-    pub fn bind_to_tls_channel(&self, tls_binder: &[u8]) -> [u8; 32] {
+    pub fn bind_to_tls_channel(&self, tls_binder: &[u8]) -> zeroize::Zeroizing<[u8; 32]> {
         assert!(!tls_binder.is_empty(), "tls_binder must not be empty");
         let hk = Hkdf::<Sha256>::new(Some(tls_binder), &self.0);
         let mut out = [0u8; 32];
         hk.expand(b"copypaste/p2p/channel-binding/v1", &mut out)
             .expect("32 bytes is well within HKDF-SHA256 output limit");
-        out
+        zeroize::Zeroizing::new(out)
     }
 }
 
@@ -511,7 +512,7 @@ mod tests {
         );
         // The channel-bound key must also differ from the raw session key.
         assert_ne!(
-            bound_a,
+            *bound_a,
             sk.0,
             "channel-bound key must differ from the raw PAKE key"
         );

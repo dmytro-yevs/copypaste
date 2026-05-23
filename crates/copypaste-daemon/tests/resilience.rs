@@ -66,13 +66,13 @@ async fn spawn_server(
     let server = IpcServer::new(
         db.clone(),
         private_mode,
-        std::sync::Arc::new([0u8; 32]),
+        std::sync::Arc::new(zeroize::Zeroizing::new([0u8; 32])),
         std::sync::Arc::new([0u8; 32]),
     );
     let path = socket_path.to_path_buf();
     let handle = tokio::spawn(async move {
         // `serve` loops forever; we abort the JoinHandle at test end.
-        let _ = server.serve(&path).await;
+        let _ = server.serve(&path, tokio_util::sync::CancellationToken::new()).await;
     });
     // Give the listener a moment to bind.
     tokio::time::sleep(Duration::from_millis(50)).await;

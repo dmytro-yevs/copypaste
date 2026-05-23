@@ -260,14 +260,15 @@ fn load_icon() -> Option<tray_icon::Icon> {
     let candidates = [
         exe_dir.join("icons/tray-icon.png"),
         exe_dir.join("../Resources/icons/tray-icon.png"),
+        exe_dir.join("../Resources/icons/tray-icon-active.png"),
         exe_dir.join("../Resources/icons/tray-icon-idle.png"),
         exe_dir.join("tray-icon.png"),
     ];
     for candidate in &candidates {
         if candidate.exists() {
             if let Ok(bytes) = std::fs::read(candidate) {
-                if let Some(rgba) = decode_png_rgba(&bytes) {
-                    if let Ok(icon) = tray_icon::Icon::from_rgba(rgba, 22, 22) {
+                if let Some((rgba, w, h)) = decode_png_rgba_sized(&bytes) {
+                    if let Ok(icon) = tray_icon::Icon::from_rgba(rgba, w, h) {
                         return Some(icon);
                     }
                 }
@@ -282,30 +283,29 @@ fn load_icon() -> Option<tray_icon::Icon> {
     tray_icon::Icon::from_rgba(grey, 22, 22).ok()
 }
 
-fn decode_png_rgba(bytes: &[u8]) -> Option<Vec<u8>> {
+fn decode_png_rgba_sized(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     use std::io::Cursor;
     let decoder = png::Decoder::new(Cursor::new(bytes));
     let mut reader = decoder.read_info().ok()?;
     let mut buf = vec![0u8; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).ok()?;
+    let w = info.width;
+    let h = info.height;
     let raw = &buf[..info.buffer_size()];
-    match info.color_type {
-        png::ColorType::Rgba => Some(raw.to_vec()),
-        png::ColorType::Rgb => Some(
-            raw.chunks_exact(3)
-                .flat_map(|c| [c[0], c[1], c[2], 0xff])
-                .collect(),
-        ),
-        png::ColorType::Grayscale => {
-            Some(raw.iter().flat_map(|&g| [g, g, g, 0xff]).collect())
-        }
-        png::ColorType::GrayscaleAlpha => Some(
-            raw.chunks_exact(2)
-                .flat_map(|c| [c[0], c[0], c[0], c[1]])
-                .collect(),
-        ),
-        _ => None,
-    }
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => raw.to_vec(),
+        png::ColorType::Rgb => raw
+            .chunks_exact(3)
+            .flat_map(|c| [c[0], c[1], c[2], 0xff])
+            .collect(),
+        png::ColorType::Grayscale => raw.iter().flat_map(|&g| [g, g, g, 0xff]).collect(),
+        png::ColorType::GrayscaleAlpha => raw
+            .chunks_exact(2)
+            .flat_map(|c| [c[0], c[0], c[0], c[1]])
+            .collect(),
+        _ => return None,
+    };
+    Some((rgba, w, h))
 }
 
 // ── Menu builder ────────────────────────────────────────────────────────────
@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn decode_png_rgba_returns_none_for_garbage() {
-        assert!(decode_png_rgba(b"not a png").is_none());
+        assert!(decode_png_rgba_sized(b"not a png").is_none());
     }
 
     #[test]

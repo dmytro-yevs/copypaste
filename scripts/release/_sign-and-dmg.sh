@@ -56,14 +56,24 @@ codesign --force --deep \
 echo "==> Verifying signature"
 codesign --verify --deep --strict --verbose=2 "$APP_DIR"
 
-# 3) Build DMG.
+# 3) Build DMG with /Applications symlink for drag-install.
+# Two-step: stage into temp dir → create writable DMG → add symlink → convert.
 echo "==> Building DMG → $OUT_DMG"
-rm -f "$OUT_DMG"
+STAGING_DIR="$(mktemp -d)"
+trap 'rm -rf "$STAGING_DIR"' EXIT
+
+cp -R "$APP_DIR" "$STAGING_DIR/"
+ln -s /Applications "$STAGING_DIR/Applications"
+
+RW_DMG="${OUT_DMG%.dmg}-rw.dmg"
+rm -f "$OUT_DMG" "$RW_DMG"
 hdiutil create \
     -volname "CopyPaste v${VERSION}" \
-    -srcfolder "$APP_DIR" \
-    -ov -format UDZO \
-    "$OUT_DMG"
+    -srcfolder "$STAGING_DIR" \
+    -ov -format UDRW \
+    "$RW_DMG"
+hdiutil convert "$RW_DMG" -format UDZO -o "$OUT_DMG" -ov
+rm -f "$RW_DMG"
 
 # 4) SHA256 alongside.
 echo "==> SHA256"

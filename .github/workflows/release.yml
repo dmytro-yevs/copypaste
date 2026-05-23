@@ -1,9 +1,10 @@
 # Release pipeline — beta-w1.3
 # Updated: PR2a Android parallel build, PR2b release integration, PR8 explicit features
+#          PR9 Android APK: adds Gradle assembleDebug after cargo-ndk .so build
 #
 # Triggered on tag push matching v*.*.* (or workflow_dispatch).
 # Builds macOS arm64 DMG via W1.4 release scripts (build-dmg-ci.sh, verify-checksum.sh).
-# Builds Android arm64-v8a .so via cargo-ndk (parallel with macOS job, no gradle).
+# Builds Android arm64-v8a .so via cargo-ndk then produces debug APK via Gradle.
 # Uses ad-hoc codesigning (no Developer ID) — see ADR for beta distribution policy.
 #
 # Required GitHub repository secrets:
@@ -86,11 +87,14 @@ jobs:
           fi
 
       - name: Strip quarantine xattr (postbuild)
-        # Ad-hoc signed artifacts inherit com.apple.quarantine from the
-        # runner's download/extract steps. Strip recursively from the DMG
-        # and any staged .app so Gatekeeper does not warn on first launch
-        # after Homebrew Cask install. See ADR-010.
-        # All release artefacts live in dist/ (see ADR-012, db8578a).
+        # make_dmg.sh now strips quarantine from the .app inside the DMG staging
+        # directory before packaging so files baked into the UDZO image carry no
+        # com.apple.quarantine xattr. Without that, Finder propagates the xattr
+        # to the /Applications copy on drag-install and Gatekeeper blocks the
+        # ad-hoc-signed binaries on first launch. This step is belt-and-suspenders:
+        # catches any quarantine on the outer DMG container (from the runner's
+        # checkout/download steps) and on any staged .app left in dist/ for
+        # Homebrew Cask. See ADR-010. All artefacts live in dist/ (ADR-012).
         run: |
           if compgen -G "dist/*.dmg" > /dev/null; then
             xattr -cr dist/*.dmg || true
@@ -178,6 +182,38 @@ jobs:
             -exec cp {} dist-android/ \;
           ls -lh dist-android/
 
+      - name: Copy .so into jniLibs
+        run: |
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          cp target/aarch64-linux-android/release/libcopypaste_android.so \
+             android/app/src/main/jniLibs/arm64-v8a/
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Generate Gradle wrapper
+        working-directory: android
+        run: gradle wrapper --gradle-version 8.7
+
+      - name: Build debug APK
+        working-directory: android
+        # Skip buildCargoNdk — .so already placed in jniLibs above
+        run: ./gradlew assembleDebug --no-daemon -x buildCargoNdk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-apk-${{ steps.ver.outputs.version }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -217,6 +253,12 @@ jobs:
           name: CopyPaste-${{ steps.ver.outputs.version }}-android-arm64
           path: dist/android
 
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-debug-apk-${{ steps.ver.outputs.version }}
+          path: dist/android
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -226,5 +268,18 @@ jobs:
             dist/macos/*.dmg.sha256
             dist/macos/SHA256SUMS
             dist/android/*.so
+            dist/android/*.apk
           generate_release_notes: true
           prerelease: ${{ contains(steps.ver.outputs.version, '-alpha') || contains(steps.ver.outputs.version, '-beta') || contains(steps.ver.outputs.version, '-rc') }}
+
+      - name: Checkout repo (for cask update)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+
+      - name: Update Homebrew Cask
+        # Runs after the release assets are published so the DMG URL resolves.
+        # gen-cask.sh auto-fetches the tag, downloads the DMG, computes sha256,
+        # updates Casks/copypaste.rb, then commits + pushes (GITHUB_ACTIONS=true).
+        run: bash scripts/release/gen-cask.sh

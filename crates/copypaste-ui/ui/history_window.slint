@@ -112,7 +112,6 @@ export component HistoryWindow inherits Window {
         // Header bar
         HorizontalBox {
             spacing: 8px;
-            height: 36px;
 
             Text {
                 text: @tr("Clipboard History");
@@ -143,7 +142,6 @@ export component HistoryWindow inherits Window {
         // before the status line below updates.
         HorizontalBox {
             spacing: 6px;
-            height: 32px;
             padding: 0;
 
             search-input := LineEdit {
@@ -321,7 +319,6 @@ export component HistoryWindow inherits Window {
         // Pagination footer
         HorizontalBox {
             spacing: 8px;
-            height: 32px;
 
             Button {
                 // i18n: mirror of "Next →" — single composite msgid covers

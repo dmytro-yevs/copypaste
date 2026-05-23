@@ -176,6 +176,7 @@ fn make_local(id: &str, lamport: i64, wall: i64) -> ClipboardItem {
         // Pinned so the device-id tie-break has a known reference string.
         origin_device_id: "device-local".to_string(),
         key_version: 1,
+        pinned: false,
     }
 }
 
