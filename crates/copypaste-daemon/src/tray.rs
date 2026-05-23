@@ -241,7 +241,7 @@ impl TrayMenu {
     }
 }
 
-/// Public, test-friendly wrapper around [`TrayMenu::build`] that constructs
+/// Public, test-friendly wrapper around `TrayMenu::build` that constructs
 /// just the menu without attaching it to a tray icon. Used by `init_safety`
 /// tests to assert that a build failure surfaces as `Err`, not a panic.
 pub fn build_tray_menu(

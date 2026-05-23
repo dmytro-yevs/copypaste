@@ -52,7 +52,7 @@ pub struct EncryptedChunk {
 }
 
 impl EncryptedChunk {
-    /// Wire format: [version:u8=1][index:u32][is_final:u8][nonce:24][len:u32][ciphertext]
+    /// Wire format: `[version:u8=1][index:u32][is_final:u8][nonce:24][len:u32][ciphertext]`
     pub fn to_wire(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(1 + 4 + 1 + 24 + 4 + self.ciphertext.len());
         buf.push(CHUNK_FORMAT_VERSION);

@@ -167,7 +167,7 @@ pub fn decode_image(
 
 /// Serialize chunks to a flat byte blob for SQLite BLOB storage.
 ///
-/// Format: [chunk_count: u32 BE] [chunk_0_wire] [chunk_1_wire] ...
+/// Format: `[chunk_count: u32 BE] [chunk_0_wire] [chunk_1_wire] ...`
 pub fn chunks_to_blob(chunks: &[EncryptedChunk]) -> Vec<u8> {
     let mut out = Vec::new();
     let count = chunks.len() as u32;
