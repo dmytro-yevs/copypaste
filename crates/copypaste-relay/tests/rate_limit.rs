@@ -94,7 +94,7 @@ fn register_within_limit_succeeds() {
     // Exactly REG_LIMIT_MAX_ATTEMPTS calls must all succeed.
     for attempt in 1..=REG_LIMIT_MAX_ATTEMPTS {
         store
-            .check_registration_rate_limit(&id)
+            .check_registration_rate_limit(None, &id)
             .unwrap_or_else(|retry| {
                 panic!(
                 "attempt #{attempt}/{REG_LIMIT_MAX_ATTEMPTS} must succeed (retry_after={retry}s)"
@@ -114,13 +114,13 @@ fn register_exceeds_limit_returns_429() {
 
     // Fill the bucket.
     for _ in 0..REG_LIMIT_MAX_ATTEMPTS {
-        store.check_registration_rate_limit(&id).unwrap();
+        store.check_registration_rate_limit(None, &id).unwrap();
     }
 
     // The (MAX+1)th attempt must be rejected with a retry_after value
     // bounded by the rolling-window length (1..=window_secs).
     let retry_after = store
-        .check_registration_rate_limit(&id)
+        .check_registration_rate_limit(None, &id)
         .expect_err("attempt #6 within 60s must be rejected");
 
     let window_secs = REG_LIMIT_WINDOW.as_secs();
@@ -131,7 +131,7 @@ fn register_exceeds_limit_returns_429() {
 
     // Subsequent attempts in the same instant must remain rejected.
     let again = store
-        .check_registration_rate_limit(&id)
+        .check_registration_rate_limit(None, &id)
         .expect_err("further attempts in same window must stay rejected");
     assert!(again >= 1 && again <= window_secs);
 }
@@ -165,12 +165,12 @@ fn rate_limit_window_expires_after_configured_duration() {
 
     // Saturate the bucket.
     for _ in 0..REG_LIMIT_MAX_ATTEMPTS {
-        store.check_registration_rate_limit(&id).unwrap();
+        store.check_registration_rate_limit(None, &id).unwrap();
     }
 
     // (a) retry_after must lie strictly inside the configured window.
     let first_retry = store
-        .check_registration_rate_limit(&id)
+        .check_registration_rate_limit(None, &id)
         .expect_err("bucket is full");
     let window_secs = REG_LIMIT_WINDOW.as_secs();
     assert!(
@@ -184,7 +184,7 @@ fn rate_limit_window_expires_after_configured_duration() {
     // oldest entry — i.e. the window is broken.
     std::thread::sleep(Duration::from_millis(1100));
     let second_retry = store
-        .check_registration_rate_limit(&id)
+        .check_registration_rate_limit(None, &id)
         .expect_err("bucket must still be full after 1.1s (< 60s window)");
 
     assert!(
@@ -200,7 +200,7 @@ fn rate_limit_window_expires_after_configured_duration() {
     // Sanity: the limiter still rejects (window is 60s; we have not waited
     // that long), proving this whole window IS being enforced.
     assert!(
-        store.check_registration_rate_limit(&id).is_err(),
+        store.check_registration_rate_limit(None, &id).is_err(),
         "limiter must still be active well before the 60s window elapses"
     );
 }
@@ -222,29 +222,29 @@ fn separate_ips_separate_buckets() {
 
     // Saturate A.
     for _ in 0..REG_LIMIT_MAX_ATTEMPTS {
-        store.check_registration_rate_limit(&a).unwrap();
+        store.check_registration_rate_limit(None, &a).unwrap();
     }
     assert!(
-        store.check_registration_rate_limit(&a).is_err(),
+        store.check_registration_rate_limit(None, &a).is_err(),
         "A must be limited"
     );
 
     // B must be untouched: full MAX attempts allowed.
     for n in 1..=REG_LIMIT_MAX_ATTEMPTS {
         store
-            .check_registration_rate_limit(&b)
+            .check_registration_rate_limit(None, &b)
             .unwrap_or_else(|retry| {
                 panic!("B attempt #{n} must succeed (retry={retry}s) — bucket leak!")
             });
     }
     assert!(
-        store.check_registration_rate_limit(&b).is_err(),
+        store.check_registration_rate_limit(None, &b).is_err(),
         "B must hit its own limit independently"
     );
 
     // A is still limited (its bucket did not get cleared by B activity).
     assert!(
-        store.check_registration_rate_limit(&a).is_err(),
+        store.check_registration_rate_limit(None, &a).is_err(),
         "A's bucket must remain saturated regardless of B traffic"
     );
 }
