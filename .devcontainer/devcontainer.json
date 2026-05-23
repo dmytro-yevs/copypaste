@@ -1,0 +1,52 @@
+{
+  "name": "CopyPaste Rust Dev",
+  "image": "mcr.microsoft.com/devcontainers/rust:1-bullseye",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "moby": true
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "configureZshAsDefaultShell": false,
+      "username": "vscode"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml",
+        "slint-ui.slint",
+        "vadimcn.vscode-lldb"
+      ],
+      "settings": {
+        "rust-analyzer.check.command": "clippy",
+        "editor.formatOnSave": true,
+        "[rust]": {
+          "editor.defaultFormatter": "rust-lang.rust-analyzer"
+        }
+      }
+    }
+  },
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libsqlcipher-dev libdbus-1-dev && rustup component add clippy rustfmt && cargo fetch",
+  "forwardPorts": [7777],
+  "portsAttributes": {
+    "7777": {
+      "label": "CopyPaste Relay",
+      "onAutoForward": "notify"
+    }
+  },
+  "mounts": [
+    "source=copypaste-cargo-cache,target=/usr/local/cargo/registry,type=volume",
+    "source=copypaste-target-cache,target=${containerWorkspaceFolder}/target,type=volume"
+  ],
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "CARGO_TERM_COLOR": "always",
+    "RUST_BACKTRACE": "1"
+  }
+}

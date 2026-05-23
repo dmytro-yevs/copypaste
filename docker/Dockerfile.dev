@@ -5,6 +5,9 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     git \
     curl \
+    libssl-dev \
+    libsqlcipher-dev \
+    libdbus-1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create dev user. On macOS Docker Desktop UID mapping works transparently.
