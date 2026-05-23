@@ -28,11 +28,10 @@
 //!
 //! An earlier iteration of this target imported
 //! `copypaste_ipc::types::ImportItem`, but that struct was never landed
-//! in `copypaste-ipc::types` (the module is an intentional placeholder —
-//! see `crates/copypaste-ipc/src/types.rs`). The real wire surface for
-//! imported items is untyped `serde_json::Value`, which the daemon's
-//! `import` handler walks field-by-field. Fuzzing `Value` therefore
-//! matches the actual deserialization performed in production.
+//! and the placeholder `types` module has since been removed. The real
+//! wire surface for imported items is untyped `serde_json::Value`, which
+//! the daemon's `import` handler walks field-by-field. Fuzzing `Value`
+//! therefore matches the actual deserialization performed in production.
 
 #![no_main]
 

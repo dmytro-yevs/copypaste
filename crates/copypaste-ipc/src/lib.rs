@@ -29,7 +29,6 @@
 pub mod error;
 pub mod request;
 pub mod response;
-pub mod types;
 
 pub use error::ErrorCode;
 pub use request::Request;
