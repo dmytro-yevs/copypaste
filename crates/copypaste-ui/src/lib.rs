@@ -15,9 +15,14 @@
 
 pub mod fingerprint;
 pub mod settings;
+pub mod tray_menu;
 pub mod windows;
 
 pub use settings::{AppSettings, HistoryLimit, PairedDevice};
+pub use tray_menu::{
+    MenuEntry, RecentItem, TrayAction, TrayMenuHandle, TrayMenuState,
+    MAX_PREVIEW_CHARS, MAX_RECENT_ITEMS,
+};
 pub use windows::{SettingsWindowHandle, PairWindowHandle};
 pub use fingerprint::{
     format_fingerprint,
