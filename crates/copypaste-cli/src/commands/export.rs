@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 use std::io::Write;
 use std::path::Path;
@@ -10,11 +11,7 @@ pub fn run(socket_path: &Path, limit: u64, output: Option<&str>) -> Result<()> {
         "params": {"limit": limit, "offset": 0}
     });
     let resp = client.call(&req)?;
-
-    if !resp.ok {
-        eprintln!("error: {}", resp.error.unwrap_or_default());
-        std::process::exit(1);
-    }
+    exit_on_err(&resp);
 
     let json = serde_json::to_string_pretty(&resp.data)?;
 

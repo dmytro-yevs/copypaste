@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 use std::path::Path;
 
@@ -12,15 +13,11 @@ pub fn run(socket_path: &Path, enable: bool) -> Result<()> {
         "params": { "enabled": enable }
     });
     let resp = client.call(&req)?;
+    exit_on_err(&resp);
 
-    if resp.ok {
-        let mode = if enable { "enabled" } else { "disabled" };
-        println!("private mode {mode}");
-        Ok(())
-    } else {
-        eprintln!("error: {}", resp.error.unwrap_or_default());
-        std::process::exit(1);
-    }
+    let mode = if enable { "enabled" } else { "disabled" };
+    println!("private mode {mode}");
+    Ok(())
 }
 
 /// Query the current private mode state from the daemon.
@@ -32,20 +29,16 @@ pub fn run_get(socket_path: &Path) -> Result<()> {
         "params": {}
     });
     let resp = client.call(&req)?;
+    exit_on_err(&resp);
 
-    if resp.ok {
-        let enabled = resp
-            .data
-            .as_ref()
-            .and_then(|d| d.get("private_mode"))
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        println!("private mode: {}", if enabled { "on" } else { "off" });
-        Ok(())
-    } else {
-        eprintln!("error: {}", resp.error.unwrap_or_default());
-        std::process::exit(1);
-    }
+    let enabled = resp
+        .data
+        .as_ref()
+        .and_then(|d| d.get("private_mode"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    println!("private mode: {}", if enabled { "on" } else { "off" });
+    Ok(())
 }
 
 #[cfg(test)]

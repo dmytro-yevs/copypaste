@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
 
+use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 
 pub fn run(socket_path: &Path, force: bool) -> Result<()> {
@@ -17,15 +18,11 @@ pub fn run(socket_path: &Path, force: bool) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
     let req = serde_json::json!({"id": "1", "method": "delete_all"});
     let resp = client.call(&req)?;
+    exit_on_err(&resp);
 
-    if resp.ok {
-        let deleted = resp.data.as_ref().and_then(|d| d["deleted"].as_i64()).unwrap_or(0);
-        println!("cleared {deleted} items");
-        Ok(())
-    } else {
-        eprintln!("error: {}", resp.error.unwrap_or_default());
-        std::process::exit(1);
-    }
+    let deleted = resp.data.as_ref().and_then(|d| d["deleted"].as_i64()).unwrap_or(0);
+    println!("cleared {deleted} items");
+    Ok(())
 }
 
 #[cfg(test)]

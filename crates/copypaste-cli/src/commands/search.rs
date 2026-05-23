@@ -1,4 +1,5 @@
 use anyhow::Result;
+use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 use std::path::Path;
 
@@ -10,11 +11,7 @@ pub fn run(socket_path: &Path, query: &str, limit: u64) -> Result<()> {
         "params": {"query": query, "limit": limit}
     });
     let resp = client.call(&req)?;
-
-    if !resp.ok {
-        eprintln!("error: {}", resp.error.unwrap_or_default());
-        std::process::exit(1);
-    }
+    exit_on_err(&resp);
 
     let items = resp.data
         .as_ref()

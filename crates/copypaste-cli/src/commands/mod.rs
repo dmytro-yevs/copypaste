@@ -1,4 +1,5 @@
 pub mod clear;
+pub mod common;
 pub mod copy;
 pub mod count;
 pub mod delete;

@@ -9,7 +9,6 @@ name = "copypaste"
 path = "src/main.rs"
 
 [dependencies]
-copypaste-core = { path = "../copypaste-core" }
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
