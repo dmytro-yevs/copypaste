@@ -159,16 +159,31 @@ where
         }
     }
 
-    // Step 4: wait ~2s, retry ping a few times.
-    for _ in 0..10 {
-        env.sleep(Duration::from_millis(200));
+    // Step 4: wait up to ~15s, retry ping. Fresh-install daemon startup
+    // includes sqlcipher key derivation (Argon2id) + DB open + IPC bind,
+    // measured ~4s on a 2024 M-series Mac. The prior 2s budget caused a
+    // false-positive `FailedToStart` and a permanently-cached "Daemon not
+    // running" status in the UI. 15s gives generous headroom on slower
+    // machines while still bounding the wait.
+    for _ in 0..30 {
+        env.sleep(Duration::from_millis(500));
         if ipc_ping(&socket_path, env) {
             return Ok(DaemonStatus::Started);
         }
     }
 
+    // Final long-tail probe: log if the daemon eventually comes up well after
+    // the budget so operators can see the actual startup time in logs.
+    env.sleep(Duration::from_millis(1000));
+    if ipc_ping(&socket_path, env) {
+        tracing::info!(
+            "autostart: daemon socket appeared past 15s budget — startup unusually slow"
+        );
+        return Ok(DaemonStatus::Started);
+    }
+
     Ok(DaemonStatus::FailedToStart(
-        "daemon socket did not appear within 2s after bootstrap".into(),
+        "daemon socket did not appear within 15s after bootstrap".into(),
     ))
 }
 
@@ -469,6 +484,17 @@ mod tests {
             Self {
                 exe,
                 socket_alive_after_calls: n,
+                calls: std::cell::Cell::new(0),
+            }
+        }
+        #[allow(dead_code)]
+        fn alive_after_all_retries(exe: PathBuf) -> Self {
+            // 1 ping in step 1 + 30 pings in retry loop + 1 long-tail probe
+            // = 32 total. Coming alive at exactly call #32 exercises the
+            // long-tail success branch deterministically.
+            Self {
+                exe,
+                socket_alive_after_calls: 31,
                 calls: std::cell::Cell::new(0),
             }
         }

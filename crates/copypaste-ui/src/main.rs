@@ -83,27 +83,6 @@ fn activate_app() {
 fn activate_app() {}
 
 fn main() -> Result<()> {
-    // Beta hot-fix: on macOS, install the Launch Agent plist + bootstrap the
-    // daemon in the background so the user does not have to run
-    // `copypaste daemon install && copypaste daemon start` after a fresh DMG
-    // install. Runs in a dedicated thread — UI rendering must NOT block on
-    // launchctl. See `crates/copypaste-ui/src/autostart.rs` for the flow.
-    #[cfg(target_os = "macos")]
-    std::thread::spawn(|| match copypaste_ui::autostart::ensure_daemon_running() {
-        Ok(copypaste_ui::autostart::DaemonStatus::AlreadyRunning) => {
-            eprintln!("[autostart] daemon already running");
-        }
-        Ok(copypaste_ui::autostart::DaemonStatus::Started) => {
-            eprintln!("[autostart] daemon started via launchctl");
-        }
-        Ok(copypaste_ui::autostart::DaemonStatus::FailedToStart(reason)) => {
-            eprintln!("[autostart] daemon failed to start: {reason}");
-        }
-        Err(e) => {
-            eprintln!("[autostart] error: {e}");
-        }
-    });
-
     // Beta-bonus i18n: bind the gettext domain (auto-set from CARGO_PKG_NAME =
     // "copypaste-ui" by slint-build) to the `lang/` catalog directory shipped
     // with the crate. At runtime Slint resolves `@tr("…")` against
@@ -113,6 +92,43 @@ fn main() -> Result<()> {
 
     let window = HistoryWindow::new()?;
     let state = Arc::new(Mutex::new(AppState::new()));
+
+    // Beta hot-fix: on macOS, install the Launch Agent plist + bootstrap the
+    // daemon in the background so the user does not have to run
+    // `copypaste daemon install && copypaste daemon start` after a fresh DMG
+    // install. Runs in a dedicated thread — UI rendering must NOT block on
+    // launchctl. See `crates/copypaste-ui/src/autostart.rs` for the flow.
+    //
+    // beta.5 Bug-2/3: once autostart succeeds, post a UI event that re-runs
+    // the initial history load. Without this, the first load fires before
+    // the daemon socket exists, the UI caches "Daemon not running", and the
+    // user is stuck unless they click Refresh manually. Spawned AFTER the
+    // window + state are created so the closure can capture a weak window
+    // handle and the shared `AppState` for the post-startup refresh.
+    #[cfg(target_os = "macos")]
+    {
+        let window_weak = window.as_weak();
+        let state_for_autostart = Arc::clone(&state);
+        std::thread::spawn(move || {
+            match copypaste_ui::autostart::ensure_daemon_running() {
+                Ok(copypaste_ui::autostart::DaemonStatus::AlreadyRunning) => {
+                    eprintln!("[autostart] daemon already running");
+                }
+                Ok(copypaste_ui::autostart::DaemonStatus::Started) => {
+                    eprintln!("[autostart] daemon started via launchctl");
+                    // Daemon just came up — refresh history so the UI drops
+                    // the stale "Daemon not running" placeholder.
+                    refresh_history_after_autostart(window_weak, state_for_autostart);
+                }
+                Ok(copypaste_ui::autostart::DaemonStatus::FailedToStart(reason)) => {
+                    eprintln!("[autostart] daemon failed to start: {reason}");
+                }
+                Err(e) => {
+                    eprintln!("[autostart] error: {e}");
+                }
+            }
+        });
+    }
 
     // v0.3: install the macOS menu-bar tray BEFORE Slint takes over the main
     // run loop. The tray host registers a slint::Timer that polls menu events
@@ -338,15 +354,63 @@ fn main() -> Result<()> {
 }
 
 /// Call `history_page` on the daemon and return parsed results.
+///
+/// beta.5 Bug-3: stop collapsing every connect error into "daemon offline:" —
+/// the funnel in `apply_history_result` previously did a substring match on
+/// that prefix and mistranslated transient IO errors into "Daemon not running"
+/// status text. Now we return the raw [`IpcError`] display, which already
+/// formats `IpcError::DaemonOffline` as "Daemon not running..." (the funnel
+/// keys off that specific phrase, see [`apply_history_result`]).
 fn load_history_page(
     socket_path: &std::path::Path,
     limit: u64,
     offset: u64,
 ) -> std::result::Result<ipc_client::HistoryPage, String> {
-    let mut client = IpcClient::connect(socket_path).map_err(|e| format!("daemon offline: {e}"))?;
+    let mut client = IpcClient::connect(socket_path).map_err(|e| ipc_error_to_string(&e))?;
     client
         .history_page(limit, offset)
         .map_err(|e| e.to_string())
+}
+
+/// Map an `anyhow::Error` produced by `IpcClient::connect` to a display
+/// string that preserves the underlying [`ipc_client::IpcError`] formatting
+/// when present (so `DaemonOffline` keeps its actionable "Daemon not running"
+/// prefix). Falls back to the raw error display for non-Ipc errors.
+fn ipc_error_to_string(e: &anyhow::Error) -> String {
+    if let Some(ipc_err) = e.downcast_ref::<ipc_client::IpcError>() {
+        ipc_err.to_string()
+    } else {
+        e.to_string()
+    }
+}
+
+/// Worker spawned from the autostart thread once the daemon socket comes up.
+/// Posts the same `load_history_page` + `apply_history_result` sequence the
+/// `on_refresh_requested` callback runs, but from a background thread that
+/// uses [`slint::invoke_from_event_loop`] to hop back to the UI thread.
+///
+/// Why this exists: the initial `std::thread::spawn` near the bottom of
+/// `main()` waits 100ms after window construction and then fires its single
+/// load attempt. On a fresh install the daemon needs ~4s to come up, so that
+/// attempt fails and the UI shows "Daemon not running". Without an explicit
+/// post-autostart refresh, the user is stuck on the stale placeholder until
+/// they click Refresh manually.
+#[cfg(target_os = "macos")]
+fn refresh_history_after_autostart(
+    window_weak: slint::Weak<HistoryWindow>,
+    state: Arc<Mutex<AppState>>,
+) {
+    let (socket_path, offset) = {
+        let s = state.lock().unwrap();
+        (s.socket_path.clone(), s.current_offset)
+    };
+    let result = load_history_page(&socket_path, PAGE_SIZE, offset);
+    let state_for_apply = Arc::clone(&state);
+    let _ = slint::invoke_from_event_loop(move || {
+        if let Some(win) = window_weak.upgrade() {
+            apply_history_result(&win, &state_for_apply, result, offset);
+        }
+    });
 }
 
 /// Call `paste` on the daemon.
@@ -395,7 +459,15 @@ fn apply_history_result(
     win.set_loading(false);
     match result {
         Err(e) => {
-            let msg = if e.contains("Daemon not running") || e.contains("daemon offline") {
+            // beta.5 Bug-3: only show the "Daemon not running" hint when the
+            // error is genuinely `IpcError::DaemonOffline`. Other failures
+            // (parse errors, transient IO, daemon-side error codes) get
+            // surfaced verbatim so misdiagnosis doesn't repeat. The
+            // `DaemonOffline` Display starts with "Daemon not running." (see
+            // `ipc_client::IpcError::fmt`), so a prefix check is exact —
+            // we no longer match on the loose "daemon offline" substring
+            // that previously caught any wrapped connect error.
+            let msg = if e.starts_with("Daemon not running") {
                 "Daemon not running. Start with `copypaste daemon start`.".to_string()
             } else {
                 format!("Error: {e}")
