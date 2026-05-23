@@ -45,13 +45,19 @@ val buildCargoNdk by tasks.registering(Exec::class) {
     }
 
     workingDir(workspaceRoot)
+    // Beta W2.6: target arm64-v8a (modern devices) and armeabi-v7a (legacy 32-bit),
+    // plus x86_64 for emulator use. Build with the `android-uniffi-live` cargo
+    // feature so addClipboardItem/getHistoryCount perform real DB I/O.
     commandLine(
         "cargo", "ndk",
         "-t", "arm64-v8a",
+        "-t", "armeabi-v7a",
         "-t", "x86_64",
         "-o", "android/app/src/main/jniLibs",
         "build",
-        "-p", "copypaste-android"
+        "--release",
+        "-p", "copypaste-android",
+        "--features", "android-uniffi-live"
     )
 }
 

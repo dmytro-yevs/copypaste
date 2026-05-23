@@ -70,3 +70,153 @@ pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
 pub fn close_database(handle: u64) {
     db_handles().lock().unwrap().remove(&handle);
 }
+
+// ---------------------------------------------------------------------------
+// Live binding for Android end-to-end clipboard flow.
+//
+// Behaviour:
+//   * Feature `android-uniffi-live` ON  → open DB at `db_path`, encrypt the
+//     text via `copypaste_core::encrypt_item`, build a `ClipboardItem`, and
+//     persist via `copypaste_core::insert_item`. Returns the new row id, or
+//     an empty string if the text was flagged as sensitive.
+//   * Feature OFF (default)            → no DB I/O. Returns a deterministic
+//     stub id so callers can still exercise the binding in CI without bundling
+//     the storage stack.
+//
+// `key` must be the 32-byte device key (derived from Android Keystore by the
+// caller; that derivation lives in Kotlin).
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "android-uniffi-live")]
+pub fn add_clipboard_item(
+    db_path: String,
+    key: &[u8],
+    text: String,
+) -> Result<String, CopypasteError> {
+    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+
+    // Skip sensitive content (caller-visible: empty string return).
+    if detect(&text).is_some() {
+        return Ok(String::new());
+    }
+
+    let db = copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr)
+        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+
+    let (nonce, ciphertext) = encrypt_item(text.as_bytes(), &key_arr)
+        .map_err(|_| CopypasteError::EncryptionFailed)?;
+
+    let lamport_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    let item = copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport_ts);
+    let id = item.id.clone();
+
+    copypaste_core::insert_item(&db, &item)
+        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+
+    Ok(id)
+}
+
+#[cfg(not(feature = "android-uniffi-live"))]
+pub fn add_clipboard_item(
+    _db_path: String,
+    key: &[u8],
+    _text: String,
+) -> Result<String, CopypasteError> {
+    // Validate key shape to mirror the live path's error surface.
+    let _: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+    Ok("stub-uniffi-not-live".to_string())
+}
+
+#[cfg(feature = "android-uniffi-live")]
+pub fn get_history_count(db_path: String, key: &[u8]) -> Result<u64, CopypasteError> {
+    let key_arr: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+    let db = copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr)
+        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+    let n = copypaste_core::count_items(&db)
+        .map_err(|e| CopypasteError::DatabaseError { message: e.to_string() })?;
+    Ok(n.max(0) as u64)
+}
+
+#[cfg(not(feature = "android-uniffi-live"))]
+pub fn get_history_count(_db_path: String, key: &[u8]) -> Result<u64, CopypasteError> {
+    let _: [u8; 32] = key.try_into().map_err(|_| CopypasteError::InvalidKeyLength)?;
+    Ok(0)
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_key() -> Vec<u8> {
+        vec![7u8; 32]
+    }
+
+    #[test]
+    fn encrypt_then_decrypt_roundtrips() {
+        let key = test_key();
+        let blob = encrypt_text(b"hello android", &key).expect("encrypt");
+        let plaintext = decrypt_text(&blob.ciphertext, &blob.nonce, &key).expect("decrypt");
+        assert_eq!(plaintext, b"hello android");
+    }
+
+    #[test]
+    fn add_clipboard_item_rejects_bad_key() {
+        let err = add_clipboard_item("/tmp/copypaste-test.db".into(), &[0u8; 16], "x".into())
+            .expect_err("16-byte key must error");
+        assert!(matches!(err, CopypasteError::InvalidKeyLength));
+    }
+
+    #[cfg(not(feature = "android-uniffi-live"))]
+    #[test]
+    fn add_clipboard_item_returns_stub_when_feature_off() {
+        let id = add_clipboard_item("/dev/null".into(), &test_key(), "hello".into())
+            .expect("stub path");
+        assert_eq!(id, "stub-uniffi-not-live");
+        let n = get_history_count("/dev/null".into(), &test_key()).expect("stub count");
+        assert_eq!(n, 0);
+    }
+
+    #[cfg(feature = "android-uniffi-live")]
+    #[test]
+    fn add_clipboard_item_persists_when_feature_on() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("live.db");
+        let key = test_key();
+
+        let id = add_clipboard_item(
+            path.to_string_lossy().into_owned(),
+            &key,
+            "live android body".into(),
+        )
+        .expect("insert");
+        assert!(!id.is_empty(), "real insert returns a uuid");
+
+        let n = get_history_count(path.to_string_lossy().into_owned(), &key).expect("count");
+        assert_eq!(n, 1);
+    }
+
+    #[cfg(feature = "android-uniffi-live")]
+    #[test]
+    fn add_clipboard_item_skips_sensitive() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("live.db");
+        let key = test_key();
+
+        // GitHub PAT pattern is detected by copypaste_core::detect.
+        let pat = format!("ghp_{}", "A".repeat(36));
+        let id = add_clipboard_item(path.to_string_lossy().into_owned(), &key, pat)
+            .expect("sensitive returns Ok empty");
+        assert!(id.is_empty(), "sensitive content yields empty id");
+
+        let n = get_history_count(path.to_string_lossy().into_owned(), &key).expect("count");
+        assert_eq!(n, 0, "no row inserted for sensitive content");
+    }
+}

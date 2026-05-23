@@ -14,6 +14,14 @@ name = "copypaste_android"
 name = "uniffi-bindgen"
 path = "uniffi-bindgen.rs"
 
+[features]
+default = []
+# When enabled, `add_clipboard_item` and `get_history_count` perform real
+# end-to-end DB I/O via copypaste-core. When disabled (default), they return
+# stub values so the .so can be built without bundling the storage stack
+# (useful for early CI smoke builds).
+android-uniffi-live = []
+
 [dependencies]
 copypaste-core = { path = "../copypaste-core" }
 uniffi = { version = "0.27", features = ["bindgen", "cli"] }
@@ -21,3 +29,7 @@ thiserror = "1"
 
 [build-dependencies]
 uniffi = { version = "0.27", features = ["build"] }
+
+[dev-dependencies]
+# Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+
+tempfile = ">=3.0, <3.14"

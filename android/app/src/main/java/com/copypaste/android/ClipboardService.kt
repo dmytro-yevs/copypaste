@@ -90,7 +90,25 @@ class ClipboardService : Service() {
         }
 
         val key = settings.encryptionKey
-        val stored = repository.storeItem(text, key)
+
+        // Live UniFFI path: insert directly into the encrypted SQLite DB via
+        // copypaste-core. Empty id from native side also means "skipped as
+        // sensitive". On UnsatisfiedLinkError (no .so) or DB failure, fall
+        // through to the SharedPreferences repository so the app stays usable.
+        var nativeInsertOk = false
+        try {
+            val nativeId = addClipboardItem(databasePath, key, text)
+            if (nativeId.isNotEmpty()) {
+                nativeInsertOk = true
+                Log.d(TAG, "Native insert ok: $nativeId")
+            }
+        } catch (e: UnsatisfiedLinkError) {
+            Log.d(TAG, "Native addClipboardItem unavailable — falling back to repo")
+        } catch (e: CopypasteException) {
+            Log.w(TAG, "Native addClipboardItem failed (${e.message}) — falling back to repo")
+        }
+
+        val stored = if (nativeInsertOk) true else repository.storeItem(text, key)
         if (stored) {
             Log.d(TAG, "Clipboard item stored successfully")
             if (settings.syncEnabled) {
@@ -98,6 +116,10 @@ class ClipboardService : Service() {
             }
         }
     }
+
+    /** Path to the app-private encrypted SQLite DB used by the UniFFI live binding. */
+    private val databasePath: String
+        get() = applicationContext.getDatabasePath("copypaste.db").absolutePath
 
     private suspend fun notifySyncManager(plaintext: String, key: ByteArray) {
         try {

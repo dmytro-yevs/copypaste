@@ -60,6 +60,8 @@ private external fun uniffiIsSensitive(text: String): Boolean
 private external fun uniffiSensitiveKind(text: String): String?
 private external fun uniffiOpenDatabase(path: String): Long
 private external fun uniffiCloseDatabase(handle: Long)
+private external fun uniffiAddClipboardItem(dbPath: String, key: ByteArray, text: String): String
+private external fun uniffiGetHistoryCount(dbPath: String, key: ByteArray): Long
 
 // ---------------------------------------------------------------------------
 // Public API — matches UDL, wraps JNI calls with stub fallback.
@@ -147,4 +149,44 @@ fun closeDatabase(handle: Long) {
         return
     }
     uniffiCloseDatabase(handle)
+}
+
+/**
+ * Insert a clipboard text item into the encrypted SQLite database at [dbPath].
+ * Returns the new row id, or an empty string when [text] is flagged as sensitive
+ * (caller should skip storage in that case).
+ *
+ * Falls back to an empty string when the native .so is not loaded so callers can
+ * still operate (the Kotlin-side SharedPreferences store still runs).
+ *
+ * Throws [CopypasteException.DatabaseError] if the Rust side reports a DB error.
+ */
+@Throws(CopypasteException::class)
+fun addClipboardItem(dbPath: String, key: ByteArray, text: String): String {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "addClipboardItem: stub — native library not loaded")
+        return ""
+    }
+    return try {
+        uniffiAddClipboardItem(dbPath, key, text)
+    } catch (e: Exception) {
+        throw CopypasteException.DatabaseError(e.message ?: "addClipboardItem failed")
+    }
+}
+
+/**
+ * Returns the number of items currently stored at [dbPath].
+ * Returns 0 when the native .so is not loaded.
+ */
+@Throws(CopypasteException::class)
+fun getHistoryCount(dbPath: String, key: ByteArray): Long {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "getHistoryCount: stub — returns 0")
+        return 0L
+    }
+    return try {
+        uniffiGetHistoryCount(dbPath, key)
+    } catch (e: Exception) {
+        throw CopypasteException.DatabaseError(e.message ?: "getHistoryCount failed")
+    }
 }

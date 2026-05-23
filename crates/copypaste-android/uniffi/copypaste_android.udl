@@ -13,6 +13,19 @@ namespace copypaste_android {
   u64 open_database(string path, [ByRef] sequence<u8> key);
 
   void close_database(u64 handle);
+
+  // Live binding (feature `android-uniffi-live`): inserts a clipboard text item
+  // into the encrypted SQLite DB at `db_path` using `key` (32 bytes).
+  // Returns the new row UUID. Returns an empty string when the text is
+  // flagged as sensitive (caller should skip storage). With the feature off,
+  // returns a stub UUID and performs no DB I/O.
+  [Throws=CopypasteError]
+  string add_clipboard_item(string db_path, [ByRef] sequence<u8> key, string text);
+
+  // Live binding (feature `android-uniffi-live`): returns the count of items
+  // currently stored at `db_path`. Returns 0 when the feature is off.
+  [Throws=CopypasteError]
+  u64 get_history_count(string db_path, [ByRef] sequence<u8> key);
 };
 
 [Error]

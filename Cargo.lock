@@ -1274,6 +1274,7 @@ name = "copypaste-android"
 version = "0.2.0-beta.0"
 dependencies = [
  "copypaste-core",
+ "tempfile",
  "thiserror 1.0.69",
  "uniffi",
 ]
@@ -1325,6 +1326,8 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "copypaste-core",
+ "copypaste-p2p",
+ "copypaste-supabase",
  "dirs 5.0.1",
  "hex",
  "home",
@@ -1364,10 +1367,14 @@ name = "copypaste-p2p"
 version = "0.2.0-beta.0"
 dependencies = [
  "anyhow",
+ "argon2",
  "bytes",
+ "generic-array",
  "hex",
+ "hkdf",
  "mdns-sd",
  "opaque-ke",
+ "rand 0.8.6",
  "rcgen",
  "rustls 0.23.40",
  "serde",
