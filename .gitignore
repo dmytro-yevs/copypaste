@@ -31,3 +31,6 @@ fuzz/target/
 fuzz/corpus/
 fuzz/artifacts/
 fuzz/Cargo.lock
+
+# Coverage reports (cargo-llvm-cov output: HTML, LCOV, JSON)
+coverage/
