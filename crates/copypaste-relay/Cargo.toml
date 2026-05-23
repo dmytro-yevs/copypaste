@@ -22,7 +22,7 @@ tracing-subscriber.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 subtle = "2"
-tower_governor = { version = "0.4", features = ["axum"] }
+tower_governor = { version = "0.8", features = ["axum"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
