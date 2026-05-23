@@ -15,7 +15,6 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 home.workspace = true
-base64.workspace = true
 copypaste-ipc = { path = "../copypaste-ipc" }
 # beta-bonus (vacuum): direct encrypted-DB access for `copypaste vacuum`.
 # We open the SQLCipher file ourselves (daemon must be stopped first), so we
