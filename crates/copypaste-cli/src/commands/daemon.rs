@@ -7,6 +7,18 @@
 //!
 //! All shell-outs are wrapped through `CommandRunner` so unit tests can assert the
 //! constructed argv without actually invoking `launchctl` on the host.
+//!
+//! ## Idempotency (beta hotfix)
+//!
+//! `start` and `install` are idempotent — re-running them when the daemon is
+//! already loaded prints a friendly "already running" notice and exits 0 instead
+//! of returning `launchctl bootstrap` error 5 ("Input/output error" / "already
+//! loaded"). Similarly `stop` is a no-op when the daemon is not loaded.
+//!
+//! We also refuse to run `start` as root: `~/Library/LaunchAgents/` is a
+//! per-user domain (`gui/<UID>`), so running with `sudo` (UID 0) tries to bootstrap
+//! into `gui/0` where the plist isn't registered → launchctl error 125
+//! ("Domain does not support specified action"). The fix is to run without sudo.
 
 use anyhow::{anyhow, bail, Result};
 use std::ffi::OsString;
@@ -93,6 +105,15 @@ fn macos_uid<R: CommandRunner>(runner: &mut R) -> Result<u32> {
         .map_err(|e| anyhow!("could not parse uid from `id -u`: {e}"))
 }
 
+/// `launchctl print gui/<uid>/<label>` exits 0 iff the service is loaded.
+/// Returns Ok(true) when loaded, Ok(false) otherwise. Network / IO errors
+/// from spawning launchctl bubble up as Err.
+fn is_loaded<R: CommandRunner>(runner: &mut R, uid: u32) -> Result<bool> {
+    let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
+    let out = runner.run("launchctl", &["print".into(), OsString::from(&target)])?;
+    Ok(out.success)
+}
+
 fn user_plist_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
     let home = fs.home_dir().ok_or_else(|| anyhow!("could not determine $HOME"))?;
     Ok(home.join(USER_LAUNCH_AGENTS_DIR).join(format!("{LAUNCHD_LABEL}.plist")))
@@ -106,6 +127,36 @@ fn packaged_plist_path<F: FsOps>(fs: &F) -> Result<PathBuf> {
     Ok(cwd.join(PACKAGED_PLIST_RELATIVE))
 }
 
+/// Translate raw `launchctl` failure text into actionable advice.
+///
+/// Launchctl prints things like `Bootstrap failed: 5: Input/output error` —
+/// useless for non-launchd-experts. We recognise the common codes and replace
+/// the message; otherwise we pass through the original + a diagnostic hint.
+fn friendly_launchctl_error(uid: u32, op: &str, stderr: &str) -> String {
+    let s = stderr.trim();
+    // Error 5 = "Input/output error" — usually "service already loaded"
+    if s.contains(": 5:") || s.contains("Input/output error") {
+        return "daemon already running (launchctl error 5). \
+                Run `copypaste daemon restart` if you want to reload it."
+            .to_string();
+    }
+    // Error 36 = "Operation now in progress" / "service not loaded"
+    if s.contains(": 36:") || s.contains("Could not find service") {
+        return "daemon not running (launchctl error 36).".to_string();
+    }
+    // Error 125 = "Domain does not support specified action" — wrong domain
+    // (typically: ran with sudo so domain is gui/0 instead of gui/<your-uid>).
+    if s.contains(": 125:") || s.contains("Domain does not support") {
+        return "wrong launchd domain (error 125) — are you running with sudo? Don't. \
+                LaunchAgents live in your user domain (gui/<UID>), not root."
+            .to_string();
+    }
+    format!(
+        "launchctl {op} failed: {s}. \
+         Try `launchctl print gui/{uid}/{LAUNCHD_LABEL}` to diagnose."
+    )
+}
+
 fn macos_start<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Result<()> {
     let plist = user_plist_path(fs)?;
     if !fs.exists(&plist) {
@@ -115,13 +166,33 @@ fn macos_start<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Result
         );
     }
     let uid = macos_uid(runner)?;
+
+    // Refuse to run as root — LaunchAgents are per-user.
+    if uid == 0 {
+        bail!(
+            "daemon must run as your user, not root. \
+             Re-run `copypaste daemon start` WITHOUT sudo. \
+             The Launch Agent lives in ~/Library/LaunchAgents/ which is a per-user \
+             domain (gui/<UID>); running with sudo tries to bootstrap into gui/0 \
+             where the plist is not registered."
+        );
+    }
+
+    // Idempotency: bail out cleanly if already loaded.
+    if is_loaded(runner, uid)? {
+        eprintln!(
+            "daemon already running (label: {LAUNCHD_LABEL}, domain: gui/{uid}). No-op."
+        );
+        return Ok(());
+    }
+
     let domain = format!("gui/{uid}");
     let out = runner.run(
         "launchctl",
         &["bootstrap".into(), OsString::from(&domain), plist.clone().into_os_string()],
     )?;
     if !out.success {
-        bail!("launchctl bootstrap failed: {}", out.stderr.trim());
+        bail!("{}", friendly_launchctl_error(uid, "bootstrap", &out.stderr));
     }
     eprintln!("daemon started (label: {LAUNCHD_LABEL}, domain: {domain})");
     Ok(())
@@ -129,10 +200,17 @@ fn macos_start<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Result
 
 fn macos_stop<R: CommandRunner>(runner: &mut R) -> Result<()> {
     let uid = macos_uid(runner)?;
+
+    // Idempotency: nothing to do if not loaded.
+    if !is_loaded(runner, uid)? {
+        eprintln!("daemon not running (label: {LAUNCHD_LABEL}, domain: gui/{uid}). No-op.");
+        return Ok(());
+    }
+
     let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
     let out = runner.run("launchctl", &["bootout".into(), OsString::from(&target)])?;
     if !out.success {
-        bail!("launchctl bootout failed: {}", out.stderr.trim());
+        bail!("{}", friendly_launchctl_error(uid, "bootout", &out.stderr));
     }
     eprintln!("daemon stopped (target: {target})");
     Ok(())
@@ -140,18 +218,50 @@ fn macos_stop<R: CommandRunner>(runner: &mut R) -> Result<()> {
 
 fn macos_install<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Result<()> {
     let src = packaged_plist_path(fs)?;
-    if !fs.exists(&src) {
+    let dst = user_plist_path(fs)?;
+    let uid = macos_uid(runner)?;
+
+    // Refuse to install as root — same reasoning as start.
+    if uid == 0 {
         bail!(
-            "packaged plist not found at {}. Run from the repo root.",
-            src.display()
+            "daemon must be installed as your user, not root. \
+             Re-run `copypaste daemon install` WITHOUT sudo. \
+             ~/Library/LaunchAgents/ is per-user; running with sudo would install \
+             into root's home and bootstrap into gui/0, which is not what you want."
         );
     }
-    let dst = user_plist_path(fs)?;
-    if let Some(parent) = dst.parent() {
-        fs.create_dir_all(parent)?;
+
+    let plist_present = fs.exists(&dst);
+    let loaded = is_loaded(runner, uid)?;
+
+    // Fully idempotent: plist already in place AND loaded → no-op success.
+    if plist_present && loaded {
+        eprintln!(
+            "daemon already installed and running ({}). No-op.",
+            dst.display()
+        );
+        return Ok(());
     }
-    fs.copy(&src, &dst)?;
-    eprintln!("installed plist to {}", dst.display());
+
+    // Need the source if we have to copy.
+    if !plist_present {
+        if !fs.exists(&src) {
+            bail!(
+                "packaged plist not found at {}. Run from the repo root.",
+                src.display()
+            );
+        }
+        if let Some(parent) = dst.parent() {
+            fs.create_dir_all(parent)?;
+        }
+        fs.copy(&src, &dst)?;
+        eprintln!("installed plist to {}", dst.display());
+    } else {
+        eprintln!("plist already present at {} (skipping copy)", dst.display());
+    }
+
+    // Plist is on disk now; if not yet loaded, bootstrap it.
+    // (macos_start handles its own idempotency check too, but we've just confirmed it.)
     macos_start(runner, fs)
 }
 
@@ -270,7 +380,28 @@ mod tests {
                 ("launchctl".into(), "bootout".into()),
                 (true, String::new(), String::new()),
             );
+            // Default: `launchctl print` reports NOT loaded (exit 1) so existing
+            // tests that assume a fresh load still see the bootstrap path.
+            responses.insert(
+                ("launchctl".into(), "print".into()),
+                (false, String::new(), "Could not find service".into()),
+            );
             Self { calls: Vec::new(), responses }
+        }
+
+        /// Override the response for a specific (program, first_arg) pair.
+        fn set_response(
+            &mut self,
+            program: &str,
+            first_arg: &str,
+            success: bool,
+            stdout: &str,
+            stderr: &str,
+        ) {
+            self.responses.insert(
+                (program.into(), first_arg.into()),
+                (success, stdout.into(), stderr.into()),
+            );
         }
     }
 
@@ -361,22 +492,29 @@ mod tests {
 
         dispatch(DaemonAction::Start, &mut runner, &mut fs).expect("start should succeed");
 
-        // Expect: `id -u` then `launchctl bootstrap gui/501 <plist>`
-        assert_eq!(runner.calls.len(), 2, "expected 2 shell-outs, got {:?}", runner.calls);
+        // Expect: `id -u`, `launchctl print gui/501/...` (idempotency probe), then
+        // `launchctl bootstrap gui/501 <plist>`.
+        assert_eq!(runner.calls.len(), 3, "expected 3 shell-outs, got {:?}", runner.calls);
         assert_eq!(runner.calls[0].program, "id");
         assert_eq!(runner.calls[0].args, vec!["-u"]);
 
         assert_eq!(runner.calls[1].program, "launchctl");
-        assert_eq!(runner.calls[1].args[0], "bootstrap");
-        assert_eq!(runner.calls[1].args[1], "gui/501");
-        assert_eq!(runner.calls[1].args[2], expected_plist().to_string_lossy());
+        assert_eq!(runner.calls[1].args[0], "print");
+        assert_eq!(runner.calls[1].args[1], "gui/501/com.copypaste.daemon");
+
+        assert_eq!(runner.calls[2].program, "launchctl");
+        assert_eq!(runner.calls[2].args[0], "bootstrap");
+        assert_eq!(runner.calls[2].args[1], "gui/501");
+        assert_eq!(runner.calls[2].args[2], expected_plist().to_string_lossy());
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn daemon_uninstall_removes_plist_then_bootout() {
         let mut runner = MockRunner::new();
+        // Simulate "currently loaded" so stop actually issues bootout.
         let mut fs = MockFs::new().with_existing(expected_plist());
+        runner.set_response("launchctl", "print", true, "", "");
 
         dispatch(DaemonAction::Uninstall, &mut runner, &mut fs)
             .expect("uninstall should succeed");
@@ -447,5 +585,197 @@ mod tests {
             .iter()
             .any(|c| c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
         assert!(bootstrap_called);
+    }
+
+    // -----------------------------------------------------------------------------
+    // Beta hotfix: idempotency + root refusal + friendly error translation
+    // -----------------------------------------------------------------------------
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn start_is_idempotent_when_already_running() {
+        let mut runner = MockRunner::new();
+        // Pretend daemon is already loaded.
+        runner.set_response("launchctl", "print", true, "", "");
+        let mut fs = MockFs::new().with_existing(expected_plist());
+
+        dispatch(DaemonAction::Start, &mut runner, &mut fs)
+            .expect("start must be idempotent when already loaded");
+
+        // Must NOT have issued bootstrap.
+        let bootstrap_called = runner
+            .calls
+            .iter()
+            .any(|c| c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
+        assert!(
+            !bootstrap_called,
+            "start must not re-bootstrap when already loaded, got: {:?}",
+            runner.calls
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn install_is_idempotent_when_plist_exists_and_loaded() {
+        let mut runner = MockRunner::new();
+        runner.set_response("launchctl", "print", true, "", "");
+        // Plist already present at destination.
+        let mut fs = MockFs::new().with_existing(expected_plist());
+
+        dispatch(DaemonAction::Install, &mut runner, &mut fs)
+            .expect("install must succeed as no-op when already installed+loaded");
+
+        // No copy should have happened.
+        assert!(fs.copies.is_empty(), "no copy expected, got {:?}", fs.copies);
+        // No bootstrap either.
+        let bootstrap_called = runner
+            .calls
+            .iter()
+            .any(|c| c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
+        assert!(!bootstrap_called, "no bootstrap expected, got: {:?}", runner.calls);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn install_skips_copy_when_plist_present_but_not_loaded() {
+        // plist present, but launchctl print says not loaded → expect bootstrap, no copy.
+        let mut runner = MockRunner::new();
+        let mut fs = MockFs::new().with_existing(expected_plist());
+        // default print response = not loaded
+
+        dispatch(DaemonAction::Install, &mut runner, &mut fs)
+            .expect("install ok when plist present but not loaded");
+
+        assert!(fs.copies.is_empty(), "expected no copy, got {:?}", fs.copies);
+        let bootstrap_called = runner
+            .calls
+            .iter()
+            .any(|c| c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
+        assert!(bootstrap_called, "expected bootstrap, got: {:?}", runner.calls);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn start_refuses_when_running_as_root() {
+        let mut runner = MockRunner::new();
+        runner.set_response("id", "-u", true, "0\n", "");
+        let mut fs = MockFs::new().with_existing(expected_plist());
+
+        let err = dispatch(DaemonAction::Start, &mut runner, &mut fs)
+            .expect_err("start must refuse under root");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("sudo") && (msg.contains("root") || msg.contains("user")),
+            "expected sudo/root refusal, got: {msg}"
+        );
+
+        // Must NOT have attempted bootstrap.
+        let bootstrap_called = runner
+            .calls
+            .iter()
+            .any(|c| c.args.first().map(|s| s.as_str()) == Some("bootstrap"));
+        assert!(!bootstrap_called, "no bootstrap expected under root, got: {:?}", runner.calls);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn install_refuses_when_running_as_root() {
+        let mut runner = MockRunner::new();
+        runner.set_response("id", "-u", true, "0\n", "");
+        let mut fs = MockFs::new();
+
+        let err = dispatch(DaemonAction::Install, &mut runner, &mut fs)
+            .expect_err("install must refuse under root");
+        assert!(
+            err.to_string().contains("sudo"),
+            "expected sudo refusal, got: {err}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn error_5_translates_to_already_running_message() {
+        let msg = friendly_launchctl_error(
+            501,
+            "bootstrap",
+            "Bootstrap failed: 5: Input/output error",
+        );
+        assert!(
+            msg.to_lowercase().contains("already running"),
+            "expected friendly 'already running' text, got: {msg}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn error_36_translates_to_not_running_message() {
+        let msg = friendly_launchctl_error(
+            501,
+            "bootout",
+            "Boot-out failed: 36: Could not find service",
+        );
+        assert!(
+            msg.to_lowercase().contains("not running"),
+            "expected friendly 'not running' text, got: {msg}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn error_125_translates_to_wrong_domain_message() {
+        let msg = friendly_launchctl_error(
+            0,
+            "bootstrap",
+            "Bootstrap failed: 125: Domain does not support specified action",
+        );
+        assert!(
+            msg.contains("sudo") || msg.contains("domain"),
+            "expected sudo/domain advice, got: {msg}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn unknown_error_passes_through_with_diagnostic_hint() {
+        let msg = friendly_launchctl_error(501, "bootstrap", "Something weird: 99: Mystery");
+        assert!(msg.contains("Mystery"), "original text must remain, got: {msg}");
+        assert!(
+            msg.contains("launchctl print"),
+            "diagnostic hint must be present, got: {msg}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn stop_is_idempotent_when_not_loaded() {
+        let mut runner = MockRunner::new();
+        // default print response: not loaded
+        let mut fs = MockFs::new().with_existing(expected_plist());
+
+        dispatch(DaemonAction::Stop, &mut runner, &mut fs)
+            .expect("stop must succeed as no-op when not loaded");
+
+        // Must NOT have issued bootout.
+        let bootout_called = runner
+            .calls
+            .iter()
+            .any(|c| c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("bootout"));
+        assert!(!bootout_called, "no bootout expected, got: {:?}", runner.calls);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn stop_issues_bootout_when_loaded() {
+        let mut runner = MockRunner::new();
+        runner.set_response("launchctl", "print", true, "", "");
+        let mut fs = MockFs::new().with_existing(expected_plist());
+
+        dispatch(DaemonAction::Stop, &mut runner, &mut fs).expect("stop ok when loaded");
+
+        let bootout_called = runner
+            .calls
+            .iter()
+            .any(|c| c.args.first().map(|s| s.as_str()) == Some("bootout"));
+        assert!(bootout_called, "expected bootout, got: {:?}", runner.calls);
     }
 }
