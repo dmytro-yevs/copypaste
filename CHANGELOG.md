@@ -15,6 +15,21 @@ reproducibility, but is not the promoted install path.
 - **UI:** In-app auto-update via Homebrew Cask: daily check + notification +
   one-click upgrade. No Sparkle (Homebrew-only per ADR-012).
 
+### Build infrastructure
+- Native amd64 CI runner for Android (`ubuntu-latest-xlarge`, no Rosetta).
+- Pre-baked OpenSSL 3.0.13 + SQLCipher 4.5.6 in the Android builder image,
+  saving ~15–20 min of host-side C compile per cold build.
+- sccache (Rust) + ccache (C) wired into the Android container, persisted
+  across runs via `sccache-android` / `ccache-android` named volumes.
+- `[profile.release]` switched to `lto = "thin"` for 30–50 % faster link
+  time at ~5 % binary-size cost; `[profile.release-size]` re-pins `lto = "fat"`
+  for size-critical mobile / embedded artifacts.
+- `make android-docker` / `make android-docker-clean-cache` for incremental
+  Docker builds; see `docs/release/build-perf.md`.
+
+  **Cold-build envelope:** 30–60 min → 5–10 min on amd64-xlarge.
+  **Warm-build envelope:** 5–10 min → 1–2 min for code-only changes.
+
 ### Breaking changes
 - **Crypto:** dropped the legacy empty-AAD AEAD decrypt fallback in
   `copypaste-core::crypto::encrypt`. The `encrypt_item` / `decrypt_item`
