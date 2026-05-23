@@ -4,18 +4,18 @@
 //! the remote side disappears at various points in the connection lifecycle.
 //!
 //! Test matrix (beta-bonus):
-//!   * peer_drops_mid_transfer_sender_gets_io_error_not_panic
-//!       — server side is dropped while client is writing 1MB; client must
-//!         observe an `Err` (no panic, no infinite hang).
-//!   * reconnect_after_disconnect_succeeds
-//!       — after a clean drop on both sides, a fresh `connect()` against a
-//!         freshly-bound listener completes a new mutual-TLS handshake.
-//!   * multiple_concurrent_streams_one_drop_doesnt_affect_others
-//!       — three independent streams are established; one is dropped; the
-//!         other two must still be writable.
-//!   * peer_offline_during_handshake_returns_timeout_within_5s
-//!       — connecting to an address with no listener must fail fast (well
-//!         under 5 seconds), not stall on the 10s TLS handshake timer.
+//! * peer_drops_mid_transfer_sender_gets_io_error_not_panic —
+//!   server side is dropped while client is writing 1MB; client must
+//!   observe an `Err` (no panic, no infinite hang).
+//! * reconnect_after_disconnect_succeeds —
+//!   after a clean drop on both sides, a fresh `connect()` against a
+//!   freshly-bound listener completes a new mutual-TLS handshake.
+//! * multiple_concurrent_streams_one_drop_doesnt_affect_others —
+//!   three independent streams are established; one is dropped; the
+//!   other two must still be writable.
+//! * peer_offline_during_handshake_returns_timeout_within_5s —
+//!   connecting to an address with no listener must fail fast (well
+//!   under 5 seconds), not stall on the 10s TLS handshake timer.
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};

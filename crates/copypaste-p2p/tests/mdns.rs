@@ -319,9 +319,11 @@ async fn malformed_txt_record_does_not_panic() {
     // surfaces it or not, only that nothing panics.
     let _ = collect_resolved(&rx, Duration::from_secs(2), |svc| svc.fullname == fullname).await;
 
-    // If we got here, no panic occurred. Explicit success assertion so
-    // the test reads positively rather than as "no-op".
-    assert!(true, "browse loop survived malformed TXT record");
-
-    let _ = daemon.shutdown();
+    // Reaching this point is itself the assertion: the daemon registered
+    // the empty-TXT service, the browse loop drained for 2s, and neither
+    // panicked. `daemon.shutdown()` returning Ok confirms the daemon is
+    // still healthy after handling the malformed record.
+    daemon
+        .shutdown()
+        .expect("daemon must shut down cleanly after malformed TXT");
 }
