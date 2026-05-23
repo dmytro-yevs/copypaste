@@ -75,6 +75,13 @@ path = "tests/p2p_init.rs"
 name = "keychain_macos"
 path = "tests/keychain_macos.rs"
 
+# Beta-bonus: IPC status/health endpoint tests (version, monotonic uptime
+# proxy, history count via stats, daemon-not-running typed error, throughput
+# sanity). See module docs in tests/health.rs for the full contract list.
+[[test]]
+name = "health"
+path = "tests/health.rs"
+
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"
