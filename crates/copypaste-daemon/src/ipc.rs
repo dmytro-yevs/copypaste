@@ -3,8 +3,9 @@ use crate::protocol::{
     ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 use copypaste_core::{
-    chunks_from_blob, count_items, decode_image, decrypt_item, delete_fts, delete_item,
-    ensure_revoked_devices_table, get_page, revoke_device, search_items, Database,
+    build_item_aad, chunks_from_blob, count_items, decode_image, decrypt_item_with_aad,
+    delete_fts, delete_item, ensure_revoked_devices_table, get_page, revoke_device, search_items,
+    Database, AAD_SCHEMA_VERSION,
 };
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -1236,7 +1237,9 @@ impl IpcServer {
     /// implementation wrote `item.content` raw, so users saw ciphertext on
     /// paste. This now:
     ///
-    /// 1. Decrypts text via [`decrypt_item`] with the per-item nonce.
+    /// 1. Decrypts text via [`decrypt_item_with_aad`] with the per-item nonce,
+    ///    rebuilding the AAD from the row's `item_id` so a tampered or
+    ///    misbound ciphertext surfaces as `AuthFailed` instead of garbage.
     /// 2. Reassembles + decrypts image chunks via [`chunks_from_blob`] +
     ///    [`decode_image`], using the `file_id` parsed out of `blob_ref`.
     /// 3. Maps the daemon's internal `content_type` to a real macOS UTI
@@ -1271,8 +1274,27 @@ impl IpcServer {
                         nonce_vec.len()
                     ))
                 })?;
-                let plaintext_bytes = decrypt_item(content, nonce, self.local_key.as_ref())
-                    .map_err(|e| PasteboardError::decrypt(e.to_string()))?;
+
+                // v0.3 post-T2: enforce AAD on paste-back. `daemon::handle_text`
+                // encrypts with `build_item_aad(item_id, AAD_SCHEMA_VERSION)`,
+                // so the symmetric path here rebuilds the same AAD from the
+                // row's own item_id. A mismatch — e.g. ciphertext re-bound to
+                // a different item_id by a tampering attacker, or a future
+                // schema bump — now surfaces as `AuthFailed` instead of
+                // silently producing garbage plaintext.
+                //
+                // Out of scope for this pass: rows tagged `key_version = 2`
+                // by the v4 migration use `build_item_aad_v2(item_id,
+                // AAD_SCHEMA_VERSION_V4, 2)` instead. Dispatching on
+                // `get_key_version` is the next step — needs the encrypt
+                // side (handle_text) to dispatch the same way before we can
+                // safely require v2 AAD here, otherwise live captures (which
+                // still write v1 AAD on key_version=2 rows) would fail to
+                // decrypt on paste.
+                let aad = build_item_aad(&item.item_id, AAD_SCHEMA_VERSION);
+                let plaintext_bytes =
+                    decrypt_item_with_aad(content, nonce, self.local_key.as_ref(), &aad)
+                        .map_err(|e| PasteboardError::decrypt(e.to_string()))?;
                 let text = std::str::from_utf8(&plaintext_bytes).map_err(|e| {
                     PasteboardError::decrypt(format!("decrypted content is not UTF-8: {e}"))
                 })?;
