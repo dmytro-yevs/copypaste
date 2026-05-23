@@ -1,0 +1,14 @@
+[package]
+name = "copypaste-ipc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Shared IPC wire types (Request/Response) for the CopyPaste daemon, UI, and CLI."
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
