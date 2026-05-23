@@ -24,6 +24,10 @@ regex.workspace = true
 unicode-normalization.workspace = true
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json"] }
+# Beta-bonus (daemon-log-rotation): daily-rotating file appender with non-blocking
+# writer.  Pinned crate-local (NOT workspace) to avoid concurrent edits of root
+# Cargo.toml by other beta-bonus workers; version stays in sync with workspace.
+tracing-appender = "0.2"
 thiserror.workspace = true
 uuid.workspace = true
 image.workspace = true
