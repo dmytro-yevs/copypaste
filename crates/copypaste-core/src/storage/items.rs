@@ -1,5 +1,5 @@
 use super::db::Database;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -378,6 +378,51 @@ pub fn count_items(db: &Database) -> Result<i64, ItemsError> {
     Ok(db
         .conn()
         .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))?)
+}
+
+/// Maximum byte length of a text preview returned by [`fetch_text_preview`].
+///
+/// The UI history list renders one row per item. Sending more than 1 KiB per
+/// row for a potentially-long list locks the UI rendering thread on large
+/// clipboard entries. Full content is still stored encrypted; only the preview
+/// is capped here. A proper rich-preview panel is planned for v0.4.
+pub const MAX_PREVIEW_BYTES: usize = 1_024;
+
+/// Fetch a clamped plaintext preview for `id` from the FTS5 index.
+///
+/// Returns `Some(text)` for text items that have an FTS entry, where `text`
+/// is at most [`MAX_PREVIEW_BYTES`] bytes long (truncated at a UTF-8 char
+/// boundary with an ellipsis appended when clamped).
+///
+/// Returns `None` when no FTS entry exists for the given id (image items or
+/// pre-FTS rows). Callers should render an appropriate placeholder in that
+/// case (e.g. `"[image — id:XXXXXXXX]"`).
+pub fn fetch_text_preview(db: &Database, id: &str) -> Result<Option<String>, ItemsError> {
+    let result: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT content_text FROM clipboard_fts WHERE id = ?1 LIMIT 1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(ItemsError::Sqlite)?;
+
+    Ok(result.map(|text| clamp_preview(text, MAX_PREVIEW_BYTES)))
+}
+
+/// Clamp `text` to at most `max_bytes` bytes, truncating at a UTF-8 character
+/// boundary and appending `…` when truncation occurs.
+fn clamp_preview(text: String, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text;
+    }
+    // Walk back from max_bytes to find a valid UTF-8 char boundary.
+    let boundary = (0..=max_bytes)
+        .rev()
+        .find(|&i| text.is_char_boundary(i))
+        .unwrap_or(0);
+    format!("{}…", &text[..boundary])
 }
 
 /// Insert or replace a plaintext snippet into the FTS5 index.
@@ -890,5 +935,93 @@ mod tests {
             )
             .unwrap();
         assert_eq!(got_b, "peer-xyz", "peer origin must not be overwritten");
+    }
+
+    // --- T5: UI clipboard model — preview clamp + edge cases ---
+
+    /// `clamp_preview` must return the text unchanged when it fits within the limit.
+    #[test]
+    fn clamp_preview_short_text_unchanged() {
+        let text = "hello world".to_string();
+        assert_eq!(clamp_preview(text.clone(), MAX_PREVIEW_BYTES), text);
+    }
+
+    /// `clamp_preview` must truncate at a UTF-8 boundary and append `…`.
+    #[test]
+    fn clamp_preview_long_text_truncated() {
+        // Build a string that is longer than MAX_PREVIEW_BYTES (1024 bytes).
+        let long_text: String = "a".repeat(MAX_PREVIEW_BYTES + 100);
+        let result = clamp_preview(long_text, MAX_PREVIEW_BYTES);
+        // Result must be at most MAX_PREVIEW_BYTES bytes (plus the 3-byte `…` ellipsis).
+        // The truncated body is ≤ MAX_PREVIEW_BYTES and the appended ellipsis is "…" (3 bytes).
+        assert!(
+            result.len() <= MAX_PREVIEW_BYTES + "…".len(),
+            "clamped preview too long: {} bytes",
+            result.len()
+        );
+        assert!(result.ends_with('…'), "clamped preview must end with ellipsis");
+        assert!(result.is_char_boundary(result.len()), "result must be valid UTF-8");
+    }
+
+    /// `clamp_preview` must not split a multi-byte character.
+    #[test]
+    fn clamp_preview_respects_utf8_boundary() {
+        // Each '€' is 3 bytes (U+20AC).  Build a string where the naive byte
+        // boundary would fall inside a character.
+        let euros: String = "€".repeat(400); // 1200 bytes total
+        let result = clamp_preview(euros, MAX_PREVIEW_BYTES);
+        // Must be valid UTF-8 (would panic on index otherwise).
+        assert!(std::str::from_utf8(result.as_bytes()).is_ok());
+        assert!(result.ends_with('…'));
+    }
+
+    /// `fetch_text_preview` returns `None` for items with no FTS entry (e.g. images).
+    #[test]
+    fn fetch_text_preview_returns_none_for_no_fts_entry() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        // No FTS entry inserted — simulates an image item or pre-FTS row.
+        let result = fetch_text_preview(&db, &item.id).unwrap();
+        assert!(result.is_none(), "expected None when no FTS entry exists");
+    }
+
+    /// `fetch_text_preview` returns clamped plaintext for text items.
+    #[test]
+    fn fetch_text_preview_returns_short_text_unchanged() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        upsert_fts(&db, &item.id, "short snippet").unwrap();
+
+        let result = fetch_text_preview(&db, &item.id).unwrap();
+        assert_eq!(result, Some("short snippet".to_string()));
+    }
+
+    /// `fetch_text_preview` clamps text that exceeds MAX_PREVIEW_BYTES.
+    #[test]
+    fn fetch_text_preview_clamps_large_text() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        let big_text: String = "x".repeat(MAX_PREVIEW_BYTES + 500);
+        upsert_fts(&db, &item.id, &big_text).unwrap();
+
+        let result = fetch_text_preview(&db, &item.id).unwrap().unwrap();
+        assert!(
+            result.len() <= MAX_PREVIEW_BYTES + "…".len(),
+            "preview must be clamped to ~{} bytes, got {}",
+            MAX_PREVIEW_BYTES,
+            result.len()
+        );
+        assert!(result.ends_with('…'));
+    }
+
+    /// Empty history list — model correctly handles zero items.
+    #[test]
+    fn get_page_meta_empty_db_returns_empty_list() {
+        let db = Database::open_in_memory().unwrap();
+        let result = get_page_meta(&db, 50, 0).unwrap();
+        assert!(result.is_empty(), "expected empty list for empty DB");
     }
 }
