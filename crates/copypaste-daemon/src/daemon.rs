@@ -5,7 +5,8 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::time::interval;
 use copypaste_core::{
     AppConfig, Database, DeviceKeypair,
-    encrypt_item, insert_item, upsert_fts, ClipboardItem,
+    encrypt_item_with_aad, build_item_aad, AAD_SCHEMA_VERSION,
+    insert_item, upsert_fts, ClipboardItem,
     encode_image, chunks_to_blob,
     detect,
 };
@@ -358,17 +359,22 @@ async fn handle_text(
 ) -> Option<ClipboardItem> {
     let is_sensitive = detect(&text).is_some();
 
-    // NOTE: encrypt_item now returns Result (crypto wave). One-line unblock
-    // so the daemon crate compiles for clipboard test verification; the
-    // crypto wave owner should fold this into their handler-error pass.
-    let (nonce, ciphertext) = match encrypt_item(text.as_bytes(), local_key) {
+    // v0.3: encrypt_item_with_aad binds ciphertext to (item_id, schema_version)
+    // via AEAD AAD. Pre-generate item_id so the value baked into the AAD is the
+    // same one persisted in the row — decryption later rebuilds AAD from the
+    // stored item_id. The legacy empty-AAD fallback was removed in 1c55e57, so
+    // a mismatch here would surface as `EncryptError::AuthFailed` on read.
+    let item_id = uuid::Uuid::new_v4().to_string();
+    let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+    let (nonce, ciphertext) = match encrypt_item_with_aad(text.as_bytes(), local_key, &aad) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!("encrypt_item failed for text: {e}");
+            tracing::warn!("encrypt_item_with_aad failed for text: {e}");
             return None;
         }
     };
     let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
+    item.item_id = item_id;
     item.is_sensitive = is_sensitive;
 
     if is_sensitive {
