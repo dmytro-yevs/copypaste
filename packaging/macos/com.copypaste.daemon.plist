@@ -13,8 +13,19 @@
     <key>RunAtLoad</key>
     <true/>
 
+    <!--
+        Respawn only on crash; a clean exit (user invoked `daemon stop` or
+        the daemon shut down intentionally) must NOT trigger a relaunch.
+        Without this, `KeepAlive=<true/>` would fight `launchctl bootout`
+        and the UI's quit/restart flows.
+    -->
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
 
     <key>ProcessType</key>
     <string>Interactive</string>
@@ -31,7 +42,11 @@
         <string>info</string>
     </dict>
 
+    <!--
+        Bumped from 10 → 30 so a flapping daemon (e.g. config error,
+        permission denial) doesn't burn CPU in a tight respawn loop.
+    -->
     <key>ThrottleInterval</key>
-    <integer>10</integer>
+    <integer>30</integer>
 </dict>
 </plist>
