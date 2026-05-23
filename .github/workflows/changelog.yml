@@ -1,0 +1,69 @@
+name: Changelog
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  changelog:
+    name: Generate release changelog
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout (full history + tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install git-cliff
+        uses: kenji-miyake/setup-git-cliff@v2
+
+      - name: Determine previous tag
+        id: prev
+        env:
+          CURRENT_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Reject anything that doesn't look like a vX.Y.Z[-suffix] tag.
+          if ! [[ "${CURRENT_TAG}" =~ ^v[0-9][A-Za-z0-9._+-]*$ ]]; then
+            echo "error: unexpected tag name: ${CURRENT_TAG}" >&2
+            exit 1
+          fi
+          prev="$(git tag --list 'v*' --sort=-v:refname \
+                    | grep -v -F -x "${CURRENT_TAG}" \
+                    | head -n1 || true)"
+          {
+            echo "current=${CURRENT_TAG}"
+            echo "previous=${prev}"
+          } >>"${GITHUB_OUTPUT}"
+          echo "Current tag: ${CURRENT_TAG}"
+          echo "Previous tag: ${prev:-<none>}"
+
+      - name: Generate release notes section
+        env:
+          CURRENT_TAG: ${{ steps.prev.outputs.current }}
+          PREVIOUS_TAG: ${{ steps.prev.outputs.previous }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--tag "${CURRENT_TAG}" --output RELEASE_NOTES.md)
+          if [[ -n "${PREVIOUS_TAG}" ]]; then
+            args=(--since "${PREVIOUS_TAG}" "${args[@]}")
+          fi
+          bash scripts/gen-changelog.sh "${args[@]}"
+          echo "----- RELEASE_NOTES.md -----"
+          cat RELEASE_NOTES.md
+
+      - name: Update GitHub Release notes
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.prev.outputs.current }}
+          body_path: RELEASE_NOTES.md
+          append_body: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
