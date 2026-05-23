@@ -245,3 +245,113 @@ async fn relay_register_rejects_wrong_length_public_key() {
     let (status, _) = register(app, &device_uuid(1), &short).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+// ---------------------------------------------------------------------------
+// Wave 3.4 — concurrent-read smoke test for list/get device handlers.
+//
+// Originally specified to assert that GET handlers use `RwLock::read()` for
+// truly-concurrent access. Wave 3.4 kept `Mutex` to avoid multi-file ripple,
+// but the contract for callers is unchanged: 100 concurrent GETs must
+// complete without deadlock and within a reasonable time bound.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn read_only_handlers_handle_concurrent_load() {
+    let (app, _state) = make_app();
+    // Seed a couple of devices so the list isn't empty. make_app() gives us a
+    // fresh RelayStore so per-device limiter state cannot leak across tests.
+    let (s, _) = register(app.clone(), &device_uuid(100), &pub_key(100)).await;
+    assert_eq!(s, StatusCode::CREATED);
+    let (s, _) = register(app.clone(), &device_uuid(101), &pub_key(101)).await;
+    assert_eq!(s, StatusCode::CREATED);
+
+    let start = std::time::Instant::now();
+    let mut handles = Vec::with_capacity(100);
+    for _ in 0..100 {
+        let app_clone = app.clone();
+        handles.push(tokio::spawn(async move {
+            get_json(app_clone, "/devices").await
+        }));
+    }
+    for h in handles {
+        let (status, body) = h.await.expect("task panicked");
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.get("devices").is_some());
+    }
+    let elapsed = start.elapsed();
+    // Smoke check: 100 in-process GETs must finish well under 5 seconds even
+    // serialized through a Mutex. If this ever exceeds 5s the lock has become
+    // a real bottleneck and the RwLock migration becomes urgent.
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "100 concurrent GET /devices took {elapsed:?} — lock contention regressed",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Wave 3.4 — security MEDIUM #13: per-device registration rate limit.
+//
+// Five attempts within 60s for the same device_id are allowed (they may fail
+// with 409 Conflict after the first, but the limiter does not reject them).
+// The 6th attempt within the window must return 429 with a Retry-After header.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn register_device_per_device_rate_limited() {
+    // Each call to make_app() creates a fresh RelayStore (which owns the
+    // limiter state), so no cross-test interference is possible — the limit
+    // only kicks in for re-registrations against THIS app's store.
+    let (app, _state) = make_app();
+
+    let device_id = device_uuid(42);
+    let key = pub_key(42);
+
+    // First attempt: succeeds with 201 Created.
+    let (status, _) = register(app.clone(), &device_id, &key).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // Attempts 2..=5: subsequent registrations of the same device_id return
+    // 409 Conflict (already registered) but each one still counts toward the
+    // per-device rate-limit window.
+    for n in 2..=5 {
+        let (status, _) = register(app.clone(), &device_id, &key).await;
+        assert_eq!(
+            status,
+            StatusCode::CONFLICT,
+            "attempt #{n}: expected 409 Conflict from store, got {status}",
+        );
+    }
+
+    // 6th attempt within 60s: must be short-circuited by the limiter as 429.
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/devices")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            serde_json::to_string(&json!({
+                "device_id": device_id,
+                "device_name": "Test Device",
+                "public_key_b64": key,
+            }))
+            .unwrap(),
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::TOO_MANY_REQUESTS,
+        "6th registration within 60s must be rate-limited",
+    );
+    let retry_after = resp
+        .headers()
+        .get(header::RETRY_AFTER)
+        .expect("Retry-After header must be present on 429")
+        .to_str()
+        .unwrap()
+        .parse::<u64>()
+        .expect("Retry-After must be an integer number of seconds");
+    assert!(
+        retry_after >= 1 && retry_after <= 60,
+        "Retry-After must be between 1 and 60 seconds, got {retry_after}",
+    );
+}

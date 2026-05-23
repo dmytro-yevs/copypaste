@@ -1,6 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
@@ -23,6 +23,13 @@ const MAX_PUSH_ITEMS_PER_DEVICE: usize = 500;
 /// Maximum number of devices a single logical "account" can register (free tier).
 #[allow(dead_code)]
 pub const MAX_FREE_DEVICES: usize = 5;
+
+/// Per-device registration-rate-limit window (security MEDIUM #13).
+pub const REG_LIMIT_WINDOW: Duration = Duration::from_secs(60);
+/// Maximum registration attempts allowed per device_id within `REG_LIMIT_WINDOW`.
+pub const REG_LIMIT_MAX_ATTEMPTS: usize = 5;
+/// Hard cap on the rate-limiter map size to bound memory if an attacker rotates device_ids.
+const REG_LIMIT_MAX_KEYS: usize = 10_000;
 
 // ---------------------------------------------------------------------------
 // Domain types
@@ -66,6 +73,10 @@ pub struct RelayStore {
     pub sync_items: HashMap<String, Vec<SyncItem>>,
     /// Monotonically increasing counter used to assign IDs to sync items.
     next_sync_id: i64,
+    /// Rolling window of registration attempts keyed by `device_id`.
+    /// Used to enforce per-device registration rate limit (security MEDIUM #13)
+    /// orthogonal to the per-IP `tower_governor` limiter.
+    reg_attempts: HashMap<String, VecDeque<Instant>>,
 }
 
 impl RelayStore {
@@ -74,7 +85,55 @@ impl RelayStore {
             devices: HashMap::new(),
             sync_items: HashMap::new(),
             next_sync_id: 1,
+            reg_attempts: HashMap::new(),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-device registration rate limiter (security MEDIUM #13)
+    // -----------------------------------------------------------------------
+
+    /// Record a registration attempt for `device_id` and return
+    /// `Err(retry_after_secs)` when the per-device rate-limit window
+    /// is exhausted (`REG_LIMIT_MAX_ATTEMPTS` attempts within
+    /// `REG_LIMIT_WINDOW`).
+    ///
+    /// This is independent of the per-IP `tower_governor` limiter installed
+    /// in `routes/mod.rs`: it blocks an attacker who has obtained a victim's
+    /// `device_id` (but not the bearer token) from flooding re-registrations
+    /// regardless of source IP.
+    pub fn check_registration_rate_limit(&mut self, device_id: &str) -> Result<(), u64> {
+        let now = Instant::now();
+
+        // Opportunistic global eviction when the map grows too large.
+        if self.reg_attempts.len() > REG_LIMIT_MAX_KEYS {
+            self.reg_attempts.retain(|_, deque| {
+                deque.retain(|t| now.duration_since(*t) < REG_LIMIT_WINDOW);
+                !deque.is_empty()
+            });
+        }
+
+        let deque = self.reg_attempts.entry(device_id.to_string()).or_default();
+        // Drop attempts that fell out of the rolling window.
+        while let Some(front) = deque.front() {
+            if now.duration_since(*front) >= REG_LIMIT_WINDOW {
+                deque.pop_front();
+            } else {
+                break;
+            }
+        }
+
+        if deque.len() >= REG_LIMIT_MAX_ATTEMPTS {
+            let oldest = *deque.front().expect("non-empty by check above");
+            let retry_after = REG_LIMIT_WINDOW
+                .saturating_sub(now.duration_since(oldest))
+                .as_secs()
+                .max(1);
+            return Err(retry_after);
+        }
+
+        deque.push_back(now);
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
