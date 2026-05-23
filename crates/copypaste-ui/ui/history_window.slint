@@ -11,6 +11,14 @@ struct HistoryItem {
     preview: string,
     timestamp: string,
     is-sensitive: bool,
+    // Wave 3.4: optional thumbnail metadata for image items.
+    // When the daemon ships an inline thumbnail (future IPC method
+    // `get_image_thumbnail(id)` — see TODO in main.rs), `thumb-source`
+    // is bound to a real `image`. Until then the row falls back to a
+    // styled placeholder rectangle showing dimensions in `preview`.
+    thumb-source: image,
+    thumb-width: int,
+    thumb-height: int,
 }
 
 export component HistoryWindow inherits Window {
@@ -111,16 +119,40 @@ export component HistoryWindow inherits Window {
                         padding-right: 10px;
                         spacing: 8px;
 
-                        // Type badge
-                        Rectangle {
+                        // Wave 3.4: image row leads with a thumbnail (or placeholder).
+                        // Non-image rows keep the original 48×22 type badge.
+                        if item.content-type == "image" : Rectangle {
+                            width: 56px;
+                            height: 42px;
+                            border-radius: 4px;
+                            background: #45475a;
+                            clip: true;
+
+                            // Real thumbnail when daemon ships pixels; falls back to
+                            // an "IMG" tag until `get_image_thumbnail(id)` lands.
+                            if item.thumb-width > 0 : Image {
+                                source: item.thumb-source;
+                                width: parent.width;
+                                height: parent.height;
+                                image-fit: contain;
+                            }
+                            if item.thumb-width == 0 : Text {
+                                text: "IMG";
+                                color: #fab387;
+                                font-size: 11px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                        if item.content-type != "image" : Rectangle {
                             width: 48px;
                             height: 22px;
                             border-radius: 4px;
-                            background: item.content-type == "text" ? #313244 : #45475a;
+                            background: #313244;
 
                             Text {
                                 text: item.content-type;
-                                color: item.content-type == "text" ? #89b4fa : #fab387;
+                                color: #89b4fa;
                                 font-size: 10px;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;

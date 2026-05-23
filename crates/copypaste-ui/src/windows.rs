@@ -121,6 +121,47 @@ pub fn pair_window_empty_hint(peer_count: usize) -> Option<(&'static str, &'stat
     }
 }
 
+// ── HistoryWindow image previews (Wave 3.4) ────────────────────────────────────
+
+/// Format a one-line label for an image clipboard item shown in the
+/// HistoryWindow. Falls back gracefully when dimensions / size are unknown
+/// (the daemon currently only ships metadata — the raw bytes are fetched
+/// lazily via a future `get_image_thumbnail(id)` IPC method, see TODO in
+/// `main.rs`).
+///
+/// Examples:
+///   `image_preview_label(Some(1920), Some(1080), Some(452_000))`
+///     → `"Image  1920×1080 · 441 KB"`
+///   `image_preview_label(None, None, None)` → `"Image"`
+pub fn image_preview_label(
+    width: Option<u32>,
+    height: Option<u32>,
+    bytes: Option<u64>,
+) -> String {
+    let mut out = String::from("Image");
+    if let (Some(w), Some(h)) = (width, height) {
+        out.push_str(&format!("  {w}×{h}"));
+    }
+    if let Some(b) = bytes {
+        out.push_str(" · ");
+        out.push_str(&format_byte_size(b));
+    }
+    out
+}
+
+/// Human-readable byte size — KB / MB with one decimal once we cross 1 MB.
+fn format_byte_size(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * 1024;
+    if bytes < KB {
+        format!("{bytes} B")
+    } else if bytes < MB {
+        format!("{} KB", bytes / KB)
+    } else {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    }
+}
+
 // ── PairWindow ─────────────────────────────────────────────────────────────────
 
 /// A live handle to the PairWindow.
@@ -239,6 +280,35 @@ mod tests {
         );
         // The Slint footprint stays in sync with the helper, so the rendered
         // hint matches exactly what we assert here.
+    }
+
+    // --- Wave 3.4: image preview label ---
+
+    #[test]
+    fn image_preview_label_with_full_metadata() {
+        let s = image_preview_label(Some(1920), Some(1080), Some(452_000));
+        assert!(s.starts_with("Image"), "must start with Image: {s}");
+        assert!(s.contains("1920×1080"), "must show dimensions: {s}");
+        assert!(s.contains("441 KB"), "must show size in KB: {s}");
+    }
+
+    #[test]
+    fn image_preview_label_without_metadata_is_safe() {
+        assert_eq!(image_preview_label(None, None, None), "Image");
+    }
+
+    #[test]
+    fn image_preview_label_dimensions_only() {
+        let s = image_preview_label(Some(64), Some(32), None);
+        assert!(s.contains("64×32"), "dimensions only: {s}");
+        assert!(!s.contains('·'), "no size separator when bytes missing: {s}");
+    }
+
+    #[test]
+    fn format_byte_size_thresholds() {
+        assert_eq!(format_byte_size(512), "512 B");
+        assert_eq!(format_byte_size(2048), "2 KB");
+        assert_eq!(format_byte_size(1_500_000), "1.4 MB");
     }
 
     #[test]

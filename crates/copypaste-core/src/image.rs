@@ -12,7 +12,7 @@
 //! The module is intentionally platform-agnostic: NSPasteboard reading lives
 //! in `copypaste-daemon`, so all code here is testable without macOS.
 
-use image::{DynamicImage, ImageFormat};
+use image::{DynamicImage, GenericImageView, ImageFormat};
 use std::io::Cursor;
 use thiserror::Error;
 
@@ -71,6 +71,41 @@ pub fn decode_clipboard_image(raw: &[u8]) -> Result<DynamicImage, ImageError> {
 
     // Generic sniff (handles BMP, etc.)
     image::load_from_memory(raw).map_err(|e| ImageError::Decode(e.to_string()))
+}
+
+/// Decode raw image bytes (PNG/TIFF/BMP) and produce an RGBA8 thumbnail
+/// that fits within `(max_w, max_h)`, preserving aspect ratio.
+///
+/// Returns `(rgba_bytes, width, height)` where `rgba_bytes.len() == width * height * 4`.
+///
+/// If the source image already fits the bounds the original pixels are
+/// returned (still as RGBA8), so callers always get a uniform pixel format
+/// suitable for `slint::Image::from_rgba8(...)`.
+///
+/// This is an additive Wave 3.4 helper used by the HistoryWindow to render
+/// inline previews of clipboard images without leaking the full bitmap
+/// through IPC.
+pub fn thumbnail(
+    raw_bytes: &[u8],
+    max_w: u32,
+    max_h: u32,
+) -> Result<(Vec<u8>, u32, u32), ImageError> {
+    if max_w == 0 || max_h == 0 {
+        return Err(ImageError::Decode(
+            "thumbnail bounds must be non-zero".into(),
+        ));
+    }
+
+    let img = decode_clipboard_image(raw_bytes)?;
+    let (w, h) = img.dimensions();
+    let resized = if w > max_w || h > max_h {
+        img.thumbnail(max_w, max_h)
+    } else {
+        img
+    };
+    let rgba = resized.to_rgba8();
+    let (rw, rh) = (rgba.width(), rgba.height());
+    Ok((rgba.into_raw(), rw, rh))
 }
 
 /// Re-encode a `DynamicImage` as PNG bytes (lossless, pure-Rust).
@@ -358,6 +393,64 @@ mod tests {
         let (_, chunks) = encode_image(&png, &key, &file_id).unwrap();
         let err = decode_image(&chunks, &bad_key, &file_id).unwrap_err();
         assert!(matches!(err, ImageError::Chunk(_)));
+    }
+
+    // --- Wave 3.4: thumbnail helper ---
+
+    /// Build a synthetic RGB image of `(w, h)` and return its PNG bytes.
+    fn synthetic_png(w: u32, h: u32) -> Vec<u8> {
+        use image::{ImageBuffer, Rgb};
+        let img = ImageBuffer::from_fn(w, h, |x, y| {
+            Rgb([(x % 255) as u8, (y % 255) as u8, 128u8])
+        });
+        encode_as_png(&DynamicImage::ImageRgb8(img)).expect("encode synthetic PNG")
+    }
+
+    #[test]
+    fn thumbnail_downscales_large_image_preserving_aspect() {
+        // 1000x500 → bounded to 200x150 keeps the 2:1 aspect → 200x100
+        let png = synthetic_png(1000, 500);
+        let (bytes, w, h) = thumbnail(&png, 200, 150).expect("thumbnail must succeed");
+        assert!(w <= 200 && h <= 150, "thumb {}x{} must fit bounds", w, h);
+        assert_eq!(w, 200, "longest side must hit max_w for 2:1 source");
+        assert_eq!(h, 100, "aspect ratio must be preserved");
+        assert_eq!(
+            bytes.len() as u32,
+            w * h * 4,
+            "RGBA8 byte count must match dimensions"
+        );
+    }
+
+    #[test]
+    fn thumbnail_no_op_for_small_image_returns_original_dimensions() {
+        // 64x32 fits within 200x150 → no resize, but still RGBA8 output.
+        let png = synthetic_png(64, 32);
+        let (bytes, w, h) = thumbnail(&png, 200, 150).expect("thumbnail must succeed");
+        assert_eq!(w, 64);
+        assert_eq!(h, 32);
+        assert_eq!(bytes.len() as u32, 64 * 32 * 4);
+    }
+
+    #[test]
+    fn thumbnail_rejects_zero_bounds() {
+        let png = synthetic_png(10, 10);
+        assert!(matches!(
+            thumbnail(&png, 0, 100).unwrap_err(),
+            ImageError::Decode(_)
+        ));
+        assert!(matches!(
+            thumbnail(&png, 100, 0).unwrap_err(),
+            ImageError::Decode(_)
+        ));
+    }
+
+    #[test]
+    fn thumbnail_rejects_garbage_bytes() {
+        let err = thumbnail(&[0xDE, 0xAD, 0xBE, 0xEF], 100, 100).unwrap_err();
+        assert!(matches!(
+            err,
+            ImageError::Decode(_) | ImageError::UnsupportedFormat
+        ));
     }
 
     #[test]

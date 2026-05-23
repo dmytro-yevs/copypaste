@@ -10,7 +10,7 @@ pub use crypto::{DeviceKeypair, KeyError};
 pub use crypto::encrypt::{encrypt_item, decrypt_item, EncryptError, NONCE_SIZE};
 pub use crypto::chunks::{encrypt_chunks, decrypt_chunks, EncryptedChunk, ChunkError};
 pub use image::{
-    encode_image, decode_image, chunks_to_blob, chunks_from_blob,
+    encode_image, decode_image, chunks_to_blob, chunks_from_blob, thumbnail,
     ImageError, ImageMeta, IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES,
 };
 pub use sensitive::{

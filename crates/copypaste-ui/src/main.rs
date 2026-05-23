@@ -265,6 +265,11 @@ fn apply_history_result(
             win.set_status_text(status.into());
             win.set_total_count(page.total as i32);
 
+            // Wave 3.4: image rows ship without inline pixels for now.
+            // `thumb_width == 0` tells the Slint row to render the "IMG"
+            // placeholder instead of an empty `Image`. A follow-up IPC
+            // method `get_image_thumbnail(id)` will populate `thumb_source`
+            // lazily — see TODO below.
             let slint_items: Vec<HistoryItem> = page
                 .items
                 .into_iter()
@@ -274,6 +279,12 @@ fn apply_history_result(
                     preview: entry.preview.into(),
                     timestamp: format_wall_time(entry.wall_time).into(),
                     is_sensitive: entry.is_sensitive,
+                    // TODO(beta-w3.5): when daemon exposes
+                    // `get_image_thumbnail(id)` IPC, call it for image rows
+                    // and convert (rgba, w, h) via slint::Image::from_rgba8.
+                    thumb_source: slint::Image::default(),
+                    thumb_width: 0,
+                    thumb_height: 0,
                 })
                 .collect();
 
