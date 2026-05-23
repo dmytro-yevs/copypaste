@@ -40,13 +40,60 @@ impl DeviceKeypair {
         *self.public.as_bytes()
     }
 
+    /// Returns the raw 32-byte X25519 secret as a plain `[u8; 32]`.
+    ///
+    /// **Security note (audit MED #3):** the return value is `Copy` and is
+    /// NOT zeroized — callers leak key material on the stack and on heap
+    /// reallocation. Prefer [`Self::secret_key_bytes_zeroizing`] for new
+    /// call sites; this signature is retained so existing call sites in
+    /// crates outside this worker's allow-list (e.g.
+    /// `copypaste-daemon::platform::macos`) keep compiling unchanged. A
+    /// follow-up patch should migrate every caller and either delete this
+    /// method or formally `#[deprecated]` it.
     pub fn secret_key_bytes(&self) -> [u8; 32] {
-        self.secret.to_bytes()
+        // Use a `Zeroizing` buffer for the intermediate copy so the
+        // x25519_dalek-allocated bytes are scrubbed when this function
+        // returns. The final `[u8; 32]` returned to the caller is still a
+        // fresh copy (compiler may keep it in a register), so this only
+        // narrows the leak window — it does not eliminate it. Callers
+        // that need a tighter window must use the `_zeroizing` variant.
+        let buf: zeroize::Zeroizing<[u8; 32]> = zeroize::Zeroizing::new(self.secret.to_bytes());
+        *buf
     }
 
+    /// Returns the raw 32-byte X25519 secret wrapped in [`Zeroizing`] so
+    /// the bytes are scrubbed when the returned value is dropped.
+    ///
+    /// Prefer this over [`Self::secret_key_bytes`] for any new code path
+    /// that hands the secret to encryption, keychain storage, or any
+    /// other transient consumer. See audit MED #3.
+    pub fn secret_key_bytes_zeroizing(&self) -> zeroize::Zeroizing<[u8; 32]> {
+        zeroize::Zeroizing::new(self.secret.to_bytes())
+    }
+
+    /// Returns the raw 32-byte ECDH shared secret as a plain `[u8; 32]`.
+    ///
+    /// **Security note (audit MED #3):** like [`Self::secret_key_bytes`],
+    /// the return value is unscrubbed `Copy` data. The underlying
+    /// `x25519_dalek::SharedSecret` is `ZeroizeOnDrop`, so the source
+    /// buffer is wiped — but the returned `[u8; 32]` copy persists.
+    /// Prefer [`Self::ecdh_zeroizing`] for new code; this shim is kept
+    /// for cross-crate ABI stability while the migration is in flight.
     pub fn ecdh(&self, peer_public_bytes: &[u8; 32]) -> [u8; 32] {
         let peer = PublicKey::from(*peer_public_bytes);
-        *self.secret.diffie_hellman(&peer).as_bytes()
+        let shared = self.secret.diffie_hellman(&peer);
+        // `shared` is dropped at the end of the function — its underlying
+        // bytes are zeroized by SharedSecret's ZeroizeOnDrop impl. Wrap
+        // our copy in Zeroizing too so the intermediate is scrubbed.
+        let buf: zeroize::Zeroizing<[u8; 32]> = zeroize::Zeroizing::new(*shared.as_bytes());
+        *buf
+    }
+
+    /// Returns the raw 32-byte ECDH shared secret wrapped in [`Zeroizing`].
+    /// See [`Self::secret_key_bytes_zeroizing`] for the migration story.
+    pub fn ecdh_zeroizing(&self, peer_public_bytes: &[u8; 32]) -> zeroize::Zeroizing<[u8; 32]> {
+        let peer = PublicKey::from(*peer_public_bytes);
+        zeroize::Zeroizing::new(*self.secret.diffie_hellman(&peer).as_bytes())
     }
 
     pub fn derive_enc_key(
@@ -55,9 +102,13 @@ impl DeviceKeypair {
         sender_id: &str,
         recipient_id: &str,
     ) -> [u8; 32] {
-        let raw_secret = self.ecdh(peer_public_bytes);
+        // Audit MED #3: use the zeroizing ECDH accessor so the raw
+        // shared secret is scrubbed when this function returns. The
+        // derived enc key is what callers receive; the ikm itself never
+        // leaks past this stack frame.
+        let raw_secret = self.ecdh_zeroizing(peer_public_bytes);
         let info = format!("copypaste-v1|{}|{}", sender_id, recipient_id);
-        let hk = Hkdf::<Sha256>::new(Some(HKDF_SALT_V1), &raw_secret);
+        let hk = Hkdf::<Sha256>::new(Some(HKDF_SALT_V1), raw_secret.as_ref());
         let mut enc_key = [0u8; 32];
         hk.expand(info.as_bytes(), &mut enc_key)
             .expect("HKDF expand 32 bytes always succeeds");
@@ -135,6 +186,26 @@ mod tests {
         let secret_bytes = kp.secret_key_bytes();
         let restored = DeviceKeypair::from_secret_bytes(&secret_bytes).unwrap();
         assert_eq!(kp.public_key_bytes(), restored.public_key_bytes());
+    }
+
+    /// Audit MED #3: the zeroizing accessor must return the same bytes as
+    /// the plain accessor — it's a wrap-not-replace operation. Callers
+    /// who switch should not observe a behavioural change.
+    #[test]
+    fn secret_key_bytes_zeroizing_matches_plain_accessor() {
+        let kp = DeviceKeypair::generate();
+        let plain = kp.secret_key_bytes();
+        let zr = kp.secret_key_bytes_zeroizing();
+        assert_eq!(plain, *zr);
+    }
+
+    #[test]
+    fn ecdh_zeroizing_matches_plain_accessor() {
+        let alice = DeviceKeypair::generate();
+        let bob = DeviceKeypair::generate();
+        let plain = alice.ecdh(&bob.public_key_bytes());
+        let zr = alice.ecdh_zeroizing(&bob.public_key_bytes());
+        assert_eq!(plain, *zr);
     }
 
     #[test]
