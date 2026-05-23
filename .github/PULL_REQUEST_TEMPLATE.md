@@ -1,32 +1,45 @@
 ## Summary
 
-<!-- One paragraph: what changed and why -->
+<!-- One paragraph: what changed and why. Focus on intent, not diff. -->
+
+## Linked issues
+
+<!-- Closes #N, Refs #M. Required for non-trivial changes. -->
 
 ## Type of change
 
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Refactor / cleanup
-- [ ] Documentation
-- [ ] CI/Infrastructure
+- [ ] feat — new user-visible functionality
+- [ ] fix — bug fix
+- [ ] perf — performance improvement
+- [ ] refactor — internal restructure, no behaviour change
+- [ ] docs — documentation only
+- [ ] test — adding or fixing tests only
+- [ ] chore — build, CI, deps, tooling
 
 ## Testing
 
+<!-- Describe how you verified the change. Paste command output where useful. -->
+
 - [ ] `cargo test --workspace` passes
-- [ ] New tests added for new functionality
-- [ ] Manually tested on macOS (if daemon/UI changes)
+- [ ] `cargo clippy --workspace --all-targets -- -D warnings` clean
+- [ ] `cargo fmt --all -- --check` clean
+- [ ] New unit / integration tests added for new behaviour
+- [ ] Manually tested on affected platform(s): <!-- macOS / Android / Windows / Linux / relay -->
 
-## Security checklist
+## Checklist
 
-- [ ] No plaintext clipboard content in logs
-- [ ] No hardcoded secrets or keys
-- [ ] SQLCipher keys not leaked
-- [ ] IPC input validated
+- [ ] All tests pass locally
+- [ ] Clippy is clean (no new warnings)
+- [ ] Public API / IPC / config schema changes are documented
+- [ ] **ADR added under `docs/adr/`** if this changes architecture
+- [ ] **CHANGELOG entry added** if this is user-visible
+- [ ] No plaintext clipboard content, keys, or tokens added to logs
+- [ ] No secrets, credentials, or `.env` files committed
 
 ## Breaking changes
 
-<!-- List any breaking changes to IPC protocol, config schema, or public API. Bump version if yes. -->
+<!-- List any breaking changes to IPC protocol, config schema, CLI flags, or public Rust API. -->
 
-## Related issues
+## Screenshots / logs
 
-<!-- Closes #N -->
+<!-- Optional. Helpful for UI and CLI changes. -->
