@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 /// Maximum size of a single IPC request line. Clients exceeding this receive
 /// an error response and have their connection closed. Prevents OOM from a
@@ -245,7 +246,15 @@ impl IpcServer {
         )
     }
 
-    pub async fn serve(self, socket_path: &std::path::Path) -> anyhow::Result<()> {
+    /// Run the IPC accept loop until `shutdown` is cancelled.
+    ///
+    /// D2: accepts a [`CancellationToken`] so the daemon can stop the server
+    /// cleanly on SIGINT/SIGTERM instead of relying on task abort.
+    pub async fn serve(
+        self,
+        socket_path: &std::path::Path,
+        shutdown: CancellationToken,
+    ) -> anyhow::Result<()> {
         // T4 (v0.3) — make sure the `revoked_devices` audit table exists
         // before any client can call `revoke_peer`. The DDL is purely
         // additive (`CREATE TABLE IF NOT EXISTS`) and does NOT bump the
@@ -284,18 +293,28 @@ impl IpcServer {
 
         let server = Arc::new(self);
         loop {
-            match listener.accept().await {
-                Ok((stream, _)) => {
-                    let s = server.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = s.handle_connection(stream).await {
-                            tracing::warn!("IPC connection error: {e}");
-                        }
-                    });
+            tokio::select! {
+                // D2: stop accepting new connections on daemon-wide shutdown.
+                _ = shutdown.cancelled() => {
+                    tracing::info!("IPC server: shutdown signal received, stopping accept loop");
+                    break;
                 }
-                Err(e) => tracing::error!("accept error: {e}"),
+                result = listener.accept() => {
+                    match result {
+                        Ok((stream, _)) => {
+                            let s = server.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = s.handle_connection(stream).await {
+                                    tracing::warn!("IPC connection error: {e}");
+                                }
+                            });
+                        }
+                        Err(e) => tracing::error!("accept error: {e}"),
+                    }
+                }
             }
         }
+        Ok(())
     }
 
     #[tracing::instrument(skip_all, name = "ipc_connection")]
@@ -1467,7 +1486,7 @@ mod tests {
         let server = IpcServer::new(db, private_mode.clone(), local_key, device_pub);
         let path = socket_path.to_path_buf();
         tokio::spawn(async move {
-            server.serve(&path).await.ok();
+            server.serve(&path, CancellationToken::new()).await.ok();
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         private_mode
@@ -2050,7 +2069,7 @@ mod tests {
             IpcServer::new_with_ready(db, private_mode, local_key, device_pub, ready_clone);
         let path = socket_path.to_path_buf();
         tokio::spawn(async move {
-            server.serve(&path).await.ok();
+            server.serve(&path, CancellationToken::new()).await.ok();
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         ready
@@ -2406,7 +2425,7 @@ mod tests {
         );
         let sock_path = sock.clone();
         tokio::spawn(async move {
-            server.serve(&sock_path).await.ok();
+            server.serve(&sock_path, CancellationToken::new()).await.ok();
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
