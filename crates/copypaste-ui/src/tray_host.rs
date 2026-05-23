@@ -303,6 +303,13 @@ struct TrayRuntime {
     /// Receiver drained by [`drain_events`] each tick — applies the
     /// result and re-enables the menu item.
     launchd_rx: Receiver<LaunchdResult>,
+    /// Slint timer driving [`drain_events`]. Stored here (instead of
+    /// `mem::forget`-ed) so its `Drop` runs when the runtime itself is
+    /// dropped, stopping the timer cleanly. Without ownership the timer
+    /// would be reclaimed at end of `install()` and tray events would
+    /// silently stop firing — keeping it inside the runtime preserves
+    /// that lifetime contract without leaking on every `install()` call.
+    _drain_timer: Option<slint::Timer>,
 }
 
 /// Build the tray icon, register a Slint timer that drains tray menu events
@@ -336,6 +343,7 @@ pub fn install(callbacks: TrayCallbacks) -> Result<(), TrayHostError> {
         launchd_in_flight: false,
         launchd_tx,
         launchd_rx,
+        _drain_timer: None,
     }));
 
     // Slint timer ticks on the UI thread; safe to read menu events here.
@@ -349,10 +357,11 @@ pub fn install(callbacks: TrayCallbacks) -> Result<(), TrayHostError> {
         },
     );
 
-    // Leak the timer into the Rc so it lives as long as the tray. Without
-    // this the timer is dropped at end of scope and tray events silently
-    // stop firing.
-    std::mem::forget(timer);
+    // Park the timer inside the runtime so it lives as long as the tray
+    // and is dropped (stopped) cleanly when the runtime is dropped.
+    // Replaces the previous `mem::forget(timer)`, which leaked one Slint
+    // timer per `install()` call.
+    runtime.borrow_mut()._drain_timer = Some(timer);
 
     tracing::info!("ui tray host installed");
     Ok(())
