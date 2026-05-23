@@ -88,13 +88,23 @@ impl ClipboardItem {
     }
 }
 
+/// Current HKDF key generation written into the `key_version` column for
+/// freshly-inserted rows. Pinned here (rather than re-exported from
+/// `crypto::keys`) because the storage layer needs an i64 value matching the
+/// column type and the on-disk meaning is "which key/AAD format to use at
+/// decrypt time" — a storage concern, not a crypto-derivation concern.
+///
+/// Increase from 2 → N in lockstep with a future HKDF-v3 family + a
+/// corresponding migration helper in `super::migration_v4`.
+pub const ITEM_KEY_VERSION_CURRENT: i64 = 2;
+
 pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError> {
     db.conn().execute(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+          content_hash, origin_device_id, key_version)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
         params![
             item.id,
             item.item_id,
@@ -110,9 +120,26 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
             item.app_bundle_id,
             item.content_hash,
             item.origin_device_id,
+            ITEM_KEY_VERSION_CURRENT,
         ],
     )?;
     Ok(())
+}
+
+/// Read the `key_version` column for a single item row. Returns `None` if no
+/// such row exists. Used by the migration sweep to spot-check that a row
+/// landed on `key_version = 2` after re-encryption.
+pub fn get_key_version(db: &Database, id: &str) -> Result<Option<i64>, ItemsError> {
+    let result = db.conn().query_row(
+        "SELECT key_version FROM clipboard_items WHERE id = ?1",
+        params![id],
+        |r| r.get::<_, i64>(0),
+    );
+    match result {
+        Ok(v) => Ok(Some(v)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(ItemsError::Sqlite(e)),
+    }
 }
 
 /// Stamp `origin_device_id` on every row that currently carries the empty
@@ -526,6 +553,27 @@ mod tests {
         // Verify expired returns 0 (pinned item not deleted)
         let removed = delete_expired(&db, 99999).unwrap();
         assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn newly_inserted_items_land_on_key_version_2() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+
+        let kv = get_key_version(&db, &item.id).unwrap();
+        assert_eq!(
+            kv,
+            Some(ITEM_KEY_VERSION_CURRENT),
+            "insert_item must stamp the current key_version on new rows"
+        );
+        assert_eq!(ITEM_KEY_VERSION_CURRENT, 2);
+    }
+
+    #[test]
+    fn get_key_version_missing_id_returns_none() {
+        let db = Database::open_in_memory().unwrap();
+        assert_eq!(get_key_version(&db, "nope").unwrap(), None);
     }
 
     #[test]
