@@ -59,7 +59,8 @@ mod verifier;
 // Convenient top-level re-exports — TLS transport.
 pub use cert::{fingerprint_of, CertError, SelfSignedCert};
 pub use transport::{
-    DeviceFingerprint, PairedPeers, PeerClientStream, PeerStream, PeerTransport, TransportError,
+    tls_channel_binder_client, tls_channel_binder_server, DeviceFingerprint, PairedPeers,
+    PeerClientStream, PeerStream, PeerTransport, TransportError, TLS_CHANNEL_BINDING_LABEL,
 };
 
 // Convenient top-level re-exports — mDNS-SD discovery.

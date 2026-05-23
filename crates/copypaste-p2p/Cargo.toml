@@ -28,6 +28,9 @@ hex.workspace = true
 # PAKE (Password-Authenticated Key Exchange) for device pairing — see ADR-008.
 # Pinned to 3.0 (MSRV 1.74); 4.x is pre-release.
 opaque-ke = { version = "3.0", default-features = false, features = ["ristretto255-voprf", "argon2", "std"] }
+# OsRng used in PAKE handshake — opaque-ke 3.0 re-exports rand but without
+# the getrandom feature, so OsRng must come from the workspace rand dep.
+rand.workspace = true
 # OPAQUE KSF — Argon2 password hashing
 argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
 # generic-array — required by opaque-ke message types

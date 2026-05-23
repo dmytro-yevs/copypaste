@@ -31,6 +31,17 @@ impl SelfSignedCert {
     ///
     /// The CN is set to `device_id` so certificates are nominally tied to a
     /// device, but the real identity check uses the fingerprint — not the CN.
+    ///
+    /// # TODO(v0.4): S10 — cert rotation race
+    ///
+    /// When a certificate is rotated (re-generated via this function) while an
+    /// in-flight TLS handshake is using the previous certificate, the handshake
+    /// may fail transiently because the new fingerprint is not yet in the peer's
+    /// `PairedPeers` table. The retry logic in `transport::connect_with_retry`
+    /// handles the most common case, but there is a window where the rotation
+    /// and the handshake race. Full fix (atomic cert-rotation with grace-period
+    /// dual-fingerprint acceptance) is deferred to v0.4.
+    /// See `docs/known-issues.md` for the documented mitigation.
     pub fn generate(device_id: &str) -> Result<Self, CertError> {
         let mut params = CertificateParams::default();
         let mut dn = DistinguishedName::new();
