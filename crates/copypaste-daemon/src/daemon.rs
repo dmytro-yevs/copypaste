@@ -14,10 +14,9 @@ use crate::{clipboard::{ClipboardContent, ClipboardMonitor}, p2p, paths};
 use crate::ipc::IpcServer;
 
 // Beta W2.2 (arch-1): sync orchestrator that wires `copypaste-sync` into the
-// daemon. Declared inline here because `main.rs` is owned by another worker
-// in this beta wave and we cannot add a top-level `mod sync_orch;` there.
-#[path = "sync_orch.rs"]
-pub mod sync_orch;
+// daemon. Declared at crate root in `lib.rs` (`pub mod sync_orch;`); we
+// re-import it here for the local `sync_orch::run` call below.
+use crate::sync_orch;
 
 /// Run the daemon until `Ctrl+C` / `SIGTERM` is received.
 ///

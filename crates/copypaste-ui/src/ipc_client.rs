@@ -224,7 +224,7 @@ impl IpcClient {
             // W3.3: parse the machine-readable `error_code` if the daemon
             // attached one. Unknown / missing codes collapse to `None` so
             // older daemons keep working unchanged.
-            error_code: v["error_code"].as_str().and_then(ErrorCode::from_str),
+            error_code: v["error_code"].as_str().and_then(ErrorCode::parse),
         })
     }
 
@@ -683,7 +683,8 @@ mod tests {
         // W3.3: `IpcError::from_code` must map every known ErrorCode onto
         // its typed variant, and fall back to `Daemon(_, None)` for
         // missing / unknown codes (forward-compat for older daemons).
-        let cases: &[(Option<ErrorCode>, &str, fn(&IpcError) -> bool)] = &[
+        type Case = (Option<ErrorCode>, &'static str, fn(&IpcError) -> bool);
+        let cases: &[Case] = &[
             (Some(ErrorCode::NotImplemented), "cloud sync",
                 |e| matches!(e, IpcError::NotImplemented(_))),
             (Some(ErrorCode::AuthFailed), "bad password",
@@ -725,7 +726,7 @@ mod tests {
             r#"{"id":1,"ok":false,"error":"nope","error_code":"not_implemented"}"#,
         )
         .unwrap();
-        let parsed_code = v["error_code"].as_str().and_then(ErrorCode::from_str);
+        let parsed_code = v["error_code"].as_str().and_then(ErrorCode::parse);
         assert_eq!(parsed_code, Some(ErrorCode::NotImplemented));
 
         // Unknown code collapses to None (forward-compat).
@@ -733,13 +734,13 @@ mod tests {
             r#"{"id":1,"ok":false,"error":"x","error_code":"future_code"}"#,
         )
         .unwrap();
-        let parsed_code = v2["error_code"].as_str().and_then(ErrorCode::from_str);
+        let parsed_code = v2["error_code"].as_str().and_then(ErrorCode::parse);
         assert_eq!(parsed_code, None);
 
         // Missing field collapses to None (legacy daemon, no regression).
         let v3: Value =
             serde_json::from_str(r#"{"id":1,"ok":false,"error":"x"}"#).unwrap();
-        let parsed_code = v3["error_code"].as_str().and_then(ErrorCode::from_str);
+        let parsed_code = v3["error_code"].as_str().and_then(ErrorCode::parse);
         assert_eq!(parsed_code, None);
     }
 

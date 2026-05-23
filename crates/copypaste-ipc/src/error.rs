@@ -5,7 +5,7 @@
 //! **wire-compatible**: the snake_case serialised form of an [`ErrorCode`] is
 //! exactly the string that ships in [`crate::Response::error_code`]. Producers
 //! may continue to emit `&'static str` codes via `Response::err_with_code`;
-//! consumers may parse the field with [`ErrorCode::from_str`] to branch on a
+//! consumers may parse the field with [`ErrorCode::parse`] to branch on a
 //! typed enum instead of a string.
 //!
 //! ## Why both forms?
@@ -19,7 +19,7 @@
 //!
 //! 1. Add a variant to [`ErrorCode`] with a snake_case `serde` rename.
 //! 2. Add the matching mapping in [`ErrorCode::as_str`] and
-//!    [`ErrorCode::from_str`].
+//!    [`ErrorCode::parse`].
 //! 3. (Optional) Add a matching `ERR_CODE_*` constant in
 //!    [`crate::response`] for daemon-side producers.
 //! 4. Never repurpose an existing code — it is part of the public wire
@@ -80,7 +80,11 @@ impl ErrorCode {
     ///
     /// Returns `None` for unknown codes so that consumers can forward-compat
     /// gracefully (treat unknown codes as a generic error rather than crash).
-    pub fn from_str(s: &str) -> Option<Self> {
+    ///
+    /// Named `parse` (not `from_str`) to avoid shadowing
+    /// [`std::str::FromStr::from_str`], whose signature returns `Result`
+    /// rather than `Option`.
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "not_found" => Some(Self::NotFound),
             "auth_failed" => Some(Self::AuthFailed),
@@ -124,8 +128,8 @@ mod tests {
         ];
         for code in all {
             let s = code.as_str();
-            let parsed = ErrorCode::from_str(s)
-                .unwrap_or_else(|| panic!("from_str failed to parse {s}"));
+            let parsed = ErrorCode::parse(s)
+                .unwrap_or_else(|| panic!("parse failed to handle {s}"));
             assert_eq!(parsed, code, "round-trip mismatch for {s}");
         }
     }
@@ -156,10 +160,10 @@ mod tests {
 
     #[test]
     fn error_code_from_str_unknown_returns_none() {
-        assert!(ErrorCode::from_str("totally_made_up").is_none());
-        assert!(ErrorCode::from_str("").is_none());
+        assert!(ErrorCode::parse("totally_made_up").is_none());
+        assert!(ErrorCode::parse("").is_none());
         // Case sensitive — codes are canonical snake_case.
-        assert!(ErrorCode::from_str("NOT_FOUND").is_none());
+        assert!(ErrorCode::parse("NOT_FOUND").is_none());
     }
 
     #[test]

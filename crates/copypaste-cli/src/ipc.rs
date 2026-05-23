@@ -67,7 +67,7 @@ impl IpcClient {
             // W3.3: parse the machine-readable `error_code` if attached.
             // Unknown / missing codes collapse to `None` so older daemons
             // keep working unchanged.
-            error_code: v["error_code"].as_str().and_then(ErrorCode::from_str),
+            error_code: v["error_code"].as_str().and_then(ErrorCode::parse),
         })
     }
 }

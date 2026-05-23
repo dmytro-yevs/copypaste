@@ -231,7 +231,7 @@ mod tests {
         // We can't capture stdout from print_report cheaply, so we render
         // the same lines manually and lock them in. Any drift in the
         // production formatter must be reflected here too.
-        let lines = vec![
+        let lines = [
             format!("Daemon:    {}", r.daemon),
             format!("Socket:    {}", r.socket),
             format!("Version:   {}", r.version.as_deref().unwrap()),
