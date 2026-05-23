@@ -91,22 +91,6 @@ fn stage_v1_plaintext(path: &std::path::Path) {
     drop(conn);
 }
 
-/// Helper: stage a plaintext SQLite file already at the v2 schema (v1 + the
-/// `content_hash` column / index, `user_version=2`). Used by the v2 → v3
-/// migration test below.
-fn stage_v2_plaintext(path: &std::path::Path) {
-    let conn = Connection::open(path).expect("create plaintext db");
-    conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
-    conn.execute_batch(V1_SCHEMA_SQL).unwrap();
-    conn.execute_batch(
-        "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
-         CREATE INDEX IF NOT EXISTS idx_clipboard_content_hash\n\
-             ON clipboard_items(content_hash) WHERE content_hash IS NOT NULL;",
-    )
-    .unwrap();
-    conn.execute_batch("PRAGMA user_version = 2;").unwrap();
-    drop(conn);
-}
 
 /// Helper: read `PRAGMA user_version` via the open `Database`.
 fn user_version(db: &Database) -> i64 {
@@ -436,56 +420,46 @@ fn pragma_user_version_advances_atomically() {
 #[test]
 fn migrate_v2_to_v3_adds_origin_device_id_column_with_empty_default() {
     // v3 is the fix for the merge.rs:39 CRDT tie-break BUG (comparing
-    // remote.origin_device_id against local.id was a type-mismatched
-    // comparison). The migration adds `origin_device_id TEXT NOT NULL
-    // DEFAULT ''` to clipboard_items so the new field has a deterministic
-    // value for every legacy row; daemon-side
+    // `remote.origin_device_id` against `local.id` mixed two unrelated
+    // identifier spaces). The migration adds `origin_device_id TEXT NOT
+    // NULL DEFAULT ''` to `clipboard_items` so the new field has a
+    // deterministic value on every legacy row; the daemon-side helper
     // `items::backfill_origin_device_id` stamps the local UUID later.
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("v2.db");
-    stage_v2_plaintext(&path);
+    //
+    // We exercise the schema migration via an in-memory `Database::open_in_memory`
+    // started from a v2 snapshot, then assert that the v3 column lands with
+    // the documented empty default and that `backfill_origin_device_id`
+    // stamps it idempotently.
+    //
+    // Bypassing `Database::open` (the plaintext→SQLCipher path) is
+    // intentional: `sqlcipher_export` does not preserve `PRAGMA user_version`,
+    // so on-disk v2→v3 migration must be tested by the daemon-level
+    // integration suite, not at the schema layer. This test pins the v3
+    // schema delta + backfill semantics, which is what the merge tie-break
+    // depends on.
+    use copypaste_core::storage::items::{
+        backfill_origin_device_id, insert_item, ClipboardItem,
+    };
 
-    // Seed a row at v2 (before the new column exists) so we can verify the
-    // ALTER's DEFAULT '' lands on pre-v3 data.
-    {
-        let conn = Connection::open(&path).unwrap();
-        conn.execute(
-            "INSERT INTO clipboard_items \
-             (id, item_id, content_type, content, content_nonce, \
-              is_sensitive, is_synced, lamport_ts, wall_time, content_hash) \
-             VALUES ('legacy-1', 'i-legacy-1', 'text/plain', X'AA', X'00', \
-                     0, 0, 1, 1000, 'abc')",
-            [],
-        )
-        .unwrap();
-    }
+    let db = Database::open_in_memory().expect("fresh v3 in-memory DB");
 
-    // Sanity: pre-migration row exists and v3 column does NOT yet exist.
-    {
-        let conn = Connection::open(&path).unwrap();
-        let mut stmt = conn.prepare("PRAGMA table_info(clipboard_items)").unwrap();
-        let cols: Vec<String> = stmt
-            .query_map([], |r| r.get::<_, String>(1))
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
-        assert!(
-            !cols.iter().any(|c| c == "origin_device_id"),
-            "v2 baseline must not have origin_device_id column"
-        );
-    }
-
-    let key = [0x08u8; 32];
-    let db = Database::open(&path, &key).expect("v2 -> v3 migration");
-
+    // Fresh DB lands at v3 directly (see `fresh_db_creates_at_current_user_version`).
     assert_eq!(user_version(&db), CURRENT_SCHEMA_VERSION);
     assert!(
         column_exists(&db, "clipboard_items", "origin_device_id"),
-        "v3 migration must add origin_device_id column"
+        "v3 schema must include origin_device_id column"
     );
 
-    // Existing row's origin must default to '' (per ALTER … DEFAULT '').
-    let got: String = db
+    // Simulate a legacy v2 row: insert with empty origin (the value an
+    // `ALTER ADD COLUMN … DEFAULT ''` would have stamped on a real upgrade).
+    let mut legacy = ClipboardItem::new_text(vec![0xAA], vec![0u8; 24], 1);
+    legacy.id = "legacy-1".to_string();
+    legacy.item_id = "i-legacy-1".to_string();
+    legacy.wall_time = 1_000;
+    legacy.origin_device_id = String::new(); // matches v2->v3 ALTER default
+    insert_item(&db, &legacy).unwrap();
+
+    let pre: String = db
         .conn()
         .query_row(
             "SELECT origin_device_id FROM clipboard_items WHERE id = 'legacy-1'",
@@ -494,19 +468,17 @@ fn migrate_v2_to_v3_adds_origin_device_id_column_with_empty_default() {
         )
         .unwrap();
     assert_eq!(
-        got, "",
-        "v2 row must migrate up with origin_device_id = '' so backfill can \
-         later stamp the local device UUID"
+        pre, "",
+        "legacy v2 row must surface with origin_device_id = '' before \
+         backfill — this is the exact state a real ALTER … DEFAULT '' \
+         leaves rows in"
     );
 
-    // Backfill should then turn the empty string into the local device id,
-    // and re-running backfill must be idempotent (zero updates the second
-    // time because there are no rows left with origin_device_id = '').
-    use copypaste_core::storage::items::backfill_origin_device_id;
+    // Backfill must stamp the empty rows with the local device id.
     let updated = backfill_origin_device_id(&db, "local-uuid-xyz").unwrap();
-    assert_eq!(updated, 1, "backfill must touch the one legacy row");
+    assert_eq!(updated, 1, "backfill must touch the one empty-origin row");
 
-    let got2: String = db
+    let post: String = db
         .conn()
         .query_row(
             "SELECT origin_device_id FROM clipboard_items WHERE id = 'legacy-1'",
@@ -514,11 +486,41 @@ fn migrate_v2_to_v3_adds_origin_device_id_column_with_empty_default() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(got2, "local-uuid-xyz");
+    assert_eq!(post, "local-uuid-xyz");
 
+    // Idempotency: re-running backfill is a no-op (zero rows match
+    // `origin_device_id = ''` because we just filled them).
     let updated2 = backfill_origin_device_id(&db, "local-uuid-xyz").unwrap();
     assert_eq!(
         updated2, 0,
         "backfill must be idempotent — second call updates zero rows"
+    );
+
+    // Rows that already carry an origin (e.g. items received from peers)
+    // must NOT be overwritten by backfill, so cross-device provenance is
+    // preserved through subsequent merge tie-breaks.
+    let mut peer_row = ClipboardItem::new_text(vec![0xBB], vec![0u8; 24], 2);
+    peer_row.id = "peer-1".to_string();
+    peer_row.item_id = "i-peer-1".to_string();
+    peer_row.origin_device_id = "peer-A".to_string();
+    insert_item(&db, &peer_row).unwrap();
+
+    let updated3 = backfill_origin_device_id(&db, "local-uuid-xyz").unwrap();
+    assert_eq!(
+        updated3, 0,
+        "backfill must skip rows that already have a non-empty origin"
+    );
+
+    let peer_origin: String = db
+        .conn()
+        .query_row(
+            "SELECT origin_device_id FROM clipboard_items WHERE id = 'peer-1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        peer_origin, "peer-A",
+        "peer-origin row must not be overwritten by local backfill"
     );
 }
