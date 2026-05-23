@@ -12,6 +12,10 @@ Signed DMG continues to ship as a GitHub release asset for
 reproducibility, but is not the promoted install path.
 
 ### Features
+- **UI:** Text preview in the history list is now capped at 1 024 bytes server-side
+  (full content is still stored encrypted); large clipboard entries no longer stall
+  the UI rendering thread. Image items show a `[image — id:XXXXXXXX]` placeholder;
+  full rich preview is planned for v0.4.
 - **UI:** In-app auto-update via Homebrew Cask: daily check + notification +
   one-click upgrade. No Sparkle (Homebrew-only per ADR-012).
 - **Telemetry:** real Sentry SDK backend (opt-in, default `Disabled`). PII
