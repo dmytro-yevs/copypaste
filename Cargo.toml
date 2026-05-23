@@ -11,6 +11,7 @@ members = [
     "crates/copypaste-android",
     "crates/copypaste-ui",
     "crates/copypaste-ipc",
+    "crates/copypaste-config",
 ]
 
 [workspace.package]
