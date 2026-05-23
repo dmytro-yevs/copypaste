@@ -500,6 +500,17 @@ impl PairWindowHandle {
         self.window.on_remove_peer(move |fp| cb(fp.to_string()));
     }
 
+    /// T4 (v0.3) — register a callback invoked when the user confirms the
+    /// revoke dialog. Receives the full fingerprint of the peer to revoke.
+    ///
+    /// Callers should route this to [`crate::ipc_client::IpcClient::revoke_peer`]
+    /// rather than `unpair_peer`: the former additionally writes a row to
+    /// the SQLite `revoked_devices` audit table consumed by the v1.0
+    /// cryptographic revocation protocol.
+    pub fn on_revoke_peer<F: Fn(String) + 'static>(&self, cb: F) {
+        self.window.on_revoke_peer(move |fp| cb(fp.to_string()));
+    }
+
     /// Register a callback invoked when ESC or "Close" is clicked.
     pub fn on_close<F: Fn() + 'static>(&self, cb: F) {
         self.window.on_close(cb);

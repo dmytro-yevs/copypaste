@@ -417,6 +417,47 @@ impl IpcClient {
         }
     }
 
+    /// T4 (v0.3) — manually revoke a paired peer.
+    ///
+    /// Differs from [`unpair_peer`] in that the daemon additionally writes
+    /// a row to the `revoked_devices` audit table. The v1.0 cryptographic
+    /// revocation protocol will later read that table to publish revocation
+    /// markers; for v0.3 the audit row is the only durable record beyond
+    /// the local peer-store deletion.
+    ///
+    /// Returns the unix-seconds `revoked_at` timestamp the daemon recorded,
+    /// so the UI can show "Revoked just now" feedback without a re-query.
+    pub fn revoke_peer(&mut self, fingerprint: &str) -> Result<u64> {
+        let resp = self.call(
+            "revoke_peer",
+            serde_json::json!({
+                "fingerprint": fingerprint,
+            }),
+        )?;
+        if !resp.ok {
+            return Err(anyhow!(
+                "revoke_peer failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ));
+        }
+        let data = resp.data.unwrap_or(Value::Null);
+        let revoked_at = data["revoked_at"].as_u64().unwrap_or(0);
+        Ok(revoked_at)
+    }
+
+    /// Build the wire-level JSON for a `revoke_peer` request. Exposed for
+    /// unit tests that want to assert method/param shape without standing
+    /// up a real daemon.
+    pub fn build_revoke_peer_request(fingerprint: &str) -> Value {
+        serde_json::json!({
+            "id": "ui-1",
+            "method": "revoke_peer",
+            "params": {
+                "fingerprint": fingerprint,
+            },
+        })
+    }
+
     // -----------------------------------------------------------------------
     // Cloud auth methods
     // -----------------------------------------------------------------------
@@ -802,6 +843,19 @@ mod tests {
             req["id"].is_string(),
             "every IPC request needs a string id for matching responses"
         );
+    }
+
+    #[test]
+    fn ipc_client_revoke_peer_sends_correct_method() {
+        // T4 (v0.3): the builder must use exactly `revoke_peer` (not
+        // `unpair_peer`) so the daemon writes the audit row, and the
+        // fingerprint parameter must be passed verbatim — the daemon
+        // validates the XX:XX:... shape on its end.
+        let fp = "ab:cd:ef:01:23:45:67:89";
+        let req = IpcClient::build_revoke_peer_request(fp);
+        assert_eq!(req["method"], "revoke_peer");
+        assert_eq!(req["params"]["fingerprint"], fp);
+        assert!(req["id"].is_string(), "request needs a string id");
     }
 
     #[test]

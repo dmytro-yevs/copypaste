@@ -36,6 +36,14 @@ export component PairWindow inherits Window {
     private property <bool>   input-valid: false;
     private property <bool>   password-valid: false;
 
+    // T4 (v0.3) — manual revoke confirmation dialog state. We keep the
+    // fingerprint of the candidate peer in `revoke-target-fp` while the
+    // dialog is open so the user sees what they're about to revoke and the
+    // Rust side knows which peer to act on when they hit "Revoke".
+    private property <bool>   revoke-confirm-open: false;
+    private property <string> revoke-target-fp:    "";
+    private property <string> revoke-target-name:  "";
+
     // ── Callbacks ─────────────────────────────────────────────────────────────
     callback pair(string);
     // Beta W3.2 — PAKE-based pairing using a shared password between two devices.
@@ -44,6 +52,11 @@ export component PairWindow inherits Window {
     // front so the user gets immediate feedback before the round-trip.
     callback pair-with-password(string, string);
     callback remove-peer(string);
+    // T4 (v0.3) — fired when the user confirms the revoke-confirmation
+    // dialog. Distinct from `remove-peer` so the Rust side can route this
+    // to the daemon's `revoke_peer` IPC (which writes an audit row) rather
+    // than the legacy `unpair_peer`.
+    callback revoke-peer(string);
     callback close();
 
     // ── Layout ────────────────────────────────────────────────────────────────
@@ -287,9 +300,18 @@ export component PairWindow inherits Window {
                                 }
                             }
 
+                            // T4 (v0.3) — clicking "Revoke" no longer fires
+                            // the daemon call directly; it opens the
+                            // confirmation overlay below. Revocation is
+                            // destructive (peer must re-pair to recover) so
+                            // a typed confirmation dialog is mandatory.
                             Button {
-                                text: @tr("Remove");
-                                clicked => { root.remove-peer(device.fingerprint); }
+                                text: @tr("Revoke");
+                                clicked => {
+                                    root.revoke-target-fp   = device.fingerprint;
+                                    root.revoke-target-name = device.name;
+                                    root.revoke-confirm-open = true;
+                                }
                             }
                         }
                     }
@@ -314,6 +336,95 @@ export component PairWindow inherits Window {
                 Button {
                     text: @tr("Close");
                     clicked => { root.close(); }
+                }
+            }
+        }
+    }
+
+    // ── Revoke confirmation dialog (T4, v0.3) ──────────────────────────────
+    //
+    // Modal overlay shown when `revoke-confirm-open` is true. Sits on top
+    // of the main VerticalLayout (Slint stacks siblings of Window in
+    // declaration order, so this overlay paints last → renders on top).
+    //
+    // Two buttons:
+    //   * Cancel — closes the dialog, leaves the peer paired.
+    //   * Revoke — fires `revoke-peer(fingerprint)` and closes the dialog.
+    //     The Rust side then routes the callback to the daemon's
+    //     `revoke_peer` IPC, which both removes the peer from the local
+    //     store and writes the audit row consumed by the v1.0 protocol.
+    if root.revoke-confirm-open: Rectangle {
+        width:  root.width;
+        height: root.height;
+        background: #000000aa;
+
+        TouchArea {
+            // Soaks up clicks on the backdrop so the underlying list
+            // doesn't react while the dialog is open.
+            width:  parent.width;
+            height: parent.height;
+        }
+
+        Rectangle {
+            x: (parent.width  - 380px) / 2;
+            y: (parent.height - 200px) / 2;
+            width:  380px;
+            height: 200px;
+            background: #1e1e2e;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: #45475a;
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 14px;
+
+                Text {
+                    text: @tr("Revoke this device?");
+                    color: #cdd6f4;
+                    font-size: 16px;
+                    font-weight: 700;
+                }
+
+                Text {
+                    text: root.revoke-target-name == ""
+                        ? @tr("Unknown Device")
+                        : root.revoke-target-name;
+                    color: #89b4fa;
+                    font-size: 13px;
+                    overflow: elide;
+                }
+
+                Text {
+                    text: @tr("This device will no longer sync. You'll need to pair again to restore it.");
+                    color: #a6adc8;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+
+                    Button {
+                        text: @tr("Cancel");
+                        clicked => {
+                            root.revoke-confirm-open = false;
+                            root.revoke-target-fp    = "";
+                            root.revoke-target-name  = "";
+                        }
+                    }
+
+                    Button {
+                        text: @tr("Revoke");
+                        primary: true;
+                        clicked => {
+                            root.revoke-peer(root.revoke-target-fp);
+                            root.revoke-confirm-open = false;
+                            root.revoke-target-fp    = "";
+                            root.revoke-target-name  = "";
+                        }
+                    }
                 }
             }
         }
