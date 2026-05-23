@@ -23,9 +23,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         clang \
         curl \
+        gcc \
         libssl-dev \
         make \
         openjdk-17-jdk-headless \
+        perl \
         pkg-config \
         python3 \
         unzip \
@@ -53,6 +55,74 @@ RUN rustup target add aarch64-linux-android armv7-linux-androideabi \
 
 # Sanity: cargo-ndk on PATH and NDK reachable.
 RUN cargo ndk --version && ls ${ANDROID_NDK_HOME}/source.properties
+
+# ----- Layer 4: pre-baked OpenSSL + SQLCipher (host-arch static libs) --------
+#
+# The rusqlite `bundled-sqlcipher` feature compiles SQLCipher amalgamation
+# (~1.5 M LOC of C) and an embedded copy of OpenSSL on every cold build,
+# adding ~15-20 min on cold runs. Pre-baking the static libs at the image
+# layer means the C build is paid ONCE per image rebuild, not per cargo
+# build.
+#
+# Caveat: these libs are built for the BUILDER host arch (linux/amd64), not
+# for the Android target — they exist so host-side build scripts (e.g.
+# build.rs probes, openssl-src bootstrap) skip rebuild via OPENSSL_DIR.
+# Android target builds still cross-compile their own OpenSSL via the NDK
+# toolchain; this layer only kills host-side OpenSSL/SQLCipher rebuilds.
+#
+# Image cost: ~200 MB. Build time saved per cold run: ~15-20 min.
+#
+# Versions pinned for reproducibility; bump when the workspace's Cargo.lock
+# advances openssl-src / libsqlite3-sys major versions.
+ARG OPENSSL_VERSION=3.0.13
+ARG SQLCIPHER_VERSION=4.5.6
+
+RUN mkdir -p /opt/prebuilt/openssl /opt/prebuilt/sqlcipher \
+    && cd /tmp \
+    && wget -q "https://www.openssl.org/source/openssl-${OPENSSL_VERSION}.tar.gz" \
+    && tar -xzf "openssl-${OPENSSL_VERSION}.tar.gz" \
+    && cd "openssl-${OPENSSL_VERSION}" \
+    && ./Configure linux-x86_64 \
+         --prefix=/opt/prebuilt/openssl \
+         --openssldir=/opt/prebuilt/openssl/ssl \
+         no-shared no-tests no-docs \
+    && make -j"$(nproc)" \
+    && make install_sw \
+    && cd /tmp \
+    && rm -rf "openssl-${OPENSSL_VERSION}" "openssl-${OPENSSL_VERSION}.tar.gz" \
+    && wget -q "https://github.com/sqlcipher/sqlcipher/archive/refs/tags/v${SQLCIPHER_VERSION}.tar.gz" \
+         -O "sqlcipher-${SQLCIPHER_VERSION}.tar.gz" \
+    && tar -xzf "sqlcipher-${SQLCIPHER_VERSION}.tar.gz" \
+    && cd "sqlcipher-${SQLCIPHER_VERSION}" \
+    && ./configure \
+         --prefix=/opt/prebuilt/sqlcipher \
+         --enable-static --disable-shared \
+         --disable-tcl \
+         CFLAGS="-DSQLITE_HAS_CODEC -I/opt/prebuilt/openssl/include" \
+         LDFLAGS="-L/opt/prebuilt/openssl/lib -lcrypto" \
+    && make -j"$(nproc)" \
+    && make install \
+    && cd /tmp \
+    && rm -rf "sqlcipher-${SQLCIPHER_VERSION}" "sqlcipher-${SQLCIPHER_VERSION}.tar.gz"
+
+# Expose pre-built libs to cargo / build.rs probes.
+# - OPENSSL_DIR: openssl-sys / openssl-src skip rebuild when this points at
+#   a directory containing include/openssl + lib/libcrypto.a.
+# - OPENSSL_STATIC: force static link so produced .so has no libcrypto.so dep.
+# - SQLCIPHER_LIB_DIR / SQLCIPHER_INCLUDE_DIR: libsqlite3-sys honours these
+#   when feature `bundled-sqlcipher` is OFF; harmless otherwise (bundled
+#   build still wins). Documented here so callers can opt-out of bundling.
+ENV OPENSSL_DIR=/opt/prebuilt/openssl
+ENV OPENSSL_STATIC=1
+ENV SQLCIPHER_LIB_DIR=/opt/prebuilt/sqlcipher/lib
+ENV SQLCIPHER_INCLUDE_DIR=/opt/prebuilt/sqlcipher/include
+
+# Sanity: both libs present + headers reachable.
+RUN test -f /opt/prebuilt/openssl/lib/libcrypto.a \
+    && test -f /opt/prebuilt/openssl/include/openssl/ssl.h \
+    && test -f /opt/prebuilt/sqlcipher/lib/libsqlcipher.a \
+    && test -f /opt/prebuilt/sqlcipher/include/sqlcipher/sqlite3.h \
+    && echo "prebuilt libs OK"
 
 WORKDIR /workspace
 
