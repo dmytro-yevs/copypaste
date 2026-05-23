@@ -51,6 +51,7 @@
 pub mod cert;
 pub mod discovery;
 pub mod error;
+pub mod pake;
 pub mod transport;
 mod verifier;
 

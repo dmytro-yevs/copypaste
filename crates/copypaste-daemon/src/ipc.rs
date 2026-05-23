@@ -6,7 +6,10 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use copypaste_core::{Database, get_page, delete_item, delete_fts, count_items, search_items};
-use crate::protocol::{ERR_CODE_IPC_NOT_READY, Request, Response};
+use crate::protocol::{
+    CURRENT_PROTOCOL_VERSION, ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY,
+    MIN_SUPPORTED_PROTOCOL_VERSION, Request, Response,
+};
 
 /// Maximum size of a single IPC request line. Clients exceeding this receive
 /// an error response and have their connection closed. Prevents OOM from a
@@ -329,6 +332,30 @@ impl IpcServer {
 
         tracing::Span::current().record("method", req.method.as_str());
         tracing::debug!(method = %req.method, id = %req.id, "IPC request");
+
+        // Protocol-version gate (ADR-007) — reject before touching any
+        // method-specific logic so clients get a deterministic upgrade signal.
+        if req.protocol_version < MIN_SUPPORTED_PROTOCOL_VERSION
+            || req.protocol_version > CURRENT_PROTOCOL_VERSION
+        {
+            tracing::warn!(
+                method = %req.method,
+                id = %req.id,
+                client_version = req.protocol_version,
+                supported = format!("{MIN_SUPPORTED_PROTOCOL_VERSION}..={CURRENT_PROTOCOL_VERSION}"),
+                "rejecting request: unsupported protocol version"
+            );
+            return Response::err_with_code(
+                req.id,
+                ERR_CODE_INVALID_ARGUMENT,
+                format!(
+                    "unsupported protocol version {} (daemon supports {}..={})",
+                    req.protocol_version,
+                    MIN_SUPPORTED_PROTOCOL_VERSION,
+                    CURRENT_PROTOCOL_VERSION
+                ),
+            );
+        }
 
         // Readiness gate — reject DB-touching methods before init is done.
         if !self.ready.load(Ordering::Relaxed) && Self::requires_db(req.method.as_str()) {
@@ -802,6 +829,37 @@ mod tests {
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
         assert!(resp["error"].as_str().unwrap().contains("unknown method"));
+    }
+
+    /// ADR-007 — a request carrying a `protocol_version` outside the
+    /// supported window must be rejected with a stable error code BEFORE
+    /// the dispatcher tries to interpret the method.
+    #[tokio::test]
+    async fn unsupported_protocol_version_rejected_with_error_code() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("test-proto-ver.sock");
+        start_test_server(&sock).await;
+
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        // Use a method that would normally succeed (`status`) to prove the
+        // version gate fires first.
+        let unsupported = CURRENT_PROTOCOL_VERSION + 99;
+        let payload = format!(
+            "{{\"id\":\"pv1\",\"method\":\"status\",\"protocol_version\":{}}}\n",
+            unsupported
+        );
+        stream.write_all(payload.as_bytes()).await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], false, "version gate must reject: {line}");
+        assert_eq!(resp["error_code"], "invalid_argument");
+        assert_eq!(resp["protocol_version"], CURRENT_PROTOCOL_VERSION);
+        assert!(
+            resp["error"].as_str().unwrap().contains("unsupported protocol version"),
+            "expected version-mismatch message, got: {}",
+            resp["error"]
+        );
     }
 
     /// W3.6 — stubbed methods (`cloud_sign_in`, `cloud_sign_out`) must carry
