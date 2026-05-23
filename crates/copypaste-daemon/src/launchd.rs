@@ -10,11 +10,30 @@ use std::process::Command;
 /// Label used in the plist and by launchctl.
 pub const LABEL: &str = "com.copypaste.daemon";
 
+/// Fallible variant of [`launch_agents_dir`].
+///
+/// Returns [`LaunchdError::NoHome`] if the user's home directory cannot be
+/// determined.
+pub fn try_launch_agents_dir() -> Result<PathBuf, LaunchdError> {
+    let home = home::home_dir().ok_or(LaunchdError::NoHome)?;
+    Ok(home.join("Library/LaunchAgents"))
+}
+
 /// Path to the user-level LaunchAgents directory.
+///
+/// Infallible — falls back to `$TMPDIR/LaunchAgents` and logs a warning if the
+/// home directory cannot be resolved so that install attempts surface a real
+/// error later instead of panicking inside a getter.
 pub fn launch_agents_dir() -> PathBuf {
-    home::home_dir()
-        .expect("HOME directory must exist")
-        .join("Library/LaunchAgents")
+    try_launch_agents_dir().unwrap_or_else(|e| {
+        let fallback = std::env::temp_dir().join("LaunchAgents");
+        tracing::warn!(
+            error = %e,
+            fallback = %fallback.display(),
+            "launch_agents_dir: home unresolved, using temp-dir fallback"
+        );
+        fallback
+    })
 }
 
 /// Destination plist path.
@@ -22,11 +41,26 @@ pub fn plist_path() -> PathBuf {
     launch_agents_dir().join(format!("{LABEL}.plist"))
 }
 
+/// Fallible variant of [`log_dir`].
+pub fn try_log_dir() -> Result<PathBuf, LaunchdError> {
+    let home = home::home_dir().ok_or(LaunchdError::NoHome)?;
+    Ok(home.join("Library/Logs/CopyPaste"))
+}
+
 /// Log directory for daemon stdout/stderr.
+///
+/// Infallible — falls back to `$TMPDIR/CopyPaste-Logs` if the home directory
+/// cannot be resolved.
 pub fn log_dir() -> PathBuf {
-    home::home_dir()
-        .expect("HOME directory must exist")
-        .join("Library/Logs/CopyPaste")
+    try_log_dir().unwrap_or_else(|e| {
+        let fallback = std::env::temp_dir().join("CopyPaste-Logs");
+        tracing::warn!(
+            error = %e,
+            fallback = %fallback.display(),
+            "log_dir: home unresolved, using temp-dir fallback"
+        );
+        fallback
+    })
 }
 
 /// Generate plist XML for the given binary path.
@@ -94,6 +128,9 @@ pub enum LaunchdError {
 
     #[error("could not determine current executable path: {0}")]
     CurrentExe(io::Error),
+
+    #[error("could not determine user home directory (HOME unset?)")]
+    NoHome,
 }
 
 /// Install the plist to `~/Library/LaunchAgents/` and load it with launchctl.
@@ -106,12 +143,14 @@ pub fn install() -> Result<(), LaunchdError> {
 
 /// Install using an explicit binary path (useful for tests / custom installs).
 pub fn install_with_binary(binary: &Path) -> Result<(), LaunchdError> {
-    // Ensure directories exist
-    let agents_dir = launch_agents_dir();
+    // Ensure directories exist. Use the fallible accessors here so install
+    // returns a real error instead of silently writing into a temp-dir
+    // fallback (which would never auto-start at login).
+    let agents_dir = try_launch_agents_dir()?;
     std::fs::create_dir_all(&agents_dir)?;
-    std::fs::create_dir_all(log_dir())?;
+    std::fs::create_dir_all(try_log_dir()?)?;
 
-    let dest = plist_path();
+    let dest = agents_dir.join(format!("{LABEL}.plist"));
     let plist_content = generate_plist(binary);
     std::fs::write(&dest, &plist_content)?;
 

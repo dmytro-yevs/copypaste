@@ -82,11 +82,16 @@ fn run_macos() -> anyhow::Result<()> {
 
     // Give the daemon a moment to drain in-flight work then shut down the runtime.
     rt.block_on(async {
-        let _ = tokio::time::timeout(
+        match tokio::time::timeout(
             std::time::Duration::from_secs(3),
             daemon_handle,
         )
-        .await;
+        .await
+        {
+            Ok(Ok(())) => tracing::info!("daemon stopped cleanly"),
+            Ok(Err(e)) => tracing::warn!("daemon join error: {e}"),
+            Err(_) => tracing::warn!("daemon did not stop within 3s; forcing runtime shutdown"),
+        }
     });
 
     Ok(())

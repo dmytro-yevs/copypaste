@@ -31,8 +31,12 @@ use tracing_subscriber::{
 ///
 /// **Must** be kept alive for the entire process lifetime.  Drop it only after
 /// the daemon event loop exits so that buffered log lines are flushed.
+///
+/// `_file_guard` is `Option` because the file-appender layer may have failed
+/// to initialise (read-only FS, permission denied, etc.) — in which case we
+/// silently dropped the file layer and fell back to stderr-only logging.
 pub struct LogGuard {
-    _file_guard: WorkerGuard,
+    _file_guard: Option<WorkerGuard>,
 }
 
 /// Initialise the global tracing subscriber.
@@ -57,31 +61,41 @@ pub fn init() -> LogGuard {
         }
     };
 
-    // Daily-rotating file appender; tracing-appender keeps the last 7 files.
-    let file_appender = tracing_appender::rolling::Builder::new()
+    // Shared env-filter (COPYPASTE_LOG env var, default: info).
+    let default_filter = "copypaste=info,warn";
+
+    // Try to build the daily-rotating file appender. On failure (read-only FS,
+    // sandbox, permission denied) we drop the file layer and continue with
+    // stderr-only logging rather than panicking the daemon at startup.
+    let file_layer_and_guard = match tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
         .filename_prefix("daemon")
         .filename_suffix("log")
         .max_log_files(7)
         .build(&log_dir)
-        .unwrap_or_else(|e| {
-            panic!("failed to build log file appender at {}: {e}", log_dir.display())
-        });
-
-    let (non_blocking, file_guard) = tracing_appender::non_blocking(file_appender);
-
-    // Shared env-filter (COPYPASTE_LOG env var, default: info).
-    let default_filter = "copypaste=info,warn";
-    let env_filter = EnvFilter::try_from_env("COPYPASTE_LOG")
-        .unwrap_or_else(|_| EnvFilter::new(default_filter));
-
-    // File layer: JSON, all span events, driven by env-filter.
-    let file_layer = fmt::layer()
-        .json()
-        .with_span_events(FmtSpan::CLOSE)
-        .with_thread_ids(true)
-        .with_writer(non_blocking)
-        .with_filter(env_filter);
+    {
+        Ok(file_appender) => {
+            let (non_blocking, file_guard) = tracing_appender::non_blocking(file_appender);
+            let env_filter = EnvFilter::try_from_env("COPYPASTE_LOG")
+                .unwrap_or_else(|_| EnvFilter::new(default_filter));
+            let file_layer = fmt::layer()
+                .json()
+                .with_span_events(FmtSpan::CLOSE)
+                .with_thread_ids(true)
+                .with_writer(non_blocking)
+                .with_filter(env_filter)
+                .boxed();
+            Some((file_layer, file_guard))
+        }
+        Err(e) => {
+            eprintln!(
+                "copypaste-daemon: WARNING: file log appender failed at {}: {e}; \
+                 continuing with stderr-only logging",
+                log_dir.display()
+            );
+            None
+        }
+    };
 
     // Stderr layer: compact human-readable, no ANSI colours (for systemd/launchd).
     let stderr_filter = EnvFilter::try_from_env("COPYPASTE_LOG")
@@ -93,15 +107,26 @@ pub fn init() -> LogGuard {
         .with_writer(std::io::stderr)
         .with_filter(stderr_filter);
 
+    // `file_layer_and_guard` is split: layer is registered with the subscriber,
+    // guard is moved into the returned LogGuard.
+    let (file_layer, file_guard) = match file_layer_and_guard {
+        Some((layer, guard)) => (Some(layer), Some(guard)),
+        None => (None, None),
+    };
+
     tracing_subscriber::registry()
         .with(file_layer)
         .with(stderr_layer)
         .init();
 
-    tracing::info!(
-        log_dir = %log_dir.display(),
-        "logging initialised"
-    );
+    if file_guard.is_some() {
+        tracing::info!(
+            log_dir = %log_dir.display(),
+            "logging initialised"
+        );
+    } else {
+        tracing::warn!("logging initialised (stderr only — file appender unavailable)");
+    }
 
     LogGuard {
         _file_guard: file_guard,

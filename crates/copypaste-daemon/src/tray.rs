@@ -23,6 +23,23 @@ use tray_icon::{
 
 use crate::launchd;
 
+/// Errors raised while constructing the tray menu / icon.
+///
+/// These are returned instead of panicking so that headless / sandboxed
+/// environments (CI, SSH sessions, test runners) can degrade gracefully and
+/// continue running the daemon without a tray icon.
+#[derive(Debug, thiserror::Error)]
+pub enum TrayInitError {
+    #[error("tray-icon menu append failed: {0}")]
+    MenuAppend(#[from] tray_icon::menu::Error),
+
+    #[error("tray-icon builder failed (no display / headless?): {0}")]
+    Build(#[from] tray_icon::Error),
+
+    #[error("tray menu can only be built on the main thread (platform requirement)")]
+    NotMainThread,
+}
+
 // ── Menu item IDs ────────────────────────────────────────────────────────────
 
 const ID_OPEN_HISTORY: &str = "open_history";
@@ -63,8 +80,10 @@ impl Default for TrayState {
 ///
 /// The PNG must be 22×22 pixels, RGBA. If the bundled icon cannot be decoded
 /// the function falls back to a 22×22 solid grey placeholder so the tray icon
-/// still appears.
-fn load_icon() -> tray_icon::Icon {
+/// still appears. If even the placeholder cannot be constructed (extremely
+/// unlikely — would mean `tray-icon` rejected a valid 22×22 RGBA buffer) the
+/// function returns `None` and the caller skips the icon entirely.
+fn load_icon() -> Option<tray_icon::Icon> {
     // TODO: embed the real icon at build time via include_bytes! once the
     // asset pipeline bundles icons to a known absolute path. For now we look
     // next to the binary and fall back to a grey placeholder.
@@ -87,19 +106,25 @@ fn load_icon() -> tray_icon::Icon {
                         22,
                         22,
                     ) {
-                        return icon;
+                        return Some(icon);
                     }
                 }
             }
         }
     }
 
-    // Fallback: 22×22 grey RGBA pixels
+    // Fallback: 22×22 grey RGBA pixels.
     let grey: Vec<u8> = std::iter::repeat([0x88u8, 0x88, 0x88, 0xffu8])
         .take(22 * 22)
         .flatten()
         .collect();
-    tray_icon::Icon::from_rgba(grey, 22, 22).expect("placeholder icon must be valid")
+    match tray_icon::Icon::from_rgba(grey, 22, 22) {
+        Ok(icon) => Some(icon),
+        Err(e) => {
+            tracing::warn!(error = %e, "tray placeholder icon build failed — continuing without icon");
+            None
+        }
+    }
 }
 
 /// Minimal PNG RGBA decoder — delegates to the `png` crate if available,
@@ -154,7 +179,30 @@ struct TrayMenu {
 }
 
 impl TrayMenu {
-    fn build(private_mode_on: bool, launch_at_login_on: bool) -> Self {
+    /// Build the tray menu, returning [`TrayInitError`] on any `menu.append`
+    /// failure instead of panicking. Callers can degrade gracefully (skip the
+    /// tray) when the platform refuses to register a menu (headless / no
+    /// display server / unsupported platform shim).
+    ///
+    /// On macOS `muda::Menu::new()` *asserts* it is called from the main
+    /// thread and aborts via `panic!` otherwise. We catch that panic so the
+    /// caller receives a recoverable `Err` and the daemon can continue
+    /// without a tray (e.g. on test runners or background helper threads).
+    pub fn build(
+        private_mode_on: bool,
+        launch_at_login_on: bool,
+    ) -> Result<Self, TrayInitError> {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Self::build_inner(private_mode_on, launch_at_login_on)
+        }))
+        .map_err(|_| TrayInitError::NotMainThread)
+        .and_then(|inner| inner)
+    }
+
+    fn build_inner(
+        private_mode_on: bool,
+        launch_at_login_on: bool,
+    ) -> Result<Self, TrayInitError> {
         let open_history = MenuItem::with_id(ID_OPEN_HISTORY, "Open History", true, None);
         let private_mode = MenuItem::with_id(
             ID_PRIVATE_MODE,
@@ -182,25 +230,35 @@ impl TrayMenu {
         let menu = Menu::new();
         // Title row (disabled)
         let title = MenuItem::with_id("title", "CopyPaste", false, None);
-        menu.append(&title).unwrap();
-        menu.append(&PredefinedMenuItem::separator()).unwrap();
-        menu.append(&open_history).unwrap();
-        menu.append(&private_mode).unwrap();
-        menu.append(&PredefinedMenuItem::separator()).unwrap();
-        menu.append(&launch_at_login).unwrap();
-        menu.append(&preferences).unwrap();
-        menu.append(&PredefinedMenuItem::separator()).unwrap();
-        menu.append(&quit).unwrap();
+        menu.append(&title)?;
+        menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&open_history)?;
+        menu.append(&private_mode)?;
+        menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&launch_at_login)?;
+        menu.append(&preferences)?;
+        menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&quit)?;
 
-        Self {
+        Ok(Self {
             menu,
             open_history,
             private_mode,
             launch_at_login,
             preferences,
             quit,
-        }
+        })
     }
+}
+
+/// Public, test-friendly wrapper around [`TrayMenu::build`] that constructs
+/// just the menu without attaching it to a tray icon. Used by `init_safety`
+/// tests to assert that a build failure surfaces as `Err`, not a panic.
+pub fn build_tray_menu(
+    private_mode_on: bool,
+    launch_at_login_on: bool,
+) -> Result<(), TrayInitError> {
+    TrayMenu::build(private_mode_on, launch_at_login_on).map(|_| ())
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -216,16 +274,37 @@ pub fn run_tray(state: Arc<TrayState>) {
     let private_mode_on = state.private_mode.load(Ordering::Relaxed);
     let launch_at_login_on = launchd::is_installed();
 
-    let tray_menu = TrayMenu::build(private_mode_on, launch_at_login_on);
+    let tray_menu = match TrayMenu::build(private_mode_on, launch_at_login_on) {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!(error = %e, "tray menu build failed — running without tray UI");
+            // Park the thread until quit is requested; daemon continues headless.
+            while !state.quit_requested.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            return;
+        }
+    };
+
     let icon = load_icon();
 
     // Build tray icon — keep _tray alive for the duration of the event loop.
-    let _tray: TrayIcon = TrayIconBuilder::new()
+    let mut builder = TrayIconBuilder::new()
         .with_menu(Box::new(tray_menu.menu))
-        .with_tooltip("CopyPaste")
-        .with_icon(icon)
-        .build()
-        .expect("failed to create tray icon");
+        .with_tooltip("CopyPaste");
+    if let Some(icon) = icon {
+        builder = builder.with_icon(icon);
+    }
+    let _tray: TrayIcon = match builder.build() {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!(error = %e, "tray icon build failed (headless?) — running without tray UI");
+            while !state.quit_requested.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            return;
+        }
+    };
 
     let menu_channel = MenuEvent::receiver();
 
@@ -344,5 +423,38 @@ mod tests {
     fn decode_png_rgba_returns_none_for_garbage() {
         let result = decode_png_rgba(b"not a png");
         assert!(result.is_none());
+    }
+
+    /// Regression test for Wave 2.6 best-prac HIGH #3 / #4.
+    ///
+    /// `TrayMenu::build` previously used 7× `.unwrap()` on `menu.append(...)`
+    /// which would abort the daemon if the platform menu shim refused an
+    /// item (headless CI, unsupported platform, sandboxed). After the fix
+    /// the function must return `Result<_, TrayInitError>` and the public
+    /// `build_tray_menu` helper must never panic regardless of environment.
+    #[test]
+    fn tray_init_failure_logs_does_not_panic() {
+        // Wrap in catch_unwind: even if the underlying platform_impl path
+        // happens to succeed under test, the assertion we care about is the
+        // absence of panic.
+        let outcome =
+            std::panic::catch_unwind(|| build_tray_menu(false, false));
+
+        let result = match outcome {
+            Ok(r) => r,
+            Err(_) => panic!("build_tray_menu must not panic — it must return Result"),
+        };
+
+        // Either Ok or Err is acceptable on macOS test runners; we only
+        // require that the function does not panic and returns the
+        // documented Result type. On macOS test threads we expect
+        // `NotMainThread` because `muda::Menu::new()` requires main-thread
+        // affinity and cargo test spawns worker threads.
+        match result {
+            Ok(()) => {}
+            Err(TrayInitError::MenuAppend(_))
+            | Err(TrayInitError::Build(_))
+            | Err(TrayInitError::NotMainThread) => {}
+        }
     }
 }
