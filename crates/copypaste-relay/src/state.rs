@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -83,6 +84,18 @@ pub struct RelayStore {
     /// Used to enforce per-device registration rate limit (security MEDIUM #13)
     /// orthogonal to the per-IP `tower_governor` limiter.
     reg_attempts: HashMap<String, VecDeque<Instant>>,
+
+    // -----------------------------------------------------------------------
+    // Prometheus metrics counters (see api/metrics.rs)
+    // -----------------------------------------------------------------------
+    /// Monotonic counter: total sync items ever accepted by `push_item`.
+    /// Never decremented (even when evicted) — this is a `counter` in
+    /// Prometheus terms. Wrapped in `Arc<AtomicU64>` so the metrics
+    /// endpoint can read it without holding the store mutex.
+    items_total: Arc<AtomicU64>,
+    /// Monotonic counter: total sync items removed by `prune_expired`
+    /// (TTL eviction). Counter — only ever incremented.
+    evictions_total: Arc<AtomicU64>,
 }
 
 impl RelayStore {
@@ -92,7 +105,29 @@ impl RelayStore {
             sync_items: HashMap::new(),
             next_sync_id: 1,
             reg_attempts: HashMap::new(),
+            items_total: Arc::new(AtomicU64::new(0)),
+            evictions_total: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Metrics accessors (see api/metrics.rs)
+    // -----------------------------------------------------------------------
+
+    /// Snapshot the three Prometheus metric values.
+    /// Returns `(items_total, evictions_total, active_devices)`.
+    /// `active_devices` is derived from inboxes — the count of device IDs
+    /// whose inbox currently has at least one item.
+    #[allow(dead_code)] // unused in some test binaries that `#[path]`-include state.rs
+    pub fn metrics_snapshot(&self) -> (u64, u64, u64) {
+        let items = self.items_total.load(Ordering::Relaxed);
+        let evictions = self.evictions_total.load(Ordering::Relaxed);
+        let active = self
+            .sync_items
+            .values()
+            .filter(|v| !v.is_empty())
+            .count() as u64;
+        (items, evictions, active)
     }
 
     // -----------------------------------------------------------------------
@@ -312,6 +347,10 @@ impl RelayStore {
             inbox.drain(..overflow);
         }
 
+        // Increment Prometheus counter — items_total tracks all accepted
+        // pushes regardless of later eviction (counter semantics).
+        self.items_total.fetch_add(1, Ordering::Relaxed);
+
         Ok(id)
     }
 
@@ -426,6 +465,10 @@ impl RelayStore {
             let before = inbox.len();
             inbox.retain(|item| item.inserted_at_unix > cutoff);
             evicted += before - inbox.len();
+        }
+        if evicted > 0 {
+            self.evictions_total
+                .fetch_add(evicted as u64, Ordering::Relaxed);
         }
         evicted
     }

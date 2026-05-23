@@ -11,6 +11,7 @@ use axum::Router;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::GovernorLayer;
 
+use crate::api::metrics;
 use crate::config::RelayConfig;
 use crate::state::AppState;
 
@@ -20,9 +21,10 @@ use crate::state::AppState;
 ///
 /// The router is split into sub-routers:
 ///
-/// 1. **Exempt routes** (`/health`, `/stats`) — no rate limiting applied.
-///    These are lightweight diagnostic endpoints that must remain available
-///    even under load.
+/// 1. **Exempt routes** (`/health`, `/stats`, `/metrics`) — no rate
+///    limiting applied. These are lightweight diagnostic endpoints that
+///    must remain available even under load (Prometheus scrapers in
+///    particular must not have to share the per-IP budget with clients).
 ///
 /// 2. **Rate-limited routes** — everything else:
 ///    - *Per-IP*: 200 requests/minute (3 req/s steady-state, burst 60).
@@ -37,6 +39,7 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
     let exempt = Router::new()
         .route("/health", get(health::handle))
         .route("/stats", get(stats_handler))
+        .route("/metrics", get(metrics::handle))
         .with_state(state.clone());
 
     // ---- Per-IP rate limit layer (200 req/min) ------------------------------
