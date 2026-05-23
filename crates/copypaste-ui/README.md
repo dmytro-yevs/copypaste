@@ -42,4 +42,4 @@ cargo test -p copypaste-ui
 ```
 
 ## Related ADRs
-- [ADR-005](../../docs/adr/ADR-005-slint-ui-framework.md) — Slint chosen as the UI framework (Tauri banned).
+- [ADR-005](../../docs/adr/ADR-005-slint-ui-framework.md) — Slint chosen as the UI framework.
