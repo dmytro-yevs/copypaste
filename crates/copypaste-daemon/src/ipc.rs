@@ -6,7 +6,7 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use copypaste_core::{Database, get_page, delete_item, delete_fts, count_items, search_items};
-use crate::protocol::{Request, Response};
+use crate::protocol::{ERR_CODE_IPC_NOT_READY, Request, Response};
 
 /// Maximum size of a single IPC request line. Clients exceeding this receive
 /// an error response and have their connection closed. Prevents OOM from a
@@ -79,6 +79,20 @@ fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
 // ---------------------------------------------------------------------------
 
 /// Format raw bytes as colon-separated hex groups (XX:XX:...).
+///
+/// NOTE (W3.6 consolidation): there are three near-identical fingerprint
+/// formatters across daemon/UI/CLI. Within the daemon, only this one and
+/// [`crate::keychain::own_fingerprint`] exist, and their semantics differ:
+///
+/// - [`keychain::own_fingerprint`] SHA-256-hashes its input, then formats the
+///   first 16 bytes (15 colons) — the canonical *device* fingerprint.
+/// - This helper formats whatever raw bytes it is handed (any length) — used
+///   for the legacy `get_own_fingerprint` stub which already supplies a
+///   pre-derived 32-byte payload (31 colons).
+///
+/// Switching the call site below to `own_fingerprint` would change the
+/// IPC contract (length + content) and is therefore deferred to post-alpha
+/// along with the cross-crate consolidation into `copypaste-core`.
 fn format_fingerprint(bytes: &[u8]) -> String {
     let encoded = hex::encode(bytes);
     encoded
@@ -323,7 +337,7 @@ impl IpcServer {
                 id = %req.id,
                 "rejecting DB-touching request: server not ready"
             );
-            return Response::err(req.id, ERR_IPC_NOT_READY);
+            return Response::err_with_code(req.id, ERR_CODE_IPC_NOT_READY, ERR_IPC_NOT_READY);
         }
 
         match req.method.as_str() {
@@ -511,16 +525,17 @@ impl IpcServer {
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
             }
-            // Cloud auth — stubs until Supabase integration lands
+            // Cloud auth — stubs until Supabase integration lands.
+            // Route through `Response::not_implemented` so clients see a
+            // machine-readable `error_code: "not_implemented"` instead of an
+            // ambiguous `ok: true` carrying a "not yet implemented" note.
             "cloud_sign_in" => {
-                // TODO: integrate with Supabase auth once credentials are wired
                 tracing::info!("cloud_sign_in stub called");
-                Response::ok(req.id, serde_json::json!({"signed_in": false, "note": "not yet implemented"}))
+                Response::not_implemented(req.id, "cloud-sync")
             }
             "cloud_sign_out" => {
-                // TODO: integrate with Supabase auth once credentials are wired
                 tracing::info!("cloud_sign_out stub called");
-                Response::ok(req.id, serde_json::json!({"signed_out": true}))
+                Response::not_implemented(req.id, "cloud-sync")
             }
             "set_private_mode" => {
                 let enabled = match req.params.get("enabled").and_then(|v| v.as_bool()) {
@@ -787,6 +802,35 @@ mod tests {
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
         assert!(resp["error"].as_str().unwrap().contains("unknown method"));
+    }
+
+    /// W3.6 — stubbed methods (`cloud_sign_in`, `cloud_sign_out`) must carry
+    /// a stable machine-readable `error_code: "not_implemented"` so clients
+    /// can branch deterministically without parsing the English `error` text.
+    #[tokio::test]
+    async fn ipc_responses_carry_machine_readable_error_code() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("test_err_code.sock");
+        start_test_server(&sock).await;
+
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"42\",\"method\":\"cloud_sign_in\"}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        assert_eq!(resp["ok"], false, "stub should report failure, not fake ok");
+        assert_eq!(
+            resp["error_code"], "not_implemented",
+            "cloud stub must tag response with machine-readable not_implemented code"
+        );
+        assert!(
+            resp["error"].as_str().unwrap().contains("cloud-sync"),
+            "human-readable error should name the unimplemented feature"
+        );
     }
 
     #[tokio::test]
