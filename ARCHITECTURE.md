@@ -126,9 +126,9 @@ WAL mode + 8 MB cache. Schema versioned via `PRAGMA user_version`.
 
 ## Key Design Decisions
 
-- **Slint UI (ADR-005)**: `copypaste-ui` uses Slint for native rendering — no WebView, no
-  Node.js/npm in the build pipeline, ~2MB binary, <100ms startup. Tauri was previously
-  evaluated and rejected; see ADR-005 for the full comparison.
+- **Slint UI (ADR-005)**: `copypaste-ui` uses Slint for native rendering — no WebView,
+  no JS toolchain, ~2 MB binary, <100 ms cold start, zero idle CPU thanks to
+  retained-mode rendering. Same `.slint` files render on macOS and Windows.
 - **Lamport timestamps**: logical clock on `ClipboardItem` enables conflict-free ordering across
   devices without wall-clock trust.
 - **Fan-out at relay**: relay writes each uploaded item into every other registered device's
