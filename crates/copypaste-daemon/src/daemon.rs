@@ -209,12 +209,19 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     sensitive_cleanup_ticks += 1;
 
                     // Sensitive item TTL: run every 5 seconds.
-                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)) {
+                    // `5_000 / poll_interval_ms` is integer-divided; for any
+                    // `poll_interval_ms > 5000` the quotient is 0, which would
+                    // make this branch fire every tick. Clamp the threshold to
+                    // at least 1 so the cleanup runs (at most) every tick.
+                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)).max(1) {
                         sensitive_cleanup_ticks = 0;
                         let db_guard = db.lock().await;
+                        // `unwrap_or_default()` matches the pattern at ipc.rs:799
+                        // — clock skew (system clock moved backwards past UNIX
+                        // epoch) must not panic the daemon.
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .unwrap_or_default()
                             .as_millis() as i64;
                         match copypaste_core::delete_sensitive_expired(&db_guard, now_ms, sensitive_ttl_ms) {
                             Ok(n) if n > 0 => tracing::info!("sensitive TTL cleanup: wiped {n} sensitive items"),
@@ -223,13 +230,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                         }
                     }
 
-                    // General expires_at TTL: run every 60 seconds.
-                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
+                    // General expires_at TTL: run every 60 seconds. Same
+                    // integer-division clamp as above.
+                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)).max(1) {
                         cleanup_ticks = 0;
                         let db_guard = db.lock().await;
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .unwrap_or_default()
                             .as_millis() as i64;
                         match copypaste_core::delete_expired(&db_guard, now_ms) {
                             Ok(n) if n > 0 => tracing::info!("TTL cleanup: removed {n} expired items"),
@@ -253,6 +261,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     }
     #[cfg(not(target_os = "macos"))]
     {
+        // SIGTERM handling on non-macOS — previously only SIGINT was wired,
+        // so launchd/systemd sending SIGTERM would terminate the process
+        // without running our cleanup branch (sock file removal, log flush).
+        #[cfg(unix)]
+        let mut sigterm = {
+            use tokio::signal::unix::{signal, SignalKind};
+            signal(SignalKind::terminate())?
+        };
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
@@ -261,12 +277,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     sensitive_cleanup_ticks += 1;
 
                     // Sensitive item TTL: run every 5 seconds.
-                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)) {
+                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)).max(1) {
                         sensitive_cleanup_ticks = 0;
                         let db_guard = db.lock().await;
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .unwrap_or_default()
                             .as_millis() as i64;
                         match copypaste_core::delete_sensitive_expired(&db_guard, now_ms, sensitive_ttl_ms) {
                             Ok(n) if n > 0 => tracing::info!("sensitive TTL cleanup: wiped {n} sensitive items"),
@@ -276,12 +292,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     }
 
                     // General expires_at TTL: run every 60 seconds.
-                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
+                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)).max(1) {
                         cleanup_ticks = 0;
                         let db_guard = db.lock().await;
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .unwrap_or_default()
                             .as_millis() as i64;
                         match copypaste_core::delete_expired(&db_guard, now_ms) {
                             Ok(n) if n > 0 => tracing::info!("TTL cleanup: removed {n} expired items"),
@@ -292,6 +308,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down");
+                    break;
+                }
+                #[cfg(unix)]
+                _ = sigterm.recv() => {
+                    tracing::info!("SIGTERM received, shutting down");
                     break;
                 }
             }
