@@ -97,32 +97,64 @@ where
             .with_context(|| format!("write {}", dst_plist.display()))?;
     }
 
-    // Step 3: launchctl bootstrap gui/<uid> <plist>.
+    // Step 3a: verify daemon load state via `launchctl print` — source of
+    // truth, much more reliable than parsing bootstrap stderr.
     let uid = current_uid(runner)?;
-    let domain = format!("gui/{uid}");
-    let out = runner.run(
-        "launchctl",
-        &[
-            "bootstrap".into(),
-            domain.clone().into(),
-            dst_plist.clone().into_os_string(),
-        ],
-    )?;
-    if !out.success {
-        // `launchctl bootstrap` is idempotent only if the service is not
-        // already loaded. Treat the "Bootstrap failed: 5: Input/output error"
-        // (already loaded) case as success and let the ping confirm it.
-        let stderr = out.stderr.trim().to_lowercase();
-        let benign_already_loaded = stderr.contains("service already loaded")
-            || stderr.contains("already bootstrapped")
-            || out.stderr.contains("Bootstrap failed: 37");
-        if !benign_already_loaded {
-            return Ok(DaemonStatus::FailedToStart(format!(
-                "launchctl bootstrap {} {}: {}",
-                domain,
-                dst_plist.display(),
-                out.stderr.trim()
-            )));
+    if is_daemon_loaded(runner, uid) {
+        // Already loaded but socket ping failed earlier — could be a stale
+        // launchd entry. Skip bootstrap to avoid a spurious error 37; just
+        // fall through to the IPC retry loop below.
+    } else {
+        // Step 3b: re-enable the label before bootstrap. A prior
+        // `launchctl bootout` leaves the label on the *disabled* list, so
+        // the subsequent `bootstrap` would fail with error 5 ("Input/output
+        // error"). `enable` is idempotent — safe to call every time.
+        let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
+        let _ = runner.run("launchctl", &["enable".into(), target.clone().into()])?;
+
+        // Step 3c: launchctl bootstrap gui/<uid> <plist>.
+        let domain = format!("gui/{uid}");
+        let out = runner.run(
+            "launchctl",
+            &[
+                "bootstrap".into(),
+                domain.clone().into(),
+                dst_plist.clone().into_os_string(),
+            ],
+        )?;
+        if !out.success {
+            // After the explicit `enable` above, "already loaded" responses are
+            // the only benign failures. Error 37 = ALREADY_BOOTSTRAPPED is the
+            // canonical code; error 5 ("Input/output error") historically also
+            // meant "already loaded" on older macOS but is more commonly a real
+            // failure (e.g. plist invalid) — treat 37 (and explicit text) as
+            // benign, 5 as a real bootstrap failure with an actionable hint.
+            let stderr_raw = out.stderr.trim();
+            let stderr_lc = stderr_raw.to_lowercase();
+            let benign_already_loaded = stderr_lc.contains("service already loaded")
+                || stderr_lc.contains("already bootstrapped")
+                || stderr_raw.contains(": 37:")
+                || stderr_raw.contains("Bootstrap failed: 37");
+            if !benign_already_loaded {
+                // Error 5: most often means the label is still on launchd's
+                // disabled list (despite our enable attempt) or the plist is
+                // structurally invalid. Surface an actionable message.
+                let hint = if stderr_raw.contains(": 5:") || stderr_raw.contains("Input/output error") {
+                    format!(
+                        " — service may still be disabled. \
+                         Try `launchctl enable gui/{uid}/{LAUNCHD_LABEL}` from a Terminal."
+                    )
+                } else {
+                    String::new()
+                };
+                return Ok(DaemonStatus::FailedToStart(format!(
+                    "launchctl bootstrap {} {}: {}{}",
+                    domain,
+                    dst_plist.display(),
+                    stderr_raw,
+                    hint,
+                )));
+            }
         }
     }
 
@@ -185,6 +217,18 @@ fn current_uid<R: CommandRunner>(runner: &mut R) -> Result<u32> {
         .trim()
         .parse::<u32>()
         .map_err(|e| anyhow!("could not parse uid from `id -u`: {e}"))
+}
+
+/// `launchctl print gui/<uid>/<label>` exits 0 iff the service is currently
+/// loaded in that domain. This is the source of truth for load state —
+/// strictly more reliable than parsing `bootstrap` stderr. Used to avoid
+/// firing a redundant bootstrap (and the spurious error 37 it would emit).
+fn is_daemon_loaded<R: CommandRunner>(runner: &mut R, uid: u32) -> bool {
+    let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
+    match runner.run("launchctl", &["print".into(), target.into()]) {
+        Ok(out) => out.success,
+        Err(_) => false,
+    }
 }
 
 /// Minimal "is the daemon listening?" probe — does NOT depend on the
@@ -308,8 +352,20 @@ mod tests {
                 "launchctl bootstrap".into(),
                 (true, String::new(), String::new()),
             );
+            // Default: `launchctl print` exits nonzero ("not loaded") so the
+            // autostart path falls through to enable+bootstrap. Tests that
+            // need the "already loaded" branch override with `.set(..)`.
+            s.responses.insert(
+                "launchctl print".into(),
+                (false, String::new(), "Could not find service".into()),
+            );
+            s.responses.insert(
+                "launchctl enable".into(),
+                (true, String::new(), String::new()),
+            );
             s
         }
+        #[allow(dead_code)]
         fn set(&mut self, key: &str, success: bool, stdout: &str, stderr: &str) {
             self.responses
                 .insert(key.into(), (success, stdout.into(), stderr.into()));
@@ -532,15 +588,26 @@ mod tests {
 
         let status = ensure_daemon_running_inner(&mut runner, &mut fs, &env).unwrap();
 
-        // Must have called `id -u` then `launchctl bootstrap gui/501 <plist>`.
+        // Must have called `id -u`, then `launchctl print` (load probe),
+        // then `launchctl enable` (recovery from disabled list), then
+        // `launchctl bootstrap gui/501 <plist>`.
         let programs: Vec<&str> = runner.calls.iter().map(|c| c.0.as_str()).collect();
-        assert_eq!(programs, vec!["id", "launchctl"]);
-        let launchctl_args = &runner.calls[1].1;
-        assert_eq!(launchctl_args[0], "bootstrap");
-        assert_eq!(launchctl_args[1], "gui/501");
+        assert_eq!(programs, vec!["id", "launchctl", "launchctl", "launchctl"]);
+
+        let print_args = &runner.calls[1].1;
+        assert_eq!(print_args[0], "print");
+        assert_eq!(print_args[1], "gui/501/com.copypaste.daemon");
+
+        let enable_args = &runner.calls[2].1;
+        assert_eq!(enable_args[0], "enable");
+        assert_eq!(enable_args[1], "gui/501/com.copypaste.daemon");
+
+        let bootstrap_args = &runner.calls[3].1;
+        assert_eq!(bootstrap_args[0], "bootstrap");
+        assert_eq!(bootstrap_args[1], "gui/501");
         assert!(
-            launchctl_args[2].ends_with(PLIST_FILENAME),
-            "expected plist path as 3rd arg, got {launchctl_args:?}"
+            bootstrap_args[2].ends_with(PLIST_FILENAME),
+            "expected plist path as 3rd arg, got {bootstrap_args:?}"
         );
 
         // Socket never recovered → FailedToStart with informative message.
@@ -584,5 +651,116 @@ mod tests {
         let env = FakeEnv::never_alive(exe.clone());
         let p = bundled_plist_path(&env).unwrap();
         assert!(p.ends_with("Contents/Resources/com.copypaste.daemon.plist"));
+    }
+
+    // -----------------------------------------------------------------------------
+    // Beta hotfix: launchctl enable must run before bootstrap so a previously
+    // bootout'd label (now on the disabled list) can recover on next app launch.
+    // -----------------------------------------------------------------------------
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn autostart_calls_enable_before_bootstrap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = fake_app_exe(tmp.path());
+        let bundled = exe
+            .parent().unwrap()
+            .parent().unwrap()
+            .join("Resources")
+            .join(PLIST_FILENAME);
+        let mut fs = TempFs::new(tmp.path().join("home"));
+        fs.seed(bundled, SAMPLE_PLIST.into());
+
+        let mut runner = MockRunner::with_default_uid();
+        let env = FakeEnv::alive_after(exe, 2);
+
+        ensure_daemon_running_inner(&mut runner, &mut fs, &env)
+            .expect("autostart should not error");
+
+        // Find enable and bootstrap positions in call order.
+        let enable_idx = runner.calls.iter().position(|(prog, args)| {
+            prog == "launchctl" && args.first().map(|s| s.as_str()) == Some("enable")
+        });
+        let bootstrap_idx = runner.calls.iter().position(|(prog, args)| {
+            prog == "launchctl" && args.first().map(|s| s.as_str()) == Some("bootstrap")
+        });
+        let enable_i = enable_idx.expect("enable must be called");
+        let bootstrap_i = bootstrap_idx.expect("bootstrap must be called");
+        assert!(
+            enable_i < bootstrap_i,
+            "enable must precede bootstrap, got calls: {:?}",
+            runner.calls
+        );
+
+        // Enable target must be gui/<uid>/<label>.
+        let enable_args = &runner.calls[enable_i].1;
+        assert_eq!(enable_args[0], "enable");
+        assert_eq!(enable_args[1], "gui/501/com.copypaste.daemon");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn autostart_skips_bootstrap_when_print_reports_already_loaded() {
+        // `launchctl print` returns 0 → service is loaded. We must skip the
+        // enable+bootstrap pair to avoid emitting a spurious error 37.
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = fake_app_exe(tmp.path());
+        let bundled = exe
+            .parent().unwrap()
+            .parent().unwrap()
+            .join("Resources")
+            .join(PLIST_FILENAME);
+        let mut fs = TempFs::new(tmp.path().join("home"));
+        fs.seed(bundled, SAMPLE_PLIST.into());
+
+        let mut runner = MockRunner::with_default_uid();
+        // Override default — print says loaded.
+        runner.set("launchctl print", true, "", "");
+
+        // Socket also alive (consistent with launchctl print success).
+        let env = FakeEnv::always_alive(exe);
+
+        let _status = ensure_daemon_running_inner(&mut runner, &mut fs, &env).unwrap();
+
+        // With always_alive socket the fast-path short-circuits before any
+        // launchctl call. Verify no launchctl invocations occurred at all.
+        let any_launchctl = runner.calls.iter().any(|(prog, _)| prog == "launchctl");
+        assert!(!any_launchctl, "fast-path must skip launchctl entirely, got: {:?}", runner.calls);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn autostart_error_5_failure_includes_enable_hint() {
+        // Simulate: print = not loaded, enable succeeds, bootstrap fails with 5.
+        // The returned FailedToStart message must include the recovery hint.
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = fake_app_exe(tmp.path());
+        let bundled = exe
+            .parent().unwrap()
+            .parent().unwrap()
+            .join("Resources")
+            .join(PLIST_FILENAME);
+        let mut fs = TempFs::new(tmp.path().join("home"));
+        fs.seed(bundled, SAMPLE_PLIST.into());
+
+        let mut runner = MockRunner::with_default_uid();
+        runner.set(
+            "launchctl bootstrap",
+            false,
+            "",
+            "Bootstrap failed: 5: Input/output error",
+        );
+        let env = FakeEnv::never_alive(exe);
+
+        let status = ensure_daemon_running_inner(&mut runner, &mut fs, &env).unwrap();
+        match status {
+            DaemonStatus::FailedToStart(msg) => {
+                assert!(
+                    msg.contains("disabled") || msg.contains("launchctl enable"),
+                    "expected enable hint for error 5, got: {msg}"
+                );
+            }
+            other => panic!("expected FailedToStart for error 5, got {other:?}"),
+        }
     }
 }
