@@ -337,6 +337,18 @@ fn macos_install<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Resu
     let dst = user_plist_path(fs)?;
     let uid = macos_uid(runner)?;
 
+    // Ensure the logs directory exists. launchd does NOT mkdir intermediate
+    // parents for `StandardOutPath` / `StandardErrorPath`; a missing
+    // `~/Library/Logs/CopyPaste/` causes the daemon process to fail at spawn
+    // time (logd refuses to open the file) and the daemon never starts.
+    // Best-effort: ignore errors (e.g. permission issues will resurface
+    // when launchd tries to write its first log line, with a clearer
+    // message).
+    if let Some(home) = fs.home_dir() {
+        let logs_dir = home.join("Library/Logs/CopyPaste");
+        let _ = fs.create_dir_all(&logs_dir);
+    }
+
     // Refuse to install as root — same reasoning as start.
     if uid == 0 {
         bail!(
@@ -408,8 +420,43 @@ fn macos_install<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Resu
 }
 
 fn macos_uninstall<R: CommandRunner, F: FsOps>(runner: &mut R, fs: &mut F) -> Result<()> {
-    // Best-effort bootout first; ignore errors (daemon may already be unloaded).
+    // Order matters here:
+    //   1. bootout — best-effort. Failures are ignored: the daemon may
+    //      already be unloaded, in which case launchctl returns error 36.
+    //   2. unlink the IPC socket — leftover socket files cause the next
+    //      `start` to error out with EADDRINUSE on `bind`. The daemon
+    //      itself does `remove_file` before binding (see
+    //      `copypaste-daemon/src/ipc.rs`), but if the daemon never bound
+    //      cleanly the file may persist. ENOENT here is fine — just means
+    //      there was nothing to remove.
+    //   3. remove the plist file itself.
+    //
+    // We deliberately do NOT call `launchctl disable` here. `disable` puts
+    // the label on launchd's *disabled* list, which makes a subsequent
+    // re-install fail with "Bootstrap failed: 5: Input/output error" until
+    // the user manually `enable`s it. The default uninstall must be
+    // reversible by a simple `install` — `bootout` already removes the
+    // service from the loaded set, which is the right cleanup for "stop
+    // running, but allow easy re-enable".
     let _ = macos_stop(runner);
+
+    // Unlink the IPC socket. Canonical path mirrors
+    // `copypaste-daemon::paths::socket_path()` on macOS:
+    // `~/Library/Application Support/CopyPaste/daemon.sock`.
+    if let Some(home) = fs.home_dir() {
+        let sock = home.join("Library/Application Support/CopyPaste/daemon.sock");
+        if fs.exists(&sock) {
+            // ENOENT-style errors are tolerated — they mean the socket
+            // was already cleaned up. Anything else (e.g. permission
+            // denied) we surface as a warning, not a hard error, so the
+            // plist still gets removed on the user's behalf.
+            match fs.remove_file(&sock) {
+                Ok(()) => eprintln!("removed stale IPC socket at {}", sock.display()),
+                Err(e) => eprintln!("warning: could not remove socket at {}: {e}", sock.display()),
+            }
+        }
+    }
+
     let plist = user_plist_path(fs)?;
     if fs.exists(&plist) {
         fs.remove_file(&plist)?;
@@ -728,6 +775,77 @@ mod tests {
 
         // plist must have been removed
         assert_eq!(fs.removed, vec![expected_plist()]);
+    }
+
+    /// Uninstall must unlink the IPC socket if it exists. A leftover
+    /// socket file causes the next `start` to fail with EADDRINUSE on
+    /// bind.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn daemon_uninstall_removes_leftover_socket() {
+        let socket =
+            PathBuf::from("/Users/test/Library/Application Support/CopyPaste/daemon.sock");
+        let mut runner = MockRunner::new();
+        runner.set_response("launchctl", "print", true, "", "");
+        let mut fs = MockFs::new()
+            .with_existing(expected_plist())
+            .with_existing(socket.clone());
+
+        dispatch(DaemonAction::Uninstall, &mut runner, &mut fs).expect("uninstall ok");
+
+        assert!(
+            fs.removed.contains(&socket),
+            "expected socket {} to be removed, removed={:?}",
+            socket.display(),
+            fs.removed
+        );
+        // Plist still removed too.
+        assert!(
+            fs.removed.contains(&expected_plist()),
+            "expected plist still removed alongside socket"
+        );
+    }
+
+    /// Uninstall must NOT call `launchctl disable` by default — disabling
+    /// the label makes a subsequent `install` fail with "Bootstrap failed:
+    /// 5" until the user manually re-enables it.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn daemon_uninstall_does_not_disable_label() {
+        let mut runner = MockRunner::new();
+        runner.set_response("launchctl", "print", true, "", "");
+        let mut fs = MockFs::new().with_existing(expected_plist());
+
+        dispatch(DaemonAction::Uninstall, &mut runner, &mut fs).expect("uninstall ok");
+
+        let disable_called = runner.calls.iter().any(|c| {
+            c.program == "launchctl" && c.args.first().map(|s| s.as_str()) == Some("disable")
+        });
+        assert!(
+            !disable_called,
+            "uninstall must NOT call launchctl disable, got: {:?}",
+            runner.calls
+        );
+    }
+
+    /// `macos_install` must create the logs dir so launchd can open
+    /// `StandardOutPath` / `StandardErrorPath` without ENOENT.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn daemon_install_creates_logs_dir() {
+        let mut runner = MockRunner::new();
+        let src = PathBuf::from("/repo/packaging/macos/com.copypaste.daemon.plist");
+        let mut fs = MockFs::new().with_file(src, SAMPLE_PLIST_FOR_INSTALL);
+
+        dispatch(DaemonAction::Install, &mut runner, &mut fs).expect("install ok");
+
+        let logs_dir = PathBuf::from("/Users/test/Library/Logs/CopyPaste");
+        assert!(
+            fs.created_dirs.contains(&logs_dir),
+            "expected logs dir {} to be created, got: {:?}",
+            logs_dir.display(),
+            fs.created_dirs
+        );
     }
 
     #[cfg(not(target_os = "macos"))]
