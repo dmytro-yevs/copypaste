@@ -1,13 +1,18 @@
 package com.copypaste.android
 
+import android.Manifest
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -57,6 +62,18 @@ class MainActivity : ComponentActivity() {
     private lateinit var settings: Settings
     private val scope = CoroutineScope(Dispatchers.Main)
 
+    /**
+     * v0.3 T4 polish: API 33+ requires the POST_NOTIFICATIONS runtime
+     * permission before the foreground-service notification will render
+     * with action buttons. Requested once at first launch; declined is fine,
+     * the service still runs (just silently).
+     */
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        Log.d(TAG, "POST_NOTIFICATIONS granted=$granted")
+    }
+
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         val clip = clipboardManager.primaryClip ?: return@OnPrimaryClipChangedListener
         val text = clip.getItemAt(0)?.text?.toString() ?: return@OnPrimaryClipChangedListener
@@ -76,6 +93,8 @@ class MainActivity : ComponentActivity() {
         // Android 10+ (API 29+): clipboard only readable in foreground
         clipboardManager.addPrimaryClipChangedListener(clipListener)
 
+        maybeRequestNotificationPermission()
+
         setContent {
             CopyPasteTheme {
                 MainScreen()
@@ -86,6 +105,24 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         super.onDestroy()
+    }
+
+    /**
+     * Request POST_NOTIFICATIONS on API 33+ so the foreground service
+     * notification (with Pause/Resume + Open actions) renders. Skipped on
+     * older releases — permission is granted implicitly there.
+     *
+     * If the user denies it the service still runs; only the notification
+     * channel is silenced.
+     */
+    private fun maybeRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) return
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     /**

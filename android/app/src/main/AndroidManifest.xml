@@ -38,5 +38,13 @@
         <service android:name=".ClipboardService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <receiver android:name=".CaptureControlReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.copypaste.android.action.PAUSE_CAPTURE" />
+                <action android:name="com.copypaste.android.action.RESUME_CAPTURE" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
