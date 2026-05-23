@@ -1,5 +1,5 @@
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit, OsRng, Payload},
     XChaCha20Poly1305, XNonce,
 };
 use rand::RngCore;
@@ -7,6 +7,20 @@ use thiserror::Error;
 
 pub const NONCE_SIZE: usize = 24;
 pub const TAG_SIZE: usize = 16;
+
+/// AAD schema version for per-item AEAD binding (`item_id|schema_version`).
+///
+/// Stored locally as a compile-time constant rather than re-exporting from
+/// `storage::schema` to avoid a cross-module merge race with other beta
+/// workers. If another worker promotes a shared `SCHEMA_VERSION` to `pub`,
+/// this constant should be reconciled to that single source of truth.
+///
+/// Re-exported via `pub use crypto::encrypt::AAD_SCHEMA_VERSION` so storage
+/// callers can pass it to `build_item_aad` without hard-coding `3` everywhere.
+///
+/// TODO(v0.3): remove legacy empty-AAD fallback in `decrypt_item_with_aad`
+/// once the entire row population has been re-encrypted with AAD.
+pub const AAD_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Error)]
 pub enum EncryptError {
@@ -20,35 +34,105 @@ pub enum EncryptError {
     CipherFailed(String),
 }
 
-/// Encrypt with XChaCha20-Poly1305. Returns (random_nonce[24], ciphertext_with_tag)
-/// or an `EncryptError::CipherFailed` if the AEAD layer rejects the input
-/// (e.g. plaintext exceeds the per-message size limit). This function MUST NOT
-/// panic on user-supplied data — see security audit medium #10.
-pub fn encrypt_item(
+/// Build the canonical AEAD AAD for a clipboard item:
+/// `"{item_id}|{schema_version}"` as UTF-8 bytes.
+///
+/// Binding ciphertext to both the row's `item_id` and the storage
+/// `schema_version` means an attacker who copies a ciphertext blob from
+/// one row into another (or replays an old-schema blob into a new-schema
+/// row) is detected by the AEAD auth tag — `decrypt_item_with_aad` will
+/// reject the substituted ciphertext with `EncryptError::AuthFailed`.
+pub fn build_item_aad(item_id: &str, schema_version: u32) -> Vec<u8> {
+    format!("{item_id}|{schema_version}").into_bytes()
+}
+
+/// Encrypt with XChaCha20-Poly1305 + associated data.
+///
+/// Returns `(random_nonce[24], ciphertext_with_tag)` or
+/// `EncryptError::CipherFailed` if the AEAD layer rejects the input
+/// (e.g. plaintext exceeds the per-message size limit).
+///
+/// `aad` is authenticated but NOT encrypted. Decryption MUST be called
+/// with the identical AAD bytes, otherwise `AuthFailed` is returned.
+/// This function MUST NOT panic on user-supplied data —
+/// see security audit medium #10.
+pub fn encrypt_item_with_aad(
     plaintext: &[u8],
     key: &[u8; 32],
+    aad: &[u8],
 ) -> Result<([u8; NONCE_SIZE], Vec<u8>), EncryptError> {
     let cipher = XChaCha20Poly1305::new(key.into());
     let mut nonce_bytes = [0u8; NONCE_SIZE];
     OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = XNonce::from(nonce_bytes);
+    let payload = Payload { msg: plaintext, aad };
     let ciphertext = cipher
-        .encrypt(&nonce, plaintext)
+        .encrypt(&nonce, payload)
         .map_err(|e| EncryptError::CipherFailed(e.to_string()))?;
     Ok((nonce_bytes, ciphertext))
 }
 
-/// Decrypt. Returns plaintext or AuthFailed.
+/// Decrypt with XChaCha20-Poly1305 + associated data.
+///
+/// Returns plaintext on success or `EncryptError::AuthFailed` if the
+/// ciphertext, nonce, key, or AAD has been tampered with / is wrong.
+///
+/// Legacy fallback (v0.2 → v0.3 transition): if decryption with the
+/// supplied `aad` fails AND `aad` is non-empty, retry once with an
+/// empty AAD. This lets us decrypt rows written by the pre-AAD
+/// (`encrypt_item`) code path without forcing a migration. The fallback
+/// MUST be removed in v0.3 once the full row population has been
+/// re-encrypted under the new AAD binding — see `AAD_SCHEMA_VERSION`
+/// TODO note above.
+pub fn decrypt_item_with_aad(
+    ciphertext: &[u8],
+    nonce: &[u8; NONCE_SIZE],
+    key: &[u8; 32],
+    aad: &[u8],
+) -> Result<Vec<u8>, EncryptError> {
+    let cipher = XChaCha20Poly1305::new(key.into());
+    let nonce_x = XNonce::from(*nonce);
+    let payload = Payload { msg: ciphertext, aad };
+    match cipher.decrypt(&nonce_x, payload) {
+        Ok(pt) => Ok(pt),
+        Err(_) if !aad.is_empty() => {
+            // Legacy row written by pre-AAD `encrypt_item`. Retry with
+            // empty AAD. TODO(v0.3): drop this fallback path.
+            let legacy = Payload {
+                msg: ciphertext,
+                aad: &[][..],
+            };
+            cipher
+                .decrypt(&nonce_x, legacy)
+                .map_err(|_| EncryptError::AuthFailed)
+        }
+        Err(_) => Err(EncryptError::AuthFailed),
+    }
+}
+
+/// Encrypt with XChaCha20-Poly1305 and no AAD (legacy/back-compat).
+///
+/// Equivalent to `encrypt_item_with_aad(plaintext, key, &[])`. New call
+/// sites SHOULD use `encrypt_item_with_aad` and pass an AAD bound to
+/// the row's `(item_id, schema_version)` — see `build_item_aad`.
+pub fn encrypt_item(
+    plaintext: &[u8],
+    key: &[u8; 32],
+) -> Result<([u8; NONCE_SIZE], Vec<u8>), EncryptError> {
+    encrypt_item_with_aad(plaintext, key, &[])
+}
+
+/// Decrypt with XChaCha20-Poly1305 and no AAD (legacy/back-compat).
+///
+/// Equivalent to `decrypt_item_with_aad(ciphertext, nonce, key, &[])`.
+/// For ciphertexts produced by `encrypt_item_with_aad` with non-empty
+/// AAD, call `decrypt_item_with_aad` with the matching AAD.
 pub fn decrypt_item(
     ciphertext: &[u8],
     nonce: &[u8; NONCE_SIZE],
     key: &[u8; 32],
 ) -> Result<Vec<u8>, EncryptError> {
-    let cipher = XChaCha20Poly1305::new(key.into());
-    let nonce = XNonce::from(*nonce);
-    cipher
-        .decrypt(&nonce, ciphertext)
-        .map_err(|_| EncryptError::AuthFailed)
+    decrypt_item_with_aad(ciphertext, nonce, key, &[])
 }
 
 #[cfg(test)]

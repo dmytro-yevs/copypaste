@@ -8,7 +8,10 @@ pub mod storage;
 // Top-level re-exports
 pub use config::AppConfig;
 pub use crypto::{DeviceKeypair, KeyError};
-pub use crypto::encrypt::{encrypt_item, decrypt_item, EncryptError, NONCE_SIZE};
+pub use crypto::encrypt::{
+    build_item_aad, decrypt_item, decrypt_item_with_aad, encrypt_item, encrypt_item_with_aad,
+    EncryptError, AAD_SCHEMA_VERSION, NONCE_SIZE,
+};
 pub use crypto::chunks::{encrypt_chunks, decrypt_chunks, EncryptedChunk, ChunkError};
 pub use image::{
     encode_image, decode_image, chunks_to_blob, chunks_from_blob, thumbnail,

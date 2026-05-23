@@ -15,12 +15,18 @@
 //!   other plaintext — the random per-message nonce binds the ciphertext to
 //!   that nonce.
 //!
-//! AAD observation: the current `encrypt_item` / `decrypt_item` API does NOT
-//! accept associated data, so an `aad_mismatch_returns_error` test is not
-//! applicable. If AAD support is added later (e.g. binding ciphertext to an
-//! item id), a parallel test should be appended here.
+//! AAD binding (beta security hardening): the AEAD layer now also exposes
+//! `encrypt_item_with_aad` / `decrypt_item_with_aad`, which authenticate an
+//! Associated Data string bound to the row's `(item_id, schema_version)`.
+//! The three trailing tests in this file pin:
+//!   * `aad_swap_fails`        — ciphertext bound to row A cannot be replayed into row B
+//!   * `aad_match_succeeds`    — matching AAD round-trips cleanly
+//!   * `legacy_empty_aad_fallback` — pre-AAD ciphertext still decrypts (v0.2→v0.3 bridge)
 
-use copypaste_core::{decrypt_item, encrypt_item, EncryptError, NONCE_SIZE};
+use copypaste_core::{
+    build_item_aad, decrypt_item, decrypt_item_with_aad, encrypt_item, encrypt_item_with_aad,
+    EncryptError, AAD_SCHEMA_VERSION, NONCE_SIZE,
+};
 
 const TAG_SIZE: usize = 16;
 
@@ -183,4 +189,99 @@ fn every_byte_flip_in_tag_is_detected() {
         assert!(matches!(result, Err(EncryptError::AuthFailed)),
             "flip at tag offset {} must fail, got {:?}", offset, result);
     }
+}
+
+// ---------------------------------------------------------------------------
+// AAD binding (beta security hardening): bind ciphertext to (item_id, schema).
+// ---------------------------------------------------------------------------
+
+/// Ciphertext encrypted with AAD "A" must NOT decrypt under AAD "B" — this is
+/// the substitution-attack protection. An attacker who swaps `clipboard_items.content`
+/// blobs between two rows is detected by the AEAD auth tag because each row's
+/// AAD is derived from its unique `item_id`.
+#[test]
+fn aad_swap_fails() {
+    let key = key_a();
+    let plaintext = b"row-A content";
+
+    let aad_a = build_item_aad("item-A-uuid", 3);
+    let aad_b = build_item_aad("item-B-uuid", 3);
+    assert_ne!(aad_a, aad_b, "distinct item_ids must produce distinct AAD");
+
+    let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &aad_a).expect("encrypt");
+
+    // Simulate the attacker copying row-A's ciphertext+nonce into row-B.
+    // Row-B's decrypt path reconstructs AAD from row-B's own (item_id, schema)
+    // — which does not match — so decryption MUST fail.
+    let result = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad_b);
+    assert!(
+        matches!(result, Err(EncryptError::AuthFailed)),
+        "AAD substitution must fail with AuthFailed, got {:?}",
+        result,
+    );
+
+    // Schema-version mismatch (same item_id, different version) must also fail —
+    // pins the second half of the binding pair.
+    let aad_a_v2 = build_item_aad("item-A-uuid", 2);
+    let schema_swap = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad_a_v2);
+    assert!(
+        matches!(schema_swap, Err(EncryptError::AuthFailed)),
+        "schema-version downgrade must fail with AuthFailed, got {:?}",
+        schema_swap,
+    );
+}
+
+/// Same AAD on both ends round-trips cleanly — the happy path for the new
+/// per-item binding contract.
+#[test]
+fn aad_match_succeeds() {
+    let key = key_a();
+    let plaintext = b"correctly-bound payload";
+    // Pin the exported AAD_SCHEMA_VERSION constant — storage callers will use
+    // this value instead of hard-coding `3`.
+    let aad = build_item_aad("item-X-uuid", AAD_SCHEMA_VERSION);
+
+    let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &aad).expect("encrypt");
+    let decrypted = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad).expect("decrypt");
+    assert_eq!(decrypted, plaintext);
+
+    // build_item_aad must be deterministic — encrypting and decrypting from
+    // independently-reconstructed AAD bytes must also succeed.
+    let aad_again = build_item_aad("item-X-uuid", AAD_SCHEMA_VERSION);
+    let decrypted_again =
+        decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad_again).expect("decrypt with rebuilt AAD");
+    assert_eq!(decrypted_again, plaintext);
+}
+
+/// Legacy rows written by the pre-AAD `encrypt_item` path (empty AAD) MUST
+/// still decrypt when read back through the new `decrypt_item_with_aad`
+/// surface — the v0.2→v0.3 bridge. The fallback only triggers when the
+/// strict-AAD attempt fails AND the supplied AAD is non-empty.
+#[test]
+fn legacy_empty_aad_fallback() {
+    let key = key_a();
+    let plaintext = b"row written before AAD landed";
+
+    // Pre-AAD path: legacy producer.
+    let (nonce, ciphertext) = encrypt_item(plaintext, &key).expect("legacy encrypt");
+
+    // Post-AAD reader: tries new AAD, falls back to empty AAD on failure.
+    let aad = build_item_aad("legacy-row-uuid", 3);
+    let decrypted =
+        decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad).expect("legacy fallback decrypt");
+    assert_eq!(decrypted, plaintext);
+
+    // Also pin the inverse: a NEW ciphertext (encrypted with real AAD) must
+    // NOT silently decrypt under a *different* item's AAD just because the
+    // fallback exists. The fallback retries with empty AAD, which still
+    // does not match the real AAD, so the call must still fail.
+    let real_aad = build_item_aad("real-item", 3);
+    let other_aad = build_item_aad("attacker-item", 3);
+    let (n2, ct2) = encrypt_item_with_aad(b"protected", &key, &real_aad).expect("encrypt");
+    let result = decrypt_item_with_aad(&ct2, &n2, &key, &other_aad);
+    assert!(
+        matches!(result, Err(EncryptError::AuthFailed)),
+        "fallback path must not weaken AAD enforcement; got {:?}",
+        result,
+    );
 }
