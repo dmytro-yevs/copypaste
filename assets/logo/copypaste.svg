@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CopyPaste app icon — modern minimalist, Big Sur squircle.
+  Canvas: 1024×1024. Corner radius: 230 (Apple Big Sur template).
+  Concept: two offset rounded rectangles ("stack" / clipboard history).
+  Accent: Radix indigo (#5B5BD6 → #4F46E5 gradient).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Background squircle gradient: top-left lighter, bottom-right deeper indigo. -->
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#4338CA"/>
+    </linearGradient>
+    <!-- Subtle inner-stroke (8% white) for depth. -->
+    <linearGradient id="innerStroke" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.04"/>
+    </linearGradient>
+    <!-- White-card subtle shadow for the back card. -->
+    <linearGradient id="backCardFill" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.70"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.55"/>
+    </linearGradient>
+    <linearGradient id="frontCardFill" x1="0" y1="0" x2="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="1.0"/>
+      <stop offset="100%" stop-color="#F4F4F7" stop-opacity="1.0"/>
+    </linearGradient>
+  </defs>
+
+  <!-- macOS Big Sur squircle: rounded-square with rx=230. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="230" ry="230" fill="url(#bg)"/>
+  <!-- 1px-equivalent inner stroke at 8% white for depth (drawn slightly inset). -->
+  <rect x="2" y="2" width="1020" height="1020" rx="228" ry="228"
+        fill="none" stroke="url(#innerStroke)" stroke-width="4"/>
+
+  <!-- ── The "stack" concept: two offset rounded rectangles ─────────────────── -->
+  <!-- Back card (history item underneath) — translucent white, offset up-left. -->
+  <g>
+    <rect x="220" y="220" width="520" height="600" rx="74" ry="74"
+          fill="url(#backCardFill)"/>
+    <!-- 4 content stripes hinting "text rows" on back card -->
+    <rect x="296" y="320" width="320" height="22" rx="11" fill="#4338CA" fill-opacity="0.18"/>
+    <rect x="296" y="380" width="280" height="22" rx="11" fill="#4338CA" fill-opacity="0.14"/>
+    <rect x="296" y="440" width="240" height="22" rx="11" fill="#4338CA" fill-opacity="0.12"/>
+  </g>
+
+  <!-- Front card (current clipboard) — solid white, offset down-right. -->
+  <g>
+    <rect x="304" y="304" width="520" height="600" rx="74" ry="74"
+          fill="url(#frontCardFill)"/>
+    <!-- Stroke for clean separation from back card. -->
+    <rect x="304" y="304" width="520" height="600" rx="74" ry="74"
+          fill="none" stroke="#1E1B4B" stroke-opacity="0.06" stroke-width="2"/>
+    <!-- 3 content stripes on front card (longer, darker — "active" item) -->
+    <rect x="380" y="420" width="368" height="28" rx="14" fill="#1E1B4B" fill-opacity="0.78"/>
+    <rect x="380" y="488" width="320" height="28" rx="14" fill="#1E1B4B" fill-opacity="0.55"/>
+    <rect x="380" y="556" width="272" height="28" rx="14" fill="#1E1B4B" fill-opacity="0.38"/>
+    <!-- Accent dot — single indigo "active" indicator -->
+    <circle cx="394" cy="740" r="18" fill="#5B5BD6"/>
+    <rect x="430" y="722" width="200" height="36" rx="18" fill="#5B5BD6" fill-opacity="0.18"/>
+  </g>
+</svg>

@@ -70,7 +70,12 @@ async fn boot_server() -> (Arc<Mutex<Database>>, tempfile::TempDir, std::path::P
         Database::open_in_memory().expect("in-memory DB"),
     ));
     let private_mode = Arc::new(AtomicBool::new(false));
-    let server = IpcServer::new(db.clone(), private_mode);
+    let server = IpcServer::new(
+        db.clone(),
+        private_mode,
+        std::sync::Arc::new([0u8; 32]),
+        std::sync::Arc::new([0u8; 32]),
+    );
     let sock_for_task = sock.clone();
     tokio::spawn(async move {
         // `serve()` returns Err on bind failure; tests fail fast via the

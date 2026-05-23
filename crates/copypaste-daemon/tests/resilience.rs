@@ -63,7 +63,12 @@ async fn spawn_server(
         Database::open_in_memory().expect("in-memory DB must open"),
     ));
     let private_mode = Arc::new(AtomicBool::new(false));
-    let server = IpcServer::new(db.clone(), private_mode);
+    let server = IpcServer::new(
+        db.clone(),
+        private_mode,
+        std::sync::Arc::new([0u8; 32]),
+        std::sync::Arc::new([0u8; 32]),
+    );
     let path = socket_path.to_path_buf();
     let handle = tokio::spawn(async move {
         // `serve` loops forever; we abort the JoinHandle at test end.

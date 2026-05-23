@@ -53,10 +53,21 @@ security-framework.workspace = true
 # v0.3 Keychain ACL (THREAT-MODEL OI-4): security-framework 2.x does not bind
 # SecAccessCreate / SecTrustedApplicationCreateFromPath / SecKeychainItem*,
 # so the ACL layer in src/keychain/acl.rs drops to raw FFI and needs the
-# CFString / CFArray / CFData wrappers shipped by core-foundation 0.9 (the
-# version the rest of the security-framework chain already pulls in).
+# CFString / CFArray / CFData wrappers shipped by core-foundation 0.9.
+#
+# Beta-merge audit HIGH #2: keychain.rs also hand-builds SecItemAdd with
+# kSecAttrAccessControl + kSecAttrSynchronizable=false (security-framework
+# 2.x has no high-level wrapper for accessibility on generic_password).
+# All FFI deps are already transitive via security-framework — pinning
+# them as direct deps so the FFI calls compile against a stable range.
 core-foundation = "0.9"
-# v0.3: tray-icon + png moved to copypaste-ui::tray_host (the daemon process
+core-foundation-sys = "0.8"
+security-framework-sys = "2"
+# Beta-merge audit MED #4: read-path Vec<u8> from get_generic_password is
+# wrapped in Zeroizing so the heap buffer holding the device secret is
+# scrubbed the moment it falls out of scope.
+zeroize = { version = "1.7", features = ["derive"] }
+# tray-icon + png moved to copypaste-ui::tray_host (the daemon process
 # is launched by launchd and cannot host an NSApplication main run loop on
 # macOS, which tray-icon / muda::Menu both require).
 

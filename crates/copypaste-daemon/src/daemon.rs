@@ -56,6 +56,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     }
 
     let local_key = load_local_key();
+    let local_key_arc: Arc<[u8; 32]> = Arc::new(local_key);
     tracing::info!("local encryption key ready");
 
     let db_path = paths::db_path();
@@ -63,6 +64,20 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         Database::open(&db_path, &local_key).map_err(|e| anyhow::anyhow!("Database: {e}"))?,
     ));
     tracing::info!("database opened at {}", db_path.display());
+
+    // Device-keypair public bytes — passed into IpcServer so
+    // `get_own_fingerprint` returns a stable cryptographic fingerprint
+    // (audit HIGH #6: DefaultHasher(hostname,pid) changed every restart).
+    // On non-macOS we don't have a keychain-backed keypair; use a zero
+    // placeholder. Memory: Windows/Linux are cfg-frozen (macOS+Android only).
+    #[cfg(target_os = "macos")]
+    let device_public_key_arc: Arc<[u8; 32]> = {
+        let kp = crate::keychain::load_or_create()
+            .map_err(|e| anyhow::anyhow!("keychain load_or_create: {e}"))?;
+        Arc::new(kp.public_key_bytes())
+    };
+    #[cfg(not(target_os = "macos"))]
+    let device_public_key_arc: Arc<[u8; 32]> = Arc::new([0u8; 32]);
 
     // Shared private-mode flag: when true, the clipboard monitor skips recording.
     // This is set/cleared via the IPC `set_private_mode` command.
@@ -74,9 +89,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     {
         let ipc_db = db.clone();
         let ipc_private_mode = private_mode.clone();
+        let ipc_local_key = local_key_arc.clone();
+        let ipc_device_pub = device_public_key_arc.clone();
         let socket_clone = socket_path.clone();
         tokio::spawn(async move {
-            let server = IpcServer::new(ipc_db, ipc_private_mode);
+            let server = IpcServer::new(ipc_db, ipc_private_mode, ipc_local_key, ipc_device_pub);
             if let Err(e) = server.serve(&socket_clone).await {
                 tracing::error!("IPC server error: {e}");
             }
@@ -84,9 +101,17 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     }
 
     // Broadcast channel: carries newly-inserted clipboard items to any
-    // subscriber (P2P sync, cloud-sync, future extensions). Capacity 64 — lagging
-    // receivers drop oldest items and log a warning.
-    let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(64);
+    // subscriber (P2P sync, cloud-sync, future extensions).
+    //
+    // Capacity 256 (bumped from 64 — audit HIGH #8). The earlier 64-slot
+    // buffer was too small for clipboard bursts (e.g. a rapid `pbcopy` loop
+    // or a P2P peer momentarily backpressured by network jitter): subscribers
+    // would receive `RecvError::Lagged` and silently drop items.
+    //
+    // Subscriber loops (p2p::subscriber_loop, cloud orchestrator, sync_orch)
+    // still need to log `Lagged(n)` themselves — owned by the subsystems that
+    // hold the receivers, not this file.
+    let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(256);
 
     // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
     let _p2p_handle: Option<p2p::P2pHandle> =
@@ -147,7 +172,25 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // returns `Err`, which the orchestrator logs at debug and continues.
     let (sync_outbound_tx, _sync_outbound_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
     let (_sync_incoming_tx, sync_incoming_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
-    let sync_device_id = uuid::Uuid::new_v4().to_string();
+    // Persistent sync_device_id (audit HIGH #13).
+    //
+    // Previously this was `Uuid::new_v4().to_string()` on every startup,
+    // which broke sync orchestrator correlation: peers saw a brand-new
+    // device on every restart and could not deduplicate items by origin.
+    //
+    // We reuse the same on-disk identifier the P2P branch already loads
+    // via `load_or_create_device_id` so the daemon presents a single
+    // stable identity across the local-clipboard / P2P / sync surfaces.
+    let sync_device_id = match load_or_create_device_id() {
+        Ok(id) => id.to_string(),
+        Err(e) => {
+            tracing::warn!(
+                "sync_device_id load/create failed ({e}); falling back to ephemeral UUID — \
+                 sync orchestrator will treat this run as a new device"
+            );
+            uuid::Uuid::new_v4().to_string()
+        }
+    };
     let sync_db = db.clone();
     let sync_rx = new_item_tx.subscribe();
     let _sync_handle = tokio::spawn(async move {
@@ -226,12 +269,19 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     sensitive_cleanup_ticks += 1;
 
                     // Sensitive item TTL: run every 5 seconds.
-                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)) {
+                    // `5_000 / poll_interval_ms` is integer-divided; for any
+                    // `poll_interval_ms > 5000` the quotient is 0, which would
+                    // make this branch fire every tick. Clamp the threshold to
+                    // at least 1 so the cleanup runs (at most) every tick.
+                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)).max(1) {
                         sensitive_cleanup_ticks = 0;
                         let db_guard = db.lock().await;
+                        // `unwrap_or_default()` matches the pattern at ipc.rs:799
+                        // — clock skew (system clock moved backwards past UNIX
+                        // epoch) must not panic the daemon.
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .unwrap_or_default()
                             .as_millis() as i64;
                         match copypaste_core::delete_sensitive_expired(&db_guard, now_ms, sensitive_ttl_ms) {
                             Ok(n) if n > 0 => tracing::info!("sensitive TTL cleanup: wiped {n} sensitive items"),
@@ -240,13 +290,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                         }
                     }
 
-                    // General expires_at TTL: run every 60 seconds.
-                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
+                    // General expires_at TTL: run every 60 seconds. Same
+                    // integer-division clamp as above.
+                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)).max(1) {
                         cleanup_ticks = 0;
                         let db_guard = db.lock().await;
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .unwrap_or_default()
                             .as_millis() as i64;
                         match copypaste_core::delete_expired(&db_guard, now_ms) {
                             Ok(n) if n > 0 => tracing::info!("TTL cleanup: removed {n} expired items"),
@@ -270,6 +321,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     }
     #[cfg(not(target_os = "macos"))]
     {
+        // SIGTERM handling on non-macOS — previously only SIGINT was wired,
+        // so launchd/systemd sending SIGTERM would terminate the process
+        // without running our cleanup branch (sock file removal, log flush).
+        #[cfg(unix)]
+        let mut sigterm = {
+            use tokio::signal::unix::{signal, SignalKind};
+            signal(SignalKind::terminate())?
+        };
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
@@ -278,12 +337,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     sensitive_cleanup_ticks += 1;
 
                     // Sensitive item TTL: run every 5 seconds.
-                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)) {
+                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)).max(1) {
                         sensitive_cleanup_ticks = 0;
                         let db_guard = db.lock().await;
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .unwrap_or_default()
                             .as_millis() as i64;
                         match copypaste_core::delete_sensitive_expired(&db_guard, now_ms, sensitive_ttl_ms) {
                             Ok(n) if n > 0 => tracing::info!("sensitive TTL cleanup: wiped {n} sensitive items"),
@@ -293,12 +352,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     }
 
                     // General expires_at TTL: run every 60 seconds.
-                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)) {
+                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)).max(1) {
                         cleanup_ticks = 0;
                         let db_guard = db.lock().await;
                         let now_ms = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
+                            .unwrap_or_default()
                             .as_millis() as i64;
                         match copypaste_core::delete_expired(&db_guard, now_ms) {
                             Ok(n) if n > 0 => tracing::info!("TTL cleanup: removed {n} expired items"),
@@ -309,6 +368,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down");
+                    break;
+                }
+                #[cfg(unix)]
+                _ = sigterm.recv() => {
+                    tracing::info!("SIGTERM received, shutting down");
                     break;
                 }
             }
@@ -340,6 +404,17 @@ async fn handle_tick(
 
     match monitor.poll() {
         Ok(Some(ClipboardContent::Text(text))) => {
+            // beta.5 Bug-1 visibility: log every capture at info level so
+            // users can confirm from `daemon.out.log` that the pasteboard is
+            // actually being read. Prior code only emitted `debug!` here
+            // which the default `copypaste=info` filter dropped, leaving
+            // operators unable to distinguish "no captures happening" from
+            // "captures happening but UI not refreshing".
+            tracing::info!(
+                bytes = text.len(),
+                "clipboard captured: text ({} bytes)",
+                text.len()
+            );
             if let Some(item) = handle_text(text, db, local_key, config).await {
                 // Broadcast to P2P + cloud-sync subscribers (and any future consumer).
                 // A send error only means there are no active receivers —
@@ -348,6 +423,11 @@ async fn handle_tick(
             }
         }
         Ok(Some(ClipboardContent::Image(raw_bytes))) => {
+            tracing::info!(
+                bytes = raw_bytes.len(),
+                "clipboard captured: image ({} bytes raw)",
+                raw_bytes.len()
+            );
             if let Some(item) = handle_image(raw_bytes, db, local_key, config).await {
                 let _ = new_item_tx.send(item);
             }
@@ -404,7 +484,15 @@ async fn handle_text(
     let db_guard = db.lock().await;
     match insert_item(&db_guard, &item) {
         Ok(_) => {
-            tracing::debug!("stored text item id={} sensitive={}", item.id, is_sensitive);
+            // beta.5 Bug-1 visibility: promoted from debug! to info! so users
+            // can verify in `daemon.out.log` that captured items reach the DB.
+            tracing::info!(
+                id = %item.id,
+                sensitive = is_sensitive,
+                "stored text item id={} sensitive={}",
+                item.id,
+                is_sensitive
+            );
             if let Err(e) = upsert_fts(&db_guard, &item.id, &text) {
                 tracing::warn!("fts index failed for id={}: {e}", item.id);
             }
@@ -449,7 +537,8 @@ async fn handle_image(
             let db_guard = db.lock().await;
             match insert_item(&db_guard, &item) {
                 Ok(_) => {
-                    tracing::debug!("stored image item id={}", item.id);
+                    // beta.5 Bug-1 visibility: promoted from debug! to info!.
+                    tracing::info!(id = %item.id, "stored image item id={}", item.id);
                     // Images don't have searchable text; index empty string for FTS consistency.
                     if let Err(e) = upsert_fts(&db_guard, &item.id, "") {
                         tracing::warn!("fts empty index failed for image id={}: {e}", item.id);
@@ -474,15 +563,34 @@ fn prune_history(db: &Database, config: &AppConfig) {
     let total = copypaste_core::count_items(db).unwrap_or(0) as usize;
     if total > config.history_limit {
         let excess = total - config.history_limit;
-        if let Ok(oldest) = copypaste_core::get_page(db, excess, config.history_limit) {
-            for old in &oldest {
-                let _ = copypaste_core::delete_item(db, &old.id);
-            }
-            tracing::debug!(
-                "pruned {} items over history_limit={}",
+        // Direct SQL DELETE ordered by `wall_time ASC` — bulk-removes the
+        // oldest rows in a single statement (audit HIGH #4). The previous
+        // implementation went through `get_page` + per-row `delete_item`,
+        // which was both N+1 and risked pruning the wrong page if the
+        // pagination math drifted.
+        //
+        // TODO(v0.3): the schema does not yet carry a dedicated `pinned`
+        // column — `pin_item` currently only clears `expires_at`, which is
+        // indistinguishable from a never-expiring default row. Once a real
+        // `pinned BOOLEAN` column lands, extend the WHERE clause with
+        // `AND (pinned = 0 OR pinned IS NULL)` so explicitly pinned items
+        // survive the prune.
+        let res = db.conn().execute(
+            "DELETE FROM clipboard_items WHERE id IN (
+                SELECT id FROM clipboard_items
+                ORDER BY wall_time ASC
+                LIMIT ?1
+            )",
+            rusqlite::params![excess as i64],
+        );
+        match res {
+            Ok(n) => tracing::debug!(
+                "pruned {} of {} requested items over history_limit={}",
+                n,
                 excess,
                 config.history_limit
-            );
+            ),
+            Err(e) => tracing::warn!("prune_history failed: {e}"),
         }
     }
 }

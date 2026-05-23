@@ -28,7 +28,11 @@ use tempfile::tempdir;
 /// Kept in-sync manually because the module is private. Bumping
 /// SCHEMA_VERSION in src/ MUST be accompanied by bumping this and adding
 /// a new migration test below.
-const CURRENT_SCHEMA_VERSION: i64 = 4;
+///
+/// v4: adds key_version column (HKDF v1→v2 re-encrypt sweep).
+/// v5: adds idx_dedup_hash_minute (TOCTOU dedup) +
+///     idx_clipboard_item_id (sync replay dedup). See schema_v2.sql.
+const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 /// v1 schema (the exact contents of src/storage/schema_v1.sql, inlined because
 /// the file is `include_str!`'d into the crate and not accessible from
@@ -519,5 +523,54 @@ fn migrate_v2_to_v3_adds_origin_device_id_column_with_empty_default() {
     assert_eq!(
         peer_origin, "peer-A",
         "peer-origin row must not be overwritten by local backfill"
+    );
+}
+
+/// v3 → v4: adds two UNIQUE INDEXes to `clipboard_items`:
+///   * `idx_dedup_hash_minute` — closes the TOCTOU hash-window dedup race
+///   * `idx_clipboard_item_id` — prevents sync replay double-inserts
+///
+/// We exercise the schema migration via `Database::open_in_memory`
+/// (which lands fresh DBs at the current version) and assert both
+/// indexes are present and enforce uniqueness.
+#[test]
+fn migrate_v3_to_v4_adds_dedup_unique_indexes() {
+    let db = Database::open_in_memory().expect("fresh v4 in-memory DB");
+    assert_eq!(user_version(&db), CURRENT_SCHEMA_VERSION);
+
+    assert!(
+        index_exists(&db, "idx_dedup_hash_minute"),
+        "v4 schema must include idx_dedup_hash_minute"
+    );
+    assert!(
+        index_exists(&db, "idx_clipboard_item_id"),
+        "v4 schema must include idx_clipboard_item_id"
+    );
+
+    // Sanity: idx_clipboard_item_id rejects duplicate item_ids at the
+    // SQL layer (independent of the dedup logic in items::*).
+    db.conn()
+        .execute(
+            "INSERT INTO clipboard_items
+                 (id, item_id, content_type, content, content_nonce,
+                  is_sensitive, is_synced, lamport_ts, wall_time,
+                  origin_device_id)
+             VALUES (?1, 'shared-item-id', 'text', X'AA', X'00',
+                     0, 0, 1, 1000, '')",
+            ["row-a"],
+        )
+        .unwrap();
+    let dup_err = db.conn().execute(
+        "INSERT INTO clipboard_items
+             (id, item_id, content_type, content, content_nonce,
+              is_sensitive, is_synced, lamport_ts, wall_time,
+              origin_device_id)
+         VALUES (?1, 'shared-item-id', 'text', X'BB', X'00',
+                 0, 0, 2, 2000, '')",
+        ["row-b"],
+    );
+    assert!(
+        dup_err.is_err(),
+        "second insert with the same item_id must be rejected by idx_clipboard_item_id"
     );
 }

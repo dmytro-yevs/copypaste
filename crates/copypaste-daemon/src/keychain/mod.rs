@@ -63,20 +63,45 @@ pub enum KeychainError {
 /// [`acl::rotate_acl_to_current_install`], which is called once at daemon
 /// startup separately from this function so that the rotation latency does
 /// not block per-component reads.
+///
+/// Beta-merge audit HIGH #2: also opportunistically re-stores entries
+/// written by older builds with the locked-down `ThisDeviceOnly` +
+/// `Synchronizable=false` attributes so the secret never leaves the device
+/// via iCloud Keychain sync — see `migrate_legacy_accessibility_if_needed`.
 pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
     #[cfg(target_os = "macos")]
     {
         match get_generic_password(SERVICE, ACCOUNT) {
             Ok(bytes) => {
+                // Audit MED #4: wrap the keychain-returned Vec in Zeroizing
+                // so the heap buffer is scrubbed when this scope exits, and
+                // use a checked conversion instead of `bytes.try_into().unwrap()`.
+                let bytes = zeroize::Zeroizing::new(bytes);
                 if bytes.len() != 32 {
                     return Err(KeychainError::InvalidLength(bytes.len()));
                 }
-                let arr: [u8; 32] = bytes.try_into().unwrap();
+                let arr: [u8; 32] = (&**bytes)
+                    .try_into()
+                    .map_err(|_| KeychainError::InvalidLength(bytes.len()))?;
+                // Audit HIGH #2 migration: re-store with the locked-down
+                // accessibility so legacy items written by pre-fix builds
+                // stop syncing to iCloud Keychain on the next run. Failure
+                // here is logged but not fatal — the keypair load itself
+                // succeeded, and we retry on every cold start.
+                if let Err(e) = migrate_legacy_accessibility_if_needed(&arr) {
+                    tracing::warn!(
+                        error = %e,
+                        "could not migrate device key to ThisDeviceOnly accessibility; will retry on next launch"
+                    );
+                }
                 Ok(DeviceKeypair::from_secret_bytes(&arr)?)
             }
             Err(_) => {
                 let kp = DeviceKeypair::generate();
-                let secret = kp.secret_key_bytes();
+                // Beta-merge audit MED #3 + #4: pull the secret via the
+                // zeroizing accessor so the buffer handed to the Keychain
+                // syscall is scrubbed when this function returns.
+                let secret = kp.secret_key_bytes_zeroizing();
                 // v0.3: create with ACL pinned to the current install.
                 let trusted = acl::trusted_binary_paths()?;
                 acl::store_with_acl(&secret, &trusted)?;
@@ -100,6 +125,127 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
 #[cfg(target_os = "macos")]
 pub fn delete_stored() -> Result<(), KeychainError> {
     delete_generic_password(SERVICE, ACCOUNT).map_err(KeychainError::from)
+}
+
+// ── HIGH #2: hardened `SecItemAdd` wrapper ─────────────────────────────────────
+//
+// `security_framework::passwords::set_generic_password` does NOT let you
+// specify accessibility, so the item lands with the default
+// `kSecAttrAccessibleWhenUnlocked` — which on macOS makes the item
+// eligible for iCloud Keychain sync AND for inclusion in a Time Machine
+// backup of the system keychain. Both violate the threat model: the X25519
+// device secret must never leave the originating device.
+//
+// We bypass `passwords::set_generic_password` by building the
+// `SecItemAdd` query manually with:
+//   * `kSecAttrAccessControl` = SecAccessControl built with
+//     `ProtectionMode::AccessibleWhenUnlockedThisDeviceOnly` (the only
+//     protection that suppresses iCloud sync and Time Machine inclusion).
+//   * `kSecAttrSynchronizable` = false (defence-in-depth — duplicate of
+//     the `ThisDeviceOnly` accessibility flag, but explicit).
+//
+// On duplicate (item already exists), we fall back to `SecItemUpdate`
+// with the same access-control attribute so an existing legacy entry is
+// re-written with the locked-down ACL.
+
+#[cfg(target_os = "macos")]
+fn set_generic_password_locked_down(
+    service: &str,
+    account: &str,
+    secret: &[u8],
+) -> Result<(), KeychainError> {
+    use core_foundation::base::{CFType, TCFType};
+    use core_foundation::boolean::CFBoolean;
+    use core_foundation::data::CFData;
+    use core_foundation::dictionary::CFDictionary;
+    use core_foundation::string::CFString;
+    use security_framework::access_control::{ProtectionMode, SecAccessControl};
+    use security_framework_sys::base::errSecDuplicateItem;
+    use security_framework_sys::item::{
+        kSecAttrAccessControl, kSecAttrAccount, kSecAttrService, kSecAttrSynchronizable, kSecClass,
+        kSecClassGenericPassword, kSecValueData,
+    };
+    use security_framework_sys::keychain_item::{SecItemAdd, SecItemUpdate};
+
+    // Build the access-control descriptor: WhenUnlockedThisDeviceOnly +
+    // no extra constraints (no biometry / passcode prompt — this is a
+    // service item, not a user-presence secret).
+    let acl = SecAccessControl::create_with_protection(
+        Some(ProtectionMode::AccessibleWhenUnlockedThisDeviceOnly),
+        0,
+    )
+    .map_err(KeychainError::from)?;
+
+    // Common attributes shared between add and update queries.
+    let class_key: CFString = unsafe { CFString::wrap_under_get_rule(kSecClass) };
+    let class_val: CFType =
+        unsafe { CFString::wrap_under_get_rule(kSecClassGenericPassword).into_CFType() };
+    let service_key: CFString = unsafe { CFString::wrap_under_get_rule(kSecAttrService) };
+    let service_val: CFType = CFString::from(service).into_CFType();
+    let account_key: CFString = unsafe { CFString::wrap_under_get_rule(kSecAttrAccount) };
+    let account_val: CFType = CFString::from(account).into_CFType();
+
+    let value_key: CFString = unsafe { CFString::wrap_under_get_rule(kSecValueData) };
+    let value_val: CFType = CFData::from_buffer(secret).into_CFType();
+    let acl_key: CFString = unsafe { CFString::wrap_under_get_rule(kSecAttrAccessControl) };
+    let acl_val: CFType = acl.into_CFType();
+    let sync_key: CFString = unsafe { CFString::wrap_under_get_rule(kSecAttrSynchronizable) };
+    let sync_val: CFType = CFBoolean::false_value().into_CFType();
+
+    // Add query: identity + value + ACL + synchronizable=false.
+    let add_pairs: Vec<(CFString, CFType)> = vec![
+        (class_key.clone(), class_val.clone()),
+        (service_key.clone(), service_val.clone()),
+        (account_key.clone(), account_val.clone()),
+        (value_key.clone(), value_val.clone()),
+        (acl_key.clone(), acl_val.clone()),
+        (sync_key.clone(), sync_val.clone()),
+    ];
+    let add_params = CFDictionary::from_CFType_pairs(&add_pairs);
+    let mut ret: core_foundation_sys::base::CFTypeRef = std::ptr::null();
+    let status = unsafe { SecItemAdd(add_params.as_concrete_TypeRef(), &mut ret) };
+
+    if status == 0 {
+        return Ok(());
+    }
+    if status != errSecDuplicateItem {
+        return Err(KeychainError::from(SfError::from_code(status)));
+    }
+
+    // Item already exists — update value + ACL + synchronizable so legacy
+    // items get re-written with the locked-down accessibility.
+    let lookup_pairs: Vec<(CFString, CFType)> = vec![
+        (class_key, class_val),
+        (service_key, service_val),
+        (account_key, account_val),
+    ];
+    let update_pairs: Vec<(CFString, CFType)> = vec![
+        (value_key, value_val),
+        (acl_key, acl_val),
+        (sync_key, sync_val),
+    ];
+    let lookup = CFDictionary::from_CFType_pairs(&lookup_pairs);
+    let update = CFDictionary::from_CFType_pairs(&update_pairs);
+    let status =
+        unsafe { SecItemUpdate(lookup.as_concrete_TypeRef(), update.as_concrete_TypeRef()) };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(KeychainError::from(SfError::from_code(status)))
+    }
+}
+
+/// Re-write the existing device-key entry under the locked-down ACL.
+///
+/// Called from `load_or_create`'s read path so any item written by a
+/// pre-fix build (default `kSecAttrAccessibleWhenUnlocked`, iCloud-sync
+/// eligible) is migrated on the next launch. We always do the rewrite —
+/// the API has no read-side accessor for the current accessibility, and
+/// `SecItemUpdate` with an identical ACL is a no-op cost-wise (no user
+/// prompt, single round-trip).
+#[cfg(target_os = "macos")]
+fn migrate_legacy_accessibility_if_needed(secret: &[u8; 32]) -> Result<(), KeychainError> {
+    set_generic_password_locked_down(SERVICE, ACCOUNT, secret)
 }
 
 #[cfg(test)]
@@ -134,5 +280,29 @@ mod tests {
         let kp2 = load_or_create().unwrap();
         assert_eq!(kp1.secret_key_bytes(), kp2.secret_key_bytes());
         delete_stored().unwrap();
+    }
+
+    /// Audit HIGH #2: structural test — verify the new accessibility-aware
+    /// setter rejects nothing on the happy path and is callable. Full
+    /// round-trip verification (read back + check accessibility attribute)
+    /// requires interactive Keychain access and lives in
+    /// `tests/keychain_macos.rs` with `#[ignore]`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "requires interactive Keychain access; run manually with `cargo test -- --ignored`"]
+    fn set_generic_password_locked_down_round_trips() {
+        let service = "com.copypaste.daemon.test.locked_down";
+        let account = "test-account";
+        let secret = [0xABu8; 32];
+        // Cleanup any leftover from a previous failed run.
+        let _ = delete_generic_password(service, account);
+        set_generic_password_locked_down(service, account, &secret)
+            .expect("locked-down add should succeed");
+        // Second call must hit the SecItemUpdate path (errSecDuplicateItem).
+        set_generic_password_locked_down(service, account, &secret)
+            .expect("locked-down add on duplicate should fall back to update");
+        let readback = get_generic_password(service, account).expect("readback");
+        assert_eq!(readback, &secret[..]);
+        delete_generic_password(service, account).expect("cleanup");
     }
 }

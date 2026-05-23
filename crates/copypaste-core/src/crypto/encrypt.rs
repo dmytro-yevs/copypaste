@@ -8,6 +8,10 @@ use thiserror::Error;
 pub const NONCE_SIZE: usize = 24;
 pub const TAG_SIZE: usize = 16;
 
+// v0.3 breaking change: legacy empty-AAD fallback removed. The env-gated
+// fallback (`COPYPASTE_ALLOW_LEGACY_AAD`) that briefly shipped on beta.6
+// is gone — all callers must pass the exact AAD used at encrypt time.
+
 /// AAD schema version for per-item AEAD binding (`item_id|schema_version`).
 ///
 /// Stored locally as a compile-time constant rather than re-exporting from
@@ -36,6 +40,13 @@ pub const AAD_SCHEMA_VERSION_V4: u32 = 4;
 pub enum EncryptError {
     #[error("Decryption failed: authentication tag mismatch")]
     AuthFailed,
+    /// Strict-mode failure: the supplied AAD did not validate AND the
+    /// `COPYPASTE_ALLOW_LEGACY_AAD` env var is disabled, so we refused to
+    /// silently fall back to empty-AAD decryption. Callers can recover by
+    /// re-enabling the env var for one-shot legacy decrypts, or by
+    /// re-encrypting the affected row under the current AAD binding.
+    #[error("Decryption failed: AAD mismatch (legacy empty-AAD fallback disabled)")]
+    AadMismatch,
     /// AEAD cipher rejected the input (e.g. payload exceeds the per-message
     /// limit of (2^32 - 1) * 64 bytes for ChaCha20-Poly1305). We surface the
     /// underlying error string instead of panicking so callers can degrade
@@ -131,6 +142,31 @@ pub fn decrypt_item_with_aad(
         .map_err(|_| EncryptError::AuthFailed)
 }
 
+/// Encrypt with XChaCha20-Poly1305 and no AAD (legacy/back-compat).
+///
+/// Equivalent to `encrypt_item_with_aad(plaintext, key, &[])`. New call
+/// sites SHOULD use `encrypt_item_with_aad` and pass an AAD bound to
+/// the row's `(item_id, schema_version)` — see `build_item_aad`.
+pub fn encrypt_item(
+    plaintext: &[u8],
+    key: &[u8; 32],
+) -> Result<([u8; NONCE_SIZE], Vec<u8>), EncryptError> {
+    encrypt_item_with_aad(plaintext, key, &[])
+}
+
+/// Decrypt with XChaCha20-Poly1305 and no AAD (legacy/back-compat).
+///
+/// Equivalent to `decrypt_item_with_aad(ciphertext, nonce, key, &[])`.
+/// For ciphertexts produced by `encrypt_item_with_aad` with non-empty
+/// AAD, call `decrypt_item_with_aad` with the matching AAD.
+pub fn decrypt_item(
+    ciphertext: &[u8],
+    nonce: &[u8; NONCE_SIZE],
+    key: &[u8; 32],
+) -> Result<Vec<u8>, EncryptError> {
+    decrypt_item_with_aad(ciphertext, nonce, key, &[])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,6 +224,29 @@ mod tests {
         let (nonce, ciphertext) = encrypt_item_with_aad(&plaintext, &key, &aad).unwrap();
         let decrypted = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad).unwrap();
         assert_eq!(decrypted, plaintext);
+    }
+
+    // ── Audit HIGH #1: legacy empty-AAD fallback must be opt-in via env ──
+    //
+    // These tests mutate process-global env state — they share the same
+    use serial_test::serial;
+
+    // v0.3 breaking change: legacy empty-AAD fallback was removed (was
+    // briefly env-gated on beta.6 via COPYPASTE_ALLOW_LEGACY_AAD). The
+    // fallback tests have been deleted along with the code path. AAD
+    // mismatch now always returns AuthFailed — pinned by
+    // `decrypt_item_with_aad_wrong_aad_returns_err` and
+    // `decrypt_item_with_aad_full_roundtrip` above.
+
+    #[test]
+    #[serial]
+    fn aad_mismatch_with_real_aad_blob_returns_authfailed() {
+        let key = test_key();
+        let aad_a = build_item_aad("item-A", AAD_SCHEMA_VERSION);
+        let aad_b = build_item_aad("item-B", AAD_SCHEMA_VERSION);
+        let (nonce, ct) = encrypt_item_with_aad(b"payload", &key, &aad_a).unwrap();
+        let err = decrypt_item_with_aad(&ct, &nonce, &key, &aad_b).unwrap_err();
+        assert!(matches!(err, EncryptError::AuthFailed));
     }
 
     /// Security audit medium #10: pathological inputs must surface as

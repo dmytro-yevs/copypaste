@@ -14,7 +14,8 @@ mod ipc_client;
 use anyhow::Result;
 use ipc_client::{format_wall_time, IpcClient};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 // Include generated Slint bindings.
@@ -33,6 +34,12 @@ struct AppState {
     /// from the daemon. Cached so the `search-changed` callback can
     /// re-filter without a second IPC round-trip per keystroke.
     last_page_items: Vec<ipc_client::HistoryEntry>,
+    /// Most recent `page.total` reported by the daemon, or `None` before
+    /// the first successful `history_page` reply. Used by
+    /// `on_load_next_page` to refuse advancing past the last page (the
+    /// daemon returns an empty slice for out-of-range offsets, which
+    /// previously left the UI on a blank "Showing 51-50 of 50" row).
+    last_known_total: Option<u64>,
 }
 
 impl AppState {
@@ -44,6 +51,7 @@ impl AppState {
             socket_path,
             current_offset: 0,
             last_page_items: Vec::new(),
+            last_known_total: None,
         }
     }
 }
@@ -57,28 +65,114 @@ impl copypaste_ui::windows::SearchableHistoryItem for ipc_client::HistoryEntry {
     }
 }
 
-fn main() -> Result<()> {
-    // Beta hot-fix: on macOS, install the Launch Agent plist + bootstrap the
-    // daemon in the background so the user does not have to run
-    // `copypaste daemon install && copypaste daemon start` after a fresh DMG
-    // install. Runs in a dedicated thread — UI rendering must NOT block on
-    // launchctl. See `crates/copypaste-ui/src/autostart.rs` for the flow.
-    #[cfg(target_os = "macos")]
-    std::thread::spawn(|| match copypaste_ui::autostart::ensure_daemon_running() {
-        Ok(copypaste_ui::autostart::DaemonStatus::AlreadyRunning) => {
-            eprintln!("[autostart] daemon already running");
-        }
-        Ok(copypaste_ui::autostart::DaemonStatus::Started) => {
-            eprintln!("[autostart] daemon started via launchctl");
-        }
-        Ok(copypaste_ui::autostart::DaemonStatus::FailedToStart(reason)) => {
-            eprintln!("[autostart] daemon failed to start: {reason}");
-        }
-        Err(e) => {
-            eprintln!("[autostart] error: {e}");
-        }
-    });
+/// Per-command in-flight flags.
+///
+/// beta.5 Bug-3 (unbounded thread spawn): every Refresh / Next / Prev
+/// click previously did `std::thread::spawn`. Spamming Next or holding
+/// ⌘R produced one OS thread per event plus an interleaving race in
+/// which a stale IPC response clobbered a newer one via
+/// `invoke_from_event_loop`. We coalesce duplicate clicks by reserving
+/// one in-flight slot per command — a click that arrives while the slot
+/// is taken is dropped on the floor.
+///
+/// Search is intentionally NOT covered: it filters the cached page
+/// synchronously on the UI thread (no IPC, no spawn) and de-duping
+/// keystrokes here would just add latency.
+#[derive(Clone)]
+struct InFlight {
+    refresh: Arc<AtomicBool>,
+    next_page: Arc<AtomicBool>,
+    prev_page: Arc<AtomicBool>,
+}
 
+impl InFlight {
+    fn new() -> Self {
+        Self {
+            refresh: Arc::new(AtomicBool::new(false)),
+            next_page: Arc::new(AtomicBool::new(false)),
+            prev_page: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+/// RAII guard that clears an `AtomicBool` on drop.
+///
+/// Used to ensure the in-flight flag is released even if the spawned
+/// worker panics partway through. Without this, a single panic in
+/// `load_history_page` would leave the flag stuck at `true` forever
+/// and the corresponding button would silently stop responding for
+/// the rest of the session.
+///
+/// Holds an `Arc<AtomicBool>` (not a borrow) so the guard can be
+/// moved into the spawned worker thread.
+struct InFlightGuard {
+    flag: Arc<AtomicBool>,
+}
+
+impl InFlightGuard {
+    /// Try to take ownership of the in-flight slot.
+    /// Returns `None` if the slot is already taken (caller should drop
+    /// the click on the floor).
+    fn acquire(flag: Arc<AtomicBool>) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()
+            .map(|_| Self { flag })
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::Release);
+    }
+}
+
+/// Acquire a `Mutex` guard, recovering from poisoning instead of panicking.
+///
+/// Every callback in this binary holds an `Arc<Mutex<AppState>>`. A panic
+/// on the UI thread (e.g. a bug in a Slint property setter) would poison
+/// the mutex and turn every subsequent `state.lock().unwrap()` into a
+/// hard crash of the whole process — the user loses access to clipboard
+/// history because of an unrelated transient panic in another callback.
+///
+/// `AppState` is a value type with no resource invariants that depend on
+/// the panic site, so recovering the inner guard is safe: the only
+/// observable effect of an interrupted critical section is whatever
+/// half-finished assignment the panicking thread left behind, and the
+/// next call site will overwrite or read past it.
+///
+/// We deliberately avoid pulling in `parking_lot` for this — std's
+/// `unwrap_or_else(|e| e.into_inner())` is the canonical recovery
+/// idiom and keeps the dependency footprint flat.
+fn lock_or_recover<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Bring the UI process to the foreground.
+///
+/// `LSUIElement=true` (set in Info.plist so the app does not show up in the
+/// Dock) means a freshly-shown window stays *behind* whatever the user was
+/// using. `NSApplication::activate` is the modern (Sonoma+) replacement for
+/// the deprecated `activateIgnoringOtherApps:` and works back to macOS 11 via
+/// the AppKit shim.
+///
+/// Tray menu callbacks are invoked from the Slint event loop, which runs on
+/// the main thread on macOS, so `MainThreadMarker::new()` should always
+/// succeed here. If it ever returns `None` we silently no-op — losing focus
+/// activation is preferable to crashing the UI.
+#[cfg(target_os = "macos")]
+fn activate_app() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+    if let Some(mtm) = MainThreadMarker::new() {
+        let app = NSApplication::sharedApplication(mtm);
+        app.activate();
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_app() {}
+
+fn main() -> Result<()> {
     // Beta-bonus i18n: bind the gettext domain (auto-set from CARGO_PKG_NAME =
     // "copypaste-ui" by slint-build) to the `lang/` catalog directory shipped
     // with the crate. At runtime Slint resolves `@tr("…")` against
@@ -88,6 +182,81 @@ fn main() -> Result<()> {
 
     let window = HistoryWindow::new()?;
     let state = Arc::new(Mutex::new(AppState::new()));
+    // Per-command in-flight flags — see `InFlight` doc-comment.
+    let in_flight = InFlight::new();
+
+    // Beta hot-fix: on macOS, install the Launch Agent plist + bootstrap the
+    // daemon in the background so the user does not have to run
+    // `copypaste daemon install && copypaste daemon start` after a fresh DMG
+    // install. Runs in a dedicated thread — UI rendering must NOT block on
+    // launchctl. See `crates/copypaste-ui/src/autostart.rs` for the flow.
+    //
+    // beta.5 Bug-2/3: once autostart succeeds, post a UI event that re-runs
+    // the initial history load. Without this, the first load fires before
+    // the daemon socket exists, the UI caches "Daemon not running", and the
+    // user is stuck unless they click Refresh manually. Spawned AFTER the
+    // window + state are created so the closure can capture a weak window
+    // handle and the shared `AppState` for the post-startup refresh.
+    #[cfg(target_os = "macos")]
+    {
+        let window_weak = window.as_weak();
+        let state_for_autostart = Arc::clone(&state);
+        std::thread::spawn(move || {
+            match copypaste_ui::autostart::ensure_daemon_running() {
+                Ok(copypaste_ui::autostart::DaemonStatus::AlreadyRunning) => {
+                    eprintln!("[autostart] daemon already running");
+                }
+                Ok(copypaste_ui::autostart::DaemonStatus::Started) => {
+                    eprintln!("[autostart] daemon started via launchctl");
+                    // Daemon just came up — refresh history so the UI drops
+                    // the stale "Daemon not running" placeholder.
+                    refresh_history_after_autostart(window_weak, state_for_autostart);
+                }
+                Ok(copypaste_ui::autostart::DaemonStatus::FailedToStart(reason)) => {
+                    eprintln!("[autostart] daemon failed to start: {reason}");
+                    // beta.5 Bug-7: surface the failure to the user instead
+                    // of leaving them with the generic "Daemon not running"
+                    // placeholder. We piggy-back on the existing
+                    // `apply_history_result` Err branch (which already
+                    // formats `Error: {e}` into the status line and clears
+                    // the items list) by posting a synthetic error result
+                    // to the UI thread.
+                    report_autostart_failure(window_weak, state_for_autostart, reason);
+                }
+                Err(e) => {
+                    eprintln!("[autostart] error: {e}");
+                }
+            }
+        });
+    }
+
+    // v0.3: install the macOS menu-bar tray BEFORE Slint takes over the main
+    // run loop. The tray host registers a slint::Timer that polls menu events
+    // on the UI thread, so we never spin a competing native run loop.
+    // Failure is non-fatal — log + continue as a window-only app.
+    #[cfg(target_os = "macos")]
+    {
+        let window_weak = window.as_weak();
+        let on_open_history: copypaste_ui::tray_host::ActionCb = Box::new(move || {
+            if let Some(win) = window_weak.upgrade() {
+                win.show().ok();
+                // LSUIElement=true (menu-bar-only) apps stay in the
+                // background after `show()` — focus stays on whatever app
+                // the user was last using. NSApplication::activate brings
+                // the process + its visible windows to the foreground.
+                activate_app();
+            }
+        });
+        let callbacks = copypaste_ui::tray_host::TrayCallbacks {
+            on_open_history: Some(on_open_history),
+            on_open_preferences: None,
+            on_quit: None, // default = slint::quit_event_loop()
+            on_paste_item: None, // wired post-MVP — recents in tray menu paste via separate cb
+        };
+        if let Err(e) = copypaste_ui::tray_host::install(callbacks) {
+            eprintln!("[tray] install failed: {e} — running without menu-bar tray");
+        }
+    }
 
     // v0.3 T3: load the redaction preference from disk and push it into the
     // window before the first render so sensitive rows are masked on the
@@ -157,12 +326,21 @@ fn main() -> Result<()> {
     {
         let window_weak = window.as_weak();
         let state = Arc::clone(&state);
+        let in_flight_refresh = Arc::clone(&in_flight.refresh);
         window.on_refresh_requested(move || {
+            // beta.5 Bug-3: drop the click if a refresh is already
+            // running. Without this, holding ⌘R fired one thread per
+            // event and the older response could clobber the newer one
+            // via `invoke_from_event_loop`.
+            let Some(guard) = InFlightGuard::acquire(Arc::clone(&in_flight_refresh)) else {
+                return;
+            };
             let window_weak = window_weak.clone();
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
+                let _guard = guard; // released on thread exit (incl. panic)
                 let (socket_path, offset) = {
-                    let s = state.lock().unwrap();
+                    let s = lock_or_recover(&state);
                     (s.socket_path.clone(), s.current_offset)
                 };
                 let result = load_history_page(&socket_path, PAGE_SIZE, offset);
@@ -183,7 +361,7 @@ fn main() -> Result<()> {
         window.on_item_clicked(move |id: slint::SharedString| {
             let window_weak = window_weak.clone();
             let socket_path = {
-                let s = state.lock().unwrap();
+                let s = lock_or_recover(&state);
                 s.socket_path.clone()
             };
             let id_str = id.to_string();
@@ -192,9 +370,14 @@ fn main() -> Result<()> {
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
                         match result {
-                            Ok(_) => win.set_status_text(
-                                format!("Pasted: {}", &id_str[..8.min(id_str.len())]).into(),
-                            ),
+                            Ok(_) => {
+                                // beta.5 fix: `&id_str[..8.min(id_str.len())]` slices by
+                                // bytes and panics when the 8th byte falls inside a
+                                // multi-byte UTF-8 codepoint. Use a char-based take so
+                                // any well-formed `String` works, regardless of script.
+                                let short: String = id_str.chars().take(8).collect();
+                                win.set_status_text(format!("Pasted: {short}").into());
+                            }
                             Err(e) => win.set_status_text(format!("Paste failed: {e}").into()),
                         }
                     }
@@ -210,7 +393,7 @@ fn main() -> Result<()> {
         window.on_settings_requested(move || {
             let window_weak = window_weak.clone();
             let socket_path = {
-                let s = state.lock().unwrap();
+                let s = lock_or_recover(&state);
                 s.socket_path.clone()
             };
             std::thread::spawn(move || {
@@ -251,7 +434,7 @@ fn main() -> Result<()> {
         let state = Arc::clone(&state);
         window.on_search_changed(move |query: slint::SharedString| {
             let snapshot = {
-                let s = state.lock().unwrap();
+                let s = lock_or_recover(&state);
                 s.last_page_items.clone()
             };
             let q = query.to_string();
@@ -278,25 +461,50 @@ fn main() -> Result<()> {
     }
 
     // --- Wire: load-next-page ---
+    //
+    // beta.5 Bug-1/2 fix: previously this handler advanced
+    // `state.current_offset` *before* awaiting the IPC reply. Two failure
+    // modes followed:
+    //   - past-end:  no guard against `current + PAGE_SIZE >= total`,
+    //                so spamming Next walked into "Showing 51-50 of 50".
+    //   - on-error:  if the daemon returned Err, the offset stayed bumped
+    //                and the next Refresh fetched the wrong page.
+    //
+    // New shape: compute the candidate offset locally, refuse the
+    // request if the cached `last_known_total` says we're already on
+    // the last page, and let `apply_history_result` commit the offset
+    // to `AppState` only on Ok.
     {
         let window_weak = window.as_weak();
         let state = Arc::clone(&state);
+        let in_flight_next = Arc::clone(&in_flight.next_page);
         window.on_load_next_page(move || {
+            // beta.5 Bug-3: coalesce duplicate Next clicks — see InFlight doc.
+            let Some(guard) = InFlightGuard::acquire(Arc::clone(&in_flight_next)) else {
+                return;
+            };
             let window_weak = window_weak.clone();
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
-                let (socket_path, new_offset) = {
-                    let mut s = state.lock().unwrap();
-                    let socket = s.socket_path.clone();
-                    let offset = s.current_offset + PAGE_SIZE;
-                    s.current_offset = offset;
-                    (socket, offset)
+                let _guard = guard;
+                let (socket_path, candidate_offset) = {
+                    let s = lock_or_recover(&state);
+                    // Refuse to advance past the last known page. The
+                    // guard is best-effort — before the first successful
+                    // load `last_known_total` is None and we let the
+                    // request through so the daemon can populate it.
+                    if let Some(total) = s.last_known_total {
+                        if s.current_offset + PAGE_SIZE >= total {
+                            return;
+                        }
+                    }
+                    (s.socket_path.clone(), s.current_offset + PAGE_SIZE)
                 };
-                let result = load_history_page(&socket_path, PAGE_SIZE, new_offset);
+                let result = load_history_page(&socket_path, PAGE_SIZE, candidate_offset);
                 let state_for_apply = Arc::clone(&state);
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
-                        apply_history_result(&win, &state_for_apply, result, new_offset);
+                        apply_history_result(&win, &state_for_apply, result, candidate_offset);
                     }
                 });
             });
@@ -304,24 +512,37 @@ fn main() -> Result<()> {
     }
 
     // --- Wire: load-prev-page ---
+    //
+    // beta.5 Bug-2 fix (mirror of load-next-page): keep `current_offset`
+    // stable until `apply_history_result` confirms the daemon returned a
+    // page. On Err the previously-mutated offset would otherwise leave
+    // the UI looking at the wrong window of history after a subsequent
+    // Refresh.
     {
         let window_weak = window.as_weak();
         let state = Arc::clone(&state);
+        let in_flight_prev = Arc::clone(&in_flight.prev_page);
         window.on_load_prev_page(move || {
+            // beta.5 Bug-3: coalesce duplicate Prev clicks — see InFlight doc.
+            let Some(guard) = InFlightGuard::acquire(Arc::clone(&in_flight_prev)) else {
+                return;
+            };
             let window_weak = window_weak.clone();
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
-                let (socket_path, new_offset) = {
-                    let mut s = state.lock().unwrap();
-                    let offset = s.current_offset.saturating_sub(PAGE_SIZE);
-                    s.current_offset = offset;
-                    (s.socket_path.clone(), offset)
+                let _guard = guard;
+                let (socket_path, candidate_offset) = {
+                    let s = lock_or_recover(&state);
+                    (
+                        s.socket_path.clone(),
+                        s.current_offset.saturating_sub(PAGE_SIZE),
+                    )
                 };
-                let result = load_history_page(&socket_path, PAGE_SIZE, new_offset);
+                let result = load_history_page(&socket_path, PAGE_SIZE, candidate_offset);
                 let state_for_apply = Arc::clone(&state);
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
-                        apply_history_result(&win, &state_for_apply, result, new_offset);
+                        apply_history_result(&win, &state_for_apply, result, candidate_offset);
                     }
                 });
             });
@@ -373,7 +594,7 @@ fn main() -> Result<()> {
             // Small delay to let the window render first
             std::thread::sleep(Duration::from_millis(100));
             let (socket_path, offset) = {
-                let s = state_clone.lock().unwrap();
+                let s = lock_or_recover(&state_clone);
                 (s.socket_path.clone(), s.current_offset)
             };
             let result = load_history_page(&socket_path, PAGE_SIZE, offset);
@@ -391,15 +612,157 @@ fn main() -> Result<()> {
 }
 
 /// Call `history_page` on the daemon and return parsed results.
+///
+/// beta.5 Bug-3: stop collapsing every connect error into "daemon offline:" —
+/// the funnel in `apply_history_result` previously did a substring match on
+/// that prefix and mistranslated transient IO errors into "Daemon not running"
+/// status text. Now we return the raw [`IpcError`] display, which already
+/// formats `IpcError::DaemonOffline` as "Daemon not running..." (the funnel
+/// keys off that specific phrase, see [`apply_history_result`]).
 fn load_history_page(
     socket_path: &std::path::Path,
     limit: u64,
     offset: u64,
 ) -> std::result::Result<ipc_client::HistoryPage, String> {
-    let mut client = IpcClient::connect(socket_path).map_err(|e| format!("daemon offline: {e}"))?;
+    let mut client = IpcClient::connect(socket_path).map_err(|e| ipc_error_to_string(&e))?;
     client
         .history_page(limit, offset)
         .map_err(|e| e.to_string())
+}
+
+/// Map an `anyhow::Error` produced by `IpcClient::connect` to a display
+/// string that preserves the underlying [`ipc_client::IpcError`] formatting
+/// when present (so `DaemonOffline` keeps its actionable "Daemon not running"
+/// prefix). Falls back to the raw error display for non-Ipc errors.
+fn ipc_error_to_string(e: &anyhow::Error) -> String {
+    if let Some(ipc_err) = e.downcast_ref::<ipc_client::IpcError>() {
+        ipc_err.to_string()
+    } else {
+        e.to_string()
+    }
+}
+
+/// Worker spawned from the autostart thread once the daemon socket comes up.
+/// Posts the same `load_history_page` + `apply_history_result` sequence the
+/// `on_refresh_requested` callback runs, but from a background thread that
+/// uses [`slint::invoke_from_event_loop`] to hop back to the UI thread.
+///
+/// Why this exists: the initial `std::thread::spawn` near the bottom of
+/// `main()` waits 100ms after window construction and then fires its single
+/// load attempt. On a fresh install the daemon needs ~4s to come up, so that
+/// attempt fails and the UI shows "Daemon not running". Without an explicit
+/// post-autostart refresh, the user is stuck on the stale placeholder until
+/// they click Refresh manually.
+/// Surface a `DaemonStatus::FailedToStart(reason)` to the UI by posting
+/// a synthetic IPC error through [`apply_history_result`].
+///
+/// beta.5 Bug-7: the autostart worker previously only `eprintln!`-ed the
+/// reason, so the user saw the generic
+/// `Daemon not running. Start with \`copypaste daemon start\``
+/// placeholder with no hint about *why* launchctl could not bring the
+/// daemon up (missing plist, sandbox denial, dangling ProgramArguments
+/// path, etc.). Out of scope: adding a dedicated Slint property for
+/// the failure reason — we route the message through the existing
+/// `set_status_text` path so this fix stays main.rs-only.
+///
+/// We synthesise a `Result::Err` whose Display does NOT start with
+/// "Daemon not running" so the funnel in `apply_history_result` falls
+/// through to the verbatim `Error: {e}` branch. That branch also
+/// clears the items list and the cached `last_page_items` for us.
+#[cfg(target_os = "macos")]
+fn report_autostart_failure(
+    window_weak: slint::Weak<HistoryWindow>,
+    state: Arc<Mutex<AppState>>,
+    reason: String,
+) {
+    let offset = lock_or_recover(&state).current_offset;
+    let msg = format!("Daemon autostart failed: {reason}");
+    let result: std::result::Result<ipc_client::HistoryPage, String> = Err(msg);
+    let payload: Arc<Mutex<Option<std::result::Result<ipc_client::HistoryPage, String>>>> =
+        Arc::new(Mutex::new(Some(result)));
+
+    // Same retry shape as `refresh_history_after_autostart` — the
+    // failure handler can fire before `window.run()` installs the
+    // event loop and would otherwise be lost to `EventLoopError`.
+    for attempt in 0..3 {
+        let window_weak_attempt = window_weak.clone();
+        let state_for_apply = Arc::clone(&state);
+        let payload_for_attempt = Arc::clone(&payload);
+        let post = slint::invoke_from_event_loop(move || {
+            if let Some(win) = window_weak_attempt.upgrade() {
+                if let Some(result) = lock_or_recover(&payload_for_attempt).take() {
+                    apply_history_result(&win, &state_for_apply, result, offset);
+                }
+            }
+        });
+        match post {
+            Ok(()) => return,
+            Err(e) => {
+                eprintln!(
+                    "[autostart] failure-report attempt {} could not post to UI: {e}",
+                    attempt + 1
+                );
+                if attempt < 2 {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn refresh_history_after_autostart(
+    window_weak: slint::Weak<HistoryWindow>,
+    state: Arc<Mutex<AppState>>,
+) {
+    let (socket_path, offset) = {
+        let s = lock_or_recover(&state);
+        (s.socket_path.clone(), s.current_offset)
+    };
+    let result = load_history_page(&socket_path, PAGE_SIZE, offset);
+
+    // beta.5 Bug-5 fix: `invoke_from_event_loop` returns
+    // `EventLoopError::NoEventLoopProvider` if the Slint loop has not
+    // started yet. The autostart worker is spawned *before*
+    // `window.run()`, so on a fast machine the post-startup post can
+    // fire before the loop is ready. Previously the `let _ = ...`
+    // swallowed the error and the UI stayed stuck on the
+    // "Daemon not running" placeholder.
+    //
+    // Retry up to 3 times with a 500 ms backoff. We share `result`
+    // across attempts via `Arc<Mutex<Option<...>>>` so the closure can
+    // .take() it without moving the outer binding.
+    let payload: Arc<Mutex<Option<std::result::Result<ipc_client::HistoryPage, String>>>> =
+        Arc::new(Mutex::new(Some(result)));
+
+    for attempt in 0..3 {
+        let window_weak_attempt = window_weak.clone();
+        let state_for_apply = Arc::clone(&state);
+        let payload_for_attempt = Arc::clone(&payload);
+        let post = slint::invoke_from_event_loop(move || {
+            if let Some(win) = window_weak_attempt.upgrade() {
+                if let Some(result) = lock_or_recover(&payload_for_attempt).take() {
+                    apply_history_result(&win, &state_for_apply, result, offset);
+                }
+            }
+        });
+        match post {
+            Ok(()) => return,
+            Err(e) => {
+                eprintln!(
+                    "[autostart] invoke_from_event_loop attempt {} failed: {e}",
+                    attempt + 1
+                );
+                if attempt < 2 {
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+            }
+        }
+    }
+    eprintln!(
+        "[autostart] giving up on post-autostart refresh after 3 attempts — \
+         user can click Refresh once the window appears"
+    );
 }
 
 /// Call `paste` on the daemon.
@@ -505,6 +868,12 @@ fn entry_to_slint_item(entry: &ipc_client::HistoryEntry) -> HistoryItem {
 /// the `search-changed` callback can re-filter without another IPC call.
 /// A pending search query is re-applied on top of the new page so the
 /// user's filter survives a refresh / pagination event.
+///
+/// beta.5 Bug-1/2: this is the single point where `state.current_offset`
+/// and `state.last_known_total` are written. Callers compute the candidate
+/// offset they want to display and pass it as `offset`; we commit it to
+/// state only on the Ok branch so an IPC error never advances or rewinds
+/// the user's view.
 fn apply_history_result(
     win: &HistoryWindow,
     state: &Arc<Mutex<AppState>>,
@@ -514,7 +883,15 @@ fn apply_history_result(
     win.set_loading(false);
     match result {
         Err(e) => {
-            let msg = if e.contains("Daemon not running") || e.contains("daemon offline") {
+            // beta.5 Bug-3: only show the "Daemon not running" hint when the
+            // error is genuinely `IpcError::DaemonOffline`. Other failures
+            // (parse errors, transient IO, daemon-side error codes) get
+            // surfaced verbatim so misdiagnosis doesn't repeat. The
+            // `DaemonOffline` Display starts with "Daemon not running." (see
+            // `ipc_client::IpcError::fmt`), so a prefix check is exact —
+            // we no longer match on the loose "daemon offline" substring
+            // that previously caught any wrapped connect error.
+            let msg = if e.starts_with("Daemon not running") {
                 "Daemon not running. Start with `copypaste daemon start`.".to_string()
             } else {
                 format!("Error: {e}")
@@ -523,9 +900,7 @@ fn apply_history_result(
             win.set_items(Default::default());
             win.set_total_count(0);
             // Clear the cache so a stale search doesn't show pre-error rows.
-            if let Ok(mut s) = state.lock() {
-                s.last_page_items.clear();
-            }
+            lock_or_recover(state).last_page_items.clear();
         }
         Ok(page) => {
             let count = page.items.len() as u64;
@@ -542,10 +917,17 @@ fn apply_history_result(
             win.set_status_text(status.into());
             win.set_total_count(page.total as i32);
 
-            // Cache the entries for the debounced search filter.
+            // Cache the entries for the debounced search filter, commit
+            // the new page offset to state (Bug-2: callers do not mutate
+            // `current_offset` until we confirm Ok), and record
+            // `page.total` so the next `on_load_next_page` can guard
+            // against advancing past the end (Bug-1).
             let query = win.get_search_query().to_string();
-            if let Ok(mut s) = state.lock() {
+            {
+                let mut s = lock_or_recover(state);
                 s.last_page_items = page.items.clone();
+                s.current_offset = offset;
+                s.last_known_total = Some(page.total);
             }
 
             // Wave 3.4: image rows ship without inline pixels for now.

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CopyPaste tray icon — macOS template image style.
+  Pure rgb(0,0,0) with alpha channel; macOS auto-tints for light/dark menu bar.
+  Designed to read crisply at 22pt (44px @2x). Single 2px stroke weight.
+  Concept: two offset rounded "cards" + 3 content stripes (clipboard stack).
+
+  Geometry (44×44 canvas):
+    Safe area ≈ inset 4 → 36×36 visible region.
+    Back card:  x=5  y=5  w=24 h=30  (peeks 6px up-left of front)
+    Front card: x=11 y=11 w=28 h=29  (centred on safe area, taller silhouette)
+    Stripes inside front card: aligned with 3 evenly-spaced rows.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44" width="44" height="44">
+  <defs>
+    <!-- Mask: hide the portion of the back card that lies under the front card,
+         so the silhouette reads as two distinct sheets. -->
+    <mask id="punchFront" maskUnits="userSpaceOnUse" x="0" y="0" width="44" height="44">
+      <rect x="0" y="0" width="44" height="44" fill="#FFFFFF"/>
+      <!-- Punch slightly larger than the front-card outer rect so the back-card
+           stroke does NOT graze through the front-card border. -->
+      <rect x="9.5" y="9.5" width="31" height="32" rx="4.5" ry="4.5" fill="#000000"/>
+    </mask>
+  </defs>
+
+  <!-- Back card outline — masked. -->
+  <g mask="url(#punchFront)">
+    <rect x="5" y="5" width="24" height="30" rx="3.5" ry="3.5"
+          fill="none" stroke="#000000" stroke-width="2"/>
+  </g>
+
+  <!-- Front card outline — fully visible. -->
+  <rect x="11" y="11" width="28" height="29" rx="3.5" ry="3.5"
+        fill="none" stroke="#000000" stroke-width="2"/>
+
+  <!-- 3 content stripes on the front card (evenly spaced rows). -->
+  <rect x="15.5" y="18" width="19" height="2.2" rx="1.1" fill="#000000"/>
+  <rect x="15.5" y="24" width="15" height="2.2" rx="1.1" fill="#000000"/>
+  <rect x="15.5" y="30" width="11" height="2.2" rx="1.1" fill="#000000"/>
+</svg>

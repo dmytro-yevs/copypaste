@@ -1345,6 +1345,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "serial_test",
  "sha2",
  "tempfile",
  "thiserror 1.0.69",
@@ -1370,6 +1371,7 @@ dependencies = [
  "copypaste-supabase",
  "copypaste-sync",
  "core-foundation 0.9.4",
+ "core-foundation-sys",
  "dirs 5.0.1",
  "hex",
  "home",
@@ -1381,6 +1383,7 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "security-framework 2.11.1",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "serial_test",
@@ -1392,6 +1395,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -1494,6 +1498,8 @@ dependencies = [
  "anyhow",
  "copypaste-ipc",
  "home",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
  "png 0.17.16",
  "serde",
  "serde_json",

@@ -38,7 +38,12 @@ async fn start_server() -> (tempfile::TempDir, std::path::PathBuf) {
         Database::open_in_memory().expect("open in-memory db"),
     ));
     let private_mode = Arc::new(AtomicBool::new(false));
-    let server = IpcServer::new(db, private_mode);
+    let server = IpcServer::new(
+        db,
+        private_mode,
+        std::sync::Arc::new([0u8; 32]),
+        std::sync::Arc::new([0u8; 32]),
+    );
 
     let sock_for_task = sock.clone();
     tokio::spawn(async move {

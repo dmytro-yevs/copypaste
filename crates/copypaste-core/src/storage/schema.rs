@@ -16,15 +16,18 @@ pub enum SchemaError {
     Downgrade { found: i64, expected: i64 },
 }
 
-/// Current on-disk schema version. Bumped from 3 → 4 in v0.3 (T5) when the
-/// `key_version` column was added to `clipboard_items` to track which HKDF
-/// key generation (v1 or v2) encrypted each row's ciphertext. See
-/// [`V4_ALTER_SQL`] and `super::migration_v4` for the re-encrypt sweep.
+/// Current on-disk schema version.
 ///
-/// Previous bumps:
+/// Bumps:
 ///   * 2 → 3: added `origin_device_id` for the LWW merge tie-break
 ///     (see `copypaste-sync::merge::resolve`).
-pub const SCHEMA_VERSION: i64 = 4;
+///   * 3 → 4 (v0.3 T5): added `key_version` column to `clipboard_items` to
+///     track which HKDF key generation (v1 or v2) encrypted each row's
+///     ciphertext. See [`V4_ALTER_SQL`] and `super::migration_v4`.
+///   * 4 → 5 (beta.6 merge): added two UNIQUE INDEXes — `content_hash`+minute
+///     bucket for TOCTOU dedup, `item_id` for sync replay protection.
+///     See [`V5_INDEXES_SQL`] / `schema_v2.sql`.
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -53,6 +56,14 @@ ALTER TABLE clipboard_items \
 CREATE INDEX IF NOT EXISTS idx_clipboard_key_version \
     ON clipboard_items(key_version) WHERE key_version < 2;\n";
 
+/// v5 step — add two UNIQUE INDEXes (`content_hash`+minute-bucket for TOCTOU
+/// dedup, `item_id` for sync replay protection). Originally landed in beta
+/// as user_version=4 (V4_INDEXES_SQL) but v3 already claimed v4 for
+/// key_version. Bumped to v5 on merge into v0.3.
+///
+/// SQL file kept as `schema_v2.sql` for historical reasons.
+pub(crate) const V5_INDEXES_SQL: &str = include_str!("schema_v2.sql");
+
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
 /// Behavior contract:
@@ -66,9 +77,16 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_key_version \
 pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
     // Connection-level pragmas. These are NOT part of a migration and MUST
     // run before BEGIN (PRAGMA journal_mode is a no-op inside a transaction).
+    //
+    // Mirrors `db::CONNECTION_PRAGMAS` and `pool::open_pool`'s `with_init`
+    // — every code path that opens a connection must set these so behaviour
+    // is uniform across UI reader, daemon writer, and the migration pass.
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
     conn.execute_batch(&format!("PRAGMA cache_size=-{};", 8 * 1024))?;
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
+    conn.execute_batch("PRAGMA busy_timeout=5000;")?;
+    conn.execute_batch("PRAGMA synchronous=NORMAL;")?;
+    conn.execute_batch("PRAGMA temp_store=MEMORY;")?;
 
     let current_version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -124,6 +142,14 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // by `super::migration_v4::migrate_v1_to_v2_keys`, invoked by the
         // daemon at startup after the schema migration commits.
         script.push_str(V4_ALTER_SQL);
+    }
+
+    if current_version < 5 {
+        // Migration v5 (beta.6 merge): two UNIQUE INDEXes. CREATE INDEX IF
+        // NOT EXISTS is idempotent so safe to re-run during partial-rollout.
+        // See schema_v2.sql for per-index rationale.
+        script.push_str(V5_INDEXES_SQL);
+        script.push('\n');
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));

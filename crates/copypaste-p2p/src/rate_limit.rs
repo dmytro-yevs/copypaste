@@ -164,7 +164,7 @@ impl MdnsRateLimiter {
         // Always emit a trace-level breadcrumb…
         tracing::trace!(%ip, "mDNS event dropped (rate limit)");
         // …and a sampled warn so operators see the trend without log flood.
-        if count % DROP_LOG_SAMPLE_RATE == 0 {
+        if count.is_multiple_of(DROP_LOG_SAMPLE_RATE) {
             tracing::warn!(
                 %ip,
                 total_drops = count,

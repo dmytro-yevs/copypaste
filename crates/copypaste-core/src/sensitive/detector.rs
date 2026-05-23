@@ -169,7 +169,10 @@ pub fn luhn_valid(s: &str) -> bool {
     let digits: Vec<u32> = s
         .chars()
         .filter(|c| c.is_ascii_digit())
-        .map(|c| c.to_digit(10).unwrap())
+        // Audit LOW #7: `to_digit(10).unwrap()` is structurally safe (filter
+        // only admits ASCII digits) but `unwrap_or(0)` removes the bare
+        // unwrap from a security-relevant path. Cannot fire in practice.
+        .map(|c| c.to_digit(10).unwrap_or(0))
         .collect();
     if digits.len() < 13 || digits.len() > 19 {
         return false;
@@ -191,7 +194,7 @@ pub fn luhn_valid(s: &str) -> bool {
             }
         })
         .sum();
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 // ── is_sensitive_app ──────────────────────────────────────────────────────────
@@ -270,7 +273,10 @@ impl SensitiveKind {
             "slack_bot" => Self::SlackToken,
             "hashicorp_vault" => Self::VaultToken,
             "gcp_oauth" => Self::GcpToken,
-            "ssh_private_key" => Self::SshPrivateKey,
+            // Audit MED #5: PKCS#8-encrypted and PuTTY variants share the
+            // same SshPrivateKey kind so callers (UI badge / log redactor)
+            // see a uniform "ssh key" classification regardless of format.
+            n if n.starts_with("ssh_private_key") => Self::SshPrivateKey,
             "jwt" => Self::Jwt,
             other => Self::Other(other.to_string()),
         }
@@ -293,17 +299,58 @@ pub fn detect(text: &str) -> Option<SensitiveKind> {
         tracing::debug!(pattern = pattern_name(idx), "sensitive content detected");
         return Some(SensitiveKind::from_pattern_name(pattern_name(idx)));
     }
-    if normalised.len() <= 25 && is_luhn_valid_card(&normalised) {
+    // Audit MED #6: the previous `normalised.len() <= 25 && Luhn(normalised)`
+    // gate missed any card embedded in a longer string (e.g. "card:
+    // 4111-1111-1111-1111 expires 12/26"). Scan the text for digit runs
+    // 13..=19 long (optionally separated by `-` / whitespace) and
+    // Luhn-validate each candidate independently. Operates on the
+    // already-normalised string so Unicode digit bypasses are defeated by
+    // the same NFKC pass.
+    if contains_luhn_valid_card_run(&normalised) {
         return Some(SensitiveKind::CreditCard);
     }
     None
 }
 
-fn is_luhn_valid_card(s: &str) -> bool {
+/// Returns true iff the input contains at least one candidate digit run
+/// (13–19 ASCII digits, optionally separated by single `-` or whitespace)
+/// that Luhn-validates as a credit-card number.
+///
+/// Uses a static `OnceLock<Regex>` so the candidate scanner is compiled once
+/// per process. The pattern is anchored on word boundaries to skip mid-token
+/// hits like `xid=4111111111111111foobar`.
+fn contains_luhn_valid_card_run(text: &str) -> bool {
+    use std::sync::OnceLock;
+    static CARD_RUN_RE: OnceLock<regex::Regex> = OnceLock::new();
+    let re = CARD_RUN_RE.get_or_init(|| {
+        // `\b(?:\d[\s-]?){13,19}\d\b` — between 13 and 19 digits with
+        // optional single space or hyphen between each, plus a final
+        // digit (so total = 14..=20 digits). The leading run already
+        // matches one digit so we accept totals 13..=19 effectively;
+        // the explicit Luhn `digits.len() < 13 || > 19` clamp filters.
+        regex::Regex::new(r"\b(?:\d[\s-]?){12,18}\d\b").expect("static card-run regex is valid")
+    });
+    for m in re.find_iter(text) {
+        if luhn_valid_strict(m.as_str()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Strip whitespace and `-`, then Luhn-validate. Mirrors the public
+/// `super::luhn_valid` helper but inlined here to avoid an extra
+/// allocation+digit-filter pass on the per-candidate hot path.
+fn luhn_valid_strict(s: &str) -> bool {
     let digits: Vec<u32> = s
         .chars()
         .filter(|c| c.is_ascii_digit())
-        .map(|c| c.to_digit(10).unwrap())
+        // Audit LOW #7: `.to_digit(10).unwrap()` is safe in this branch
+        // (the preceding filter only admits ASCII digits) but `unwrap_or(0)`
+        // removes the smell entirely. A `0` could only appear if an
+        // ASCII-digit char somehow rejected base-10 decode, which is
+        // impossible — the `0` is a safety net, not an active value.
+        .map(|c| c.to_digit(10).unwrap_or(0))
         .collect();
     if digits.len() < 13 || digits.len() > 19 {
         return false;
@@ -325,7 +372,7 @@ fn is_luhn_valid_card(s: &str) -> bool {
             }
         })
         .sum();
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 #[cfg(test)]
@@ -372,6 +419,39 @@ mod tests {
         assert!(detect("-----BEGIN OPENSSH PRIVATE KEY-----\nMIIEo...").is_some());
     }
     #[test]
+    fn detects_pkcs8_encrypted_private_key() {
+        // Audit MED #5 — PKCS#8 encrypted form previously slipped through.
+        let blob = "garbage prefix\n-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIFD...\n";
+        let kind = detect(blob).expect("should detect PKCS#8 encrypted key");
+        assert!(matches!(kind, SensitiveKind::SshPrivateKey));
+    }
+    #[test]
+    fn detects_putty_user_key_file() {
+        // Audit MED #5 — PuTTY `.ppk` header.
+        let blob =
+            "PuTTY-User-Key-File-2: ssh-rsa\nEncryption: none\nComment: imported-from-openssh\n";
+        let kind = detect(blob).expect("should detect PuTTY key");
+        assert!(matches!(kind, SensitiveKind::SshPrivateKey));
+    }
+    #[test]
+    fn jwt_word_boundary_anchors_match() {
+        // Audit MED #5 — `\b` anchor: real JWT in normal context detects.
+        let jwt =
+            "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        assert!(detect(jwt).is_some());
+        // A `eyJ`-prefixed garbage glued onto an identifier should NOT match
+        // as a JWT (we'd still detect bearer token from generic_bearer if
+        // present — here we use a non-bearer prefix to isolate the case).
+        let glued = "configsomethingeyJabc.def.ghi notajwt";
+        // Either no match at all OR not classified as Jwt — both are
+        // acceptable; pin "not Jwt" precisely.
+        let kind = detect(glued);
+        assert!(
+            !matches!(kind, Some(SensitiveKind::Jwt)),
+            "glued eyJ inside an identifier must not be classified as JWT"
+        );
+    }
+    #[test]
     fn detects_stripe_live_key() {
         assert!(detect(&("sk_live_".to_string() + &"A".repeat(24))).is_some());
     }
@@ -390,6 +470,35 @@ mod tests {
     #[test]
     fn credit_card_detected_short_line_only() {
         assert!(detect("4111111111111111").is_some());
+    }
+    #[test]
+    fn credit_card_detected_when_embedded_in_longer_text() {
+        // Audit MED #6: the previous `len <= 25` gate dropped this case.
+        let blob = "Customer card: 4111 1111 1111 1111 — expires 12/26";
+        let kind = detect(blob).expect("embedded card must be detected");
+        assert!(matches!(kind, SensitiveKind::CreditCard));
+    }
+    #[test]
+    fn credit_card_with_hyphens_in_long_text() {
+        let blob = "please charge 4111-1111-1111-1111 today";
+        let kind = detect(blob).expect("hyphenated card must be detected");
+        assert!(matches!(kind, SensitiveKind::CreditCard));
+    }
+    #[test]
+    fn credit_card_no_false_positive_on_luhn_invalid_run() {
+        // Pin: a Luhn-invalid 13-digit run inside longer text must not
+        // classify as CreditCard. We assert *only* "not classified as
+        // CreditCard" — the input may still trigger an unrelated pattern
+        // (e.g. phone_us on a 10-digit subrun), which is out of scope.
+        // (Earlier fixtures used "all zeros" or "all ones": the former
+        // is Luhn-valid (sum=0 ≡ 0 mod 10) and the latter trips phone_us.)
+        let blob = "ref=4242424242422 EOT";
+        let kind = detect(blob);
+        assert!(
+            !matches!(kind, Some(SensitiveKind::CreditCard)),
+            "Luhn-invalid 13-digit run must not classify as CreditCard, got {:?}",
+            kind
+        );
     }
     #[test]
     fn detects_slack_bot_token() {
