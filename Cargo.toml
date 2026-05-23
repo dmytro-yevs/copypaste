@@ -18,6 +18,8 @@ edition = "2021"
 rust-version = "1.75"
 authors = ["CopyPaste"]
 license = "MIT OR Apache-2.0"
+description = "Encrypted clipboard manager for macOS/Android/Windows"
+repository = "https://github.com/dmytro/CopyPaste"
 
 [workspace.dependencies]
 # Crypto
