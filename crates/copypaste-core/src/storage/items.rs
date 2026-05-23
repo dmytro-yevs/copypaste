@@ -308,6 +308,34 @@ pub fn get_page(
     Ok(items)
 }
 
+/// List-view variant of [`get_page`] that omits the `content` blob.
+///
+/// Returns the same `ClipboardItem` shape but with `content = None`. Used by
+/// the UI history list, which renders previews from `blob_ref` / type / hash
+/// and only needs the ciphertext blob when the user actually pastes an item.
+/// For image rows the blob can be hundreds of KB; skipping the SELECT shaves
+/// substantial bytes off every history-page round trip.
+///
+/// SQL emits `NULL` in the `content` column so the existing `row_to_item`
+/// mapper still works — only the read side changes, callers do not need a
+/// new type.
+pub fn get_page_meta(
+    db: &Database,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<ClipboardItem>, ItemsError> {
+    let mut stmt = db.conn().prepare(
+        "SELECT id, item_id, content_type, NULL AS content, content_nonce, blob_ref,
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+                content_hash, origin_device_id
+         FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
+    )?;
+    let items = stmt
+        .query_map(params![limit as i64, offset as i64], row_to_item)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(items)
+}
+
 pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
     let changed = db.conn().execute(
         "DELETE FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1",
@@ -476,6 +504,33 @@ mod tests {
         let ids1: Vec<_> = page1.iter().map(|i| &i.id).collect();
         let ids2: Vec<_> = page2.iter().map(|i| &i.id).collect();
         assert!(ids1.iter().all(|id| !ids2.contains(id)));
+    }
+
+    #[test]
+    fn get_page_meta_omits_content_blob_but_keeps_metadata() {
+        let db = Database::open_in_memory().unwrap();
+        let mut item = make_item(1);
+        item.content_hash = Some("deadbeef".to_string());
+        item.blob_ref = Some("blob://x".to_string());
+        let id = item.id.clone();
+        insert_item(&db, &item).unwrap();
+
+        // Sanity: get_page returns the full blob.
+        let full = get_page(&db, 10, 0).unwrap();
+        assert_eq!(full.len(), 1);
+        assert_eq!(full[0].content.as_deref(), Some(&[0xAA, 0xBB][..]));
+
+        // get_page_meta drops the blob but preserves metadata.
+        let meta = get_page_meta(&db, 10, 0).unwrap();
+        assert_eq!(meta.len(), 1);
+        assert_eq!(meta[0].id, id);
+        assert!(
+            meta[0].content.is_none(),
+            "get_page_meta must NOT load content blob"
+        );
+        assert_eq!(meta[0].content_hash.as_deref(), Some("deadbeef"));
+        assert_eq!(meta[0].blob_ref.as_deref(), Some("blob://x"));
+        assert_eq!(meta[0].content_nonce.as_deref(), Some(&[0u8; 24][..]));
     }
 
     #[test]

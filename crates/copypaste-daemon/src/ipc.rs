@@ -1153,29 +1153,20 @@ impl IpcServer {
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    // 5 minute dedupe window — matches the live clipboard
-                    // monitor's find_recent_by_hash usage.
-                    const DEDUPE_WINDOW_MS: i64 = 5 * 60 * 1000;
+                    // v0.3 post-T2: dedup is now enforced atomically by the
+                    // v5 UNIQUE indexes (content_hash + minute_bucket) inside
+                    // insert_item_with_fts. The previous explicit
+                    // `find_recent_by_hash` precheck created a TOCTOU window
+                    // — two concurrent imports of the same payload could both
+                    // pass the precheck and then race on insert. The new
+                    // path returns the existing row's id on a unique-violation,
+                    // which we treat as a dedup skip.
                     let mut inserted: u32 = 0;
                     let mut skipped: u32 = 0;
                     for item in decoded {
                         let mut hasher = Sha256::new();
                         hasher.update(&item.bytes);
                         let hash_hex = hex::encode(hasher.finalize());
-
-                        match copypaste_core::find_recent_by_hash(
-                            &db,
-                            &hash_hex,
-                            item.created_at_ms,
-                            DEDUPE_WINDOW_MS,
-                        ) {
-                            Ok(Some(_)) => {
-                                skipped += 1;
-                                continue;
-                            }
-                            Ok(None) => { /* fall through to insert */ }
-                            Err(e) => return Err::<(u32, u32), anyhow::Error>(e.into()),
-                        }
 
                         // Imported items have no encryption nonce — the bytes
                         // are stored verbatim as the "content" field. This
@@ -1189,10 +1180,24 @@ impl IpcServer {
                         clip.wall_time = item.created_at_ms;
                         clip.content_hash = Some(hash_hex);
 
-                        if let Err(e) = copypaste_core::insert_item(&db, &clip) {
-                            return Err::<(u32, u32), anyhow::Error>(e.into());
+                        // Imported items have no plaintext available here
+                        // (the bytes are stored verbatim, often already
+                        // encrypted or binary), so we pass "" to skip FTS
+                        // indexing — matches the image path semantics.
+                        let requested_id = clip.id.clone();
+                        match copypaste_core::insert_item_with_fts(&db, &clip, "") {
+                            Ok(stored_id) if stored_id == requested_id => {
+                                inserted += 1;
+                            }
+                            Ok(_) => {
+                                // Returned id differs => dedup hit (existing
+                                // row with same content_hash/item_id).
+                                skipped += 1;
+                            }
+                            Err(e) => {
+                                return Err::<(u32, u32), anyhow::Error>(e.into());
+                            }
                         }
-                        inserted += 1;
                     }
                     Ok::<(u32, u32), anyhow::Error>((inserted, skipped))
                 })

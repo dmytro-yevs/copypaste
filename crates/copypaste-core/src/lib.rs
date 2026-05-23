@@ -26,8 +26,8 @@ pub use sensitive::{
 };
 pub use storage::items::{
     count_items, delete_expired, delete_fts, delete_item, delete_sensitive_expired,
-    find_recent_by_hash, get_page, insert_item, pin_item, search_items, upsert_fts, ClipboardItem,
-    ItemsError,
+    find_recent_by_hash, get_page, get_page_meta, insert_item, insert_item_with_fts, pin_item,
+    search_items, upsert_fts, ClipboardItem, ItemsError,
 };
 pub use storage::{Database, DbError};
 pub use storage::devices::{
