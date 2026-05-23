@@ -266,14 +266,39 @@ pub fn preflight_encrypted_db_check(db_path: &std::path::Path) -> Result<(), Clo
 
 /// Handle returned by [`start_cloud`].  Drop it to abandon the background tasks
 /// (they will exit when the shutdown channel is signalled).
+///
+/// Audit-concurrency HIGH #3 (cloud-side): the daemon used to expose
+/// `shutdown_tx` as a public field that the caller had to explicitly send on,
+/// and in practice the daemon shutdown path never did — letting the cloud
+/// tasks run until process exit. Two safeguards make that impossible now:
+///   1. `shutdown_tx` is wrapped in `Option<...>` so [`shutdown`] can take it
+///      out behind a `&mut self`-style API.
+///   2. `Drop` calls [`shutdown`] automatically so dropping the handle (e.g.
+///      losing the binding on a panic, or daemon teardown forgetting to call
+///      it explicitly) still signals both loops.
 pub struct CloudHandle {
-    shutdown_tx: tokio::sync::oneshot::Sender<()>,
+    shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl CloudHandle {
-    /// Signal both background tasks to stop.
-    pub fn shutdown(self) {
-        let _ = self.shutdown_tx.send(());
+    /// Signal both background tasks to stop. Idempotent — calling twice is a
+    /// no-op (the second call finds `None` in the slot).
+    pub fn shutdown(mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            // Receiver dropped or send failure → loops already exited.
+            let _ = tx.send(());
+        }
+    }
+}
+
+impl Drop for CloudHandle {
+    /// Belt-and-braces: if the caller forgot to call [`shutdown`] explicitly
+    /// (or dropped the handle on a panic/early return), still signal the
+    /// background tasks so they don't outlive the daemon.
+    fn drop(&mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
     }
 }
 
@@ -336,7 +361,9 @@ pub async fn start_cloud(
     tokio::spawn(realtime_loop(poll_config, poll_bearer, db, poll_shutdown));
 
     tracing::info!("cloud-sync started (url={})", config.supabase_url);
-    Ok(CloudHandle { shutdown_tx })
+    Ok(CloudHandle {
+        shutdown_tx: Some(shutdown_tx),
+    })
 }
 
 // ── Bearer token resolution ───────────────────────────────────────────────────
