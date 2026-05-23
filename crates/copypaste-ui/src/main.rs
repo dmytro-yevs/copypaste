@@ -57,6 +57,31 @@ impl copypaste_ui::windows::SearchableHistoryItem for ipc_client::HistoryEntry {
     }
 }
 
+/// Bring the UI process to the foreground.
+///
+/// `LSUIElement=true` (set in Info.plist so the app does not show up in the
+/// Dock) means a freshly-shown window stays *behind* whatever the user was
+/// using. `NSApplication::activate` is the modern (Sonoma+) replacement for
+/// the deprecated `activateIgnoringOtherApps:` and works back to macOS 11 via
+/// the AppKit shim.
+///
+/// Tray menu callbacks are invoked from the Slint event loop, which runs on
+/// the main thread on macOS, so `MainThreadMarker::new()` should always
+/// succeed here. If it ever returns `None` we silently no-op — losing focus
+/// activation is preferable to crashing the UI.
+#[cfg(target_os = "macos")]
+fn activate_app() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+    if let Some(mtm) = MainThreadMarker::new() {
+        let app = NSApplication::sharedApplication(mtm);
+        app.activate();
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn activate_app() {}
+
 fn main() -> Result<()> {
     // Beta hot-fix: on macOS, install the Launch Agent plist + bootstrap the
     // daemon in the background so the user does not have to run
@@ -99,6 +124,11 @@ fn main() -> Result<()> {
         let on_open_history: copypaste_ui::tray_host::ActionCb = Box::new(move || {
             if let Some(win) = window_weak.upgrade() {
                 win.show().ok();
+                // LSUIElement=true (menu-bar-only) apps stay in the
+                // background after `show()` — focus stays on whatever app
+                // the user was last using. NSApplication::activate brings
+                // the process + its visible windows to the foreground.
+                activate_app();
             }
         });
         let callbacks = copypaste_ui::tray_host::TrayCallbacks {

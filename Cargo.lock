@@ -1477,6 +1477,8 @@ dependencies = [
  "anyhow",
  "copypaste-ipc",
  "home",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
  "png 0.17.16",
  "serde",
  "serde_json",

@@ -32,6 +32,13 @@ thiserror.workspace = true
 # an NSApp event loop via slint::run_event_loop).
 tray-icon = "0.19"
 png = "0.17"
+# Beta hot-fix v0.2.0-beta.4: needed to call `NSApplication::activate` after
+# the tray's "Open History" reveals the window. Without it, the menu-bar-only
+# (LSUIElement=true) app does not come to the foreground on click. Already
+# transitively in the dep graph via tray-icon's `objc2-app-kit 0.3`; declared
+# here as a direct dep so we can call it from `main.rs`.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSResponder"] }
 
 [build-dependencies]
 slint-build.workspace = true

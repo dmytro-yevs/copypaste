@@ -159,8 +159,8 @@ fn load_icon() -> Option<tray_icon::Icon> {
     for candidate in &candidates {
         if candidate.exists() {
             if let Ok(bytes) = std::fs::read(candidate) {
-                if let Some(rgba) = decode_png_rgba(&bytes) {
-                    if let Ok(icon) = tray_icon::Icon::from_rgba(rgba, 22, 22) {
+                if let Some((rgba, w, h)) = decode_png_rgba(&bytes) {
+                    if let Ok(icon) = tray_icon::Icon::from_rgba(rgba, w, h) {
                         return Some(icon);
                     }
                 }
@@ -175,30 +175,36 @@ fn load_icon() -> Option<tray_icon::Icon> {
     tray_icon::Icon::from_rgba(grey, 22, 22).ok()
 }
 
-fn decode_png_rgba(bytes: &[u8]) -> Option<Vec<u8>> {
+/// Decode a PNG byte slice into `(rgba_bytes, width, height)`.
+///
+/// Returning the actual image dimensions (instead of assuming 22×22) lets the
+/// caller pass them straight into `tray_icon::Icon::from_rgba`, which
+/// validates `data.len() == width * height * 4`. The bundled tray PNGs are
+/// 32×32; hardcoding 22×22 here caused `from_rgba` to return
+/// `Err(BadImageBufferSize)` and the tray fell through to the grey placeholder.
+fn decode_png_rgba(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
     use std::io::Cursor;
     let decoder = png::Decoder::new(Cursor::new(bytes));
     let mut reader = decoder.read_info().ok()?;
     let mut buf = vec![0u8; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).ok()?;
     let raw = &buf[..info.buffer_size()];
-    match info.color_type {
-        png::ColorType::Rgba => Some(raw.to_vec()),
-        png::ColorType::Rgb => Some(
-            raw.chunks_exact(3)
-                .flat_map(|c| [c[0], c[1], c[2], 0xff])
-                .collect(),
-        ),
+    let rgba: Vec<u8> = match info.color_type {
+        png::ColorType::Rgba => raw.to_vec(),
+        png::ColorType::Rgb => raw
+            .chunks_exact(3)
+            .flat_map(|c| [c[0], c[1], c[2], 0xff])
+            .collect(),
         png::ColorType::Grayscale => {
-            Some(raw.iter().flat_map(|&g| [g, g, g, 0xff]).collect())
+            raw.iter().flat_map(|&g| [g, g, g, 0xff]).collect()
         }
-        png::ColorType::GrayscaleAlpha => Some(
-            raw.chunks_exact(2)
-                .flat_map(|c| [c[0], c[0], c[0], c[1]])
-                .collect(),
-        ),
-        _ => None,
-    }
+        png::ColorType::GrayscaleAlpha => raw
+            .chunks_exact(2)
+            .flat_map(|c| [c[0], c[0], c[0], c[1]])
+            .collect(),
+        _ => return None,
+    };
+    Some((rgba, info.width, info.height))
 }
 
 // ── Menu builder ────────────────────────────────────────────────────────────
@@ -387,6 +393,28 @@ mod tests {
     #[test]
     fn decode_png_rgba_returns_none_for_garbage() {
         assert!(decode_png_rgba(b"not a png").is_none());
+    }
+
+    #[test]
+    fn decode_png_rgba_reports_actual_dimensions() {
+        // Minimal 2×2 RGBA PNG built via the `png` crate so the test stays
+        // self-contained — guards the regression where dimensions were
+        // hardcoded to 22×22 and `tray_icon::Icon::from_rgba` rejected the
+        // buffer with BadImageBufferSize.
+        let mut buf = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut buf, 2, 2);
+            enc.set_color(png::ColorType::Rgba);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut writer = enc.write_header().expect("encode header");
+            // 2x2 = 4 px × 4 bytes RGBA = 16 bytes
+            writer
+                .write_image_data(&[0xff; 16])
+                .expect("encode pixels");
+        }
+        let (rgba, w, h) = decode_png_rgba(&buf).expect("decode round-trip");
+        assert_eq!((w, h), (2, 2));
+        assert_eq!(rgba.len(), (w * h * 4) as usize);
     }
 
     #[test]
