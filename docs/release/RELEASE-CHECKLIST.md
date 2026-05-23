@@ -89,6 +89,22 @@ target before the tag is cut.
 
 ## 5. Distribution (T+0)
 
+**Policy (frozen 2026-05-23 — see ADR-010 + ADR-012):** Homebrew Cask only.
+Apple notarization is **not** used (no Developer ID per project policy);
+users grant trust manually via
+`xattr -dr com.apple.quarantine /Applications/CopyPaste.app` if Gatekeeper
+flags the install. Sparkle / autoupdate feeds are **not** shipped. A
+signed `.dmg` is still attached to every GitHub release for
+reproducibility, but the README directs users at the Cask rather than
+promoting standalone `.dmg` downloads as the primary install path.
+
+The DMG itself is built and signed (ad-hoc) by
+`scripts/release/build-dmg-ci.sh` and `scripts/release/_sign-and-dmg.sh`
+during the release workflow (`.github/workflows/release.yml`); the Cask
+formula (`scripts/release/gen-cask.sh`) then points at that DMG.
+
+- [ ] **DMG built + checksummed** by `release.yml` and attached to the
+      GitHub release. `verify-checksum.sh` exit 0.
 - [ ] **Homebrew Cask update** via `bash scripts/release/gen-cask.sh`. Verify
       the generated cask references the new tag, correct SHA-256 sums, and the
       arch-specific URLs.
@@ -98,8 +114,10 @@ target before the tag is cut.
       `brew install --cask copypaste/tap/copypaste`. Launch the app, copy and
       paste between two pasteboards, quit cleanly. Uninstall and reinstall to
       confirm idempotency.
-- [ ] **Mirror checks.** If additional distribution channels are wired (direct
-      download page, package mirrors), verify each links to the new tag.
+- [ ] **(NOT applicable):** Apple notarization / `notarytool` round-trip,
+      Sparkle update feed publication, mirror checks to direct-download
+      promo pages. Re-introduce only if a Developer ID is acquired AND
+      ADR-010/ADR-012 are amended in a follow-up PR.
 - [ ] **Announcement.** Post the release notes to the project README/website
       and any social channels listed in the comms plan.
 

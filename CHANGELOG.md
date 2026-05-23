@@ -5,6 +5,16 @@
 v0.3 development branch. Cut from release/v0.2.0-beta after Wave 5 verify-gate.
 See docs/release/v0.3-plan.md for scope.
 
+**Scope (2026-05-23):** dropped Windows (frozen — see
+`docs/adr/ADR-012-windows-frozen-homebrew-only.md`). Distribution:
+Homebrew Cask only (no Apple notarization, no Sparkle update feed).
+Signed DMG continues to ship as a GitHub release asset for
+reproducibility, but is not the promoted install path.
+
+### Features
+- **UI:** In-app auto-update via Homebrew Cask: daily check + notification +
+  one-click upgrade. No Sparkle (Homebrew-only per ADR-012).
+
 ### Breaking changes
 - **Crypto:** dropped the legacy empty-AAD AEAD decrypt fallback in
   `copypaste-core::crypto::encrypt`. The `encrypt_item` / `decrypt_item`
