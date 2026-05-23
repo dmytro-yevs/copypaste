@@ -1,0 +1,1 @@
+{"id":2,"method":"insert","params":{"content_type":"text","content":"hello world","is_sensitive":false,"app_bundle_id":"com.apple.Terminal"},"protocol_version":1}
