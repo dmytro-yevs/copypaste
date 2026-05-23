@@ -302,7 +302,7 @@ The existing `#[cfg(not(target_os = "macos"))]` block in `daemon.rs` already cov
 
 The `tray-icon` crate already works on Windows (uses `Shell_NotifyIconW` internally). No Windows-specific changes needed — the same API compiles and runs on both macOS and Windows.
 
-This is handled separately in the Tauri/tray-icon task.
+This is handled separately in the Slint/tray-icon task.
 
 ---
 

@@ -27,8 +27,8 @@ case "$CMD" in
     echo '{"id":"1","method":"status"}' | nc -U ~/Library/Application\ Support/CopyPaste/daemon.sock 2>/dev/null || echo "daemon not running" ;;
   list)
     echo '{"id":"1","method":"list","params":{"limit":10}}' | nc -U ~/Library/Application\ Support/CopyPaste/daemon.sock 2>/dev/null ;;
-  tauri-dev)
-    cd "$(dirname "$0")/../crates/copypaste-app" && npm run tauri dev ;;
+  ui-dev)
+    cd "$(dirname "$0")/.." && cargo run -p copypaste-ui ;;
   android-build)
     bash "$(dirname "$0")/build-android.sh" ;;
   help|*)
@@ -43,7 +43,7 @@ case "$CMD" in
     echo "  daemon-logs  — tail daemon log"
     echo "  daemon-status— ping daemon via IPC"
     echo "  list         — show last 10 clipboard items"
-    echo "  tauri-dev    — start Tauri dev server"
+    echo "  ui-dev       — run Slint UI (copypaste-ui)"
     echo "  android-build— build Android .so via cargo-ndk"
     ;;
 esac

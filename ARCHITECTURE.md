@@ -6,12 +6,12 @@
 copypaste-core          (library — no binary)
   ├── copypaste-daemon  (long-running background process)
   ├── copypaste-cli     (user-facing CLI, no core dep — speaks IPC only)
-  └── copypaste-app     (Tauri 2 menu-bar UI, standalone workspace, speaks IPC only)
+  └── copypaste-ui      (Slint menu-bar UI, speaks IPC only)
 
 copypaste-relay         (optional HTTP sync server — no core dep, standalone)
 ```
 
-`copypaste-cli` and `copypaste-app` never link `copypaste-core` directly; they communicate
+`copypaste-cli` and `copypaste-ui` never link `copypaste-core` directly; they communicate
 exclusively through the Unix domain socket owned by `copypaste-daemon`.
 
 `copypaste-relay` is a self-contained HTTP service; it receives only encrypted blobs and
@@ -45,7 +45,7 @@ Unix socket  [~/.local/share/copypaste/copypaste.sock]
         │
   ┌─────┴──────┐
   ▼            ▼
-copypaste-cli  copypaste-app (Tauri)
+copypaste-cli  copypaste-ui (Slint)
 (terminal)     (menu-bar tray)
 ```
 
@@ -118,7 +118,7 @@ WAL mode + 8 MB cache. Schema versioned via `PRAGMA user_version`.
 | 1b — Daemon | `copypaste-daemon`: clipboard polling, IPC server, keychain | Done |
 | 2 — CLI | `copypaste-cli`: list, count, delete, search, copy, export | Done |
 | 2a — FTS | Full-text search via FTS5, IPC `search` method | Done |
-| 3 — UI | `copypaste-app`: Tauri 2 menu-bar tray, WebView history panel | Done |
+| 3 — UI | `copypaste-ui`: Slint menu-bar tray, native history panel (see ADR-005) | Done |
 | 3b — Linux | systemd user service unit + install script | Done |
 | 4 — Relay | `copypaste-relay`: device registration, upload/poll, quota | Done |
 | 5 — E2E sync | Daemon sync loop: push pending_uploads, poll inbox, decrypt | Planned |
@@ -126,8 +126,9 @@ WAL mode + 8 MB cache. Schema versioned via `PRAGMA user_version`.
 
 ## Key Design Decisions
 
-- **Workspace + standalone app**: `copypaste-app` (Tauri) sits outside the root workspace to
-  avoid edition2024 / getrandom version conflicts imposed by Tauri's build dependencies.
+- **Slint UI (ADR-005)**: `copypaste-ui` uses Slint for native rendering — no WebView, no
+  Node.js/npm in the build pipeline, ~2MB binary, <100ms startup. Tauri was previously
+  evaluated and rejected; see ADR-005 for the full comparison.
 - **Lamport timestamps**: logical clock on `ClipboardItem` enables conflict-free ordering across
   devices without wall-clock trust.
 - **Fan-out at relay**: relay writes each uploaded item into every other registered device's
