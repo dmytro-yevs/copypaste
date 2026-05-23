@@ -24,7 +24,7 @@
 //! use copypaste_p2p::{DiscoveryService};
 //! use tokio::net::TcpListener;
 //!
-//! # async fn example() -> anyhow::Result<()> {
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! // Generate our certificate (normally persisted between runs).
 //! let my_cert = SelfSignedCert::generate("my-device-id")?;
 //! println!("My fingerprint: {}", my_cert.fingerprint());
