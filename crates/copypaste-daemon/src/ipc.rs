@@ -1,8 +1,11 @@
 use crate::protocol::{
-    Request, Response, CURRENT_PROTOCOL_VERSION, ERR_CODE_INTERNAL_ERROR,
+    Request, Response, CURRENT_PROTOCOL_VERSION, ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR,
     ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
-use copypaste_core::{count_items, delete_fts, delete_item, get_page, search_items, Database};
+use copypaste_core::{
+    chunks_from_blob, count_items, decode_image, decrypt_item, delete_fts, delete_item, get_page,
+    search_items, Database,
+};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -163,6 +166,18 @@ pub struct IpcServer {
     db: Arc<Mutex<Database>>,
     /// Shared private-mode flag. When true, the clipboard monitor skips recording.
     private_mode: Arc<AtomicBool>,
+    /// Local symmetric encryption key (XChaCha20-Poly1305). Required by the
+    /// `copy`/`paste` handlers so paste-back can decrypt the ciphertext
+    /// stored in `clipboard_items.content` and write *plaintext* to
+    /// NSPasteboard. Audit CRIT #1: previously the handler wrote raw
+    /// ciphertext bytes back, so paste produced "content is not valid
+    /// UTF-8" for text and garbage for images.
+    local_key: Arc<[u8; 32]>,
+    /// Device public-key bytes — used by `get_own_fingerprint` to derive
+    /// the canonical user-visible fingerprint (`keychain::own_fingerprint`).
+    /// Audit HIGH #6: previously the handler used DefaultHasher(hostname,
+    /// pid), which changed every restart and was not collision-resistant.
+    device_public_key: Arc<[u8; 32]>,
     /// Readiness gate. While `false`, all data-touching methods return
     /// `IPC_NOT_READY` instead of dispatching. Default `true` for production
     /// use (db is fully constructed before `IpcServer::new` is called); tests
@@ -171,10 +186,17 @@ pub struct IpcServer {
 }
 
 impl IpcServer {
-    pub fn new(db: Arc<Mutex<Database>>, private_mode: Arc<AtomicBool>) -> Self {
+    pub fn new(
+        db: Arc<Mutex<Database>>,
+        private_mode: Arc<AtomicBool>,
+        local_key: Arc<[u8; 32]>,
+        device_public_key: Arc<[u8; 32]>,
+    ) -> Self {
         Self {
             db,
             private_mode,
+            local_key,
+            device_public_key,
             ready: Arc::new(AtomicBool::new(true)),
         }
     }
@@ -187,11 +209,15 @@ impl IpcServer {
     pub fn new_with_ready(
         db: Arc<Mutex<Database>>,
         private_mode: Arc<AtomicBool>,
+        local_key: Arc<[u8; 32]>,
+        device_public_key: Arc<[u8; 32]>,
         ready: Arc<AtomicBool>,
     ) -> Self {
         Self {
             db,
             private_mode,
+            local_key,
+            device_public_key,
             ready,
         }
     }
@@ -519,7 +545,7 @@ impl IpcServer {
                 })
                 .await;
                 match join {
-                    Ok(Ok(Some(item))) => match Self::write_to_pasteboard(&item) {
+                    Ok(Ok(Some(item))) => match self.write_to_pasteboard(&item) {
                         Ok(()) => Response::ok(
                             req.id,
                             serde_json::json!({
@@ -528,7 +554,14 @@ impl IpcServer {
                                 "written": true,
                             }),
                         ),
-                        Err(e) => Response::err(req.id, format!("pasteboard write failed: {e}")),
+                        Err(PasteboardError::DecryptFailed(msg)) => Response::err_with_code(
+                            req.id,
+                            ERR_CODE_AUTH_FAILED,
+                            format!("paste decrypt failed: {msg}"),
+                        ),
+                        Err(PasteboardError::Other(msg)) => {
+                            Response::err(req.id, format!("pasteboard write failed: {msg}"))
+                        }
                     },
                     Ok(Ok(None)) => Response::err(req.id, format!("item not found: {id}")),
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
@@ -726,33 +759,18 @@ impl IpcServer {
             // P2P IPC methods
             // ------------------------------------------------------------------
             "get_own_fingerprint" => {
-                // Use a stable device identifier: SHA-256 of the machine UUID
-                // (placeholder implementation — real keychain cert used in Phase 5+).
-                use std::collections::hash_map::DefaultHasher;
-                use std::hash::{Hash, Hasher};
-
-                // Derive a deterministic pseudo-UUID from the hostname so each
-                // device gets a stable, unique-enough fingerprint.
-                let hostname = std::env::var("HOSTNAME")
-                    .or_else(|_| {
-                        std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_string())
-                    })
-                    .unwrap_or_else(|_| "localhost".to_string());
-
-                let mut hasher = DefaultHasher::new();
-                hostname.hash(&mut hasher);
-                std::process::id().hash(&mut hasher);
-                let hash_val = hasher.finish();
-
-                // Expand to 32 bytes using a simple XOR-spread so we have
-                // enough material to format a fingerprint.
-                let mut bytes = [0u8; 32];
-                let seed = hash_val.to_le_bytes();
-                for (i, b) in bytes.iter_mut().enumerate() {
-                    *b = seed[i % 8].wrapping_add(i as u8);
-                }
-
-                let fingerprint = format_fingerprint(&bytes);
+                // Audit HIGH #6 fix: use the canonical SHA-256-of-public-key
+                // fingerprint derived from the device's persistent keypair
+                // (loaded by the daemon at startup via
+                // `keychain::load_or_create` and passed into `IpcServer::new`).
+                //
+                // The previous DefaultHasher(hostname, pid) scheme:
+                //   * changed on every restart (pid varies),
+                //   * was not collision-resistant across hosts that share a
+                //     hostname (common in containers / dev VMs),
+                //   * could not be reconciled with the canonical fingerprint
+                //     the UI / pair_peer paths already used.
+                let fingerprint = crate::keychain::own_fingerprint(self.device_public_key.as_ref());
                 Response::ok(req.id, serde_json::json!({ "fingerprint": fingerprint }))
             }
 
@@ -1088,51 +1106,116 @@ impl IpcServer {
         }
     }
 
-    /// Write a clipboard item's content back to NSPasteboard (macOS) or no-op on other platforms.
-    fn write_to_pasteboard(item: &copypaste_core::ClipboardItem) -> Result<(), String> {
+    /// Write a clipboard item's *decrypted* content back to NSPasteboard
+    /// (macOS) or no-op on other platforms.
+    ///
+    /// Audit CRIT #1 fix: the daemon stores every clipboard item encrypted
+    /// (XChaCha20-Poly1305 for text, chunked AEAD for images) — the legacy
+    /// implementation wrote `item.content` raw, so users saw ciphertext on
+    /// paste. This now:
+    ///
+    /// 1. Decrypts text via [`decrypt_item`] with the per-item nonce.
+    /// 2. Reassembles + decrypts image chunks via [`chunks_from_blob`] +
+    ///    [`decode_image`], using the `file_id` parsed out of `blob_ref`.
+    /// 3. Maps the daemon's internal `content_type` to a real macOS UTI
+    ///    (`"image"` is **not** a valid UTI — audit HIGH #2). Text uses
+    ///    `NSPasteboardTypeString`; image always writes `public.png` since
+    ///    `encode_image` re-encodes raw clipboard bytes to PNG before
+    ///    chunking. Anything already shaped like a UTI (`public.*`,
+    ///    `com.*`, `org.*`) is passed through unchanged.
+    fn write_to_pasteboard(
+        &self,
+        item: &copypaste_core::ClipboardItem,
+    ) -> Result<(), PasteboardError> {
         #[cfg(target_os = "macos")]
         {
             let content = match &item.content {
-                Some(bytes) => bytes,
-                None => return Err("item has no content".to_string()),
+                Some(bytes) => bytes.as_slice(),
+                None => return Err(PasteboardError::other("item has no content")),
             };
 
             use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
-            use objc2_foundation::NSString;
+            use objc2_foundation::{NSData, NSString};
 
             if item.content_type == "text" {
-                // Interpret bytes as UTF-8 text and write to NSPasteboard
-                let text = std::str::from_utf8(content)
-                    .map_err(|e| format!("content is not valid UTF-8: {e}"))?;
+                // ----- text: decrypt per-item ciphertext, then write -----
+                let nonce_vec = item
+                    .content_nonce
+                    .as_ref()
+                    .ok_or_else(|| PasteboardError::other("text item missing content_nonce"))?;
+                let nonce: &[u8; 24] = nonce_vec.as_slice().try_into().map_err(|_| {
+                    PasteboardError::other(format!(
+                        "text item content_nonce wrong length: expected 24, got {}",
+                        nonce_vec.len()
+                    ))
+                })?;
+                let plaintext_bytes = decrypt_item(content, nonce, self.local_key.as_ref())
+                    .map_err(|e| PasteboardError::decrypt(e.to_string()))?;
+                let text = std::str::from_utf8(&plaintext_bytes).map_err(|e| {
+                    PasteboardError::decrypt(format!("decrypted content is not UTF-8: {e}"))
+                })?;
                 unsafe {
                     let pb = NSPasteboard::generalPasteboard();
                     pb.clearContents();
                     let ns_str = NSString::from_str(text);
                     let ok = pb.setString_forType(&ns_str, NSPasteboardTypeString);
                     if !ok {
-                        return Err("NSPasteboard setString:forType: returned false".to_string());
+                        return Err(PasteboardError::other(
+                            "NSPasteboard setString:forType: returned false",
+                        ));
                     }
                 }
-            } else {
-                // Binary content: write raw bytes with a generic type
-                use objc2_foundation::NSData;
+                Ok(())
+            } else if item.content_type == "image" {
+                // ----- image: reassemble chunks → decrypt → write as PNG -----
+                // `file_id` is embedded in the JSON metadata stored in
+                // `blob_ref` (see ClipboardItem::new_image in
+                // storage/items.rs).
+                let meta_json = item.blob_ref.as_deref().ok_or_else(|| {
+                    PasteboardError::other("image item missing blob_ref metadata")
+                })?;
+                let file_id = parse_image_file_id(meta_json).map_err(PasteboardError::other)?;
+
+                let chunks = chunks_from_blob(content).map_err(|e| {
+                    PasteboardError::other(format!("image chunks_from_blob failed: {e}"))
+                })?;
+                let png_bytes = decode_image(&chunks, self.local_key.as_ref(), &file_id)
+                    .map_err(|e| PasteboardError::decrypt(format!("image decode failed: {e}")))?;
 
                 unsafe {
                     let pb = NSPasteboard::generalPasteboard();
                     pb.clearContents();
-                    // Use the content_type as the pasteboard type string (best-effort)
-                    let type_str = NSString::from_str(&item.content_type);
-                    let data = NSData::with_bytes(content);
+                    let type_str = NSString::from_str("public.png");
+                    let data = NSData::with_bytes(&png_bytes);
                     let ok = pb.setData_forType(Some(&data), &type_str);
                     if !ok {
-                        return Err(format!(
-                            "NSPasteboard setData:forType: returned false for type '{}'",
-                            item.content_type
+                        return Err(PasteboardError::other(
+                            "NSPasteboard setData:forType: returned false for public.png",
                         ));
                     }
                 }
+                Ok(())
+            } else {
+                // Unknown content_type — keep a best-effort raw-bytes write,
+                // but map to a real UTI when possible. We do NOT attempt
+                // decryption here because we don't know the shape of the
+                // ciphertext (no nonce / no chunk metadata). Used only by
+                // future content_types added without updating this handler.
+                let uti = map_content_type_to_uti(&item.content_type);
+                unsafe {
+                    let pb = NSPasteboard::generalPasteboard();
+                    pb.clearContents();
+                    let type_str = NSString::from_str(&uti);
+                    let data = NSData::with_bytes(content);
+                    let ok = pb.setData_forType(Some(&data), &type_str);
+                    if !ok {
+                        return Err(PasteboardError::other(format!(
+                            "NSPasteboard setData:forType: returned false for type '{uti}'"
+                        )));
+                    }
+                }
+                Ok(())
             }
-            Ok(())
         }
 
         #[cfg(not(target_os = "macos"))]
@@ -1141,6 +1224,77 @@ impl IpcServer {
             // No clipboard support on non-macOS platforms in this crate
             Ok(())
         }
+    }
+}
+
+/// Internal error type for the paste-back path so the dispatcher can
+/// distinguish authentication / decryption failures (which deserve a
+/// dedicated error code so a tampered row is surfaced to the caller) from
+/// generic write failures.
+#[derive(Debug)]
+#[allow(dead_code)]
+enum PasteboardError {
+    DecryptFailed(String),
+    Other(String),
+}
+
+impl PasteboardError {
+    fn decrypt(msg: impl Into<String>) -> Self {
+        Self::DecryptFailed(msg.into())
+    }
+    fn other(msg: impl Into<String>) -> Self {
+        Self::Other(msg.into())
+    }
+}
+
+/// Parse the `file_id` field out of the JSON metadata embedded in an
+/// image item's `blob_ref`. The metadata shape is produced by
+/// `daemon::handle_image` (`{"width":...,"file_id":[u8; 16]}` — Rust
+/// `{:?}` debug formatting of the byte array).
+#[cfg(target_os = "macos")]
+fn parse_image_file_id(meta_json: &str) -> Result<[u8; 16], String> {
+    let value: serde_json::Value = serde_json::from_str(meta_json)
+        .map_err(|e| format!("image meta_json parse error: {e}"))?;
+    let arr = value
+        .get("file_id")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "image meta_json missing 'file_id' array".to_string())?;
+    if arr.len() != 16 {
+        return Err(format!(
+            "image meta_json 'file_id' has wrong length: expected 16, got {}",
+            arr.len()
+        ));
+    }
+    let mut out = [0u8; 16];
+    for (i, v) in arr.iter().enumerate() {
+        out[i] = v
+            .as_u64()
+            .and_then(|n| u8::try_from(n).ok())
+            .ok_or_else(|| format!("image meta_json 'file_id[{i}]' not a u8"))?;
+    }
+    Ok(out)
+}
+
+/// Map the daemon's internal `content_type` string to a macOS UTI suitable
+/// for `setData:forType:`. Audit HIGH #2: bare `"image"` is not a UTI and
+/// macOS refuses to set the pasteboard data for it.
+///
+/// Heuristic: anything already shaped like a UTI (`public.*`, `com.*`,
+/// `org.*`) is passed through; bare `"image"` defaults to `public.png`;
+/// `"text"` to `public.utf8-plain-text`; everything else gets
+/// `public.data` so the write doesn't silently no-op.
+#[cfg(target_os = "macos")]
+fn map_content_type_to_uti(content_type: &str) -> String {
+    if content_type.starts_with("public.")
+        || content_type.starts_with("com.")
+        || content_type.starts_with("org.")
+    {
+        return content_type.to_string();
+    }
+    match content_type {
+        "image" => "public.png".to_string(),
+        "text" => "public.utf8-plain-text".to_string(),
+        _ => "public.data".to_string(),
     }
 }
 
@@ -1162,7 +1316,11 @@ mod tests {
     ) -> Arc<AtomicBool> {
         let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
         let private_mode = Arc::new(AtomicBool::new(initial_private_mode));
-        let server = IpcServer::new(db, private_mode.clone());
+        // Dummy keys: in-process tests do not hit paste-back or fingerprint
+        // surfaces — they only validate dispatch / state-machine behaviour.
+        let local_key = Arc::new([0u8; 32]);
+        let device_pub = Arc::new([0u8; 32]);
+        let server = IpcServer::new(db, private_mode.clone(), local_key, device_pub);
         let path = socket_path.to_path_buf();
         tokio::spawn(async move {
             server.serve(&path).await.ok();
@@ -1742,7 +1900,10 @@ mod tests {
         let private_mode = Arc::new(AtomicBool::new(false));
         let ready = Arc::new(AtomicBool::new(false));
         let ready_clone = ready.clone();
-        let server = IpcServer::new_with_ready(db, private_mode, ready_clone);
+        let local_key = Arc::new([0u8; 32]);
+        let device_pub = Arc::new([0u8; 32]);
+        let server =
+            IpcServer::new_with_ready(db, private_mode, local_key, device_pub, ready_clone);
         let path = socket_path.to_path_buf();
         tokio::spawn(async move {
             server.serve(&path).await.ok();

@@ -39,6 +39,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     );
 
     let local_key = load_local_key();
+    let local_key_arc: Arc<[u8; 32]> = Arc::new(local_key);
     tracing::info!("local encryption key ready");
 
     let db_path = paths::db_path();
@@ -46,6 +47,20 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         Database::open(&db_path, &local_key).map_err(|e| anyhow::anyhow!("Database: {e}"))?,
     ));
     tracing::info!("database opened at {}", db_path.display());
+
+    // Device-keypair public bytes — passed into IpcServer so
+    // `get_own_fingerprint` returns a stable cryptographic fingerprint
+    // (audit HIGH #6: DefaultHasher(hostname,pid) changed every restart).
+    // On non-macOS we don't have a keychain-backed keypair; use a zero
+    // placeholder. Memory: Windows/Linux are cfg-frozen (macOS+Android only).
+    #[cfg(target_os = "macos")]
+    let device_public_key_arc: Arc<[u8; 32]> = {
+        let kp = crate::keychain::load_or_create()
+            .map_err(|e| anyhow::anyhow!("keychain load_or_create: {e}"))?;
+        Arc::new(kp.public_key_bytes())
+    };
+    #[cfg(not(target_os = "macos"))]
+    let device_public_key_arc: Arc<[u8; 32]> = Arc::new([0u8; 32]);
 
     // Shared private-mode flag: when true, the clipboard monitor skips recording.
     // This is set/cleared via the IPC `set_private_mode` command.
@@ -57,9 +72,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     {
         let ipc_db = db.clone();
         let ipc_private_mode = private_mode.clone();
+        let ipc_local_key = local_key_arc.clone();
+        let ipc_device_pub = device_public_key_arc.clone();
         let socket_clone = socket_path.clone();
         tokio::spawn(async move {
-            let server = IpcServer::new(ipc_db, ipc_private_mode);
+            let server = IpcServer::new(ipc_db, ipc_private_mode, ipc_local_key, ipc_device_pub);
             if let Err(e) = server.serve(&socket_clone).await {
                 tracing::error!("IPC server error: {e}");
             }
