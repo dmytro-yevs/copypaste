@@ -1,0 +1,267 @@
+# Nightly build pipeline - beta-bonus
+#
+# Builds .dmg / .aar(.apk) / .exe artifacts every night at 06:00 UTC and on
+# manual dispatch. Independent of release.yml - no tagging, no checksum gen,
+# no Homebrew cask updates. Purpose: catch regressions in container images
+# and macOS host build path before they bite a real release.
+#
+# Each platform job has continue-on-error: true so one broken target does
+# not mask successful builds on the others. nightly-summary aggregates the
+# outcomes into a single commit comment.
+#
+# Inputs are limited to controlled github.* context fields (run_id,
+# run_number, server_url, repository) and outputs of sibling jobs in this
+# same workflow. No untrusted user input is ever interpolated into run:.
+#
+# Pinned action versions (no @master or @v0 refs):
+#   actions/checkout@v4
+#   actions/upload-artifact@v4
+#   dtolnay/rust-toolchain@stable
+#   Swatinem/rust-cache@v2
+#   peter-evans/commit-comment@v3
+
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  nightly-macos:
+    name: Nightly macOS (arm64)
+    runs-on: macos-14
+    continue-on-error: true
+    outputs:
+      status: ${{ steps.outcome.outputs.status }}
+      artifact: ${{ steps.outcome.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: nightly-macos-arm64
+
+      - name: Compute nightly date
+        id: date
+        run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS arm64 (bin + .app)
+        run: bash scripts/build-macos.sh arm64
+
+      - name: Build DMG
+        env:
+          NIGHTLY_DATE: ${{ steps.date.outputs.date }}
+        run: |
+          if [ ! -d dist/CopyPaste.app ] && [ -d builds/macos-arm64/CopyPaste.app ]; then
+            mkdir -p dist
+            cp -R builds/macos-arm64/CopyPaste.app dist/CopyPaste.app
+          fi
+          bash scripts/make_dmg.sh "nightly-${NIGHTLY_DATE}"
+
+      - name: Stage artifact
+        id: stage
+        env:
+          NIGHTLY_DATE: ${{ steps.date.outputs.date }}
+        run: |
+          mkdir -p nightly-out
+          cp "dist/CopyPaste-nightly-${NIGHTLY_DATE}.dmg" \
+             "nightly-out/copypaste-nightly-macos-${NIGHTLY_DATE}.dmg"
+          ls -la nightly-out/
+
+      - name: Upload macOS nightly DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: copypaste-nightly-macos-${{ steps.date.outputs.date }}.dmg
+          path: nightly-out/copypaste-nightly-macos-${{ steps.date.outputs.date }}.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Record outcome
+        id: outcome
+        if: always()
+        env:
+          NIGHTLY_DATE: ${{ steps.date.outputs.date }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          echo "status=${JOB_STATUS}" >> "$GITHUB_OUTPUT"
+          echo "artifact=copypaste-nightly-macos-${NIGHTLY_DATE}.dmg" >> "$GITHUB_OUTPUT"
+
+  nightly-android:
+    name: Nightly Android (arm64-v8a)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    outputs:
+      status: ${{ steps.outcome.outputs.status }}
+      artifact: ${{ steps.outcome.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute nightly date
+        id: date
+        run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Build Android container image
+        run: docker compose --profile build build android
+
+      - name: Run Android build
+        run: docker compose --profile build run --rm android
+
+      - name: Stage artifacts
+        id: stage
+        run: |
+          mkdir -p nightly-out
+          shopt -s nullglob
+          found=0
+          for f in builds/android-*/*.aar builds/android-*/*.apk; do
+            cp "$f" "nightly-out/"
+            found=1
+          done
+          if [ "$found" = "0" ]; then
+            echo "::warning::No .aar or .apk produced under builds/android-*/"
+          fi
+          ls -la nightly-out/ || true
+
+      - name: Upload Android nightly artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: copypaste-nightly-android-${{ steps.date.outputs.date }}
+          path: nightly-out/*
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Record outcome
+        id: outcome
+        if: always()
+        env:
+          NIGHTLY_DATE: ${{ steps.date.outputs.date }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          echo "status=${JOB_STATUS}" >> "$GITHUB_OUTPUT"
+          echo "artifact=copypaste-nightly-android-${NIGHTLY_DATE}" >> "$GITHUB_OUTPUT"
+
+  nightly-windows:
+    name: Nightly Windows (x86_64)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    outputs:
+      status: ${{ steps.outcome.outputs.status }}
+      artifact: ${{ steps.outcome.outputs.artifact }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute nightly date
+        id: date
+        run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Build Windows container image
+        run: docker compose --profile build build windows
+
+      - name: Run Windows build
+        run: docker compose --profile build run --rm windows
+
+      - name: Stage artifacts
+        id: stage
+        run: |
+          mkdir -p nightly-out
+          shopt -s nullglob
+          found=0
+          for f in builds/windows-*/*.exe; do
+            cp "$f" "nightly-out/"
+            found=1
+          done
+          if [ "$found" = "0" ]; then
+            echo "::warning::No .exe produced under builds/windows-*/"
+          fi
+          ls -la nightly-out/ || true
+
+      - name: Upload Windows nightly artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: copypaste-nightly-windows-${{ steps.date.outputs.date }}
+          path: nightly-out/*.exe
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Record outcome
+        id: outcome
+        if: always()
+        env:
+          NIGHTLY_DATE: ${{ steps.date.outputs.date }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          echo "status=${JOB_STATUS}" >> "$GITHUB_OUTPUT"
+          echo "artifact=copypaste-nightly-windows-${NIGHTLY_DATE}" >> "$GITHUB_OUTPUT"
+
+  nightly-summary:
+    name: Nightly summary
+    needs: [nightly-macos, nightly-android, nightly-windows]
+    if: always()
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compose summary body
+        id: body
+        env:
+          MAC_RESULT: ${{ needs.nightly-macos.result }}
+          MAC_ARTIFACT: ${{ needs.nightly-macos.outputs.artifact }}
+          AND_RESULT: ${{ needs.nightly-android.result }}
+          AND_ARTIFACT: ${{ needs.nightly-android.outputs.artifact }}
+          WIN_RESULT: ${{ needs.nightly-windows.result }}
+          WIN_ARTIFACT: ${{ needs.nightly-windows.outputs.artifact }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_ID: ${{ github.run_id }}
+          SERVER_URL: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+        run: |
+          DATE_UTC="$(date -u +%Y-%m-%d)"
+          {
+            echo "body<<NIGHTLY_EOF"
+            echo "## Nightly build ${DATE_UTC}"
+            echo ""
+            echo "| Platform | Status | Artifact |"
+            echo "|----------|--------|----------|"
+            echo "| macOS arm64    | ${MAC_RESULT} | ${MAC_ARTIFACT} |"
+            echo "| Android arm64  | ${AND_RESULT} | ${AND_ARTIFACT} |"
+            echo "| Windows x86_64 | ${WIN_RESULT} | ${WIN_ARTIFACT} |"
+            echo ""
+            echo "Artifacts (14-day retention): [Run #${RUN_NUMBER}](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})"
+            echo "NIGHTLY_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post commit comment
+        uses: peter-evans/commit-comment@v3
+        with:
+          body: ${{ steps.body.outputs.body }}
+
+      - name: Job summary
+        env:
+          MAC_RESULT: ${{ needs.nightly-macos.result }}
+          AND_RESULT: ${{ needs.nightly-android.result }}
+          WIN_RESULT: ${{ needs.nightly-windows.result }}
+        run: |
+          DATE_UTC="$(date -u +%Y-%m-%d)"
+          {
+            echo "## Nightly build ${DATE_UTC}"
+            echo ""
+            echo "| Platform | Status |"
+            echo "|----------|--------|"
+            echo "| macOS arm64    | ${MAC_RESULT} |"
+            echo "| Android arm64  | ${AND_RESULT} |"
+            echo "| Windows x86_64 | ${WIN_RESULT} |"
+          } >> "$GITHUB_STEP_SUMMARY"
