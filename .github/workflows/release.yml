@@ -80,6 +80,19 @@ jobs:
             exit 1
           fi
 
+      - name: Strip quarantine xattr (postbuild)
+        # Ad-hoc signed artifacts inherit com.apple.quarantine from the
+        # runner's download/extract steps. Strip recursively from the DMG
+        # and any staged .app so Gatekeeper does not warn on first launch
+        # after Homebrew Cask install. See ADR-010.
+        run: |
+          if [ -f target/release/CopyPaste.dmg ]; then
+            xattr -cr target/release/CopyPaste.dmg || true
+          fi
+          if [ -d dist/CopyPaste.app ]; then
+            xattr -cr dist/CopyPaste.app || true
+          fi
+
       - name: Verify checksum (W1.4 script)
         run: |
           if [ -f scripts/release/verify-checksum.sh ]; then

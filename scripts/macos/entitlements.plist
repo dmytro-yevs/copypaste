@@ -2,11 +2,33 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Hardened runtime: tighten by default. JIT and unsigned exec memory are
+         disabled because we don't run a JIT (Rust is AOT) and don't load
+         arbitrary code at runtime. Disabling these reduces attack surface. -->
     <key>com.apple.security.cs.allow-jit</key>
-    <true/>
+    <false/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
-    <true/>
+    <false/>
+    <!-- Library validation is OFF (false here = "do not disable validation"
+         = validation stays enabled). Only Apple-signed or same-team-signed
+         dylibs may load. -->
     <key>com.apple.security.cs.disable-library-validation</key>
+    <false/>
+
+    <!-- Networking: relay HTTP client + daemon IPC socket (Unix socket is
+         not gated, but server entitlement is required if we ever bind TCP). -->
+    <key>com.apple.security.network.client</key>
     <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+
+    <!-- File access: user-selected files only (e.g. drag-drop, file picker).
+         App sandbox is OFF because the clipboard daemon needs full disk
+         access semantics (read pasteboard, write history DB outside
+         container) and we are not shipping via Mac App Store. -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
 </dict>
 </plist>
