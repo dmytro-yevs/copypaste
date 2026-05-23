@@ -14,7 +14,7 @@ mod ipc_client;
 use anyhow::Result;
 use ipc_client::{format_wall_time, IpcClient};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 // Include generated Slint bindings.
@@ -55,6 +55,27 @@ impl copypaste_ui::windows::SearchableHistoryItem for ipc_client::HistoryEntry {
     fn preview(&self) -> &str {
         &self.preview
     }
+}
+
+/// Acquire a `Mutex` guard, recovering from poisoning instead of panicking.
+///
+/// Every callback in this binary holds an `Arc<Mutex<AppState>>`. A panic
+/// on the UI thread (e.g. a bug in a Slint property setter) would poison
+/// the mutex and turn every subsequent `state.lock().unwrap()` into a
+/// hard crash of the whole process — the user loses access to clipboard
+/// history because of an unrelated transient panic in another callback.
+///
+/// `AppState` is a value type with no resource invariants that depend on
+/// the panic site, so recovering the inner guard is safe: the only
+/// observable effect of an interrupted critical section is whatever
+/// half-finished assignment the panicking thread left behind, and the
+/// next call site will overwrite or read past it.
+///
+/// We deliberately avoid pulling in `parking_lot` for this — std's
+/// `unwrap_or_else(|e| e.into_inner())` is the canonical recovery
+/// idiom and keeps the dependency footprint flat.
+fn lock_or_recover<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Bring the UI process to the foreground.
@@ -166,7 +187,7 @@ fn main() -> Result<()> {
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
                 let (socket_path, offset) = {
-                    let s = state.lock().unwrap();
+                    let s = lock_or_recover(&state);
                     (s.socket_path.clone(), s.current_offset)
                 };
                 let result = load_history_page(&socket_path, PAGE_SIZE, offset);
@@ -187,7 +208,7 @@ fn main() -> Result<()> {
         window.on_item_clicked(move |id: slint::SharedString| {
             let window_weak = window_weak.clone();
             let socket_path = {
-                let s = state.lock().unwrap();
+                let s = lock_or_recover(&state);
                 s.socket_path.clone()
             };
             let id_str = id.to_string();
@@ -219,7 +240,7 @@ fn main() -> Result<()> {
         window.on_settings_requested(move || {
             let window_weak = window_weak.clone();
             let socket_path = {
-                let s = state.lock().unwrap();
+                let s = lock_or_recover(&state);
                 s.socket_path.clone()
             };
             std::thread::spawn(move || {
@@ -260,7 +281,7 @@ fn main() -> Result<()> {
         let state = Arc::clone(&state);
         window.on_search_changed(move |query: slint::SharedString| {
             let snapshot = {
-                let s = state.lock().unwrap();
+                let s = lock_or_recover(&state);
                 s.last_page_items.clone()
             };
             let q = query.to_string();
@@ -291,7 +312,7 @@ fn main() -> Result<()> {
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
                 let (socket_path, new_offset) = {
-                    let mut s = state.lock().unwrap();
+                    let mut s = lock_or_recover(&state);
                     let socket = s.socket_path.clone();
                     let offset = s.current_offset + PAGE_SIZE;
                     s.current_offset = offset;
@@ -317,7 +338,7 @@ fn main() -> Result<()> {
             let state = Arc::clone(&state);
             std::thread::spawn(move || {
                 let (socket_path, new_offset) = {
-                    let mut s = state.lock().unwrap();
+                    let mut s = lock_or_recover(&state);
                     let offset = s.current_offset.saturating_sub(PAGE_SIZE);
                     s.current_offset = offset;
                     (s.socket_path.clone(), offset)
@@ -341,7 +362,7 @@ fn main() -> Result<()> {
             // Small delay to let the window render first
             std::thread::sleep(Duration::from_millis(100));
             let (socket_path, offset) = {
-                let s = state_clone.lock().unwrap();
+                let s = lock_or_recover(&state_clone);
                 (s.socket_path.clone(), s.current_offset)
             };
             let result = load_history_page(&socket_path, PAGE_SIZE, offset);
@@ -406,7 +427,7 @@ fn refresh_history_after_autostart(
     state: Arc<Mutex<AppState>>,
 ) {
     let (socket_path, offset) = {
-        let s = state.lock().unwrap();
+        let s = lock_or_recover(&state);
         (s.socket_path.clone(), s.current_offset)
     };
     let result = load_history_page(&socket_path, PAGE_SIZE, offset);
@@ -481,9 +502,7 @@ fn apply_history_result(
             win.set_items(Default::default());
             win.set_total_count(0);
             // Clear the cache so a stale search doesn't show pre-error rows.
-            if let Ok(mut s) = state.lock() {
-                s.last_page_items.clear();
-            }
+            lock_or_recover(state).last_page_items.clear();
         }
         Ok(page) => {
             let count = page.items.len() as u64;
@@ -502,9 +521,7 @@ fn apply_history_result(
 
             // Cache the entries for the debounced search filter.
             let query = win.get_search_query().to_string();
-            if let Ok(mut s) = state.lock() {
-                s.last_page_items = page.items.clone();
-            }
+            lock_or_recover(state).last_page_items = page.items.clone();
 
             // Wave 3.4: image rows ship without inline pixels for now.
             // `thumb_width == 0` tells the Slint row to render the "IMG"
