@@ -16,7 +16,10 @@ pub async fn delete_item(
     Path((device_id, item_id)): Path<(String, String)>,
     BearerToken(token): BearerToken,
 ) -> Result<StatusCode, RelayError> {
-    let mut store = state.lock().expect("state mutex poisoned");
+    // Survive mutex poisoning (security HIGH #1, INFO #21): recover the
+    // inner data rather than crashing the request. Matches the pattern
+    // already used in devices.rs.
+    let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
     store.verify_token(&device_id, &token)?;
     store.delete_item(&device_id, &item_id)?;
     Ok(StatusCode::NO_CONTENT)
@@ -41,7 +44,8 @@ pub async fn push(
     BearerToken(token): BearerToken,
     Json(body): Json<PushRequest>,
 ) -> Result<(StatusCode, Json<PushResponse>), RelayError> {
-    let mut store = state.lock().expect("state mutex poisoned");
+    // Survive mutex poisoning (security HIGH #1).
+    let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
 
     // Auth: verify token belongs to this device.
     store.verify_token(&device_id, &token)?;
@@ -69,7 +73,8 @@ pub async fn pull(
     BearerToken(token): BearerToken,
     Query(params): Query<PullParams>,
 ) -> Result<Json<Vec<PullItem>>, RelayError> {
-    let store = state.lock().expect("state mutex poisoned");
+    // Survive mutex poisoning (security HIGH #1).
+    let store = state.lock().unwrap_or_else(|e| e.into_inner());
 
     // Auth: verify token belongs to this device.
     store.verify_token(&device_id, &token)?;
