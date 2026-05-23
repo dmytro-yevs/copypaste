@@ -5,15 +5,59 @@ pub mod items;
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get};
 use axum::Router;
+use tower_governor::errors::GovernorError;
 use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::KeyExtractor;
 use tower_governor::GovernorLayer;
 
 use crate::api::metrics;
 use crate::config::RelayConfig;
 use crate::state::AppState;
+
+/// `KeyExtractor` that pulls the `:device_id` segment out of paths shaped like
+/// `/devices/<id>/items[/...]`. Used by the per-device `GovernorLayer` so the
+/// rate limit is genuinely per-device (HIGH #4) — `PeerIpKeyExtractor` keyed
+/// the bucket by client IP, which means a single NAT'd network shared one
+/// per-device bucket while a single attacker on many IPs got a fresh bucket
+/// per IP. Both directions of that error are now closed.
+///
+/// Returns `UnableToExtractKey` (which `tower_governor` maps to a 500) if the
+/// URI does not look like a device-scoped item route; in practice that never
+/// happens because this extractor is only attached to the `item_routes`
+/// sub-router, but we fail closed rather than silently merging the bucket.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct DeviceIdKeyExtractor;
+
+impl KeyExtractor for DeviceIdKeyExtractor {
+    type Key = String;
+
+    fn extract<B>(&self, req: &Request<B>) -> Result<Self::Key, GovernorError> {
+        // Expected shape: "/devices/<id>/items" or "/devices/<id>/items/<item_id>".
+        // No allocation in the happy path beyond the returned `String`.
+        let path = req.uri().path();
+        let rest = path.strip_prefix("/devices/").ok_or(GovernorError::Other {
+            code: StatusCode::INTERNAL_SERVER_ERROR,
+            msg: Some("device-rate-limited route without device id segment".into()),
+            headers: None,
+        })?;
+        let id = match rest.find('/') {
+            Some(end) => &rest[..end],
+            None => rest,
+        };
+        if id.is_empty() {
+            return Err(GovernorError::Other {
+                code: StatusCode::INTERNAL_SERVER_ERROR,
+                msg: Some("empty device id in path".into()),
+                headers: None,
+            });
+        }
+        Ok(id.to_owned())
+    }
+}
 
 /// Build the complete relay router.
 ///
@@ -52,10 +96,14 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
     );
 
     // ---- Per-device rate limit layer (60 req/min) ---------------------------
+    // HIGH #4: key the bucket by the `:device_id` URL segment via a custom
+    // `KeyExtractor`. The previous default keyed by peer IP, so this layer
+    // was effectively a *second* per-IP limit, not a per-device one.
     let per_device_conf = Arc::new(
         GovernorConfigBuilder::default()
             .per_second(1)
             .burst_size(20)
+            .key_extractor(DeviceIdKeyExtractor)
             .finish()
             .expect("invalid per-device governor configuration"),
     );
@@ -125,4 +173,55 @@ async fn list_devices_handler(State(state): State<AppState>) -> impl IntoRespons
     let store = state.lock().unwrap_or_else(|e| e.into_inner());
     let device_ids = store.list_devices();
     axum::Json(serde_json::json!({ "devices": device_ids }))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+
+    fn req(uri: &str) -> Request<Body> {
+        Request::builder().uri(uri).body(Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn device_id_extractor_pulls_id_from_items_collection() {
+        let key = DeviceIdKeyExtractor
+            .extract(&req("/devices/abc-123/items"))
+            .unwrap();
+        assert_eq!(key, "abc-123");
+    }
+
+    #[test]
+    fn device_id_extractor_pulls_id_from_single_item() {
+        let key = DeviceIdKeyExtractor
+            .extract(&req("/devices/abc-123/items/42"))
+            .unwrap();
+        assert_eq!(key, "abc-123");
+    }
+
+    #[test]
+    fn device_id_extractor_ignores_query_string() {
+        let key = DeviceIdKeyExtractor
+            .extract(&req("/devices/abc-123/items?since=10"))
+            .unwrap();
+        assert_eq!(key, "abc-123");
+    }
+
+    #[test]
+    fn device_id_extractor_fails_closed_on_unrelated_path() {
+        assert!(DeviceIdKeyExtractor.extract(&req("/health")).is_err());
+        assert!(DeviceIdKeyExtractor.extract(&req("/devices")).is_err());
+    }
+
+    #[test]
+    fn device_id_extractor_rejects_empty_id() {
+        assert!(DeviceIdKeyExtractor
+            .extract(&req("/devices//items"))
+            .is_err());
+    }
 }
