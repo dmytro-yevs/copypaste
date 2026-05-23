@@ -10,6 +10,7 @@ description = "Beta-bonus criterion benchmark harness for CopyPaste"
 
 [dev-dependencies]
 copypaste-core = { path = "../copypaste-core" }
+copypaste-sync = { path = "../copypaste-sync" }
 criterion.workspace = true
 sha2.workspace = true
 # tempfile pinned to match copypaste-core dev-deps (Rust 1.75 MSRV).
@@ -25,4 +26,8 @@ harness = false
 
 [[bench]]
 name = "hash"
+harness = false
+
+[[bench]]
+name = "sync"
 harness = false
