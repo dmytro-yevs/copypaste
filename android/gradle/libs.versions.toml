@@ -6,7 +6,7 @@ targetSdk = "34"
 compileSdk = "34"
 coreKtx = "1.12.0"
 appcompat = "1.6.1"
-material = "1.11.0"
+material = "1.14.0"
 coroutines = "1.8.0"
 # Jetpack Compose — beta-bonus history/pair/settings screens.
 # Kotlin 1.9.23 pairs with Compose Compiler 1.5.11.
