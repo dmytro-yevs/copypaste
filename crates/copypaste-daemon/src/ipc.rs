@@ -2,7 +2,10 @@ use crate::protocol::{
     Request, Response, CURRENT_PROTOCOL_VERSION, ERR_CODE_INTERNAL_ERROR,
     ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
-use copypaste_core::{count_items, delete_fts, delete_item, get_page, search_items, Database};
+use copypaste_core::{
+    count_items, delete_fts, delete_item, ensure_revoked_devices_table, get_page, revoke_device,
+    search_items, Database,
+};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -214,10 +217,26 @@ impl IpcServer {
                 | "pin"
                 | "history_page"
                 | "import"
+                | "revoke_peer"
         )
     }
 
     pub async fn serve(self, socket_path: &std::path::Path) -> anyhow::Result<()> {
+        // T4 (v0.3) — make sure the `revoked_devices` audit table exists
+        // before any client can call `revoke_peer`. The DDL is purely
+        // additive (`CREATE TABLE IF NOT EXISTS`) and does NOT bump the
+        // SQLite `user_version`, keeping us out of the HKDF v2 worker's
+        // schema-migration territory.
+        {
+            let db = self.db.lock().await;
+            if let Err(e) = ensure_revoked_devices_table(db.conn()) {
+                tracing::error!(
+                    "failed to ensure revoked_devices table: {e} — \
+                     revoke_peer requests will fail until this is fixed"
+                );
+            }
+        }
+
         // Ensure parent directory exists and is user-only (0o700) so that the
         // socket cannot be reached by other local users even if the socket
         // mode itself were ever loosened.
@@ -840,6 +859,107 @@ impl IpcServer {
                         }
                     }
                     Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
+                }
+            }
+
+            // T4 (v0.3) — manual peer revocation. Atomic with respect to the
+            // user: a single click both (a) removes the peer from the local
+            // JSON peer store so future sync attempts won't re-discover the
+            // device by name, and (b) writes a row to the SQLite
+            // `revoked_devices` audit table. The v1.0 cryptographic
+            // revocation protocol will later consume that table to broadcast
+            // revocation markers. For v0.3 the audit row is the only durable
+            // record — mTLS rejection on unknown fingerprint is what blocks
+            // the revoked peer from continuing to sync.
+            "revoke_peer" => {
+                let fingerprint = match req.params.get("fingerprint").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: fingerprint",
+                        )
+                    }
+                };
+                if !is_valid_fingerprint(&fingerprint) {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        format!("invalid fingerprint format: {fingerprint}"),
+                    );
+                }
+
+                // Capture the peer's display name *before* deleting so the
+                // audit row preserves the human-readable label. Falls back
+                // to an empty string if the peer wasn't in the store
+                // (revoking an unknown fingerprint is allowed — useful when
+                // the local peer list is out of sync with reality).
+                let (removed, captured_name) = match load_peers() {
+                    Ok(mut peers) => {
+                        let before_len = peers.len();
+                        let name = peers
+                            .iter()
+                            .find(|p| {
+                                p.get("fingerprint")
+                                    .and_then(|v| v.as_str())
+                                    .map(|f| f == fingerprint)
+                                    .unwrap_or(false)
+                            })
+                            .and_then(|p| p.get("name"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+
+                        peers.retain(|p| {
+                            p.get("fingerprint")
+                                .and_then(|v| v.as_str())
+                                .map(|f| f != fingerprint)
+                                .unwrap_or(true)
+                        });
+                        if let Err(e) = save_peers(&peers) {
+                            return Response::err(req.id, format!("failed to save peers: {e}"));
+                        }
+                        (peers.len() < before_len, name)
+                    }
+                    Err(e) => {
+                        return Response::err(req.id, format!("failed to load peers: {e}"))
+                    }
+                };
+
+                // Write the audit row. Done on the blocking thread pool
+                // because rusqlite is sync; the mutex is held only for the
+                // duration of the two short statements inside
+                // `revoke_device`.
+                let db_arc = self.db.clone();
+                let fp_for_db = fingerprint.clone();
+                let name_for_db = captured_name.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    revoke_device(db.conn(), &fp_for_db, &name_for_db)
+                })
+                .await;
+
+                match join {
+                    Ok(Ok(revoked_at)) => Response::ok(
+                        req.id,
+                        serde_json::json!({
+                            "ok": true,
+                            "removed": removed,
+                            "revoked_at": revoked_at,
+                            "fingerprint": fingerprint,
+                        }),
+                    ),
+                    Ok(Err(e)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("failed to record revocation: {e}"),
+                    ),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("revoke task join error: {e}"),
+                    ),
                 }
             }
 
@@ -2076,4 +2196,5 @@ mod tests {
             "valid request must report not_implemented until Transport is wired"
         );
     }
+
 }
