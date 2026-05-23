@@ -803,6 +803,7 @@ fn clipboard_item_to_json(item: &ClipboardItem) -> serde_json::Value {
         "wall_time":     item.wall_time,
         "expires_at":    item.expires_at,
         "app_bundle_id": item.app_bundle_id,
+        "origin_device_id": item.origin_device_id,
     })
 }
 
@@ -830,6 +831,13 @@ fn json_to_clipboard_item(v: &serde_json::Value) -> Option<ClipboardItem> {
     let wall_time = v["wall_time"].as_i64().unwrap_or(0);
     let expires_at = v["expires_at"].as_i64();
     let app_bundle_id = v["app_bundle_id"].as_str().map(str::to_owned);
+    // Empty default mirrors the v2->v3 migration: rows that pre-date the
+    // origin-tracking column surface with `""` and are later stamped by
+    // `items::backfill_origin_device_id` once the local UUID is known.
+    let origin_device_id = v["origin_device_id"]
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_default();
 
     Some(ClipboardItem {
         id,
@@ -845,6 +853,7 @@ fn json_to_clipboard_item(v: &serde_json::Value) -> Option<ClipboardItem> {
         expires_at,
         app_bundle_id,
         content_hash: None,
+        origin_device_id,
     })
 }
 
@@ -1084,6 +1093,7 @@ mod tests {
             expires_at: None,
             app_bundle_id: None,
             content_hash: None,
+            origin_device_id: String::new(),
         }
     }
 
