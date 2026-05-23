@@ -76,3 +76,15 @@ cargo run -p copypaste-relay
 ```bash
 cargo run -p copypaste-cli -- --help
 ```
+
+## Alpha caveats (v0.1.0-alpha)
+
+This is an early alpha. Known limitations:
+
+- **P2P sync is scaffolding:** the `copypaste-p2p`, `copypaste-sync` crates exist but are not wired into the daemon yet. Pairing UI is a preview.
+- **Cloud sync (Supabase) is integration-tested only:** end-to-end push/pull requires valid `SUPABASE_URL`/`SUPABASE_ANON_KEY` and the schema migration applied to your project.
+- **Relay is in-memory only:** the optional `copypaste-relay` service does not persist devices or items across restart. Use only for testing.
+- **IPC protocol is unversioned:** the daemon, CLI, and UI must be built from the same commit. Mixed versions may break silently.
+- **Windows daemon is a stub:** named-pipe IPC scaffolding exists but the daemon does not run on Windows yet.
+- **Android is preview only:** UniFFI bindings + a Kotlin skeleton exist, but no signed APK is validated end-to-end.
+- **No code signing or notarisation yet.** macOS builds are unsigned.
