@@ -57,5 +57,19 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "sensitive_detect"
+path = "fuzz_targets/sensitive_detect.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chunks_from_blob"
+path = "fuzz_targets/chunks_from_blob.rs"
+test = false
+doc = false
+bench = false
+
 [profile.release]
 debug = 1
