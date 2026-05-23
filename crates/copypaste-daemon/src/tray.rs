@@ -114,8 +114,7 @@ fn load_icon() -> Option<tray_icon::Icon> {
     }
 
     // Fallback: 22×22 grey RGBA pixels.
-    let grey: Vec<u8> = std::iter::repeat([0x88u8, 0x88, 0x88, 0xffu8])
-        .take(22 * 22)
+    let grey: Vec<u8> = std::iter::repeat_n([0x88u8, 0x88, 0x88, 0xffu8], 22 * 22)
         .flatten()
         .collect();
     match tray_icon::Icon::from_rgba(grey, 22, 22) {
@@ -148,10 +147,7 @@ fn decode_png_rgba(bytes: &[u8]) -> Option<Vec<u8>> {
             Some(rgba)
         }
         png::ColorType::Grayscale => {
-            let rgba: Vec<u8> = raw
-                .iter()
-                .flat_map(|&g| [g, g, g, 0xff])
-                .collect();
+            let rgba: Vec<u8> = raw.iter().flat_map(|&g| [g, g, g, 0xff]).collect();
             Some(rgba)
         }
         png::ColorType::GrayscaleAlpha => {
@@ -188,10 +184,7 @@ impl TrayMenu {
     /// thread and aborts via `panic!` otherwise. We catch that panic so the
     /// caller receives a recoverable `Err` and the daemon can continue
     /// without a tray (e.g. on test runners or background helper threads).
-    pub fn build(
-        private_mode_on: bool,
-        launch_at_login_on: bool,
-    ) -> Result<Self, TrayInitError> {
+    pub fn build(private_mode_on: bool, launch_at_login_on: bool) -> Result<Self, TrayInitError> {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             Self::build_inner(private_mode_on, launch_at_login_on)
         }))
@@ -199,10 +192,7 @@ impl TrayMenu {
         .and_then(|inner| inner)
     }
 
-    fn build_inner(
-        private_mode_on: bool,
-        launch_at_login_on: bool,
-    ) -> Result<Self, TrayInitError> {
+    fn build_inner(private_mode_on: bool, launch_at_login_on: bool) -> Result<Self, TrayInitError> {
         let open_history = MenuItem::with_id(ID_OPEN_HISTORY, "Open History", true, None);
         let private_mode = MenuItem::with_id(
             ID_PRIVATE_MODE,
@@ -437,8 +427,7 @@ mod tests {
         // Wrap in catch_unwind: even if the underlying platform_impl path
         // happens to succeed under test, the assertion we care about is the
         // absence of panic.
-        let outcome =
-            std::panic::catch_unwind(|| build_tray_menu(false, false));
+        let outcome = std::panic::catch_unwind(|| build_tray_menu(false, false));
 
         let result = match outcome {
             Ok(r) => r,
