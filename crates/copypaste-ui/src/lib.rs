@@ -13,6 +13,7 @@
 //! `on_*` registration methods so a host application can wire callbacks
 //! without depending on the generated Slint types directly.
 
+pub mod autostart;
 pub mod fingerprint;
 pub mod settings;
 pub mod tray_menu;
