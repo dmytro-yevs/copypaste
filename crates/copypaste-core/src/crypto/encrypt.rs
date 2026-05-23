@@ -3,10 +3,44 @@ use chacha20poly1305::{
     XChaCha20Poly1305, XNonce,
 };
 use rand::RngCore;
+use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
 
 pub const NONCE_SIZE: usize = 24;
 pub const TAG_SIZE: usize = 16;
+
+/// Process-global counter used to rate-limit the "legacy empty-AAD fallback"
+/// warning emitted by [`decrypt_item_with_aad`]. Without rate limiting a
+/// migration-time bulk decrypt could spam logs with one line per row.
+static LEGACY_AAD_FALLBACK_HITS: AtomicU64 = AtomicU64::new(0);
+
+/// Environment variable that re-enables the legacy empty-AAD decryption
+/// fallback. Defaults to enabled (`true`) for v0.2 backwards-compatibility
+/// during the AAD migration; set to `"0"` / `"false"` / `"no"` to force
+/// strict AAD enforcement (no fallback — pre-AAD rows will fail to decrypt
+/// with `EncryptError::AuthFailed`).
+///
+/// TODO(v0.3): once the storage schema gains a per-row `aad_version`
+/// column (owned by the storage worker), the fallback becomes per-row and
+/// this env var disappears.
+pub const LEGACY_AAD_ENV: &str = "COPYPASTE_ALLOW_LEGACY_AAD";
+
+/// Returns `true` iff the legacy empty-AAD decryption fallback is enabled
+/// for this process. Reads `LEGACY_AAD_ENV` on every call; cheap enough
+/// (single syscall per decrypt attempt) and avoids stale-cache surprises
+/// in long-running daemons that toggle the env var via re-exec.
+///
+/// Recognised "disabled" values (case-insensitive): `0`, `false`, `no`,
+/// `off`. Any other value — including unset — means "enabled" for v0.2.
+fn legacy_aad_fallback_allowed() -> bool {
+    match std::env::var(LEGACY_AAD_ENV) {
+        Ok(v) => !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        Err(_) => true, // unset → enabled (v0.2 default)
+    }
+}
 
 /// AAD schema version for per-item AEAD binding (`item_id|schema_version`).
 ///
@@ -26,6 +60,13 @@ pub const AAD_SCHEMA_VERSION: u32 = 3;
 pub enum EncryptError {
     #[error("Decryption failed: authentication tag mismatch")]
     AuthFailed,
+    /// Strict-mode failure: the supplied AAD did not validate AND the
+    /// `COPYPASTE_ALLOW_LEGACY_AAD` env var is disabled, so we refused to
+    /// silently fall back to empty-AAD decryption. Callers can recover by
+    /// re-enabling the env var for one-shot legacy decrypts, or by
+    /// re-encrypting the affected row under the current AAD binding.
+    #[error("Decryption failed: AAD mismatch (legacy empty-AAD fallback disabled)")]
+    AadMismatch,
     /// AEAD cipher rejected the input (e.g. payload exceeds the per-message
     /// limit of (2^32 - 1) * 64 bytes for ChaCha20-Poly1305). We surface the
     /// underlying error string instead of panicking so callers can degrade
@@ -81,12 +122,24 @@ pub fn encrypt_item_with_aad(
 /// ciphertext, nonce, key, or AAD has been tampered with / is wrong.
 ///
 /// Legacy fallback (v0.2 → v0.3 transition): if decryption with the
-/// supplied `aad` fails AND `aad` is non-empty, retry once with an
+/// supplied `aad` fails AND `aad` is non-empty AND the env var
+/// [`LEGACY_AAD_ENV`] is enabled (default), retry once with an
 /// empty AAD. This lets us decrypt rows written by the pre-AAD
-/// (`encrypt_item`) code path without forcing a migration. The fallback
-/// MUST be removed in v0.3 once the full row population has been
-/// re-encrypted under the new AAD binding — see `AAD_SCHEMA_VERSION`
-/// TODO note above.
+/// (`encrypt_item`) code path without forcing a migration.
+///
+/// Security note: the unconditional fallback (pre-audit) silently disabled
+/// AAD substitution protection — an attacker who could swap a ciphertext
+/// blob from row `item_id=A` into row `item_id=B` would succeed if the
+/// original blob was written without AAD. Gating behind an env var that
+/// defaults to enabled preserves migration UX while letting deployments
+/// that have completed re-encryption flip the strict switch
+/// (`COPYPASTE_ALLOW_LEGACY_AAD=0`). The fallback MUST be removed in v0.3
+/// once the full row population has been re-encrypted under the new AAD
+/// binding — see `AAD_SCHEMA_VERSION` TODO note above.
+///
+/// Every successful fallback hit is logged at `warn!` level, rate-limited
+/// to ~1 line per 100 calls via [`LEGACY_AAD_FALLBACK_HITS`] so a bulk
+/// migration cannot DoS the log file.
 pub fn decrypt_item_with_aad(
     ciphertext: &[u8],
     nonce: &[u8; NONCE_SIZE],
@@ -102,15 +155,33 @@ pub fn decrypt_item_with_aad(
     match cipher.decrypt(&nonce_x, payload) {
         Ok(pt) => Ok(pt),
         Err(_) if !aad.is_empty() => {
+            if !legacy_aad_fallback_allowed() {
+                // Strict mode: refuse to silently fall back to empty AAD.
+                // Surface a distinct error so callers / tests can tell
+                // "AAD mismatch + fallback disabled" apart from a
+                // straight ciphertext/key/nonce auth failure.
+                return Err(EncryptError::AadMismatch);
+            }
             // Legacy row written by pre-AAD `encrypt_item`. Retry with
-            // empty AAD. TODO(v0.3): drop this fallback path.
+            // empty AAD. TODO(v0.3): drop this fallback path entirely.
             let legacy = Payload {
                 msg: ciphertext,
                 aad: &[][..],
             };
-            cipher
-                .decrypt(&nonce_x, legacy)
-                .map_err(|_| EncryptError::AuthFailed)
+            match cipher.decrypt(&nonce_x, legacy) {
+                Ok(pt) => {
+                    let hits = LEGACY_AAD_FALLBACK_HITS.fetch_add(1, Ordering::Relaxed);
+                    if hits % 100 == 0 {
+                        tracing::warn!(
+                            total_hits = hits + 1,
+                            "legacy empty-AAD decryption used — will be disabled in v0.3 \
+                             (set COPYPASTE_ALLOW_LEGACY_AAD=0 to opt in early)"
+                        );
+                    }
+                    Ok(pt)
+                }
+                Err(_) => Err(EncryptError::AuthFailed),
+            }
         }
         Err(_) => Err(EncryptError::AuthFailed),
     }
@@ -189,6 +260,98 @@ mod tests {
         let (nonce, ciphertext) = encrypt_item(&plaintext, &key).unwrap();
         let decrypted = decrypt_item(&ciphertext, &nonce, &key).unwrap();
         assert_eq!(decrypted, plaintext);
+    }
+
+    // ── Audit HIGH #1: legacy empty-AAD fallback must be opt-in via env ──
+    //
+    // These tests mutate process-global env state — they share the same
+    // env var with every other test in the binary, so they must run
+    // serially. Without `serial_test::serial` two of these executing on
+    // different worker threads would race and produce flaky CI failures.
+    use serial_test::serial;
+
+    /// SAFETY (clippy `deprecated-cfg-attr-crate-type-name` /
+    /// `unsafe-op-in-unsafe-fn`): `env::set_var` is `unsafe` only because
+    /// concurrent reads from other threads racing the write can produce a
+    /// torn read. We force `#[serial]` on every env-mutating test so no
+    /// other test is observing the env var while we flip it.
+    fn set_env_var(key: &str, value: &str) {
+        // Safe because tests using this helper are `#[serial]`-gated.
+        unsafe {
+            std::env::set_var(key, value);
+        }
+    }
+
+    fn unset_env_var(key: &str) {
+        unsafe {
+            std::env::remove_var(key);
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn legacy_empty_aad_fallback_succeeds_when_env_unset() {
+        unset_env_var(LEGACY_AAD_ENV);
+        let key = test_key();
+        // Write with empty AAD (pre-AAD code path), then read with a
+        // non-empty AAD — fallback should kick in and succeed.
+        let (nonce, ct) = encrypt_item(b"legacy-payload", &key).unwrap();
+        let aad = build_item_aad("item-xyz", AAD_SCHEMA_VERSION);
+        let pt = decrypt_item_with_aad(&ct, &nonce, &key, &aad).unwrap();
+        assert_eq!(pt, b"legacy-payload");
+    }
+
+    #[test]
+    #[serial]
+    fn legacy_empty_aad_fallback_succeeds_when_env_true() {
+        set_env_var(LEGACY_AAD_ENV, "1");
+        let key = test_key();
+        let (nonce, ct) = encrypt_item(b"legacy", &key).unwrap();
+        let aad = build_item_aad("item-A", AAD_SCHEMA_VERSION);
+        let pt = decrypt_item_with_aad(&ct, &nonce, &key, &aad).unwrap();
+        assert_eq!(pt, b"legacy");
+        unset_env_var(LEGACY_AAD_ENV);
+    }
+
+    #[test]
+    #[serial]
+    fn legacy_empty_aad_fallback_disabled_when_env_zero() {
+        set_env_var(LEGACY_AAD_ENV, "0");
+        let key = test_key();
+        let (nonce, ct) = encrypt_item(b"legacy", &key).unwrap();
+        let aad = build_item_aad("item-A", AAD_SCHEMA_VERSION);
+        let err = decrypt_item_with_aad(&ct, &nonce, &key, &aad).unwrap_err();
+        assert!(matches!(err, EncryptError::AadMismatch));
+        unset_env_var(LEGACY_AAD_ENV);
+    }
+
+    #[test]
+    #[serial]
+    fn legacy_empty_aad_fallback_disabled_when_env_false() {
+        set_env_var(LEGACY_AAD_ENV, "FALSE");
+        let key = test_key();
+        let (nonce, ct) = encrypt_item(b"legacy", &key).unwrap();
+        let aad = build_item_aad("item-A", AAD_SCHEMA_VERSION);
+        let err = decrypt_item_with_aad(&ct, &nonce, &key, &aad).unwrap_err();
+        assert!(matches!(err, EncryptError::AadMismatch));
+        unset_env_var(LEGACY_AAD_ENV);
+    }
+
+    #[test]
+    #[serial]
+    fn aad_mismatch_with_real_aad_blob_returns_authfailed_not_fallback() {
+        // Both writer and reader use AAD, but reader supplies the wrong
+        // item_id — this MUST stay AuthFailed regardless of env var,
+        // because the original ciphertext was never written with empty AAD
+        // so the fallback path also fails. Pin behaviour.
+        set_env_var(LEGACY_AAD_ENV, "1");
+        let key = test_key();
+        let aad_a = build_item_aad("item-A", AAD_SCHEMA_VERSION);
+        let aad_b = build_item_aad("item-B", AAD_SCHEMA_VERSION);
+        let (nonce, ct) = encrypt_item_with_aad(b"payload", &key, &aad_a).unwrap();
+        let err = decrypt_item_with_aad(&ct, &nonce, &key, &aad_b).unwrap_err();
+        assert!(matches!(err, EncryptError::AuthFailed));
+        unset_env_var(LEGACY_AAD_ENV);
     }
 
     /// Security audit medium #10: pathological inputs must surface as

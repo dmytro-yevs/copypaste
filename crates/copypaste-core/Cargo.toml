@@ -46,6 +46,10 @@ sha2.workspace = true
 # to round-trip JPEG / GIF synthetic fixtures.
 image = { version = ">=0.25, <0.25.10", default-features = false, features = ["png", "tiff", "jpeg", "gif"] }
 serde_json.workspace = true
+# Audit HIGH #1 (encrypt.rs): env-var-mutating tests for the legacy
+# empty-AAD fallback MUST serialise — concurrent env::set_var on different
+# threads triggers torn reads / UB. Pure-Rust, only built for `cargo test`.
+serial_test = "3"
 
 [[bench]]
 name = "crypto"
