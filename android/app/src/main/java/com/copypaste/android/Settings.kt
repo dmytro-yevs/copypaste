@@ -17,6 +17,31 @@ import javax.crypto.spec.GCMParameterSpec
 class Settings(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("copypaste", Context.MODE_PRIVATE)
 
+    /**
+     * HIGH-7: subscribe to live updates of any pref. The SharedPreferences
+     * getter is already process-local synchronous (each read returns the
+     * current in-memory value), but writes from a UI coroutine and reads
+     * from the service's IO coroutine can interleave such that the service
+     * acts on a stale snapshot it captured into a local val.
+     *
+     * Callers that need to react to changes (e.g. ClipboardService toggling
+     * its behaviour the moment the user flips a switch in SettingsActivity)
+     * should subscribe via this helper and unsubscribe in onDestroy /
+     * coroutine cancellation. The returned [SharedPreferences.OnSharedPreferenceChangeListener]
+     * must be retained by the caller — SharedPreferences holds a weak
+     * reference to it.
+     */
+    fun observe(
+        listener: SharedPreferences.OnSharedPreferenceChangeListener
+    ): SharedPreferences.OnSharedPreferenceChangeListener {
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        return listener
+    }
+
+    fun stopObserving(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+        prefs.unregisterOnSharedPreferenceChangeListener(listener)
+    }
+
     var relayUrl: String
         get() = prefs.getString("relay_url", "http://localhost:8080") ?: "http://localhost:8080"
         set(v) = prefs.edit().putString("relay_url", v).apply()

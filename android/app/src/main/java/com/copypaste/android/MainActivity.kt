@@ -94,11 +94,32 @@ class MainActivity : ComponentActivity() {
         clipboardManager.addPrimaryClipChangedListener(clipListener)
 
         maybeRequestNotificationPermission()
+        startClipboardServiceIfPossible()
 
         setContent {
             CopyPasteTheme {
                 MainScreen()
             }
+        }
+    }
+
+    /**
+     * Kick off [ClipboardService] so background capture continues on API 26-28
+     * after the user leaves MainActivity. Wrapped in try/catch because
+     * `startForegroundService` can throw [SecurityException] under heavy
+     * background restrictions (API 31+) and
+     * [android.app.ForegroundServiceStartNotAllowedException] (API 34+) when
+     * the app is in a state that disallows foreground promotion. A failure
+     * here is non-fatal: the in-activity clipListener still works while the
+     * UI is visible.
+     */
+    private fun startClipboardServiceIfPossible() {
+        try {
+            val intent = Intent(this, ClipboardService::class.java)
+            ContextCompat.startForegroundService(this, intent)
+            Log.d(TAG, "ClipboardService start requested")
+        } catch (e: Exception) {
+            Log.w(TAG, "ClipboardService start failed: ${e.javaClass.simpleName} ${e.message}")
         }
     }
 
