@@ -1,7 +1,9 @@
 # Release pipeline — beta-w1.3
+# Updated: PR2a Android parallel build, PR2b release integration, PR8 explicit features
 #
 # Triggered on tag push matching v*.*.* (or workflow_dispatch).
 # Builds macOS arm64 DMG via W1.4 release scripts (build-dmg-ci.sh, verify-checksum.sh).
+# Builds Android arm64-v8a .so via cargo-ndk (parallel with macOS job, no gradle).
 # Uses ad-hoc codesigning (no Developer ID) — see ADR for beta distribution policy.
 #
 # Required GitHub repository secrets:
@@ -57,8 +59,11 @@ jobs:
         with:
           key: release-macos-arm64
 
-      - name: Build release (workspace, all features)
-        run: cargo build --release --workspace --all-features
+      - name: Build release (workspace, explicit features)
+        run: |
+          # cloud-sync excluded from release build — requires Supabase credentials not present in CI
+          cargo build --release --workspace \
+            --features copypaste-android/android-uniffi-live
 
       - name: Resolve release version
         id: ver
@@ -116,14 +121,110 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  # PR2a — Android arm64-v8a build (runs in parallel with build-macos, no dependency)
+  build-android:
+    name: Build Android (arm64-v8a)
+    runs-on: ubuntu-latest
+    env:
+      INPUT_VERSION: ${{ inputs.version }}
+      TAG_NAME: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable) with Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: release-android-arm64
+
+      - name: Install Android NDK and cargo-ndk
+        run: |
+          # Install cargo-ndk (cross-compilation driver for Android targets)
+          cargo install cargo-ndk --locked
+          # Install NDK via sdkmanager bundled with the ubuntu-latest runner
+          echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
+            "ndk;27.2.12479018" 2>/dev/null \
+            || echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
+            "ndk-bundle" 2>/dev/null \
+            || true
+          # Prefer the env var set by the runner; fall back to the installed bundle
+          NDK_DIR="${ANDROID_NDK_HOME:-${ANDROID_HOME}/ndk-bundle}"
+          echo "ANDROID_NDK_HOME=${NDK_DIR}" >> "$GITHUB_ENV"
+
+      - name: Resolve release version
+        id: ver
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build Android .so (arm64-v8a, explicit features)
+        run: |
+          # cloud-sync excluded from release build — requires Supabase credentials not present in CI
+          cargo ndk -t arm64-v8a \
+            build -p copypaste-android --release \
+            --features copypaste-android/android-uniffi-live
+
+      - name: Collect .so artifact
+        run: |
+          mkdir -p dist-android
+          find target/aarch64-linux-android/release -maxdepth 1 -name "*.so" \
+            -exec cp {} dist-android/ \;
+          ls -lh dist-android/
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CopyPaste-${{ steps.ver.outputs.version }}-android-arm64
+          path: dist-android/*.so
+          if-no-files-found: error
+          retention-days: 14
+
+  # PR2b — Publish release only after both platform builds succeed
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-macos, build-android]
+    runs-on: ubuntu-latest
+    env:
+      INPUT_VERSION: ${{ inputs.version }}
+      TAG_NAME: ${{ github.ref_name }}
+    steps:
+      - name: Resolve release version
+        id: ver
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: CopyPaste-${{ steps.ver.outputs.version }}-macos-arm64
+          path: dist/macos
+
+      - name: Download Android artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: CopyPaste-${{ steps.ver.outputs.version }}-android-arm64
+          path: dist/android
+
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.version }}
           files: |
-            dist/*.dmg
-            dist/*.dmg.sha256
-            dist/SHA256SUMS
+            dist/macos/*.dmg
+            dist/macos/*.dmg.sha256
+            dist/macos/SHA256SUMS
+            dist/android/*.so
           generate_release_notes: true
           prerelease: ${{ contains(steps.ver.outputs.version, '-alpha') || contains(steps.ver.outputs.version, '-beta') || contains(steps.ver.outputs.version, '-rc') }}
