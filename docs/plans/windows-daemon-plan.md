@@ -1,7 +1,14 @@
 # Windows Daemon Implementation Plan
 
-Status: PLANNING
-Branch: feature/windows-daemon
+> **FROZEN 2026-05-23.** Windows is out of scope for v0.3 and beyond
+> until further notice. This document is preserved for the eventual
+> thaw — see [ADR-012](../adr/ADR-012-windows-frozen-homebrew-only.md)
+> and [`docs/release/v0.3-plan.md`](../release/v0.3-plan.md).
+>
+> Do not start work against this plan without first reverting ADR-012.
+
+Status: FROZEN (was PLANNING)
+Branch: feature/windows-daemon (do not cut new worktree)
 Author: worker-windows-daemon
 
 ---
