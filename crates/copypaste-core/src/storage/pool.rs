@@ -45,6 +45,16 @@ fn key_hex(key: &[u8; 32]) -> String {
 /// before it is handed back to the caller:
 ///   * `PRAGMA key = "x'<hex>'"` — required FIRST statement for SQLCipher
 ///   * `PRAGMA journal_mode = WAL` — concurrent readers + single writer
+///   * `PRAGMA busy_timeout = 5000` — wait up to 5 s on lock contention
+///     instead of returning `SQLITE_BUSY` immediately. Without this, the UI
+///     reader and the daemon writer race the first time they touch the file
+///     and either side may see silent `SQLITE_BUSY` errors.
+///   * `PRAGMA synchronous = NORMAL` — WAL-safe durability with better
+///     write throughput than the default `FULL`.
+///   * `PRAGMA foreign_keys = ON` — must be re-enabled per connection;
+///     SQLite defaults to OFF and the setting is NOT persisted to the file.
+///   * `PRAGMA temp_store = MEMORY` — keep temp B-trees off disk so
+///     plaintext intermediates never hit the filesystem.
 ///
 /// Note: this constructor does **not** run schema migrations. Either run
 /// `Database::open()` once first on the same path (it will apply migrations),
@@ -55,8 +65,19 @@ pub fn open_pool(path: &Path, key: &[u8; 32], max_size: u32) -> Result<SqlitePoo
         // SQLCipher requirement: key pragma MUST be the very first statement
         // executed on a fresh connection. WAL mode applies to the database
         // file (not the connection) but is idempotent and safe to set here.
+        //
+        // The remaining pragmas are per-connection (not persisted in the
+        // file) and MUST be re-applied each time the pool hands out a fresh
+        // connection — otherwise UI reader / daemon writer races surface as
+        // silent `SQLITE_BUSY` and foreign-key checks silently no-op.
+        // Kept in sync with `db::CONNECTION_PRAGMAS`.
         conn.execute_batch(&format!(
-            "PRAGMA key = \"x'{key_hex}'\";\nPRAGMA journal_mode = WAL;"
+            "PRAGMA key = \"x'{key_hex}'\";\n\
+             PRAGMA journal_mode = WAL;\n\
+             PRAGMA busy_timeout = 5000;\n\
+             PRAGMA synchronous = NORMAL;\n\
+             PRAGMA foreign_keys = ON;\n\
+             PRAGMA temp_store = MEMORY;"
         ))
     });
 

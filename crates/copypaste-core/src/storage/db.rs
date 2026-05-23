@@ -69,12 +69,6 @@ impl Database {
         // SQLCipher requirement: key pragma MUST be the very first statement.
         conn.execute_batch(&key_pragma(key))?;
 
-        // Per-connection pragmas (busy_timeout, synchronous, foreign_keys,
-        // temp_store). Run AFTER the key but BEFORE the validation read so
-        // single-connection callers (e.g. the daemon) get the same lock /
-        // foreign-key behaviour as pooled callers.
-        conn.execute_batch(CONNECTION_PRAGMAS)?;
-
         // Validate the key by reading the schema table.
         // With a correct key (or a newly-created empty file): returns 0 or N.
         // With a wrong key on an encrypted file: SQLCipher returns SQLITE_NOTADB.
@@ -83,6 +77,11 @@ impl Database {
             r.get::<_, i64>(0)
         }) {
             Ok(_) => {
+                // Key validated; safe to apply per-connection pragmas that
+                // touch user data (foreign_keys requires reading the
+                // schema). Single-connection callers (e.g. the daemon) now
+                // get the same lock / FK behaviour as pooled callers.
+                conn.execute_batch(CONNECTION_PRAGMAS)?;
                 apply_migrations(&conn)?;
                 Ok(Self { conn })
             }
