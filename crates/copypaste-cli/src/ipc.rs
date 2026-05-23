@@ -1,7 +1,11 @@
+#[cfg(unix)]
 use std::io::{BufRead, BufReader, Write};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use anyhow::{anyhow, Context, Result};
+#[cfg(unix)]
+use anyhow::Context;
+use anyhow::{anyhow, Result};
 use copypaste_ipc::ErrorCode;
 use serde_json::Value;
 
@@ -23,10 +27,12 @@ pub struct Response {
     pub error_code: Option<ErrorCode>,
 }
 
+#[cfg(unix)]
 pub struct IpcClient {
     stream: UnixStream,
 }
 
+#[cfg(unix)]
 impl IpcClient {
     /// Connect to daemon socket. Returns an error if the socket does not exist or
     /// the daemon is not listening.
@@ -72,7 +78,32 @@ impl IpcClient {
     }
 }
 
-#[cfg(test)]
+// Windows stub: the daemon's IPC server is `#[cfg(unix)]` only (Unix domain
+// socket), so the CLI cannot talk to it on Windows in beta.1. This stub keeps
+// the CLI compiling and returns a clear "not yet implemented" error from every
+// call site. Replace with a Windows named-pipe (or loopback TCP) implementation
+// in a follow-up.
+#[cfg(windows)]
+pub struct IpcClient {
+    _socket_path: std::path::PathBuf,
+}
+
+#[cfg(windows)]
+impl IpcClient {
+    pub fn connect(socket_path: &Path) -> Result<Self> {
+        let _ = socket_path;
+        Err(anyhow!(
+            "CLI IPC is not yet implemented on Windows in this beta. \
+             Run the daemon on macOS/Linux, or use the Android app."
+        ))
+    }
+
+    pub fn call(&mut self, _request: &Value) -> Result<Response> {
+        Err(anyhow!("CLI IPC is not yet implemented on Windows in this beta."))
+    }
+}
+
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::io::Write;
