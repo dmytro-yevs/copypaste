@@ -7,6 +7,32 @@
 # Runs on host (needs cargo-ndk + ANDROID_NDK_HOME) OR in the Docker image
 # docker/Dockerfile.android (which provides both). Set IN_DOCKER=1 in the
 # container to silence host-install instructions.
+#
+# ----- Caching (Docker path) -------------------------------------------------
+# When invoked via `docker compose --profile build run --rm android`, the
+# compose service in docker-compose.yml already mounts four named volumes
+# for cache persistence:
+#
+#   cargo-android-cache   -> /usr/local/cargo/registry  (cargo registry)
+#   cargo-android-target  -> /workspace/target-android  (cargo target dir)
+#   sccache-android       -> /sccache                   (Rust compile cache)
+#   ccache-android        -> /ccache                    (C compile cache)
+#
+# If invoking `docker run` directly instead of compose, replicate the mounts:
+#
+#   docker run --rm \
+#     -v "$PWD:/workspace" \
+#     -v copypaste-android-target:/workspace/target-android \
+#     -v copypaste-android-registry:/usr/local/cargo/registry \
+#     -v copypaste-sccache:/sccache \
+#     -v copypaste-ccache:/ccache \
+#     -e CARGO_TARGET_DIR=/workspace/target-android \
+#     copypaste-builder-android \
+#     bash scripts/build-android-pkg.sh arm64-v8a
+#
+# First cold container = full build (~5-10 min on amd64-xlarge with the
+# image's pre-baked openssl/sqlcipher); subsequent runs hit sccache+ccache
+# for ~1-2 min incremental on code-only changes. See docs/release/build-perf.md.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

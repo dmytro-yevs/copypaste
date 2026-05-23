@@ -124,6 +124,48 @@ RUN test -f /opt/prebuilt/openssl/lib/libcrypto.a \
     && test -f /opt/prebuilt/sqlcipher/include/sqlcipher/sqlite3.h \
     && echo "prebuilt libs OK"
 
+# ----- Layer 5: sccache (Rust compile cache) + ccache (C compile cache) ------
+#
+# sccache wraps rustc and caches compilation units keyed by source +
+# compiler version + flags. ccache does the same for C/C++ compilers
+# (which the NDK toolchain invokes for any C dep in the dep graph,
+# e.g. ring, libsqlite3-sys when bundling is enabled).
+#
+# Together they cut incremental rebuild time from ~5-10 min to ~30-90s
+# when only one or two crates have changed, by reusing object files
+# from prior builds across containers/sessions.
+#
+# Cache backend: local disk at /sccache. Mount a Docker named volume
+# (e.g. `-v copypaste-sccache:/sccache`) at run time to persist the
+# cache across `docker run` invocations. See scripts/build-android-apk.sh
+# (and docker-compose.yml `android` service) for the mount pattern.
+ARG SCCACHE_VERSION=0.8.2
+RUN apt-get update && apt-get install -y --no-install-recommends ccache \
+    && rm -rf /var/lib/apt/lists/* \
+    && wget -q "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+         -O /tmp/sccache.tar.gz \
+    && tar -xzf /tmp/sccache.tar.gz -C /tmp \
+    && mv "/tmp/sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache" /usr/local/bin/sccache \
+    && chmod +x /usr/local/bin/sccache \
+    && rm -rf /tmp/sccache.tar.gz "/tmp/sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl" \
+    && mkdir -p /sccache /ccache \
+    && sccache --version \
+    && ccache --version
+
+# Cache configuration.
+# - RUSTC_WRAPPER=sccache: cargo invokes sccache instead of rustc directly.
+# - SCCACHE_DIR=/sccache: local-disk backend (mount a volume for persistence).
+# - SCCACHE_CACHE_SIZE: 10G ceiling; oldest entries are evicted past that.
+# - CC/CXX prefixed with `ccache`: NDK and host C builds hit ccache first.
+# - CCACHE_DIR=/ccache: ditto, mount a volume to persist.
+ENV RUSTC_WRAPPER=sccache
+ENV SCCACHE_DIR=/sccache
+ENV SCCACHE_CACHE_SIZE=10G
+ENV CCACHE_DIR=/ccache
+ENV CCACHE_MAXSIZE=5G
+ENV CC="ccache cc"
+ENV CXX="ccache c++"
+
 WORKDIR /workspace
 
 # Default: build arm64-v8a. Override with: docker run ... <image> bash scripts/build-android-pkg.sh armeabi-v7a

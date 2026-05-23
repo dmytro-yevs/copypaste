@@ -53,6 +53,10 @@ services:
       - .:/workspace
       - cargo-android-cache:/usr/local/cargo/registry
       - cargo-android-target:/workspace/target-android
+      # sccache (Rust) + ccache (C) — persisted across runs so incremental
+      # rebuilds reuse compilation units. See docker/Dockerfile.android L5.
+      - sccache-android:/sccache
+      - ccache-android:/ccache
     environment:
       - CARGO_TARGET_DIR=/workspace/target-android
       - ABI=arm64-v8a
@@ -109,3 +113,7 @@ volumes:
   cargo-windows-target:
   cargo-linux-cache:
   cargo-linux-target:
+  # sccache + ccache backends for the android service. Survive `docker
+  # compose down` so the next cold container start hits warm caches.
+  sccache-android:
+  ccache-android:
