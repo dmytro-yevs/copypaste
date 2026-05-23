@@ -1,5 +1,5 @@
 use hkdf::Hkdf;
-use sha2::Sha256;
+use sha2::{Sha256, Sha512};
 use thiserror::Error;
 use x25519_dalek::{PublicKey, StaticSecret};
 use zeroize::ZeroizeOnDrop;
@@ -10,6 +10,95 @@ use zeroize::ZeroizeOnDrop;
 /// in production — changing it is a hard-fork of all on-wire and on-disk
 /// encrypted material.
 pub const HKDF_SALT_V1: &[u8] = b"copypaste-v1-salt";
+
+/// Current HKDF derivation version. Bumped from 1 → 2 in v0.3 (T5):
+///
+/// **v1** keyed HKDF-SHA256 with a single static salt (`HKDF_SALT_V1`) and an
+/// `info` of `copypaste-v1|{sender}|{recipient}` (network) or
+/// `copypaste-local-storage-v1` (local). Every device used the same salt; key
+/// rotation required a full hard-fork bump of `HKDF_SALT_V1`.
+///
+/// **v2** keys HKDF-SHA512 with a *per-device-pair* salt derived from the pair
+/// fingerprint, and an `info` string of
+/// `copypaste-hkdf-v2|{pair_id}|{key_purpose}` where `key_purpose ∈
+/// {"storage", "sync", "telemetry"}`. This means each device-pair can rotate
+/// its own keys independently (re-issue `pair_id`) without affecting any other
+/// pair, and the three logical key purposes are domain-separated by construction.
+///
+/// v1 derivation is kept (`derive_enc_key` / `local_enc_key`) ONLY for the
+/// ciphertext-migration sweep (v3 → v4 schema). All NEW encryption MUST use
+/// the v2 family.
+pub const HKDF_VERSION: u32 = 2;
+
+/// Base HKDF salt prefix for v2 derivations. The actual salt fed to HKDF is
+/// `SHA-256(HKDF_SALT_V2_BASE || pair_id_bytes)` — using SHA-256 of the
+/// concatenation gives us a fixed-length 32-byte salt regardless of the
+/// `pair_id` shape (UUID string, fingerprint hex, etc.).
+pub const HKDF_SALT_V2_BASE: &[u8] = b"copypaste-v2-salt";
+
+/// Compute the v2 per-pair salt: `SHA-256(HKDF_SALT_V2_BASE || pair_id)`.
+/// Exposed for tests and the migration helper that needs to verify two
+/// pair-ids produce different salts.
+pub fn hkdf_v2_pair_salt(pair_id: &str) -> [u8; 32] {
+    use sha2::Digest;
+    let mut h = Sha256::new();
+    h.update(HKDF_SALT_V2_BASE);
+    h.update(pair_id.as_bytes());
+    let out = h.finalize();
+    let mut salt = [0u8; 32];
+    salt.copy_from_slice(&out);
+    salt
+}
+
+/// Derive a 32-byte v2 key from `ikm` (input keying material — typically the
+/// raw ECDH output or the device's secret bytes), bound to `pair_id` (per-pair
+/// salt) and `purpose` ∈ {"storage", "sync", "telemetry"}.
+///
+/// **Deterministic** for identical `(ikm, pair_id, purpose)`. Domain-separated
+/// from v1 by both algorithm (SHA-512 vs SHA-256) and `info` prefix
+/// (`copypaste-hkdf-v2|...`).
+fn derive_key_v2(ikm: &[u8], pair_id: &str, purpose: &str) -> [u8; 32] {
+    let salt = hkdf_v2_pair_salt(pair_id);
+    let info = format!("copypaste-hkdf-v2|{}|{}", pair_id, purpose);
+    let hk = Hkdf::<Sha512>::new(Some(&salt), ikm);
+    let mut key = [0u8; 32];
+    hk.expand(info.as_bytes(), &mut key)
+        .expect("HKDF-SHA512 expand 32 bytes always succeeds");
+    key
+}
+
+/// v2 storage-key derivation. Used for local at-rest item encryption.
+/// Replaces `DeviceKeypair::local_enc_key()` for new ciphertexts.
+pub fn derive_storage_key_v2(ikm: &[u8], pair_id: &str) -> [u8; 32] {
+    derive_key_v2(ikm, pair_id, "storage")
+}
+
+/// v2 sync-key derivation. Used for over-the-wire item payload encryption
+/// between paired devices. Replaces `DeviceKeypair::derive_enc_key()` for
+/// new ciphertexts.
+pub fn derive_sync_key_v2(ikm: &[u8], pair_id: &str) -> [u8; 32] {
+    derive_key_v2(ikm, pair_id, "sync")
+}
+
+/// v2 telemetry-key derivation. Reserved for future use (e.g. authenticated
+/// metric submission to the relay). Domain-separated from storage/sync so a
+/// telemetry key leak cannot decrypt clipboard data.
+pub fn derive_telemetry_key_v2(ikm: &[u8], pair_id: &str) -> [u8; 32] {
+    derive_key_v2(ikm, pair_id, "telemetry")
+}
+
+/// v1 local-storage-key derivation, exposed as a free function so the
+/// migration sweep can derive the legacy key without going through the
+/// `DeviceKeypair` instance API. Identical output to
+/// `DeviceKeypair::local_enc_key()`. **Migration-only** — do NOT use for
+/// new ciphertexts.
+pub fn derive_storage_key_v1(ikm: &[u8; 32]) -> [u8; 32] {
+    let hk = Hkdf::<Sha256>::new(Some(HKDF_SALT_V1), ikm);
+    let mut key = [0u8; 32];
+    hk.expand(b"copypaste-local-storage-v1", &mut key)
+        .expect("HKDF expand: output length 32 is always valid for SHA-256");
+    key
+}
 
 #[derive(Debug, Error)]
 pub enum KeyError {
@@ -195,5 +284,88 @@ mod tests {
         // Sanity: salt constant is stable. (Non-emptiness is enforced at
         // compile time via the const equality below.)
         assert_eq!(HKDF_SALT_V1, b"copypaste-v1-salt");
+    }
+
+    // ---------------------------------------------------------------------
+    // T5 (v0.3): HKDF v2 — per-pair salt, SHA-512, purpose domain separation
+    // ---------------------------------------------------------------------
+
+    /// v1 and v2 derivations must produce different keys even with identical
+    /// IKM. Domain-separation is the whole point of bumping the HKDF version;
+    /// if these collided we'd have a silent migration footgun.
+    #[test]
+    fn hkdf_v1_and_v2_produce_different_keys() {
+        let ikm = [0x33u8; 32];
+        let v1 = derive_storage_key_v1(&ikm);
+        let v2 = derive_storage_key_v2(&ikm, "pair-abc");
+        assert_ne!(v1, v2, "v1 and v2 HKDF derivations must NOT collide");
+    }
+
+    /// Two different `pair_id`s must produce two different v2 keys for the
+    /// same IKM and purpose. This is the property that lets each device-pair
+    /// rotate independently.
+    #[test]
+    fn hkdf_v2_different_pair_ids_produce_different_keys() {
+        let ikm = [0x44u8; 32];
+        let ka = derive_storage_key_v2(&ikm, "pair-aaa");
+        let kb = derive_storage_key_v2(&ikm, "pair-bbb");
+        assert_ne!(ka, kb, "different pair_ids must derive different keys");
+    }
+
+    /// Same `(ikm, pair_id)` must give the same key — re-derivable across
+    /// process restarts.
+    #[test]
+    fn hkdf_v2_is_deterministic() {
+        let ikm = [0x55u8; 32];
+        let k1 = derive_storage_key_v2(&ikm, "pair-zzz");
+        let k2 = derive_storage_key_v2(&ikm, "pair-zzz");
+        assert_eq!(k1, k2);
+    }
+
+    /// The three purposes (storage, sync, telemetry) must be mutually
+    /// domain-separated. A storage-key leak must NOT enable decryption of
+    /// sync traffic, and vice-versa.
+    #[test]
+    fn hkdf_v2_purposes_are_domain_separated() {
+        let ikm = [0x66u8; 32];
+        let pair_id = "pair-domain-test";
+        let s = derive_storage_key_v2(&ikm, pair_id);
+        let n = derive_sync_key_v2(&ikm, pair_id);
+        let t = derive_telemetry_key_v2(&ikm, pair_id);
+        assert_ne!(s, n);
+        assert_ne!(s, t);
+        assert_ne!(n, t);
+    }
+
+    /// The per-pair salt itself must differ between pair_ids — guards against
+    /// a refactor that accidentally drops `pair_id` from the salt input.
+    #[test]
+    fn hkdf_v2_pair_salt_varies_by_pair_id() {
+        let a = hkdf_v2_pair_salt("pair-a");
+        let b = hkdf_v2_pair_salt("pair-b");
+        assert_ne!(a, b);
+        // Determinism check: same pair_id → same salt
+        assert_eq!(hkdf_v2_pair_salt("pair-a"), a);
+    }
+
+    /// HKDF version constant is locked at 2 for the v0.3 release. A bump to 3
+    /// would be a hard fork and should require an explicit, deliberate change
+    /// to this snapshot test.
+    #[test]
+    fn hkdf_version_is_2() {
+        assert_eq!(HKDF_VERSION, 2);
+    }
+
+    /// `derive_storage_key_v1` (free function) and `DeviceKeypair::local_enc_key`
+    /// (instance method) must produce the same key for the same secret bytes —
+    /// the free function exists only as a re-export for the migration sweep
+    /// and must NOT subtly diverge from the legacy path.
+    #[test]
+    fn derive_storage_key_v1_matches_local_enc_key() {
+        let kp = DeviceKeypair::generate();
+        let secret = kp.secret_key_bytes();
+        let instance_key = kp.local_enc_key();
+        let free_fn_key = derive_storage_key_v1(&secret);
+        assert_eq!(instance_key, free_fn_key);
     }
 }
