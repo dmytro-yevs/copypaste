@@ -16,10 +16,15 @@ pub enum SchemaError {
     Downgrade { found: i64, expected: i64 },
 }
 
-/// Current on-disk schema version. Bumped from 2 → 3 when the
-/// `origin_device_id` column was added to `clipboard_items` to back the LWW
-/// merge tie-break (see `copypaste-sync::merge::resolve`).
-pub const SCHEMA_VERSION: i64 = 3;
+/// Current on-disk schema version. Bumped from 3 → 4 in v0.3 (T5) when the
+/// `key_version` column was added to `clipboard_items` to track which HKDF
+/// key generation (v1 or v2) encrypted each row's ciphertext. See
+/// [`V4_ALTER_SQL`] and `super::migration_v4` for the re-encrypt sweep.
+///
+/// Previous bumps:
+///   * 2 → 3: added `origin_device_id` for the LWW merge tie-break
+///     (see `copypaste-sync::merge::resolve`).
+pub const SCHEMA_VERSION: i64 = 4;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -34,6 +39,19 @@ pub(crate) const V1_SCHEMA_SQL: &str = include_str!("schema_v1.sql");
 pub(crate) const V3_ALTER_SQL: &str = "\
 ALTER TABLE clipboard_items \
     ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';\n";
+
+/// v4 ALTER step — add `key_version` to `clipboard_items`.
+///
+/// Default `1` ensures every existing row is marked as v1-key-encrypted, so
+/// `super::migration_v4::migrate_v1_to_v2_keys` can find them via the
+/// straightforward `WHERE key_version = 1` predicate. New `insert_item`
+/// calls write the current key version (`2`) explicitly — the `DEFAULT 1`
+/// here is exclusively for the existing-row backfill case.
+pub(crate) const V4_ALTER_SQL: &str = "\
+ALTER TABLE clipboard_items \
+    ADD COLUMN key_version INTEGER NOT NULL DEFAULT 1;\n\
+CREATE INDEX IF NOT EXISTS idx_clipboard_key_version \
+    ON clipboard_items(key_version) WHERE key_version < 2;\n";
 
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
@@ -97,6 +115,15 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // `items::backfill_origin_device_id` after open to stamp the local
         // device UUID onto any rows still carrying the empty default.
         script.push_str(V3_ALTER_SQL);
+    }
+
+    if current_version < 4 {
+        // Migration v4 (T5): add `key_version` column so the re-encrypt sweep
+        // can identify rows still encrypted under the v1 HKDF key family.
+        // The actual decrypt-with-v1 + re-encrypt-with-v2 work is performed
+        // by `super::migration_v4::migrate_v1_to_v2_keys`, invoked by the
+        // daemon at startup after the schema migration commits.
+        script.push_str(V4_ALTER_SQL);
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));
@@ -193,5 +220,77 @@ mod tests {
             cols.iter().any(|c| c == "origin_device_id"),
             "v3 schema must include origin_device_id column"
         );
+    }
+
+    #[test]
+    fn fresh_db_has_key_version_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_migrations(&conn).unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(clipboard_items)").unwrap();
+        let cols: Vec<(String, String, i64)> = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(1)?, // column name
+                    r.get::<_, String>(2)?, // declared type
+                    r.get::<_, i64>(3)?,    // notnull
+                ))
+            })
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        let kv = cols
+            .iter()
+            .find(|c| c.0 == "key_version")
+            .expect("v4 schema must include key_version column");
+        assert_eq!(kv.1.to_uppercase(), "INTEGER");
+        assert_eq!(kv.2, 1, "key_version must be NOT NULL");
+    }
+
+    #[test]
+    fn v3_to_v4_migration_marks_existing_rows_as_v1_key() {
+        // Bring a fresh DB only up to v3 by short-circuiting the v4 step,
+        // then re-run apply_migrations and assert existing rows landed on
+        // key_version=1 (the DEFAULT in V4_ALTER_SQL).
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Hand-build v3 state.
+        conn.execute_batch(V1_SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
+             ALTER TABLE clipboard_items ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';",
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA user_version = 3;").unwrap();
+
+        // Insert a v3-era row.
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, lamport_ts, wall_time, content_hash, origin_device_id) \
+             VALUES ('id-1', 'item-1', 'text', 1, 1000, NULL, '')",
+            [],
+        )
+        .unwrap();
+
+        // Run apply_migrations → must add key_version column and DEFAULT 1
+        // backfills the pre-existing row.
+        apply_migrations(&conn).unwrap();
+
+        let kv: i64 = conn
+            .query_row(
+                "SELECT key_version FROM clipboard_items WHERE id = 'id-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            kv, 1,
+            "pre-v4 rows must land on key_version=1 so the v1→v2 sweep can find them"
+        );
+
+        let uv: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(uv, SCHEMA_VERSION);
     }
 }

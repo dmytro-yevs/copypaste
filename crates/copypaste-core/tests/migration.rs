@@ -28,7 +28,7 @@ use tempfile::tempdir;
 /// Kept in-sync manually because the module is private. Bumping
 /// SCHEMA_VERSION in src/ MUST be accompanied by bumping this and adding
 /// a new migration test below.
-const CURRENT_SCHEMA_VERSION: i64 = 3;
+const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 /// v1 schema (the exact contents of src/storage/schema_v1.sql, inlined because
 /// the file is `include_str!`'d into the crate and not accessible from
