@@ -2197,4 +2197,74 @@ mod tests {
         );
     }
 
+    /// T4 (v0.3) — `revoke_peer` validates its fingerprint argument and, for
+    /// a well-formed request, writes a row to the `revoked_devices` audit
+    /// table even when the peer was never in the local JSON peer store
+    /// (revoking an unknown fingerprint is intentionally allowed so the UI
+    /// can recover from a corrupted peers.json).
+    #[tokio::test]
+    async fn revoke_peer_validates_and_records_audit_row() {
+        use copypaste_core::list_revoked_devices;
+
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("test-revoke.sock");
+
+        // Build the server manually so we can reach the shared Database
+        // handle for assertions after the call.
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let private_mode = Arc::new(AtomicBool::new(false));
+        let server = IpcServer::new(db.clone(), private_mode);
+        let sock_path = sock.clone();
+        tokio::spawn(async move {
+            server.serve(&sock_path).await.ok();
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        async fn call(sock: &std::path::Path, body: &str) -> serde_json::Value {
+            let mut stream = UnixStream::connect(sock).await.unwrap();
+            stream.write_all(body.as_bytes()).await.unwrap();
+            stream.write_all(b"\n").await.unwrap();
+            let mut lines = BufReader::new(&mut stream).lines();
+            let line = lines.next_line().await.unwrap().unwrap();
+            serde_json::from_str(&line).unwrap()
+        }
+
+        // Missing fingerprint → invalid_argument
+        let resp = call(
+            &sock,
+            r#"{"id":"r1","method":"revoke_peer","params":{}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], false, "missing fingerprint must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+
+        // Bad fingerprint hex → invalid_argument
+        let resp = call(
+            &sock,
+            r#"{"id":"r2","method":"revoke_peer","params":{"fingerprint":"not-hex"}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], false, "bad fingerprint must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+
+        // Valid request — unknown peer, but revoke still succeeds and writes
+        // the audit row.
+        let fp = std::iter::repeat_n("ab", 32).collect::<Vec<_>>().join(":");
+        let body = format!(
+            r#"{{"id":"r3","method":"revoke_peer","params":{{"fingerprint":"{fp}"}}}}"#
+        );
+        let resp = call(&sock, &body).await;
+        assert_eq!(resp["ok"], true, "valid revoke must succeed: {resp}");
+        assert_eq!(resp["data"]["fingerprint"], fp);
+        assert!(
+            resp["data"]["revoked_at"].as_u64().unwrap_or(0) > 0,
+            "revoked_at must be populated"
+        );
+
+        // Audit row must be persisted in the shared SQLite DB.
+        let db_guard = db.lock().await;
+        let rows = list_revoked_devices(db_guard.conn()).unwrap();
+        assert_eq!(rows.len(), 1, "exactly one audit row expected");
+        assert_eq!(rows[0].fingerprint, fp);
+    }
 }
