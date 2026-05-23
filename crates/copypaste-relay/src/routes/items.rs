@@ -1,4 +1,4 @@
-use axum::extract::{Path, Query, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 
@@ -40,6 +40,7 @@ pub async fn delete_item(
 /// Quota: decoded `content_b64` must not exceed `max_item_bytes` from config.
 pub async fn push(
     State(state): State<AppState>,
+    Extension(config): Extension<RelayConfig>,
     Path(device_id): Path<String>,
     BearerToken(token): BearerToken,
     Json(body): Json<PushRequest>,
@@ -50,7 +51,10 @@ pub async fn push(
     // Auth: verify token belongs to this device.
     store.verify_token(&device_id, &token)?;
 
-    let max_item_bytes = RelayConfig::default().max_item_bytes;
+    // Honor the operator-configured RELAY_MAX_ITEM_BYTES rather than the
+    // hardcoded default (security HIGH #2) — previously
+    // `RelayConfig::default().max_item_bytes` silently ignored env vars.
+    let max_item_bytes = config.max_item_bytes;
 
     let id = store.push_item(
         &device_id,

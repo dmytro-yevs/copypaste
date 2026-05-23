@@ -90,7 +90,7 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
             config: per_ip_conf,
         });
 
-    // ---- Merge all sub-routers + shared body-limit layer -------------------
+    // ---- Merge all sub-routers + shared body-limit + config injection ------
     Router::new()
         .merge(exempt)
         .merge(item_routes)
@@ -98,6 +98,10 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
         .layer(axum::extract::DefaultBodyLimit::max(
             config.max_item_bytes + 4096,
         ))
+        // Inject the live `RelayConfig` so handlers (e.g. `items::push`)
+        // can honor operator-supplied limits like `RELAY_MAX_ITEM_BYTES`
+        // instead of falling back to compile-time defaults (HIGH #2).
+        .layer(axum::Extension(config))
 }
 
 async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
