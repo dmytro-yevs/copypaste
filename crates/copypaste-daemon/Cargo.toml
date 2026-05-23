@@ -82,6 +82,20 @@ path = "tests/keychain_macos.rs"
 name = "health"
 path = "tests/health.rs"
 
+# Beta-bonus: launchd LaunchAgent plist install/uninstall tests (macOS only).
+# See module docs in tests/launchd_install.rs for the "how is launchctl mocked"
+# strategy (file-write half reproduced inline, error path triggered via bogus
+# $HOME so no real launchd registration ever occurs).
+[[test]]
+name = "launchd_install"
+path = "tests/launchd_install.rs"
+
+# Beta-bonus: end-to-end pairing flow tests — mDNS discovery + PAKE handshake +
+# mutual PairedPeers trust. See module docs in tests/pairing_e2e.rs.
+[[test]]
+name = "pairing_e2e"
+path = "tests/pairing_e2e.rs"
+
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"
@@ -98,6 +112,9 @@ mockito = "0.31"
 # Beta-bonus keychain tests — serialize Keychain Services access (process-global).
 # Cross-platform crate; gated at test level via `#[cfg(target_os = "macos")]`.
 serial_test = "3"
+# Beta-bonus pairing-e2e tests need a raw mDNS daemon with per-test unique
+# service types (DiscoveryService hard-codes `_copypaste._tcp.local.`).
+mdns-sd = { workspace = true }
 
 # Beta-bonus keychain tests need direct access to set/get/delete primitives
 # (the wrapper uses a hardcoded SERVICE/ACCOUNT so tests use unique account
