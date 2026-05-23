@@ -30,5 +30,6 @@ pub mod sync_orch;
 #[cfg(feature = "cloud-sync")]
 pub mod cloud;
 
-#[cfg(target_os = "macos")]
-pub mod tray;
+// v0.3: the menu-bar tray module moved to `copypaste-ui::tray_host`. The
+// daemon process is started by launchd and cannot host an NSApplication
+// main run loop on macOS, which `tray-icon` / `muda::Menu` require.

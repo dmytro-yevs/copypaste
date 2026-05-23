@@ -50,10 +50,9 @@ objc2.workspace = true
 objc2-foundation.workspace = true
 objc2-app-kit.workspace = true
 security-framework.workspace = true
-# Tray icon — macOS native NSStatusItem
-tray-icon = "0.19"
-# PNG decoding for the tray icon asset
-png = "0.17"
+# tray-icon + png moved to copypaste-ui::tray_host (the daemon process
+# is launched by launchd and cannot host an NSApplication main run loop on
+# macOS, which tray-icon / muda::Menu both require).
 
 [[test]]
 name = "integration_ipc"

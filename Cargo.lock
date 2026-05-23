@@ -1363,7 +1363,6 @@ dependencies = [
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
- "png 0.17.16",
  "reqwest",
  "rusqlite",
  "security-framework 2.11.1",
@@ -1377,7 +1376,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "tray-icon",
  "uuid",
 ]
 
@@ -1479,11 +1477,15 @@ dependencies = [
  "anyhow",
  "copypaste-ipc",
  "home",
+ "png 0.17.16",
  "serde",
  "serde_json",
  "slint",
  "slint-build",
  "tempfile",
+ "thiserror 1.0.69",
+ "tracing",
+ "tray-icon",
 ]
 
 [[package]]
