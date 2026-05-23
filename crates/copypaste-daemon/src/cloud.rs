@@ -754,24 +754,42 @@ async fn realtime_loop(
                 match fetch_remote_items(&client, &poll_url, &config.anon_key, &token).await {
                     Err(e) => tracing::warn!("cloud-sync poll failed: {e}"),
                     Ok(remote_items) => {
-                        let db_guard = db.lock().await;
-                        for item in remote_items {
-                            match exists_item(&db_guard, &item.id) {
-                                Ok(true) => {} // already local
-                                Ok(false) => {
-                                    if let Err(e) = copypaste_core::insert_item(&db_guard, &item) {
+                        // Audit-concurrency HIGH #2 — the previous code held
+                        // `db.lock().await` across synchronous rusqlite IO,
+                        // blocking the runtime worker for the whole insert
+                        // fan-out. Mirror the pattern from ipc.rs:428: hop
+                        // into spawn_blocking, take the mutex with
+                        // `blocking_lock()`, and run the entire insert loop
+                        // synchronously off the async worker thread. The
+                        // HTTP poll itself stays on the async worker — only
+                        // the DB fan-out moves.
+                        let db_arc = db.clone();
+                        let join = tokio::task::spawn_blocking(move || {
+                            let db_guard = db_arc.blocking_lock();
+                            for item in remote_items {
+                                match exists_item(&db_guard, &item.id) {
+                                    Ok(true) => {} // already local
+                                    Ok(false) => {
+                                        if let Err(e) = copypaste_core::insert_item(&db_guard, &item) {
+                                            tracing::warn!(
+                                                "cloud-sync: failed to insert remote id={}: {e}",
+                                                item.id
+                                            );
+                                        } else {
+                                            tracing::info!("cloud-sync: synced remote id={}", item.id);
+                                        }
+                                    }
+                                    Err(e) => {
                                         tracing::warn!(
-                                            "cloud-sync: failed to insert remote id={}: {e}",
-                                            item.id
+                                            "cloud-sync: exists_item error for id={}: {e}",
+                                            item.id,
                                         );
-                                    } else {
-                                        tracing::info!("cloud-sync: synced remote id={}", item.id);
                                     }
                                 }
-                                Err(e) => {
-                                    tracing::warn!("cloud-sync: exists_item error for id={}: {e}", item.id);
-                                }
                             }
+                        });
+                        if let Err(e) = join.await {
+                            tracing::warn!("cloud-sync: insert worker panicked or was cancelled: {e}");
                         }
                     }
                 }
