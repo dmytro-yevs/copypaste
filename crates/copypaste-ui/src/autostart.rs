@@ -123,8 +123,13 @@ where
         let stale_placeholder = installed
             .contains("/Applications/CopyPaste.app/Contents/MacOS/copypaste-daemon")
             && !rendered.contains("/Applications/CopyPaste.app/Contents/MacOS/copypaste-daemon");
-        drift || stale_placeholder || !fs.exists(&daemon_bin) && drift
+        drift || stale_placeholder
     };
+    // `daemon_bin` is reserved for future diagnostic use (e.g. surfacing
+    // a clearer error when the resolved daemon path doesn't exist on
+    // disk). Suppress unused-variable warnings without dropping the
+    // lookup, which also validates `current_exe()` early.
+    let _ = &daemon_bin;
 
     // Step 3a: resolve uid + current load state. Done here so we can reuse
     // both for the optional bootout-before-rewrite below and the bootstrap
