@@ -79,8 +79,16 @@ pub struct RelayStore {
     pub devices: HashMap<String, DeviceRecord>,
     /// Per-device inbox for the wall-clock push/pull sync protocol.
     pub sync_items: HashMap<String, Vec<SyncItem>>,
-    /// Monotonically increasing counter used to assign IDs to sync items.
-    next_sync_id: i64,
+    /// Per-device monotonically increasing counter used to assign IDs to
+    /// sync items. Keying by `device_id` (rather than a single global
+    /// counter) avoids cross-restart ID collisions for a given device:
+    /// on the first push for a device after restart we seed this counter
+    /// from `MAX(item.id) + 1` over that device's inbox (security HIGH #3).
+    ///
+    /// `i64` matches the wire/DB representation; we use `checked_add` on
+    /// allocation to convert overflow into a server error instead of an
+    /// unchecked-arithmetic panic.
+    next_sync_id_per_device: HashMap<String, i64>,
     /// Rolling window of registration attempts keyed by `device_id`.
     /// Used to enforce per-device registration rate limit (security MEDIUM #13)
     /// orthogonal to the per-IP `tower_governor` limiter.
@@ -104,7 +112,7 @@ impl RelayStore {
         Self {
             devices: HashMap::new(),
             sync_items: HashMap::new(),
-            next_sync_id: 1,
+            next_sync_id_per_device: HashMap::new(),
             reg_attempts: HashMap::new(),
             items_total: Arc::new(AtomicU64::new(0)),
             evictions_total: Arc::new(AtomicU64::new(0)),
@@ -332,8 +340,27 @@ impl RelayStore {
             return Err(RelayError::PayloadTooLarge);
         }
 
-        let id = self.next_sync_id;
-        self.next_sync_id += 1;
+        // Per-device counter, seeded from the inbox on first push so a
+        // server restart cannot re-issue an id another item in the same
+        // device's inbox already holds (security HIGH #3).
+        let counter = self
+            .next_sync_id_per_device
+            .entry(device_id.to_string())
+            .or_insert_with(|| {
+                self.sync_items
+                    .get(device_id)
+                    .and_then(|inbox| inbox.iter().map(|i| i.id).max())
+                    .map(|m| m.saturating_add(1))
+                    .unwrap_or(1)
+                    .max(1)
+            });
+        let id = *counter;
+        // `checked_add` so an id-counter overflow returns a server error
+        // instead of an unchecked-arithmetic panic (security HIGH #3).
+        *counter = counter.checked_add(1).ok_or_else(|| {
+            tracing::warn!(device_id, "sync id counter overflow");
+            RelayError::Internal("sync id counter exhausted".into())
+        })?;
 
         let inserted_at_unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -432,6 +459,7 @@ impl RelayStore {
         for id in &inactive_ids {
             self.devices.remove(id);
             self.sync_items.remove(id);
+            self.next_sync_id_per_device.remove(id);
         }
         count
     }
