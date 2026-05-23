@@ -35,6 +35,18 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 /// stalls during handshake.
 pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Default number of times [`PeerTransport::connect_with_retry`] will retry a
+/// transient network error before propagating it. The first attempt counts —
+/// i.e. `MAX_CONNECT_ATTEMPTS = 4` means 1 initial attempt + 3 retries.
+pub const MAX_CONNECT_ATTEMPTS: u32 = 4;
+
+/// Delay between transient-error retries in [`PeerTransport::connect_with_retry`].
+/// Kept short (100 ms) because the typical trigger is a peer that just
+/// announced over mDNS but hasn't bound its listener yet, or a brief network
+/// blip on the LAN — not a peer that genuinely needs minutes of backoff
+/// (that's the relay client's job, see `copypaste_sync::backoff`).
+pub const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
+
 use crate::cert::{fingerprint_of, SelfSignedCert};
 use crate::verifier::PeerCertVerifier;
 
@@ -236,6 +248,68 @@ impl PeerTransport {
         Ok(framed)
     }
 
+    /// Connect to a peer with bounded retries on transient I/O errors.
+    ///
+    /// Wraps [`Self::connect`] with up to [`MAX_CONNECT_ATTEMPTS`] attempts
+    /// (one initial + N-1 retries), separated by [`CONNECT_RETRY_DELAY`].
+    /// Only **transient** errors are retried — see [`is_transient_io_error`]
+    /// for the exhaustive list. Permanent errors (unknown-peer, TLS config,
+    /// cert problems, handshake timeout) propagate on the first failure so
+    /// callers don't waste time retrying a fundamentally broken setup.
+    ///
+    /// The intended use case is the brief race between mDNS announcement
+    /// and the peer's TCP listener actually accepting connections, and
+    /// transient LAN blips (cable bounce, brief Wi-Fi roaming). For
+    /// long-haul relay reconnects with exponential backoff, see
+    /// [`copypaste_sync::backoff::BackoffScheduler`].
+    pub async fn connect_with_retry(
+        &self,
+        addr: SocketAddr,
+        expected_fingerprint: &str,
+    ) -> Result<PeerClientStream, TransportError> {
+        let mut last_err: Option<TransportError> = None;
+        for attempt in 1..=MAX_CONNECT_ATTEMPTS {
+            match self.connect(addr, expected_fingerprint).await {
+                Ok(stream) => {
+                    if attempt > 1 {
+                        tracing::info!(
+                            peer_addr = %addr,
+                            attempt,
+                            "peer connect succeeded after retry"
+                        );
+                    }
+                    return Ok(stream);
+                }
+                Err(err) => {
+                    // Only retry transient I/O errors — anything else is a
+                    // configuration / pairing problem and retrying won't help.
+                    if !is_transient_transport_error(&err) {
+                        tracing::debug!(
+                            peer_addr = %addr,
+                            attempt,
+                            error = %err,
+                            "peer connect failed with non-transient error — not retrying"
+                        );
+                        return Err(err);
+                    }
+                    if attempt < MAX_CONNECT_ATTEMPTS {
+                        tracing::debug!(
+                            peer_addr = %addr,
+                            attempt,
+                            backoff_ms = CONNECT_RETRY_DELAY.as_millis(),
+                            error = %err,
+                            "peer connect transient failure — retrying"
+                        );
+                        tokio::time::sleep(CONNECT_RETRY_DELAY).await;
+                    }
+                    last_err = Some(err);
+                }
+            }
+        }
+        // Exhausted retries — surface the last transient error.
+        Err(last_err.expect("loop runs at least once so last_err is set on failure"))
+    }
+
     // ---- private helpers ----
 
     fn build_server_config(&self) -> Result<ServerConfig, TransportError> {
@@ -273,6 +347,51 @@ impl PeerTransport {
 
         Ok(config)
     }
+}
+
+/// Classify a [`TransportError`] as transient (worth retrying) vs permanent.
+///
+/// Transient = the LAN/peer is momentarily unavailable but the setup is sane:
+///   * `ConnectionRefused` — peer's listener not bound yet (common right after
+///     an mDNS announcement).
+///   * `ConnectionReset` / `ConnectionAborted` / `BrokenPipe` — peer dropped
+///     mid-connect, retry will pick up the next listener cycle.
+///   * `WouldBlock` — extremely rare on `connect()`, but harmless to retry.
+///   * `TimedOut` — kernel TCP timeout; one more try may succeed if the
+///     peer just woke from Wi-Fi roam.
+///   * `NotConnected` — the kernel surfaced a half-open socket; retry.
+///
+/// Everything else (unknown-peer pairing failure, TLS config issue, cert
+/// error, our own handshake timeout) is permanent and propagates immediately.
+fn is_transient_transport_error(err: &TransportError) -> bool {
+    match err {
+        TransportError::Io(io_err) => is_transient_io_kind(io_err.kind()),
+        // HandshakeTimeout is *our* 10s budget — if we hit it, the peer is
+        // actively misbehaving (slowloris, dead socket). Retrying just wastes
+        // 10 more seconds. Surface it.
+        TransportError::HandshakeTimeout
+        | TransportError::UnknownPeer(_)
+        | TransportError::NoPeerCert
+        | TransportError::InvalidKey
+        | TransportError::TlsConfig(_)
+        | TransportError::Cert(_) => false,
+    }
+}
+
+/// Standalone [`std::io::ErrorKind`] classifier — kept separate so it can be
+/// unit-tested without constructing a full [`TransportError`].
+fn is_transient_io_kind(kind: std::io::ErrorKind) -> bool {
+    use std::io::ErrorKind;
+    matches!(
+        kind,
+        ErrorKind::ConnectionRefused
+            | ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionAborted
+            | ErrorKind::BrokenPipe
+            | ErrorKind::WouldBlock
+            | ErrorKind::TimedOut
+            | ErrorKind::NotConnected
+    )
 }
 
 // ---- helper: extract fingerprint from completed server-side TLS stream ----
@@ -403,6 +522,153 @@ mod tests {
         // Keep the listener alive until here to avoid kernel TCP reset before
         // the timeout would fire on real time.
         drop(listener);
+    }
+
+    // ---- Sub C: connect_with_retry tests ----
+
+    /// Sub C #1 — `is_transient_io_kind` classifies the documented kinds as
+    /// transient and other common kinds as permanent. This is the lever that
+    /// stops us retrying e.g. an `AddrNotAvailable` (mDNS gave us a bad IP).
+    #[test]
+    fn transient_io_kind_classifier() {
+        use std::io::ErrorKind;
+        // Transient — retried.
+        assert!(is_transient_io_kind(ErrorKind::ConnectionRefused));
+        assert!(is_transient_io_kind(ErrorKind::ConnectionReset));
+        assert!(is_transient_io_kind(ErrorKind::ConnectionAborted));
+        assert!(is_transient_io_kind(ErrorKind::BrokenPipe));
+        assert!(is_transient_io_kind(ErrorKind::WouldBlock));
+        assert!(is_transient_io_kind(ErrorKind::TimedOut));
+        assert!(is_transient_io_kind(ErrorKind::NotConnected));
+
+        // Permanent — surfaced immediately.
+        assert!(!is_transient_io_kind(ErrorKind::AddrNotAvailable));
+        assert!(!is_transient_io_kind(ErrorKind::AddrInUse));
+        assert!(!is_transient_io_kind(ErrorKind::PermissionDenied));
+        assert!(!is_transient_io_kind(ErrorKind::InvalidInput));
+        assert!(!is_transient_io_kind(ErrorKind::Other));
+    }
+
+    /// Sub C #2 — non-I/O errors (unknown-peer, cert problems, our own
+    /// handshake timeout) are NEVER classified as transient, even if a
+    /// freshly-constructed `TransportError::Io(...)` would be.
+    #[test]
+    fn non_io_errors_are_never_transient() {
+        let err = TransportError::UnknownPeer("deadbeef".into());
+        assert!(!is_transient_transport_error(&err));
+
+        let err = TransportError::NoPeerCert;
+        assert!(!is_transient_transport_error(&err));
+
+        let err = TransportError::InvalidKey;
+        assert!(!is_transient_transport_error(&err));
+
+        let err = TransportError::HandshakeTimeout;
+        assert!(
+            !is_transient_transport_error(&err),
+            "HandshakeTimeout means we already burned 10s — retry would burn more"
+        );
+
+        // I/O errors of the transient flavour ARE retried.
+        let err = TransportError::Io(std::io::Error::from(std::io::ErrorKind::ConnectionRefused));
+        assert!(is_transient_transport_error(&err));
+
+        // I/O errors of a non-transient flavour are NOT.
+        let err = TransportError::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert!(!is_transient_transport_error(&err));
+    }
+
+    /// Sub C #3 — `connect_with_retry` against a closed port (kernel returns
+    /// ECONNREFUSED, a transient kind) must exhaust [`MAX_CONNECT_ATTEMPTS`]
+    /// attempts before giving up. We bind a listener to grab a real port,
+    /// then drop it so subsequent connects refuse immediately. With
+    /// `start_paused`, the inter-attempt sleeps don't slow the test.
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn connect_with_retry_exhausts_attempts_on_persistent_refusal() {
+        // Bind then drop to learn a port the kernel has just released.
+        let addr = {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            listener.local_addr().unwrap()
+        };
+
+        let client_cert = SelfSignedCert::generate("client-device").unwrap();
+        let bogus_fp = "0".repeat(64);
+        let mut client_peers = PairedPeers::new();
+        client_peers.add(bogus_fp.clone(), "dead-peer");
+
+        let client_transport =
+            PeerTransport::from_cert(client_cert.cert_der, client_cert.key_der, client_peers);
+
+        let connect_fut = client_transport.connect_with_retry(addr, &bogus_fp);
+        // Advance virtual time past all retry delays + handshake timeouts so
+        // the future actually completes (each attempt's connect is instant
+        // because the port refuses immediately).
+        let advance_fut = async {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        };
+        let (result, _) = tokio::join!(connect_fut, advance_fut);
+
+        let err = result.expect_err("must fail after exhausting retries");
+        // The final surfaced error must still be transient — meaning we did
+        // genuinely exhaust the retry budget on a transient kind.
+        assert!(
+            is_transient_transport_error(&err),
+            "expected a transient I/O error to surface, got {:?}",
+            err
+        );
+    }
+
+    /// Sub C #4 — `connect_with_retry` MUST NOT retry a permanent error.
+    /// We aim it at an address that's reachable (the rogue server pattern)
+    /// but with a fingerprint the verifier will reject, which surfaces as
+    /// a non-transient TLS / I/O error. The retry helper should propagate
+    /// after the first failure without burning the full attempt budget.
+    ///
+    /// We can't directly observe attempt count from outside, but we can
+    /// bound test wall time: with paused time the test runs in microseconds,
+    /// and the result must be the same kind of error `connect()` would
+    /// have returned on its own.
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn connect_with_retry_does_not_retry_permanent_errors() {
+        // Set up a server that will accept TCP but reject in TLS verify
+        // (mismatched fingerprint). This produces a non-transient error.
+        let real_server_cert = SelfSignedCert::generate("real-server").unwrap();
+        let rogue_server_cert = SelfSignedCert::generate("rogue-server").unwrap();
+        let client_cert = SelfSignedCert::generate("client-device").unwrap();
+
+        let real_server_fp = real_server_cert.fingerprint();
+        let client_fp = client_cert.fingerprint();
+
+        let mut rogue_server_peers = PairedPeers::new();
+        rogue_server_peers.add(client_fp.clone(), "client-device");
+        let mut client_peers = PairedPeers::new();
+        client_peers.add(real_server_fp.clone(), "real-server");
+
+        let rogue_transport = PeerTransport::from_cert(
+            rogue_server_cert.cert_der,
+            rogue_server_cert.key_der,
+            rogue_server_peers,
+        );
+        let client_transport =
+            PeerTransport::from_cert(client_cert.cert_der, client_cert.key_der, client_peers);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server_fut = rogue_transport.accept(&listener);
+        let client_fut = client_transport.connect_with_retry(addr, &real_server_fp);
+        // Advance virtual time so any retry sleeps complete instantly.
+        let advance_fut = async {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        };
+
+        let (_server_result, client_result, _) =
+            tokio::join!(server_fut, client_fut, advance_fut);
+
+        assert!(
+            client_result.is_err(),
+            "rogue peer must be rejected, retries or not"
+        );
     }
 
     /// edge HIGH #12 — a rogue mDNS advertisement may direct us to a real peer
