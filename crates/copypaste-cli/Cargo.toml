@@ -16,6 +16,19 @@ anyhow.workspace = true
 home.workspace = true
 base64.workspace = true
 copypaste-ipc = { path = "../copypaste-ipc" }
+# beta-bonus (vacuum): direct encrypted-DB access for `copypaste vacuum`.
+# We open the SQLCipher file ourselves (daemon must be stopped first), so we
+# need rusqlite and the core Database wrapper. Adds ~1MB to binary but lets
+# us avoid an "IPC vacuum" method that would lock the daemon for seconds.
+copypaste-core = { path = "../copypaste-core" }
+rusqlite.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# beta-bonus (vacuum): fetch the device secret key from the macOS Keychain so
+# we can derive the SQLCipher DB key. Mirrors what the daemon does in
+# `copypaste-daemon/src/keychain.rs`. Daemon's keychain module is in a binary
+# crate (not importable), so the CLI replicates the small fetch routine.
+security-framework.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

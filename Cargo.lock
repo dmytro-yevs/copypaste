@@ -1284,6 +1284,7 @@ name = "copypaste-bench"
 version = "0.2.0-beta.0"
 dependencies = [
  "copypaste-core",
+ "copypaste-sync",
  "criterion",
  "sha2",
  "tempfile",
@@ -1296,8 +1297,11 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "clap",
+ "copypaste-core",
  "copypaste-ipc",
  "home",
+ "rusqlite",
+ "security-framework 2.11.1",
  "serde",
  "serde_json",
  "tempfile",
@@ -1329,12 +1333,14 @@ dependencies = [
  "regex",
  "rusqlite",
  "serde",
+ "serde_json",
  "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "toml 0.8.23",
  "tracing",
+ "tracing-subscriber",
  "unicode-normalization",
  "uuid",
  "x25519-dalek",
@@ -1355,6 +1361,7 @@ dependencies = [
  "hex",
  "home",
  "image 0.25.9",
+ "mdns-sd",
  "mockito",
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
@@ -1393,9 +1400,11 @@ dependencies = [
  "anyhow",
  "argon2",
  "bytes",
+ "futures-util",
  "generic-array",
  "hex",
  "hkdf",
+ "if-addrs",
  "mdns-sd",
  "opaque-ke",
  "rand 0.8.6",
@@ -1463,6 +1472,15 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "copypaste-telemetry"
+version = "0.2.0-beta.0"
+dependencies = [
+ "serde",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
@@ -2616,6 +2634,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "gettext-rs"
+version = "0.7.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d5857dc1b7f0fee86961de833f434e29494d72af102ce5355738c0664222bdf"
+dependencies = [
+ "gettext-sys",
+ "locale_config",
+]
+
+[[package]]
+name = "gettext-sys"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ea859ab0dd7e70ff823032b3e077d03d39c965d68c6c10775add60e999d8ee9"
+dependencies = [
+ "cc",
+ "temp-dir",
+]
+
+[[package]]
 name = "gif"
 version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3381,6 +3419,7 @@ dependencies = [
  "derive_more",
  "euclid",
  "fontdue",
+ "gettext-rs",
  "i-slint-common",
  "i-slint-core-macros",
  "image 0.24.9",
@@ -4079,6 +4118,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
+name = "locale_config"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08d2c35b16f4483f6c26f0e4e9550717a2f6575bcd6f12a53ff0c490a94a6934"
+dependencies = [
+ "lazy_static",
+ "objc",
+ "objc-foundation",
+ "regex",
+ "winapi",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4462,6 +4514,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "objc-foundation"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1add1b659e36c9607c7aab864a76c7a4c2760cd0cd2e120f3fb8b952c7e22bf9"
+dependencies = [
+ "block",
+ "objc",
+ "objc_id",
+]
+
+[[package]]
 name = "objc-sys"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4763,6 +4826,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad970fb455818ad6cba4c122ad012fae53ae8b4795f86378bce65e4f6bab2ca4"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "objc_id"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c92d4ddb4bd7b50d730c215ff871754d0da6b2178849f8a2a2ab69712d0c073b"
+dependencies = [
+ "objc",
 ]
 
 [[package]]
@@ -6671,6 +6743,12 @@ name = "target-lexicon"
 version = "0.12.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
+
+[[package]]
+name = "temp-dir"
+version = "0.1.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83176759e9416cf81ee66cb6508dbfe9c96f20b8b56265a39917551c23c70964"
 
 [[package]]
 name = "tempfile"
