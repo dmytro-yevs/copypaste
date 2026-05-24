@@ -35,9 +35,7 @@ sealed class CopypasteException(message: String) : Exception(message) {
 }
 
 /** True when libcopypaste_android.so was successfully loaded at startup. */
-val isNativeLibraryLoaded: Boolean
-
-init {
+val isNativeLibraryLoaded: Boolean = run {
     var loaded = false
     try {
         System.loadLibrary(LIB_NAME)
@@ -46,7 +44,7 @@ init {
     } catch (e: UnsatisfiedLinkError) {
         Log.w(TAG, "Native library $LIB_NAME not available — stub mode active. $e")
     }
-    isNativeLibraryLoaded = loaded
+    loaded
 }
 
 // ---------------------------------------------------------------------------

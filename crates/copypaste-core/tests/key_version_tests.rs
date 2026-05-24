@@ -413,9 +413,10 @@ fn t4_sweep_v1_rows_completes_and_state_is_complete() {
 fn t4_force_complete_if_no_v1_rows_clears_inprogress_state() {
     let db = Database::open_in_memory().unwrap();
 
-    // Seed a migration_state row as InProgress (completed_at = NULL),
-    // matching what the v6 schema migration `INSERT OR IGNORE` does on a
-    // fresh install with zero clipboard items.
+    // Seed a migration_state row as InProgress (completed_at = NULL).
+    // The v6 schema migration already seeded the row as Complete on a fresh
+    // in-memory DB (no v1 rows exist). Use INSERT OR REPLACE to override it
+    // so the test exercises the InProgress → Complete transition path.
     db.conn()
         .execute(
             "CREATE TABLE IF NOT EXISTS migration_state (
@@ -430,9 +431,9 @@ fn t4_force_complete_if_no_v1_rows_clears_inprogress_state() {
         .unwrap();
     db.conn()
         .execute(
-            "INSERT OR IGNORE INTO migration_state \
-             (key, key_version_in_progress, last_processed_id, started_at) \
-             VALUES ('v4-key-version-sweep', 2, 0, strftime('%s','now'))",
+            "INSERT OR REPLACE INTO migration_state \
+             (key, key_version_in_progress, last_processed_id, started_at, completed_at) \
+             VALUES ('v4-key-version-sweep', 2, 0, strftime('%s','now'), NULL)",
             [],
         )
         .unwrap();
@@ -465,7 +466,8 @@ fn t4_force_complete_leaves_inprogress_when_v1_rows_exist() {
     // Seed a v1 row so the helper must NOT mark complete.
     seed_v1_row(&db, b"v1 data that must still be swept");
 
-    // Ensure the migration_state row exists as InProgress.
+    // Force the migration_state row to InProgress (override the Complete row
+    // seeded by the v6 migration on a fresh in-memory DB that has no v1 rows).
     db.conn()
         .execute(
             "CREATE TABLE IF NOT EXISTS migration_state (
@@ -480,9 +482,9 @@ fn t4_force_complete_leaves_inprogress_when_v1_rows_exist() {
         .unwrap();
     db.conn()
         .execute(
-            "INSERT OR IGNORE INTO migration_state \
-             (key, key_version_in_progress, last_processed_id, started_at) \
-             VALUES ('v4-key-version-sweep', 2, 0, strftime('%s','now'))",
+            "INSERT OR REPLACE INTO migration_state \
+             (key, key_version_in_progress, last_processed_id, started_at, completed_at) \
+             VALUES ('v4-key-version-sweep', 2, 0, strftime('%s','now'), NULL)",
             [],
         )
         .unwrap();

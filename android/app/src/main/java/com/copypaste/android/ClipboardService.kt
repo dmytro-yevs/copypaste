@@ -324,7 +324,7 @@ class ClipboardService : Service() {
             return NotificationCompat.Builder(context, CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(content)
-                .setSmallIcon(android.R.drawable.ic_menu_clipboard)
+                .setSmallIcon(android.R.drawable.ic_popup_sync)
                 .setColor(0xFF0066CC.toInt())
                 .setOngoing(true)
                 .setShowWhen(false)
