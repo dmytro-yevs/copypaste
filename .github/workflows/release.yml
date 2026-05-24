@@ -63,8 +63,9 @@ jobs:
       - name: Build release (workspace, explicit features)
         run: |
           # cloud-sync excluded from release build — requires Supabase credentials not present in CI
+          # copypaste-android excluded on macOS — needs aarch64-linux-android target (built in build-android job)
           cargo build --release --workspace \
-            --features copypaste-android/android-uniffi-live
+            --exclude copypaste-android
 
       - name: Resolve release version
         id: ver

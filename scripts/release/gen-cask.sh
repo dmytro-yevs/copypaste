@@ -141,9 +141,27 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
     echo "==> CI mode: committing and pushing cask update ..."
     git config user.name  "github-actions[bot]"
     git config user.email "github-actions[bot]@users.noreply.github.com"
+
+    # Embed GH_TOKEN into remote URL — release.yml checks out at tag ref,
+    # so HEAD is detached and the default credential helper has no token.
+    if [[ -n "${GH_TOKEN:-}" ]]; then
+        git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+    fi
+
+    # Bring main into a local branch on top of cask update so push targets main.
+    # release.yml step checks out the TAG (detached HEAD), so we must:
+    #   1) fetch latest main, 2) cherry-pick our cask commit on top, 3) push.
     git add "$CASK"
     git commit -m "chore(cask): bump to ${VERSION} [skip ci]"
-    git push
+    CASK_SHA="$(git rev-parse HEAD)"
+
+    git fetch origin main
+    git checkout -B main origin/main
+    git cherry-pick "$CASK_SHA" || {
+        echo "ERROR: cherry-pick failed; cask change may conflict with main HEAD" >&2
+        exit 1
+    }
+    git push origin main
     echo "Done."
 else
     echo
