@@ -1,6 +1,6 @@
 cask "copypaste" do
   version "0.3.1"
-  sha256 "82df769012c5544b33919973b75a166a2a036b10508ff73123bbca24450f4c22"
+  sha256 "3b40455f21519ce21e595502c2a543632166f0a4837e5bea81ddac4fbee6ad97"
 
   # DMG filename follows the CI pattern: CopyPaste-v<tag>-macos-arm64.dmg
   # where <tag> already includes the leading 'v', so the prefix becomes 'vv'.
