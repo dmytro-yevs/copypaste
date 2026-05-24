@@ -148,20 +148,48 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
         git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
     fi
 
-    # Bring main into a local branch on top of cask update so push targets main.
-    # release.yml step checks out the TAG (detached HEAD), so we must:
-    #   1) fetch latest main, 2) cherry-pick our cask commit on top, 3) push.
-    git add "$CASK"
-    git commit -m "chore(cask): bump to ${VERSION} [skip ci]"
-    CASK_SHA="$(git rev-parse HEAD)"
+    # Save the freshly-generated cask content before any branch switching.
+    NEW_CASK_CONTENT="$(cat "$CASK")"
 
+    # Overwrite-on-main strategy (no cherry-pick):
+    #   1) Fetch + reset to remote main (avoids detached-HEAD / cherry-pick conflicts).
+    #   2) Drop the new cask file in — overwriting whatever stale content is there.
+    #   3) If no diff → already up to date, exit 0.
+    #   4) Commit + push. Retry up to 3 times on push race.
     git fetch origin main
     git checkout -B main origin/main
-    git cherry-pick "$CASK_SHA" || {
-        echo "ERROR: cherry-pick failed; cask change may conflict with main HEAD" >&2
-        exit 1
-    }
-    git push origin main
+
+    printf '%s' "$NEW_CASK_CONTENT" > "$CASK"
+    git add "$CASK"
+
+    if git diff --cached --quiet; then
+        echo "Cask already up to date on main — nothing to push."
+        echo "Done."
+        exit 0
+    fi
+
+    git commit -m "chore(cask): bump to ${VERSION} [skip ci]"
+
+    PUSH_ATTEMPTS=0
+    MAX_ATTEMPTS=3
+    until git push origin main; do
+        PUSH_ATTEMPTS=$(( PUSH_ATTEMPTS + 1 ))
+        if [[ $PUSH_ATTEMPTS -ge $MAX_ATTEMPTS ]]; then
+            echo "ERROR: push failed after ${MAX_ATTEMPTS} attempts" >&2
+            exit 1
+        fi
+        echo "Push rejected (race); retrying (attempt $((PUSH_ATTEMPTS + 1))/${MAX_ATTEMPTS}) ..."
+        git fetch origin main
+        git reset --hard origin/main
+        printf '%s' "$NEW_CASK_CONTENT" > "$CASK"
+        git add "$CASK"
+        if git diff --cached --quiet; then
+            echo "Cask already up to date after re-fetch — nothing to push."
+            echo "Done."
+            exit 0
+        fi
+        git commit -m "chore(cask): bump to ${VERSION} [skip ci]"
+    done
     echo "Done."
 else
     echo
