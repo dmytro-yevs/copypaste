@@ -110,7 +110,6 @@ else
   <key>CFBundleVersion</key><string>${VERSION}</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleExecutable</key><string>copypaste-ui</string>
-  <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST

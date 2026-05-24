@@ -151,6 +151,7 @@ const LAUNCHD_LABEL: &str = "com.copypaste.daemon";
 const ID_OPEN_HISTORY: &str = "open_history";
 const ID_PRIVATE_MODE: &str = "private_mode";
 const ID_LAUNCH_AT_LOGIN: &str = "launch_at_login";
+const ID_PAIR_DEVICE: &str = "pair_device";
 const ID_PREFERENCES: &str = "preferences";
 const ID_QUIT: &str = "quit";
 
@@ -182,6 +183,8 @@ pub type PasteCb = Box<dyn Fn(&str) + 'static>;
 pub struct TrayCallbacks {
     pub on_open_history: Option<ActionCb>,
     pub on_open_preferences: Option<ActionCb>,
+    /// Bug-6: open the device-pairing window from the tray.
+    pub on_open_pair: Option<ActionCb>,
     pub on_quit: Option<ActionCb>,
     /// v0.3 T3: invoked when the user picks a row from the tray's
     /// "Recent items" block. The string argument is the daemon-side
@@ -314,6 +317,8 @@ struct TrayMenu {
     menu: Menu,
     private_mode: MenuItem,
     launch_at_login: MenuItem,
+    /// Bug-6: "Pair Device…" menu item kept alive so muda doesn't drop it.
+    _pair_device: MenuItem,
     /// v0.3 T3: refs to the dynamic "Recent items" rows. Kept on the
     /// struct so muda doesn't garbage-collect them between rebuilds; the
     /// Vec is rebuilt wholesale by `rebuild_with_recents`.
@@ -363,6 +368,8 @@ impl TrayMenu {
             true,
             None,
         );
+        // Bug-6: "Pair Device…" entry opens the pairing window.
+        let pair_device = MenuItem::with_id(ID_PAIR_DEVICE, "Pair Device…", true, None);
         let preferences = MenuItem::with_id(ID_PREFERENCES, "Preferences…", true, None);
         let quit = MenuItem::with_id(ID_QUIT, "Quit", true, None);
 
@@ -378,6 +385,7 @@ impl TrayMenu {
         let (recent_items, recent_headers) = append_recents_block(&menu, recents)?;
 
         menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&pair_device)?;
         menu.append(&private_mode)?;
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&launch_at_login)?;
@@ -389,6 +397,7 @@ impl TrayMenu {
             menu,
             private_mode,
             launch_at_login,
+            _pair_device: pair_device,
             _recent_items: recent_items,
             _recent_headers: recent_headers,
         })

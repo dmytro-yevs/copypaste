@@ -149,9 +149,9 @@ fn lock_or_recover<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// Bring the UI process to the foreground.
 ///
-/// `LSUIElement=true` (set in Info.plist so the app does not show up in the
-/// Dock) means a freshly-shown window stays *behind* whatever the user was
-/// using. `NSApplication::activate` is the modern (Sonoma+) replacement for
+/// Starting as `.accessory` (tray-only, set via `set_activation_policy_accessory()`
+/// at launch instead of the former `LSUIElement=true` plist key) means a
+/// freshly-shown window stays *behind* whatever the user was using. `NSApplication::activate` is the modern (Sonoma+) replacement for
 /// the deprecated `activateIgnoringOtherApps:` and works back to macOS 11 via
 /// the AppKit shim.
 ///
@@ -510,19 +510,27 @@ fn main() -> Result<()> {
     // run loop. The tray host registers a slint::Timer that polls menu events
     // on the UI thread, so we never spin a competing native run loop.
     // Failure is non-fatal — log + continue as a window-only app.
+    //
+    // Bug-1 fix: LSUIElement=true has been removed from Info.plist so that
+    // cmd-tab works when a window is visible. We start hidden by calling
+    // set_activation_policy_accessory() here — same tray-only behaviour as
+    // LSUIElement, but allows runtime flip to .regular when opening a window.
+    #[cfg(target_os = "macos")]
+    set_activation_policy_accessory();
+
     #[cfg(target_os = "macos")]
     {
         let window_weak = window.as_weak();
         let on_open_history: copypaste_ui::tray_host::ActionCb = Box::new(move || {
             if let Some(win) = window_weak.upgrade() {
                 // Switch to .regular so the app appears in cmd-tab / Dock
-                // while the window is visible (fix: alt-tab presence).
+                // while the window is visible.
                 set_activation_policy_regular();
                 win.show().ok();
-                // LSUIElement=true (menu-bar-only) apps stay in the
-                // background after `show()` — focus stays on whatever app
-                // the user was last using. NSApplication::activate brings
-                // the process + its visible windows to the foreground.
+                // .accessory-policy apps stay in the background after
+                // `show()` — focus stays on whatever the user had last.
+                // NSApplication::activate brings the process + its visible
+                // windows to the foreground.
                 activate_app();
             }
         });
@@ -531,6 +539,16 @@ fn main() -> Result<()> {
         let sw_weak = settings_window.as_weak();
         let on_open_preferences: copypaste_ui::tray_host::ActionCb = Box::new(move || {
             if let Some(w) = sw_weak.upgrade() {
+                set_activation_policy_regular();
+                w.show().ok();
+                activate_app();
+            }
+        });
+
+        // Bug-6: tray "Pair Device…" → show the PairWindow.
+        let pw_weak = pair_window.as_weak();
+        let on_open_pair: copypaste_ui::tray_host::ActionCb = Box::new(move || {
+            if let Some(w) = pw_weak.upgrade() {
                 set_activation_policy_regular();
                 w.show().ok();
                 activate_app();
@@ -553,6 +571,7 @@ fn main() -> Result<()> {
         let callbacks = copypaste_ui::tray_host::TrayCallbacks {
             on_open_history: Some(on_open_history),
             on_open_preferences: Some(on_open_preferences),
+            on_open_pair: Some(on_open_pair),
             on_quit: None, // default = slint::quit_event_loop()
             on_paste_item: Some(on_paste_item),
         };
@@ -642,6 +661,21 @@ fn main() -> Result<()> {
         let sw_weak = settings_window.as_weak();
         window.on_settings_requested(move || {
             if let Some(w) = sw_weak.upgrade() {
+                #[cfg(target_os = "macos")]
+                set_activation_policy_regular();
+                w.show().ok();
+                activate_app();
+            }
+        });
+    }
+
+    // --- Wire: pair-requested (Bug-6) ---
+    // Show the PairWindow when the user clicks the "Pair…" button in the
+    // HistoryWindow toolbar. Mirrors on_settings_requested exactly.
+    {
+        let pw_weak = pair_window.as_weak();
+        window.on_pair_requested(move || {
+            if let Some(w) = pw_weak.upgrade() {
                 #[cfg(target_os = "macos")]
                 set_activation_policy_regular();
                 w.show().ok();
@@ -844,7 +878,7 @@ fn main() -> Result<()> {
     // --- Wire: window close → revert to .accessory activation policy ---
     //
     // When the user closes the History window the app should disappear from
-    // cmd-tab and the Dock again (back to tray-only / LSUIElement behaviour).
+    // cmd-tab and the Dock again (back to tray-only / .accessory behaviour).
     // `window().on_close_requested()` fires on the Slint event loop (main
     // thread on macOS) which is where `setActivationPolicy:` must be called.
     //

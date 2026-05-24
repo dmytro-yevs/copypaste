@@ -56,6 +56,7 @@ export component HistoryWindow inherits Window {
     callback load-next-page();
     callback load-prev-page();
     callback settings-requested();  // open settings panel
+    callback pair-requested();      // Bug-6: open device-pairing window
     // beta-bonus (slint-search): fired 200 ms after the user stops typing
     // in the search field. The Rust handler re-filters the cached page
     // (see `AppState::last_page_items`) and swaps the visible model.
@@ -138,6 +139,12 @@ export component HistoryWindow inherits Window {
                 // the icon stays put while the word flips with the locale.
                 text: "⚙ " + @tr("Settings");
                 clicked => { settings-requested(); }
+            }
+
+            Button {
+                // Bug-6: shortcut to the device-pairing window from the toolbar.
+                text: @tr("Pair…");
+                clicked => { pair-requested(); }
             }
         }
 
@@ -295,15 +302,20 @@ export component HistoryWindow inherits Window {
                             // wrap:no-wrap + overflow:elide + explicit height
                             // pins the element to one line; the parent
                             // Rectangle's clip:true is the safety net.
-                            Text {
-                                text: (item.is-sensitive && root.hide-sensitive && !touch.has-hover)
-                                    ? "••••••••"
-                                    : item.preview;
-                                color: item.is-sensitive ? #f38ba8 : #cdd6f4;
-                                font-size: 13px;
-                                wrap: no-wrap;
-                                overflow: elide;
+                            Rectangle {
+                                clip: true;
+                                horizontal-stretch: 1;
                                 height: 18px;
+                                Text {
+                                    width: parent.width;
+                                    text: (item.is-sensitive && root.hide-sensitive && !touch.has-hover)
+                                        ? "••••••••"
+                                        : item.preview;
+                                    color: item.is-sensitive ? #f38ba8 : #cdd6f4;
+                                    font-size: 13px;
+                                    wrap: no-wrap;
+                                    overflow: elide;
+                                }
                             }
 
                             Text {

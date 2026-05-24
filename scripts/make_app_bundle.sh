@@ -16,7 +16,7 @@
 #   Contents/MacOS/copypaste-relay    (HTTP relay server)
 #   Contents/Resources/AppIcon.icns
 #   Contents/Resources/com.copypaste.daemon.plist  (LaunchAgent template — USERNAME substituted at install time)
-#   Contents/Info.plist               (CFBundleExecutable = copypaste-ui, LSUIElement = true)
+#   Contents/Info.plist               (CFBundleExecutable = copypaste-ui; no LSUIElement — runtime .accessory policy)
 set -euo pipefail
 
 VERSION="${1:-0.2.0-beta.1}"
@@ -90,7 +90,9 @@ fi
 
 # Info.plist — CFBundleExecutable points at the UI binary so `open CopyPaste.app`
 # launches the Slint window, which then autostarts the daemon via launchd.
-# LSUIElement=true keeps the app out of the Dock (menu-bar-only style).
+# NOTE: LSUIElement is intentionally absent — the app calls setActivationPolicy(.accessory)
+# at runtime to start hidden. This allows runtime flipping to .regular (cmd-tab visible)
+# when the user opens a window, which LSUIElement=true would permanently prevent.
 cat > "$CONTENTS/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -103,7 +105,6 @@ cat > "$CONTENTS/Info.plist" << PLIST
   <key>CFBundleExecutable</key><string>copypaste-ui</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>LSUIElement</key><true/>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>© 2026 CopyPaste contributors</string>
