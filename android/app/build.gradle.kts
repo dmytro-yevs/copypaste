@@ -112,6 +112,12 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+        jniLibs {
+            // JNA AAR bundles libjnidispatch.so for arm64-v8a/armeabi-v7a/x86_64;
+            // our cargo-ndk also drops libcopypaste_android.so under jniLibs/arm64-v8a/.
+            // pickFirsts prevents AGP DuplicateFilesException on mergeDebugNativeLibs.
+            pickFirsts += listOf("**/libjnidispatch.so")
+        }
     }
 }
 
