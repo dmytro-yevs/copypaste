@@ -25,7 +25,7 @@ export component IconButton inherits Rectangle {
         !root.enabled ? transparent :
         root.style == "primary" ? Theme.accent-gradient :
         root.style == "secondary" ? Theme.surface-elevated :
-        root.style == "danger" ? Theme.danger :
+        root.style == "danger" ? Theme.color-danger :
         ta.has-hover ? Theme.row-hover : transparent;
 
     border-width: root.style == "secondary" ? 1px : 0px;
@@ -45,7 +45,7 @@ export component IconButton inherits Rectangle {
             height: 14px;
             colorize:
                 root.style == "primary" ? Theme.text-inverse :
-                root.style == "danger" ? Theme.danger :
+                root.style == "danger" ? Theme.color-danger :
                 ta.has-hover ? Theme.text-primary : Theme.text-secondary;
         }
 
@@ -54,7 +54,7 @@ export component IconButton inherits Rectangle {
             font-size: 13px;
             color:
                 root.style == "primary" ? Theme.text-inverse :
-                root.style == "danger" ? Theme.danger :
+                root.style == "danger" ? Theme.color-danger :
                 Theme.text-primary;
         }
     }
@@ -201,7 +201,6 @@ export component Card inherits Rectangle {
     in property <string> title: "";
     in property <image> title-icon;
     in property <bool> show-title-icon: false;
-    @children
 
     border-radius: 8px;
     background: Theme.surface-panel;
@@ -275,16 +274,37 @@ export component SearchField inherits Rectangle {
             colorize: Theme.text-tertiary;
         }
 
-        fi := TextInput {
-            text <=> root.text;
-            font-size: 13px;
-            color: Theme.text-primary;
-            selection-background-color: Theme.row-selected;
-            selection-foreground-color: Theme.text-primary;
-            placeholder-color: Theme.text-tertiary;
-            single-line: true;
-            enabled: root.enabled;
-            edited => { root.text = self.text; root.edited(self.text); }
+        // Input area: TextInput overlaid with placeholder text when empty
+        input-area := Rectangle {
+            horizontal-stretch: 1;
+            height: 20px;
+            background: transparent;
+
+            // Placeholder text — shown when empty and not focused
+            if root.text == "" && !fi.has-focus: Text {
+                text: root.placeholder;
+                font-size: 13px;
+                color: Theme.text-tertiary;
+                vertical-alignment: center;
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+            }
+
+            fi := TextInput {
+                text <=> root.text;
+                font-size: 13px;
+                color: Theme.text-primary;
+                selection-background-color: Theme.row-selected;
+                selection-foreground-color: Theme.text-primary;
+                single-line: true;
+                enabled: root.enabled;
+                width: parent.width;
+                height: parent.height;
+                vertical-alignment: center;
+                edited => { root.text = self.text; root.edited(self.text); }
+            }
         }
 
         if root.text != "": TouchArea {
@@ -294,7 +314,7 @@ export component SearchField inherits Rectangle {
             clicked => { root.text = ""; fi.text = ""; root.edited(""); }
 
             Image {
-                source: Icons.x-circle;
+                source: Icons.x-close;
                 width: 13px;
                 height: 13px;
                 colorize: Theme.text-tertiary;
@@ -438,7 +458,8 @@ export enum ToastKind { success, error, info }
 export component Toast inherits Rectangle {
     in property <string> message: "";
     in property <ToastKind> kind: ToastKind.info;
-    in-out property <bool> visible: false;
+    /// Use `shown` (not `visible`) to show/hide the toast and drive its timer.
+    in-out property <bool> shown: false;
     callback dismissed();
 
     // Position anchoring is done by the parent (overlay layer in RootWindow)
@@ -448,19 +469,19 @@ export component Toast inherits Rectangle {
     border-width: 1px;
     background: Theme.surface-elevated;
     border-color:
-        root.kind == ToastKind.success ? Theme.success :
-        root.kind == ToastKind.error ? Theme.danger :
+        root.kind == ToastKind.success ? Theme.color-success :
+        root.kind == ToastKind.error ? Theme.color-danger :
         Theme.border-regular;
 
-    opacity: root.visible ? 1.0 : 0.0;
+    opacity: root.shown ? 1.0 : 0.0;
     animate opacity { duration: 160ms; easing: ease-out; }
 
     // Auto-dismiss timer
     timer := Timer {
         interval: 3000ms;
-        running: root.visible;
+        running: root.shown;
         triggered => {
-            root.visible = false;
+            root.shown = false;
             root.dismissed();
         }
     }
@@ -473,14 +494,14 @@ export component Toast inherits Rectangle {
 
         Image {
             source:
-                root.kind == ToastKind.success ? Icons.check-circle :
+                root.kind == ToastKind.success ? Icons.check-circle-2 :
                 root.kind == ToastKind.error ? Icons.alert-triangle :
                 Icons.info;
             width: 14px;
             height: 14px;
             colorize:
-                root.kind == ToastKind.success ? Theme.success :
-                root.kind == ToastKind.error ? Theme.danger :
+                root.kind == ToastKind.success ? Theme.color-success :
+                root.kind == ToastKind.error ? Theme.color-danger :
                 Theme.text-secondary;
         }
 
@@ -497,12 +518,12 @@ export component Toast inherits Rectangle {
             height: 20px;
             mouse-cursor: MouseCursor.pointer;
             clicked => {
-                root.visible = false;
+                root.shown = false;
                 root.dismissed();
             }
 
             Image {
-                source: Icons.x;
+                source: Icons.x-close;
                 width: 12px;
                 height: 12px;
                 colorize: Theme.text-tertiary;
@@ -520,7 +541,8 @@ export component ConfirmDialog inherits Rectangle {
     in property <string> confirm-label: "Confirm";
     in property <string> cancel-label: "Cancel";
     in property <bool> danger: false;
-    in-out property <bool> visible: false;
+    /// Use `shown` (not `visible`) to open/close the dialog.
+    in-out property <bool> shown: false;
     callback confirmed();
     callback cancelled();
 
@@ -528,14 +550,13 @@ export component ConfirmDialog inherits Rectangle {
     width: 100%;
     height: 100%;
     background: #00000099;  // overlay.scrim: #000000 @ 60%
-    opacity: root.visible ? 1.0 : 0.0;
-    visible: root.visible || self.opacity > 0.0;
+    opacity: root.shown ? 1.0 : 0.0;
 
     animate opacity { duration: 160ms; easing: ease-out; }
 
     // Dismiss on scrim click
     TouchArea {
-        clicked => { root.visible = false; root.cancelled(); }
+        clicked => { root.shown = false; root.cancelled(); }
     }
 
     // Dialog panel (centered)
@@ -578,16 +599,16 @@ export component ConfirmDialog inherits Rectangle {
                 alignment: end;
 
                 GhostButton {
-                    icon: Icons.x;
+                    icon: Icons.x-close;
                     label: root.cancel-label;
-                    clicked => { root.visible = false; root.cancelled(); }
+                    clicked => { root.shown = false; root.cancelled(); }
                 }
 
                 IconButton {
-                    icon: root.danger ? Icons.alert-triangle : Icons.check-circle;
+                    icon: root.danger ? Icons.alert-triangle : Icons.check-circle-2;
                     label: root.confirm-label;
                     style: root.danger ? "danger" : "primary";
-                    clicked => { root.visible = false; root.confirmed(); }
+                    clicked => { root.shown = false; root.confirmed(); }
                 }
             }
         }
