@@ -127,8 +127,7 @@ fn migration_gate_clears_after_sweep_with_v1_rows() {
     let row_id = uuid::Uuid::new_v4().to_string();
     let item_id = uuid::Uuid::new_v4().to_string();
     let aad = copypaste_core::build_item_aad(&item_id, copypaste_core::AAD_SCHEMA_VERSION);
-    let (nonce, ct) =
-        encrypt_item_with_aad(b"legacy v1 content", &v1_key, &aad).expect("encrypt");
+    let (nonce, ct) = encrypt_item_with_aad(b"legacy v1 content", &v1_key, &aad).expect("encrypt");
     db.conn()
         .execute(
             "INSERT INTO clipboard_items \
