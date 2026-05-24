@@ -208,6 +208,14 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
+      - name: Pre-create debug keystore dir (CI writable)
+        # Avoids: "Unable to create debug keystore in /home/runner/.config/.android"
+        # On hosted runners $HOME/.config exists but is not always writable for nested
+        # mkdir by Gradle. Pre-creating with explicit perms fixes it.
+        run: |
+          mkdir -p "$HOME/.android"
+          chmod 755 "$HOME/.android"
+
       - name: Build debug APK
         working-directory: android
         # Skip buildCargoNdk — .so already placed in jniLibs above
