@@ -105,7 +105,7 @@ pub(crate) const HKDF_SALT_V2: &[u8; 32] = &[
 /// Derive a 32-byte local-storage key from a raw 32-byte seed using the v2
 /// HKDF family.
 ///
-/// Uses HKDF-SHA512 with the frozen [`HKDF_SALT_V2`] salt and the info string
+/// Uses HKDF-SHA512 with the frozen `HKDF_SALT_V2` salt and the info string
 /// `"copypaste-local-storage-v2"`. Domain-separated from the network sync/
 /// telemetry keys by the `info` string and from v1 by both the algorithm
 /// (SHA-512 vs SHA-256) and the salt bytes.
