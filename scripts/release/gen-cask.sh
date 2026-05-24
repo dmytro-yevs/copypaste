@@ -71,8 +71,9 @@ else
     #   build-dmg-ci.sh produces CopyPaste-v<tag>-macos-arm64.dmg
     #   where <tag> already has the leading 'v', giving the double-vv prefix.
     DMG_NAME="CopyPaste-v${TAG}-macos-arm64.dmg"
+    # gh's --jq is a single-string filter (no --arg). Use bash to embed the name.
     DMG_URL="$(gh release view --repo "$REPO" --json assets \
-        --jq --arg name "$DMG_NAME" '.assets[] | select(.name==$name) | .browserDownloadUrl')"
+        --jq ".assets[] | select(.name==\"${DMG_NAME}\") | .url")"
 
     if [[ -z "$DMG_URL" ]]; then
         echo "ERROR: asset '${DMG_NAME}' not found in release ${TAG}" >&2
