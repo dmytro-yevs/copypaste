@@ -229,11 +229,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # PR2b — Publish release only after both platform builds succeed
-  publish:
-    name: Publish GitHub Release
+  # Per-platform publish: each platform independent so one failure
+  # does not block the other from shipping. softprops/action-gh-release
+  # is idempotent — both jobs append to the same release.
+  publish-macos:
+    name: Publish macOS Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-macos, build-android]
+    needs: [build-macos]
     runs-on: ubuntu-latest
     env:
       INPUT_VERSION: ${{ inputs.version }}
@@ -254,7 +256,49 @@ jobs:
           name: CopyPaste-${{ steps.ver.outputs.version }}-macos-arm64
           path: dist/macos
 
-      - name: Download Android artifacts
+      - name: Publish macOS assets to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          files: |
+            dist/macos/*.dmg
+            dist/macos/*.dmg.sha256
+            dist/macos/SHA256SUMS
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.ver.outputs.version, '-alpha') || contains(steps.ver.outputs.version, '-beta') || contains(steps.ver.outputs.version, '-rc') }}
+          fail_on_unmatched_files: true
+
+      - name: Checkout repo (for cask update)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+
+      - name: Update Homebrew Cask
+        # Runs after the macOS DMG is published so the URL resolves.
+        # gen-cask.sh auto-fetches the tag, downloads the DMG, computes sha256,
+        # updates Casks/copypaste.rb, then commits + pushes (GITHUB_ACTIONS=true).
+        run: bash scripts/release/gen-cask.sh
+
+  publish-android:
+    name: Publish Android Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-android]
+    runs-on: ubuntu-latest
+    env:
+      INPUT_VERSION: ${{ inputs.version }}
+      TAG_NAME: ${{ github.ref_name }}
+    steps:
+      - name: Resolve release version
+        id: ver
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$TAG_NAME" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download Android .so artifact
         uses: actions/download-artifact@v4
         with:
           name: CopyPaste-${{ steps.ver.outputs.version }}-android-arm64
@@ -266,27 +310,13 @@ jobs:
           name: android-debug-apk-${{ steps.ver.outputs.version }}
           path: dist/android
 
-      - name: Create GitHub Release
+      - name: Publish Android assets to release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.version }}
           files: |
-            dist/macos/*.dmg
-            dist/macos/*.dmg.sha256
-            dist/macos/SHA256SUMS
             dist/android/*.so
             dist/android/*.apk
           generate_release_notes: true
           prerelease: ${{ contains(steps.ver.outputs.version, '-alpha') || contains(steps.ver.outputs.version, '-beta') || contains(steps.ver.outputs.version, '-rc') }}
-
-      - name: Checkout repo (for cask update)
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref_name }}
-          fetch-depth: 1
-
-      - name: Update Homebrew Cask
-        # Runs after the release assets are published so the DMG URL resolves.
-        # gen-cask.sh auto-fetches the tag, downloads the DMG, computes sha256,
-        # updates Casks/copypaste.rb, then commits + pushes (GITHUB_ACTIONS=true).
-        run: bash scripts/release/gen-cask.sh
+          fail_on_unmatched_files: true
