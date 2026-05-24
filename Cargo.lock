@@ -1503,6 +1503,7 @@ dependencies = [
  "anyhow",
  "copypaste-core",
  "copypaste-ipc",
+ "dirs 5.0.1",
  "home",
  "i-slint-backend-testing",
  "objc2 0.6.4",
@@ -1514,6 +1515,7 @@ dependencies = [
  "slint-build",
  "tempfile",
  "thiserror 1.0.69",
+ "toml 0.8.23",
  "tracing",
  "tray-icon",
 ]

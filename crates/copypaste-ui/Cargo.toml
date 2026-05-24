@@ -18,6 +18,8 @@ serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 home.workspace = true
+toml.workspace = true
+dirs.workspace = true
 # Beta-bonus i18n: `gettext` feature exposes `slint::init_translations!` and
 # runtime msgid lookup against `.mo` catalogs under `lang/<locale>/LC_MESSAGES`.
 slint = { workspace = true, features = ["gettext"] }
