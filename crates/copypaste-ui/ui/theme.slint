@@ -1,0 +1,114 @@
+// theme.slint — global design tokens for CopyPaste UI (PhpStorm Darcula-aligned).
+// T1.1: created by UI-redesign wave-1 agent. Do NOT hand-edit hex values — source
+// of truth is ~/.claude/superpowers/specs/2026-05-24-copypaste-ui-redesign.md § 3.
+
+// ---------------------------------------------------------------------------
+// Theme — all design tokens. Importable from any .slint file in this crate.
+// Rust side must call Theme.set-is-android(true) on Android startup to apply
+// the Android surface override. The compact flag is toggled by UiPrefs loader.
+// ---------------------------------------------------------------------------
+export global Theme {
+    // -----------------------------------------------------------------------
+    // Runtime switches (set from Rust after window creation)
+    // -----------------------------------------------------------------------
+
+    /// Compact list mode: reduces row height. Toggled via UiPrefs.
+    in-out property <bool> compact: false;
+
+    /// Set to true on Android startup to apply Android surface overrides.
+    in-out property <bool> is-android: false;
+
+    // -----------------------------------------------------------------------
+    // § 3.1 Color tokens — surfaces
+    // -----------------------------------------------------------------------
+
+    out property <color> surface-base:     #1E1F22;  // Root window bg
+    out property <color> surface-sidebar:  #2B2D30;  // Left sidebar
+    out property <color> surface-panel:    #26282B;  // Right detail panel
+    out property <color> surface-row:      #1E1F22;  // List row default
+    out property <color> row-hover:        #2E3034;  // List row hover
+    out property <color> row-selected:     #2F3640;  // List row selected (blue tint)
+    out property <color> surface-elevated: #313438;  // Popover, palette, toast
+
+    // -----------------------------------------------------------------------
+    // § 3.1 Color tokens — borders
+    // -----------------------------------------------------------------------
+
+    out property <color> border-subtle:  #1A1B1E;  // Hairline separators
+    out property <color> border-regular: #393B40;  // Field borders, panel dividers
+    out property <color> border-focus:   #3574F0;  // Focus ring (JetBrains blue)
+
+    // -----------------------------------------------------------------------
+    // § 3.1 Color tokens — text
+    // -----------------------------------------------------------------------
+
+    out property <color> text-primary:   #DFE1E5;  // Body
+    out property <color> text-secondary: #9DA0A8;  // Captions, metadata
+    out property <color> text-tertiary:  #6F737A;  // Disabled, timestamps
+    out property <color> text-inverse:   #1E1F22;  // On-accent text
+
+    // -----------------------------------------------------------------------
+    // § 3.1 Color tokens — accent
+    // -----------------------------------------------------------------------
+
+    out property <color> accent-solid:          #3574F0;  // Single-color fallback
+    out property <color> accent-gradient-start: #3574F0;  // JetBrains blue
+    out property <color> accent-gradient-end:   #7F52FF;  // JetBrains purple
+
+    /// Gradient brush — use for primary CTA strokes, selected-row edge marker,
+    /// and focus rings where a gradient ring is desired.
+    out property <brush> accent-gradient: @linear-gradient(135deg, #3574F0 0%, #7F52FF 100%);
+
+    // -----------------------------------------------------------------------
+    // § 3.1 Color tokens — semantic states
+    // -----------------------------------------------------------------------
+
+    out property <color> color-success: #5FB865;  // "Paired", "Copied" toast
+    out property <color> color-warning: #E3B341;  // Stale device, low entropy
+    out property <color> color-danger:  #E55765;  // Unpair, delete, decrypt fail
+
+    // -----------------------------------------------------------------------
+    // § 3.1 Color tokens — overlay
+    // -----------------------------------------------------------------------
+
+    /// Scrim behind command palette. 60 % opacity black.
+    out property <color> overlay-scrim: #00000099;  // #000000 @ ~60 %
+
+    // -----------------------------------------------------------------------
+    // § 3.2 Spacing scale: 4 / 8 / 12 / 16 / 24 / 32 px
+    // -----------------------------------------------------------------------
+
+    out property <length> space-1:  4px;
+    out property <length> space-2:  8px;
+    out property <length> space-3: 12px;
+    out property <length> space-4: 16px;
+    out property <length> space-6: 24px;
+    out property <length> space-8: 32px;
+
+    // Named semantic spacing (derived from scale above)
+    out property <length> row-padding-v:    8px;   // Row vertical padding
+    out property <length> row-padding-h:   12px;   // Row horizontal padding
+    out property <length> panel-inset:     16px;   // Panel content inset
+    out property <length> section-gap:     24px;   // Gap between sections
+    out property <length> sidebar-item-h:  32px;   // Sidebar nav item height
+
+    // -----------------------------------------------------------------------
+    // § 3.3 Type scale
+    // -----------------------------------------------------------------------
+
+    out property <length> font-display:  22px;  // View title
+    out property <length> font-heading:  15px;  // Section headers, dialog titles
+    out property <length> font-body:     13px;  // Default UI text
+    out property <length> font-caption:  11px;  // Timestamps, hints, status
+    out property <length> font-mono:     12px;  // Code-shaped clipboard preview
+    out property <length> font-mono-meta:11px;  // Item kind tag, size, source app
+
+    // -----------------------------------------------------------------------
+    // § 3.5 Radius scale
+    // -----------------------------------------------------------------------
+
+    out property <length> radius-sm:      4px;   // Buttons, input fields, tags
+    out property <length> radius-row:     6px;   // List rows
+    out property <length> radius-panel:   8px;   // Panels, cards
+    out property <length> radius-overlay: 12px;  // Command palette, popovers
+}
