@@ -3,9 +3,12 @@ use crate::protocol::{
     ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 use copypaste_core::{
-    chunks_from_blob, count_items, decode_image, decrypt_item_by_version, delete_fts, delete_item,
-    derive_v2, ensure_revoked_devices_table, fetch_text_preview, get_page, revoke_device,
-    search_items, Database, EncryptError,
+    count_items, delete_fts, delete_item, ensure_revoked_devices_table, fetch_text_preview,
+    get_page, revoke_device, search_items, Database,
+};
+#[cfg(target_os = "macos")]
+use copypaste_core::{
+    chunks_from_blob, decode_image, decrypt_item_by_version, derive_v2, EncryptError,
 };
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
