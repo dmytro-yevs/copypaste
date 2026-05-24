@@ -16,6 +16,10 @@ on:
       - 'crates/copypaste-core/**'
       - '.github/workflows/ci-android-build.yml'
 
+concurrency:
+  group: ci-android-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
