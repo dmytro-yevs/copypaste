@@ -207,13 +207,18 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Cache Gradle caches
+      - name: Cache Gradle caches + build cache + configuration cache
         uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
+            ~/.gradle/build-cache
+            ~/.gradle/configuration-cache
+            android/.gradle/configuration-cache
+            android/build/intermediates
+            android/app/build/intermediates
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties', 'android/**/libs.versions.toml') }}
           restore-keys: |
             gradle-${{ runner.os }}-
 
