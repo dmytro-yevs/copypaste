@@ -16,7 +16,7 @@
 use copypaste_core::{
     build_item_aad, build_item_aad_v2, decrypt_item_by_version, decrypt_item_with_aad,
     encrypt_item_with_aad, ClipboardItem, Database, EncryptError, MigrationState,
-    NONCE_SIZE, AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4,
+    AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
 use rusqlite::params;
 
@@ -116,7 +116,10 @@ fn t1_1_fresh_v2_row_round_trips() {
 
     let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
     let decrypted = decrypt_item_with_aad(&ct, &nonce, &v2_key(), &aad).unwrap();
-    assert_eq!(&decrypted, plaintext, "v2 round-trip must recover original plaintext");
+    assert_eq!(
+        &decrypted, plaintext,
+        "v2 round-trip must recover original plaintext"
+    );
 }
 
 /// T1.2: post-`Database::rekey()` scenario — mixed v1+v2 rows decrypt correctly
@@ -171,8 +174,8 @@ fn t1_3_v2_row_inserted_while_v1_rows_exist_decrypts_correctly() {
     // The v2 straggler must decrypt correctly.
     let (ct, nonce, kv) = read_row(&db, &straggler_row);
     assert_eq!(kv, 2, "straggler must be at key_version=2");
-    let pt = decrypt_item_by_version(kv, &v1_key(), &v2_key(), &straggler_item, &nonce, &ct)
-        .unwrap();
+    let pt =
+        decrypt_item_by_version(kv, &v1_key(), &v2_key(), &straggler_item, &nonce, &ct).unwrap();
     assert_eq!(&pt, straggler_pt);
 
     // The v1 rows must still be v1.
@@ -298,7 +301,10 @@ fn t4_v3_and_v4_aad_are_not_interchangeable() {
     // just with key_version appended)
     let aad_v4_kv1 = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION, 1);
 
-    assert_ne!(aad_v3, aad_v4_kv1, "v3 and v4 AADs must differ even at the same schema version");
+    assert_ne!(
+        aad_v3, aad_v4_kv1,
+        "v3 and v4 AADs must differ even at the same schema version"
+    );
 
     // Encrypt with v3 AAD, attempt to decrypt with v4 AAD → must fail.
     let key = [0x42u8; 32];
@@ -364,7 +370,9 @@ fn t4_sweep_with_no_v1_rows_marks_complete() {
     let db = Database::open_in_memory().unwrap();
     // Seed only v2 rows — no v1 rows to sweep.
     seed_v2_row(&db, b"v2-only-row");
-    let rotated = db.migration_v4_sweep_resumable(&v1_key(), &v2_key()).unwrap();
+    let rotated = db
+        .migration_v4_sweep_resumable(&v1_key(), &v2_key())
+        .unwrap();
     assert_eq!(rotated, 0, "no v1 rows → 0 rotated");
     assert_eq!(
         db.migration_state().unwrap(),
@@ -381,12 +389,11 @@ fn t4_sweep_v1_rows_completes_and_state_is_complete() {
     let pt = b"sweep test plaintext";
     let (row_id, item_id) = seed_v1_row(&db, pt);
 
-    let rotated = db.migration_v4_sweep_resumable(&v1_key(), &v2_key()).unwrap();
+    let rotated = db
+        .migration_v4_sweep_resumable(&v1_key(), &v2_key())
+        .unwrap();
     assert_eq!(rotated, 1, "one v1 row must be rotated");
-    assert_eq!(
-        db.migration_state().unwrap(),
-        MigrationState::Complete
-    );
+    assert_eq!(db.migration_state().unwrap(), MigrationState::Complete);
 
     // Verify the row is now decryptable with v2 key.
     let (ct, nonce, kv) = read_row(&db, &row_id);

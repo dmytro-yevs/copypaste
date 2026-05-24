@@ -707,8 +707,7 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(60)).await;
         };
 
-        let (_server_result, client_result, _) =
-            tokio::join!(server_fut, client_fut, advance_fut);
+        let (_server_result, client_result, _) = tokio::join!(server_fut, client_fut, advance_fut);
 
         assert!(
             client_result.is_err(),

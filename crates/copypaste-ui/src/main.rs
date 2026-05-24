@@ -172,6 +172,61 @@ fn activate_app() {
 #[cfg(not(target_os = "macos"))]
 fn activate_app() {}
 
+/// Switch to `.regular` activation policy so the app appears in cmd-tab and
+/// the Dock while the History window is visible.
+///
+/// Called every time the History window is shown via the tray "Open History"
+/// action. The policy change is idempotent — calling it when already `.regular`
+/// is a no-op. Returns whether the change succeeded (failures are logged but
+/// not fatal; worst case the user cannot cmd-tab to the window).
+///
+/// Note: `setActivationPolicy:` must be called on the main thread. Tray
+/// callbacks run on the Slint event loop, which IS the main thread on macOS,
+/// so `MainThreadMarker::new()` succeeds here in the same way it does in
+/// `activate_app`.
+#[cfg(target_os = "macos")]
+fn set_activation_policy_regular() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+    if let Some(mtm) = MainThreadMarker::new() {
+        let app = NSApplication::sharedApplication(mtm);
+        let ok = app.setActivationPolicy(NSApplicationActivationPolicy::Regular);
+        if !ok {
+            tracing::warn!("setActivationPolicy(.regular) returned false — cmd-tab may not work");
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_activation_policy_regular() {}
+
+/// Switch back to `.accessory` (tray-only) policy once no window is visible.
+///
+/// Called when the History window is closed. After macOS 10.9 the policy may
+/// be toggled in either direction; the function logs a warning if the system
+/// refuses the change (which should not happen on supported OS versions).
+///
+/// Apple note: changing *to* `.accessory` hides the Dock icon and removes the
+/// app from cmd-tab immediately. The tray icon is unaffected — it continues to
+/// work because it is driven by the Slint event loop, not the Dock.
+#[cfg(target_os = "macos")]
+fn set_activation_policy_accessory() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+    if let Some(mtm) = MainThreadMarker::new() {
+        let app = NSApplication::sharedApplication(mtm);
+        let ok = app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+        if !ok {
+            tracing::warn!(
+                "setActivationPolicy(.accessory) returned false — app may stay in cmd-tab"
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn set_activation_policy_accessory() {}
+
 fn main() -> Result<()> {
     // Beta-bonus i18n: bind the gettext domain (auto-set from CARGO_PKG_NAME =
     // "copypaste-ui" by slint-build) to the `lang/` catalog directory shipped
@@ -184,6 +239,207 @@ fn main() -> Result<()> {
     let state = Arc::new(Mutex::new(AppState::new()));
     // Per-command in-flight flags — see `InFlight` doc-comment.
     let in_flight = InFlight::new();
+
+    // ── Settings window ────────────────────────────────────────────────────────
+    // Constructed eagerly so it is ready when the tray "Preferences" item fires.
+    // The IPC adapter bridges `ipc_client::IpcClient` (binary-private) to the
+    // library's `SettingsIpc` trait without leaking IPC types into the lib crate.
+    let socket_path_for_settings = lock_or_recover(&state).socket_path.clone();
+    // Try to fetch the current settings for the initial window population; fall
+    // back to defaults if the daemon is offline at startup.
+    let (initial_settings, initial_fp) = {
+        use copypaste_ui::settings::{AppSettings as UiSettings, HistoryLimit};
+        match IpcClient::connect(&socket_path_for_settings)
+            .map_err(|e| e.to_string())
+            .and_then(|mut c| {
+                let s = c.get_settings().map_err(|e| e.to_string())?;
+                let fp = c.get_own_fingerprint().map_err(|e| e.to_string())?;
+                Ok((s, fp))
+            }) {
+            Ok((s, fp)) => {
+                let ui = UiSettings {
+                    launch_at_login: false,
+                    private_mode: false,
+                    history_limit: HistoryLimit::Hundred,
+                    supabase_url: s.supabase_url.unwrap_or_default(),
+                    supabase_key: s.supabase_anon_key.unwrap_or_default(),
+                    device_name: String::from("My Mac"),
+                };
+                (ui, fp)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "settings pre-load failed — using defaults");
+                (UiSettings::default(), String::new())
+            }
+        }
+    };
+    let settings_window = copypaste_ui::windows::SettingsWindowHandle::new(
+        &initial_settings,
+        env!("CARGO_PKG_VERSION"),
+        &initial_fp,
+    )?;
+    // Wire Save / Clear History via the SettingsIpc adapter.
+    {
+        use copypaste_ui::settings::{AppSettings as UiSettings, HistoryLimit};
+        use copypaste_ui::windows::SettingsIpc;
+        use std::ops::Not;
+        struct IpcAdapter(std::path::PathBuf);
+        impl SettingsIpc for IpcAdapter {
+            fn get_settings(&mut self) -> Result<UiSettings, String> {
+                let mut c = IpcClient::connect(&self.0).map_err(|e| e.to_string())?;
+                let s = c.get_settings().map_err(|e| e.to_string())?;
+                Ok(UiSettings {
+                    launch_at_login: false,
+                    private_mode: false,
+                    history_limit: HistoryLimit::Hundred,
+                    supabase_url: s.supabase_url.unwrap_or_default(),
+                    supabase_key: s.supabase_anon_key.unwrap_or_default(),
+                    device_name: String::from("My Mac"),
+                })
+            }
+            fn save_settings(&mut self, settings: &UiSettings) -> Result<(), String> {
+                let mut c = IpcClient::connect(&self.0).map_err(|e| e.to_string())?;
+                let ipc_settings = ipc_client::AppSettings {
+                    p2p_enabled: settings.supabase_url.is_empty().not(),
+                    supabase_url: if settings.supabase_url.is_empty() {
+                        None
+                    } else {
+                        Some(settings.supabase_url.clone())
+                    },
+                    supabase_anon_key: if settings.supabase_key.is_empty() {
+                        None
+                    } else {
+                        Some(settings.supabase_key.clone())
+                    },
+                };
+                c.save_settings(&ipc_settings).map_err(|e| e.to_string())
+            }
+            fn delete_all_history(&mut self) -> Result<(), String> {
+                // TODO(v0.3.x): wire to a dedicated IPC method when daemon exposes one.
+                tracing::warn!("delete_all_history: no IPC method yet — no-op");
+                Ok(())
+            }
+        }
+        let adapter = std::rc::Rc::new(std::cell::RefCell::new(IpcAdapter(
+            lock_or_recover(&state).socket_path.clone(),
+        )));
+        if let Err(e) = settings_window.wire_to_ipc(adapter) {
+            tracing::warn!(error = %e, "settings initial load failed");
+        }
+    }
+    // Close button hides the window (does not quit).
+    {
+        let sw = settings_window.as_weak();
+        settings_window.on_close(move || {
+            if let Some(w) = sw.upgrade() {
+                w.hide().ok();
+            }
+        });
+    }
+
+    // ── Pair window ────────────────────────────────────────────────────────────
+    let socket_path_for_pair = lock_or_recover(&state).socket_path.clone();
+    let (own_fp, paired_devices) = {
+        match IpcClient::connect(&socket_path_for_pair)
+            .map_err(|e| e.to_string())
+            .and_then(|mut c| {
+                let fp = c.get_own_fingerprint().map_err(|e| e.to_string())?;
+                let peers = c.list_peers().map_err(|e| e.to_string())?;
+                let pd: Vec<copypaste_ui::settings::PairedDevice> = peers
+                    .into_iter()
+                    .map(|p| copypaste_ui::settings::PairedDevice::new(p.name, p.fingerprint))
+                    .collect();
+                Ok((fp, pd))
+            }) {
+            Ok((fp, pd)) => (fp, pd),
+            Err(e) => {
+                tracing::warn!(error = %e, "pair window pre-load failed — using defaults");
+                (String::new(), vec![])
+            }
+        }
+    };
+    let pair_window = copypaste_ui::windows::PairWindowHandle::new(&own_fp, &paired_devices)?;
+    // Wire Pair / Remove / Revoke / Close callbacks.
+    {
+        let socket = socket_path_for_pair.clone();
+        let pw = pair_window.as_weak();
+        pair_window.on_pair(move |fp| {
+            let socket = socket.clone();
+            let pw = pw.clone();
+            std::thread::spawn(move || {
+                let result = IpcClient::connect(&socket)
+                    .map_err(|e| e.to_string())
+                    .and_then(|mut c| c.pair_peer(&fp, "").map_err(|e| e.to_string()));
+                let (msg, is_err) = match result {
+                    Ok(()) => ("Paired successfully.".to_string(), false),
+                    Err(e) => (format!("Pair failed: {e}"), true),
+                };
+                slint::invoke_from_event_loop(move || {
+                    if let Some(w) = pw.upgrade() {
+                        w.set_status_message(msg.into());
+                        w.set_status_is_error(is_err);
+                    }
+                })
+                .ok();
+            });
+        });
+    }
+    {
+        let socket = socket_path_for_pair.clone();
+        let pw = pair_window.as_weak();
+        pair_window.on_remove_peer(move |fp| {
+            let socket = socket.clone();
+            let pw = pw.clone();
+            std::thread::spawn(move || {
+                let result = IpcClient::connect(&socket)
+                    .map_err(|e| e.to_string())
+                    .and_then(|mut c| c.unpair_peer(&fp).map_err(|e| e.to_string()));
+                let (msg, is_err) = match result {
+                    Ok(()) => ("Device removed.".to_string(), false),
+                    Err(e) => (format!("Remove failed: {e}"), true),
+                };
+                slint::invoke_from_event_loop(move || {
+                    if let Some(w) = pw.upgrade() {
+                        w.set_status_message(msg.into());
+                        w.set_status_is_error(is_err);
+                    }
+                })
+                .ok();
+            });
+        });
+    }
+    {
+        let socket = socket_path_for_pair.clone();
+        let pw = pair_window.as_weak();
+        pair_window.on_revoke_peer(move |fp| {
+            let socket = socket.clone();
+            let pw = pw.clone();
+            std::thread::spawn(move || {
+                let result = IpcClient::connect(&socket)
+                    .map_err(|e| e.to_string())
+                    .and_then(|mut c| c.revoke_peer(&fp).map(|_| ()).map_err(|e| e.to_string()));
+                let (msg, is_err) = match result {
+                    Ok(()) => ("Device revoked.".to_string(), false),
+                    Err(e) => (format!("Revoke failed: {e}"), true),
+                };
+                slint::invoke_from_event_loop(move || {
+                    if let Some(w) = pw.upgrade() {
+                        w.set_status_message(msg.into());
+                        w.set_status_is_error(is_err);
+                    }
+                })
+                .ok();
+            });
+        });
+    }
+    {
+        let pw = pair_window.as_weak();
+        pair_window.on_close(move || {
+            if let Some(w) = pw.upgrade() {
+                w.hide().ok();
+            }
+        });
+    }
 
     // Beta hot-fix: on macOS, install the Launch Agent plist + bootstrap the
     // daemon in the background so the user does not have to run
@@ -230,34 +486,6 @@ fn main() -> Result<()> {
         });
     }
 
-    // v0.3: install the macOS menu-bar tray BEFORE Slint takes over the main
-    // run loop. The tray host registers a slint::Timer that polls menu events
-    // on the UI thread, so we never spin a competing native run loop.
-    // Failure is non-fatal — log + continue as a window-only app.
-    #[cfg(target_os = "macos")]
-    {
-        let window_weak = window.as_weak();
-        let on_open_history: copypaste_ui::tray_host::ActionCb = Box::new(move || {
-            if let Some(win) = window_weak.upgrade() {
-                win.show().ok();
-                // LSUIElement=true (menu-bar-only) apps stay in the
-                // background after `show()` — focus stays on whatever app
-                // the user was last using. NSApplication::activate brings
-                // the process + its visible windows to the foreground.
-                activate_app();
-            }
-        });
-        let callbacks = copypaste_ui::tray_host::TrayCallbacks {
-            on_open_history: Some(on_open_history),
-            on_open_preferences: None,
-            on_quit: None, // default = slint::quit_event_loop()
-            on_paste_item: None, // wired post-MVP — recents in tray menu paste via separate cb
-        };
-        if let Err(e) = copypaste_ui::tray_host::install(callbacks) {
-            eprintln!("[tray] install failed: {e} — running without menu-bar tray");
-        }
-    }
-
     // v0.3 T3: load the redaction preference from disk and push it into the
     // window before the first render so sensitive rows are masked on the
     // initial paint (no flash of un-redacted previews).
@@ -287,16 +515,32 @@ fn main() -> Result<()> {
         let window_weak = window.as_weak();
         let on_open_history: copypaste_ui::tray_host::ActionCb = Box::new(move || {
             if let Some(win) = window_weak.upgrade() {
+                // Switch to .regular so the app appears in cmd-tab / Dock
+                // while the window is visible (fix: alt-tab presence).
+                set_activation_policy_regular();
                 win.show().ok();
+                // LSUIElement=true (menu-bar-only) apps stay in the
+                // background after `show()` — focus stays on whatever app
+                // the user was last using. NSApplication::activate brings
+                // the process + its visible windows to the foreground.
+                activate_app();
             }
         });
+
+        // Tray "Preferences" → show the Settings window.
+        let sw_weak = settings_window.as_weak();
+        let on_open_preferences: copypaste_ui::tray_host::ActionCb = Box::new(move || {
+            if let Some(w) = sw_weak.upgrade() {
+                set_activation_policy_regular();
+                w.show().ok();
+                activate_app();
+            }
+        });
+
         // v0.3 T3: tray "Recent items" row click → paste via IPC. The
         // closure spawns a worker thread so we never block the UI on the
         // daemon socket (paste involves a write + ack).
-        let paste_socket = {
-            let s = state.lock().unwrap();
-            s.socket_path.clone()
-        };
+        let paste_socket = lock_or_recover(&state).socket_path.clone();
         let on_paste_item: copypaste_ui::tray_host::PasteCb = Box::new(move |id: &str| {
             let socket = paste_socket.clone();
             let id_owned = id.to_string();
@@ -308,7 +552,7 @@ fn main() -> Result<()> {
         });
         let callbacks = copypaste_ui::tray_host::TrayCallbacks {
             on_open_history: Some(on_open_history),
-            on_open_preferences: None,
+            on_open_preferences: Some(on_open_preferences),
             on_quit: None, // default = slint::quit_event_loop()
             on_paste_item: Some(on_paste_item),
         };
@@ -391,40 +635,18 @@ fn main() -> Result<()> {
     }
 
     // --- Wire: settings-requested ---
+    // Show the SettingsWindow when the user clicks the gear/settings button
+    // in the HistoryWindow toolbar. The window was constructed and wired
+    // above; here we just upgrade the weak handle and call show().
     {
-        let window_weak = window.as_weak();
-        let state = Arc::clone(&state);
+        let sw_weak = settings_window.as_weak();
         window.on_settings_requested(move || {
-            let window_weak = window_weak.clone();
-            let socket_path = {
-                let s = lock_or_recover(&state);
-                s.socket_path.clone()
-            };
-            std::thread::spawn(move || {
-                // Fetch current settings from daemon and log them.
-                // Full Settings UI to follow in a separate feature branch.
-                let result: Result<ipc_client::AppSettings, String> =
-                    IpcClient::connect(&socket_path)
-                        .map_err(|e| format!("daemon offline: {e}"))
-                        .and_then(|mut c| c.get_settings().map_err(|e| e.to_string()));
-                if let Err(e) = slint::invoke_from_event_loop(move || {
-                    if let Some(win) = window_weak.upgrade() {
-                        match result {
-                            Ok(settings) => win.set_status_text(
-                                format!(
-                                    "Settings: p2p={}, supabase={}",
-                                    settings.p2p_enabled,
-                                    settings.supabase_url.as_deref().unwrap_or("(none)")
-                                )
-                                .into(),
-                            ),
-                            Err(e) => win.set_status_text(format!("Settings error: {e}").into()),
-                        }
-                    }
-                }) {
-                    tracing::debug!(error = %e, "ui update dropped during event-loop shutdown");
-                }
-            });
+            if let Some(w) = sw_weak.upgrade() {
+                #[cfg(target_os = "macos")]
+                set_activation_policy_regular();
+                w.show().ok();
+                activate_app();
+            }
         });
     }
 
@@ -616,6 +838,24 @@ fn main() -> Result<()> {
             }) {
                 tracing::debug!(error = %e, "ui update dropped during event-loop shutdown");
             }
+        });
+    }
+
+    // --- Wire: window close → revert to .accessory activation policy ---
+    //
+    // When the user closes the History window the app should disappear from
+    // cmd-tab and the Dock again (back to tray-only / LSUIElement behaviour).
+    // `window().on_close_requested()` fires on the Slint event loop (main
+    // thread on macOS) which is where `setActivationPolicy:` must be called.
+    //
+    // We return `CloseRequestResponse::HideWindow` (the default) to preserve
+    // Slint's hide-on-close behaviour — the process stays alive and the tray
+    // continues to work.
+    #[cfg(target_os = "macos")]
+    {
+        window.window().on_close_requested(|| {
+            set_activation_policy_accessory();
+            slint::CloseRequestResponse::HideWindow
         });
     }
 
@@ -844,9 +1084,13 @@ fn spawn_tray_recents_refresh(state: Arc<Mutex<AppState>>) {
 
     // Repeating timer on the Slint event loop.
     let timer = slint::Timer::default();
-    timer.start(slint::TimerMode::Repeated, TRAY_REFRESH_INTERVAL, move || {
-        refresh();
-    });
+    timer.start(
+        slint::TimerMode::Repeated,
+        TRAY_REFRESH_INTERVAL,
+        move || {
+            refresh();
+        },
+    );
     // Leak so the timer outlives this scope.
     std::mem::forget(timer);
 }

@@ -167,6 +167,18 @@ msgstr "No peers discovered."
 msgid "QR code will appear here"
 msgstr "QR code will appear here"
 
+msgid "(coming soon)"
+msgstr "(coming soon)"
+
+msgid "Search history... (⌘F)"
+msgstr "Search history... (⌘F)"
+
+msgid "https://your-project.supabase.co"
+msgstr "https://your-project.supabase.co"
+
+msgid "eyJ…"
+msgstr "eyJ…"
+
 # -- Menu / shortcut labels ----------------------------------------------
 
 msgid "Clear History"

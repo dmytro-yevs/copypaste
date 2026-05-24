@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.3.1] - 2026-05-24
+
+Emergency release. v0.3.0 shipped broken; this release rolls up post-tag fixes from commits 06b8f84, 11b282a, and Wave 0 UI/daemon repairs.
+
+### Fixed
+
+- **paste:** "authentication tag mismatch" — IPC paste decrypt always used v1 AAD regardless of `key_version` (broke every `key_version=2` item)
+- **ui:** `history_window.slint` HorizontalBox height constraints clipped Button text to zero (buttons rendered as black rectangles)
+- **ui:** tray icon missing/grey — `load_icon` used hardcoded 22x22 dims instead of actual PNG dimensions
+- **ui:** `tray-icon-active.png` added to tray icon candidate search list
+- **ui:** Settings and Pair window callbacks now wired via `wire_to_ipc()` in `main.rs` (were firing into void)
+- **ui:** `on_settings_requested` now opens `SettingsWindow` (was only logging to stderr)
+- **ui:** tray `on_open_preferences` and `on_paste_item` callbacks wired (were `None`)
+- **ui:** tray icon uses `.with_icon_as_template(true)` — adapts automatically to macOS dark/light menubar
+- **ui:** tray `load_icon` fallback now emits `tracing::warn!` when bundle icon is missing (was silent)
+- **ui:** history list rows no longer overlap — `clip: true`, `wrap: no-wrap`, `height: 18px` on preview `Text`
+- **ui:** `SettingsWindow.app_version` bound to `env!("CARGO_PKG_VERSION")` (was hardcoded `"0.1.0"`)
+- **macos:** app now appears in Cmd-Tab when window is open — `NSApp` activation policy toggles `.accessory` ↔ `.regular` on window show/hide
+- **macos:** daemon failed to spawn after DMG install — `build-dmg-ci.sh` now copies `com.copypaste.daemon.plist` into `Contents/Resources/`; `-x` → `-f` guard fixed in `make_app_bundle.sh` and `make_dmg.sh` (CI strips exec bits)
+- **storage:** schema v7 — added `pinned` column to prevent TTL prune deleting pinned items (data loss: prune only cleared `expires_at`, not the pin)
+- **storage:** `pin_item` now sets `pinned=1`; added `unpin_item`; `delete_expired`/`prune_history` now filter `AND pinned=0`
+- **ipc:** `delete_item`/`delete_fts` errors no longer silently swallowed; 3 server loops changed from `.ok()` to `if let Err` with logging
+- **security:** `SessionKey` gains `ZeroizeOnDrop` (key material scrubbed on drop); `KeystoreBackend::load_or_create`, `local_enc_key`, and `load_local_key` now return `Zeroizing<[u8;32]>`
+- **daemon:** `cloud.rs` — fixed 5 compile errors: `pinned` field added to `ClipboardItem` literals; `rx.recv()` double-borrow restructured
+- **dist:** Android APK now built and uploaded in `release.yml` (Gradle `assembleDebug`)
+- **dist:** `release.yml` auto-updates Homebrew Cask after publish
+- **dist:** DMG scripts add `/Applications` symlink for drag-install UX
+- **dist:** `xattr -cr` inside DMG image to clear quarantine on install
+- **dist:** `build-dmg-ci.sh` fixed `CFBundleExecutable` substitution (`copypaste-daemon` → `copypaste-ui`)
+- **dist:** Homebrew Cask repo URL, version, and DMG filename pattern fixed
+- **ci:** Install OpenSSL on Windows runner for SQLCipher; pin `rust-toolchain.toml` to `channel = stable`
+
+### Added
+
+- **i18n:** 4 previously hardcoded strings wrapped in `@tr()`: search placeholder, "(coming soon)", and 2 Supabase UI placeholders
+- **tests:** Slint headless + ViewModel test suite — 225 tests
+- **android:** `versionName` bumped to `"0.3.1"`, `versionCode` → 4
+
+### Known limitations
+
+- Tray Private Mode IPC plumbing not wired (deferred to v0.4)
+- QR pair flow incomplete (deferred to v0.4)
+- APK is debug-signed (production signing in v0.3.2)
+- Dead code in `src/tray_menu.rs` (cleanup deferred to v0.3.2)
+
 ## [0.3.0-dev] — Unreleased
 
 v0.3 development branch. Cut from release/v0.2.0-beta after Wave 5 verify-gate.

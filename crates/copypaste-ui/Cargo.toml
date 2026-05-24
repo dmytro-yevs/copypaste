@@ -38,10 +38,12 @@ png = "0.17"
 # transitively in the dep graph via tray-icon's `objc2-app-kit 0.3`; declared
 # here as a direct dep so we can call it from `main.rs`.
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSResponder"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSApplication", "NSResponder", "NSRunningApplication"] }
 
 [build-dependencies]
 slint-build.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+i-slint-backend-testing = "=1.8.0"
+copypaste-core = { path = "../copypaste-core" }

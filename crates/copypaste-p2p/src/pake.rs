@@ -32,13 +32,13 @@ use argon2::Argon2;
 use generic_array::GenericArray;
 use hkdf::Hkdf;
 use opaque_ke::ciphersuite::CipherSuite;
-use rand::rngs::OsRng;
 use opaque_ke::{
     ClientLogin, ClientLoginFinishParameters, ClientRegistration,
     ClientRegistrationFinishParameters, CredentialFinalization, CredentialRequest,
     CredentialResponse, RegistrationRequest, RegistrationResponse, RegistrationUpload, ServerLogin,
     ServerLoginStartParameters, ServerRegistration, ServerSetup,
 };
+use rand::rngs::OsRng;
 use sha2::Sha256;
 use thiserror::Error;
 
@@ -345,10 +345,10 @@ impl PakeInitiator {
         // and zeroize it eagerly. The drained `self.password` (an empty
         // Vec) is later visited by `Drop`, which is a no-op on empty.
         let password = std::mem::take(&mut self.password);
-        let result = self
-            .state
-            .clone()
-            .finish(&password, resp, ClientLoginFinishParameters::default());
+        let result =
+            self.state
+                .clone()
+                .finish(&password, resp, ClientLoginFinishParameters::default());
         let mut pw = password;
         pw.zeroize();
 
@@ -512,8 +512,7 @@ mod tests {
         );
         // The channel-bound key must also differ from the raw session key.
         assert_ne!(
-            *bound_a,
-            sk.0,
+            *bound_a, sk.0,
             "channel-bound key must differ from the raw PAKE key"
         );
     }

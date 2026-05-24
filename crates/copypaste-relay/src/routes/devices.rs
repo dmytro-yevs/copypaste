@@ -72,9 +72,7 @@ pub async fn register(
     let client_ip = connect_info.map(|ConnectInfo(addr)| addr.ip());
     {
         let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(retry_after) =
-            store.check_registration_rate_limit(client_ip, &body.device_id)
-        {
+        if let Err(retry_after) = store.check_registration_rate_limit(client_ip, &body.device_id) {
             let body = serde_json::json!({
                 "error": "too many registration attempts",
                 "code": "RATE_LIMITED",
@@ -173,7 +171,8 @@ fn epoch_to_date(mut secs: u64) -> (u32, u32, u32, u32, u32, u32) {
     days -= year_1 * 365;
 
     let year = (year_400 * 400 + year_100 * 100 + year_4 * 4 + year_1 + 1970) as u32;
-    let leap = (year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))) as u64;
+    let leap =
+        (year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))) as u64;
 
     let month_days: [u64; 12] = [31, 28 + leap, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     let mut month = 1u32;

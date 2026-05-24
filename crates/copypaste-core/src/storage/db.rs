@@ -610,9 +610,11 @@ impl Database {
             // Mark complete — store the highest rowid as a record.
             let max_id: i64 = self
                 .conn
-                .query_row("SELECT COALESCE(MAX(rowid), 0) FROM clipboard_items", [], |r| {
-                    r.get(0)
-                })
+                .query_row(
+                    "SELECT COALESCE(MAX(rowid), 0) FROM clipboard_items",
+                    [],
+                    |r| r.get(0),
+                )
                 .unwrap_or(0);
             self.conn.execute(
                 "UPDATE migration_state \

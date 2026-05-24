@@ -62,7 +62,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
 
     let db_path = paths::db_path();
     let db = Arc::new(Mutex::new(
-        Database::open(&db_path, &**local_key_arc).map_err(|e| anyhow::anyhow!("Database: {e}"))?,
+        Database::open(&db_path, &local_key_arc).map_err(|e| anyhow::anyhow!("Database: {e}"))?,
     ));
     tracing::info!("database opened at {}", db_path.display());
 
@@ -278,7 +278,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &**local_key_arc, &config, &private_mode, &new_item_tx).await;
+                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -350,7 +350,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &**local_key_arc, &config, &private_mode, &new_item_tx).await;
+                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 

@@ -619,10 +619,16 @@ impl IpcServer {
                             Ok(items) => {
                                 for item in items {
                                     if let Err(e) = delete_item(&db, &item.id) {
-                                        tracing::error!("ipc: delete_item failed for id={}: {e}", &item.id);
+                                        tracing::error!(
+                                            "ipc: delete_item failed for id={}: {e}",
+                                            &item.id
+                                        );
                                     }
                                     if let Err(e) = delete_fts(&db, &item.id) {
-                                        tracing::error!("ipc: delete_fts failed for id={}: {e}", &item.id);
+                                        tracing::error!(
+                                            "ipc: delete_fts failed for id={}: {e}",
+                                            &item.id
+                                        );
                                     }
                                 }
                             }
@@ -743,12 +749,10 @@ impl IpcServer {
                 })
                 .await;
                 match join {
-                    Ok(Ok((json_items, total))) => {
-                        Response::ok(
-                            req.id,
-                            serde_json::json!({"items": json_items, "total": total}),
-                        )
-                    }
+                    Ok(Ok((json_items, total))) => Response::ok(
+                        req.id,
+                        serde_json::json!({"items": json_items, "total": total}),
+                    ),
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
@@ -973,9 +977,7 @@ impl IpcServer {
                         }
                         (peers.len() < before_len, name)
                     }
-                    Err(e) => {
-                        return Response::err(req.id, format!("failed to load peers: {e}"))
-                    }
+                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
                 };
 
                 // Write the audit row. Done on the blocking thread pool
@@ -1331,28 +1333,27 @@ impl IpcServer {
                 // struct does not need a second Arc field.
                 let v1_key: [u8; 32] = **self.local_key;
                 let v2_key = derive_v2(&v1_key);
-                let plaintext_bytes =
-                    decrypt_item_by_version(
-                        item.key_version,
-                        &v1_key,
-                        &v2_key,
-                        &item.item_id,
-                        nonce,
-                        content,
-                    )
-                    .map_err(|e| match e {
-                        EncryptError::AuthFailed | EncryptError::AadMismatch => {
-                            PasteboardError::decrypt(
-                                "Decryption failed: authentication tag mismatch".to_string(),
-                            )
-                        }
-                        EncryptError::UnknownKeyVersion(_) => PasteboardError::decrypt(
-                            "Item encrypted with a previous key — cannot be recovered. \
+                let plaintext_bytes = decrypt_item_by_version(
+                    item.key_version,
+                    &v1_key,
+                    &v2_key,
+                    &item.item_id,
+                    nonce,
+                    content,
+                )
+                .map_err(|e| match e {
+                    EncryptError::AuthFailed | EncryptError::AadMismatch => {
+                        PasteboardError::decrypt(
+                            "Decryption failed: authentication tag mismatch".to_string(),
+                        )
+                    }
+                    EncryptError::UnknownKeyVersion(_) => PasteboardError::decrypt(
+                        "Item encrypted with a previous key — cannot be recovered. \
                              Clear history to start fresh."
-                                .to_string(),
-                        ),
-                        other => PasteboardError::decrypt(other.to_string()),
-                    })?;
+                            .to_string(),
+                    ),
+                    other => PasteboardError::decrypt(other.to_string()),
+                })?;
                 let text = std::str::from_utf8(&plaintext_bytes).map_err(|e| {
                     PasteboardError::decrypt(format!("decrypted content is not UTF-8: {e}"))
                 })?;
@@ -1381,7 +1382,7 @@ impl IpcServer {
                 let chunks = chunks_from_blob(content).map_err(|e| {
                     PasteboardError::other(format!("image chunks_from_blob failed: {e}"))
                 })?;
-                let png_bytes = decode_image(&chunks, &**self.local_key, &file_id)
+                let png_bytes = decode_image(&chunks, &self.local_key, &file_id)
                     .map_err(|e| PasteboardError::decrypt(format!("image decode failed: {e}")))?;
 
                 unsafe {
@@ -2484,11 +2485,7 @@ mod tests {
         }
 
         // Missing fingerprint → invalid_argument
-        let resp = call(
-            &sock,
-            r#"{"id":"r1","method":"revoke_peer","params":{}}"#,
-        )
-        .await;
+        let resp = call(&sock, r#"{"id":"r1","method":"revoke_peer","params":{}}"#).await;
         assert_eq!(resp["ok"], false, "missing fingerprint must fail");
         assert_eq!(resp["error_code"], "invalid_argument");
 
@@ -2504,9 +2501,8 @@ mod tests {
         // Valid request — unknown peer, but revoke still succeeds and writes
         // the audit row.
         let fp = std::iter::repeat_n("ab", 32).collect::<Vec<_>>().join(":");
-        let body = format!(
-            r#"{{"id":"r3","method":"revoke_peer","params":{{"fingerprint":"{fp}"}}}}"#
-        );
+        let body =
+            format!(r#"{{"id":"r3","method":"revoke_peer","params":{{"fingerprint":"{fp}"}}}}"#);
         let resp = call(&sock, &body).await;
         assert_eq!(resp["ok"], true, "valid revoke must succeed: {resp}");
         assert_eq!(resp["data"]["fingerprint"], fp);

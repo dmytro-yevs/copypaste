@@ -15,7 +15,7 @@ slint::include_modules!();
 
 /// A live handle to the SettingsWindow.
 pub struct SettingsWindowHandle {
-    window: SettingsWindow,
+    pub(crate) window: SettingsWindow,
 }
 
 impl SettingsWindowHandle {
@@ -148,6 +148,14 @@ impl SettingsWindowHandle {
     /// Run the event loop (blocks until window closes).
     pub fn run(&self) -> Result<(), slint::PlatformError> {
         self.window.run()
+    }
+
+    /// Return a weak reference to the underlying Slint window.
+    ///
+    /// Callers (e.g. `main.rs`) use this to post UI updates from worker
+    /// threads via `slint::invoke_from_event_loop`.
+    pub fn as_weak(&self) -> slint::Weak<SettingsWindow> {
+        self.window.as_weak()
     }
 }
 
@@ -417,7 +425,7 @@ pub fn filter_history_items<'a, T: SearchableHistoryItem>(
 
 /// A live handle to the PairWindow.
 pub struct PairWindowHandle {
-    window: PairWindow,
+    pub(crate) window: PairWindow,
 }
 
 impl PairWindowHandle {
@@ -530,6 +538,14 @@ impl PairWindowHandle {
     /// Run the event loop (blocks until window closes).
     pub fn run(&self) -> Result<(), slint::PlatformError> {
         self.window.run()
+    }
+
+    /// Return a weak reference to the underlying Slint window.
+    ///
+    /// Callers (e.g. `main.rs`) use this to post UI updates from worker
+    /// threads via `slint::invoke_from_event_loop`.
+    pub fn as_weak(&self) -> slint::Weak<PairWindow> {
+        self.window.as_weak()
     }
 }
 

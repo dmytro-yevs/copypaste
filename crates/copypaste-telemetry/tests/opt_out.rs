@@ -29,12 +29,7 @@ fn default_consent_yields_noop() {
 #[test]
 fn noop_swallows_every_os_tag() {
     let reporter = NoopReporter::new();
-    for os in [
-        OsTag::MacOs,
-        OsTag::Windows,
-        OsTag::Android,
-        OsTag::Unknown,
-    ] {
+    for os in [OsTag::MacOs, OsTag::Windows, OsTag::Android, OsTag::Unknown] {
         let evt = ReportableError::new("c", "0.0.0", "class", os);
         assert!(reporter.report(evt).is_ok());
     }

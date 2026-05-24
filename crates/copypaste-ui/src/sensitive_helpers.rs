@@ -147,7 +147,12 @@ mod tests {
     fn round_trip_preserves_toggle() {
         let dir = tempdir().unwrap();
         let p = dir.path().join("ui_prefs.json");
-        save_to(&p, &UiPrefs { hide_sensitive: false });
+        save_to(
+            &p,
+            &UiPrefs {
+                hide_sensitive: false,
+            },
+        );
         let loaded = load_from(Some(&p));
         assert!(!loaded.hide_sensitive);
     }

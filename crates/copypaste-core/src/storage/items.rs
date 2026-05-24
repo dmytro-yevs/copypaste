@@ -1079,8 +1079,14 @@ mod tests {
             "clamped preview too long: {} bytes",
             result.len()
         );
-        assert!(result.ends_with('…'), "clamped preview must end with ellipsis");
-        assert!(result.is_char_boundary(result.len()), "result must be valid UTF-8");
+        assert!(
+            result.ends_with('…'),
+            "clamped preview must end with ellipsis"
+        );
+        assert!(
+            result.is_char_boundary(result.len()),
+            "result must be valid UTF-8"
+        );
     }
 
     /// `clamp_preview` must not split a multi-byte character.

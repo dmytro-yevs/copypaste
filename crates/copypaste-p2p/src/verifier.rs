@@ -273,8 +273,7 @@ mod tests {
         peers.add(cert_b.fingerprint(), "device-b");
 
         // Client expects cert_a but receives cert_b.
-        let verifier =
-            PeerCertVerifier::new_with_expected(Arc::new(peers), &cert_a.fingerprint());
+        let verifier = PeerCertVerifier::new_with_expected(Arc::new(peers), &cert_a.fingerprint());
         let der_b = CertificateDer::from(cert_b.cert_der.clone());
         assert!(
             verifier.verify_fingerprint(&der_b).is_err(),
@@ -290,8 +289,7 @@ mod tests {
         let mut peers = PairedPeers::new();
         peers.add(cert.fingerprint(), "device-ok");
 
-        let verifier =
-            PeerCertVerifier::new_with_expected(Arc::new(peers), &cert.fingerprint());
+        let verifier = PeerCertVerifier::new_with_expected(Arc::new(peers), &cert.fingerprint());
         let der = CertificateDer::from(cert.cert_der.clone());
         assert!(
             verifier.verify_fingerprint(&der).is_ok(),

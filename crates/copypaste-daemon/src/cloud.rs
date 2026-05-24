@@ -464,17 +464,13 @@ async fn push_loop(
     let mut retry_queue: VecDeque<ClipboardItem> = VecDeque::new();
 
     // Audit-concurrency HIGH #1 — `broadcast::Receiver::recv` is documented
-    // cancellation-safe, BUT pairing it inside `select!` with the network
-    // call below means that if `shutdown.notified()` fires AFTER the item is
-    // dequeued from the broadcast buffer but BEFORE the await returns from
-    // `push_item_with_retries`, the item is silently dropped. Fix: pin the
-    // `recv` future and ONLY drop the item once it's been moved into the
-    // retry queue (which we treat as the "in-flight" buffer). The shutdown
-    // path then checks the queue length so the operator at least sees what
-    // was lost.
-    let mut next = rx.recv();
-    tokio::pin!(next);
-
+    // cancellation-safe. We park each item in the retry queue immediately upon
+    // receipt (before any network await), so if `shutdown.notified()` fires
+    // between dequeue and push the item is visible in the retry-queue log and
+    // not silently dropped. We call `rx.recv().await` directly inside the
+    // select arm rather than pinning a long-lived future, which avoids the
+    // borrow-checker double-mutable-borrow that arises when `next.set(rx.recv())`
+    // is used while `next` is a `Pin<&mut Recv<'_, _>>` tied to `rx`.
     loop {
         // Drain the retry queue first — if we made progress on backlog before
         // touching new items, recovery is observable and old items are not
@@ -513,9 +509,8 @@ async fn push_loop(
         }
 
         tokio::select! {
-            // biased: prefer shutdown over receive. This is belt-and-braces —
-            // even with the pinned future, a tie should resolve in favour of
-            // tearing down promptly instead of accepting one more item.
+            // biased: prefer shutdown over receive so a burst of incoming items
+            // cannot starve teardown.
             biased;
             _ = shutdown.notified() => {
                 tracing::info!(
@@ -524,19 +519,13 @@ async fn push_loop(
                 );
                 break;
             }
-            result = &mut next => {
-                // Re-arm the receiver for the next iteration BEFORE doing any
-                // network work, so the broadcast buffer keeps draining and we
-                // never lose the dequeued item to a cancellation.
+            result = rx.recv() => {
                 match result {
                     Ok(item) => {
-                        // Step 1: park the item in the retry queue so it is
-                        // owned by us, not by the broadcast buffer.
+                        // Park the item in the retry queue first so it is owned
+                        // by us before any network await. If shutdown fires after
+                        // this point the item surfaces in the log above.
                         enqueue_for_retry(&mut retry_queue, item);
-                        next.set(rx.recv());
-                        // Step 2: attempt the push from the queue. If shutdown
-                        // fires now, the item stays in the queue and is
-                        // surfaced in the shutdown log above.
                         if let Some(item) = retry_queue.pop_front() {
                             match push_item_with_retries(&client, &rest_url, &config, &bearer, &item).await {
                                 Ok(()) => tracing::debug!("cloud-sync pushed id={}", item.id),
@@ -552,7 +541,6 @@ async fn push_loop(
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("cloud-sync push_loop: lagged by {n} items");
-                        next.set(rx.recv());
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         tracing::info!(
@@ -943,6 +931,8 @@ fn json_to_clipboard_item(v: &serde_json::Value) -> Option<ClipboardItem> {
         // Cloud-synced items default to key_version=1 until the v4 sweep
         // re-encrypts them to v2. This is conservative and correct.
         key_version: 1,
+        // Cloud-synced items are never user-pinned at ingest time.
+        pinned: false,
     })
 }
 
@@ -1192,6 +1182,7 @@ mod tests {
             content_hash: None,
             origin_device_id: String::new(),
             key_version: 1,
+            pinned: false,
         }
     }
 

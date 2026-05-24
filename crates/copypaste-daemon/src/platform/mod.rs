@@ -29,7 +29,11 @@ pub trait KeystoreBackend: Send {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Load a 32-byte secret by (service, account). Creates if absent.
-    fn load_or_create(&self, service: &str, account: &str) -> Result<zeroize::Zeroizing<[u8; 32]>, Self::Error>;
+    fn load_or_create(
+        &self,
+        service: &str,
+        account: &str,
+    ) -> Result<zeroize::Zeroizing<[u8; 32]>, Self::Error>;
 
     /// Overwrite stored secret.
     fn store(&self, service: &str, account: &str, secret: &[u8; 32]) -> Result<(), Self::Error>;

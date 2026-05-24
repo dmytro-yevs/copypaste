@@ -72,7 +72,9 @@ async fn spawn_server(
     let path = socket_path.to_path_buf();
     let handle = tokio::spawn(async move {
         // `serve` loops forever; we abort the JoinHandle at test end.
-        let _ = server.serve(&path, tokio_util::sync::CancellationToken::new()).await;
+        let _ = server
+            .serve(&path, tokio_util::sync::CancellationToken::new())
+            .await;
     });
     // Give the listener a moment to bind.
     tokio::time::sleep(Duration::from_millis(50)).await;

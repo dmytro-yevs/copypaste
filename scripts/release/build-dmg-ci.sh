@@ -75,7 +75,9 @@ if [[ ! -f "$ENTITLEMENTS" ]]; then
 fi
 
 # 1) Build .app bundle. Reuse existing make_app_bundle.sh when present.
-if [[ -x "scripts/make_app_bundle.sh" ]]; then
+# Use -f (exists) not -x (executable) so the primary path is taken even
+# when the CI checkout strips executable bits (git core.fileMode=false).
+if [[ -f "scripts/make_app_bundle.sh" ]]; then
     echo "==> Building .app via scripts/make_app_bundle.sh $VERSION"
     bash scripts/make_app_bundle.sh "$VERSION"
 else
@@ -87,6 +89,18 @@ else
     cp "$BIN_UI"     "$APP_DIR/Contents/MacOS/"
     cp "$BIN_DAEMON" "$APP_DIR/Contents/MacOS/"
     cp "$BIN_CLI"    "$APP_DIR/Contents/MacOS/"
+    # LaunchAgent plist template: autostart.rs reads this from
+    # Contents/Resources/com.copypaste.daemon.plist on first launch and
+    # installs it into ~/Library/LaunchAgents/ (substituting USERNAME and
+    # the hardcoded /Applications path). Without this file the daemon never
+    # starts — ensure_daemon_running_inner() returns FailedToStart immediately.
+    LAUNCHD_PLIST_SRC="packaging/macos/com.copypaste.daemon.plist"
+    if [[ -f "$LAUNCHD_PLIST_SRC" ]]; then
+        cp "$LAUNCHD_PLIST_SRC" "$APP_DIR/Contents/Resources/com.copypaste.daemon.plist"
+    else
+        echo "ERROR: $LAUNCHD_PLIST_SRC missing — daemon will not start on first launch" >&2
+        exit 1
+    fi
     cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -122,7 +136,7 @@ codesign --verify --deep --strict --verbose=2 "$APP_DIR"
 
 # 4) Build DMG. Reuse make_dmg.sh when present (with same VERSION).
 mkdir -p "$(dirname "$OUT_DMG")"
-if [[ -x "scripts/make_dmg.sh" ]]; then
+if [[ -f "scripts/make_dmg.sh" ]]; then
     echo "==> Building DMG via scripts/make_dmg.sh $VERSION"
     bash scripts/make_dmg.sh "$VERSION"
     # make_dmg.sh writes to dist/CopyPaste-<version>.dmg; rename to canonical form.

@@ -30,7 +30,6 @@ pub fn init_patterns() -> Result<(), regex::Error> {
     Ok(())
 }
 
-
 /// (name, raw_regex, category_index, confidence)
 /// category_index: 0=Credential, 1=Financial, 2=PersonalId, 3=Infrastructure
 pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[

@@ -191,7 +191,7 @@ export component SettingsWindow inherits Window {
                         spacing: 6px;
                         FieldLabel { text: @tr("Supabase URL"); }
                         LineEdit {
-                            placeholder-text: "https://your-project.supabase.co";
+                            placeholder-text: @tr("https://your-project.supabase.co");
                             text <=> root.supabase-url;
                             enabled: !root.sync-connected;
                         }
@@ -201,7 +201,7 @@ export component SettingsWindow inherits Window {
                         spacing: 6px;
                         FieldLabel { text: @tr("Anon Key"); }
                         LineEdit {
-                            placeholder-text: "eyJ…";
+                            placeholder-text: @tr("eyJ…");
                             text <=> root.supabase-key;
                             enabled: !root.sync-connected;
                             input-type: password;

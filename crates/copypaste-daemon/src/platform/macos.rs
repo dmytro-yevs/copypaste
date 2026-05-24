@@ -45,7 +45,11 @@ pub struct MacosKeystoreBackend;
 impl KeystoreBackend for MacosKeystoreBackend {
     type Error = KeychainError;
 
-    fn load_or_create(&self, _service: &str, _account: &str) -> Result<zeroize::Zeroizing<[u8; 32]>, Self::Error> {
+    fn load_or_create(
+        &self,
+        _service: &str,
+        _account: &str,
+    ) -> Result<zeroize::Zeroizing<[u8; 32]>, Self::Error> {
         keychain::load_or_create().map(|kp| kp.secret_key_bytes_zeroizing())
     }
 

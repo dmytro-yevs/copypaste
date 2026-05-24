@@ -337,7 +337,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 1, "migration_state table must be created by v6 migration");
+        assert_eq!(
+            count, 1,
+            "migration_state table must be created by v6 migration"
+        );
 
         // The seed row must be present.
         let row_count: i64 = conn

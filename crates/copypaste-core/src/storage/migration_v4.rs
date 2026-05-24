@@ -210,20 +210,23 @@ fn rotate_one(
 
     // Decrypt with v1 key + v3-format AAD.
     let aad_v1 = build_item_aad(&row.item_id, AAD_SCHEMA_V3);
-    let plaintext = decrypt_item_with_aad(&row.content, &nonce_v1, v1_key, &aad_v1)
-        .map_err(|e| MigrationV4Error::Decrypt {
-            id: row.id.clone(),
-            source: e,
+    let plaintext =
+        decrypt_item_with_aad(&row.content, &nonce_v1, v1_key, &aad_v1).map_err(|e| {
+            MigrationV4Error::Decrypt {
+                id: row.id.clone(),
+                source: e,
+            }
         })?;
 
     // Re-encrypt with v2 key + v4-format AAD (key_version = 2).
     let aad_v2 = build_item_aad_v2(&row.item_id, AAD_SCHEMA_V4, KEY_VERSION_V2 as u32);
-    let (nonce_v2, ciphertext_v2) = encrypt_item_with_aad(&plaintext, v2_key, &aad_v2).map_err(
-        |e| MigrationV4Error::Reencrypt {
-            id: row.id.clone(),
-            source: e,
-        },
-    )?;
+    let (nonce_v2, ciphertext_v2) =
+        encrypt_item_with_aad(&plaintext, v2_key, &aad_v2).map_err(|e| {
+            MigrationV4Error::Reencrypt {
+                id: row.id.clone(),
+                source: e,
+            }
+        })?;
 
     // Update in a single statement — the row is atomically swapped to v2.
     // The WHERE clause re-asserts key_version=1 so a concurrent writer
@@ -249,7 +252,11 @@ mod tests {
     /// Seed a row that looks exactly like a v1-key-encrypted text item:
     /// `key_version = 1`, AEAD built with the legacy 2-arg AAD format
     /// `"{item_id}|3"`. Returns `(row_id, item_id, plaintext)`.
-    fn seed_v1_row(db: &Database, v1_key: &[u8; 32], plaintext: &[u8]) -> (String, String, Vec<u8>) {
+    fn seed_v1_row(
+        db: &Database,
+        v1_key: &[u8; 32],
+        plaintext: &[u8],
+    ) -> (String, String, Vec<u8>) {
         let row_id = Uuid::new_v4().to_string();
         let item_id = Uuid::new_v4().to_string();
         let aad = build_item_aad(&item_id, AAD_SCHEMA_V3);

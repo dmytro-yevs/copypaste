@@ -64,12 +64,18 @@ export component HistoryWindow inherits Window {
     // CheckBox. Rust persists the new value to ui_prefs.json so the
     // choice survives a relaunch.
     callback hide-sensitive-changed(bool);
+    // v0.3: fired when the window is closed so the Rust host can switch
+    // the NSApp activation policy back to Accessory (hide from cmd-tab).
+    callback close();
 
     // Watch the in-out property and bubble to Rust. Using `changed` here
     // (Slint 1.6+) instead of CheckBox.toggled means we also catch
     // programmatic changes (settings window writes back through this
     // property).
     changed hide-sensitive => { hide-sensitive-changed(self.hide-sensitive); }
+    // Fire close() when the window becomes hidden (covers both the user
+    // pressing Cmd+W and the Slint default close-request hide action).
+    changed visible => { if !self.visible { close(); } }
 
     // beta-bonus (slint-search): 200 ms debounce timer. Restarts on every
     // keystroke (`edited` handler in `search-input` below) and only fires
@@ -145,7 +151,7 @@ export component HistoryWindow inherits Window {
             padding: 0;
 
             search-input := LineEdit {
-                placeholder-text: "Search history... (⌘F)";
+                placeholder-text: @tr("Search history... (⌘F)");
                 text <=> root.search-query;
                 height: 28px;
                 horizontal-stretch: 1;
@@ -218,6 +224,7 @@ export component HistoryWindow inherits Window {
             if !loading && items.length > 0 : ListView {
                 for item[idx] in items : Rectangle {
                     height: 62px;
+                    clip: true;
                     border-radius: 4px;
                     background: touch.has-hover ? #313244 : transparent;
 
@@ -281,13 +288,22 @@ export component HistoryWindow inherits Window {
                             // redacted row reveals the real preview so the
                             // user can still scan/select without flipping
                             // the global switch.
+                            // Fix: clamp to single line — multi-line content
+                            // (e.g. terminal commands with \n) previously
+                            // caused the Text to grow beyond the fixed 62px
+                            // row height and bleed into the next row. Setting
+                            // wrap:no-wrap + overflow:elide + explicit height
+                            // pins the element to one line; the parent
+                            // Rectangle's clip:true is the safety net.
                             Text {
                                 text: (item.is-sensitive && root.hide-sensitive && !touch.has-hover)
                                     ? "••••••••"
                                     : item.preview;
                                 color: item.is-sensitive ? #f38ba8 : #cdd6f4;
                                 font-size: 13px;
+                                wrap: no-wrap;
                                 overflow: elide;
+                                height: 18px;
                             }
 
                             Text {

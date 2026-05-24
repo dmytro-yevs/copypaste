@@ -122,13 +122,14 @@ pub fn type_icon(content_type: &str, preview: &str, ascii: bool) -> &'static str
         return if ascii { "[I]" } else { "🖼" };
     }
     // URL heuristic — works for both `text` and a future `url` content type.
-    if content_type == "url"
-        || preview.starts_with("http://")
-        || preview.starts_with("https://")
-    {
+    if content_type == "url" || preview.starts_with("http://") || preview.starts_with("https://") {
         return if ascii { "[U]" } else { "🔗" };
     }
-    if ascii { "[T]" } else { "📋" }
+    if ascii {
+        "[T]"
+    } else {
+        "📋"
+    }
 }
 
 /// Current wall-clock ms since Unix epoch, defaulting to 0 if the system
@@ -204,9 +205,7 @@ fn launchd_plist_path() -> Option<PathBuf> {
 }
 
 fn launchd_is_installed() -> bool {
-    launchd_plist_path()
-        .map(|p| p.exists())
-        .unwrap_or(false)
+    launchd_plist_path().map(|p| p.exists()).unwrap_or(false)
 }
 
 /// Locate the `copypaste` CLI binary next to the running UI binary. Falls
@@ -277,6 +276,7 @@ fn load_icon() -> Option<tray_icon::Icon> {
     }
 
     // Grey 22×22 placeholder fallback so the tray slot is still visible.
+    tracing::warn!("[tray] icon not found in bundle; using grey placeholder");
     let grey: Vec<u8> = std::iter::repeat_n([0x88u8, 0x88, 0x88, 0xff], 22 * 22)
         .flatten()
         .collect();
@@ -345,13 +345,21 @@ impl TrayMenu {
         let open_history = MenuItem::with_id(ID_OPEN_HISTORY, "Open History", true, None);
         let private_mode = MenuItem::with_id(
             ID_PRIVATE_MODE,
-            if private_mode_on { "Private Mode  ✓" } else { "Private Mode" },
+            if private_mode_on {
+                "Private Mode  ✓"
+            } else {
+                "Private Mode"
+            },
             true,
             None,
         );
         let launch_at_login = MenuItem::with_id(
             ID_LAUNCH_AT_LOGIN,
-            if launch_at_login_on { "Launch at Login  ✓" } else { "Launch at Login" },
+            if launch_at_login_on {
+                "Launch at Login  ✓"
+            } else {
+                "Launch at Login"
+            },
             true,
             None,
         );
@@ -367,8 +375,7 @@ impl TrayMenu {
         // MAX_TRAY_RECENTS, grouped by age bucket with a glyph prefix per
         // content type. Skipped entirely when the daemon hasn't shipped
         // any history yet (cold start) so the tray stays compact.
-        let (recent_items, recent_headers) =
-            append_recents_block(&menu, recents)?;
+        let (recent_items, recent_headers) = append_recents_block(&menu, recents)?;
 
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&private_mode)?;
@@ -425,12 +432,7 @@ fn append_recents_block(
     for r in capped {
         let bucket = bucket_label_for_age_ms(now, r.wall_time_ms);
         if current_bucket != Some(bucket) {
-            let header = MenuItem::with_id(
-                format!("recent_header:{bucket}"),
-                bucket,
-                false,
-                None,
-            );
+            let header = MenuItem::with_id(format!("recent_header:{bucket}"), bucket, false, None);
             menu.append(&header)?;
             headers.push(header);
             current_bucket = Some(bucket);
@@ -438,12 +440,7 @@ fn append_recents_block(
 
         let glyph = type_icon(&r.content_type, &r.preview, false);
         let label = format!("{glyph}  {}", sanitize_for_menu(&r.preview));
-        let row = MenuItem::with_id(
-            format!("{ID_RECENT_PREFIX}{}", r.id),
-            label,
-            true,
-            None,
-        );
+        let row = MenuItem::with_id(format!("{ID_RECENT_PREFIX}{}", r.id), label, true, None);
         menu.append(&row)?;
         items.push(row);
     }
@@ -514,7 +511,10 @@ pub fn install(callbacks: TrayCallbacks) -> Result<(), TrayHostError> {
     let icon = load_icon();
     let mut builder = TrayIconBuilder::new()
         .with_menu(Box::new(menu.menu.clone()))
-        .with_tooltip("CopyPaste");
+        .with_tooltip("CopyPaste")
+        // Use a template image so macOS inverts the icon automatically for
+        // dark / light menu-bar modes. Requires a greyscale PNG with alpha.
+        .with_icon_as_template(true);
     if let Some(icon) = icon {
         builder = builder.with_icon(icon);
     }
@@ -611,17 +611,29 @@ fn drain_events(runtime: &Rc<RefCell<TrayRuntime>>) {
                 // the daemon. For now the UI just toggles the checkmark so
                 // the menu state is testable.
                 rt.private_mode = !rt.private_mode;
-                let label = if rt.private_mode { "Private Mode  ✓" } else { "Private Mode" };
+                let label = if rt.private_mode {
+                    "Private Mode  ✓"
+                } else {
+                    "Private Mode"
+                };
                 rt.menu.private_mode.set_text(label);
                 tracing::info!("tray: private_mode={}", rt.private_mode);
             }
             ID_LAUNCH_AT_LOGIN => {
                 let want = !rt.launch_at_login;
-                let result = if want { launchd_install() } else { launchd_uninstall() };
+                let result = if want {
+                    launchd_install()
+                } else {
+                    launchd_uninstall()
+                };
                 match result {
                     Ok(()) => {
                         rt.launch_at_login = want;
-                        let label = if want { "Launch at Login  ✓" } else { "Launch at Login" };
+                        let label = if want {
+                            "Launch at Login  ✓"
+                        } else {
+                            "Launch at Login"
+                        };
                         rt.menu.launch_at_login.set_text(label);
                         tracing::info!("tray: launch_at_login={}", want);
                     }
@@ -708,7 +720,10 @@ mod tests {
         let now = 10 * DAY_MS;
         // Exactly DAY_MS old = Yesterday (boundary belongs to the next bucket).
         assert_eq!(bucket_label_for_age_ms(now, now - DAY_MS), "Yesterday");
-        assert_eq!(bucket_label_for_age_ms(now, now - 2 * DAY_MS + 1), "Yesterday");
+        assert_eq!(
+            bucket_label_for_age_ms(now, now - 2 * DAY_MS + 1),
+            "Yesterday"
+        );
     }
 
     #[test]
@@ -716,7 +731,10 @@ mod tests {
         let now = 30 * DAY_MS;
         assert_eq!(bucket_label_for_age_ms(now, now - 2 * DAY_MS), "This Week");
         assert_eq!(bucket_label_for_age_ms(now, now - 6 * DAY_MS), "This Week");
-        assert_eq!(bucket_label_for_age_ms(now, now - 7 * DAY_MS + 1), "This Week");
+        assert_eq!(
+            bucket_label_for_age_ms(now, now - 7 * DAY_MS + 1),
+            "This Week"
+        );
     }
 
     #[test]
@@ -772,7 +790,10 @@ mod tests {
     fn sanitize_truncates_long_strings_with_ellipsis() {
         let long = "x".repeat(80);
         let out = sanitize_for_menu(&long);
-        assert!(out.ends_with('…'), "expected ellipsis on long input, got {out}");
+        assert!(
+            out.ends_with('…'),
+            "expected ellipsis on long input, got {out}"
+        );
         assert_eq!(out.chars().count(), 51); // 50 chars + …
     }
 
