@@ -278,6 +278,8 @@ jobs:
         # Runs after the macOS DMG is published so the URL resolves.
         # gen-cask.sh auto-fetches the tag, downloads the DMG, computes sha256,
         # updates Casks/copypaste.rb, then commits + pushes (GITHUB_ACTIONS=true).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/release/gen-cask.sh
 
   publish-android:
