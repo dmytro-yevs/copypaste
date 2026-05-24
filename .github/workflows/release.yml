@@ -233,8 +233,12 @@ jobs:
         #   2. Pre-generate the debug.keystore file with keytool (always present with JDK).
         #   3. Point ANDROID_USER_HOME explicitly so Gradle never falls back to XDG.
         run: |
-          mkdir -p "$HOME/.android" "$HOME/.config/.android"
-          chmod 755 "$HOME/.android" "$HOME/.config/.android"
+          # $HOME/.config may already exist with restrictive perms (system-managed).
+          # mkdir is fine; chmod on system-owned XDG dirs throws "Operation not permitted".
+          # Use `|| true` on the XDG path; the canonical ~/.android is what Gradle uses.
+          mkdir -p "$HOME/.android" "$HOME/.config/.android" 2>/dev/null || true
+          chmod 755 "$HOME/.android" || true
+          chmod 755 "$HOME/.config/.android" 2>/dev/null || true
           keytool -genkey -v \
             -keystore "$HOME/.android/debug.keystore" \
             -storepass android \

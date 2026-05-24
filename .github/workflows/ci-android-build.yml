@@ -82,8 +82,10 @@ jobs:
 
       - name: Pre-generate debug keystore
         run: |
-          mkdir -p "$HOME/.android" "$HOME/.config/.android"
-          chmod 755 "$HOME/.android" "$HOME/.config/.android"
+          # XDG path may be system-managed; ignore chmod errors there.
+          mkdir -p "$HOME/.android" "$HOME/.config/.android" 2>/dev/null || true
+          chmod 755 "$HOME/.android" || true
+          chmod 755 "$HOME/.config/.android" 2>/dev/null || true
           keytool -genkey -v \
             -keystore "$HOME/.android/debug.keystore" \
             -storepass android -alias androiddebugkey \
