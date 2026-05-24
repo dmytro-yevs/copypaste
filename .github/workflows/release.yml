@@ -222,13 +222,28 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: Pre-create debug keystore dir (CI writable)
-        # Avoids: "Unable to create debug keystore in /home/runner/.config/.android"
-        # On hosted runners $HOME/.config exists but is not always writable for nested
-        # mkdir by Gradle. Pre-creating with explicit perms fixes it.
+      - name: Pre-generate debug keystore (CI robust)
+        # Belt-and-suspenders fix for validateSigningDebug failures.
+        # Root cause: Gradle resolves the debug keystore via ANDROID_USER_HOME
+        # which may fall back to $HOME/.config/.android (XDG path) on Linux runners,
+        # and then fails because (a) the directory is not writable or (b) the keystore
+        # FILE itself does not exist and Gradle cannot create it.
+        # Fix:
+        #   1. mkdir both canonical paths with explicit perms.
+        #   2. Pre-generate the debug.keystore file with keytool (always present with JDK).
+        #   3. Point ANDROID_USER_HOME explicitly so Gradle never falls back to XDG.
         run: |
-          mkdir -p "$HOME/.android"
-          chmod 755 "$HOME/.android"
+          mkdir -p "$HOME/.android" "$HOME/.config/.android"
+          chmod 755 "$HOME/.android" "$HOME/.config/.android"
+          keytool -genkey -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            2>/dev/null || true
+          echo "ANDROID_USER_HOME=$HOME/.android" >> "$GITHUB_ENV"
 
       - name: Build debug APK
         working-directory: android
