@@ -159,7 +159,7 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
     git fetch origin main
     git checkout -B main origin/main
 
-    printf '%s' "$NEW_CASK_CONTENT" > "$CASK"
+    printf '%s\n' "$NEW_CASK_CONTENT" > "$CASK"
     git add "$CASK"
 
     if git diff --cached --quiet; then
@@ -181,7 +181,7 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
         echo "Push rejected (race); retrying (attempt $((PUSH_ATTEMPTS + 1))/${MAX_ATTEMPTS}) ..."
         git fetch origin main
         git reset --hard origin/main
-        printf '%s' "$NEW_CASK_CONTENT" > "$CASK"
+        printf '%s\n' "$NEW_CASK_CONTENT" > "$CASK"
         git add "$CASK"
         if git diff --cached --quiet; then
             echo "Cask already up to date after re-fetch — nothing to push."
