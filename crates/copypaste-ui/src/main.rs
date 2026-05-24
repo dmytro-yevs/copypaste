@@ -198,6 +198,7 @@ fn set_activation_policy_regular() {
 }
 
 #[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
 fn set_activation_policy_regular() {}
 
 /// Switch back to `.accessory` (tray-only) policy once no window is visible.
@@ -225,6 +226,7 @@ fn set_activation_policy_accessory() {
 }
 
 #[cfg(not(target_os = "macos"))]
+#[allow(dead_code)]
 fn set_activation_policy_accessory() {}
 
 fn main() -> Result<()> {
