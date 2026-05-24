@@ -58,9 +58,9 @@ pub enum KeychainError {
 /// Load device keypair from Keychain, or generate and store a new one.
 ///
 /// On v0.3 macOS builds, freshly created entries are written with an ACL
-/// pinned to the three CopyPaste binaries (see [`acl::store_with_acl`]).
+/// pinned to the three CopyPaste binaries (see `acl::store_with_acl`).
 /// Pre-existing v0.2 entries without an ACL are upgraded by
-/// [`acl::rotate_acl_to_current_install`], which is called once at daemon
+/// `acl::rotate_acl_to_current_install`, which is called once at daemon
 /// startup separately from this function so that the rotation latency does
 /// not block per-component reads.
 ///

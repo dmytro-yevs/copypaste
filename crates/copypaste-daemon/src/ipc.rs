@@ -1280,8 +1280,8 @@ impl IpcServer {
     /// 1. Decrypts text via [`copypaste_core::decrypt_item_with_aad`] with the per-item nonce,
     ///    rebuilding the AAD from the row's `item_id` so a tampered or
     ///    misbound ciphertext surfaces as `AuthFailed` instead of garbage.
-    /// 2. Reassembles + decrypts image chunks via [`chunks_from_blob`] +
-    ///    [`decode_image`], using the `file_id` parsed out of `blob_ref`.
+    /// 2. Reassembles + decrypts image chunks via `chunks_from_blob` +
+    ///    `decode_image`, using the `file_id` parsed out of `blob_ref`.
     /// 3. Maps the daemon's internal `content_type` to a real macOS UTI
     ///    (`"image"` is **not** a valid UTI — audit HIGH #2). Text uses
     ///    `NSPasteboardTypeString`; image always writes `public.png` since
