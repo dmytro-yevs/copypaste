@@ -218,7 +218,7 @@ jobs:
             android/.gradle/configuration-cache
             android/build/intermediates
             android/app/build/intermediates
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties', 'android/**/libs.versions.toml') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties', 'android/**/libs.versions.toml', 'android/app/src/main/java/com/copypaste/generated/**') }}
           restore-keys: |
             gradle-${{ runner.os }}-
 

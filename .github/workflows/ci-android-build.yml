@@ -61,7 +61,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install NDK
-        run: sdkmanager "ndk;27.0.12077973"
+        run: sdkmanager "ndk;27.2.12479018"
 
       - name: Build .so libraries via cargo-ndk
         run: |
@@ -79,6 +79,18 @@ jobs:
             { echo "ERROR: arm64-v8a .so missing"; exit 1; }
           test -f android/app/src/main/jniLibs/x86_64/libcopypaste_android.so || \
             { echo "ERROR: x86_64 .so missing"; exit 1; }
+
+      - name: Pre-generate debug keystore
+        run: |
+          mkdir -p "$HOME/.android" "$HOME/.config/.android"
+          chmod 755 "$HOME/.android" "$HOME/.config/.android"
+          keytool -genkey -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey \
+            -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            2>/dev/null || true
+          echo "ANDROID_USER_HOME=$HOME/.android" >> "$GITHUB_ENV"
 
       - name: Gradle assembleDebug
         working-directory: android

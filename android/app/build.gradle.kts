@@ -141,8 +141,11 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     // UniFFI generated Kotlin bindings use JNA for native interop.
-    // Android variant ships the .so loader; @aar suffix is mandatory.
-    implementation("net.java.dev.jna:jna:5.14.0@aar")
+    // Plain coordinate (no @aar): Gradle resolves JAR via POM for kotlinc compile
+    // classpath + AAR .so resources at runtime. @aar bypasses POM resolution and
+    // puts only the AAR on the classpath (dex-time only), causing "Unresolved
+    // reference: Structure/Library/Native" in compileDebugKotlin.
+    implementation("net.java.dev.jna:jna:5.14.0")
 
     // UniFFI Kotlin bindings are compiled as source (CopypasteBindings.kt).
     // Uncomment the line below only when using a separately-packaged bindings jar
