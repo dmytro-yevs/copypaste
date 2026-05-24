@@ -30,17 +30,11 @@ jobs:
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
 
-  # Test + clippy on macOS and Windows.
-  # copypaste-daemon links against macOS-only frameworks (objc2, security-framework)
-  # so it is excluded from the Windows build.
+  # Test + clippy on macOS only. Windows/Linux platforms are FROZEN per
+  # project mandate — code kept behind cfg gates but not built in CI.
   test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-
+    name: Test (macos-latest)
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -53,62 +47,16 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.os }}
+          key: macos-latest
 
-      # On Windows, exclude copypaste-daemon (macOS-only Objective-C / Keychain deps).
       - name: Build (macOS — full workspace)
-        if: runner.os == 'macOS'
         run: cargo build --workspace
 
-      - name: Build (Windows — cross-platform crates only)
-        if: runner.os == 'Windows'
-        run: cargo build -p copypaste-core -p copypaste-cli -p copypaste-relay
-
       - name: Test (macOS — full workspace)
-        if: runner.os == 'macOS'
         run: cargo test --workspace
 
-      - name: Test (Windows — cross-platform crates only)
-        if: runner.os == 'Windows'
-        run: cargo test -p copypaste-core -p copypaste-cli -p copypaste-relay
-
       - name: Clippy (macOS — full workspace)
-        if: runner.os == 'macOS'
         run: cargo clippy --workspace -- -D warnings
-
-      - name: Clippy (Windows — cross-platform crates only)
-        if: runner.os == 'Windows'
-        run: cargo clippy -p copypaste-core -p copypaste-cli -p copypaste-relay -- -D warnings
-
-  # Dedicated cargo check on Windows to verify cross-platform compatibility
-  # (complements the test matrix — runs check without requiring full test suite).
-  check-windows:
-    name: Windows cargo check (cross-platform)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install OpenSSL (required by libsqlite3-sys/SQLCipher on Windows)
-        run: choco install openssl --no-progress -y
-        shell: pwsh
-
-      - name: Set OPENSSL_DIR
-        run: echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" | Out-File -FilePath $env:GITHUB_ENV -Append
-        shell: pwsh
-
-      - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: windows-check
-
-      - name: Check cross-platform crates
-        run: cargo check -p copypaste-core -p copypaste-cli -p copypaste-relay
-
-      - name: Check workspace (excluding macOS-only daemon)
-        run: cargo check --workspace --exclude copypaste-daemon
 
   # Dedicated macOS job for the daemon with Keychain integration tests.
   test-macos-daemon:
