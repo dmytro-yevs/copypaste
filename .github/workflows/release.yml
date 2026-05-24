@@ -232,8 +232,16 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        # Skip buildCargoNdk — .so already placed in jniLibs above
-        run: ./gradlew assembleDebug --no-daemon -x buildCargoNdk
+        # Skip: buildCargoNdk (.so already placed above), lint/lintVitalRelease (slow,
+        # not needed for debug APK ship), test (separate CI job), assembleAndroidTest.
+        run: |
+          ./gradlew assembleDebug \
+            --no-daemon \
+            --build-cache \
+            -x buildCargoNdk \
+            -x lint \
+            -x lintVitalRelease \
+            -x test
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
