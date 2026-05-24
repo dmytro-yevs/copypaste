@@ -21,16 +21,27 @@ cask "copypaste" do
   app "CopyPaste.app"
 
   postflight do
-    # Strip quarantine (ad-hoc signed builds, no Apple Developer ID)
+    # Strip quarantine (ad-hoc signed builds, no Apple Developer ID).
+    # must_succeed: false — xattr exits non-zero on certain FS configurations;
+    # aborting the install over this non-critical op caused the missing-app
+    # regression on upgrade (v0.3.1 → v0.3.2): postflight aborted, Homebrew
+    # marked the install failed, but the old app was already deleted by the
+    # uninstall phase — leaving /Applications/CopyPaste.app absent.
     system_command "/usr/bin/xattr",
-                   args: ["-cr", "#{appdir}/CopyPaste.app"]
-    # Load launchd plist if it exists
+                   args: ["-cr", "#{appdir}/CopyPaste.app"],
+                   must_succeed: false
+    # Load launchd plist if it exists (no-op on upgrade if already loaded)
     plist = Pathname.new("#{Dir.home}/Library/LaunchAgents/com.copypaste.daemon.plist")
-    system_command "/bin/launchctl", args: ["load", "-w", plist.to_s] if plist.exist?
+    system_command "/bin/launchctl", args: ["load", "-w", plist.to_s],
+                   must_succeed: false if plist.exist?
   end
 
-  uninstall launchctl: "com.copypaste.daemon",
-            delete:    "#{appdir}/CopyPaste.app"
+  # IMPORTANT: do NOT add `delete: "#{appdir}/CopyPaste.app"` here.
+  # Homebrew already removes artifacts tracked by the `app` stanza on uninstall.
+  # The redundant explicit delete in v0.3.1 caused the upgrade regression:
+  # uninstall removed the old .app, then postflight aborted (xattr non-zero),
+  # leaving no .app in /Applications.
+  uninstall launchctl: "com.copypaste.daemon"
 
   zap trash: [
     "~/Library/Application Support/copypaste",
