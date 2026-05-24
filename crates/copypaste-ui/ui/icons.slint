@@ -1,0 +1,75 @@
+// icons.slint — Central icon asset registry for CopyPaste UI.
+//
+// All icons are Lucide (MIT licence). Paths are relative to this file.
+// Use `Image { source: Icons.history; colorize: Theme.icon-default; }` at
+// call sites — do NOT hard-code a colour here.
+//
+// Generated for T1.2 of the v0.4 UI redesign.
+
+export global Icons {
+    // ── App brand ────────────────────────────────────────────────────────────
+    out property <image> clipboard-paste: @image-url("icons/clipboard-paste.svg");
+
+    // ── Sidebar navigation ───────────────────────────────────────────────────
+    out property <image> history:           @image-url("icons/history.svg");
+    out property <image> monitor-smartphone:@image-url("icons/monitor-smartphone.svg");
+    out property <image> link-2:            @image-url("icons/link-2.svg");
+    out property <image> settings-2:        @image-url("icons/settings-2.svg");
+    out property <image> info:              @image-url("icons/info.svg");
+
+    // ── Sidebar collapse toggle ──────────────────────────────────────────────
+    out property <image> panel-left-close:  @image-url("icons/panel-left-close.svg");
+    out property <image> panel-left-open:   @image-url("icons/panel-left-open.svg");
+
+    // ── Toolbar / search ─────────────────────────────────────────────────────
+    out property <image> search:            @image-url("icons/search.svg");
+    out property <image> command:           @image-url("icons/command.svg");
+
+    // ── Item actions ─────────────────────────────────────────────────────────
+    out property <image> pin:               @image-url("icons/pin.svg");
+    out property <image> pin-off:           @image-url("icons/pin-off.svg");
+    out property <image> copy:              @image-url("icons/copy.svg");
+    out property <image> send:              @image-url("icons/send.svg");
+    out property <image> trash-2:           @image-url("icons/trash-2.svg");
+
+    // ── Item kind indicators ─────────────────────────────────────────────────
+    out property <image> type:              @image-url("icons/type.svg");
+    out property <image> link:              @image-url("icons/link.svg");
+    out property <image> braces:            @image-url("icons/braces.svg");
+    out property <image> image:             @image-url("icons/image.svg");
+    out property <image> file:              @image-url("icons/file.svg");
+    out property <image> palette:           @image-url("icons/palette.svg");
+
+    // ── Device status ────────────────────────────────────────────────────────
+    out property <image> circle:            @image-url("icons/circle.svg");
+
+    // ── Pair flow ────────────────────────────────────────────────────────────
+    out property <image> qr-code:           @image-url("icons/qr-code.svg");
+    out property <image> scan-line:         @image-url("icons/scan-line.svg");
+    out property <image> key-round:         @image-url("icons/key-round.svg");
+
+    // ── Settings sections ────────────────────────────────────────────────────
+    out property <image> sun-moon:          @image-url("icons/sun-moon.svg");
+    out property <image> keyboard:          @image-url("icons/keyboard.svg");
+    out property <image> database:          @image-url("icons/database.svg");
+    out property <image> shield-check:      @image-url("icons/shield-check.svg");
+    out property <image> sliders-horizontal:@image-url("icons/sliders-horizontal.svg");
+
+    // ── About ────────────────────────────────────────────────────────────────
+    out property <image> file-text:         @image-url("icons/file-text.svg");
+    out property <image> scale:             @image-url("icons/scale.svg");
+
+    // ── Toasts / status ──────────────────────────────────────────────────────
+    out property <image> check-circle-2:    @image-url("icons/check-circle-2.svg");
+    out property <image> alert-triangle:    @image-url("icons/alert-triangle.svg");
+    out property <image> log-in:            @image-url("icons/log-in.svg");
+
+    // ── Generic UI primitives ────────────────────────────────────────────────
+    out property <image> chevron-down:      @image-url("icons/chevron-down.svg");
+    out property <image> chevron-right:     @image-url("icons/chevron-right.svg");
+    out property <image> x-close:          @image-url("icons/x-close.svg");
+    out property <image> check:             @image-url("icons/check.svg");
+    out property <image> refresh:           @image-url("icons/refresh.svg");
+    out property <image> plus:              @image-url("icons/plus.svg");
+    out property <image> toggle:            @image-url("icons/toggle.svg");
+}
