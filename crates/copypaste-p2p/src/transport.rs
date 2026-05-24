@@ -252,7 +252,7 @@ impl PeerTransport {
     ///
     /// Wraps [`Self::connect`] with up to [`MAX_CONNECT_ATTEMPTS`] attempts
     /// (one initial + N-1 retries), separated by [`CONNECT_RETRY_DELAY`].
-    /// Only **transient** errors are retried — see [`is_transient_io_error`]
+    /// Only **transient** errors are retried — see `is_transient_transport_error`
     /// for the exhaustive list. Permanent errors (unknown-peer, TLS config,
     /// cert problems, handshake timeout) propagate on the first failure so
     /// callers don't waste time retrying a fundamentally broken setup.
@@ -260,8 +260,8 @@ impl PeerTransport {
     /// The intended use case is the brief race between mDNS announcement
     /// and the peer's TCP listener actually accepting connections, and
     /// transient LAN blips (cable bounce, brief Wi-Fi roaming). For
-    /// long-haul relay reconnects with exponential backoff, see
-    /// [`copypaste_sync::backoff::BackoffScheduler`].
+    /// long-haul relay reconnects with exponential backoff, see the
+    /// `BackoffScheduler` in the `copypaste-sync` crate.
     pub async fn connect_with_retry(
         &self,
         addr: SocketAddr,

@@ -377,14 +377,13 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     }
     #[cfg(not(target_os = "macos"))]
     {
-        // SIGTERM handling on non-macOS — previously only SIGINT was wired,
-        // so launchd/systemd sending SIGTERM would terminate the process
-        // without running our cleanup branch (sock file removal, log flush).
-        #[cfg(unix)]
-        let mut sigterm = {
-            use tokio::signal::unix::{signal, SignalKind};
-            signal(SignalKind::terminate())?
-        };
+        // SIGTERM handling on non-macOS (Linux/Unix) — previously only SIGINT
+        // was wired, so launchd/systemd sending SIGTERM would terminate the
+        // process without running our cleanup branch (sock file removal, log
+        // flush). On this branch, not(target_os = "macos") implies unix, so
+        // tokio::signal::unix is always available here.
+        use tokio::signal::unix::{signal, SignalKind};
+        let mut sigterm = signal(SignalKind::terminate())?;
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
@@ -428,7 +427,6 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     shutdown_token.cancel();
                     break;
                 }
-                #[cfg(unix)]
                 _ = sigterm.recv() => {
                     tracing::info!("SIGTERM received, shutting down");
                     // D3: broadcast shutdown to all tasks.
