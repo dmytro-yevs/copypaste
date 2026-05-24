@@ -402,3 +402,99 @@ fn t4_sweep_v1_rows_completes_and_state_is_complete() {
     let decrypted = decrypt_item_with_aad(&ct, &nonce, &v2_key(), &aad).unwrap();
     assert_eq!(&decrypted, pt);
 }
+
+/// T4.9: `Database::force_complete_if_no_v1_rows` clears an `InProgress`
+/// state when there are no v1 rows in `clipboard_items`.
+///
+/// Regression for the production bug where fresh installs were seeded with a
+/// `migration_state` row with `completed_at = NULL` (InProgress), but the
+/// daemon never called the sweep, leaving every clipboard write gated.
+#[test]
+fn t4_force_complete_if_no_v1_rows_clears_inprogress_state() {
+    let db = Database::open_in_memory().unwrap();
+
+    // Seed a migration_state row as InProgress (completed_at = NULL),
+    // matching what the v6 schema migration `INSERT OR IGNORE` does on a
+    // fresh install with zero clipboard items.
+    db.conn()
+        .execute(
+            "CREATE TABLE IF NOT EXISTS migration_state (
+                key                     TEXT PRIMARY KEY,
+                key_version_in_progress INTEGER,
+                last_processed_id       INTEGER NOT NULL DEFAULT 0,
+                started_at              INTEGER,
+                completed_at            INTEGER
+            );",
+            [],
+        )
+        .unwrap();
+    db.conn()
+        .execute(
+            "INSERT OR IGNORE INTO migration_state \
+             (key, key_version_in_progress, last_processed_id, started_at) \
+             VALUES ('v4-key-version-sweep', 2, 0, strftime('%s','now'))",
+            [],
+        )
+        .unwrap();
+
+    // Confirm state is InProgress (no v1 rows in clipboard_items).
+    assert!(
+        matches!(
+            db.migration_state().unwrap(),
+            MigrationState::InProgress { .. }
+        ),
+        "expected InProgress after seeding"
+    );
+
+    // Call the recovery helper — it must transition to Complete.
+    db.force_complete_if_no_v1_rows().unwrap();
+
+    assert_eq!(
+        db.migration_state().unwrap(),
+        MigrationState::Complete,
+        "force_complete_if_no_v1_rows must mark Complete when no v1 rows exist"
+    );
+}
+
+/// T4.10: `force_complete_if_no_v1_rows` does NOT advance to Complete when
+/// there are still `key_version = 1` rows present.
+#[test]
+fn t4_force_complete_leaves_inprogress_when_v1_rows_exist() {
+    let db = Database::open_in_memory().unwrap();
+
+    // Seed a v1 row so the helper must NOT mark complete.
+    seed_v1_row(&db, b"v1 data that must still be swept");
+
+    // Ensure the migration_state row exists as InProgress.
+    db.conn()
+        .execute(
+            "CREATE TABLE IF NOT EXISTS migration_state (
+                key                     TEXT PRIMARY KEY,
+                key_version_in_progress INTEGER,
+                last_processed_id       INTEGER NOT NULL DEFAULT 0,
+                started_at              INTEGER,
+                completed_at            INTEGER
+            );",
+            [],
+        )
+        .unwrap();
+    db.conn()
+        .execute(
+            "INSERT OR IGNORE INTO migration_state \
+             (key, key_version_in_progress, last_processed_id, started_at) \
+             VALUES ('v4-key-version-sweep', 2, 0, strftime('%s','now'))",
+            [],
+        )
+        .unwrap();
+
+    db.force_complete_if_no_v1_rows().unwrap();
+
+    // State must remain InProgress — v1 rows still exist.
+    assert!(
+        matches!(
+            db.migration_state().unwrap(),
+            MigrationState::InProgress { .. }
+        ),
+        "force_complete_if_no_v1_rows must not mark Complete when v1 rows remain"
+    );
+}

@@ -645,6 +645,44 @@ impl Database {
 
         Ok(total_rotated)
     }
+
+    /// Recovery helper: if the migration state is `InProgress` but there are
+    /// no `key_version = 1` rows remaining, mark the sweep complete.
+    ///
+    /// This covers users who were seeded with an `InProgress` row (via the
+    /// v6 schema migration `INSERT OR IGNORE`) on a fresh install that had
+    /// zero clipboard rows — the gate was armed but could never clear itself
+    /// because the sweep was never invoked. Call this after
+    /// `migration_v4_sweep_resumable` returns.
+    pub fn force_complete_if_no_v1_rows(&self) -> Result<(), DbError> {
+        const SWEEP_KEY: &str = "v4-key-version-sweep";
+
+        // Only act if the state is genuinely InProgress (completed_at IS NULL).
+        let state = self.migration_state()?;
+        if !matches!(state, MigrationState::InProgress { .. }) {
+            return Ok(());
+        }
+
+        let v1_count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items WHERE key_version = 1",
+            [],
+            |r| r.get(0),
+        )?;
+
+        if v1_count == 0 {
+            self.conn.execute(
+                "UPDATE migration_state \
+                 SET completed_at = strftime('%s','now') \
+                 WHERE key = ?1",
+                rusqlite::params![SWEEP_KEY],
+            )?;
+            tracing::info!(
+                "force_complete_if_no_v1_rows: no v1 rows found, migration marked Complete"
+            );
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -5,8 +5,9 @@ use crate::{
     p2p, paths,
 };
 use copypaste_core::{
-    build_item_aad, chunks_to_blob, detect, encode_image, encrypt_item_with_aad,
-    insert_item_with_fts, AppConfig, ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION,
+    build_item_aad, chunks_to_blob, derive_storage_key_v1, derive_v2, detect, encode_image,
+    encrypt_item_with_aad, insert_item_with_fts, AppConfig, ClipboardItem, Database,
+    DeviceKeypair, AAD_SCHEMA_VERSION,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -65,6 +66,43 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         Database::open(&db_path, &local_key_arc).map_err(|e| anyhow::anyhow!("Database: {e}"))?,
     ));
     tracing::info!("database opened at {}", db_path.display());
+
+    // v4 key-version migration sweep — runs once at startup (resumable).
+    //
+    // The sweep rotates any remaining `key_version = 1` rows to `key_version
+    // = 2`.  It is synchronous (rusqlite), so we offload it to a blocking
+    // thread via `spawn_blocking` and await the result before continuing.
+    // On error we WARN and continue — a partially-swept DB is still usable;
+    // new writes will keep being rejected by the migration gate until the
+    // sweep eventually completes on a future restart.
+    {
+        // Derive both keys from the raw seed once; the seed is the value
+        // stored in the Keychain / returned by load_local_key().
+        let seed: [u8; 32] = **local_key_arc;
+        let v1_key: [u8; 32] = derive_storage_key_v1(&seed);
+        let v2_key: [u8; 32] = derive_v2(&seed);
+        let sweep_db = db.clone();
+        match tokio::task::spawn_blocking(move || {
+            // Acquire the lock inside the blocking thread so the async
+            // executor is not blocked while we hold it.
+            let guard = sweep_db.blocking_lock();
+            let rotated = guard.migration_v4_sweep_resumable(&v1_key, &v2_key)?;
+            guard.force_complete_if_no_v1_rows()?;
+            Ok::<usize, copypaste_core::DbError>(rotated)
+        })
+        .await
+        {
+            Ok(Ok(rotated)) => {
+                tracing::info!(rotated, "v4 key-version migration sweep complete");
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "v4 migration sweep failed — writes remain gated until next restart");
+            }
+            Err(join_err) => {
+                tracing::warn!(error = %join_err, "v4 migration sweep task panicked");
+            }
+        }
+    }
 
     // Device-keypair public bytes — passed into IpcServer so
     // `get_own_fingerprint` returns a stable cryptographic fingerprint
