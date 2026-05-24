@@ -9,6 +9,10 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
+concurrency:
+  group: sbom-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 

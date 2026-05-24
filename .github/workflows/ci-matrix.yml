@@ -6,6 +6,10 @@ on:
     branches: [release/v0.2.0-beta]
   workflow_dispatch:
 
+concurrency:
+  group: ci-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1

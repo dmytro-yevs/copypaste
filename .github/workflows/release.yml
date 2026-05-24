@@ -33,6 +33,14 @@ on:
         required: true
         type: string
 
+# Cancel any in-flight release run for the same ref. Tag re-pushes
+# (force-update of v0.3.1 etc) supersede the previous attempt rather
+# than racing it. Asset uploads (softprops) are not transactional —
+# concurrent runs to the same release cause partial/duplicate uploads.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
