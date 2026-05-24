@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.2] - 2026-05-24
+
+Post-install user feedback fixes from v0.3.1.
+
+### Fixed
+- **storage:** clipboard captures permanently blocked by stuck migration_state gate. Daemon now calls migration_v4_sweep_resumable + force_complete_if_no_v1_rows() on startup.
+- **ui (macos):** app missing from Cmd-Tab when window open. Removed LSUIElement=true from bundle plist; app starts as .accessory via runtime objc2 call, flips to .regular when window visible.
+- **ui:** Pair window unreachable. Added "Pair…" button to history toolbar + "Pair Device…" tray menu item, both wired to PairWindow.show().
+- **ui:** long-text history rows showed only "…". Wrapped preview Text in clip-true Rectangle + pinned width to parent.width so elide truncates with tail ellipsis.
+
 ## [0.3.1] - 2026-05-24
 
 Emergency release. v0.3.0 shipped broken; this release rolls up post-tag fixes from commits 06b8f84, 11b282a, and Wave 0 UI/daemon repairs.
