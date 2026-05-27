@@ -24,6 +24,10 @@ pub mod tray_menu;
 // Slint UI already drives one. See `tray_host.rs` module docs.
 #[cfg(target_os = "macos")]
 pub mod tray_host;
+// macOS vibrancy shim — applies NSVisualEffectView (Sidebar material) to the
+// Slint window backing.  See module docs for activation instructions.
+#[cfg(target_os = "macos")]
+pub mod macos_vibrancy;
 pub mod updater;
 pub mod windows;
 
