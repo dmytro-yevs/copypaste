@@ -1,7 +1,14 @@
 // appui.slint — root compilation file for copypaste-ui.
 // Re-exports all CopyPaste UI components via Slint 1.8 export-from syntax.
+// T3.4: views wired into MainWindow; view struct types exported for Rust.
+// Legacy window exports kept for main.rs / windows.rs compatibility until
+// the Rust layer is migrated to the new single-window MainWindow API.
 
+export { MainWindow } from "MainWindow.slint";
+export { ClipItem } from "views/history.slint";
+export { DeviceEntry } from "views/devices.slint";
+
+// Legacy window exports — TODO: remove after Rust migration.
 export { HistoryWindow } from "history_window.slint";
 export { SettingsWindow, ShortcutEntry } from "SettingsWindow.slint";
 export { PairWindow, PairedDeviceEntry } from "PairWindow.slint";
-export { MainWindow } from "MainWindow.slint";

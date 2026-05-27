@@ -1,13 +1,16 @@
 // MainWindow.slint — Single-window shell for CopyPaste v0.4 UI redesign.
-// T2.1: creates the root window with collapsible sidebar + tab content area.
-// Wave 3 tasks will replace the placeholder Rectangles with real view components.
+// T2.1: root window with collapsible sidebar + tab content area.
+// T3.4: placeholder Rectangles replaced with real view components.
 //
 // Tab indices:  0 = History  1 = Devices  2 = Pair  3 = Settings
-// Do NOT touch this file for anything outside T2.1 scope.
 
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
 import { SidebarTab, SearchField, GhostButton } from "primitives.slint";
+import { HistoryView, ClipItem } from "views/history.slint";
+import { DevicesView, DeviceEntry } from "views/devices.slint";
+import { PairView } from "views/pair.slint";
+import { SettingsView } from "views/settings.slint";
 
 // ---------------------------------------------------------------------------
 // Sidebar — collapsible left navigation rail
@@ -189,6 +192,55 @@ export component MainWindow inherits Window {
     /// Fired when the user requests application quit (e.g. ⌘Q).
     callback request-quit();
 
+    // ── History view ────────────────────────────────────────────────────────
+    in property <[ClipItem]> history-items: [];
+    in property <bool> history-loading: false;
+    in property <string> history-error: "";
+    in-out property <int> selected-history-index: -1;
+    callback item-clicked(int);
+    callback item-copy(int);
+    callback item-pin(int);
+    callback item-delete(int);
+    callback fetch-next-page();
+    callback open-pair-view();
+
+    // ── Devices view ────────────────────────────────────────────────────────
+    in property <[DeviceEntry]> devices: [];
+    callback device-selected(int);
+    callback open-pair();
+    callback pause-device(int);
+    callback unpair-device(int);
+
+    // ── Pair view ───────────────────────────────────────────────────────────
+    in-out property <int> pair-mode: 1;
+    in property <image> qr-image;
+    in property <string> pair-code: "";
+    in property <string> pair-status-text: "Waiting for peer…";
+    in property <bool> pair-status-is-error: false;
+    callback pair-regenerate();
+    callback pair-with-code(string);
+    callback pair-cancel();
+    callback pair-succeeded(string);
+
+    // ── Settings view ───────────────────────────────────────────────────────
+    in-out property <int> settings-tab: 0;
+    in-out property <int> accent: 0;
+    in-out property <bool> compact: false;
+    in-out property <bool> vibrancy: true;
+    in-out property <bool> launch-at-login: false;
+    in-out property <bool> private-mode: false;
+    in-out property <int> history-limit: 1000;
+    in-out property <bool> sync-enabled: false;
+    in-out property <string> sync-url: "";
+    in property <string> fingerprint: "";
+    in property <[{action: string, keys: string}]> shortcuts: [];
+    callback save-prefs();
+    callback save-app-settings();
+    callback clear-history();
+    callback reset-pairings();
+    callback reset-ui-prefs();
+    callback settings-tab-changed(int);
+
     // ── Layout ──────────────────────────────────────────────────────────────
     HorizontalLayout {
         spacing: 0px;
@@ -245,61 +297,69 @@ export component MainWindow inherits Window {
                 }
             }
 
-            // ── Content area: one placeholder per tab ─────────────────────
+            // ── Content area: one view per tab ────────────────────────────
             // Tab 0 — History
-            if root.active-tab == 0: Rectangle {
-                background: Theme.surface-base;
+            if root.active-tab == 0: HistoryView {
                 vertical-stretch: 1;
-
-                Text {
-                    text: "History coming";
-                    color: Theme.text-tertiary;
-                    font-size: 13px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                }
+                items: root.history-items;
+                loading: root.history-loading;
+                search-query: root.search-query;
+                error-message: root.history-error;
+                selected-index <=> root.selected-history-index;
+                item-clicked(idx) => { root.item-clicked(idx); }
+                item-copy(idx) => { root.item-copy(idx); }
+                item-pin(idx) => { root.item-pin(idx); }
+                item-delete(idx) => { root.item-delete(idx); }
+                search-changed(q) => { root.search-changed(q); }
+                fetch-next-page() => { root.fetch-next-page(); }
+                open-pair-view() => { root.open-pair-view(); }
             }
 
             // Tab 1 — Devices
-            if root.active-tab == 1: Rectangle {
-                background: Theme.surface-base;
+            if root.active-tab == 1: DevicesView {
                 vertical-stretch: 1;
-
-                Text {
-                    text: "Devices coming";
-                    color: Theme.text-tertiary;
-                    font-size: 13px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                }
+                devices: root.devices;
+                device-selected(idx) => { root.device-selected(idx); }
+                open-pair() => { root.open-pair(); }
+                pause-device(idx) => { root.pause-device(idx); }
+                unpair-device(idx) => { root.unpair-device(idx); }
             }
 
             // Tab 2 — Pair
-            if root.active-tab == 2: Rectangle {
-                background: Theme.surface-base;
+            if root.active-tab == 2: PairView {
                 vertical-stretch: 1;
-
-                Text {
-                    text: "Pair coming";
-                    color: Theme.text-tertiary;
-                    font-size: 13px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                }
+                pair-mode <=> root.pair-mode;
+                qr-image: root.qr-image;
+                pair-code: root.pair-code;
+                status-text: root.pair-status-text;
+                status-is-error: root.pair-status-is-error;
+                regenerate() => { root.pair-regenerate(); }
+                pair-with-code(code) => { root.pair-with-code(code); }
+                cancel() => { root.pair-cancel(); }
+                pair-succeeded(fp) => { root.pair-succeeded(fp); }
             }
 
             // Tab 3 — Settings
-            if root.active-tab == 3: Rectangle {
-                background: Theme.surface-base;
+            if root.active-tab == 3: SettingsView {
                 vertical-stretch: 1;
-
-                Text {
-                    text: "Settings coming";
-                    color: Theme.text-tertiary;
-                    font-size: 13px;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                }
+                settings-tab <=> root.settings-tab;
+                accent <=> root.accent;
+                compact <=> root.compact;
+                vibrancy <=> root.vibrancy;
+                launch-at-login <=> root.launch-at-login;
+                private-mode <=> root.private-mode;
+                history-limit <=> root.history-limit;
+                sync-enabled <=> root.sync-enabled;
+                sync-url <=> root.sync-url;
+                fingerprint: root.fingerprint;
+                app-version: root.app-version;
+                shortcuts: root.shortcuts;
+                save-prefs() => { root.save-prefs(); }
+                save-app-settings() => { root.save-app-settings(); }
+                clear-history() => { root.clear-history(); }
+                reset-pairings() => { root.reset-pairings(); }
+                reset-ui-prefs() => { root.reset-ui-prefs(); }
+                settings-tab-changed(t) => { root.settings-tab-changed(t); }
             }
         }
     }

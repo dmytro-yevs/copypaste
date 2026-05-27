@@ -15,14 +15,7 @@ import { ScrollView } from "std-widgets.slint";
 
 import { Theme }        from "../theme.slint";
 import { Icons }        from "../icons.slint";
-import {
-    SubTabPill,
-    ToggleRow,
-    IconButton,
-    DangerButton,
-    GhostButton,
-    ConfirmDialog,
-} from "../primitives.slint";
+import { SubTabPill, ToggleRow, IconButton, DangerButton, GhostButton, ConfirmDialog } from "../primitives.slint";
 
 // ---------------------------------------------------------------------------
 // SettingsSection — icon + title header + children rows
@@ -69,8 +62,6 @@ component SettingsSection inherits VerticalLayout {
     Rectangle {
         height: 1px;
         background: Theme.border-subtle;
-        margin-left: 16px;
-        margin-right: 16px;
     }
 
     @children
