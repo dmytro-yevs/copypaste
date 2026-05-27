@@ -47,7 +47,7 @@
                  can confirm the category is not abused. -->
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="clipboard_history_capture" />
+                android:value="Encrypted clipboard sync between user's paired devices" />
         </service>
 
         <receiver android:name=".CaptureControlReceiver"

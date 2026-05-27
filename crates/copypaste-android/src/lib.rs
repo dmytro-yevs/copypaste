@@ -128,9 +128,11 @@ pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
                 }
             })?;
         let handle = NEXT_HANDLE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        // `.lock().unwrap()` on a poisoned mutex would panic — catch_result
-        // turns that into CopypasteError::Panicked instead of aborting the JVM.
-        db_handles().lock().unwrap().insert(handle, db);
+        // recover from mutex poison instead of panicking across FFI boundary
+        db_handles()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(handle, db);
         Ok(handle)
     })
 }
@@ -142,7 +144,10 @@ pub fn close_database(handle: u64) {
     // is declared as void in the UDL and Kotlin callers cannot signal a
     // failure path, but at minimum we keep the process alive.
     let _ = panic_boundary::catch_result(|| {
-        db_handles().lock().unwrap().remove(&handle);
+        db_handles()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&handle); // recover from mutex poison instead of panicking across FFI boundary
         Ok::<(), CopypasteError>(())
     });
 }
