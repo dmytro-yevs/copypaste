@@ -257,7 +257,7 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug -x buildCargoNdk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
