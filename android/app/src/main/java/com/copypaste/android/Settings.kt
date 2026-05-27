@@ -50,7 +50,7 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("sync_enabled", false)
         set(v) = prefs.edit().putBoolean("sync_enabled", v).apply()
 
-    var deviceId: String
+    val deviceId: String
         get() {
             val stored = prefs.getString("device_id", null)
             if (stored != null) return stored
