@@ -1061,16 +1061,19 @@ mod tests {
     /// would bind below 500), rather than ignoring it.
     #[test]
     fn effective_history_cap_is_tier_aware() {
-        // Free: min(500, 1000) = 500.
-        assert_eq!(
-            effective_history_cap(Tier::Free),
-            MAX_PUSH_ITEMS_PER_DEVICE.min(1_000)
-        );
+        // Free's 1000-item tier limit is intentionally looser than the 500
+        // hard cap, so the cap clamps down to the hard cap, not the tier limit.
+        assert_eq!(effective_history_cap(Tier::Free), MAX_PUSH_ITEMS_PER_DEVICE);
         // Pro: unlimited tier history → bounded only by the hard cap.
         assert_eq!(effective_history_cap(Tier::Pro), MAX_PUSH_ITEMS_PER_DEVICE);
         // A tier limit tighter than the hard cap must win, demonstrating the
-        // tier value is actually applied (not just the constant hard cap).
+        // tier value is actually applied (not just the constant hard cap). No
+        // live tier defines a sub-hard-cap limit, so exercise the clamp helper
+        // directly with a genuinely tight limit.
         let tight_tier_limit = 10usize;
-        assert_eq!(MAX_PUSH_ITEMS_PER_DEVICE.min(tight_tier_limit), 10);
+        assert!(tight_tier_limit < MAX_PUSH_ITEMS_PER_DEVICE);
+        assert_eq!(history_cap_for_limit(Some(tight_tier_limit)), 10);
+        // Unlimited tier history (`None`) clamps to the hard cap.
+        assert_eq!(history_cap_for_limit(None), MAX_PUSH_ITEMS_PER_DEVICE);
     }
 }
