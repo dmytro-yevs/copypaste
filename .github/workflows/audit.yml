@@ -19,8 +19,21 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Get week stamp for cache key
+        id: date
+        run: echo "week=$(date -u +%Y-%W)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache advisory-db
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/advisory-db
+          key: advisory-db-${{ steps.date.outputs.week }}
+          restore-keys: advisory-db-
+
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
       - name: cargo audit
-        run: cargo audit
+        # --no-fetch uses the cached advisory-db; falls back to full network
+        # fetch on a cache miss (first run of the week or cold runner).
+        run: cargo audit --no-fetch || cargo audit
