@@ -22,10 +22,12 @@
   cert-rotation with a grace-period dual-fingerprint acceptance window) is
   deferred to v0.4.
 
-- **Cnew**: Image clipboard items captured before upgrading to v0.3 retain
-  their original encryption key derivation (v1 HKDF family). They remain
-  accessible but are not re-encrypted as part of the v4 migration sweep, which
-  is scoped to text items only. The items are stored securely under the device
-  key — the limitation is that the key derivation is the older v1 variant, not
-  the upgraded v2 variant. Full re-encryption of image chunks is deferred to
-  v0.4.
+- **Cnew (RESOLVED in v0.4)**: Image clipboard items captured before upgrading
+  to v0.3 previously retained their original encryption key derivation (v1 HKDF
+  family) because the v4 migration sweep was scoped to text items only. This is
+  now fixed: the v4 sweep (`migrate_v1_to_v2_keys`) rotates image rows too, via
+  `migrate_v1_image_chunks_to_v2`. Each image row's chunk blob is decrypted with
+  the v1 key, re-encrypted with the v2 key (fresh per-chunk nonces), and the
+  row's `key_version` is bumped to 2. The per-chunk AAD `file_id` (read from the
+  row's `blob_ref` JSON) is preserved across the rotation, and undecryptable
+  rows are left at `key_version = 1` without aborting the sweep.

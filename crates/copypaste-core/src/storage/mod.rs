@@ -13,5 +13,5 @@ pub use items::{
     get_page, get_page_meta, insert_item, insert_item_with_fts, pin_item, search_items, upsert_fts,
     ClipboardItem, ItemsError, ITEM_KEY_VERSION_CURRENT,
 };
-pub use migration_v4::{migrate_v1_to_v2_keys, MigrationV4Error};
+pub use migration_v4::{migrate_v1_image_chunks_to_v2, migrate_v1_to_v2_keys, MigrationV4Error};
 pub use pool::{open_pool, PoolError, SqlitePool};
