@@ -5,9 +5,9 @@ use crate::{
     p2p, paths,
 };
 use copypaste_core::{
-    build_item_aad, chunks_to_blob, derive_storage_key_v1, derive_v2, detect, encode_image,
+    build_item_aad_v2, chunks_to_blob, derive_storage_key_v1, derive_v2, detect, encode_image,
     encrypt_item_with_aad, insert_item_with_fts, AppConfig, ClipboardItem, Database, DeviceKeypair,
-    AAD_SCHEMA_VERSION,
+    AAD_SCHEMA_VERSION_V4,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -83,6 +83,15 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // new writes will keep being rejected by the migration gate until the
     // sweep eventually completes on a future restart.
     {
+        // Escape hatch for installs that are ALREADY stuck on a prior build:
+        // an install whose only remaining `key_version = 1` rows are
+        // permanently unrotatable (auth tag mismatch) left the gate armed
+        // forever on older daemons, rejecting every capture with
+        // `MigrationInProgress`. Setting COPYPASTE_FORCE_MIGRATION_COMPLETE=1
+        // force-clears the gate before the sweep runs so new captures resume
+        // immediately. Mirrors COPYPASTE_NO_AUTO_MIGRATE. The corrupt rows are
+        // left untouched (they were already unreadable).
+        let force_complete = std::env::var_os("COPYPASTE_FORCE_MIGRATION_COMPLETE").is_some();
         // Derive both keys from the raw seed once; the seed is the value
         // stored in the Keychain / returned by load_local_key().
         let seed: [u8; 32] = **local_key_arc;
@@ -93,6 +102,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             // Acquire the lock inside the blocking thread so the async
             // executor is not blocked while we hold it.
             let guard = sweep_db.blocking_lock();
+            if force_complete {
+                guard.force_migration_complete()?;
+            }
             let rotated = guard.migration_v4_sweep_resumable(&v1_key, &v2_key)?;
             guard.force_complete_if_no_v1_rows()?;
             Ok::<usize, copypaste_core::DbError>(rotated)
@@ -533,6 +545,43 @@ async fn handle_tick(
     }
 }
 
+/// Encrypt a freshly-captured text payload for at-rest storage, producing a
+/// ciphertext that the read path (`ipc::write_to_pasteboard`) can decrypt.
+///
+/// **Key/AAD/key_version consistency (the v0.4 ingest fix).** A new row is
+/// stamped `key_version = 2` by [`ClipboardItem::new_text`] (which uses
+/// `ITEM_KEY_VERSION_CURRENT = 2`). The read path dispatches on that
+/// `key_version` via `copypaste_core::decrypt_item_by_version`, and for
+/// `key_version = 2` it decrypts with **the v2 key** (`derive_v2(local_key)`)
+/// and **the v4 AAD format** (`build_item_aad_v2(item_id, 4, 2)`).
+///
+/// Ingest must therefore encrypt with that exact `(key, AAD)` pair. The prior
+/// code encrypted with the raw `local_key` (the v1 key) + the v3 AAD
+/// (`build_item_aad(item_id, 3)`) while still stamping `key_version = 2`, so
+/// every freshly-captured text item failed to round-trip with
+/// `EncryptError::AuthFailed` ("authentication tag mismatch") on paste-back.
+///
+/// `local_key` is the device's v1 storage key (`load_local_key()` /
+/// `DeviceKeypair::local_enc_key`). It is used here only as the input keying
+/// material to `derive_v2`, mirroring exactly what the read path does
+/// (`derive_v2(&self.local_key)`), so the two sides derive the identical v2
+/// key.
+fn encrypt_text_for_storage(
+    plaintext: &[u8],
+    local_key: &[u8; 32],
+    item_id: &str,
+) -> Result<([u8; copypaste_core::NONCE_SIZE], Vec<u8>), copypaste_core::EncryptError> {
+    let v2_key = derive_v2(local_key);
+    let aad = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT_U32);
+    encrypt_item_with_aad(plaintext, &v2_key, &aad)
+}
+
+/// `key_version` stamped into newly-inserted rows, mirrored from
+/// `copypaste_core::storage::items::ITEM_KEY_VERSION_CURRENT` (= 2). Pinned as
+/// a `u32` here because `build_item_aad_v2` binds the key version into the AAD
+/// as a `u32` and the read path uses the literal `2`.
+const ITEM_KEY_VERSION_CURRENT_U32: u32 = 2;
+
 async fn handle_text(
     text: String,
     db: &Arc<Mutex<Database>>,
@@ -545,17 +594,11 @@ async fn handle_text(
 
     let is_sensitive = detect(&text).is_some();
 
-    // v0.3: encrypt_item_with_aad binds ciphertext to (item_id, schema_version)
-    // via AEAD AAD. Pre-generate item_id so the value baked into the AAD is the
-    // same one persisted in the row — decryption later rebuilds AAD from the
-    // stored item_id. The legacy empty-AAD fallback was removed in 1c55e57, so
-    // a mismatch here would surface as `EncryptError::AuthFailed` on read.
     let item_id = uuid::Uuid::new_v4().to_string();
-    let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
-    let (nonce, ciphertext) = match encrypt_item_with_aad(text.as_bytes(), local_key, &aad) {
+    let (nonce, ciphertext) = match encrypt_text_for_storage(text.as_bytes(), local_key, &item_id) {
         Ok(v) => v,
         Err(e) => {
-            tracing::warn!("encrypt_item_with_aad failed for text: {e}");
+            tracing::warn!("encrypt_text_for_storage failed for text: {e}");
             return None;
         }
     };
@@ -800,6 +843,57 @@ fn load_or_create_device_id() -> anyhow::Result<uuid::Uuid> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use copypaste_core::{decrypt_item_by_version, NONCE_SIZE};
+
+    /// v0.4 ingest round-trip (HIGH): a freshly-captured text item must be
+    /// readable through the SAME path the daemon uses on paste-back. The read
+    /// path (`ipc::write_to_pasteboard`, text branch) dispatches on the row's
+    /// `key_version` via `decrypt_item_by_version`, deriving the v2 key as
+    /// `derive_v2(local_key)`. This test feeds the production ingest crypto
+    /// (`encrypt_text_for_storage`) into the production read crypto
+    /// (`decrypt_item_by_version`) and asserts the bytes survive.
+    ///
+    /// Before the ingest fix, ingest encrypted with the v1 key + v3 AAD while
+    /// stamping `key_version = 2`, so this round-trip failed with
+    /// `EncryptError::AuthFailed`.
+    #[test]
+    fn fresh_text_capture_round_trips_through_read_path() {
+        let local_key = [0x42u8; 32]; // stands in for load_local_key() (the v1 key)
+        let item_id = uuid::Uuid::new_v4().to_string();
+        let plaintext = b"hello from a fresh clipboard capture";
+
+        // Ingest: exactly what handle_text does to produce the stored row.
+        let (nonce, ciphertext) =
+            encrypt_text_for_storage(plaintext, &local_key, &item_id).expect("encrypt");
+
+        // The row is stamped key_version = 2 (ClipboardItem::new_text).
+        let item = ClipboardItem::new_text(ciphertext.clone(), nonce.to_vec(), 0);
+        assert_eq!(
+            item.key_version, 2,
+            "freshly-captured rows are stamped key_version = 2"
+        );
+
+        // Read: replicate the read path's key derivation + dispatch.
+        let v1_key = local_key;
+        let v2_key = derive_v2(&v1_key);
+        let mut nonce_arr = [0u8; NONCE_SIZE];
+        nonce_arr.copy_from_slice(&nonce);
+
+        let recovered = decrypt_item_by_version(
+            item.key_version,
+            &v1_key,
+            &v2_key,
+            &item_id,
+            &nonce_arr,
+            &ciphertext,
+        )
+        .expect("read path must decrypt a freshly-captured row");
+
+        assert_eq!(
+            recovered, plaintext,
+            "round-trip plaintext must match the captured bytes"
+        );
+    }
 
     /// arch LOW #24 regression: the device_id must survive restarts.
     /// Two consecutive calls to `load_or_create_device_id` with the same
