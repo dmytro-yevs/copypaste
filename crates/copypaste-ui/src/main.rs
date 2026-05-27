@@ -579,23 +579,16 @@ fn main() -> Result<()> {
             }
         });
 
-        // T2.2: capture a weak handle to the v0.4 RootWindow so the closure
-        // below is ready to wire once TrayCallbacks gains an on_open_preview
-        // field (T2.3). The closure is NOT yet registered — doing so requires
-        // a new field in tray_host::TrayCallbacks which is out of T2.2 scope.
-        //
-        // When T2.3 lands, move this closure into TrayCallbacks:
-        //   callbacks.on_open_preview = Some(on_open_preview_window);
+        // T2.3: capture a weak handle to the v0.4 RootWindow so the tray
+        // "New Window (v0.4 preview)" item can raise it.
         let rw_weak = root_window_handle.as_weak();
-        let _on_open_preview_window: copypaste_ui::tray_host::ActionCb = Box::new(move || {
+        let on_open_preview_window: copypaste_ui::tray_host::ActionCb = Box::new(move || {
             if let Some(w) = rw_weak.upgrade() {
                 set_activation_policy_regular();
                 w.show().ok();
                 activate_app();
             }
         });
-        // TODO(T2.3): add TrayCallbacks::on_open_preview and wire
-        // _on_open_preview_window to the "New Window (v0.4 preview)" menu item.
 
         // v0.3 T3: tray "Recent items" row click → paste via IPC. The
         // closure spawns a worker thread so we never block the UI on the
@@ -616,6 +609,7 @@ fn main() -> Result<()> {
             on_open_pair: Some(on_open_pair),
             on_quit: None, // default = slint::quit_event_loop()
             on_paste_item: Some(on_paste_item),
+            on_open_preview: Some(on_open_preview_window),
         };
         if let Err(e) = copypaste_ui::tray_host::install(callbacks) {
             eprintln!("[tray] install failed: {e} — running without menu-bar tray");

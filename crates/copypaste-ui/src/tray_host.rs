@@ -154,6 +154,7 @@ const ID_LAUNCH_AT_LOGIN: &str = "launch_at_login";
 const ID_PAIR_DEVICE: &str = "pair_device";
 const ID_PREFERENCES: &str = "preferences";
 const ID_QUIT: &str = "quit";
+const ID_OPEN_PREVIEW: &str = "open_preview";
 
 // ── Errors ──────────────────────────────────────────────────────────────────
 
@@ -186,6 +187,8 @@ pub struct TrayCallbacks {
     /// Bug-6: open the device-pairing window from the tray.
     pub on_open_pair: Option<ActionCb>,
     pub on_quit: Option<ActionCb>,
+    /// T2.3: open the v0.4 preview RootWindow from the tray.
+    pub on_open_preview: Option<ActionCb>,
     /// v0.3 T3: invoked when the user picks a row from the tray's
     /// "Recent items" block. The string argument is the daemon-side
     /// history id; the UI is expected to call `IpcClient::paste(id)`.
@@ -319,6 +322,8 @@ struct TrayMenu {
     launch_at_login: MenuItem,
     /// Bug-6: "Pair Device…" menu item kept alive so muda doesn't drop it.
     _pair_device: MenuItem,
+    /// T2.3: "New Window (v0.4 preview)" kept alive so muda doesn't drop it.
+    _open_preview: MenuItem,
     /// v0.3 T3: refs to the dynamic "Recent items" rows. Kept on the
     /// struct so muda doesn't garbage-collect them between rebuilds; the
     /// Vec is rebuilt wholesale by `rebuild_with_recents`.
@@ -371,6 +376,9 @@ impl TrayMenu {
         // Bug-6: "Pair Device…" entry opens the pairing window.
         let pair_device = MenuItem::with_id(ID_PAIR_DEVICE, "Pair Device…", true, None);
         let preferences = MenuItem::with_id(ID_PREFERENCES, "Preferences…", true, None);
+        // T2.3: v0.4 preview window shortcut.
+        let open_preview =
+            MenuItem::with_id(ID_OPEN_PREVIEW, "New Window (v0.4 preview)", true, None);
         let quit = MenuItem::with_id(ID_QUIT, "Quit", true, None);
 
         let menu = Menu::new();
@@ -391,6 +399,8 @@ impl TrayMenu {
         menu.append(&launch_at_login)?;
         menu.append(&preferences)?;
         menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&open_preview)?;
+        menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&quit)?;
 
         Ok(Self {
@@ -398,6 +408,7 @@ impl TrayMenu {
             private_mode,
             launch_at_login,
             _pair_device: pair_device,
+            _open_preview: open_preview,
             _recent_items: recent_items,
             _recent_headers: recent_headers,
         })
@@ -653,6 +664,11 @@ fn drain_events(runtime: &Rc<RefCell<TrayRuntime>>) {
             }
             ID_PREFERENCES => {
                 if let Some(cb) = &rt.callbacks.on_open_preferences {
+                    cb();
+                }
+            }
+            ID_OPEN_PREVIEW => {
+                if let Some(cb) = &rt.callbacks.on_open_preview {
                     cb();
                 }
             }
