@@ -160,10 +160,14 @@ pub fn migrate_v1_to_v2_keys(
             break;
         }
         let batch_len = batch.len();
+        let mut rotated_this_batch = 0usize;
 
         for row in batch {
             match rotate_one(db, &row, v1_key, v2_key) {
-                Ok(()) => total_rotated += 1,
+                Ok(()) => {
+                    total_rotated += 1;
+                    rotated_this_batch += 1;
+                }
                 Err(e) => {
                     total_failed += 1;
                     tracing::warn!(
@@ -174,6 +178,20 @@ pub fn migrate_v1_to_v2_keys(
                     );
                 }
             }
+        }
+
+        // Termination guard: a full batch that rotated ZERO rows means every
+        // one of these `key_version = 1` rows failed (e.g. all undecryptable /
+        // corrupt). Since the `WHERE key_version = 1` predicate would re-fetch
+        // the exact same rows on the next iteration, continuing would loop
+        // forever and hang daemon startup. Stop and leave them at v1.
+        if rotated_this_batch == 0 && batch_len == BATCH_SIZE {
+            tracing::warn!(
+                stuck = batch_len,
+                "migration_v4: a full batch of {batch_len} rows all failed to rotate; \
+                 leaving them at key_version=1 and stopping the text sweep to avoid an infinite loop"
+            );
+            break;
         }
 
         // If the batch was full, more rows likely remain — sleep to yield
@@ -316,10 +334,14 @@ pub fn migrate_v1_image_chunks_to_v2(
             break;
         }
         let batch_len = batch.len();
+        let mut rotated_this_batch = 0usize;
 
         for row in batch {
             match rotate_one_image(db, &row, v1_key, v2_key) {
-                Ok(()) => total_rotated += 1,
+                Ok(()) => {
+                    total_rotated += 1;
+                    rotated_this_batch += 1;
+                }
                 Err(e) => {
                     total_failed += 1;
                     tracing::warn!(
@@ -330,6 +352,19 @@ pub fn migrate_v1_image_chunks_to_v2(
                     );
                 }
             }
+        }
+
+        // Termination guard (same defect as the text sweep): a full batch that
+        // rotated ZERO rows would be re-fetched verbatim by the next
+        // `WHERE key_version = 1` query, looping forever. Stop and leave them
+        // at v1 rather than hang daemon startup.
+        if rotated_this_batch == 0 && batch_len == BATCH_SIZE {
+            tracing::warn!(
+                stuck = batch_len,
+                "migration_v4: a full batch of {batch_len} image rows all failed to rotate; \
+                 leaving them at key_version=1 and stopping the image sweep to avoid an infinite loop"
+            );
+            break;
         }
 
         if batch_len < BATCH_SIZE {
@@ -379,6 +414,13 @@ fn fetch_v1_image_batch(db: &Database, limit: usize) -> Result<Vec<V1ImageRow>, 
 /// `serde_json` into the production build of `copypaste-core` (it is only a
 /// dev-dependency here). The format is fixed and emitted by our own daemon, so
 /// a targeted extractor is sufficient and avoids a new runtime dependency.
+///
+/// NOTE: this hand-rolled parser only locates a `"file_id":[...]` token; it
+/// assumes the daemon's *current* `blob_ref` schema where `file_id` is a 16-
+/// element JSON byte array. If `daemon::handle_image` ever changes the
+/// `blob_ref` field order, key name, or `file_id` encoding, this extractor must
+/// be updated in lockstep (the migration would otherwise leave image rows at
+/// `key_version = 1`).
 fn parse_file_id(id: &str, blob_ref: Option<&str>) -> Result<[u8; 16], MigrationV4Error> {
     let meta_json = blob_ref.ok_or_else(|| MigrationV4Error::ImageMeta {
         id: id.to_string(),
@@ -850,6 +892,123 @@ mod tests {
             parse_file_id("r", Some(bad)),
             Err(MigrationV4Error::ImageMeta { .. })
         ));
+    }
+
+    // ── Termination guard regression (HIGH) ───────────────────────────────
+    //
+    // If an ENTIRE batch (BATCH_SIZE rows) all fail to rotate, the
+    // `WHERE key_version = 1` predicate would re-fetch the exact same rows on
+    // the next iteration and the sweep would loop forever, hanging daemon
+    // startup. The guard breaks out once a full batch produces zero
+    // successful rotations. These tests seed a full batch of undecryptable
+    // rows and assert the sweep TERMINATES (and leaves them at v1).
+    //
+    // The sweep itself is already bounded by the fix, but to guarantee the
+    // test can never hang the whole suite if the guard ever regresses, we arm
+    // a watchdog thread before the call: if the sweep hasn't returned (and
+    // cleared the flag) within a generous budget, the watchdog aborts the
+    // process with a clear message instead of letting CI block forever. A
+    // worker-thread approach isn't usable here because rusqlite's in-memory
+    // `Connection` is per-connection and `!Send`, so the sweep must run inline
+    // on this thread against the borrowed `&Database`.
+
+    #[test]
+    fn full_batch_of_undecryptable_text_rows_terminates() {
+        let db = Database::open_in_memory().unwrap();
+        let v1_key = [0xC1u8; 32];
+        let v2_key = [0xC2u8; 32];
+        // Every seeded row is encrypted under a DIFFERENT key, so none of them
+        // decrypt with `v1_key` — a full batch of guaranteed failures.
+        let other_v1_key = [0xCEu8; 32];
+
+        for i in 0..BATCH_SIZE {
+            let pt = format!("undecryptable-{i}").into_bytes();
+            seed_v1_row(&db, &other_v1_key, &pt);
+        }
+
+        let timed_out = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let flag = timed_out.clone();
+        let watchdog = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                // The sweep never set the flag to false → it hung.
+                eprintln!(
+                    "full_batch_of_undecryptable_text_rows_terminates: \
+                     sweep hung (>10s) — termination guard regressed"
+                );
+                std::process::abort();
+            }
+        });
+
+        let rotated = migrate_v1_to_v2_keys(&db, &v1_key, &v2_key).unwrap();
+        timed_out.store(false, std::sync::atomic::Ordering::SeqCst);
+        let _ = watchdog.join();
+
+        assert_eq!(rotated, 0, "no row was decryptable, so none may rotate");
+
+        // All BATCH_SIZE rows must still be at key_version=1.
+        let remaining_v1: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE key_version = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            remaining_v1 as usize, BATCH_SIZE,
+            "every stuck row must be left at key_version=1"
+        );
+    }
+
+    #[test]
+    fn full_batch_of_undecryptable_image_rows_terminates() {
+        let db = Database::open_in_memory().unwrap();
+        let v1_key = [0xD1u8; 32];
+        let v2_key = [0xD2u8; 32];
+        let other_v1_key = [0xDEu8; 32];
+
+        for i in 0..BATCH_SIZE {
+            // Distinct payloads, all encrypted under a key the sweep won't have.
+            let pt = vec![(i % 256) as u8; 32];
+            seed_v1_image_row(&db, &other_v1_key, &pt, 8);
+        }
+
+        let timed_out = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let flag = timed_out.clone();
+        let watchdog = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                eprintln!(
+                    "full_batch_of_undecryptable_image_rows_terminates: \
+                     sweep hung (>10s) — termination guard regressed"
+                );
+                std::process::abort();
+            }
+        });
+
+        let rotated = migrate_v1_image_chunks_to_v2(&db, &v1_key, &v2_key).unwrap();
+        timed_out.store(false, std::sync::atomic::Ordering::SeqCst);
+        let _ = watchdog.join();
+
+        assert_eq!(
+            rotated, 0,
+            "no image row was decryptable, so none may rotate"
+        );
+
+        let remaining_v1: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items \
+                 WHERE key_version = 1 AND content_type = 'image'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            remaining_v1 as usize, BATCH_SIZE,
+            "every stuck image row must be left at key_version=1"
+        );
     }
 
     /// The combined `migrate_v1_to_v2_keys` sweep must rotate BOTH text and
