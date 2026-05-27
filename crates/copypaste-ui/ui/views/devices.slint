@@ -1,0 +1,356 @@
+// devices.slint — Devices view for CopyPaste UI v0.4.
+// T3.3: DevicesView component with card grid layout.
+// No IPC wiring yet — T3.4 imports this into AppWindow.
+//
+// Slint 1.8 compatible.
+
+import { Theme } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { IconButton, PrimaryButton, DangerButton, EmptyState } from "../primitives.slint";
+import { ScrollView } from "std-widgets.slint";
+
+// ---------------------------------------------------------------------------
+// DeviceEntry — data model for a paired device row / card
+// ---------------------------------------------------------------------------
+export struct DeviceEntry {
+    name: string,
+    fingerprint: string,
+    online: bool,
+    bytes-up: int,
+    bytes-down: int,
+    last-seen: string,
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// Format a byte count as a compact human-readable string.
+// Uses integer math only (no floats in Slint expressions).
+pure function format-bytes(n: int) -> string {
+    if (n < 1024) {
+        return n + " B";
+    } else if (n < 1048576) {
+        return (n / 1024) + " KB";
+    } else {
+        return (n / 1048576) + " MB";
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DeviceCard — single card in the 3-up grid
+// ---------------------------------------------------------------------------
+component DeviceCard inherits Rectangle {
+    in property <DeviceEntry> device;
+    in property <int> index;
+    callback selected(int);
+    callback pause-device(int);
+    callback unpair-device(int);
+
+    min-width: 160px;
+    height: 130px;
+    border-radius: Theme.radius-panel;
+    background: Theme.surface-panel;
+    border-width: 1px;
+    border-color: ta.has-hover ? Theme.border-regular : Theme.border-subtle;
+
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.selected(root.index); }
+    }
+
+    VerticalLayout {
+        padding: Theme.panel-inset;
+        spacing: Theme.space-2;
+
+        // Status dot + name row
+        HorizontalLayout {
+            spacing: Theme.space-2;
+            alignment: space-between;
+
+            HorizontalLayout {
+                spacing: Theme.space-2;
+                alignment: start;
+
+                // Online/offline dot
+                Rectangle {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background: root.device.online ? Theme.color-success : Theme.text-tertiary;
+                    y: (parent.height - self.height) / 2;
+                }
+
+                Text {
+                    text: root.device.name;
+                    font-size: Theme.font-body;
+                    font-weight: 600;
+                    color: Theme.text-primary;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            // Device icon
+            Image {
+                source: Icons.monitor-smartphone;
+                width: 16px;
+                height: 16px;
+                colorize: root.device.online ? Theme.accent-solid : Theme.text-tertiary;
+            }
+        }
+
+        // Fingerprint (truncated)
+        Text {
+            text: root.device.fingerprint;
+            font-size: Theme.font-caption;
+            color: Theme.text-tertiary;
+            overflow: elide;
+        }
+
+        // Transfer stats row
+        if root.device.online: HorizontalLayout {
+            spacing: Theme.space-2;
+            alignment: start;
+
+            Image {
+                source: Icons.send;
+                width: 12px;
+                height: 12px;
+                colorize: Theme.text-secondary;
+                y: (parent.height - self.height) / 2;
+            }
+
+            Text {
+                text: format-bytes(root.device.bytes-up);
+                font-size: Theme.font-caption;
+                color: Theme.text-secondary;
+            }
+
+            Image {
+                source: Icons.copy;
+                width: 12px;
+                height: 12px;
+                colorize: Theme.text-secondary;
+                y: (parent.height - self.height) / 2;
+            }
+
+            Text {
+                text: format-bytes(root.device.bytes-down);
+                font-size: Theme.font-caption;
+                color: Theme.text-secondary;
+            }
+        }
+
+        if !root.device.online: Text {
+            text: "last seen " + root.device.last-seen;
+            font-size: Theme.font-caption;
+            color: Theme.text-tertiary;
+        }
+
+        // Action row — Pause + Unpair
+        HorizontalLayout {
+            spacing: Theme.space-2;
+            alignment: start;
+            padding-top: Theme.space-1;
+
+            IconButton {
+                icon: Icons.shield-check;
+                label: "Pause";
+                style: "ghost";
+                height: 22px;
+                clicked => { root.pause-device(root.index); }
+            }
+
+            IconButton {
+                icon: Icons.trash-2;
+                label: "Unpair";
+                style: "danger";
+                height: 22px;
+                clicked => { root.unpair-device(root.index); }
+            }
+        }
+    }
+
+    animate border-color { duration: 80ms; easing: linear; }
+}
+
+// ---------------------------------------------------------------------------
+// DevicesView — main exported component
+// ---------------------------------------------------------------------------
+export component DevicesView inherits Rectangle {
+    in property <[DeviceEntry]> devices: [];
+    callback device-selected(int);
+    callback open-pair();
+    callback pause-device(int);
+    callback unpair-device(int);
+
+    background: Theme.surface-base;
+
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // ── Toolbar ─────────────────────────────────────────────────────────
+        toolbar := Rectangle {
+            height: 48px;
+            background: Theme.surface-sidebar;
+            border-width: 0px;
+
+            HorizontalLayout {
+                padding-left: Theme.panel-inset;
+                padding-right: Theme.panel-inset;
+                spacing: Theme.space-4;
+                alignment: space-between;
+
+                Text {
+                    text: "Devices";
+                    font-size: Theme.font-heading;
+                    font-weight: 600;
+                    color: Theme.text-primary;
+                    vertical-alignment: center;
+                }
+
+                PrimaryButton {
+                    icon: Icons.plus;
+                    label: "+ Pair";
+                    clicked => { root.open-pair(); }
+                }
+            }
+        }
+
+        // Hairline separator
+        Rectangle {
+            height: 1px;
+            background: Theme.border-subtle;
+        }
+
+        // ── Content area ─────────────────────────────────────────────────────
+        if root.devices.length == 0: EmptyState {
+            vertical-stretch: 1;
+            title: "No paired devices";
+            body: "Pair a device to start syncing your clipboard.";
+            icon: Icons.monitor-smartphone;
+            cta-label: "+ Pair Device";
+            cta-icon: Icons.link-2;
+            cta-clicked => { root.open-pair(); }
+        }
+
+        if root.devices.length > 0: ScrollView {
+            vertical-stretch: 1;
+
+            // Card grid — 3-up wrapping using a flow-like HorizontalLayout
+            // Note: Slint does not have a native wrapping grid; we use a
+            // VerticalLayout of HorizontalLayout rows (max 3 per row).
+            // For a flat list the host can pass up to 9 devices cleanly.
+            VerticalLayout {
+                padding: Theme.panel-inset;
+                spacing: Theme.space-4;
+                alignment: start;
+
+                // Row 1 (cards 0-2)
+                if root.devices.length > 0: HorizontalLayout {
+                    spacing: Theme.space-4;
+                    alignment: start;
+
+                    if root.devices.length > 0: DeviceCard {
+                        device: root.devices[0];
+                        index: 0;
+                        horizontal-stretch: 1;
+                        selected(i) => { root.device-selected(i); }
+                        pause-device(i) => { root.pause-device(i); }
+                        unpair-device(i) => { root.unpair-device(i); }
+                    }
+                    if root.devices.length > 1: DeviceCard {
+                        device: root.devices[1];
+                        index: 1;
+                        horizontal-stretch: 1;
+                        selected(i) => { root.device-selected(i); }
+                        pause-device(i) => { root.pause-device(i); }
+                        unpair-device(i) => { root.unpair-device(i); }
+                    }
+                    if root.devices.length > 2: DeviceCard {
+                        device: root.devices[2];
+                        index: 2;
+                        horizontal-stretch: 1;
+                        selected(i) => { root.device-selected(i); }
+                        pause-device(i) => { root.pause-device(i); }
+                        unpair-device(i) => { root.unpair-device(i); }
+                    }
+                    // Fill empty columns when fewer than 3 devices in row 1
+                    if root.devices.length == 1: Rectangle { horizontal-stretch: 1; }
+                    if root.devices.length == 1: Rectangle { horizontal-stretch: 1; }
+                    if root.devices.length == 2: Rectangle { horizontal-stretch: 1; }
+                }
+
+                // Row 2 (cards 3-5)
+                if root.devices.length > 3: HorizontalLayout {
+                    spacing: Theme.space-4;
+                    alignment: start;
+
+                    if root.devices.length > 3: DeviceCard {
+                        device: root.devices[3];
+                        index: 3;
+                        horizontal-stretch: 1;
+                        selected(i) => { root.device-selected(i); }
+                        pause-device(i) => { root.pause-device(i); }
+                        unpair-device(i) => { root.unpair-device(i); }
+                    }
+                    if root.devices.length > 4: DeviceCard {
+                        device: root.devices[4];
+                        index: 4;
+                        horizontal-stretch: 1;
+                        selected(i) => { root.device-selected(i); }
+                        pause-device(i) => { root.pause-device(i); }
+                        unpair-device(i) => { root.unpair-device(i); }
+                    }
+                    if root.devices.length > 5: DeviceCard {
+                        device: root.devices[5];
+                        index: 5;
+                        horizontal-stretch: 1;
+                        selected(i) => { root.device-selected(i); }
+                        pause-device(i) => { root.pause-device(i); }
+                        unpair-device(i) => { root.unpair-device(i); }
+                    }
+                    if root.devices.length == 4: Rectangle { horizontal-stretch: 1; }
+                    if root.devices.length == 4: Rectangle { horizontal-stretch: 1; }
+                    if root.devices.length == 5: Rectangle { horizontal-stretch: 1; }
+                }
+
+                // Row 3 (cards 6-8)
+                if root.devices.length > 6: HorizontalLayout {
+                    spacing: Theme.space-4;
+                    alignment: start;
+
+                    if root.devices.length > 6: DeviceCard {
+                        device: root.devices[6];
+                        index: 6;
+                        horizontal-stretch: 1;
+                        selected(i) => { root.device-selected(i); }
+                        pause-device(i) => { root.pause-device(i); }
+                        unpair-device(i) => { root.unpair-device(i); }
+                    }
+                    if root.devices.length > 7: DeviceCard {
+                        device: root.devices[7];
+                        index: 7;
+                        horizontal-stretch: 1;
+                        selected(i) => { root.device-selected(i); }
+                        pause-device(i) => { root.pause-device(i); }
+                        unpair-device(i) => { root.unpair-device(i); }
+                    }
+                    if root.devices.length > 8: DeviceCard {
+                        device: root.devices[8];
+                        index: 8;
+                        horizontal-stretch: 1;
+                        selected(i) => { root.device-selected(i); }
+                        pause-device(i) => { root.pause-device(i); }
+                        unpair-device(i) => { root.unpair-device(i); }
+                    }
+                    if root.devices.length == 7: Rectangle { horizontal-stretch: 1; }
+                    if root.devices.length == 7: Rectangle { horizontal-stretch: 1; }
+                    if root.devices.length == 8: Rectangle { horizontal-stretch: 1; }
+                }
+            }
+        }
+    }
+}

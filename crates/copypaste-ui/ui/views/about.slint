@@ -1,0 +1,123 @@
+// about.slint — About view for CopyPaste UI v0.4.
+// T3.3: AboutView component with centered hero layout.
+// No IPC wiring yet — T3.4 imports this into AppWindow.
+//
+// Slint 1.8 compatible.
+
+import { Theme } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { IconButton } from "../primitives.slint";
+
+// ---------------------------------------------------------------------------
+// AboutView — centered brand hero, version, links
+// ---------------------------------------------------------------------------
+export component AboutView inherits Rectangle {
+    in property <string> version: "";
+
+    background: Theme.surface-base;
+
+    VerticalLayout {
+        alignment: center;
+        spacing: Theme.section-gap;
+        padding: Theme.section-gap;
+
+        // ── Brand hero ───────────────────────────────────────────────────────
+        VerticalLayout {
+            alignment: center;
+            spacing: Theme.space-3;
+
+            // App icon (48px, gradient colorize)
+            HorizontalLayout {
+                alignment: center;
+
+                Rectangle {
+                    width: 64px;
+                    height: 64px;
+                    border-radius: Theme.radius-panel;
+                    background: Theme.surface-elevated;
+                    border-width: 1px;
+                    border-color: Theme.border-regular;
+
+                    Image {
+                        source: Icons.clipboard-paste;
+                        width: 48px;
+                        height: 48px;
+                        // gradient stroke: use accent-solid as colorize fallback
+                        colorize: Theme.accent-solid;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // App name
+            Text {
+                text: "CopyPaste";
+                font-size: 22px;
+                font-weight: 700;
+                color: Theme.text-primary;
+                horizontal-alignment: center;
+            }
+
+            // Version
+            Text {
+                text: root.version != "" ? "v" + root.version : "v0.3.0";
+                font-size: Theme.font-body;
+                color: Theme.text-secondary;
+                horizontal-alignment: center;
+            }
+
+            // Tagline
+            Text {
+                text: "Native clipboard sync";
+                font-size: Theme.font-caption;
+                color: Theme.text-tertiary;
+                horizontal-alignment: center;
+            }
+        }
+
+        // Hairline divider
+        Rectangle {
+            height: 1px;
+            width: 240px;
+            horizontal-alignment: center;
+            background: Theme.border-subtle;
+        }
+
+        // ── Link buttons ─────────────────────────────────────────────────────
+        HorizontalLayout {
+            alignment: center;
+            spacing: Theme.space-4;
+
+            // Changelog
+            IconButton {
+                icon: Icons.file-text;
+                label: "Changelog";
+                style: "secondary";
+                // No callback yet — T3.4/T3.5 will wire shell::open
+            }
+
+            // Licenses
+            IconButton {
+                icon: Icons.scale;
+                label: "Licenses";
+                style: "secondary";
+            }
+
+            // Repo
+            IconButton {
+                icon: Icons.link-2;
+                label: "Repo";
+                style: "secondary";
+            }
+        }
+
+        // ── Platform line ────────────────────────────────────────────────────
+        Text {
+            text: "macOS · Android · open-source";
+            font-size: Theme.font-caption;
+            color: Theme.text-tertiary;
+            horizontal-alignment: center;
+        }
+    }
+}
