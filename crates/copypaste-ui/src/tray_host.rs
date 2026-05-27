@@ -15,7 +15,7 @@
 //!   CopyPaste            (title, disabled)
 //!   ─────────────────
 //!   Open History         → callback into the Slint UI
-//!   Private Mode  ✓      → toggles local state (TODO: IPC to daemon)
+//!   Private Mode  ✓      → persisted to daemon via set_private_mode IPC
 //!   ─────────────────
 //!   Launch at Login ✓    → shells out to `copypaste daemon install|uninstall`
 //!   Preferences…         → callback into the Slint UI (settings window)
@@ -29,6 +29,7 @@
 // Gating: the module is declared as `#[cfg(target_os = "macos")] pub mod
 // tray_host;` in `lib.rs`, so we don't need an inner `#![cfg(...)]` here.
 
+use crate::ipc_client::IpcClient;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -516,6 +517,8 @@ struct TrayRuntime {
     /// Set when the user picks Quit. Latched so subsequent ticks can stop
     /// polling and forward the quit to Slint via the callback (if any).
     quit_latch: Arc<AtomicBool>,
+    /// Daemon Unix socket path used to persist Private Mode state via IPC.
+    socket_path: PathBuf,
 }
 
 /// Build the tray icon, register a Slint timer that drains tray menu events
@@ -524,9 +527,22 @@ struct TrayRuntime {
 /// Must be called *before* `slint::run_event_loop` (i.e. before
 /// `Window::run`). The returned `Result` allows callers to log + degrade
 /// gracefully when the platform refuses the tray (CI, no display).
-pub fn install(callbacks: TrayCallbacks) -> Result<(), TrayHostError> {
+pub fn install(
+    socket_path: std::path::PathBuf,
+    callbacks: TrayCallbacks,
+) -> Result<(), TrayHostError> {
     let launch_at_login = launchd_is_installed();
-    let menu = TrayMenu::build(false, launch_at_login, &[])?;
+
+    // C.H9: read initial private-mode state from the daemon so it
+    // survives restarts. Falls back to `false` when the daemon is offline
+    // (cold start before the daemon is ready) — the next toggle will
+    // correct it via IPC.
+    let initial_private_mode = IpcClient::connect(&socket_path)
+        .ok()
+        .and_then(|mut c| c.get_private_mode().ok())
+        .unwrap_or(false);
+
+    let menu = TrayMenu::build(initial_private_mode, launch_at_login, &[])?;
 
     let icon = load_icon();
     let mut builder = TrayIconBuilder::new()
@@ -543,10 +559,11 @@ pub fn install(callbacks: TrayCallbacks) -> Result<(), TrayHostError> {
     let runtime = Rc::new(RefCell::new(TrayRuntime {
         tray,
         menu,
-        private_mode: false,
+        private_mode: initial_private_mode,
         launch_at_login,
         callbacks,
         quit_latch: Arc::new(AtomicBool::new(false)),
+        socket_path,
     }));
 
     // v0.3 T3: stash the runtime in a thread-local so the free function
@@ -627,9 +644,6 @@ fn drain_events(runtime: &Rc<RefCell<TrayRuntime>>) {
                 }
             }
             ID_PRIVATE_MODE => {
-                // TODO(v0.3.x): plumb Private Mode through an IPC method on
-                // the daemon. For now the UI just toggles the checkmark so
-                // the menu state is testable.
                 rt.private_mode = !rt.private_mode;
                 let label = if rt.private_mode {
                     "Private Mode  ✓"
@@ -638,6 +652,18 @@ fn drain_events(runtime: &Rc<RefCell<TrayRuntime>>) {
                 };
                 rt.menu.private_mode.set_text(label);
                 tracing::info!("tray: private_mode={}", rt.private_mode);
+                // C.H9: persist the toggle to the daemon so the state
+                // survives UI restarts. Non-fatal: warn and continue
+                // if the daemon is unreachable.
+                let socket = rt.socket_path.clone();
+                let enabled = rt.private_mode;
+                std::thread::spawn(move || {
+                    if let Err(e) =
+                        IpcClient::connect(&socket).and_then(|mut c| c.set_private_mode(enabled))
+                    {
+                        tracing::warn!(error = %e, enabled, "tray: set_private_mode IPC failed");
+                    }
+                });
             }
             ID_LAUNCH_AT_LOGIN => {
                 let want = !rt.launch_at_login;

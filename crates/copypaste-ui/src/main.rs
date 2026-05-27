@@ -615,7 +615,8 @@ fn main() -> Result<()> {
             on_paste_item: Some(on_paste_item),
             on_open_preview: Some(on_open_preview_window),
         };
-        if let Err(e) = copypaste_ui::tray_host::install(callbacks) {
+        let tray_socket = lock_or_recover(&state).socket_path.clone();
+        if let Err(e) = copypaste_ui::tray_host::install(tray_socket, callbacks) {
             eprintln!("[tray] install failed: {e} — running without menu-bar tray");
         } else {
             // v0.3 T3: prime the tray with current history immediately and

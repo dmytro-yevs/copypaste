@@ -465,6 +465,65 @@ impl IpcClient {
     }
 
     // -----------------------------------------------------------------------
+    // Private mode methods
+    // -----------------------------------------------------------------------
+
+    /// Read the current private-mode state from the daemon.
+    ///
+    /// Returns `Ok(false)` when the daemon is unreachable so the tray can
+    /// fall back gracefully without crashing the UI.
+    pub fn get_private_mode(&mut self) -> Result<bool> {
+        let resp = self.call("get_private_mode", serde_json::json!({}))?;
+        if !resp.ok {
+            return Err(anyhow!(
+                "get_private_mode failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ));
+        }
+        let data = resp.data.unwrap_or(Value::Null);
+        let enabled = data["private_mode"].as_bool().unwrap_or(false);
+        Ok(enabled)
+    }
+
+    /// Persist the private-mode toggle via the daemon.
+    pub fn set_private_mode(&mut self, enabled: bool) -> Result<()> {
+        let resp = self.call(
+            "set_private_mode",
+            serde_json::json!({ "enabled": enabled }),
+        )?;
+        if resp.ok {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "set_private_mode failed: {}",
+                resp.error.unwrap_or_else(|| "unknown".into())
+            ))
+        }
+    }
+
+    /// Build the wire-level JSON for a `get_private_mode` request.
+    /// Exposed for unit tests that want to assert method/param shape
+    /// without standing up a real daemon.
+    pub fn build_get_private_mode_request() -> Value {
+        serde_json::json!({
+            "id": "ui-1",
+            "method": "get_private_mode",
+            "params": {},
+        })
+    }
+
+    /// Build the wire-level JSON for a `set_private_mode` request.
+    /// Exposed for unit tests that want to assert method/param shape
+    /// without standing up a real daemon.
+    pub fn build_set_private_mode_request(enabled: bool) -> Value {
+        serde_json::json!({
+            "id": "ui-1",
+            "method": "set_private_mode",
+            "params": { "enabled": enabled },
+        })
+    }
+
+    // -----------------------------------------------------------------------
     // Cloud auth methods
     // -----------------------------------------------------------------------
 
@@ -862,6 +921,34 @@ mod tests {
         assert_eq!(req["method"], "revoke_peer");
         assert_eq!(req["params"]["fingerprint"], fp);
         assert!(req["id"].is_string(), "request needs a string id");
+    }
+
+    #[test]
+    fn ipc_client_get_private_mode_sends_correct_method() {
+        // C.H9: builder must use exactly `get_private_mode` so the daemon
+        // dispatcher matches; params must be an empty object (not null) per
+        // the protocol spec.
+        let req = IpcClient::build_get_private_mode_request();
+        assert_eq!(req["method"], "get_private_mode");
+        assert!(
+            req["params"].is_object(),
+            "params must be an object (not null)"
+        );
+        assert!(req["id"].is_string(), "request needs a string id");
+    }
+
+    #[test]
+    fn ipc_client_set_private_mode_sends_correct_method() {
+        // C.H9: builder must use exactly `set_private_mode` and pass the
+        // `enabled` bool verbatim — the daemon rejects missing/renamed fields.
+        let req_on = IpcClient::build_set_private_mode_request(true);
+        assert_eq!(req_on["method"], "set_private_mode");
+        assert_eq!(req_on["params"]["enabled"], true);
+        assert!(req_on["id"].is_string(), "request needs a string id");
+
+        let req_off = IpcClient::build_set_private_mode_request(false);
+        assert_eq!(req_off["method"], "set_private_mode");
+        assert_eq!(req_off["params"]["enabled"], false);
     }
 
     #[test]
