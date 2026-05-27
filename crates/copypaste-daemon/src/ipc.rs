@@ -484,6 +484,9 @@ impl IpcServer {
                     Some(s) => s.to_string(),
                     None => return Response::err(req.id, "missing param: id"),
                 };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err(req.id, "invalid param: id must be a valid UUID");
+                }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
@@ -572,6 +575,9 @@ impl IpcServer {
                     Some(s) => s.to_string(),
                     None => return Response::err(req.id, "missing param: id"),
                 };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err(req.id, "invalid param: id must be a valid UUID");
+                }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
@@ -680,6 +686,9 @@ impl IpcServer {
                     Some(s) => s.to_string(),
                     None => return Response::err(req.id, "missing param: id"),
                 };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err(req.id, "invalid param: id must be a valid UUID");
+                }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
