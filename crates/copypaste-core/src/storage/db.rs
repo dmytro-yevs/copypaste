@@ -57,6 +57,15 @@ pub enum DbError {
     /// instant-failure mode that the missing-pragma bug used to surface.
     #[error("Database is locked")]
     Locked,
+    /// A plaintext database was found but auto-migration is disabled
+    /// (`COPYPASTE_NO_AUTO_MIGRATE=1`). Run `copypaste migrate` or unset
+    /// the flag to allow in-place encryption.
+    #[error(
+        "plaintext database found at {path} ({size} bytes) — \
+         auto-migration is disabled (COPYPASTE_NO_AUTO_MIGRATE=1). \
+         Back up the file and re-run the daemon without that flag to encrypt it."
+    )]
+    PlaintextMigrationBlocked { path: String, size: u64 },
 }
 
 /// Promote well-known operational SQLite failures (`SQLITE_FULL`,
@@ -245,7 +254,15 @@ impl Database {
                             .is_ok();
                         drop(plain_conn);
                         if schema_ok {
-                            // Plaintext file confirmed. Migrate in-place.
+                            // Plaintext file confirmed.
+                            let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                            tracing::warn!(
+                                path = %path.display(),
+                                size_bytes = size,
+                                "plaintext SQLite database detected; \
+                                 auto-migrating to SQLCipher in-place. \
+                                 Set COPYPASTE_NO_AUTO_MIGRATE=1 to block this."
+                            );
                             Self::encrypt_existing(path, key)?;
                             // Re-open encrypted.
                             let enc = Connection::open_with_flags(
@@ -272,6 +289,46 @@ impl Database {
             }
             Err(e) => Err(DbError::Sqlite(e)),
         }
+    }
+
+    /// Like [`open`] but returns [`DbError::PlaintextMigrationBlocked`] instead
+    /// of auto-migrating when a plaintext database is found. Use this when the
+    /// caller has received `COPYPASTE_NO_AUTO_MIGRATE=1` from the environment.
+    pub fn open_no_auto_migrate(path: impl AsRef<Path>, key: &[u8; 32]) -> Result<Self, DbError> {
+        let path = path.as_ref();
+        if let Err(rusqlite::Error::SqliteFailure(err, msg)) = {
+            let conn = Connection::open_with_flags(
+                path,
+                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
+            )?;
+            conn.execute_batch(&key_pragma(key))?;
+            conn.query_row("SELECT COUNT(*) FROM sqlite_master", [], |r| {
+                r.get::<_, i64>(0)
+            })
+        } {
+            if err.extended_code == rusqlite::ffi::SQLITE_NOTADB
+                || err.code == rusqlite::ErrorCode::DatabaseCorrupt
+            {
+                let probe = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE);
+                if let Ok(plain_conn) = probe {
+                    let schema_ok = plain_conn
+                        .query_row("SELECT COUNT(*) FROM sqlite_master", [], |r| {
+                            r.get::<_, i64>(0)
+                        })
+                        .is_ok();
+                    if schema_ok {
+                        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                        return Err(DbError::PlaintextMigrationBlocked {
+                            path: path.display().to_string(),
+                            size,
+                        });
+                    }
+                }
+                return Err(DbError::Sqlite(rusqlite::Error::SqliteFailure(err, msg)));
+            }
+        }
+        // Plaintext check passed — key is valid; delegate to regular open.
+        Self::open(path, key)
     }
 
     /// Migrate an unencrypted file to SQLCipher in-place.

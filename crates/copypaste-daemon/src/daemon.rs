@@ -63,7 +63,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
 
     let db_path = paths::db_path();
     let db = Arc::new(Mutex::new(
-        Database::open(&db_path, &local_key_arc).map_err(|e| anyhow::anyhow!("Database: {e}"))?,
+        if std::env::var_os("COPYPASTE_NO_AUTO_MIGRATE").is_some() {
+            // A.M1 Option C: operator opted out of silent plaintext→SQLCipher migration.
+            // Returns DbError::PlaintextMigrationBlocked if a legacy database is found.
+            Database::open_no_auto_migrate(&db_path, &local_key_arc)
+        } else {
+            Database::open(&db_path, &local_key_arc)
+        }
+        .map_err(|e| anyhow::anyhow!("Database: {e}"))?,
     ));
     tracing::info!("database opened at {}", db_path.display());
 
