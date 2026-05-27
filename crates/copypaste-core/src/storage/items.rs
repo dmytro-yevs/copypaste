@@ -380,6 +380,28 @@ pub fn get_page_meta(
     Ok(items)
 }
 
+/// Fetch a single clipboard item by its primary-key `id`.
+///
+/// Returns `Ok(None)` when no row matches. Used by IPC verbs such as
+/// `copy_item` that resolve an item directly by id — this avoids the
+/// data-loss footgun of paging (`get_page`) and linear-scanning, which
+/// silently misses any item beyond the fetched page window.
+pub fn get_item_by_id(db: &Database, id: &str) -> Result<Option<ClipboardItem>, ItemsError> {
+    let result = db.conn().query_row(
+        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+                content_hash, origin_device_id, key_version, pinned
+         FROM clipboard_items WHERE id = ?1",
+        params![id],
+        row_to_item,
+    );
+    match result {
+        Ok(item) => Ok(Some(item)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(ItemsError::Sqlite(e)),
+    }
+}
+
 pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
     let changed = db.conn().execute(
         "DELETE FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1 AND pinned = 0",
@@ -403,10 +425,16 @@ pub fn delete_sensitive_expired(
     Ok(changed)
 }
 
-pub fn delete_item(db: &Database, id: &str) -> Result<(), ItemsError> {
-    db.conn()
+/// Delete the clipboard item with the given primary-key `id`.
+///
+/// Returns the number of rows actually removed (`0` when no row matched).
+/// Callers can use this to distinguish a real deletion from a no-op against a
+/// non-existent id.
+pub fn delete_item(db: &Database, id: &str) -> Result<usize, ItemsError> {
+    let removed = db
+        .conn()
         .execute("DELETE FROM clipboard_items WHERE id=?1", params![id])?;
-    Ok(())
+    Ok(removed)
 }
 
 /// Pin an item so it is never auto-deleted by TTL or history-limit prunes.
@@ -718,8 +746,62 @@ mod tests {
         let item = make_item(1);
         let id = item.id.clone();
         insert_item(&db, &item).unwrap();
-        delete_item(&db, &id).unwrap();
+        let removed = delete_item(&db, &id).unwrap();
+        assert_eq!(removed, 1, "exactly one row removed");
         assert_eq!(count_items(&db).unwrap(), 0);
+    }
+
+    #[test]
+    fn delete_item_reports_zero_for_missing_row() {
+        let db = Database::open_in_memory().unwrap();
+        let removed = delete_item(&db, "00000000-0000-0000-0000-000000000000").unwrap();
+        assert_eq!(removed, 0, "no row matched, nothing removed");
+    }
+
+    #[test]
+    fn get_item_by_id_returns_matching_row() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(7);
+        let id = item.id.clone();
+        insert_item(&db, &item).unwrap();
+
+        let found = get_item_by_id(&db, &id).unwrap();
+        assert!(found.is_some(), "inserted row must be found by id");
+        let found = found.unwrap();
+        assert_eq!(found.id, id);
+        assert_eq!(found.lamport_ts, 7);
+        assert_eq!(found.content.as_deref(), Some(&[0xAA, 0xBB][..]));
+    }
+
+    #[test]
+    fn get_item_by_id_returns_none_for_missing_row() {
+        let db = Database::open_in_memory().unwrap();
+        let found = get_item_by_id(&db, "00000000-0000-0000-0000-000000000000").unwrap();
+        assert!(found.is_none(), "absent id must yield None, not an error");
+    }
+
+    #[test]
+    fn get_item_by_id_finds_row_beyond_first_page() {
+        // Regression: `copy_item` used to page get_page(1000, 0) and scan, so
+        // any item past position 1000 was unreachable. get_item_by_id must
+        // resolve a row regardless of how many other rows exist.
+        let db = Database::open_in_memory().unwrap();
+        let mut target_id = String::new();
+        for i in 0..1200 {
+            let item = make_item(i);
+            if i == 0 {
+                // Oldest row (sorts last under ORDER BY wall_time DESC) — would
+                // fall outside a 1000-row window once 1200 rows exist.
+                target_id = item.id.clone();
+            }
+            insert_item(&db, &item).unwrap();
+        }
+        let found = get_item_by_id(&db, &target_id).unwrap();
+        assert!(
+            found.is_some(),
+            "row beyond the legacy 1000-row page window must still be found"
+        );
+        assert_eq!(found.unwrap().id, target_id);
     }
 
     // --- Task 1: upsert_fts ---
