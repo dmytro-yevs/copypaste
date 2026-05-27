@@ -82,7 +82,9 @@ where
     // "FailedToStart". Creating the dir up front is cheap and idempotent.
     if let Some(home) = fs.home_dir() {
         let logs_dir = home.join("Library/Logs/CopyPaste");
-        let _ = fs.create_dir_all(&logs_dir);
+        if let Err(e) = fs.create_dir_all(&logs_dir) {
+            tracing::warn!("autostart logs dir create failed: {e}");
+        }
     }
 
     // Step 2b: ensure plist installed and up-to-date.

@@ -225,16 +225,30 @@ impl RootWindowHandle {
         }
 
         // ── T5.2: item-copy callback (keyboard ↵ / ⌘C on selected item) ─────
+        // H8: wired to IpcClient::paste — the daemon's "paste" verb copies the
+        // selected entry into the system clipboard and brings the target app to
+        // front, which is the correct semantic for a keyboard-triggered copy.
         {
             let vm = Rc::clone(&view_model);
+            let socket = socket_path.to_string();
             window.on_item_copy(move |idx| {
                 if idx < 0 {
                     return;
                 }
                 match vm.row_data(idx as usize) {
                     Some(item) => {
-                        tracing::info!("item-copy (keyboard): id={}", item.id);
-                        // TODO T5.x: send IPC copy command with item.id
+                        let id = item.id.to_string();
+                        tracing::info!("item-copy (keyboard): id={id}");
+                        match IpcClient::connect(socket.as_ref()) {
+                            Ok(mut c) => {
+                                if let Err(e) = c.paste(&id) {
+                                    tracing::warn!(error = %e, "item-copy: IPC paste failed");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "item-copy: daemon offline");
+                            }
+                        }
                     }
                     None => {
                         tracing::warn!("item-copy: index {idx} out of bounds");
@@ -244,6 +258,8 @@ impl RootWindowHandle {
         }
 
         // ── T5.2: item-pin callback (keyboard ⌘P on selected item) ───────────
+        // H8: no pin_item IPC method exists yet — warn so behaviour is explicit.
+        // TODO(T5.x): wire to c.pin_item(&id) when daemon exposes the verb.
         {
             let vm = Rc::clone(&view_model);
             window.on_item_pin(move |idx| {
@@ -252,12 +268,11 @@ impl RootWindowHandle {
                 }
                 match vm.row_data(idx as usize) {
                     Some(item) => {
-                        tracing::info!(
-                            "item-pin (keyboard): id={} pinned={}",
+                        tracing::warn!(
+                            "item-pin (keyboard): id={} pinned={} — IPC pin not yet wired",
                             item.id,
                             item.pinned
                         );
-                        // TODO T5.x: send IPC pin/unpin command with item.id
                     }
                     None => {
                         tracing::warn!("item-pin: index {idx} out of bounds");
@@ -267,6 +282,8 @@ impl RootWindowHandle {
         }
 
         // ── T5.2: item-delete callback (keyboard ⌫ on selected item) ─────────
+        // H8: no delete_item IPC method exists yet — warn so behaviour is explicit.
+        // TODO(T5.x): wire to c.delete_item(&id) when daemon exposes the verb.
         {
             let vm = Rc::clone(&view_model);
             let win_weak = window.as_weak();
@@ -276,15 +293,18 @@ impl RootWindowHandle {
                 }
                 match vm.row_data(idx as usize) {
                     Some(item) => {
-                        tracing::info!("item-delete (keyboard): id={}", item.id);
-                        // Deselect and close detail panel if the deleted item was open.
+                        tracing::warn!(
+                            "item-delete (keyboard): id={} — IPC delete not yet wired",
+                            item.id
+                        );
+                        // Deselect and close detail panel optimistically so the UI
+                        // feels responsive even without the daemon call.
                         if let Some(win) = win_weak.upgrade() {
                             if win.get_detail_visible() && win.get_detail_item().id == item.id {
                                 win.set_detail_visible(false);
                             }
                             win.set_selected_history_index(-1);
                         }
-                        // TODO T5.x: send IPC delete command with item.id
                     }
                     None => {
                         tracing::warn!("item-delete: index {idx} out of bounds");

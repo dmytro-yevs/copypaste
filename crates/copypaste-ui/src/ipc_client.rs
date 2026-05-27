@@ -371,7 +371,13 @@ impl IpcClient {
         let raw = data["peers"].as_array().cloned().unwrap_or_default();
         let peers = raw
             .into_iter()
-            .filter_map(|v| serde_json::from_value::<PairedDevice>(v).ok())
+            .filter_map(|v| match serde_json::from_value::<PairedDevice>(v) {
+                Ok(d) => Some(d),
+                Err(e) => {
+                    tracing::warn!("dropping malformed PairedDevice JSON: {e}");
+                    None
+                }
+            })
             .collect();
         Ok(peers)
     }

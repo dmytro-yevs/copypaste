@@ -41,7 +41,16 @@ fn content_type_to_kind(content_type: &str) -> slint::SharedString {
 /// Convert a [`crate::ipc_client::HistoryEntry`] to a Slint [`ClipItem`].
 fn entry_to_clip_item(entry: &crate::ipc_client::HistoryEntry) -> ClipItem {
     ClipItem {
-        id: entry.id.parse::<i64>().unwrap_or(0) as i32,
+        // H1: parse as i64 first, then clamp to i32.  i32::MAX (2_147_483_647)
+        // is used as the sentinel for out-of-range / unparseable IDs; daemon
+        // IDs are small positive integers so MAX cannot collide with a real entry,
+        // unlike the previous sentinel of 0 which aliases the "unset" state.
+        id: entry
+            .id
+            .parse::<i64>()
+            .ok()
+            .and_then(|n| i32::try_from(n).ok())
+            .unwrap_or(i32::MAX),
         preview: entry.preview.clone().into(),
         kind: content_type_to_kind(&entry.content_type),
         wall_time: format_wall_time(entry.wall_time).into(),
@@ -138,7 +147,9 @@ impl HistoryModel {
     /// Safe to call on the Slint UI thread; the IPC round-trip for 50 items
     /// is typically < 5 ms on a local Unix socket.
     pub fn load_initial(&self) {
-        self.reset_with_query("").ok();
+        if let Err(e) = self.reset_with_query("") {
+            tracing::warn!("HistoryModel::load_initial: reset_with_query failed — {e}");
+        }
     }
 
     /// Fetch the next page from the daemon and append results.
@@ -207,12 +218,16 @@ impl HistoryModel {
 
     /// Reset to the unfiltered item list and fetch the first page.
     pub fn reset(&self) {
-        self.reset_with_query("").ok();
+        if let Err(e) = self.reset_with_query("") {
+            tracing::warn!("history reset failed: {e}");
+        }
     }
 
     /// Set a search query and reload from page 0.
     pub fn search(&self, query: &str) {
-        self.reset_with_query(query).ok();
+        if let Err(e) = self.reset_with_query(query) {
+            tracing::warn!("history search reset failed: {e}");
+        }
     }
 
     /// `true` if a page fetch is currently in progress.

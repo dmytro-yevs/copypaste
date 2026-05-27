@@ -44,16 +44,18 @@ struct AppState {
 }
 
 impl AppState {
-    fn new() -> Self {
+    // H2: return Result so a missing HOME directory surfaces a clear error
+    // instead of a panic that kills the process with no user-visible message.
+    fn new() -> anyhow::Result<Self> {
         let socket_path = home::home_dir()
-            .expect("HOME must exist")
+            .ok_or_else(|| anyhow::anyhow!("HOME directory not found; cannot start UI"))?
             .join("Library/Application Support/CopyPaste/daemon.sock");
-        Self {
+        Ok(Self {
             socket_path,
             current_offset: 0,
             last_page_items: Vec::new(),
             last_known_total: None,
-        }
+        })
     }
 }
 
@@ -237,7 +239,7 @@ fn main() -> Result<()> {
     slint::init_translations!(concat!(env!("CARGO_MANIFEST_DIR"), "/lang"));
 
     let window = HistoryWindow::new()?;
-    let state = Arc::new(Mutex::new(AppState::new()));
+    let state = Arc::new(Mutex::new(AppState::new()?));
     // Per-command in-flight flags — see `InFlight` doc-comment.
     let in_flight = InFlight::new();
 
@@ -325,7 +327,10 @@ fn main() -> Result<()> {
             lock_or_recover(&state).socket_path.clone(),
         )));
         if let Err(e) = settings_window.wire_to_ipc(adapter) {
-            tracing::warn!(error = %e, "settings initial load failed");
+            // M5: upgraded from warn — a failed initial load means settings are
+            // in an unknown state; user will see stale/default values until restart.
+            // TODO(M5-full): surface this in a Slint error banner property.
+            tracing::error!(error = %e, "settings initial load failed — settings will show defaults");
         }
     }
     // Close button hides the window (does not quit).
