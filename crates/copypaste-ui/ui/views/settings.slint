@@ -1,0 +1,811 @@
+// views/settings.slint — CopyPaste SettingsView (T3.2, v0.4 redesign)
+//
+// Two-level structure:  [ ⚙ Simple ]  [ ⧉ Advanced ]  pill sub-tabs.
+// Detail panel is hidden when this view is active (hides-detail-panel = true).
+//
+// Depends on:
+//   - theme.slint (Theme global)
+//   - icons.slint (Icons global)
+//   - primitives.slint (SubTabPill, ToggleRow, IconButton, DangerButton,
+//                        GhostButton, ConfirmDialog)
+//
+// Slint 1.8 compatible.
+
+import { ScrollView } from "std-widgets.slint";
+
+import { Theme }        from "../theme.slint";
+import { Icons }        from "../icons.slint";
+import {
+    SubTabPill,
+    ToggleRow,
+    IconButton,
+    DangerButton,
+    GhostButton,
+    ConfirmDialog,
+} from "../primitives.slint";
+
+// ---------------------------------------------------------------------------
+// SettingsSection — icon + title header + children rows
+// ---------------------------------------------------------------------------
+component SettingsSection inherits VerticalLayout {
+    in property <image> icon;
+    in property <string> title;
+
+    spacing: 0px;
+    padding-top: 16px;
+    padding-bottom: 8px;
+
+    // Section header row
+    Rectangle {
+        height: 32px;
+        background: transparent;
+
+        HorizontalLayout {
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 8px;
+            alignment: center;
+
+            Image {
+                source: root.icon;
+                width: 14px;
+                height: 14px;
+                colorize: Theme.text-secondary;
+            }
+
+            Text {
+                text: root.title;
+                font-size: 11px;
+                font-weight: 700;
+                color: Theme.text-secondary;
+                letter-spacing: 0.5px;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+        }
+    }
+
+    // Hairline separator
+    Rectangle {
+        height: 1px;
+        background: Theme.border-subtle;
+        margin-left: 16px;
+        margin-right: 16px;
+    }
+
+    @children
+}
+
+// ---------------------------------------------------------------------------
+// AccentPicker — Blue / Purple radio row
+// ---------------------------------------------------------------------------
+component AccentPicker inherits Rectangle {
+    in-out property <int> accent: 0;  // 0 = Blue, 1 = Purple
+    callback changed(int);
+
+    height: 40px;
+    background: transparent;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 8px;
+        alignment: center;
+
+        Text {
+            text: @tr("Accent");
+            font-size: 13px;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        // Blue option
+        blue-ta := TouchArea {
+            width: 72px;
+            height: 26px;
+            mouse-cursor: MouseCursor.pointer;
+            clicked => { root.accent = 0; root.changed(0); }
+
+            Rectangle {
+                border-radius: 13px;
+                background: root.accent == 0 ? Theme.surface-elevated : transparent;
+                border-width: root.accent == 0 ? 1px : 0px;
+                border-color: Theme.border-regular;
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 6px;
+                    alignment: center;
+
+                    Rectangle {
+                        width: 10px;
+                        height: 10px;
+                        border-radius: 5px;
+                        background: #3574F0;
+                    }
+
+                    Text {
+                        text: @tr("Blue");
+                        font-size: 12px;
+                        color: root.accent == 0 ? Theme.text-primary : Theme.text-secondary;
+                        vertical-alignment: center;
+                    }
+                }
+
+                animate background { duration: 80ms; easing: linear; }
+            }
+        }
+
+        // Purple option
+        purple-ta := TouchArea {
+            width: 80px;
+            height: 26px;
+            mouse-cursor: MouseCursor.pointer;
+            clicked => { root.accent = 1; root.changed(1); }
+
+            Rectangle {
+                border-radius: 13px;
+                background: root.accent == 1 ? Theme.surface-elevated : transparent;
+                border-width: root.accent == 1 ? 1px : 0px;
+                border-color: Theme.border-regular;
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 6px;
+                    alignment: center;
+
+                    Rectangle {
+                        width: 10px;
+                        height: 10px;
+                        border-radius: 5px;
+                        background: #7F52FF;
+                    }
+
+                    Text {
+                        text: @tr("Purple");
+                        font-size: 12px;
+                        color: root.accent == 1 ? Theme.text-primary : Theme.text-secondary;
+                        vertical-alignment: center;
+                    }
+                }
+
+                animate background { duration: 80ms; easing: linear; }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HistoryLimitPicker — dropdown-style selector for Keep history N items
+// ---------------------------------------------------------------------------
+component HistoryLimitPicker inherits Rectangle {
+    in-out property <int> limit: 1000;  // 0 = Unlimited
+    in-out property <bool> open: false;
+    callback changed(int);
+
+    height: 36px;
+    background: transparent;
+
+    // Returns display label for a limit value
+    pure function label-for(v: int) -> string {
+        v == 0     ? @tr("Unlimited") :
+        v == 100   ? @tr("100") :
+        v == 500   ? @tr("500") :
+        v == 1000  ? @tr("1 000") :
+        v == 5000  ? @tr("5 000") :
+                     @tr("Custom")
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 8px;
+        alignment: center;
+
+        Text {
+            text: @tr("Keep history");
+            font-size: 13px;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        // Dropdown button
+        dropdown-ta := TouchArea {
+            width: 110px;
+            height: 26px;
+            mouse-cursor: MouseCursor.pointer;
+            clicked => { root.open = !root.open; }
+
+            dropdown-btn := Rectangle {
+                border-radius: 4px;
+                background: dropdown-ta.has-hover ? Theme.surface-elevated : Theme.surface-elevated;
+                border-width: 1px;
+                border-color: root.open ? Theme.border-focus : Theme.border-regular;
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 4px;
+                    alignment: center;
+
+                    Text {
+                        text: root.label-for(root.limit);
+                        font-size: 12px;
+                        color: Theme.text-primary;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+
+                    Image {
+                        source: Icons.chevron-down;
+                        width: 12px;
+                        height: 12px;
+                        colorize: Theme.text-secondary;
+                    }
+                }
+            }
+        }
+    }
+
+    // Inline dropdown overlay — appears below the button
+    if root.open: Rectangle {
+        y: parent.height;
+        x: parent.width - 120px;
+        width: 120px;
+        z: 100;
+        border-radius: 6px;
+        background: Theme.surface-elevated;
+        border-width: 1px;
+        border-color: Theme.border-regular;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: #00000040;
+        drop-shadow-offset-x: 0px;
+        drop-shadow-offset-y: 4px;
+
+        VerticalLayout {
+            padding: 4px;
+            spacing: 0px;
+
+            for opt in [100, 500, 1000, 5000, 0]: opt-ta := TouchArea {
+                height: 28px;
+                mouse-cursor: MouseCursor.pointer;
+                clicked => {
+                    root.limit = opt;
+                    root.open = false;
+                    root.changed(opt);
+                }
+
+                Rectangle {
+                    border-radius: 4px;
+                    background: opt-ta.has-hover ? Theme.row-hover
+                              : opt == root.limit ? Theme.row-selected
+                              : transparent;
+
+                    Text {
+                        x: 10px;
+                        y: 0px;
+                        width: parent.width - 20px;
+                        height: parent.height;
+                        text: root.label-for(opt);
+                        font-size: 12px;
+                        color: opt == root.limit ? Theme.text-primary : Theme.text-secondary;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TextFieldRow — label + single-line text input
+// ---------------------------------------------------------------------------
+component TextFieldRow inherits Rectangle {
+    in property <string> label;
+    in property <string> placeholder: "";
+    in-out property <string> text: "";
+    in property <bool> enabled: true;
+    callback edited(string);
+
+    height: 44px;
+    background: transparent;
+    opacity: root.enabled ? 1.0 : 0.4;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 8px;
+        alignment: center;
+
+        Text {
+            text: root.label;
+            font-size: 13px;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+            min-width: 100px;
+        }
+
+        field-bg := Rectangle {
+            horizontal-stretch: 1;
+            height: 26px;
+            border-radius: 4px;
+            background: Theme.surface-elevated;
+            border-width: 1px;
+            border-color: fi.has-focus ? Theme.border-focus : Theme.border-regular;
+            clip: true;
+
+            animate border-color { duration: 80ms; easing: linear; }
+
+            // Placeholder text
+            if root.text == "" && !fi.has-focus: Text {
+                x: 8px;
+                y: 0px;
+                width: parent.width - 16px;
+                height: parent.height;
+                text: root.placeholder;
+                font-size: 12px;
+                color: Theme.text-tertiary;
+                vertical-alignment: center;
+            }
+
+            fi := TextInput {
+                x: 8px;
+                y: 0px;
+                width: parent.width - 16px;
+                height: parent.height;
+                text <=> root.text;
+                font-size: 12px;
+                color: Theme.text-primary;
+                selection-background-color: Theme.row-selected;
+                selection-foreground-color: Theme.text-primary;
+                single-line: true;
+                enabled: root.enabled;
+                vertical-alignment: center;
+                edited => { root.text = self.text; root.edited(self.text); }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ReadOnlyRow — label + read-only value + optional copy button
+// ---------------------------------------------------------------------------
+component ReadOnlyRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <bool> show-copy: false;
+    callback copy-clicked();
+
+    height: 36px;
+    background: transparent;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 12px;
+        spacing: 8px;
+        alignment: center;
+
+        Text {
+            text: root.label;
+            font-size: 13px;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+            min-width: 100px;
+        }
+
+        Text {
+            text: root.value;
+            font-size: 12px;
+            color: Theme.text-secondary;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+
+        if root.show-copy: IconButton {
+            icon: Icons.copy;
+            style: "ghost";
+            height: 24px;
+            clicked => { root.copy-clicked(); }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ShortcutRow — single row in the keyboard shortcuts table
+// ---------------------------------------------------------------------------
+component ShortcutRow inherits Rectangle {
+    in property <string> action;
+    in property <string> keys;
+
+    height: 32px;
+    background: transparent;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 8px;
+        alignment: center;
+
+        Text {
+            text: root.action;
+            font-size: 13px;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        // Key badge
+        Rectangle {
+            height: 20px;
+            min-width: 60px;
+            border-radius: 4px;
+            background: Theme.surface-elevated;
+            border-width: 1px;
+            border-color: Theme.border-regular;
+
+            Text {
+                x: 8px;
+                y: 0px;
+                width: parent.width - 16px;
+                height: parent.height;
+                text: root.keys;
+                font-size: 11px;
+                color: Theme.text-secondary;
+                vertical-alignment: center;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DangerActionRow — labelled danger button that shows a confirm dialog
+// ---------------------------------------------------------------------------
+component DangerActionRow inherits Rectangle {
+    in property <string> label;
+    in property <string> button-label;
+    in property <string> dialog-title;
+    in property <string> dialog-body;
+    callback confirmed();
+
+    in-out property <bool> dialog-open: false;
+
+    height: 44px;
+    background: transparent;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 8px;
+        alignment: center;
+
+        Text {
+            text: root.label;
+            font-size: 13px;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+
+        DangerButton {
+            icon: Icons.trash-2;
+            label: root.button-label;
+            clicked => { root.dialog-open = true; }
+        }
+    }
+
+    // Confirm dialog overlay (z=200 per spec)
+    ConfirmDialog {
+        z: 200;
+        shown <=> root.dialog-open;
+        title: root.dialog-title;
+        body: root.dialog-body;
+        confirm-label: root.button-label;
+        cancel-label: @tr("Cancel");
+        danger: true;
+        confirmed => { root.confirmed(); }
+        cancelled => { root.dialog-open = false; }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SimpleSettingsPane — Appearance / Launch / Storage / Sync sections
+// ---------------------------------------------------------------------------
+component SimpleSettingsPane inherits Rectangle {
+    // Properties (mirror UiPrefs + AppSettings)
+    in-out property <int>    accent: 0;
+    in-out property <bool>   compact: false;
+    in-out property <bool>   vibrancy: true;
+    in-out property <bool>   launch-at-login: false;
+    in-out property <bool>   private-mode: false;
+    in-out property <int>    history-limit: 1000;
+    in-out property <bool>   sync-enabled: false;
+    in-out property <string> sync-url: "";
+
+    callback save-prefs();
+    callback save-app-settings();
+
+    background: transparent;
+
+    ScrollView {
+        VerticalLayout {
+            spacing: 0px;
+            padding-bottom: 24px;
+
+            // ── Appearance ────────────────────────────────────────────────
+            SettingsSection {
+                icon: Icons.sun-moon;
+                title: @tr("APPEARANCE");
+
+                AccentPicker {
+                    accent <=> root.accent;
+                    changed(v) => { root.save-prefs(); }
+                }
+
+                ToggleRow {
+                    label: @tr("Compact rows");
+                    checked <=> root.compact;
+                    toggled(v) => { root.save-prefs(); }
+                }
+
+                ToggleRow {
+                    label: @tr("Sidebar translucent");
+                    sub-label: @tr("macOS only");
+                    checked <=> root.vibrancy;
+                    toggled(v) => { root.save-prefs(); }
+                }
+            }
+
+            // ── Launch ────────────────────────────────────────────────────
+            SettingsSection {
+                icon: Icons.log-in;
+                title: @tr("LAUNCH");
+
+                ToggleRow {
+                    label: @tr("Start at login");
+                    checked <=> root.launch-at-login;
+                    toggled(v) => { root.save-app-settings(); }
+                }
+
+                ToggleRow {
+                    label: @tr("Private mode");
+                    sub-label: @tr("Disables history recording");
+                    checked <=> root.private-mode;
+                    toggled(v) => { root.save-app-settings(); }
+                }
+            }
+
+            // ── Storage ───────────────────────────────────────────────────
+            SettingsSection {
+                icon: Icons.database;
+                title: @tr("STORAGE");
+
+                HistoryLimitPicker {
+                    limit <=> root.history-limit;
+                    changed(v) => { root.save-app-settings(); }
+                }
+            }
+
+            // ── Sync ──────────────────────────────────────────────────────
+            SettingsSection {
+                icon: Icons.link-2;
+                title: @tr("SYNC");
+
+                ToggleRow {
+                    label: @tr("Sync enabled");
+                    checked <=> root.sync-enabled;
+                    toggled(v) => { root.save-app-settings(); }
+                }
+
+                if root.sync-enabled: TextFieldRow {
+                    label: @tr("Supabase URL");
+                    placeholder: @tr("https://…supabase.co");
+                    text <=> root.sync-url;
+                    edited(v) => { root.save-app-settings(); }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AdvancedSettingsPane — Device identity / Keyboard shortcuts / Danger zone
+// ---------------------------------------------------------------------------
+component AdvancedSettingsPane inherits Rectangle {
+    in property <string> fingerprint: "";
+    in property <string> app-version: "";
+    in property <[{action: string, keys: string}]> shortcuts;
+
+    callback clear-history();
+    callback reset-pairings();
+    callback reset-ui-prefs();
+
+    background: transparent;
+
+    ScrollView {
+        VerticalLayout {
+            spacing: 0px;
+            padding-bottom: 24px;
+
+            // ── Device identity ───────────────────────────────────────────
+            SettingsSection {
+                icon: Icons.key-round;
+                title: @tr("DEVICE IDENTITY");
+
+                ReadOnlyRow {
+                    label: @tr("Fingerprint");
+                    value: root.fingerprint;
+                    show-copy: true;
+                    copy-clicked => { /* parent handles clipboard */ }
+                }
+
+                ReadOnlyRow {
+                    label: @tr("App version");
+                    value: root.app-version;
+                    show-copy: false;
+                }
+            }
+
+            // ── Keyboard shortcuts ────────────────────────────────────────
+            SettingsSection {
+                icon: Icons.keyboard;
+                title: @tr("KEYBOARD SHORTCUTS");
+
+                for entry in root.shortcuts: ShortcutRow {
+                    action: entry.action;
+                    keys: entry.keys;
+                }
+            }
+
+            // ── Danger zone ───────────────────────────────────────────────
+            SettingsSection {
+                icon: Icons.trash-2;
+                title: @tr("DANGER ZONE");
+
+                DangerActionRow {
+                    label: @tr("Clear all history");
+                    button-label: @tr("Clear history…");
+                    dialog-title: @tr("Clear all history?");
+                    dialog-body: @tr("This will permanently delete all clipboard history. This action cannot be undone.");
+                    confirmed => { root.clear-history(); }
+                }
+
+                DangerActionRow {
+                    label: @tr("Reset all pairings");
+                    button-label: @tr("Reset pairings…");
+                    dialog-title: @tr("Reset all pairings?");
+                    dialog-body: @tr("All paired devices will be disconnected and removed. They will need to be re-paired.");
+                    confirmed => { root.reset-pairings(); }
+                }
+
+                DangerActionRow {
+                    label: @tr("Reset UI preferences");
+                    button-label: @tr("Reset UI…");
+                    dialog-title: @tr("Reset UI preferences?");
+                    dialog-body: @tr("All UI preferences will be reset to their defaults. This cannot be undone.");
+                    confirmed => { root.reset-ui-prefs(); }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SettingsView — top-level exported component
+// ---------------------------------------------------------------------------
+export component SettingsView inherits Rectangle {
+    // ── Signals to parent layout ───────────────────────────────────────────
+    /// True: parent must hide the detail panel (full-width mode).
+    in property <bool> hides-detail-panel: true;
+
+    // ── Sub-tab selection ─────────────────────────────────────────────────
+    in-out property <int> settings-tab: 0;  // 0 = Simple, 1 = Advanced
+
+    // ── Simple pane: mirrors UiPrefs + AppSettings ────────────────────────
+    in-out property <int>    accent: 0;
+    in-out property <bool>   compact: false;
+    in-out property <bool>   vibrancy: true;
+    in-out property <bool>   launch-at-login: false;
+    in-out property <bool>   private-mode: false;
+    in-out property <int>    history-limit: 1000;
+    in-out property <bool>   sync-enabled: false;
+    in-out property <string> sync-url: "";
+
+    // ── Advanced pane ─────────────────────────────────────────────────────
+    in property <string> fingerprint: "";
+    in property <string> app-version: "";
+    in property <[{action: string, keys: string}]> shortcuts: [
+        { action: "Show history",    keys: "⌘⇧V"   },
+        { action: "Copy selection",  keys: "⌘C"     },
+        { action: "Clear history",   keys: "⌘⇧⌫"  },
+        { action: "Toggle private",  keys: "⌘⇧P"   },
+        { action: "Open settings",   keys: "⌘,"     },
+    ];
+
+    // ── Callbacks ─────────────────────────────────────────────────────────
+    callback save-prefs();
+    callback save-app-settings();
+    callback clear-history();
+    callback reset-pairings();
+    callback reset-ui-prefs();
+    callback settings-tab-changed(int);
+
+    background: Theme.surface-base;
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // ── Sub-tab pill bar ───────────────────────────────────────────────
+        Rectangle {
+            height: 48px;
+            background: Theme.surface-sidebar;
+            border-width: 0px;
+
+            // Bottom hairline
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.border-subtle;
+            }
+
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 6px;
+                alignment: start;
+                padding-top: 10px;
+                padding-bottom: 10px;
+
+                SubTabPill {
+                    icon: Icons.settings-2;
+                    label: @tr("Simple");
+                    active: root.settings-tab == 0;
+                    activated => {
+                        root.settings-tab = 0;
+                        root.settings-tab-changed(0);
+                    }
+                }
+
+                SubTabPill {
+                    icon: Icons.sliders-horizontal;
+                    label: @tr("Advanced");
+                    active: root.settings-tab == 1;
+                    activated => {
+                        root.settings-tab = 1;
+                        root.settings-tab-changed(1);
+                    }
+                }
+            }
+        }
+
+        // ── Pane area ──────────────────────────────────────────────────────
+        if root.settings-tab == 0: SimpleSettingsPane {
+            vertical-stretch: 1;
+            accent <=> root.accent;
+            compact <=> root.compact;
+            vibrancy <=> root.vibrancy;
+            launch-at-login <=> root.launch-at-login;
+            private-mode <=> root.private-mode;
+            history-limit <=> root.history-limit;
+            sync-enabled <=> root.sync-enabled;
+            sync-url <=> root.sync-url;
+            save-prefs => { root.save-prefs(); }
+            save-app-settings => { root.save-app-settings(); }
+        }
+
+        if root.settings-tab == 1: AdvancedSettingsPane {
+            vertical-stretch: 1;
+            fingerprint: root.fingerprint;
+            app-version: root.app-version;
+            shortcuts: root.shortcuts;
+            clear-history => { root.clear-history(); }
+            reset-pairings => { root.reset-pairings(); }
+            reset-ui-prefs => { root.reset-ui-prefs(); }
+        }
+    }
+}
