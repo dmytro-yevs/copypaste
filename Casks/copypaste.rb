@@ -29,8 +29,7 @@ cask "copypaste" do
     system_command "/bin/launchctl", args: ["load", "-w", plist.to_s] if plist.exist?
   end
 
-  uninstall launchctl: "com.copypaste.daemon",
-            delete:    "#{appdir}/CopyPaste.app"
+  uninstall launchctl: "com.copypaste.daemon"
 
   zap trash: [
     "~/Library/Application Support/copypaste",
