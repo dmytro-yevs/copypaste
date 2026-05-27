@@ -318,8 +318,10 @@ fn main() -> Result<()> {
                 c.save_settings(&ipc_settings).map_err(|e| e.to_string())
             }
             fn delete_all_history(&mut self) -> Result<(), String> {
-                // TODO(v0.3.x): wire to a dedicated IPC method when daemon exposes one.
-                tracing::warn!("delete_all_history: no IPC method yet — no-op");
+                // T5.x: wired to the daemon `delete_all` verb via IpcClient.
+                let mut c = IpcClient::connect(&self.0).map_err(|e| e.to_string())?;
+                let deleted = c.delete_all().map_err(|e| e.to_string())?;
+                tracing::info!("delete_all_history: daemon deleted {deleted} items");
                 Ok(())
             }
         }

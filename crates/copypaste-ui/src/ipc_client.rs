@@ -292,6 +292,78 @@ impl IpcClient {
         }
     }
 
+    /// Copy a history item back to the system clipboard by id.
+    ///
+    /// T5.x: uses the daemon `copy_item` verb, which surfaces typed
+    /// `invalid_argument` / `not_found` / `auth_failed` error codes. The
+    /// daemon decrypts the stored ciphertext and writes plaintext to the
+    /// system clipboard. Returns the item id on success.
+    pub fn copy_item(&mut self, item_id: &str) -> Result<String> {
+        let resp = self.call("copy_item", serde_json::json!({ "id": item_id }))?;
+        if resp.ok {
+            Ok(item_id.to_owned())
+        } else {
+            Err(IpcError::from_code(
+                resp.error_code,
+                resp.error.unwrap_or_else(|| "copy_item failed".into()),
+            )
+            .into())
+        }
+    }
+
+    /// Pin or unpin a history item by id.
+    ///
+    /// T5.x: `pinned = true` removes the item's expiry so it survives TTL
+    /// and history-limit prunes; `pinned = false` restores normal behaviour.
+    pub fn pin_item(&mut self, item_id: &str, pinned: bool) -> Result<()> {
+        let resp = self.call(
+            "pin_item",
+            serde_json::json!({ "id": item_id, "pinned": pinned }),
+        )?;
+        if resp.ok {
+            Ok(())
+        } else {
+            Err(IpcError::from_code(
+                resp.error_code,
+                resp.error.unwrap_or_else(|| "pin_item failed".into()),
+            )
+            .into())
+        }
+    }
+
+    /// Delete a single history item by id.
+    ///
+    /// T5.x: uses the daemon `delete_item` verb (typed error codes). FTS
+    /// cleanup is best-effort on the daemon side.
+    pub fn delete_item(&mut self, item_id: &str) -> Result<()> {
+        let resp = self.call("delete_item", serde_json::json!({ "id": item_id }))?;
+        if resp.ok {
+            Ok(())
+        } else {
+            Err(IpcError::from_code(
+                resp.error_code,
+                resp.error.unwrap_or_else(|| "delete_item failed".into()),
+            )
+            .into())
+        }
+    }
+
+    /// Delete every clipboard-history item (Settings → "Clear history").
+    ///
+    /// Returns the number of items the daemon deleted.
+    pub fn delete_all(&mut self) -> Result<u64> {
+        let resp = self.call("delete_all", serde_json::json!({}))?;
+        if !resp.ok {
+            return Err(IpcError::from_code(
+                resp.error_code,
+                resp.error.unwrap_or_else(|| "delete_all failed".into()),
+            )
+            .into());
+        }
+        let data = resp.data.unwrap_or(Value::Null);
+        Ok(data["deleted"].as_u64().unwrap_or(0))
+    }
+
     /// Ping the daemon and return true if it responds.
     #[allow(dead_code)]
     pub fn is_running(&mut self) -> bool {
@@ -464,6 +536,24 @@ impl IpcClient {
         })
     }
 
+    /// T5.x — revoke ALL paired peers (Settings → "Reset pairings").
+    ///
+    /// Clears the daemon's local peer store and writes an audit row per
+    /// peer. Returns the number of audit rows the daemon recorded.
+    pub fn revoke_all_peers(&mut self) -> Result<u64> {
+        let resp = self.call("revoke_all_peers", serde_json::json!({}))?;
+        if !resp.ok {
+            return Err(IpcError::from_code(
+                resp.error_code,
+                resp.error
+                    .unwrap_or_else(|| "revoke_all_peers failed".into()),
+            )
+            .into());
+        }
+        let data = resp.data.unwrap_or(Value::Null);
+        Ok(data["revoked"].as_u64().unwrap_or(0))
+    }
+
     // -----------------------------------------------------------------------
     // Private mode methods
     // -----------------------------------------------------------------------
@@ -616,6 +706,55 @@ impl IpcClient {
     /// scalar counts so multibyte characters count as one.
     pub fn is_valid_pair_password(password: &str) -> bool {
         password.chars().count() >= Self::MIN_PAIR_PASSWORD_LEN
+    }
+
+    // -----------------------------------------------------------------------
+    // Request builders for the T5.x history-action verbs (unit-testable)
+    // -----------------------------------------------------------------------
+
+    /// Build the wire-level JSON for a `copy_item` request.
+    pub fn build_copy_item_request(item_id: &str) -> Value {
+        serde_json::json!({
+            "id": "ui-1",
+            "method": "copy_item",
+            "params": { "id": item_id },
+        })
+    }
+
+    /// Build the wire-level JSON for a `pin_item` request.
+    pub fn build_pin_item_request(item_id: &str, pinned: bool) -> Value {
+        serde_json::json!({
+            "id": "ui-1",
+            "method": "pin_item",
+            "params": { "id": item_id, "pinned": pinned },
+        })
+    }
+
+    /// Build the wire-level JSON for a `delete_item` request.
+    pub fn build_delete_item_request(item_id: &str) -> Value {
+        serde_json::json!({
+            "id": "ui-1",
+            "method": "delete_item",
+            "params": { "id": item_id },
+        })
+    }
+
+    /// Build the wire-level JSON for a `delete_all` request.
+    pub fn build_delete_all_request() -> Value {
+        serde_json::json!({
+            "id": "ui-1",
+            "method": "delete_all",
+            "params": {},
+        })
+    }
+
+    /// Build the wire-level JSON for a `revoke_all_peers` request.
+    pub fn build_revoke_all_peers_request() -> Value {
+        serde_json::json!({
+            "id": "ui-1",
+            "method": "revoke_all_peers",
+            "params": {},
+        })
     }
 }
 
@@ -988,5 +1127,57 @@ mod tests {
             6,
             "constant must stay in sync with the daemon-side check"
         );
+    }
+
+    #[test]
+    fn ipc_client_copy_item_sends_correct_method() {
+        // T5.x: builder must use exactly `copy_item` and pass the id verbatim.
+        let req = IpcClient::build_copy_item_request("abc-123");
+        assert_eq!(req["method"], "copy_item");
+        assert_eq!(req["params"]["id"], "abc-123");
+        assert!(req["id"].is_string(), "request needs a string id");
+    }
+
+    #[test]
+    fn ipc_client_pin_item_sends_correct_method_and_flag() {
+        // T5.x: builder must use `pin_item` and carry the `pinned` bool so
+        // the daemon can toggle pin state from a single verb.
+        let req_on = IpcClient::build_pin_item_request("abc-123", true);
+        assert_eq!(req_on["method"], "pin_item");
+        assert_eq!(req_on["params"]["id"], "abc-123");
+        assert_eq!(req_on["params"]["pinned"], true);
+
+        let req_off = IpcClient::build_pin_item_request("abc-123", false);
+        assert_eq!(req_off["params"]["pinned"], false);
+    }
+
+    #[test]
+    fn ipc_client_delete_item_sends_correct_method() {
+        let req = IpcClient::build_delete_item_request("abc-123");
+        assert_eq!(req["method"], "delete_item");
+        assert_eq!(req["params"]["id"], "abc-123");
+        assert!(req["id"].is_string(), "request needs a string id");
+    }
+
+    #[test]
+    fn ipc_client_delete_all_sends_correct_method() {
+        let req = IpcClient::build_delete_all_request();
+        assert_eq!(req["method"], "delete_all");
+        assert!(
+            req["params"].is_object(),
+            "params must be an object (not null)"
+        );
+        assert!(req["id"].is_string(), "request needs a string id");
+    }
+
+    #[test]
+    fn ipc_client_revoke_all_peers_sends_correct_method() {
+        let req = IpcClient::build_revoke_all_peers_request();
+        assert_eq!(req["method"], "revoke_all_peers");
+        assert!(
+            req["params"].is_object(),
+            "params must be an object (not null)"
+        );
+        assert!(req["id"].is_string(), "request needs a string id");
     }
 }

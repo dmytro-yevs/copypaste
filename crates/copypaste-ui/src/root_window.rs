@@ -258,21 +258,30 @@ impl RootWindowHandle {
         }
 
         // ── T5.2: item-pin callback (keyboard ⌘P on selected item) ───────────
-        // H8: no pin_item IPC method exists yet — warn so behaviour is explicit.
-        // TODO(T5.x): wire to c.pin_item(&id) when daemon exposes the verb.
+        // T5.x: wired to IpcClient::pin_item — toggles the pin flag based on
+        // the item's current state so the same key both pins and unpins.
         {
             let vm = Rc::clone(&view_model);
+            let socket = socket_path.to_string();
             window.on_item_pin(move |idx| {
                 if idx < 0 {
                     return;
                 }
                 match vm.row_data(idx as usize) {
                     Some(item) => {
-                        tracing::warn!(
-                            "item-pin (keyboard): id={} pinned={} — IPC pin not yet wired",
-                            item.id,
-                            item.pinned
-                        );
+                        let id = item.id.to_string();
+                        let want_pinned = !item.pinned;
+                        tracing::info!("item-pin (keyboard): id={id} pinned={want_pinned}");
+                        match IpcClient::connect(socket.as_ref()) {
+                            Ok(mut c) => {
+                                if let Err(e) = c.pin_item(&id, want_pinned) {
+                                    tracing::warn!(error = %e, "item-pin: IPC pin_item failed");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "item-pin: daemon offline");
+                            }
+                        }
                     }
                     None => {
                         tracing::warn!("item-pin: index {idx} out of bounds");
@@ -282,23 +291,33 @@ impl RootWindowHandle {
         }
 
         // ── T5.2: item-delete callback (keyboard ⌫ on selected item) ─────────
-        // H8: no delete_item IPC method exists yet — warn so behaviour is explicit.
-        // TODO(T5.x): wire to c.delete_item(&id) when daemon exposes the verb.
+        // T5.x: wired to IpcClient::delete_item — removes the item from the
+        // daemon's store, then optimistically deselects + closes the detail
+        // panel so the UI feels responsive regardless of daemon latency.
         {
             let vm = Rc::clone(&view_model);
             let win_weak = window.as_weak();
+            let socket = socket_path.to_string();
             window.on_item_delete(move |idx| {
                 if idx < 0 {
                     return;
                 }
                 match vm.row_data(idx as usize) {
                     Some(item) => {
-                        tracing::warn!(
-                            "item-delete (keyboard): id={} — IPC delete not yet wired",
-                            item.id
-                        );
+                        let id = item.id.to_string();
+                        tracing::info!("item-delete (keyboard): id={id}");
+                        match IpcClient::connect(socket.as_ref()) {
+                            Ok(mut c) => {
+                                if let Err(e) = c.delete_item(&id) {
+                                    tracing::warn!(error = %e, "item-delete: IPC delete_item failed");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "item-delete: daemon offline");
+                            }
+                        }
                         // Deselect and close detail panel optimistically so the UI
-                        // feels responsive even without the daemon call.
+                        // feels responsive even when the daemon call is slow.
                         if let Some(win) = win_weak.upgrade() {
                             if win.get_detail_visible() && win.get_detail_item().id == item.id {
                                 win.set_detail_visible(false);
@@ -314,45 +333,84 @@ impl RootWindowHandle {
         }
 
         // ── detail-copy callback ───────────────────────────────────────────
+        // T4.3 / T5.x: send the daemon `copy_item` verb so the selected entry
+        // is decrypted and written back to the system clipboard.
         {
             let win_weak = window.as_weak();
+            let socket = socket_path.to_string();
             window.on_detail_copy(move || {
                 let win = match win_weak.upgrade() {
                     Some(w) => w,
                     None => return,
                 };
                 let item = win.get_detail_item();
-                tracing::info!("detail-copy: id={}", item.id);
-                // TODO T4.3: send IPC copy command with item.id
+                let id = item.id.to_string();
+                tracing::info!("detail-copy: id={id}");
+                match IpcClient::connect(socket.as_ref()) {
+                    Ok(mut c) => {
+                        if let Err(e) = c.copy_item(&id) {
+                            tracing::warn!(error = %e, "detail-copy: IPC copy_item failed");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "detail-copy: daemon offline");
+                    }
+                }
             });
         }
 
         // ── detail-pin callback ────────────────────────────────────────────
+        // T4.3 / T5.x: toggle the pin flag via the daemon `pin_item` verb.
         {
             let win_weak = window.as_weak();
+            let socket = socket_path.to_string();
             window.on_detail_pin(move || {
                 let win = match win_weak.upgrade() {
                     Some(w) => w,
                     None => return,
                 };
                 let item = win.get_detail_item();
-                tracing::info!("detail-pin: id={} pinned={}", item.id, item.pinned);
-                // TODO T4.3: send IPC pin/unpin command with item.id
+                let id = item.id.to_string();
+                let want_pinned = !item.pinned;
+                tracing::info!("detail-pin: id={id} pinned={want_pinned}");
+                match IpcClient::connect(socket.as_ref()) {
+                    Ok(mut c) => {
+                        if let Err(e) = c.pin_item(&id, want_pinned) {
+                            tracing::warn!(error = %e, "detail-pin: IPC pin_item failed");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "detail-pin: daemon offline");
+                    }
+                }
             });
         }
 
         // ── detail-delete callback ─────────────────────────────────────────
+        // T4.3 / T5.x: delete the item via the daemon `delete_item` verb, then
+        // close the detail panel.
         {
             let win_weak = window.as_weak();
+            let socket = socket_path.to_string();
             window.on_detail_delete(move || {
                 let win = match win_weak.upgrade() {
                     Some(w) => w,
                     None => return,
                 };
                 let item = win.get_detail_item();
-                tracing::info!("detail-delete: id={}", item.id);
+                let id = item.id.to_string();
+                tracing::info!("detail-delete: id={id}");
                 win.set_detail_visible(false);
-                // TODO T4.3: send IPC delete command with item.id
+                match IpcClient::connect(socket.as_ref()) {
+                    Ok(mut c) => {
+                        if let Err(e) = c.delete_item(&id) {
+                            tracing::warn!(error = %e, "detail-delete: IPC delete_item failed");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "detail-delete: daemon offline");
+                    }
+                }
             });
         }
 
@@ -407,17 +465,21 @@ impl RootWindowHandle {
             });
         }
 
-        // clear-history: IPC delete_all (stub until daemon implements the verb)
+        // clear-history: IPC delete_all (T5.x — daemon verb now wired)
         {
             let socket = socket_path.to_string();
             let model = Rc::clone(&history_model);
             let vm = Rc::clone(&view_model);
             window.on_clear_history(move || {
                 match IpcClient::connect(socket.as_ref()) {
-                    Ok(_c) => {
-                        // TODO: call c.delete_all() once daemon implements the verb.
-                        tracing::info!("clear-history: TODO delete_all IPC not yet implemented");
-                    }
+                    Ok(mut c) => match c.delete_all() {
+                        Ok(deleted) => {
+                            tracing::info!("clear-history: daemon deleted {deleted} items");
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "clear-history: IPC delete_all failed");
+                        }
+                    },
                     Err(e) => {
                         tracing::warn!(error = %e, "clear-history: daemon offline");
                     }
@@ -428,20 +490,20 @@ impl RootWindowHandle {
             });
         }
 
-        // reset-pairings: IPC revoke_all_peers (stub until daemon implements it)
+        // reset-pairings: IPC revoke_all_peers (T5.x — daemon verb now wired)
         {
             let socket = socket_path.to_string();
-            window.on_reset_pairings(move || {
-                match IpcClient::connect(socket.as_ref()) {
-                    Ok(_c) => {
-                        // TODO: call c.revoke_all_peers() once daemon implements the verb.
-                        tracing::info!(
-                            "reset-pairings: TODO revoke_all_peers IPC not yet implemented"
-                        );
+            window.on_reset_pairings(move || match IpcClient::connect(socket.as_ref()) {
+                Ok(mut c) => match c.revoke_all_peers() {
+                    Ok(revoked) => {
+                        tracing::info!("reset-pairings: daemon revoked {revoked} peers");
                     }
                     Err(e) => {
-                        tracing::warn!(error = %e, "reset-pairings: daemon offline");
+                        tracing::warn!(error = %e, "reset-pairings: IPC revoke_all_peers failed");
                     }
+                },
+                Err(e) => {
+                    tracing::warn!(error = %e, "reset-pairings: daemon offline");
                 }
             });
         }
