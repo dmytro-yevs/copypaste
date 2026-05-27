@@ -148,7 +148,49 @@ pub fn get_own_fingerprint(public_key: &[u8]) -> String {
 /// the mTLS Framed stream. The outbound fanout loop writes to every live
 /// sender; closed senders (disconnected peers) are pruned on the next
 /// fanout pass.
+///
+/// Keyed by the peer's verified **certificate fingerprint** (not its socket
+/// address): a reconnect from a fresh ephemeral source port reuses the same
+/// key, so the new connection replaces the old sink rather than producing a
+/// duplicate that would double-fan-out every item (fix/p2p-c-review #4).
 type PeerSinks = Arc<Mutex<HashMap<DeviceFingerprint, mpsc::Sender<WireItem>>>>;
+
+/// Load peers persisted in `peers.json` into the live `PairedPeers` allowlist
+/// (fix/p2p-c-review #2).
+///
+/// Each stored record carries the user-facing colon-hex `fingerprint`; it is
+/// normalised to the canonical lowercase, colon-free hex the mTLS verifier
+/// compares against ([`copypaste_p2p::cert::fingerprint_of`]). Returns the
+/// number of peers loaded. Read/parse failures are logged and treated as an
+/// empty store so a missing/corrupt file never blocks P2P startup.
+pub fn load_persisted_peers_into(peers: &PairedPeers) -> usize {
+    let path = crate::ipc::peers_file_path();
+    let loaded = load_peers_from_path_into(&path, peers);
+    if loaded > 0 {
+        tracing::info!(loaded, path = %path.display(), "loaded persisted P2P peers into allowlist");
+    }
+    loaded
+}
+
+/// Path-taking core of [`load_persisted_peers_into`] (test seam).
+fn load_peers_from_path_into(path: &std::path::Path, peers: &PairedPeers) -> usize {
+    let stored = crate::peers::load_peers(path);
+    let mut loaded = 0usize;
+    for dev in &stored {
+        if dev.fingerprint.is_empty() {
+            continue;
+        }
+        let canonical = crate::ipc::canonical_fingerprint(&dev.fingerprint);
+        let name = if dev.name.is_empty() {
+            dev.fingerprint.clone()
+        } else {
+            dev.name.clone()
+        };
+        peers.add(canonical, name);
+        loaded += 1;
+    }
+    loaded
+}
 
 /// Start the long-running P2P subsystem.
 ///
@@ -174,6 +216,7 @@ pub async fn start_p2p(
     _db: Arc<Mutex<Database>>,
     device_id: uuid::Uuid,
     _db_key: zeroize::Zeroizing<[u8; 32]>,
+    peers: PairedPeers,
     new_item_rx: broadcast::Receiver<ClipboardItem>,
     incoming_tx: mpsc::Sender<WireItem>,
     outbound_rx: mpsc::Receiver<WireItem>,
@@ -194,8 +237,18 @@ pub async fn start_p2p(
     // ── mTLS transport ────────────────────────────────────────────────────────
     // Generate a fresh self-signed cert for this session. The cert fingerprint
     // is the stable device identity that peers verify at handshake time.
-    let peers = PairedPeers::new();
-    let transport = PeerTransport::new_with_generated_cert(&device_id.to_string(), peers)
+    //
+    // fix/p2p-c-review #2: `peers` is the SAME live allowlist the IPC PAKE
+    // handlers mutate (interior-mutable `PairedPeers`). We seed it from the
+    // persisted `peers.json` so previously-paired peers are accepted on
+    // startup, then hand a clone to the transport. Both observe later updates.
+    let loaded = load_persisted_peers_into(&peers);
+    tracing::info!(
+        loaded_peers = loaded,
+        active_peers = peers.active_count(),
+        "P2P allowlist seeded from peers.json"
+    );
+    let transport = PeerTransport::new_with_generated_cert(&device_id.to_string(), peers.clone())
         .map_err(|e| anyhow::anyhow!("PeerTransport init failed: {e}"))?;
     let transport = Arc::new(transport);
 
@@ -274,42 +327,60 @@ async fn accept_loop(
     peer_sinks: PeerSinks,
     incoming_tx: mpsc::Sender<WireItem>,
 ) {
-    tracing::debug!(
-        "P2P accept loop running on {}",
-        // local_addr() only fails if the socket is already closed — infallible here.
-        listener
-            .local_addr()
-            .unwrap_or_else(|_| "unknown".parse().unwrap())
-    );
+    // fix/p2p-c-review #3: the previous `"unknown".parse().unwrap()` fallback
+    // panicked because `"unknown"` is not a valid `SocketAddr`. `local_addr`
+    // is practically infallible here (the socket is open), but log a string
+    // instead of unwrapping so a closed-socket edge can never crash the task.
+    match listener.local_addr() {
+        Ok(addr) => tracing::debug!(%addr, "P2P accept loop running"),
+        Err(e) => tracing::debug!(error = %e, "P2P accept loop running (local_addr unavailable)"),
+    }
 
     loop {
         tokio::select! {
             result = transport.accept(&listener) => {
                 match result {
-                    Ok((peer_addr, framed)) => {
-                        tracing::info!(%peer_addr, "mTLS handshake completed");
+                    Ok((peer_addr, peer_fp, framed)) => {
+                        tracing::info!(%peer_addr, %peer_fp, "mTLS handshake completed");
 
                         // Per-peer write channel: the outbound loop sends items here;
                         // the write half of the per-connection task drains and serialises them.
                         let (peer_tx, peer_rx) = mpsc::channel::<WireItem>(64);
 
-                        // We use the peer address string as a stable-enough key for the
-                        // sinks map until W2.4 adds fingerprint-keyed storage. The
-                        // fingerprint is already verified by the transport.
-                        let peer_key: DeviceFingerprint = peer_addr.to_string();
+                        // fix/p2p-c-review #4: key by the verified cert fingerprint,
+                        // not the ephemeral socket address. A reconnect from a new
+                        // source port then replaces the stale sink instead of adding
+                        // a duplicate (which would double every outbound item).
+                        let peer_key: DeviceFingerprint = peer_fp.clone();
+
+                        // `same_channel` lets the cleanup task below avoid evicting a
+                        // *newer* connection's sink if this (older) connection drops
+                        // after being superseded by a reconnect under the same key.
+                        let cleanup_tx = peer_tx.clone();
 
                         {
                             let mut sinks = peer_sinks.lock().await;
-                            sinks.insert(peer_key.clone(), peer_tx);
+                            if sinks.insert(peer_key.clone(), peer_tx).is_some() {
+                                tracing::debug!(%peer_fp, "replaced existing peer sink (reconnect)");
+                            }
                         }
 
                         let incoming_tx = incoming_tx.clone();
                         let peer_sinks = Arc::clone(&peer_sinks);
                         tokio::spawn(async move {
                             run_peer_connection(framed, peer_rx, incoming_tx).await;
-                            // Clean up the sink when the connection drops.
-                            peer_sinks.lock().await.remove(&peer_key);
-                            tracing::debug!(%peer_addr, "peer connection closed");
+                            // Clean up the sink when the connection drops — but only
+                            // if it is still *this* connection's sink (a later
+                            // reconnect may have replaced it under the same key).
+                            let mut sinks = peer_sinks.lock().await;
+                            if sinks
+                                .get(&peer_key)
+                                .is_some_and(|tx| tx.same_channel(&cleanup_tx))
+                            {
+                                sinks.remove(&peer_key);
+                            }
+                            drop(sinks);
+                            tracing::debug!(%peer_addr, %peer_fp, "peer connection closed");
                         });
                     }
                     Err(e) => {
@@ -514,10 +585,10 @@ mod tests {
         let server_fp = server_cert.fingerprint();
         let client_fp = client_cert.fingerprint();
 
-        let mut server_peers = PairedPeers::new();
+        let server_peers = PairedPeers::new();
         server_peers.add(client_fp.clone(), "client");
 
-        let mut client_peers = PairedPeers::new();
+        let client_peers = PairedPeers::new();
         client_peers.add(server_fp.clone(), "server");
 
         let server_transport =
@@ -537,7 +608,8 @@ mod tests {
         let accept_fut = {
             let tx = incoming_tx.clone();
             async move {
-                let (_peer_addr, mut stream) = server_transport.accept(&listener).await.unwrap();
+                let (_peer_addr, _peer_fp, mut stream) =
+                    server_transport.accept(&listener).await.unwrap();
                 while let Some(Ok(frame)) = stream.next().await {
                     let wire: WireItem = serde_json::from_slice(&frame).unwrap();
                     tx.send(wire).await.unwrap();
@@ -570,10 +642,10 @@ mod tests {
         let server_fp = server_cert.fingerprint();
         let client_fp = client_cert.fingerprint();
 
-        let mut server_peers = PairedPeers::new();
+        let server_peers = PairedPeers::new();
         server_peers.add(client_fp.clone(), "client2");
 
-        let mut client_peers = PairedPeers::new();
+        let client_peers = PairedPeers::new();
         client_peers.add(server_fp.clone(), "server2");
 
         let server_transport = Arc::new(PeerTransport::from_cert(
@@ -597,7 +669,8 @@ mod tests {
         // Server: accept connection, then read from outbound_rx and write to peer.
         let server_fp_clone = server_fp.clone();
         let server_fut = async move {
-            let (_peer_addr, mut stream) = server_transport.accept(&listener).await.unwrap();
+            let (_peer_addr, _peer_fp, mut stream) =
+                server_transport.accept(&listener).await.unwrap();
             // Simulate the outbound fanout: read one item and send to the connected peer.
             if let Some(item) = outbound_rx.recv().await {
                 let payload = serde_json::to_vec(&item).unwrap();
@@ -677,5 +750,55 @@ mod tests {
     fn get_own_fingerprint_matches_keychain() {
         let pk = [0u8; 32];
         assert_eq!(get_own_fingerprint(&pk), keychain::own_fingerprint(&pk));
+    }
+
+    /// fix/p2p-c-review #2 — a peer persisted in `peers.json` is loaded into the
+    /// live `PairedPeers` allowlist at `start_p2p` time and accepted by
+    /// `is_known` (normalised to the canonical lowercase, colon-free hex the
+    /// mTLS verifier uses).
+    #[test]
+    fn persisted_peer_is_known_after_loading() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+
+        // Two records in the colon-hex form the IPC pairing handlers write,
+        // one with a display name and one (PAKE responder side) without.
+        let fp_colon = std::iter::repeat_n("aa", 32).collect::<Vec<_>>().join(":");
+        let fp_canonical = crate::ipc::canonical_fingerprint(&fp_colon);
+        let json = format!(
+            r#"[{{"fingerprint":"{fp_colon}","name":"Alice's Mac","added_at":1700000000}},
+                {{"fingerprint":"bb:bb","added_at":1700000001}}]"#
+        );
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(json.as_bytes()).unwrap();
+        drop(f);
+
+        let peers = PairedPeers::new();
+        assert!(
+            !peers.is_known(&fp_canonical),
+            "precondition: empty allowlist"
+        );
+
+        let loaded = load_peers_from_path_into(&path, &peers);
+        assert_eq!(loaded, 2, "both persisted peers loaded");
+
+        assert!(
+            peers.is_known(&fp_canonical),
+            "persisted peer must be accepted by is_known after loading"
+        );
+        // The lean (name-less) record is also honoured, normalised.
+        assert!(peers.is_known("bbbb"), "name-less peer also loaded");
+    }
+
+    /// A missing `peers.json` loads zero peers and never errors.
+    #[test]
+    fn missing_peers_file_loads_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("does-not-exist.json");
+        let peers = PairedPeers::new();
+        assert_eq!(load_peers_from_path_into(&path, &peers), 0);
+        assert_eq!(peers.active_count(), 0);
     }
 }

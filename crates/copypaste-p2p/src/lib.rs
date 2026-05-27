@@ -30,7 +30,7 @@
 //! println!("My fingerprint: {}", my_cert.fingerprint());
 //!
 //! // After out-of-band pairing, register the peer.
-//! let mut peers = PairedPeers::new();
+//! let peers = PairedPeers::new();
 //! peers.add("abc123...peer_fingerprint...", "Alice's MacBook");
 //!
 //! let transport = PeerTransport::from_cert(my_cert.cert_der, my_cert.key_der, peers);
@@ -43,7 +43,7 @@
 //!
 //! // Accept incoming connections.
 //! let listener = TcpListener::bind("0.0.0.0:51515").await?;
-//! let (_peer_addr, _stream) = transport.accept(&listener).await?;
+//! let (_peer_addr, _peer_fp, _stream) = transport.accept(&listener).await?;
 //! # Ok(())
 //! # }
 //! ```

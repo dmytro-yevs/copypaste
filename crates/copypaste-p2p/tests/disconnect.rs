@@ -48,9 +48,9 @@ fn paired_endpoints(server_id: &str, client_id: &str) -> (PeerTransport, PeerTra
     let server_fp = server_cert.fingerprint();
     let client_fp = client_cert.fingerprint();
 
-    let mut server_peers = PairedPeers::new();
+    let server_peers = PairedPeers::new();
     server_peers.add(client_fp.clone(), client_id);
-    let mut client_peers = PairedPeers::new();
+    let client_peers = PairedPeers::new();
     client_peers.add(server_fp.clone(), server_id);
 
     (
@@ -70,7 +70,7 @@ async fn establish_pair(
     let (listener, addr) = bind_loopback().await;
     let (srv_res, cli_res) =
         tokio::join!(server.accept(&listener), client.connect(addr, server_fp));
-    let (_peer_addr, srv_stream) = srv_res.expect("server accept");
+    let (_peer_addr, _peer_fp, srv_stream) = srv_res.expect("server accept");
     let cli_stream = cli_res.expect("client connect");
     (srv_stream, cli_stream)
 }
@@ -218,7 +218,7 @@ async fn peer_offline_during_handshake_returns_timeout_within_5s() {
     // The expected fingerprint never matters because the connection will
     // fail at the TCP layer well before TLS verification.
     let bogus_fp = "0".repeat(64);
-    let mut client_peers = PairedPeers::new();
+    let client_peers = PairedPeers::new();
     client_peers.add(bogus_fp.clone(), "ghost-peer");
 
     let client = PeerTransport::from_cert(client_cert.cert_der, client_cert.key_der, client_peers);

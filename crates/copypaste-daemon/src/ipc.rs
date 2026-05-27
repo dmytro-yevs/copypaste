@@ -122,7 +122,7 @@ fn format_fingerprint(bytes: &[u8]) -> String {
 }
 
 /// Path to peers.json in the app config directory.
-fn peers_file_path() -> PathBuf {
+pub(crate) fn peers_file_path() -> PathBuf {
     static FALLBACK_WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     let base = dirs::config_dir().unwrap_or_else(|| {
         FALLBACK_WARNED.get_or_init(|| {
@@ -173,6 +173,34 @@ fn is_valid_fingerprint(fp: &str) -> bool {
         .all(|g| g.len() == 2 && g.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
+/// Normalise a user-facing `XX:XX:...` colon-hex fingerprint to the canonical
+/// lowercase, colon-free hex form used by the mTLS layer
+/// ([`copypaste_p2p::cert::fingerprint_of`] → `hex::encode(SHA-256(cert_der))`).
+///
+/// The IPC pairing surface and `peers.json` carry the human-readable colon
+/// form; [`PairedPeers::is_known`] compares against `fingerprint_of` output.
+/// Both must agree or a paired peer is silently rejected at handshake time, so
+/// the live-allowlist registration (fix/p2p-c-review #2) goes through this.
+pub(crate) fn canonical_fingerprint(fp: &str) -> String {
+    fp.replace(':', "").to_ascii_lowercase()
+}
+
+/// Maximum lifetime of an in-progress PAKE session before it is evicted as
+/// stale (fix/p2p-c-review #1 — DoS). The full 3-message handshake is two
+/// user-driven IPC round-trips; 120 s is generous for a human typing a
+/// pairing password on the second device while bounding how long a leaked /
+/// abandoned session (crashed client) pins a `PakeInitiator`/`PakeResponder`
+/// in memory.
+const PAKE_SESSION_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Hard cap on the number of simultaneously-live PAKE sessions (fix/p2p-c-review
+/// #1 — DoS). Pairing is an interactive, one-at-a-time-per-user operation; a
+/// healthy host never approaches this. The cap converts an unbounded-growth
+/// memory-exhaustion vector into a bounded one: past the cap, new `initiate` /
+/// `pair_accept_password` calls are rejected with a clear error rather than
+/// allocating without limit.
+const MAX_PAKE_SESSIONS: usize = 64;
+
 /// In-progress PAKE handshake session stored between IPC round-trips.
 ///
 /// Because IPC is request-response (single turn), the 3-message OPAQUE
@@ -185,10 +213,9 @@ fn is_valid_fingerprint(fp: &str) -> bool {
 ///   `pair_accept_finish` → consumes it.
 ///
 /// Sessions are keyed by a UUID `session_id` that is returned to the caller
-/// and echoed back in the follow-up call. Stale sessions (e.g., client
-/// crashed between steps) are never explicitly GC'd in this implementation —
-/// the daemon is short-lived on the relevant dev pairing path, and the memory
-/// ceiling is one `PakeInitiator`/`PakeResponder` per in-flight session.
+/// and echoed back in the follow-up call. Each entry is timestamped
+/// ([`StampedPakeSession`]) and bounded by [`PAKE_SESSION_TTL`] /
+/// [`MAX_PAKE_SESSIONS`] — see [`IpcServer::insert_pake_session`].
 enum PakeSession {
     /// Initiator waiting for the server's `CredentialResponse` (message2)
     /// to call `PakeInitiator::finish`. Boxed to equalise variant sizes and
@@ -207,6 +234,13 @@ enum PakeSession {
         /// Fingerprint of the initiating peer; stored in peers.json on success.
         peer_fingerprint: String,
     },
+}
+
+/// A [`PakeSession`] tagged with its creation time so stale sessions can be
+/// evicted (fix/p2p-c-review #1 — DoS).
+struct StampedPakeSession {
+    session: PakeSession,
+    created_at: std::time::Instant,
 }
 
 pub struct IpcServer {
@@ -233,9 +267,18 @@ pub struct IpcServer {
     /// In-progress PAKE sessions keyed by session_id UUID string.
     ///
     /// Each entry lives from the first IPC call (initiate / accept) until the
-    /// matching finish call consumes it. Sessions are not evicted automatically;
-    /// the daemon is expected to restart between pairings in production.
-    pake_sessions: Arc<Mutex<HashMap<String, PakeSession>>>,
+    /// matching finish call consumes it. Bounded against unbounded growth
+    /// (fix/p2p-c-review #1 — DoS): entries older than [`PAKE_SESSION_TTL`]
+    /// are evicted on every insert, and the live count is capped at
+    /// [`MAX_PAKE_SESSIONS`]. See [`IpcServer::insert_pake_session`].
+    pake_sessions: Arc<Mutex<HashMap<String, StampedPakeSession>>>,
+    /// Live P2P paired-peer allowlist, shared with the running mTLS transport
+    /// (fix/p2p-c-review #2). When a PAKE handshake finishes, the newly-paired
+    /// peer fingerprint is fed into this same instance via
+    /// [`PairedPeers::rotate_peer`] so the accept loop immediately honours it
+    /// (the S10 grace path is exercised). `None` when P2P is disabled — the
+    /// PAKE handlers then only persist to `peers.json` (loaded on next start).
+    p2p_peers: Option<copypaste_p2p::transport::PairedPeers>,
 }
 
 impl IpcServer {
@@ -252,7 +295,19 @@ impl IpcServer {
             device_public_key,
             ready: Arc::new(AtomicBool::new(true)),
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
+            p2p_peers: None,
         }
+    }
+
+    /// Attach the live P2P paired-peer allowlist (fix/p2p-c-review #2).
+    ///
+    /// The daemon shares the same `PairedPeers` instance with the running mTLS
+    /// transport; supplying it here lets the PAKE finish handlers register a
+    /// freshly-paired peer in-memory so the accept loop honours it without a
+    /// daemon restart.
+    pub fn with_p2p_peers(mut self, peers: copypaste_p2p::transport::PairedPeers) -> Self {
+        self.p2p_peers = Some(peers);
+        self
     }
 
     /// Construct with an explicit readiness flag. The returned handle can be
@@ -274,6 +329,73 @@ impl IpcServer {
             device_public_key,
             ready,
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
+            p2p_peers: None,
+        }
+    }
+
+    /// Insert a PAKE session under `session_id`, first evicting stale and
+    /// excess sessions (fix/p2p-c-review #1 — DoS).
+    ///
+    /// Eviction policy, applied on every insert:
+    /// 1. Drop any session older than [`PAKE_SESSION_TTL`].
+    /// 2. If still at/above [`MAX_PAKE_SESSIONS`], reject the new session with
+    ///    `Err` so the caller can surface a clear error instead of growing the
+    ///    map without bound.
+    ///
+    /// On success returns `Ok(())` with the timestamped session stored.
+    async fn insert_pake_session(
+        &self,
+        session_id: String,
+        session: PakeSession,
+    ) -> Result<(), &'static str> {
+        let now = std::time::Instant::now();
+        let mut sessions = self.pake_sessions.lock().await;
+
+        // 1. Evict stale sessions (TTL).
+        sessions.retain(|_, s| now.duration_since(s.created_at) < PAKE_SESSION_TTL);
+
+        // 2. Enforce the hard cap. Reuse of an existing id (should not happen —
+        //    ids are fresh UUIDs) overwrites in place and does not grow the map.
+        if !sessions.contains_key(&session_id) && sessions.len() >= MAX_PAKE_SESSIONS {
+            tracing::warn!(
+                live = sessions.len(),
+                cap = MAX_PAKE_SESSIONS,
+                "rejecting new PAKE session: live-session cap reached"
+            );
+            return Err("too many in-flight pairing sessions; try again shortly");
+        }
+
+        sessions.insert(
+            session_id,
+            StampedPakeSession {
+                session,
+                created_at: now,
+            },
+        );
+        Ok(())
+    }
+
+    /// Register a freshly-paired peer in the live mTLS allowlist so the accept
+    /// loop honours it immediately, with no daemon restart (fix/p2p-c-review #2).
+    ///
+    /// `peer_fingerprint` is the user-facing colon-hex form; it is normalised
+    /// to the canonical lowercase, colon-free hex the transport compares
+    /// against. We go through [`PairedPeers::rotate_peer`] (rather than `add`)
+    /// so the S10 cert-rotation grace path is exercised on the same code path
+    /// used for re-pairing; for a first-time pair `old == new`, which `rotate`
+    /// treats as a plain add (no superseded entry — nothing to grace).
+    ///
+    /// No-op when P2P is disabled (`p2p_peers == None`): the PAKE handler has
+    /// already persisted the peer to `peers.json`, which `start_p2p` loads on
+    /// the next run.
+    fn register_live_peer(&self, peer_fingerprint: &str) {
+        if let Some(ref peers) = self.p2p_peers {
+            let canonical = canonical_fingerprint(peer_fingerprint);
+            peers.rotate_peer(&canonical, canonical.clone(), peer_fingerprint);
+            tracing::info!(
+                fingerprint = %peer_fingerprint,
+                "registered paired peer in live P2P allowlist"
+            );
         }
     }
 
@@ -1152,10 +1274,15 @@ impl IpcServer {
                         let session_id = uuid::Uuid::new_v4().to_string();
                         let msg1_b64 = b64.encode(&msg1_bytes);
 
-                        self.pake_sessions.lock().await.insert(
-                            session_id.clone(),
-                            PakeSession::Initiator(Box::new(initiator)),
-                        );
+                        if let Err(msg) = self
+                            .insert_pake_session(
+                                session_id.clone(),
+                                PakeSession::Initiator(Box::new(initiator)),
+                            )
+                            .await
+                        {
+                            return Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, msg);
+                        }
 
                         Response::ok(
                             req.id,
@@ -1205,7 +1332,10 @@ impl IpcServer {
                         let initiator = {
                             let mut sessions = self.pake_sessions.lock().await;
                             match sessions.remove(&session_id) {
-                                Some(PakeSession::Initiator(i)) => *i,
+                                Some(StampedPakeSession {
+                                    session: PakeSession::Initiator(i),
+                                    ..
+                                }) => *i,
                                 Some(other) => {
                                     // Wrong session type — put it back and error.
                                     let key = session_id.clone();
@@ -1226,6 +1356,16 @@ impl IpcServer {
                             }
                         };
 
+                        // TODO(S3): the PAKE `SessionKey` is derived here and
+                        // immediately dropped. It SHOULD be mixed with the
+                        // RFC 5705 TLS channel binder (see
+                        // `copypaste_p2p::transport::tls_channel_binder_*` and
+                        // `SessionKey::bind_to_tls_channel`) and verified against
+                        // the peer to defeat a relay/MitM that terminates the
+                        // PAKE on one socket and the mTLS on another. Wiring it
+                        // is a deliberate design decision left to the human
+                        // owner; until then pairing authenticity rests on the
+                        // mTLS cert-fingerprint pinning alone.
                         let (_session_key, msg3_bytes) = match initiator.finish(&msg2_bytes) {
                             Ok(pair) => pair,
                             Err(e) => {
@@ -1271,6 +1411,10 @@ impl IpcServer {
                                 return Response::err(req.id, format!("failed to load peers: {e}"))
                             }
                         }
+
+                        // Feed the newly-paired peer into the live allowlist so
+                        // the mTLS accept loop honours it without a restart.
+                        self.register_live_peer(&peer_fingerprint);
 
                         Response::ok(
                             req.id,
@@ -1337,6 +1481,18 @@ impl IpcServer {
                     );
                 }
 
+                // fix/p2p-c-review #5: enforce the same 6-char minimum the
+                // initiator does. Without this the responder would happily
+                // register a PasswordFile for a 1-char password if the peer
+                // (or a malicious initiator) skipped the initiator-side check.
+                if password.chars().count() < 6 {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "password must be at least 6 characters",
+                    );
+                }
+
                 let msg1_bytes = match b64.decode(&message1_b64) {
                     Ok(b) => b,
                     Err(e) => {
@@ -1375,14 +1531,19 @@ impl IpcServer {
                 let session_id = uuid::Uuid::new_v4().to_string();
                 let msg2_b64 = b64.encode(&msg2_bytes);
 
-                self.pake_sessions.lock().await.insert(
-                    session_id.clone(),
-                    PakeSession::Responder {
-                        responder: Box::new(responder),
-                        password_file,
-                        peer_fingerprint,
-                    },
-                );
+                if let Err(msg) = self
+                    .insert_pake_session(
+                        session_id.clone(),
+                        PakeSession::Responder {
+                            responder: Box::new(responder),
+                            password_file,
+                            peer_fingerprint,
+                        },
+                    )
+                    .await
+                {
+                    return Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, msg);
+                }
 
                 Response::ok(
                     req.id,
@@ -1437,10 +1598,14 @@ impl IpcServer {
                 let (responder, password_file, peer_fingerprint) = {
                     let mut sessions = self.pake_sessions.lock().await;
                     match sessions.remove(&session_id) {
-                        Some(PakeSession::Responder {
-                            responder,
-                            password_file,
-                            peer_fingerprint,
+                        Some(StampedPakeSession {
+                            session:
+                                PakeSession::Responder {
+                                    responder,
+                                    password_file,
+                                    peer_fingerprint,
+                                },
+                            ..
                         }) => (*responder, password_file, peer_fingerprint),
                         Some(other) => {
                             let key = session_id.clone();
@@ -1462,6 +1627,15 @@ impl IpcServer {
                 };
 
                 // Finalize the handshake (validates the initiator's authenticator).
+                //
+                // TODO(S3): `responder.finish` returns the shared `SessionKey`,
+                // which we discard here. It SHOULD be mixed with the RFC 5705
+                // TLS channel binder (`tls_channel_binder_server` +
+                // `SessionKey::bind_to_tls_channel`) and confirmed with the peer
+                // so a relay/MitM cannot bridge a PAKE on one connection to an
+                // mTLS session on another. Deferred — design decision left to
+                // the human owner; pairing currently relies on mTLS
+                // cert-fingerprint pinning for channel authenticity.
                 if let Err(e) = responder.finish(&msg3_bytes) {
                     return Response::err_with_code(
                         req.id,
@@ -1511,6 +1685,10 @@ impl IpcServer {
                     }
                     Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
                 }
+
+                // Feed the newly-paired peer into the live allowlist so the
+                // mTLS accept loop honours it without a restart.
+                self.register_live_peer(&peer_fingerprint);
 
                 Response::ok(req.id, serde_json::json!({ "ok": true }))
             }
@@ -3163,5 +3341,134 @@ mod tests {
         let rows = list_revoked_devices(db_guard.conn()).unwrap();
         assert_eq!(rows.len(), 1, "exactly one audit row expected");
         assert_eq!(rows[0].fingerprint, fp);
+    }
+
+    /// Build a bare in-process `IpcServer` (no socket) for exercising private
+    /// helpers like `insert_pake_session` directly.
+    fn bare_server() -> IpcServer {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        IpcServer::new(
+            db,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+            Arc::new([0u8; 32]),
+        )
+    }
+
+    /// fix/p2p-c-review #1 — a session older than `PAKE_SESSION_TTL` is evicted
+    /// on the next `insert_pake_session`, so the map cannot grow with abandoned
+    /// (crashed-client) sessions.
+    #[tokio::test]
+    async fn stale_pake_sessions_are_evicted_on_insert() {
+        let server = bare_server();
+
+        // Insert a first session, then back-date it past the TTL so it is
+        // considered stale. (`Instant` can't be constructed directly; we patch
+        // the stored `created_at` in place — this module has field access.)
+        let (init1, _msg1) = PakeInitiator::new("hunter2-pw").unwrap();
+        server
+            .insert_pake_session("stale".into(), PakeSession::Initiator(Box::new(init1)))
+            .await
+            .unwrap();
+        {
+            let mut sessions = server.pake_sessions.lock().await;
+            let stamped = sessions.get_mut("stale").expect("stale session present");
+            stamped.created_at =
+                std::time::Instant::now() - (PAKE_SESSION_TTL + std::time::Duration::from_secs(1));
+        }
+
+        // Inserting a fresh session triggers TTL eviction of the stale one.
+        let (init2, _msg2) = PakeInitiator::new("hunter2-pw").unwrap();
+        server
+            .insert_pake_session("fresh".into(), PakeSession::Initiator(Box::new(init2)))
+            .await
+            .unwrap();
+
+        let sessions = server.pake_sessions.lock().await;
+        assert!(
+            !sessions.contains_key("stale"),
+            "stale session must be evicted on insert"
+        );
+        assert!(
+            sessions.contains_key("fresh"),
+            "fresh session must remain after eviction pass"
+        );
+        assert_eq!(sessions.len(), 1, "exactly one live session expected");
+    }
+
+    /// fix/p2p-c-review #1 — once `MAX_PAKE_SESSIONS` non-stale sessions are
+    /// live, a further insert is rejected (rather than growing without bound).
+    #[tokio::test]
+    async fn pake_session_cap_rejects_excess() {
+        let server = bare_server();
+
+        for i in 0..MAX_PAKE_SESSIONS {
+            let (init, _m) = PakeInitiator::new("hunter2-pw").unwrap();
+            server
+                .insert_pake_session(format!("s{i}"), PakeSession::Initiator(Box::new(init)))
+                .await
+                .expect("inserts up to the cap must succeed");
+        }
+
+        let (init, _m) = PakeInitiator::new("hunter2-pw").unwrap();
+        let over_cap = server
+            .insert_pake_session("over".into(), PakeSession::Initiator(Box::new(init)))
+            .await;
+        assert!(over_cap.is_err(), "insert past the cap must be rejected");
+        assert_eq!(
+            server.pake_sessions.lock().await.len(),
+            MAX_PAKE_SESSIONS,
+            "map must not exceed the cap"
+        );
+    }
+
+    /// fix/p2p-c-review #5 — the responder (`pair_accept_password`) enforces the
+    /// 6-char minimum password, matching the initiator side.
+    #[tokio::test]
+    async fn pair_accept_password_rejects_short_password() {
+        use base64::Engine as _;
+
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("test-short-pw.sock");
+        start_test_server(&sock).await;
+
+        let (_init, msg1) = PakeInitiator::new("short").unwrap();
+        let msg1_b64 = base64::engine::general_purpose::STANDARD.encode(&msg1);
+        let fp = std::iter::repeat_n("ab", 32).collect::<Vec<_>>().join(":");
+        let body = format!(
+            r#"{{"id":"sp1","method":"pair_accept_password","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"{fp}","password":"short"}}}}"#
+        );
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream.write_all(body.as_bytes()).await.unwrap();
+        stream.write_all(b"\n").await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        assert_eq!(
+            resp["ok"], false,
+            "5-char password must be rejected: {resp}"
+        );
+        assert_eq!(resp["error_code"], "invalid_argument");
+    }
+
+    /// fix/p2p-c-review #2 — when a live P2P allowlist is attached, finishing a
+    /// PAKE pairing registers the peer in it (normalised to canonical hex) so
+    /// the mTLS accept loop honours the peer without a restart.
+    #[tokio::test]
+    async fn register_live_peer_feeds_shared_allowlist() {
+        let peers = copypaste_p2p::transport::PairedPeers::new();
+        let server = bare_server().with_p2p_peers(peers.clone());
+
+        let colon_fp = std::iter::repeat_n("aa", 32).collect::<Vec<_>>().join(":");
+        let canonical = canonical_fingerprint(&colon_fp);
+        assert!(!peers.is_known(&canonical), "precondition: not yet known");
+
+        server.register_live_peer(&colon_fp);
+
+        assert!(
+            peers.is_known(&canonical),
+            "paired peer must be accepted by the live allowlist after finish"
+        );
     }
 }

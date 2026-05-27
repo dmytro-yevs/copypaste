@@ -56,11 +56,19 @@ const VIRTUAL_IFACE_PREFIXES: &[&str] = &[
 
 /// Returns `true` if `name` looks like a virtual / software interface that
 /// should not be advertised on.
+///
+/// Matches by **prefix only** (fix/p2p-c-review #5). The earlier
+/// `|| lower.contains(prefix)` fallback was unsafe for the short tokens
+/// (`tun`, `tap`, `zt`, `gif`, `wg`): a substring match would hide a
+/// legitimate NIC whose name merely *contains* one of them (e.g. a vendor NIC
+/// named `engtun0`, or any interface with `wg` somewhere in the middle).
+/// Every entry in [`VIRTUAL_IFACE_PREFIXES`] is a genuine name *prefix*, so
+/// `starts_with` is both sufficient and strictly safer.
 fn is_virtual_iface_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     VIRTUAL_IFACE_PREFIXES
         .iter()
-        .any(|prefix| lower.starts_with(prefix) || lower.contains(prefix))
+        .any(|prefix| lower.starts_with(prefix))
 }
 
 /// Returns `true` if `addr` is a real, routable-on-LAN address worth

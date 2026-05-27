@@ -44,9 +44,9 @@ async fn mtls_handshake_with_matching_certs_succeeds() {
     let client_fp = client_cert.fingerprint();
 
     // Mutual trust: each side knows the other's fingerprint.
-    let mut server_peers = PairedPeers::new();
+    let server_peers = PairedPeers::new();
     server_peers.add(client_fp.clone(), "client");
-    let mut client_peers = PairedPeers::new();
+    let client_peers = PairedPeers::new();
     client_peers.add(server_fp.clone(), "server");
 
     let server = transport_with_cert(&server_cert, server_peers);
@@ -57,7 +57,7 @@ async fn mtls_handshake_with_matching_certs_succeeds() {
     let (srv_res, cli_res) =
         tokio::join!(server.accept(&listener), client.connect(addr, &server_fp));
 
-    let (peer_addr, _srv_stream) = srv_res.expect("server accept succeeds");
+    let (peer_addr, _peer_fp, _srv_stream) = srv_res.expect("server accept succeeds");
     let _cli_stream = cli_res.expect("client connect succeeds");
     assert_eq!(peer_addr.ip().to_string(), "127.0.0.1");
 }
@@ -78,7 +78,7 @@ async fn reject_client_with_untrusted_cert() {
 
     // Stranger blindly trusts the server (to make connect() proceed to the
     // point where the *server* gets to reject it).
-    let mut stranger_peers = PairedPeers::new();
+    let stranger_peers = PairedPeers::new();
     stranger_peers.add(server_fp.clone(), "server");
 
     let server = transport_with_cert(&server_cert, server_peers);
@@ -114,7 +114,7 @@ async fn reject_server_with_untrusted_cert() {
 
     // Server happens to know the client (so it would accept), but the client
     // has NOT paired with this server's fingerprint.
-    let mut server_peers = PairedPeers::new();
+    let server_peers = PairedPeers::new();
     server_peers.add(client_fp.clone(), "client");
     let client_peers = PairedPeers::new(); // client trusts nobody
 
@@ -156,12 +156,12 @@ async fn cert_rotation_old_cert_after_rotation_fails() {
     let client_fp = client_cert.fingerprint();
 
     // Server (post-rotation) trusts the client.
-    let mut server_peers = PairedPeers::new();
+    let server_peers = PairedPeers::new();
     server_peers.add(client_fp.clone(), "client");
 
     // Client still has only the OLD fingerprint in its paired list and pins
     // the OLD fingerprint during connect.
-    let mut client_peers = PairedPeers::new();
+    let client_peers = PairedPeers::new();
     client_peers.add(old_server_fp.clone(), "server");
 
     let server_after_rotation = transport_with_cert(&new_server_cert, server_peers);
@@ -212,9 +212,9 @@ async fn fingerprint_pinning_matches() {
     let client_cert = SelfSignedCert::generate("client").unwrap();
     let client_fp = client_cert.fingerprint();
 
-    let mut server_peers = PairedPeers::new();
+    let server_peers = PairedPeers::new();
     server_peers.add(client_fp.clone(), "client");
-    let mut client_peers = PairedPeers::new();
+    let client_peers = PairedPeers::new();
     client_peers.add(fp_from_helper.clone(), "pin-target");
 
     let server = transport_with_cert(&cert, server_peers);

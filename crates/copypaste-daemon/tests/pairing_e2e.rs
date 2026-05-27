@@ -370,11 +370,11 @@ async fn run_pairing(
     );
 
     {
-        let mut peers_a = state_a.peers.lock().await;
+        let peers_a = state_a.peers.lock().await;
         peers_a.add(peer_fp_seen_by_a.clone(), "Peer B");
     }
     {
-        let mut peers_b = state_b.peers.lock().await;
+        let peers_b = state_b.peers.lock().await;
         peers_b.add(peer_fp_seen_by_b.clone(), "Peer A");
     }
 
