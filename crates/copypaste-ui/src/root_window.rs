@@ -7,8 +7,9 @@
 // T4.2: wires HistoryModel (pagination, search) into MainWindow and connects
 // the ItemDetailPanel callbacks (detail-copy, detail-pin, detail-delete).
 //
+// T4.3: wires Settings view callbacks to IPC + UiPrefs persistence.
+//
 // Downstream tasks that will build on this handle:
-//   T4.3  — wire Settings view to IPC + UiPrefs.
 //   T5.x  — command palette, keyboard shortcuts.
 //
 // ## Two-crate ClipItem note
@@ -28,11 +29,12 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::cell::RefCell;
 
-use slint::{Model as _, VecModel};
+use slint::{Model as _, SharedString, VecModel};
 
 use copypaste_ui::history_model::HistoryModel;
+use copypaste_ui::ipc_client::IpcClient;
+use copypaste_ui::ui_prefs::{AccentColor, SettingsTab, UiPrefs};
 use crate::{ClipItem, MainWindow};
-use copypaste_ui::ui_prefs::UiPrefs;
 use slint::ComponentHandle;
 
 // ---------------------------------------------------------------------------
@@ -86,8 +88,41 @@ impl RootWindowHandle {
     pub fn new(prefs: &UiPrefs, socket_path: &str) -> anyhow::Result<Self> {
         let window = MainWindow::new()?;
 
-        // ── Preferences ────────────────────────────────────────────────────
+        // ── Preferences (UiPrefs) ──────────────────────────────────────────
         window.set_sidebar_collapsed(prefs.sidebar_collapsed);
+        window.set_compact(prefs.compact);
+        window.set_vibrancy(prefs.vibrancy);
+        window.set_accent(match prefs.accent {
+            AccentColor::Blue => 0,
+            AccentColor::Purple => 1,
+        });
+        window.set_settings_tab(match prefs.settings_tab {
+            SettingsTab::Simple => 0,
+            SettingsTab::Advanced => 1,
+        });
+
+        // ── App version ────────────────────────────────────────────────────
+        window.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
+
+        // ── AppSettings (from IPC, best-effort) ────────────────────────────
+        // The IPC wire type carries p2p_enabled + supabase fields only.
+        // launch_at_login / private_mode / history_limit are UI-only for now.
+        {
+            let ipc_settings = IpcClient::connect(socket_path.as_ref())
+                .and_then(|mut c| c.get_settings())
+                .unwrap_or_default();
+            let sync_url = ipc_settings.supabase_url.unwrap_or_default();
+            window.set_sync_url(SharedString::from(sync_url.as_str()));
+            window.set_sync_enabled(ipc_settings.p2p_enabled);
+        }
+
+        // ── Own fingerprint (from IPC, best-effort) ────────────────────────
+        {
+            let fp = IpcClient::connect(socket_path.as_ref())
+                .and_then(|mut c| c.get_own_fingerprint())
+                .unwrap_or_default();
+            window.set_fingerprint(SharedString::from(&fp));
+        }
 
         // ── History model (IPC-backed) ──────────────────────────────────────
         let history_model = Rc::new(RefCell::new(
@@ -204,6 +239,136 @@ impl RootWindowHandle {
                 tracing::info!("detail-delete: id={}", item.id);
                 win.set_detail_visible(false);
                 // TODO T4.3: send IPC delete command with item.id
+            });
+        }
+
+        // ── Settings wiring ───────────────────────────────────────────────
+
+        // save-prefs: persist UiPrefs fields and apply live
+        {
+            let win_weak = window.as_weak();
+            window.on_save_prefs(move || {
+                let Some(win) = win_weak.upgrade() else { return; };
+                let mut p = UiPrefs::load().unwrap_or_default();
+                p.compact = win.get_compact();
+                p.vibrancy = win.get_vibrancy();
+                p.accent = match win.get_accent() {
+                    1 => AccentColor::Purple,
+                    _ => AccentColor::Blue,
+                };
+                p.sidebar_collapsed = win.get_sidebar_collapsed();
+                if let Err(e) = p.save() {
+                    tracing::warn!(error = %e, "save-prefs: failed to save ui-prefs");
+                }
+            });
+        }
+
+        // save-app-settings: persist IPC-level settings (p2p + supabase) via daemon.
+        // launch_at_login / private_mode / history_limit are UI-only for now.
+        {
+            let socket = socket_path.to_string();
+            let win_weak = window.as_weak();
+            window.on_save_app_settings(move || {
+                let Some(win) = win_weak.upgrade() else { return; };
+                // Read back the current IPC settings first so we preserve
+                // any fields we don't expose in this view.
+                let mut ipc_settings = IpcClient::connect(socket.as_ref())
+                    .and_then(|mut c| c.get_settings())
+                    .unwrap_or_default();
+                ipc_settings.p2p_enabled = win.get_sync_enabled();
+                let url = win.get_sync_url().to_string();
+                ipc_settings.supabase_url = if url.is_empty() { None } else { Some(url) };
+                match IpcClient::connect(socket.as_ref()) {
+                    Ok(mut c) => {
+                        if let Err(e) = c.save_settings(&ipc_settings) {
+                            tracing::warn!(error = %e, "save-app-settings: IPC save_settings failed");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "save-app-settings: daemon offline");
+                    }
+                }
+            });
+        }
+
+        // clear-history: IPC delete_all (stub until daemon implements the verb)
+        {
+            let socket = socket_path.to_string();
+            let model = Rc::clone(&history_model);
+            let vm = Rc::clone(&view_model);
+            window.on_clear_history(move || {
+                match IpcClient::connect(socket.as_ref()) {
+                    Ok(_c) => {
+                        // TODO: call c.delete_all() once daemon implements the verb.
+                        tracing::info!("clear-history: TODO delete_all IPC not yet implemented");
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "clear-history: daemon offline");
+                    }
+                }
+                // Reset the local view optimistically so the list empties.
+                model.borrow().reset();
+                vm.set_vec(vec![]);
+            });
+        }
+
+        // reset-pairings: IPC revoke_all_peers (stub until daemon implements it)
+        {
+            let socket = socket_path.to_string();
+            window.on_reset_pairings(move || {
+                match IpcClient::connect(socket.as_ref()) {
+                    Ok(_c) => {
+                        // TODO: call c.revoke_all_peers() once daemon implements the verb.
+                        tracing::info!("reset-pairings: TODO revoke_all_peers IPC not yet implemented");
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "reset-pairings: daemon offline");
+                    }
+                }
+            });
+        }
+
+        // reset-ui-prefs: delete the file and reload defaults into window
+        {
+            let win_weak = window.as_weak();
+            window.on_reset_ui_prefs(move || {
+                let path = UiPrefs::prefs_path();
+                if path.exists() {
+                    if let Err(e) = std::fs::remove_file(&path) {
+                        tracing::warn!(error = %e, "reset-ui-prefs: failed to delete prefs file");
+                    }
+                }
+                let defaults = UiPrefs::default();
+                if let Err(e) = defaults.save() {
+                    tracing::warn!(error = %e, "reset-ui-prefs: failed to save defaults");
+                }
+                if let Some(win) = win_weak.upgrade() {
+                    win.set_compact(defaults.compact);
+                    win.set_vibrancy(defaults.vibrancy);
+                    win.set_accent(match defaults.accent {
+                        AccentColor::Blue => 0,
+                        AccentColor::Purple => 1,
+                    });
+                    win.set_settings_tab(match defaults.settings_tab {
+                        SettingsTab::Simple => 0,
+                        SettingsTab::Advanced => 1,
+                    });
+                    win.set_sidebar_collapsed(defaults.sidebar_collapsed);
+                }
+            });
+        }
+
+        // settings-tab-changed: persist the active sub-tab
+        {
+            window.on_settings_tab_changed(move |tab| {
+                let mut p = UiPrefs::load().unwrap_or_default();
+                p.settings_tab = match tab {
+                    1 => SettingsTab::Advanced,
+                    _ => SettingsTab::Simple,
+                };
+                if let Err(e) = p.save() {
+                    tracing::warn!(error = %e, "settings-tab-changed: failed to save ui-prefs");
+                }
             });
         }
 
