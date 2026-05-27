@@ -44,7 +44,7 @@ component HistoryRow inherits Rectangle {
         ? Theme.row-selected
         : (ta.has-hover ? Theme.row-hover : Theme.surface-row);
 
-    animate background { duration: 80ms; easing: linear; }
+    animate background { duration: Theme.anim-row; easing: linear; }
 
     // ── Pinned accent marker (3 px left edge, gradient) ─────────────────────
     Rectangle {
@@ -54,7 +54,7 @@ component HistoryRow inherits Rectangle {
         height: root.height - 8px;
         border-radius: 1.5px;
         background: Theme.accent-gradient;
-        animate width { duration: 80ms; easing: linear; }
+        animate width { duration: Theme.anim-row; easing: linear; }
     }
 
     // ── Bottom hairline separator ────────────────────────────────────────────

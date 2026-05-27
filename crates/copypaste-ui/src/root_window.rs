@@ -9,8 +9,9 @@
 //
 // T4.3: wires Settings view callbacks to IPC + UiPrefs persistence.
 //
-// Downstream tasks that will build on this handle:
-//   T5.x  — command palette, keyboard shortcuts.
+// T5.2: wires keyboard-shortcut callbacks (item-copy, item-pin, item-delete,
+//        request-quit) so the FocusScope in MainWindow.slint can dispatch
+//        actions by index without extra IPC plumbing at this stage.
 //
 // ## Two-crate ClipItem note
 //
@@ -25,16 +26,16 @@
 // is driven through `HistoryModel`; a window-side `Rc<VecModel<crate::ClipItem>>`
 // is kept in sync and bound to `window.set_history_items(…)`.
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::cell::RefCell;
 
 use slint::{Model as _, SharedString, VecModel};
 
+use crate::{ClipItem, MainWindow};
 use copypaste_ui::history_model::HistoryModel;
 use copypaste_ui::ipc_client::IpcClient;
 use copypaste_ui::ui_prefs::{AccentColor, SettingsTab, UiPrefs};
-use crate::{ClipItem, MainWindow};
 use slint::ComponentHandle;
 
 // ---------------------------------------------------------------------------
@@ -104,6 +105,22 @@ impl RootWindowHandle {
         // ── App version ────────────────────────────────────────────────────
         window.set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
 
+        // ── Reduced-motion accessibility (T5.4) ───────────────────────────
+        // On macOS, read the accessibility display option at startup.
+        // The Theme global's `reduced-motion` flag controls all animate durations.
+        {
+            let reduced = reduced_motion_enabled();
+            window.global::<crate::Theme>().set_reduced_motion(reduced);
+        }
+
+        // ── Screen width for responsive layout (T5.3) ─────────────────────
+        // On Android, set to the device logical width so the bottom-tab layout
+        // activates for screens < 600dp. On desktop, the default (900px) keeps
+        // the sidebar layout. Android startup code should call
+        // `root.set_screen_width(physical_px / scale_factor)` after this.
+        // Default 900px triggers sidebar layout on all desktop platforms.
+        window.set_screen_width(900.0);
+
         // ── AppSettings (from IPC, best-effort) ────────────────────────────
         // The IPC wire type carries p2p_enabled + supabase fields only.
         // launch_at_login / private_mode / history_limit are UI-only for now.
@@ -125,9 +142,7 @@ impl RootWindowHandle {
         }
 
         // ── History model (IPC-backed) ──────────────────────────────────────
-        let history_model = Rc::new(RefCell::new(
-            HistoryModel::new(PathBuf::from(socket_path)),
-        ));
+        let history_model = Rc::new(RefCell::new(HistoryModel::new(PathBuf::from(socket_path))));
 
         // ── Window-side view model (binary-crate ClipItem) ──────────────────
         let view_model: Rc<VecModel<ClipItem>> = Rc::new(VecModel::default());
@@ -138,10 +153,7 @@ impl RootWindowHandle {
         /// Called after every fetch (initial, next-page, search reset).
         /// Replaces the entire vec rather than appending to stay in lock-step
         /// with `HistoryModel`'s snapshot; for ≤50-item pages this is fine.
-        fn sync_view_model(
-            hm: &HistoryModel,
-            vm: &VecModel<ClipItem>,
-        ) {
+        fn sync_view_model(hm: &HistoryModel, vm: &VecModel<ClipItem>) {
             let lib_rc = hm.as_model_rc();
             let count = lib_rc.row_count();
             let items: Vec<ClipItem> = (0..count)
@@ -199,6 +211,76 @@ impl RootWindowHandle {
             });
         }
 
+        // ── T5.2: request-quit callback (⌘W hides the window) ────────────────
+        {
+            let win_weak = window.as_weak();
+            window.on_request_quit(move || {
+                if let Some(win) = win_weak.upgrade() {
+                    let _ = win.hide();
+                }
+            });
+        }
+
+        // ── T5.2: item-copy callback (keyboard ↵ / ⌘C on selected item) ─────
+        {
+            let vm = Rc::clone(&view_model);
+            window.on_item_copy(move |idx| {
+                match vm.row_data(idx as usize) {
+                    Some(item) => {
+                        tracing::info!("item-copy (keyboard): id={}", item.id);
+                        // TODO T5.x: send IPC copy command with item.id
+                    }
+                    None => {
+                        tracing::warn!("item-copy: index {idx} out of bounds");
+                    }
+                }
+            });
+        }
+
+        // ── T5.2: item-pin callback (keyboard ⌘P on selected item) ───────────
+        {
+            let vm = Rc::clone(&view_model);
+            window.on_item_pin(move |idx| {
+                match vm.row_data(idx as usize) {
+                    Some(item) => {
+                        tracing::info!(
+                            "item-pin (keyboard): id={} pinned={}",
+                            item.id,
+                            item.pinned
+                        );
+                        // TODO T5.x: send IPC pin/unpin command with item.id
+                    }
+                    None => {
+                        tracing::warn!("item-pin: index {idx} out of bounds");
+                    }
+                }
+            });
+        }
+
+        // ── T5.2: item-delete callback (keyboard ⌫ on selected item) ─────────
+        {
+            let vm = Rc::clone(&view_model);
+            let win_weak = window.as_weak();
+            window.on_item_delete(move |idx| {
+                match vm.row_data(idx as usize) {
+                    Some(item) => {
+                        tracing::info!("item-delete (keyboard): id={}", item.id);
+                        // Deselect and close detail panel if the deleted item was open.
+                        if let Some(win) = win_weak.upgrade() {
+                            if win.get_detail_visible() && win.get_detail_item().id == item.id {
+                                win.set_detail_visible(false);
+                            }
+                            win.set_selected_history_index(-1);
+                        }
+                        // TODO T5.x: send IPC delete command with item.id
+                    }
+                    None => {
+                        tracing::warn!("item-delete: index {idx} out of bounds");
+                    }
+                }
+            });
+        }
+
         // ── detail-copy callback ───────────────────────────────────────────
         {
             let win_weak = window.as_weak();
@@ -248,7 +330,9 @@ impl RootWindowHandle {
         {
             let win_weak = window.as_weak();
             window.on_save_prefs(move || {
-                let Some(win) = win_weak.upgrade() else { return; };
+                let Some(win) = win_weak.upgrade() else {
+                    return;
+                };
                 let mut p = UiPrefs::load().unwrap_or_default();
                 p.compact = win.get_compact();
                 p.vibrancy = win.get_vibrancy();
@@ -319,7 +403,9 @@ impl RootWindowHandle {
                 match IpcClient::connect(socket.as_ref()) {
                     Ok(_c) => {
                         // TODO: call c.revoke_all_peers() once daemon implements the verb.
-                        tracing::info!("reset-pairings: TODO revoke_all_peers IPC not yet implemented");
+                        tracing::info!(
+                            "reset-pairings: TODO revoke_all_peers IPC not yet implemented"
+                        );
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "reset-pairings: daemon offline");
@@ -382,7 +468,11 @@ impl RootWindowHandle {
             sync_view_model(&borrow, &view_model);
         }
 
-        Ok(Self { window, history_model, view_model })
+        Ok(Self {
+            window,
+            history_model,
+            view_model,
+        })
     }
 
     /// Set the app-version string shown in the sidebar footer.
@@ -407,5 +497,33 @@ impl RootWindowHandle {
     /// Borrow a weak reference for use in closures.
     pub fn as_weak(&self) -> slint::Weak<MainWindow> {
         self.window.as_weak()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Accessibility helpers
+// ---------------------------------------------------------------------------
+
+/// Returns true if the OS has the "Reduce motion" accessibility setting active.
+/// On macOS uses `NSWorkspace accessibilityDisplayShouldReduceMotion` (macOS 10.12+).
+/// On all other platforms returns false.
+fn reduced_motion_enabled() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::rc::Retained;
+        use objc2::runtime::{AnyClass, AnyObject, Bool};
+
+        unsafe {
+            // +[NSWorkspace sharedWorkspace]
+            let cls = AnyClass::get(c"NSWorkspace").expect("NSWorkspace class must exist on macOS");
+            let shared: Retained<AnyObject> = objc2::msg_send![cls, sharedWorkspace];
+            // -[NSWorkspace accessibilityDisplayShouldReduceMotion]
+            let result: Bool = objc2::msg_send![&*shared, accessibilityDisplayShouldReduceMotion];
+            result.as_bool()
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
     }
 }

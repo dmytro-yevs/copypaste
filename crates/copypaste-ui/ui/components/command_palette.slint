@@ -46,6 +46,9 @@ export component CommandPalette inherits Rectangle {
     // Scrim: semi-transparent black when open, transparent otherwise.
     background: root.open ? Theme.overlay-scrim : transparent;
     visible: root.open;
+    opacity: root.open ? 1.0 : 0.0;
+
+    animate opacity { duration: Theme.anim-palette; easing: ease-out; }
 
     // ── Modal box ────────────────────────────────────────────────────────────
     Rectangle {

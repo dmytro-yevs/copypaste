@@ -65,7 +65,7 @@ export component IconButton inherits Rectangle {
         clicked => { root.clicked(); }
     }
 
-    animate background { duration: 80ms; easing: linear; }
+    animate background { duration: Theme.anim-row; easing: linear; }
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ export component SidebarTab inherits Rectangle {
         height: parent.height - 8px;
         border-radius: 1.5px;
         background: Theme.accent-gradient;
-        animate width { duration: 80ms; easing: linear; }
+        animate width { duration: Theme.anim-row; easing: linear; }
     }
 
     HorizontalLayout {
@@ -147,7 +147,7 @@ export component SidebarTab inherits Rectangle {
         clicked => { root.activated(); }
     }
 
-    animate background { duration: 80ms; easing: linear; }
+    animate background { duration: Theme.anim-row; easing: linear; }
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +191,7 @@ export component SubTabPill inherits Rectangle {
         clicked => { root.activated(); }
     }
 
-    animate background { duration: 80ms; easing: linear; }
+    animate background { duration: Theme.anim-row; easing: linear; }
 }
 
 // ---------------------------------------------------------------------------
@@ -322,7 +322,7 @@ export component SearchField inherits Rectangle {
         }
     }
 
-    animate border-color { duration: 80ms; easing: linear; }
+    animate border-color { duration: Theme.anim-row; easing: linear; }
 }
 
 // ---------------------------------------------------------------------------
@@ -434,7 +434,7 @@ export component ToggleRow inherits Rectangle {
                 height: 20px;
                 border-radius: 10px;
                 background: root.checked ? Theme.accent-solid : Theme.border-regular;
-                animate background { duration: 120ms; easing: ease-in-out; }
+                animate background { duration: Theme.anim-toggle; easing: ease-in-out; }
 
                 Rectangle {
                     x: root.checked ? parent.width - self.width - 2px : 2px;
@@ -443,7 +443,7 @@ export component ToggleRow inherits Rectangle {
                     height: 16px;
                     border-radius: 8px;
                     background: Theme.text-primary;
-                    animate x { duration: 120ms; easing: ease-in-out; }
+                    animate x { duration: Theme.anim-toggle; easing: ease-in-out; }
                 }
             }
         }
@@ -474,7 +474,7 @@ export component Toast inherits Rectangle {
         Theme.border-regular;
 
     opacity: root.shown ? 1.0 : 0.0;
-    animate opacity { duration: 160ms; easing: ease-out; }
+    animate opacity { duration: Theme.anim-toast; easing: ease-out; }
 
     // Auto-dismiss timer
     timer := Timer {
@@ -552,7 +552,7 @@ export component ConfirmDialog inherits Rectangle {
     background: #00000099;  // overlay.scrim: #000000 @ 60%
     opacity: root.shown ? 1.0 : 0.0;
 
-    animate opacity { duration: 160ms; easing: ease-out; }
+    animate opacity { duration: Theme.anim-toast; easing: ease-out; }
 
     // Dismiss on scrim click
     TouchArea {

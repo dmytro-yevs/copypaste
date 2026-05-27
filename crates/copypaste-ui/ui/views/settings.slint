@@ -125,7 +125,7 @@ component AccentPicker inherits Rectangle {
                     }
                 }
 
-                animate background { duration: 80ms; easing: linear; }
+                animate background { duration: Theme.anim-row; easing: linear; }
             }
         }
 
@@ -163,7 +163,7 @@ component AccentPicker inherits Rectangle {
                     }
                 }
 
-                animate background { duration: 80ms; easing: linear; }
+                animate background { duration: Theme.anim-row; easing: linear; }
             }
         }
     }
@@ -329,7 +329,7 @@ component TextFieldRow inherits Rectangle {
             border-color: fi.has-focus ? Theme.border-focus : Theme.border-regular;
             clip: true;
 
-            animate border-color { duration: 80ms; easing: linear; }
+            animate border-color { duration: Theme.anim-row; easing: linear; }
 
             // Placeholder text
             if root.text == "" && !fi.has-focus: Text {

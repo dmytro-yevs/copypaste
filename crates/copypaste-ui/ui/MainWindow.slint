@@ -39,7 +39,7 @@ component ItemDetailPanel inherits Rectangle {
     clip: true;
     background: Theme.surface-panel;
 
-    animate width { duration: 180ms; easing: ease-out; }
+    animate width { duration: Theme.anim-panel; easing: ease-out; }
 
     // Left hairline border separating panel from view area
     Rectangle {
@@ -221,7 +221,7 @@ component Sidebar inherits Rectangle {
     background: Theme.surface-sidebar;
     border-width: 0px;
 
-    animate width { duration: 180ms; easing: ease-out; }
+    animate width { duration: Theme.anim-sidebar; easing: ease-out; }
 
     VerticalLayout {
         spacing: 0px;
@@ -479,67 +479,17 @@ export component MainWindow inherits Window {
     callback settings-tab-changed(int);
 
     // ── Layout ──────────────────────────────────────────────────────────────
-    HorizontalLayout {
+    // T5.3: screen-width < 600px → Android bottom-tab layout (no sidebar).
+    //       screen-width ≥ 600px → desktop sidebar layout.
+
+    // ── Small screen (Android): content area above BottomTabBar ────────────
+    if root.screen-width < 600px: VerticalLayout {
         spacing: 0px;
 
-        // Left sidebar
-        sidebar := Sidebar {
-            active-tab <=> root.active-tab;
-            collapsed <=> root.sidebar-collapsed;
-            daemon-connected <=> root.daemon-connected;
-            app-version <=> root.app-version;
-            tab-changed(i) => {
-                root.active-tab = i;
-                root.tab-changed(i);
-                // Closing the detail panel when switching away from History
-                if i != 0 {
-                    root.detail-visible = false;
-                }
-            }
-            toggle-sidebar => {
-                root.sidebar-collapsed = !root.sidebar-collapsed;
-            }
-        }
-
-        // Centre column: top bar + content area
         VerticalLayout {
             spacing: 0px;
-            horizontal-stretch: 1;
+            vertical-stretch: 1;
 
-            // ── Top bar ────────────────────────────────────────────────────
-            Rectangle {
-                height: 44px;
-                background: Theme.surface-sidebar;
-
-                // Bottom hairline separator
-                Rectangle {
-                    x: 0;
-                    y: parent.height - 1px;
-                    width: parent.width;
-                    height: 1px;
-                    background: Theme.border-subtle;
-                }
-
-                HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
-                    padding-top: 8px;
-                    padding-bottom: 8px;
-                    spacing: 8px;
-                    alignment: center;
-
-                    // Search field — stretches to fill available space
-                    SearchField {
-                        horizontal-stretch: 1;
-                        text <=> root.search-query;
-                        placeholder: "Search…";
-                        edited(q) => { root.search-changed(q); }
-                    }
-                }
-            }
-
-            // ── Content area: one view per tab ────────────────────────────
-            // Tab 0 — History
             if root.active-tab == 0: HistoryView {
                 vertical-stretch: 1;
                 items: root.history-items;
@@ -556,7 +506,6 @@ export component MainWindow inherits Window {
                 open-pair-view() => { root.open-pair-view(); }
             }
 
-            // Tab 1 — Devices
             if root.active-tab == 1: DevicesView {
                 vertical-stretch: 1;
                 devices: root.devices;
@@ -566,7 +515,6 @@ export component MainWindow inherits Window {
                 unpair-device(idx) => { root.unpair-device(idx); }
             }
 
-            // Tab 2 — Pair
             if root.active-tab == 2: PairView {
                 vertical-stretch: 1;
                 pair-mode <=> root.pair-mode;
@@ -580,7 +528,6 @@ export component MainWindow inherits Window {
                 pair-succeeded(fp) => { root.pair-succeeded(fp); }
             }
 
-            // Tab 3 — Settings
             if root.active-tab == 3: SettingsView {
                 vertical-stretch: 1;
                 settings-tab <=> root.settings-tab;
@@ -604,7 +551,133 @@ export component MainWindow inherits Window {
             }
         }
 
-        // Right-side detail panel — visible only on History tab (tab 0)
+        BottomTabBar {
+            active-tab <=> root.active-tab;
+            tab-changed(i) => {
+                root.active-tab = i;
+                root.tab-changed(i);
+                if i != 0 { root.detail-visible = false; }
+            }
+        }
+    }
+
+    // ── Large screen (desktop / tablet ≥ 600px): sidebar layout ────────────
+    if root.screen-width >= 600px: HorizontalLayout {
+        spacing: 0px;
+
+        sidebar := Sidebar {
+            active-tab <=> root.active-tab;
+            collapsed <=> root.sidebar-collapsed;
+            daemon-connected <=> root.daemon-connected;
+            app-version <=> root.app-version;
+            tab-changed(i) => {
+                root.active-tab = i;
+                root.tab-changed(i);
+                if i != 0 {
+                    root.detail-visible = false;
+                }
+            }
+            toggle-sidebar => {
+                root.sidebar-collapsed = !root.sidebar-collapsed;
+            }
+        }
+
+        VerticalLayout {
+            spacing: 0px;
+            horizontal-stretch: 1;
+
+            // ── Top bar ────────────────────────────────────────────────────
+            Rectangle {
+                height: 44px;
+                background: Theme.surface-sidebar;
+
+                Rectangle {
+                    x: 0;
+                    y: parent.height - 1px;
+                    width: parent.width;
+                    height: 1px;
+                    background: Theme.border-subtle;
+                }
+
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    padding-top: 8px;
+                    padding-bottom: 8px;
+                    spacing: 8px;
+                    alignment: center;
+
+                    SearchField {
+                        horizontal-stretch: 1;
+                        text <=> root.search-query;
+                        placeholder: "Search…";
+                        edited(q) => { root.search-changed(q); }
+                    }
+                }
+            }
+
+            // ── Content area ──────────────────────────────────────────────
+            if root.active-tab == 0: HistoryView {
+                vertical-stretch: 1;
+                items: root.history-items;
+                loading: root.history-loading;
+                search-query: root.search-query;
+                error-message: root.history-error;
+                selected-index <=> root.selected-history-index;
+                item-clicked(idx) => { root.item-clicked(idx); }
+                item-copy(idx) => { root.item-copy(idx); }
+                item-pin(idx) => { root.item-pin(idx); }
+                item-delete(idx) => { root.item-delete(idx); }
+                search-changed(q) => { root.search-changed(q); }
+                fetch-next-page() => { root.fetch-next-page(); }
+                open-pair-view() => { root.open-pair-view(); }
+            }
+
+            if root.active-tab == 1: DevicesView {
+                vertical-stretch: 1;
+                devices: root.devices;
+                device-selected(idx) => { root.device-selected(idx); }
+                open-pair() => { root.open-pair(); }
+                pause-device(idx) => { root.pause-device(idx); }
+                unpair-device(idx) => { root.unpair-device(idx); }
+            }
+
+            if root.active-tab == 2: PairView {
+                vertical-stretch: 1;
+                pair-mode <=> root.pair-mode;
+                qr-image: root.qr-image;
+                pair-code: root.pair-code;
+                status-text: root.pair-status-text;
+                status-is-error: root.pair-status-is-error;
+                regenerate() => { root.pair-regenerate(); }
+                pair-with-code(code) => { root.pair-with-code(code); }
+                cancel() => { root.pair-cancel(); }
+                pair-succeeded(fp) => { root.pair-succeeded(fp); }
+            }
+
+            if root.active-tab == 3: SettingsView {
+                vertical-stretch: 1;
+                settings-tab <=> root.settings-tab;
+                accent <=> root.accent;
+                compact <=> root.compact;
+                vibrancy <=> root.vibrancy;
+                launch-at-login <=> root.launch-at-login;
+                private-mode <=> root.private-mode;
+                history-limit <=> root.history-limit;
+                sync-enabled <=> root.sync-enabled;
+                sync-url <=> root.sync-url;
+                fingerprint: root.fingerprint;
+                app-version: root.app-version;
+                shortcuts: root.shortcuts;
+                save-prefs() => { root.save-prefs(); }
+                save-app-settings() => { root.save-app-settings(); }
+                clear-history() => { root.clear-history(); }
+                reset-pairings() => { root.reset-pairings(); }
+                reset-ui-prefs() => { root.reset-ui-prefs(); }
+                settings-tab-changed(t) => { root.settings-tab-changed(t); }
+            }
+        }
+
         ItemDetailPanel {
             detail-visible: root.detail-visible && root.active-tab == 0;
             item: root.detail-item;
@@ -634,5 +707,148 @@ export component MainWindow inherits Window {
             root.palette-action(id);
         }
         closed => { root.palette-open = false; }
+    }
+
+    // ── Global keyboard handler (T5.2) ───────────────────────────────────────
+    // Zero-size FocusScope — doesn't affect layout.
+    // All shortcuts are no-ops when palette-open is true, except Esc which
+    // always dismisses the top-most layer.
+    FocusScope {
+        width: 0px;
+        height: 0px;
+
+        key-pressed(e) => {
+            // ── Esc: layered dismiss (palette → detail → search clear) ───────
+            if e.text == Key.Escape {
+                if root.palette-open {
+                    root.palette-open = false;
+                    return accept;
+                }
+                if root.detail-visible {
+                    root.detail-visible = false;
+                    return accept;
+                }
+                if root.search-query != "" {
+                    root.search-query = "";
+                    root.search-changed("");
+                    return accept;
+                }
+                return reject;
+            }
+
+            // All remaining shortcuts are blocked when palette is open
+            if root.palette-open {
+                return reject;
+            }
+
+            // ── ⌘ / Ctrl shortcuts ──────────────────────────────────────────
+            if e.modifiers.control || e.modifiers.meta {
+
+                // ⌘⌥\ — toggle detail panel (check alt before bare \)
+                if e.modifiers.alt && e.text == "\\" {
+                    if root.active-tab == 0 {
+                        root.detail-visible = !root.detail-visible;
+                    }
+                    return accept;
+                }
+
+                // ⌘\ — toggle sidebar
+                if e.text == "\\" {
+                    root.sidebar-collapsed = !root.sidebar-collapsed;
+                    return accept;
+                }
+
+                // ⌘1..4 — tab switch
+                if e.text == "1" { root.active-tab = 0; root.tab-changed(0); return accept; }
+                if e.text == "2" { root.active-tab = 1; root.tab-changed(1); return accept; }
+                if e.text == "3" { root.active-tab = 2; root.tab-changed(2); return accept; }
+                if e.text == "4" { root.active-tab = 3; root.tab-changed(3); return accept; }
+
+                // ⌘, — Settings
+                if e.text == "," {
+                    root.active-tab = 3;
+                    root.tab-changed(3);
+                    return accept;
+                }
+
+                // ⌘K — command palette
+                if e.text == "k" || e.text == "K" {
+                    root.palette-open = !root.palette-open;
+                    return accept;
+                }
+
+                // ⌘F — focus search
+                if e.text == "f" || e.text == "F" {
+                    root.search-focused = true;
+                    return accept;
+                }
+
+                // ⌘N — navigate to Pair view
+                if e.text == "n" || e.text == "N" {
+                    root.active-tab = 2;
+                    root.tab-changed(2);
+                    root.pair-mode = 0;
+                    return accept;
+                }
+
+                // ⌘W — hide window
+                if e.text == "w" || e.text == "W" {
+                    root.request-quit();
+                    return accept;
+                }
+
+                // ⌘P — pin/unpin selected history item (History tab only)
+                if (e.text == "p" || e.text == "P") && root.active-tab == 0 {
+                    if root.selected-history-index >= 0 {
+                        root.item-pin(root.selected-history-index);
+                    }
+                    return accept;
+                }
+
+                // ⌘C — copy selected history item (History tab only)
+                if (e.text == "c" || e.text == "C") && root.active-tab == 0 {
+                    if root.selected-history-index >= 0 {
+                        root.item-copy(root.selected-history-index);
+                    }
+                    return accept;
+                }
+
+                return reject;
+            }
+
+            // ── Bare keys (no modifier) ──────────────────────────────────────
+
+            // ↑ — move selection up (History tab only)
+            if e.text == Key.UpArrow && root.active-tab == 0 {
+                if root.selected-history-index > 0 {
+                    root.selected-history-index = root.selected-history-index - 1;
+                }
+                return accept;
+            }
+
+            // ↓ — move selection down (History tab only)
+            if e.text == Key.DownArrow && root.active-tab == 0 {
+                root.selected-history-index = root.selected-history-index + 1;
+                return accept;
+            }
+
+            // ↵ — copy selected item (History tab only)
+            if e.text == Key.Return && root.active-tab == 0 {
+                if root.selected-history-index >= 0 {
+                    root.item-copy(root.selected-history-index);
+                }
+                return accept;
+            }
+
+            // ⌫ — delete selected item (History tab only)
+            if e.text == Key.Backspace && root.active-tab == 0 {
+                if root.selected-history-index >= 0 {
+                    root.item-delete(root.selected-history-index);
+                }
+                return accept;
+            }
+
+            return reject;
+        }
     }
 }

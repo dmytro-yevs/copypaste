@@ -18,6 +18,19 @@ export global Theme {
     /// Set to true on Android startup to apply Android surface overrides.
     in-out property <bool> is-android: false;
 
+    /// Reduced-motion accessibility flag. When true, all animations clamp to 0ms
+    /// except toast (kept at 100ms). Set from Rust via NSWorkspace accessibility API
+    /// on macOS; hardcoded false on Android.
+    in-out property <bool> reduced-motion: false;
+
+    // Animation duration helpers — use these in all animate{} blocks.
+    out property <duration> anim-sidebar:   reduced-motion ?   0ms : 180ms;
+    out property <duration> anim-panel:     reduced-motion ?   0ms : 200ms;
+    out property <duration> anim-row:       reduced-motion ?   0ms :  80ms;
+    out property <duration> anim-palette:   reduced-motion ?   0ms : 140ms;
+    out property <duration> anim-toast:     reduced-motion ? 100ms : 160ms;
+    out property <duration> anim-toggle:    reduced-motion ?   0ms : 120ms;
+
     // -----------------------------------------------------------------------
     // § 3.1 Color tokens — surfaces
     // -----------------------------------------------------------------------

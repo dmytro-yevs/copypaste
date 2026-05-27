@@ -105,7 +105,7 @@ impl HistoryModel {
     /// `true` when the daemon has more items beyond what is already loaded.
     #[allow(dead_code)]
     fn has_more(&self) -> bool {
-        (self.next_offset.get() as u64) < self.total_count.get()
+        self.next_offset.get() < self.total_count.get()
             || self.total_count.get() == 0 && self.next_offset.get() == 0
     }
 
@@ -167,11 +167,10 @@ impl HistoryModel {
 
         // Build the IPC result; restore query + clear loading flag on all
         // paths (including the early-return from `connect` failure).
-        let result: anyhow::Result<crate::ipc_client::HistoryPage> =
-            match self.connect() {
-                None => Err(anyhow::anyhow!("daemon offline")),
-                Some(mut client) => client.history_page(self.page_size, offset),
-            };
+        let result: anyhow::Result<crate::ipc_client::HistoryPage> = match self.connect() {
+            None => Err(anyhow::anyhow!("daemon offline")),
+            Some(mut client) => client.history_page(self.page_size, offset),
+        };
 
         // Restore the query field and clear the loading flag regardless of
         // whether the IPC call succeeded or failed.
@@ -183,8 +182,7 @@ impl HistoryModel {
                 self.total_count.set(page.total);
                 let new_offset = offset + page.items.len() as u64;
                 self.next_offset.set(new_offset);
-                let clip_items: Vec<ClipItem> =
-                    page.items.iter().map(entry_to_clip_item).collect();
+                let clip_items: Vec<ClipItem> = page.items.iter().map(entry_to_clip_item).collect();
                 self.append_items(clip_items);
                 Ok(())
             }
