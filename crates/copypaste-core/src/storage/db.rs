@@ -663,42 +663,55 @@ impl Database {
             |r| r.get(0),
         )?;
 
-        if remaining == 0 {
-            // Mark complete — store the highest rowid as a record.
-            let max_id: i64 = self
-                .conn
-                .query_row(
-                    "SELECT COALESCE(MAX(rowid), 0) FROM clipboard_items",
-                    [],
-                    |r| r.get(0),
-                )
-                .unwrap_or(0);
-            self.conn.execute(
-                "UPDATE migration_state \
-                 SET last_processed_id = ?1, completed_at = strftime('%s','now') \
-                 WHERE key = ?2",
-                params![max_id, SWEEP_KEY],
-            )?;
-        } else {
-            // Still in progress — update the high-water mark.
-            let max_processed: i64 = self
-                .conn
-                .query_row(
-                    "SELECT COALESCE(MAX(rowid), 0) FROM clipboard_items WHERE key_version = 2",
-                    [],
-                    |r| r.get(0),
-                )
-                .unwrap_or(0);
-            self.conn.execute(
-                "UPDATE migration_state SET last_processed_id = ?1 WHERE key = ?2",
-                params![max_processed, SWEEP_KEY],
-            )?;
+        // `migrate_v1_to_v2_keys` is a self-bounded full pass: it loops
+        // fetching `key_version = 1` batches until either none remain, a short
+        // (< BATCH_SIZE) batch is processed, or a full batch rotates zero rows
+        // (the termination guard). In every termination case it has ATTEMPTED
+        // to rotate every row that is still at `key_version = 1` when it
+        // returns. Therefore any rows remaining now are permanently
+        // unrotatable (their auth tag does not verify under the current v1
+        // key) — they were just tried and failed this pass.
+        //
+        // We mark the sweep Complete regardless of `remaining`:
+        //   * remaining == 0 → every v1 row rotated cleanly (happy path).
+        //   * remaining  > 0 → the leftover v1 rows are corrupt/legacy and can
+        //     never be rotated. Leaving `completed_at = NULL` here would keep
+        //     the write-gate armed FOREVER (the live-install bug), rejecting
+        //     every new capture. The unreadable rows stay at `key_version = 1`
+        //     (they were already unreadable); the gate releases so ingest
+        //     resumes.
+        //
+        // Crash-safety / cursor-resume is preserved: we only reach this point
+        // AFTER the full pass returned, so we never mark Complete before the
+        // rows were attempted. A mid-pass crash leaves `completed_at = NULL`
+        // and the next startup re-runs the pass from scratch (the
+        // `WHERE key_version = 1` predicate is the cursor).
+        let max_id: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(rowid), 0) FROM clipboard_items",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        self.conn.execute(
+            "UPDATE migration_state \
+             SET last_processed_id = ?1, completed_at = strftime('%s','now') \
+             WHERE key = ?2",
+            params![max_id, SWEEP_KEY],
+        )?;
 
-            // Yield between resumable invocations.
-            std::thread::sleep(INTER_BATCH_SLEEP);
+        if remaining > 0 {
+            tracing::warn!(
+                remaining,
+                "v4 migration: {remaining} key_version=1 row(s) could not be rotated \
+                 (undecryptable under the current key); leaving them at key_version=1 \
+                 and marking the sweep Complete so new captures are no longer gated"
+            );
         }
 
         let _ = BATCH_SIZE; // ensure constant is referenced
+        let _ = INTER_BATCH_SLEEP; // referenced by the batched inner sweep
 
         Ok(total_rotated)
     }
@@ -738,6 +751,52 @@ impl Database {
             );
         }
 
+        Ok(())
+    }
+
+    /// Escape hatch: unconditionally mark the v4 sweep Complete, clearing the
+    /// write-gate even if `key_version = 1` rows remain.
+    ///
+    /// This is the backing primitive for the `COPYPASTE_FORCE_MIGRATION_COMPLETE`
+    /// environment variable (mirrors `COPYPASTE_NO_AUTO_MIGRATE`). It exists for
+    /// installs that were *already* stuck on a prior build — where the sweep
+    /// logged `rotated=0 failed=N` and left `completed_at` NULL forever, so
+    /// every clipboard capture was rejected with `MigrationInProgress`.
+    ///
+    /// Unlike [`force_complete_if_no_v1_rows`], this does NOT require zero v1
+    /// rows: it seeds the sweep row if absent and sets `completed_at` no matter
+    /// what. The remaining `key_version = 1` rows are left untouched (they were
+    /// already unreadable under the current key); only the gate is released.
+    pub fn force_migration_complete(&self) -> Result<(), DbError> {
+        const SWEEP_KEY: &str = "v4-key-version-sweep";
+
+        // Ensure the table + row exist so the UPDATE has something to hit.
+        self.conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS migration_state (
+                key                     TEXT PRIMARY KEY,
+                key_version_in_progress INTEGER,
+                last_processed_id       INTEGER NOT NULL DEFAULT 0,
+                started_at              INTEGER,
+                completed_at            INTEGER
+            );",
+        )?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO migration_state \
+             (key, key_version_in_progress, last_processed_id, started_at) \
+             VALUES ('v4-key-version-sweep', 2, 0, strftime('%s','now'))",
+            [],
+        )?;
+        self.conn.execute(
+            "UPDATE migration_state \
+             SET completed_at = strftime('%s','now') \
+             WHERE key = ?1 AND completed_at IS NULL",
+            rusqlite::params![SWEEP_KEY],
+        )?;
+        tracing::warn!(
+            "force_migration_complete: write-gate force-cleared via \
+             COPYPASTE_FORCE_MIGRATION_COMPLETE — any remaining key_version=1 \
+             rows are left as-is (they were already unreadable)"
+        );
         Ok(())
     }
 }
@@ -872,5 +931,138 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    // ── Write-gate release after a stuck migration sweep (HIGH / v0.4) ─────
+    //
+    // Regression for the live-install bug: an install with legacy
+    // `key_version = 1` rows that can NEVER be rotated (their auth tag does
+    // not verify under the current v1 key) left the migration sweep logging
+    // `rotated=0 failed=N` forever, `completed_at` stuck NULL, and EVERY new
+    // capture rejected with `MigrationInProgress`. After a full sweep pass
+    // attempts those rows and fails, the gate must release.
+
+    /// Seed a `key_version = 1` text row whose ciphertext was produced under a
+    /// DIFFERENT v1 key, so the real sweep key can never decrypt it (auth tag
+    /// mismatch). These rows are the permanently-unrotatable legacy rows from
+    /// the live install.
+    fn seed_unrotatable_v1_text_row(db: &Database, foreign_v1_key: &[u8; 32]) {
+        use crate::crypto::encrypt::{build_item_aad, encrypt_item_with_aad, AAD_SCHEMA_VERSION};
+        let row_id = uuid::Uuid::new_v4().to_string();
+        let item_id = uuid::Uuid::new_v4().to_string();
+        let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+        let (nonce, ciphertext) =
+            encrypt_item_with_aad(b"legacy payload", foreign_v1_key, &aad).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO clipboard_items \
+                 (id, item_id, content_type, content, content_nonce, \
+                  is_sensitive, is_synced, lamport_ts, wall_time, key_version) \
+                 VALUES (?1,?2,'text',?3,?4,0,0,?5,?5,1)",
+                rusqlite::params![row_id, item_id, ciphertext, nonce.to_vec(), 1i64],
+            )
+            .unwrap();
+    }
+
+    /// A freshly-inserted `ClipboardItem` for the gate test. Content shape is
+    /// irrelevant here — we only care that `insert_item` is no longer rejected.
+    fn make_text_item() -> crate::storage::items::ClipboardItem {
+        crate::storage::items::ClipboardItem::new_text(b"new capture".to_vec(), vec![0u8; 24], 1)
+    }
+
+    #[test]
+    fn stuck_sweep_releases_write_gate_and_insert_succeeds() {
+        let db = Database::open_in_memory().unwrap();
+        // The sweep's real key.
+        let v1_key = [0x10u8; 32];
+        let v2_key = [0x20u8; 32];
+        // Rows encrypted under a key the sweep will never have.
+        let foreign = [0xFEu8; 32];
+
+        for _ in 0..37 {
+            seed_unrotatable_v1_text_row(&db, &foreign);
+        }
+        // Arm the gate as InProgress to model the live install precisely (the
+        // v6 schema migration leaves `completed_at = NULL` for an upgrade that
+        // still has key_version=1 rows). `open_in_memory` seeds it Complete
+        // because the DB was empty when migrations ran; override that here.
+        db.conn()
+            .execute(
+                "UPDATE migration_state SET completed_at = NULL \
+                 WHERE key = 'v4-key-version-sweep'",
+                [],
+            )
+            .unwrap();
+        assert!(
+            matches!(
+                db.migration_state().unwrap(),
+                MigrationState::InProgress { .. }
+            ),
+            "precondition: gate armed before the sweep"
+        );
+
+        // Run the sweep + the new force-complete pass.
+        let rotated = db.migration_v4_sweep_resumable(&v1_key, &v2_key).unwrap();
+        db.force_complete_if_no_v1_rows().unwrap();
+
+        assert_eq!(rotated, 0, "no row was decryptable, so none may rotate");
+
+        // (b) the gate must now read Complete even though 37 v1 rows remain.
+        assert_eq!(
+            db.migration_state().unwrap(),
+            MigrationState::Complete,
+            "gate must release after a full sweep pass attempts the unrotatable rows"
+        );
+
+        // The unrotatable rows are left at key_version=1 (still unreadable).
+        let remaining_v1: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE key_version = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining_v1, 37, "corrupt rows stay at key_version=1");
+
+        // (c) a subsequent insert must SUCCEED (no MigrationInProgress).
+        let item = make_text_item();
+        crate::storage::items::insert_item(&db, &item)
+            .expect("insert must succeed after the gate releases");
+    }
+
+    #[test]
+    fn force_migration_complete_env_clears_a_stuck_gate() {
+        // Escape hatch for already-stuck installs: even before any sweep runs,
+        // COPYPASTE_FORCE_MIGRATION_COMPLETE=1 force-clears the gate.
+        let db = Database::open_in_memory().unwrap();
+        let foreign = [0xABu8; 32];
+        for _ in 0..5 {
+            seed_unrotatable_v1_text_row(&db, &foreign);
+        }
+        // Manually arm the gate as InProgress (the live install's state).
+        db.conn()
+            .execute(
+                "INSERT OR REPLACE INTO migration_state \
+                 (key, key_version_in_progress, last_processed_id, started_at, completed_at) \
+                 VALUES ('v4-key-version-sweep', 2, 0, strftime('%s','now'), NULL)",
+                [],
+            )
+            .unwrap();
+        assert!(matches!(
+            db.migration_state().unwrap(),
+            MigrationState::InProgress { .. }
+        ));
+
+        db.force_migration_complete().unwrap();
+
+        assert_eq!(
+            db.migration_state().unwrap(),
+            MigrationState::Complete,
+            "force_migration_complete must clear the gate unconditionally"
+        );
+        let item = make_text_item();
+        crate::storage::items::insert_item(&db, &item)
+            .expect("insert must succeed after force_migration_complete");
     }
 }
