@@ -199,6 +199,9 @@ impl RootWindowHandle {
                     Some(w) => w,
                     None => return,
                 };
+                if idx < 0 {
+                    return;
+                }
                 match vm.row_data(idx as usize) {
                     Some(clip) => {
                         win.set_detail_item(clip);
@@ -225,6 +228,9 @@ impl RootWindowHandle {
         {
             let vm = Rc::clone(&view_model);
             window.on_item_copy(move |idx| {
+                if idx < 0 {
+                    return;
+                }
                 match vm.row_data(idx as usize) {
                     Some(item) => {
                         tracing::info!("item-copy (keyboard): id={}", item.id);
@@ -241,6 +247,9 @@ impl RootWindowHandle {
         {
             let vm = Rc::clone(&view_model);
             window.on_item_pin(move |idx| {
+                if idx < 0 {
+                    return;
+                }
                 match vm.row_data(idx as usize) {
                     Some(item) => {
                         tracing::info!(
@@ -262,6 +271,9 @@ impl RootWindowHandle {
             let vm = Rc::clone(&view_model);
             let win_weak = window.as_weak();
             window.on_item_delete(move |idx| {
+                if idx < 0 {
+                    return;
+                }
                 match vm.row_data(idx as usize) {
                     Some(item) => {
                         tracing::info!("item-delete (keyboard): id={}", item.id);

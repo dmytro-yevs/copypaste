@@ -41,7 +41,7 @@ fn content_type_to_kind(content_type: &str) -> slint::SharedString {
 /// Convert a [`crate::ipc_client::HistoryEntry`] to a Slint [`ClipItem`].
 fn entry_to_clip_item(entry: &crate::ipc_client::HistoryEntry) -> ClipItem {
     ClipItem {
-        id: entry.id.parse::<i32>().unwrap_or(0),
+        id: entry.id.parse::<i64>().unwrap_or(0) as i32,
         preview: entry.preview.clone().into(),
         kind: content_type_to_kind(&entry.content_type),
         wall_time: format_wall_time(entry.wall_time).into(),
