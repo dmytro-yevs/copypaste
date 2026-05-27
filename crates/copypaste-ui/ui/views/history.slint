@@ -1,0 +1,451 @@
+// views/history.slint — T3.1 HistoryView component
+//
+// Main clipboard history list for the v0.4 redesigned RootWindow.
+// Displays HistoryItem rows (62 px fixed height) with kind icon, snippet,
+// timestamp, source device, pin marker, hover mini-toolbar, and empty /
+// loading / error states.
+//
+// Detail panel lives as a sibling in RootWindow — this component only
+// signals selection via item-clicked(index).
+
+import { Theme } from "../theme.slint";
+import { Icons } from "../icons.slint";
+import { IconButton, GhostButton, EmptyState, SearchField } from "../primitives.slint";
+
+// ---------------------------------------------------------------------------
+// HistoryItem — data model for a single clipboard entry.
+// Matches the Rust-side `UiHistoryItem` that will be bound via the Slint
+// generated API.  `id` is an int so comparisons stay cheap in expressions.
+// ---------------------------------------------------------------------------
+export struct HistoryItem {
+    id: int,
+    preview: string,
+    kind: string,          // "text" | "image" | "link" | "code" | "file" | "color"
+    wall-time: string,     // formatted timestamp, e.g. "12:04" or "Yesterday"
+    source-device: string, // e.g. "MacBook", "iPhone"
+    pinned: bool,
+    redacted: bool,
+}
+
+// ---------------------------------------------------------------------------
+// HistoryView — exported top-level component
+// ---------------------------------------------------------------------------
+export component HistoryView inherits Rectangle {
+    // ── Inputs ──────────────────────────────────────────────────────────────
+    in property <[HistoryItem]> items: [];
+    in property <bool> loading: false;
+    in property <string> search-query: "";
+    in property <string> error-message: "";  // non-empty → error banner shown
+
+    // ── In-out ──────────────────────────────────────────────────────────────
+    in-out property <int> selected-index: -1;
+
+    // ── Callbacks ───────────────────────────────────────────────────────────
+    callback item-clicked(int);      // index of clicked row
+    callback item-copy(int);         // copy action in hover mini-toolbar
+    callback item-pin(int);          // toggle pin in hover mini-toolbar
+    callback item-delete(int);       // delete action in hover mini-toolbar
+    callback search-changed(string); // fired ~200 ms after user stops typing
+    callback fetch-next-page();      // request next page when scroll nears end
+    callback open-pair-view();       // empty-state CTA
+
+    // ── Root ────────────────────────────────────────────────────────────────
+    background: Theme.surface-base;
+
+    // 200 ms debounce for search field
+    debounce-timer := Timer {
+        interval: 200ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            search-changed(root.search-query);
+        }
+    }
+
+    VerticalLayout {
+        spacing: 0px;
+
+        // ── Title bar ───────────────────────────────────────────────────────
+        Rectangle {
+            height: 48px;
+            background: Theme.surface-base;
+
+            // Bottom hairline separator
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.border-subtle;
+            }
+
+            HorizontalLayout {
+                padding-left: Theme.panel-inset;
+                padding-right: Theme.space-2;
+                padding-top: 0px;
+                padding-bottom: 0px;
+                spacing: Theme.space-2;
+                alignment: center;
+
+                Text {
+                    text: @tr("History");
+                    font-size: Theme.font-display;
+                    font-weight: 700;
+                    color: Theme.text-primary;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+
+                // ⌘K hint button
+                IconButton {
+                    icon: Icons.command;
+                    label: "K";
+                    style: "secondary";
+                }
+            }
+        }
+
+        // ── Search bar ──────────────────────────────────────────────────────
+        Rectangle {
+            height: 44px;
+            background: Theme.surface-base;
+
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                background: Theme.border-subtle;
+            }
+
+            HorizontalLayout {
+                padding-left: Theme.panel-inset;
+                padding-right: Theme.panel-inset;
+                padding-top: Theme.space-2;
+                padding-bottom: Theme.space-2;
+                spacing: Theme.space-2;
+                alignment: center;
+
+                search-field := SearchField {
+                    text <=> root.search-query;
+                    placeholder: @tr("Search clipboard…  ⌘F");
+                    horizontal-stretch: 1;
+                    edited(q) => {
+                        debounce-timer.running = false;
+                        debounce-timer.running = true;
+                    }
+                }
+            }
+        }
+
+        // ── Error banner (non-empty error-message) ──────────────────────────
+        if root.error-message != "": Rectangle {
+            height: 36px;
+            background: Theme.color-danger;
+
+            HorizontalLayout {
+                padding-left: Theme.panel-inset;
+                padding-right: Theme.space-2;
+                spacing: Theme.space-2;
+                alignment: center;
+
+                Image {
+                    source: Icons.alert-triangle;
+                    width: 14px;
+                    height: 14px;
+                    colorize: Theme.text-inverse;
+                }
+
+                Text {
+                    text: root.error-message;
+                    font-size: Theme.font-body;
+                    color: Theme.text-inverse;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+
+                IconButton {
+                    icon: Icons.refresh;
+                    label: @tr("Retry");
+                    style: "ghost";
+                    clicked => { root.fetch-next-page(); }
+                }
+            }
+        }
+
+        // ── Main content area ────────────────────────────────────────────────
+        content-area := Rectangle {
+            vertical-stretch: 1;
+            background: Theme.surface-base;
+            clip: true;
+
+            // ── Loading state (initial / first page) ─────────────────────────
+            if root.loading && root.items.length == 0: VerticalLayout {
+                alignment: start;
+                spacing: 1px;
+                padding-top: Theme.space-2;
+                padding-bottom: Theme.space-2;
+
+                // 8 skeleton rows with shimmer-like alternating alpha
+                for i in [0, 1, 2, 3, 4, 5, 6, 7]: SkeletonRow { opacity: i < 4 ? 1.0 : 0.6 - i * 0.05; }
+            }
+
+            // ── Empty state ───────────────────────────────────────────────────
+            if !root.loading && root.items.length == 0 && root.error-message == "": EmptyState {
+                icon: Icons.history;
+                title: @tr("Nothing here yet.");
+                body: @tr("Copy something on a paired device and it will appear here.");
+                cta-label: @tr("Open Pair view");
+                cta-icon: Icons.link-2;
+                cta-clicked => { root.open-pair-view(); }
+            }
+
+            // ── Item list ─────────────────────────────────────────────────────
+            if root.items.length > 0: Flickable {
+                interactive: true;
+                viewport-height: list-layout.preferred-height;
+
+                // Fire fetch-next-page when the user scrolls within 200 px of
+                // the bottom of the viewport.
+                flicked => {
+                    if (self.viewport-height - self.viewport-y - self.height) < 200px {
+                        root.fetch-next-page();
+                    }
+                }
+
+                list-layout := VerticalLayout {
+                    alignment: start;
+                    spacing: 0px;
+                    padding-top: Theme.space-1;
+                    padding-bottom: Theme.space-2;
+
+                    for item[index] in root.items: HistoryRow {
+                        item: item;
+                        selected: index == root.selected-index;
+                        clicked => {
+                            root.selected-index = index;
+                            root.item-clicked(index);
+                        }
+                        copy => { root.item-copy(index); }
+                        pin => { root.item-pin(index); }
+                        delete => { root.item-delete(index); }
+                    }
+
+                    // Spinner row appended at the bottom while paginating
+                    if root.loading && root.items.length > 0: Rectangle {
+                        height: 40px;
+                        background: transparent;
+
+                        Text {
+                            text: @tr("Loading…");
+                            font-size: Theme.font-caption;
+                            color: Theme.text-tertiary;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HistoryRow — single 62 px item row (private to this file)
+// ---------------------------------------------------------------------------
+component HistoryRow inherits Rectangle {
+    in property <HistoryItem> item;
+    in property <bool> selected: false;
+    callback clicked();
+    callback copy();
+    callback pin();
+    callback delete();
+
+    height: 62px;
+    clip: true;
+    background: root.selected
+        ? Theme.row-selected
+        : (ta.has-hover ? Theme.row-hover : Theme.surface-row);
+
+    animate background { duration: 80ms; easing: linear; }
+
+    // ── Pinned accent marker (3 px left edge, gradient) ─────────────────────
+    Rectangle {
+        x: 0;
+        y: 4px;
+        width: root.item.pinned ? 3px : 0px;
+        height: root.height - 8px;
+        border-radius: 1.5px;
+        background: Theme.accent-gradient;
+        animate width { duration: 80ms; easing: linear; }
+    }
+
+    // ── Bottom hairline separator ────────────────────────────────────────────
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border-subtle;
+    }
+
+    // ── Row content ──────────────────────────────────────────────────────────
+    HorizontalLayout {
+        padding-left: Theme.row-padding-h;
+        padding-right: Theme.space-2;
+        padding-top: 0px;
+        padding-bottom: 0px;
+        spacing: Theme.space-2;
+        alignment: center;
+
+        // Kind icon — 14×14, colorized by kind
+        Image {
+            source: root.item.kind == "text"  ? Icons.type :
+                    root.item.kind == "link"  ? Icons.link :
+                    root.item.kind == "code"  ? Icons.braces :
+                    root.item.kind == "image" ? Icons.image :
+                    root.item.kind == "file"  ? Icons.file :
+                    root.item.kind == "color" ? Icons.palette :
+                    Icons.type;
+            width: 14px;
+            height: 14px;
+            colorize: root.item.kind == "text"  ? Theme.text-secondary :
+                      root.item.kind == "link"  ? #3574F0 :
+                      root.item.kind == "code"  ? #7F52FF :
+                      root.item.kind == "image" ? Theme.color-success :
+                      root.item.kind == "file"  ? Theme.color-warning :
+                      root.item.kind == "color" ? Theme.accent-solid :
+                      Theme.text-secondary;
+        }
+
+        // Snippet + metadata (grows to fill available space)
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 3px;
+
+            // Snippet — 1 line, elided, redacted if flagged
+            snippet-clip := Rectangle {
+                clip: true;
+                horizontal-stretch: 1;
+                height: 18px;
+
+                Text {
+                    width: parent.width;
+                    text: root.item.redacted ? "••••••••" : root.item.preview;
+                    font-size: Theme.font-body;
+                    color: root.item.redacted ? Theme.text-tertiary : Theme.text-primary;
+                    wrap: no-wrap;
+                    overflow: elide;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Timestamp · source device
+            HorizontalLayout {
+                spacing: Theme.space-1;
+                alignment: start;
+
+                Text {
+                    text: root.item.wall-time;
+                    font-size: Theme.font-caption;
+                    color: Theme.text-tertiary;
+                    vertical-alignment: center;
+                }
+
+                if root.item.source-device != "": Text {
+                    text: "·";
+                    font-size: Theme.font-caption;
+                    color: Theme.text-tertiary;
+                    vertical-alignment: center;
+                }
+
+                if root.item.source-device != "": Text {
+                    text: root.item.source-device;
+                    font-size: Theme.font-caption;
+                    color: Theme.text-tertiary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Hover mini-toolbar — visible only on hover or when row is selected
+        if ta.has-hover || root.selected: HorizontalLayout {
+            spacing: 2px;
+            alignment: center;
+            padding-right: Theme.space-1;
+
+            IconButton {
+                icon: Icons.copy;
+                style: "ghost";
+                clicked => { root.copy(); }
+            }
+
+            IconButton {
+                icon: root.item.pinned ? Icons.pin-off : Icons.pin;
+                style: "ghost";
+                clicked => { root.pin(); }
+            }
+
+            IconButton {
+                icon: Icons.trash-2;
+                style: "danger";
+                clicked => { root.delete(); }
+            }
+        }
+    }
+
+    // Full-row click area (behind mini-toolbar)
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SkeletonRow — loading placeholder row (private)
+// ---------------------------------------------------------------------------
+component SkeletonRow inherits Rectangle {
+    height: 62px;
+    background: transparent;
+
+    // Bottom hairline
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.border-subtle;
+    }
+
+    HorizontalLayout {
+        padding-left: Theme.row-padding-h;
+        padding-right: Theme.row-padding-h;
+        padding-top: 0px;
+        padding-bottom: 0px;
+        spacing: Theme.space-2;
+        alignment: center;
+
+        // Kind icon placeholder
+        Rectangle {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            background: Theme.border-regular;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            spacing: 6px;
+
+            // Snippet placeholder bar
+            Rectangle {
+                height: 12px;
+                border-radius: 4px;
+                background: Theme.border-regular;
+                // Vary width per row via a fixed fraction for visual rhythm
+            }
+
+            // Metadata placeholder bar (shorter)
+            Rectangle {
+                height: 9px;
+                width: 96px;
+                border-radius: 3px;
+                background: Theme.surface-elevated;
+            }
+        }
+    }
+}
