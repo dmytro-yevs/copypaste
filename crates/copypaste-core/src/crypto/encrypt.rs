@@ -194,6 +194,9 @@ pub fn decrypt_item_by_version(
 /// Equivalent to `encrypt_item_with_aad(plaintext, key, &[])`. New call
 /// sites SHOULD use `encrypt_item_with_aad` and pass an AAD bound to
 /// the row's `(item_id, schema_version)` — see `build_item_aad`.
+#[deprecated(
+    note = "Use encrypt_item_with_aad to bind AAD context. Empty-AAD allows replay/swap attacks."
+)]
 pub fn encrypt_item(
     plaintext: &[u8],
     key: &[u8; 32],
@@ -206,6 +209,9 @@ pub fn encrypt_item(
 /// Equivalent to `decrypt_item_with_aad(ciphertext, nonce, key, &[])`.
 /// For ciphertexts produced by `encrypt_item_with_aad` with non-empty
 /// AAD, call `decrypt_item_with_aad` with the matching AAD.
+#[deprecated(
+    note = "Use decrypt_item_with_aad to bind AAD context. Empty-AAD allows replay/swap attacks."
+)]
 pub fn decrypt_item(
     ciphertext: &[u8],
     nonce: &[u8; NONCE_SIZE],

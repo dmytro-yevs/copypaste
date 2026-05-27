@@ -9,10 +9,11 @@ pub mod storage;
 pub use config::AppConfig;
 pub use crypto::chunks::{decrypt_chunks, encrypt_chunks, ChunkError, EncryptedChunk};
 pub use crypto::encrypt::{
-    build_item_aad, build_item_aad_v2, decrypt_item, decrypt_item_by_version,
-    decrypt_item_with_aad, encrypt_item, encrypt_item_with_aad, EncryptError, AAD_SCHEMA_VERSION,
-    AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
+    build_item_aad, build_item_aad_v2, decrypt_item_by_version, decrypt_item_with_aad,
+    encrypt_item_with_aad, EncryptError, AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
+#[allow(deprecated)]
+pub use crypto::encrypt::{decrypt_item, encrypt_item};
 pub use crypto::{
     derive_storage_key_v1, derive_storage_key_v2, derive_sync_key_v2, derive_telemetry_key_v2,
     derive_v2, DeviceKeypair, KeyError, HKDF_VERSION,

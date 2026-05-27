@@ -172,6 +172,9 @@ impl DeviceKeypair {
     /// `copypaste-daemon::platform::macos`) keep compiling unchanged. A
     /// follow-up patch should migrate every caller and either delete this
     /// method or formally `#[deprecated]` it.
+    #[deprecated(
+        note = "use secret_key_bytes_zeroizing — plain [u8;32] leaks key material on stack/heap reallocation (audit MED #3)"
+    )]
     pub fn secret_key_bytes(&self) -> [u8; 32] {
         // Use a `Zeroizing` buffer for the intermediate copy so the
         // x25519_dalek-allocated bytes are scrubbed when this function
@@ -303,6 +306,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn keypair_roundtrips_through_bytes() {
         let kp = DeviceKeypair::generate();
         let secret_bytes = kp.secret_key_bytes();
@@ -314,6 +318,7 @@ mod tests {
     /// the plain accessor — it's a wrap-not-replace operation. Callers
     /// who switch should not observe a behavioural change.
     #[test]
+    #[allow(deprecated)]
     fn secret_key_bytes_zeroizing_matches_plain_accessor() {
         let kp = DeviceKeypair::generate();
         let plain = kp.secret_key_bytes();
@@ -331,6 +336,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn local_enc_key_is_deterministic_across_keypair_instances() {
         let kp = DeviceKeypair::generate();
         let secret = kp.secret_key_bytes();
@@ -527,6 +533,7 @@ mod tests {
     /// the free function exists only as a re-export for the migration sweep
     /// and must NOT subtly diverge from the legacy path.
     #[test]
+    #[allow(deprecated)]
     fn derive_storage_key_v1_matches_local_enc_key() {
         let kp = DeviceKeypair::generate();
         let secret = kp.secret_key_bytes();

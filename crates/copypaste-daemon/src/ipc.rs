@@ -27,6 +27,13 @@ const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 /// materialize huge result sets in a single response.
 const MAX_PAGE: usize = 1000;
 
+/// Per-item ceiling on `import` payloads (decoded `content_bytes_b64` length).
+/// Larger items are rejected with `invalid_argument` BEFORE storage so a
+/// malformed or hostile export cannot exhaust memory / disk on the daemon.
+/// 4 MiB matches the practical upper bound for clipboard text/image payloads
+/// we round-trip today; bumping this requires re-evaluating SQLite blob limits.
+const MAX_IMPORT_ITEM_BYTES: usize = 4 * 1024 * 1024;
+
 /// Error code returned when an IPC method is called before the server's
 /// backing state (database, etc.) has finished initializing. Clients should
 /// back off and retry rather than treat this as a hard failure.
@@ -1120,8 +1127,8 @@ impl IpcServer {
                         );
                     }
                 };
-                let raw_items: Vec<serde_json::Value> = match items_value.as_array() {
-                    Some(a) => a.clone(),
+                let raw_items: &[serde_json::Value] = match items_value.as_array() {
+                    Some(a) => a.as_slice(),
                     None => {
                         return Response::err_with_code(
                             req.id,
@@ -1175,6 +1182,22 @@ impl IpcServer {
                             );
                         }
                     };
+                    // Audit MED #4: enforce per-item ceiling BEFORE storage so
+                    // a hostile/corrupt export cannot exhaust daemon memory or
+                    // SQLite blob limits. Reject the whole import on first
+                    // oversized item — matches the "malformed entry aborts
+                    // the batch" contract documented above.
+                    if bytes.len() > MAX_IMPORT_ITEM_BYTES {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            format!(
+                                "item[{idx}]: decoded payload {} bytes exceeds max {} bytes",
+                                bytes.len(),
+                                MAX_IMPORT_ITEM_BYTES
+                            ),
+                        );
+                    }
                     let created_at_ms = match raw.get("created_at_ms").and_then(|v| v.as_i64()) {
                         Some(n) => n,
                         None => {
