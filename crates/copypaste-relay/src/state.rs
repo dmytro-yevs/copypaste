@@ -312,17 +312,28 @@ impl RelayStore {
 
     /// Verify that `token` matches the bearer token for `device_id`.
     /// Uses constant-time comparison to prevent timing-based token oracle attacks.
+    ///
+    /// M11 (audit 2026-05-27): also enforces `expires_at_unix`. An expired
+    /// token returns `Unauthorized` (NOT a distinct error) so an attacker
+    /// cannot distinguish "wrong token" from "expired token". The equality
+    /// check still runs before the expiry branch so the constant-time
+    /// comparison path is unconditional.
     pub fn verify_token(&self, device_id: &str, token: &str) -> Result<(), RelayError> {
         let record = self
             .devices
             .get(device_id)
             .ok_or(RelayError::DeviceNotFound)?;
-        if record
+        let token_ok: bool = record
             .bearer_token
             .as_bytes()
             .ct_eq(token.as_bytes())
-            .into()
-        {
+            .into();
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let not_expired = now_unix <= record.expires_at_unix;
+        if token_ok && not_expired {
             Ok(())
         } else {
             Err(RelayError::Unauthorized)
@@ -640,6 +651,22 @@ mod tests {
         let err = store
             .verify_token(&device_a_id(), "badtoken00000000000000000000000")
             .unwrap_err();
+        assert!(matches!(err, RelayError::Unauthorized));
+    }
+
+    #[test]
+    fn verify_token_expired_is_unauthorized() {
+        // M11: an expired token must return Unauthorized (same variant as
+        // a wrong token) so an attacker cannot distinguish the two cases.
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        // Forcibly expire the device's token by rewinding `expires_at_unix`.
+        let record = store.devices.get_mut(&device_a_id()).unwrap();
+        let token = record.bearer_token.clone();
+        record.expires_at_unix = 1; // 1970-01-01
+        let err = store.verify_token(&device_a_id(), &token).unwrap_err();
         assert!(matches!(err, RelayError::Unauthorized));
     }
 

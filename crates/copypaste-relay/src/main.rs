@@ -1,3 +1,11 @@
+// M10 (audit 2026-05-27): enforce async-safe locking crate-wide.
+// `std::sync::Mutex` guards must never be held across `.await` points —
+// doing so can deadlock the tokio runtime. This lint is denied here
+// rather than switching to `tokio::sync::Mutex` (12 lock sites, mostly
+// short critical sections) so the smaller blast radius is preferred and
+// any future violation fails the build.
+#![deny(clippy::await_holding_lock)]
+
 mod api;
 mod auth;
 mod config;
