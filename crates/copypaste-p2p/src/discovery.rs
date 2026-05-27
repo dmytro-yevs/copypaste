@@ -237,14 +237,32 @@ impl DiscoveryService {
             (TXT_DEVICE_NAME, reg.device_name.as_str()),
         ];
 
-        let service_info = ServiceInfo::new(
-            SERVICE_TYPE,
-            &instance_name,
-            &hostname,
-            (), // let mdns-sd discover addresses from all interfaces
-            reg.port,
-            &properties[..],
-        )
+        // Wave F.L12 — advertise only on real LAN interfaces, filtering out
+        // loopback / virtual / down NICs. When the host has no usable
+        // interface (or enumeration failed) we fall back to `()` so `mdns-sd`
+        // auto-detects, preserving the previous behaviour rather than going
+        // silent.
+        let usable_addrs = crate::interfaces::usable_advertise_addrs();
+        let service_info = if usable_addrs.is_empty() {
+            warn!("no usable LAN interface found; letting mdns-sd auto-detect addresses");
+            ServiceInfo::new(
+                SERVICE_TYPE,
+                &instance_name,
+                &hostname,
+                (),
+                reg.port,
+                &properties[..],
+            )
+        } else {
+            ServiceInfo::new(
+                SERVICE_TYPE,
+                &instance_name,
+                &hostname,
+                &usable_addrs[..],
+                reg.port,
+                &properties[..],
+            )
+        }
         .map_err(|e| DiscoveryError::Register(e.to_string()))?;
 
         let fullname = service_info.get_fullname().to_string();

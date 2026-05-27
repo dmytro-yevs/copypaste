@@ -51,6 +51,7 @@
 pub mod cert;
 pub mod discovery;
 pub mod error;
+pub mod interfaces;
 pub mod pake;
 pub mod rate_limit;
 pub mod transport;
