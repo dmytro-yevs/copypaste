@@ -31,7 +31,16 @@ const MAX_PUSH_ITEMS_PER_DEVICE: usize = 500;
 /// — the sender is never told a recipient inbox is full, matching the existing
 /// hard-cap eviction behaviour (see the relay v2 quotas plan).
 fn effective_history_cap(tier: Tier) -> usize {
-    MAX_PUSH_ITEMS_PER_DEVICE.min(tier.max_history_items().unwrap_or(usize::MAX))
+    history_cap_for_limit(tier.max_history_items())
+}
+
+/// Core of [`effective_history_cap`]: clamp a tier's optional `max_history_items`
+/// against the absolute hard cap. `None` (unlimited tier history) yields the
+/// hard cap; a limit tighter than the hard cap wins. Split out so the
+/// clamp can be unit-tested with a genuinely sub-hard-cap limit (no live tier
+/// currently defines one — see `effective_history_cap_is_tier_aware`).
+fn history_cap_for_limit(tier_limit: Option<usize>) -> usize {
+    MAX_PUSH_ITEMS_PER_DEVICE.min(tier_limit.unwrap_or(usize::MAX))
 }
 
 /// Maximum number of devices a single logical "account" can register (free tier).
@@ -63,6 +72,11 @@ pub struct DeviceRecord {
     /// Unix timestamp (seconds since epoch) when the token expires (1 year).
     pub expires_at_unix: i64,
     /// Subscription tier — determines device count and history quotas.
+    // Read by `push_item` via the per-device tier lookup, but live
+    // registration always stores `Tier::Free` today (token-/SQLite-driven tier
+    // selection is not wired to the in-memory store yet — see the relay v2
+    // quotas plan), so the compiler sees no production read and reports it as
+    // dead. Kept for the forthcoming tier-wiring.
     #[allow(dead_code)]
     pub tier: Tier,
 }
@@ -427,16 +441,13 @@ impl RelayStore {
         // `max_history_items`). Enforced as a silent prune of the oldest
         // items rather than rejecting the push — the fan-out sender cannot
         // know which recipient inboxes are full (see the relay v2 quotas
-        // plan). `check_history_quota` reports whether the inbox is now at or
-        // over the tier history limit; the absolute hard cap is folded in via
-        // `effective_history_cap` so memory stays bounded for unlimited tiers.
-        let over_tier_quota = quota::check_history_quota(tier, inbox.len()).is_err();
+        // plan). `effective_history_cap` already folds the tier history limit
+        // into the absolute hard cap, so this single guard subsumes the tier
+        // quota check for every current tier (Free's 1000 limit is looser than
+        // the 500 hard cap, Pro is unlimited).
         let cap = effective_history_cap(tier);
-        if over_tier_quota || inbox.len() > cap {
-            let overflow = inbox.len().saturating_sub(cap);
-            if overflow > 0 {
-                inbox.drain(..overflow);
-            }
+        if inbox.len() > cap {
+            inbox.drain(..inbox.len() - cap);
         }
 
         // Increment Prometheus counter — items_total tracks all accepted

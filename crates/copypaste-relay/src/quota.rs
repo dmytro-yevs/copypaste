@@ -53,6 +53,13 @@ pub enum QuotaViolation {
     /// The uploaded item exceeds the size limit for its content type.
     ItemTooLarge { limit_bytes: usize },
     /// The device inbox has reached its maximum history count.
+    //
+    // Constructed only by `check_history_quota`, which `push_item` no longer
+    // calls: history enforcement is now a silent prune clamped to
+    // `effective_history_cap` (the tier limit folded into the hard cap), so no
+    // production path returns this variant. Retained as part of the public
+    // quota model and exercised by `check_history_quota`'s unit tests.
+    #[allow(dead_code)]
     HistoryFull { limit: usize },
 }
 
@@ -89,6 +96,11 @@ pub fn check_item_size(
 /// Check whether the device inbox still has capacity for one more item.
 ///
 /// `current_count` is the number of items already in the inbox.
+//
+// No production caller: `push_item` enforces history via a silent prune
+// clamped to `effective_history_cap` rather than rejecting at the tier limit.
+// Kept as part of the public quota model and covered by the tests below.
+#[allow(dead_code)]
 pub fn check_history_quota(tier: Tier, current_count: usize) -> Result<(), QuotaViolation> {
     if let Some(limit) = tier.max_history_items() {
         if current_count >= limit {
