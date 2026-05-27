@@ -340,3 +340,84 @@ async fn test_delete_nonexistent_item_is_404() {
     let del_status = delete_req(app, &format!("/devices/{DEVICE_A}/items/9999"), &a_token).await;
     assert_eq!(del_status, StatusCode::NOT_FOUND);
 }
+
+// ---------------------------------------------------------------------------
+// Item-size quota (plan: 413 ITEM_SIZE_EXCEEDED, checked at the HTTP layer)
+// ---------------------------------------------------------------------------
+
+/// A text item whose decoded ciphertext exceeds the Free-tier 1 MiB limit must
+/// be rejected with HTTP 413 and the `ITEM_SIZE_EXCEEDED` error code — even
+/// though it is well under the 10 MiB `max_item_bytes` body limit.
+#[tokio::test]
+async fn test_push_oversized_text_item_is_413_item_size_exceeded() {
+    let (app, state) = make_app();
+    let a_token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+            .unwrap()
+            .0
+    };
+
+    // 1 MiB + 1 byte of decoded payload — over the Free text limit (1 MiB),
+    // under the 10 MiB body/max_item_bytes limit.
+    let oversized = B64.encode(vec![0u8; 1024 * 1024 + 1]);
+    let (status, body) = post_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&a_token),
+        json!({"content_type": "text", "content_b64": oversized, "wall_time": 1000}),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(body["code"], "ITEM_SIZE_EXCEEDED");
+}
+
+/// A text item at exactly the 1 MiB Free-tier limit must be accepted.
+#[tokio::test]
+async fn test_push_text_item_at_limit_is_accepted() {
+    let (app, state) = make_app();
+    let a_token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+            .unwrap()
+            .0
+    };
+
+    // Exactly 1 MiB of decoded payload — at the limit, must pass.
+    let at_limit = B64.encode(vec![0u8; 1024 * 1024]);
+    let (status, _body) = post_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&a_token),
+        json!({"content_type": "text", "content_b64": at_limit, "wall_time": 1000}),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+}
+
+/// An image item up to the 10 MiB Free-tier limit must be accepted even though
+/// it far exceeds the 1 MiB text limit — the size check is content-type aware.
+#[tokio::test]
+async fn test_push_large_image_under_image_limit_is_accepted() {
+    let (app, state) = make_app();
+    let a_token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+            .unwrap()
+            .0
+    };
+
+    // 2 MiB image: over the 1 MiB text limit, under the 10 MiB image limit.
+    let image = B64.encode(vec![0u8; 2 * 1024 * 1024]);
+    let (status, _body) = post_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&a_token),
+        json!({"content_type": "image", "content_b64": image, "wall_time": 1000}),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::CREATED);
+}

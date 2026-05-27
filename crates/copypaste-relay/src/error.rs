@@ -21,10 +21,15 @@ pub enum RelayError {
     #[error("device quota exceeded: maximum {limit} devices allowed for this tier")]
     DeviceQuotaExceeded { limit: usize },
     /// Returned when a clipboard item exceeds the size limit for its content type.
-    #[allow(dead_code)]
     #[error("item size exceeds the {limit_bytes}-byte limit for this content type")]
     ItemSizeExceeded { limit_bytes: usize },
     /// Returned when a device inbox has reached its maximum history count.
+    ///
+    /// History-quota enforcement is currently a *silent drop* (the fan-out
+    /// sender cannot know which recipient inboxes are full — see the relay v2
+    /// quotas plan), so this error is never returned over the wire today. It
+    /// is retained for the planned future per-recipient error path and is
+    /// covered by `error.rs` status-mapping tests.
     #[allow(dead_code)]
     #[error("history quota exceeded: maximum {limit} items allowed for this tier")]
     HistoryQuotaExceeded { limit: usize },
