@@ -15,6 +15,8 @@
 
 pub mod autostart;
 pub mod fingerprint;
+pub mod history_model;
+pub mod ipc_client;
 pub mod sensitive_helpers;
 pub mod ui_prefs;
 pub mod settings;
