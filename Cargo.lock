@@ -1376,6 +1376,7 @@ version = "0.3.2"
 dependencies = [
  "anyhow",
  "base64",
+ "bytes",
  "copypaste-core",
  "copypaste-p2p",
  "copypaste-supabase",
@@ -1383,6 +1384,7 @@ dependencies = [
  "core-foundation 0.9.4",
  "core-foundation-sys",
  "dirs 5.0.1",
+ "futures-util",
  "hex",
  "home",
  "mdns-sd",

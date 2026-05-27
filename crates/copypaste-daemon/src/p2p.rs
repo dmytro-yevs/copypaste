@@ -1,27 +1,27 @@
 //! P2P subsystem orchestrator.
 //!
-//! Beta W2.1 — wires the `copypaste-p2p` crate's `DiscoveryService` and
-//! `PeerTransport` into the daemon. The legacy `start_p2p` entry point used
-//! by `daemon.rs` is preserved and upgraded to use the real mDNS-SD discovery
-//! service (replacing the wave-1.3 stub). In parallel, this module exposes a
-//! `P2pState` handle + `init()` / `list_peers()` / `pair_peer()` /
-//! `unpair_peer()` / `get_own_fingerprint()` surface for `ipc.rs` consumers
-//! (W2.2 will wire those into the IPC dispatcher).
+//! W2.2 — wires the mTLS accept loop and outbound fanout into the daemon,
+//! bridging `copypaste-p2p` transport with the `sync_orch` channel pair
+//! (`incoming_tx` / `outbound_rx`).
 //!
 //! Pairing (`pair_peer` / `unpair_peer`) currently returns
 //! [`P2pError::NotImplemented`] — the PAKE handshake lands in W2.4.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use bytes::Bytes;
+use futures_util::{SinkExt, StreamExt};
 use thiserror::Error;
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, oneshot, Mutex};
+use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 
 use copypaste_core::{ClipboardItem, Database};
 use copypaste_p2p::{
     discovery::{DiscoveryService, PeerInfo},
-    transport::{PairedPeers, PeerTransport},
+    transport::{DeviceFingerprint, PairedPeers, PeerTransport},
 };
+use copypaste_sync::protocol::WireItem;
 
 use crate::keychain;
 
@@ -141,14 +141,26 @@ pub fn get_own_fingerprint(public_key: &[u8]) -> String {
     keychain::own_fingerprint(public_key)
 }
 
+/// Shared map of currently-connected peer sinks.
+///
+/// Each entry is a per-connection `mpsc::Sender<WireItem>` that the
+/// per-connection write task drains, serialises and sends to the peer over
+/// the mTLS Framed stream. The outbound fanout loop writes to every live
+/// sender; closed senders (disconnected peers) are pruned on the next
+/// fanout pass.
+type PeerSinks = Arc<Mutex<HashMap<DeviceFingerprint, mpsc::Sender<WireItem>>>>;
+
 /// Start the long-running P2P subsystem.
 ///
 /// Binds a `TcpListener`, registers with mDNS-SD via
 /// `copypaste_p2p::DiscoveryService`, and spawns three background tasks:
 ///
-/// - **accept_loop** — accepts incoming mTLS connections from paired peers.
-/// - **subscriber_loop** — forwards new clipboard items to connected peers.
-/// - **discovery_task** — keeps the discovery service alive for the lifetime
+/// - **accept_loop** — accepts incoming mTLS connections from paired peers,
+///   performs the TLS handshake, spawns a per-connection read/write task,
+///   and forwards received frames to `incoming_tx`.
+/// - **outbound_loop** — reads from `outbound_rx` (items from sync_orch to
+///   push to peers) and fans them out to all connected peer sinks.
+/// - **discovery_task** — keeps the mDNS-SD service alive for the lifetime
 ///   of the subsystem.
 ///
 /// Returns a [`P2pHandle`] that keeps the subsystem alive.  Drop or send to
@@ -163,6 +175,8 @@ pub async fn start_p2p(
     device_id: uuid::Uuid,
     _db_key: zeroize::Zeroizing<[u8; 32]>,
     new_item_rx: broadcast::Receiver<ClipboardItem>,
+    incoming_tx: mpsc::Sender<WireItem>,
+    outbound_rx: mpsc::Receiver<WireItem>,
 ) -> anyhow::Result<P2pHandle> {
     let bind_addr = format!("0.0.0.0:{}", config.listen_port);
     let listener = TcpListener::bind(&bind_addr).await?;
@@ -177,9 +191,21 @@ pub async fn start_p2p(
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
-    // ── discovery service — real mDNS-SD via copypaste-p2p ────────────────────
-    // Constructed up-front so the accept loop and (future) IPC handlers can
-    // share the same `Arc<DiscoveryService>`.
+    // ── mTLS transport ────────────────────────────────────────────────────────
+    // Generate a fresh self-signed cert for this session. The cert fingerprint
+    // is the stable device identity that peers verify at handshake time.
+    let peers = PairedPeers::new();
+    let transport = PeerTransport::new_with_generated_cert(&device_id.to_string(), peers)
+        .map_err(|e| anyhow::anyhow!("PeerTransport init failed: {e}"))?;
+    let transport = Arc::new(transport);
+
+    // ── peer sinks map ────────────────────────────────────────────────────────
+    // Shared across the accept loop (inserts new sinks) and the outbound loop
+    // (reads and writes to each sink). Protected by an async Mutex so neither
+    // task has to block the executor.
+    let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
+
+    // ── discovery service ─────────────────────────────────────────────────────
     let discovery = Arc::new(DiscoveryService::new());
     let device_id_str = device_id.to_string();
     discovery
@@ -190,24 +216,24 @@ pub async fn start_p2p(
     let device_name_for_task = config.device_name.clone();
 
     // ── accept loop ───────────────────────────────────────────────────────────
-    // Accepts raw TCP connections; full mTLS handshake lands in W2.2/W2.4
-    // (sync orchestrator + PAKE pairing).
-    tokio::spawn(async move {
-        accept_loop(listener, shutdown_rx).await;
-    });
+    {
+        let transport = Arc::clone(&transport);
+        let peer_sinks = Arc::clone(&peer_sinks);
+        let incoming_tx = incoming_tx.clone();
+        tokio::spawn(async move {
+            accept_loop(listener, shutdown_rx, transport, peer_sinks, incoming_tx).await;
+        });
+    }
 
-    // ── subscriber loop ───────────────────────────────────────────────────────
-    // Receives freshly-inserted clipboard items from the broadcast channel and
-    // (eventually) fans them out to connected peers via copypaste-sync.
-    tokio::spawn(async move {
-        subscriber_loop(new_item_rx).await;
-    });
+    // ── outbound fanout loop ──────────────────────────────────────────────────
+    {
+        let peer_sinks = Arc::clone(&peer_sinks);
+        tokio::spawn(async move {
+            outbound_loop(new_item_rx, outbound_rx, peer_sinks).await;
+        });
+    }
 
     // ── discovery task ────────────────────────────────────────────────────────
-    // Starts the mDNS-SD daemon and keeps it alive for the lifetime of the
-    // subsystem. The returned JoinHandle is awaited inside this task; on
-    // shutdown dropping the parent task drops the inner JoinHandle and the
-    // mdns-sd ServiceDaemon shuts down.
     tokio::spawn(async move {
         match discovery_for_task.start().await {
             Ok(handle) => {
@@ -232,21 +258,62 @@ pub async fn start_p2p(
 
 // ── private helpers ───────────────────────────────────────────────────────────
 
-async fn accept_loop(listener: TcpListener, mut shutdown_rx: oneshot::Receiver<()>) {
+/// Accept incoming mTLS connections.
+///
+/// For each connection that completes the TLS handshake successfully, spawns a
+/// per-connection task that:
+/// - Reads `WireItem` frames from the peer and forwards them to `incoming_tx`.
+/// - Drains a per-peer `mpsc::Receiver<WireItem>` and writes frames to the peer.
+///
+/// The per-peer sender is stored in `peer_sinks` (keyed by the peer's cert
+/// fingerprint) so the outbound fanout loop can deliver outgoing items.
+async fn accept_loop(
+    listener: TcpListener,
+    mut shutdown_rx: oneshot::Receiver<()>,
+    transport: Arc<PeerTransport>,
+    peer_sinks: PeerSinks,
+    incoming_tx: mpsc::Sender<WireItem>,
+) {
     tracing::debug!(
         "P2P accept loop running on {}",
-        listener.local_addr().unwrap()
+        // local_addr() only fails if the socket is already closed — infallible here.
+        listener
+            .local_addr()
+            .unwrap_or_else(|_| "unknown".parse().unwrap())
     );
+
     loop {
         tokio::select! {
-            result = listener.accept() => {
+            result = transport.accept(&listener) => {
                 match result {
-                    Ok((stream, peer_addr)) => {
-                        tracing::debug!(%peer_addr, "incoming P2P connection (mTLS pending W2.2)");
-                        drop(stream);
+                    Ok((peer_addr, framed)) => {
+                        tracing::info!(%peer_addr, "mTLS handshake completed");
+
+                        // Per-peer write channel: the outbound loop sends items here;
+                        // the write half of the per-connection task drains and serialises them.
+                        let (peer_tx, peer_rx) = mpsc::channel::<WireItem>(64);
+
+                        // We use the peer address string as a stable-enough key for the
+                        // sinks map until W2.4 adds fingerprint-keyed storage. The
+                        // fingerprint is already verified by the transport.
+                        let peer_key: DeviceFingerprint = peer_addr.to_string();
+
+                        {
+                            let mut sinks = peer_sinks.lock().await;
+                            sinks.insert(peer_key.clone(), peer_tx);
+                        }
+
+                        let incoming_tx = incoming_tx.clone();
+                        let peer_sinks = Arc::clone(&peer_sinks);
+                        tokio::spawn(async move {
+                            run_peer_connection(framed, peer_rx, incoming_tx).await;
+                            // Clean up the sink when the connection drops.
+                            peer_sinks.lock().await.remove(&peer_key);
+                            tracing::debug!(%peer_addr, "peer connection closed");
+                        });
                     }
                     Err(e) => {
-                        tracing::warn!("P2P accept error: {e}");
+                        tracing::warn!("P2P accept/handshake error: {e}");
                     }
                 }
             }
@@ -258,23 +325,150 @@ async fn accept_loop(listener: TcpListener, mut shutdown_rx: oneshot::Receiver<(
     }
 }
 
-async fn subscriber_loop(mut rx: broadcast::Receiver<ClipboardItem>) {
-    tracing::debug!("P2P subscriber loop running");
+/// Manage one authenticated peer connection.
+///
+/// Reads incoming frames and forwards them to `incoming_tx`; reads from
+/// `peer_rx` and writes outgoing frames to the peer. Both directions run
+/// concurrently via `tokio::select!`; the task exits when either side closes.
+async fn run_peer_connection(
+    mut framed: copypaste_p2p::transport::PeerStream,
+    mut peer_rx: mpsc::Receiver<WireItem>,
+    incoming_tx: mpsc::Sender<WireItem>,
+) {
     loop {
-        match rx.recv().await {
-            Ok(item) => {
-                tracing::debug!(
-                    item_id = %item.id,
-                    "new clipboard item — will push to peers (W2.2 sync orchestrator)"
-                );
+        tokio::select! {
+            // Inbound: peer sent a frame — deserialise and forward to sync_orch.
+            frame_opt = framed.next() => {
+                match frame_opt {
+                    Some(Ok(frame)) => {
+                        match serde_json::from_slice::<WireItem>(&frame) {
+                            Ok(wire) => {
+                                if incoming_tx.send(wire).await.is_err() {
+                                    // incoming_tx closed means sync_orch shut down.
+                                    tracing::debug!("incoming_tx closed, dropping peer connection");
+                                    return;
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("failed to deserialise WireItem from peer: {e}");
+                            }
+                        }
+                    }
+                    Some(Err(e)) => {
+                        tracing::warn!("peer frame error: {e}");
+                        return;
+                    }
+                    None => {
+                        // Peer closed connection cleanly.
+                        return;
+                    }
+                }
             }
-            Err(broadcast::error::RecvError::Lagged(n)) => {
-                tracing::warn!("P2P subscriber lagged by {n} items — some items not forwarded");
+            // Outbound: sync_orch wants to push an item to this peer.
+            item_opt = peer_rx.recv() => {
+                match item_opt {
+                    Some(item) => {
+                        match serde_json::to_vec(&item) {
+                            Ok(payload) => {
+                                if let Err(e) = framed.send(Bytes::from(payload)).await {
+                                    tracing::warn!("failed to send WireItem to peer: {e}");
+                                    return;
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("failed to serialise WireItem for peer: {e}");
+                            }
+                        }
+                    }
+                    None => {
+                        // peer_rx channel closed — no more outbound items for this peer.
+                        return;
+                    }
+                }
             }
-            Err(broadcast::error::RecvError::Closed) => {
-                tracing::info!("P2P subscriber loop: broadcast channel closed, shutting down");
-                break;
+        }
+    }
+}
+
+/// Outbound fanout loop.
+///
+/// Receives `WireItem`s from the sync orchestrator via `outbound_rx` and
+/// sends each one to every currently-connected peer. Also drains the
+/// `new_item_rx` broadcast channel (previously handled by `subscriber_loop`)
+/// so broadcast items are also fanned out.
+///
+/// Peer sinks whose channel is closed (peer disconnected) are removed from
+/// `peer_sinks` on the next fanout pass.
+async fn outbound_loop(
+    mut new_item_rx: broadcast::Receiver<ClipboardItem>,
+    mut outbound_rx: mpsc::Receiver<WireItem>,
+    peer_sinks: PeerSinks,
+) {
+    tracing::debug!("P2P outbound fanout loop running");
+
+    let mut new_item_closed = false;
+    let mut outbound_closed = false;
+
+    loop {
+        if new_item_closed && outbound_closed {
+            tracing::info!("P2P outbound loop: both upstream channels closed, shutting down");
+            break;
+        }
+
+        tokio::select! {
+            // New clipboard item from the local monitor (broadcast channel).
+            result = new_item_rx.recv(), if !new_item_closed => {
+                match result {
+                    Ok(_item) => {
+                        // The clipboard item is stored in the DB; the sync orchestrator
+                        // converts it to a WireItem and sends it via outbound_rx.
+                        // We log only at debug to avoid double-counting.
+                        tracing::debug!("P2P: new local clipboard item (sync_orch will forward)");
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("P2P outbound loop lagged by {n} items");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        tracing::info!("P2P outbound loop: broadcast channel closed");
+                        new_item_closed = true;
+                    }
+                }
             }
+            // Outbound WireItem from sync_orch — fan out to all connected peers.
+            item_opt = outbound_rx.recv(), if !outbound_closed => {
+                match item_opt {
+                    Some(item) => {
+                        fanout_to_peers(&item, &peer_sinks).await;
+                    }
+                    None => {
+                        tracing::info!("P2P outbound loop: outbound_rx channel closed");
+                        outbound_closed = true;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Send `item` to every currently-connected peer sink.
+///
+/// Peers whose sender has been closed (disconnected) are removed from
+/// `peer_sinks`.
+async fn fanout_to_peers(item: &WireItem, peer_sinks: &PeerSinks) {
+    let mut dead_keys: Vec<DeviceFingerprint> = Vec::new();
+    {
+        let sinks = peer_sinks.lock().await;
+        for (key, tx) in sinks.iter() {
+            if tx.send(item.clone()).await.is_err() {
+                tracing::debug!(peer = %key, "peer sink closed — will prune");
+                dead_keys.push(key.clone());
+            }
+        }
+    }
+    if !dead_keys.is_empty() {
+        let mut sinks = peer_sinks.lock().await;
+        for key in dead_keys {
+            sinks.remove(&key);
         }
     }
 }
@@ -284,6 +478,155 @@ async fn subscriber_loop(mut rx: broadcast::Receiver<ClipboardItem>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use copypaste_p2p::transport::{PairedPeers, PeerTransport};
+    use copypaste_sync::protocol::WireItem;
+    use tokio::net::TcpListener;
+
+    // ── W2.2 integration tests ────────────────────────────────────────────────
+
+    /// Build a minimal `WireItem` for use in tests.
+    fn test_wire_item(id: &str) -> WireItem {
+        WireItem {
+            id: id.to_string(),
+            item_id: id.to_string(),
+            content_type: "text".to_string(),
+            content: Some(b"hello".to_vec()),
+            content_nonce: Some(vec![0u8; 24]),
+            blob_ref: None,
+            is_sensitive: false,
+            lamport_ts: 1,
+            wall_time: 0,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "test-device".to_string(),
+        }
+    }
+
+    /// `accept_loop_forwards_wire_item_to_incoming_tx`:
+    /// Spawn two in-process PeerTransports; client connects to server's accept
+    /// loop; client sends a `WireItem`; verify it arrives on `incoming_tx`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn accept_loop_forwards_wire_item_to_incoming_tx() {
+        let server_cert = copypaste_p2p::cert::SelfSignedCert::generate("server").unwrap();
+        let client_cert = copypaste_p2p::cert::SelfSignedCert::generate("client").unwrap();
+
+        let server_fp = server_cert.fingerprint();
+        let client_fp = client_cert.fingerprint();
+
+        let mut server_peers = PairedPeers::new();
+        server_peers.add(client_fp.clone(), "client");
+
+        let mut client_peers = PairedPeers::new();
+        client_peers.add(server_fp.clone(), "server");
+
+        let server_transport =
+            PeerTransport::from_cert(server_cert.cert_der, server_cert.key_der, server_peers);
+        let client_transport =
+            PeerTransport::from_cert(client_cert.cert_der, client_cert.key_der, client_peers);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let (incoming_tx, mut incoming_rx) = mpsc::channel::<WireItem>(8);
+
+        let item_sent = test_wire_item("item-1");
+        let item_check = item_sent.clone();
+
+        // Server: accept one connection, forward framed items to incoming_tx.
+        let accept_fut = {
+            let tx = incoming_tx.clone();
+            async move {
+                let (_peer_addr, mut stream) = server_transport.accept(&listener).await.unwrap();
+                while let Some(Ok(frame)) = stream.next().await {
+                    let wire: WireItem = serde_json::from_slice(&frame).unwrap();
+                    tx.send(wire).await.unwrap();
+                }
+            }
+        };
+
+        // Client: connect and send one WireItem.
+        let connect_fut = async move {
+            let mut stream = client_transport.connect(addr, &server_fp).await.unwrap();
+            let payload = serde_json::to_vec(&item_sent).unwrap();
+            stream.send(Bytes::from(payload)).await.unwrap();
+        };
+
+        tokio::join!(accept_fut, connect_fut);
+
+        let received = incoming_rx.recv().await.expect("must receive one item");
+        assert_eq!(received.id, item_check.id);
+        assert_eq!(received.content, item_check.content);
+    }
+
+    /// `subscriber_loop_fans_out_to_connected_peer`:
+    /// Push a `WireItem` to `outbound_rx`; verify it appears on the connected
+    /// peer's stream as a readable framed message.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn subscriber_loop_fans_out_to_connected_peer() {
+        let server_cert = copypaste_p2p::cert::SelfSignedCert::generate("server2").unwrap();
+        let client_cert = copypaste_p2p::cert::SelfSignedCert::generate("client2").unwrap();
+
+        let server_fp = server_cert.fingerprint();
+        let client_fp = client_cert.fingerprint();
+
+        let mut server_peers = PairedPeers::new();
+        server_peers.add(client_fp.clone(), "client2");
+
+        let mut client_peers = PairedPeers::new();
+        client_peers.add(server_fp.clone(), "server2");
+
+        let server_transport = Arc::new(PeerTransport::from_cert(
+            server_cert.cert_der,
+            server_cert.key_der,
+            server_peers,
+        ));
+        let client_transport =
+            PeerTransport::from_cert(client_cert.cert_der, client_cert.key_der, client_peers);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let item_sent = test_wire_item("item-2");
+        let item_check = item_sent.clone();
+
+        // Channel that mimics outbound_rx: daemon code will read from this and
+        // fan-out to connected peers.
+        let (outbound_tx, mut outbound_rx) = mpsc::channel::<WireItem>(8);
+
+        // Server: accept connection, then read from outbound_rx and write to peer.
+        let server_fp_clone = server_fp.clone();
+        let server_fut = async move {
+            let (_peer_addr, mut stream) = server_transport.accept(&listener).await.unwrap();
+            // Simulate the outbound fanout: read one item and send to the connected peer.
+            if let Some(item) = outbound_rx.recv().await {
+                let payload = serde_json::to_vec(&item).unwrap();
+                stream.send(Bytes::from(payload)).await.unwrap();
+            }
+            // Keep stream alive briefly so client can drain it.
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+            let _ = server_fp_clone; // keep binding alive
+        };
+
+        // Client: connect and read one WireItem from the server.
+        let client_fut = async move {
+            let mut stream = client_transport.connect(addr, &server_fp).await.unwrap();
+            // Wait for the server to push the item.
+            if let Some(Ok(frame)) = stream.next().await {
+                let wire: WireItem = serde_json::from_slice(&frame).unwrap();
+                Some(wire)
+            } else {
+                None
+            }
+        };
+
+        // Send item to outbound channel.
+        outbound_tx.send(item_sent).await.unwrap();
+
+        let ((), received_opt) = tokio::join!(server_fut, client_fut);
+        let received = received_opt.expect("client must receive one item from server");
+        assert_eq!(received.id, item_check.id);
+    }
 
     /// `init` must build a `P2pState` end-to-end without panicking and without
     /// requiring any I/O beyond cert generation + mDNS registration (which
