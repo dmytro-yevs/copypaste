@@ -159,63 +159,18 @@ where
             .with_context(|| format!("write {}", dst_plist.display()))?;
     }
 
-    if loaded {
-        // Already loaded but socket ping failed earlier — could be a stale
-        // launchd entry. Skip bootstrap to avoid a spurious error 37; just
-        // fall through to the IPC retry loop below.
-    } else {
-        // Step 3b: re-enable the label before bootstrap. A prior
-        // `launchctl bootout` leaves the label on the *disabled* list, so
-        // the subsequent `bootstrap` would fail with error 5 ("Input/output
-        // error"). `enable` is idempotent — safe to call every time.
-        let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
-        let _ = runner.run("launchctl", &["enable".into(), target.clone().into()])?;
-
-        // Step 3c: launchctl bootstrap gui/<uid> <plist>.
-        let domain = format!("gui/{uid}");
-        let out = runner.run(
-            "launchctl",
-            &[
-                "bootstrap".into(),
-                domain.clone().into(),
-                dst_plist.clone().into_os_string(),
-            ],
-        )?;
-        if !out.success {
-            // After the explicit `enable` above, "already loaded" responses are
-            // the only benign failures. Error 37 = ALREADY_BOOTSTRAPPED is the
-            // canonical code; error 5 ("Input/output error") historically also
-            // meant "already loaded" on older macOS but is more commonly a real
-            // failure (e.g. plist invalid) — treat 37 (and explicit text) as
-            // benign, 5 as a real bootstrap failure with an actionable hint.
-            let stderr_raw = out.stderr.trim();
-            let stderr_lc = stderr_raw.to_lowercase();
-            let benign_already_loaded = stderr_lc.contains("service already loaded")
-                || stderr_lc.contains("already bootstrapped")
-                || stderr_raw.contains(": 37:")
-                || stderr_raw.contains("Bootstrap failed: 37");
-            if !benign_already_loaded {
-                // Error 5: most often means the label is still on launchd's
-                // disabled list (despite our enable attempt) or the plist is
-                // structurally invalid. Surface an actionable message.
-                let hint =
-                    if stderr_raw.contains(": 5:") || stderr_raw.contains("Input/output error") {
-                        format!(
-                            " — service may still be disabled. \
-                         Try `launchctl enable gui/{uid}/{LAUNCHD_LABEL}` from a Terminal."
-                        )
-                    } else {
-                        String::new()
-                    };
-                return Ok(DaemonStatus::FailedToStart(format!(
-                    "launchctl bootstrap {} {}: {}{}",
-                    domain,
-                    dst_plist.display(),
-                    stderr_raw,
-                    hint,
-                )));
-            }
-        }
+    // Step 3b/3c: clear any disabled override and (re)bootstrap the daemon.
+    //
+    // The disabled override is the v0.4 startup bug's root cause: a previous
+    // `launchctl unload -w`, `launchctl disable`, or even a plain `bootout`
+    // can leave `com.copypaste.daemon` on launchd's *per-user disabled list*.
+    // Once disabled, `bootstrap` fails with error 5 ("Input/output error")
+    // and the daemon never starts. Crucially, the disabled state is
+    // INDEPENDENT of whether the label is currently loaded — so we must NOT
+    // gate the clear-disabled recovery on `loaded == false`. We always try to
+    // clear it before deciding whether to bootstrap.
+    if let Err(status) = recover_and_bootstrap(runner, uid, &dst_plist, loaded) {
+        return Ok(status);
     }
 
     // Step 4: wait up to ~15s, retry ping. Fresh-install daemon startup
@@ -439,6 +394,200 @@ fn is_daemon_loaded<R: CommandRunner>(runner: &mut R, uid: u32) -> bool {
     }
 }
 
+/// Returns `true` if `LAUNCHD_LABEL` appears on launchd's per-user *disabled*
+/// list for `gui/<uid>`.
+///
+/// `launchctl print-disabled gui/<uid>` dumps every label launchd knows the
+/// disabled state for, e.g.:
+/// ```text
+/// disabled services = {
+///     "com.copypaste.daemon" => true
+///     "com.example.other" => false
+/// }
+/// ```
+/// We only treat a label as disabled when it appears with `=> true`. A label
+/// absent from the list, or present with `=> false`, is considered enabled.
+/// This is the authoritative check for the v0.4 startup bug — a disabled
+/// label makes `bootstrap` fail with error 5 regardless of load state, and
+/// the disabled flag survives `bootout`, so probing load state alone misses
+/// it.
+fn is_label_disabled<R: CommandRunner>(runner: &mut R, uid: u32) -> bool {
+    let domain = format!("gui/{uid}");
+    let out = match runner.run("launchctl", &["print-disabled".into(), domain.into()]) {
+        Ok(o) if o.success => o,
+        // If the probe fails we cannot prove the label is disabled — return
+        // false so the caller still runs the idempotent `enable` (cheap) but
+        // does not perform the heavier bootout-recovery on a false positive.
+        _ => return false,
+    };
+    label_is_disabled_in_print(&out.stdout, LAUNCHD_LABEL)
+}
+
+/// Parse `launchctl print-disabled` output and report whether `label` is
+/// explicitly disabled (`"<label>" => true`). Split out for unit testing
+/// since the live `print-disabled` invocation cannot run in CI.
+fn label_is_disabled_in_print(blob: &str, label: &str) -> bool {
+    for line in blob.lines() {
+        if line.contains(label) {
+            // Normalise whitespace so `=> true` / `=>true` both match.
+            let lc: String = line.to_lowercase().split_whitespace().collect();
+            if lc.contains("=>true") {
+                return true;
+            }
+            if lc.contains("=>false") {
+                return false;
+            }
+        }
+    }
+    false
+}
+
+/// Outcome of the bootstrap attempt itself (independent of the later IPC
+/// readiness probe). Lets the recovery routine distinguish "bootstrap reported
+/// success / benign-already-loaded" from "hard failure" so it can retry once.
+enum BootstrapOutcome {
+    /// `bootstrap` exited 0, or failed benignly because the service was
+    /// already loaded (error 37 / "already bootstrapped").
+    Ok,
+    /// `bootstrap` failed for a reason worth retrying once after a fresh
+    /// disabled-override clear (most often error 5 = still disabled).
+    Failed(String),
+}
+
+/// Robust disabled-override recovery + bootstrap.
+///
+/// Recovery sequence (the v0.4 startup-bug fix):
+///   1. ALWAYS `launchctl enable gui/<uid>/<label>` — idempotent, cheap, and
+///      sufficient on its own in the common case. Done unconditionally so a
+///      label that was left disabled by `launchctl unload -w` / `disable`
+///      gets cleared even when it is also currently loaded.
+///   2. If `launchctl print-disabled gui/<uid>` still shows the label as
+///      disabled (a known launchd footgun where `enable` does not take effect
+///      until the label is fully torn out of its domain), perform a hard
+///      recovery: `bootout` → `enable` → fall through to bootstrap. This is
+///      the only reliable way to drop a sticky disabled override.
+///   3. Bootstrap (unless the service is already loaded and we did not just
+///      bootout it). On a hard failure, retry the whole clear-and-bootstrap
+///      once — the first pass may have only just cleared the disabled flag.
+///
+/// Returns `Ok(())` once a bootstrap has been issued (or skipped because the
+/// daemon is already loaded and not disabled); `Err(DaemonStatus)` with an
+/// actionable message on a hard, non-recoverable failure.
+fn recover_and_bootstrap<R: CommandRunner>(
+    runner: &mut R,
+    uid: u32,
+    dst_plist: &Path,
+    loaded: bool,
+) -> std::result::Result<(), DaemonStatus> {
+    let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
+
+    // Step 1: unconditional enable. Clears the disabled override in the
+    // common case, independent of load state.
+    let _ = runner.run("launchctl", &["enable".into(), target.clone().into()]);
+
+    // Step 2: detect a *sticky* disabled override that `enable` alone did not
+    // clear, and perform the hard bootout → enable recovery.
+    let mut currently_loaded = loaded;
+    if is_label_disabled(runner, uid) {
+        tracing::warn!(
+            "autostart: {LAUNCHD_LABEL} still on launchd disabled list after enable; \
+             performing bootout → enable recovery"
+        );
+        // bootout removes the (possibly loaded) service so the disabled flag
+        // can be dropped cleanly. Best-effort: a not-loaded label makes this
+        // a no-op error we ignore.
+        let _ = runner.run("launchctl", &["bootout".into(), target.clone().into()]);
+        currently_loaded = false;
+        let _ = runner.run("launchctl", &["enable".into(), target.clone().into()]);
+    }
+
+    // Step 3: if the service is still loaded (and we did not bootout it during
+    // recovery), skip bootstrap to avoid a spurious error 37 — the later IPC
+    // retry loop will confirm readiness.
+    if currently_loaded {
+        return Ok(());
+    }
+
+    match attempt_bootstrap(runner, uid, dst_plist) {
+        BootstrapOutcome::Ok => Ok(()),
+        BootstrapOutcome::Failed(first_err) => {
+            // Retry once: re-run the full clear-disabled sequence then
+            // bootstrap again. A flapping disabled override or a race with a
+            // just-completed bootout can make the first bootstrap fail with
+            // error 5 even though the label is now clearable.
+            tracing::warn!("autostart: first bootstrap failed ({first_err}); retrying once");
+            let _ = runner.run("launchctl", &["enable".into(), target.clone().into()]);
+            if is_label_disabled(runner, uid) {
+                let _ = runner.run("launchctl", &["bootout".into(), target.clone().into()]);
+                let _ = runner.run("launchctl", &["enable".into(), target.clone().into()]);
+            }
+            match attempt_bootstrap(runner, uid, dst_plist) {
+                BootstrapOutcome::Ok => Ok(()),
+                BootstrapOutcome::Failed(second_err) => {
+                    Err(DaemonStatus::FailedToStart(second_err))
+                }
+            }
+        }
+    }
+}
+
+/// Issue a single `launchctl bootstrap gui/<uid> <plist>` and classify the
+/// result. Error 37 ("already bootstrapped") and the textual "already loaded"
+/// variants are treated as benign success.
+fn attempt_bootstrap<R: CommandRunner>(
+    runner: &mut R,
+    uid: u32,
+    dst_plist: &Path,
+) -> BootstrapOutcome {
+    let domain = format!("gui/{uid}");
+    let out = match runner.run(
+        "launchctl",
+        &[
+            "bootstrap".into(),
+            domain.clone().into(),
+            dst_plist.to_path_buf().into_os_string(),
+        ],
+    ) {
+        Ok(o) => o,
+        Err(e) => {
+            return BootstrapOutcome::Failed(format!("launchctl bootstrap spawn failed: {e}"))
+        }
+    };
+    if out.success {
+        return BootstrapOutcome::Ok;
+    }
+
+    let stderr_raw = out.stderr.trim();
+    let stderr_lc = stderr_raw.to_lowercase();
+    let benign_already_loaded = stderr_lc.contains("service already loaded")
+        || stderr_lc.contains("already bootstrapped")
+        || stderr_raw.contains(": 37:")
+        || stderr_raw.contains("Bootstrap failed: 37");
+    if benign_already_loaded {
+        return BootstrapOutcome::Ok;
+    }
+
+    // Error 5 = still disabled (or structurally invalid plist). Surface an
+    // actionable hint so a user reading the status bar can recover manually.
+    let hint = if stderr_raw.contains(": 5:") || stderr_raw.contains("Input/output error") {
+        format!(
+            " — service may still be disabled. Try \
+             `launchctl enable gui/{uid}/{LAUNCHD_LABEL}` then \
+             `launchctl bootstrap gui/{uid} {}` from a Terminal.",
+            dst_plist.display()
+        )
+    } else {
+        String::new()
+    };
+    BootstrapOutcome::Failed(format!(
+        "launchctl bootstrap {} {}: {}{}",
+        domain,
+        dst_plist.display(),
+        stderr_raw,
+        hint,
+    ))
+}
+
 /// Minimal "is the daemon listening?" probe — does NOT depend on the
 /// `copypaste-ipc` crate to keep this module trivially testable. On macOS
 /// the daemon binds a Unix-domain socket; a successful `UnixStream::connect`
@@ -567,6 +716,17 @@ mod tests {
             );
             s.responses.insert(
                 "launchctl enable".into(),
+                (true, String::new(), String::new()),
+            );
+            // Default: `print-disabled` succeeds and lists nothing for our
+            // label → not disabled. Tests exercising the bootout-recovery
+            // branch override with `.set("launchctl print-disabled", ...)`.
+            s.responses.insert(
+                "launchctl print-disabled".into(),
+                (true, String::new(), String::new()),
+            );
+            s.responses.insert(
+                "launchctl bootout".into(),
                 (true, String::new(), String::new()),
             );
             s
@@ -817,14 +977,23 @@ mod tests {
         let status = ensure_daemon_running_inner(&mut runner, &mut fs, &env).unwrap();
 
         // Must have called `id -u`, then `launchctl print` (load probe),
-        // then `launchctl enable` (recovery from disabled list), then
-        // `launchctl bootstrap gui/501 <plist>`, then a FINAL
-        // `launchctl print` from the diagnose_launchd_failure path that
-        // turns "socket never came up" into an actionable message.
+        // then `launchctl enable` (unconditional disabled-override clear),
+        // then `launchctl print-disabled` (sticky-disabled detection — not
+        // disabled in the default mock, so no bootout), then
+        // `launchctl bootstrap gui/501 <plist>`, then a FINAL `launchctl
+        // print` from the diagnose_launchd_failure path that turns "socket
+        // never came up" into an actionable message.
         let programs: Vec<&str> = runner.calls.iter().map(|c| c.0.as_str()).collect();
         assert_eq!(
             programs,
-            vec!["id", "launchctl", "launchctl", "launchctl", "launchctl"]
+            vec![
+                "id",
+                "launchctl",
+                "launchctl",
+                "launchctl",
+                "launchctl",
+                "launchctl"
+            ]
         );
 
         let print_args = &runner.calls[1].1;
@@ -835,7 +1004,11 @@ mod tests {
         assert_eq!(enable_args[0], "enable");
         assert_eq!(enable_args[1], "gui/501/com.copypaste.daemon");
 
-        let bootstrap_args = &runner.calls[3].1;
+        let print_disabled_args = &runner.calls[3].1;
+        assert_eq!(print_disabled_args[0], "print-disabled");
+        assert_eq!(print_disabled_args[1], "gui/501");
+
+        let bootstrap_args = &runner.calls[4].1;
         assert_eq!(bootstrap_args[0], "bootstrap");
         assert_eq!(bootstrap_args[1], "gui/501");
         assert!(
@@ -844,7 +1017,7 @@ mod tests {
         );
 
         // Diagnostic `launchctl print` re-probe after the wait budget.
-        let diag_args = &runner.calls[4].1;
+        let diag_args = &runner.calls[5].1;
         assert_eq!(diag_args[0], "print");
         assert_eq!(diag_args[1], "gui/501/com.copypaste.daemon");
 
@@ -1211,5 +1384,191 @@ mod tests {
             }
             other => panic!("expected FailedToStart for error 5, got {other:?}"),
         }
+    }
+
+    // -----------------------------------------------------------------------------
+    // v0.4 startup-bug fix: sticky disabled-override recovery
+    // (bootout → enable → bootstrap) and print-disabled parsing.
+    // -----------------------------------------------------------------------------
+
+    #[test]
+    fn label_is_disabled_in_print_detects_true_and_false() {
+        let blob = r#"disabled services = {
+    "com.copypaste.daemon" => true
+    "com.example.other" => false
+}"#;
+        assert!(label_is_disabled_in_print(blob, "com.copypaste.daemon"));
+        assert!(!label_is_disabled_in_print(blob, "com.example.other"));
+        // Absent label → treated as enabled.
+        assert!(!label_is_disabled_in_print(blob, "com.absent.label"));
+    }
+
+    #[test]
+    fn label_is_disabled_in_print_tolerates_whitespace_variants() {
+        let blob = "\t\"com.copypaste.daemon\"=>true\n";
+        assert!(label_is_disabled_in_print(blob, "com.copypaste.daemon"));
+    }
+
+    /// When `print-disabled` reports the label as disabled even after the
+    /// unconditional `enable`, the recovery sequence must run
+    /// `bootout` → `enable` → `bootstrap` (in that order) to drop the sticky
+    /// override. This is the core v0.4 startup-bug fix.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn autostart_recovers_from_sticky_disabled_via_bootout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = fake_app_exe(tmp.path());
+        let bundled = exe
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("Resources")
+            .join(PLIST_FILENAME);
+        let mut fs = TempFs::new(tmp.path().join("home"));
+        fs.seed(bundled, SAMPLE_PLIST.into());
+
+        let mut runner = MockRunner::with_default_uid();
+        // Label is stuck on the disabled list — `enable` alone won't clear it.
+        runner.set(
+            "launchctl print-disabled",
+            true,
+            "disabled services = {\n\t\"com.copypaste.daemon\" => true\n}",
+            "",
+        );
+        // Socket comes alive after the recovery + bootstrap completes.
+        let env = FakeEnv::alive_after(exe, 5);
+
+        let status = ensure_daemon_running_inner(&mut runner, &mut fs, &env)
+            .expect("autostart must not error on the disabled-recovery path");
+
+        // Expected launchctl sequence (after `id -u` + load-probe `print`):
+        //   enable → print-disabled → bootout → enable → bootstrap
+        let launchctl_ops: Vec<&str> = runner
+            .calls
+            .iter()
+            .filter(|(prog, _)| prog == "launchctl")
+            .map(|(_, args)| args[0].as_str())
+            .collect();
+        assert_eq!(
+            launchctl_ops,
+            vec![
+                "print",
+                "enable",
+                "print-disabled",
+                "bootout",
+                "enable",
+                "bootstrap"
+            ],
+            "expected bootout→enable→bootstrap recovery, got {launchctl_ops:?}"
+        );
+        assert!(
+            matches!(status, DaemonStatus::Started),
+            "expected Started after recovery, got {status:?}"
+        );
+    }
+
+    /// Even when the daemon is reported *loaded* by `launchctl print`, a
+    /// sticky disabled override must still trigger the bootout recovery —
+    /// the fix must NOT be gated on `loaded == false`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn autostart_clears_disabled_even_when_loaded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = fake_app_exe(tmp.path());
+        let bundled = exe
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("Resources")
+            .join(PLIST_FILENAME);
+        let mut fs = TempFs::new(tmp.path().join("home"));
+        fs.seed(bundled, SAMPLE_PLIST.into());
+
+        // Pre-install the plist already matching the rendered template so
+        // `needs_install` is false — this isolates the bootout we assert on
+        // to the *disabled-recovery* path rather than the install rewrite.
+        let env = FakeEnv::alive_after(exe.clone(), 2);
+        let rendered = render_plist(SAMPLE_PLIST, &fs, &env).unwrap();
+        let installed_path = tmp
+            .path()
+            .join("home/Library/LaunchAgents")
+            .join(PLIST_FILENAME);
+        fs.seed(installed_path, rendered);
+
+        let mut runner = MockRunner::with_default_uid();
+        // print = loaded, but the label is still disabled.
+        runner.set("launchctl print", true, "", "");
+        runner.set(
+            "launchctl print-disabled",
+            true,
+            "\t\"com.copypaste.daemon\" => true\n",
+            "",
+        );
+
+        ensure_daemon_running_inner(&mut runner, &mut fs, &env).expect("autostart must not error");
+
+        let launchctl_ops: Vec<&str> = runner
+            .calls
+            .iter()
+            .filter(|(prog, _)| prog == "launchctl")
+            .map(|(_, args)| args[0].as_str())
+            .collect();
+        // No install rewrite happened (needs_install == false), so the only
+        // bootout in the sequence is the disabled-recovery one. Expected:
+        //   print(loaded) → enable → print-disabled → bootout → enable → bootstrap
+        assert_eq!(
+            launchctl_ops,
+            vec![
+                "print",
+                "enable",
+                "print-disabled",
+                "bootout",
+                "enable",
+                "bootstrap"
+            ],
+            "loaded-but-disabled must run bootout-recovery, got {launchctl_ops:?}"
+        );
+    }
+
+    /// A first bootstrap that fails with error 5 must be retried once after a
+    /// fresh disabled-override clear.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn autostart_retries_bootstrap_once_after_error_5() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = fake_app_exe(tmp.path());
+        let bundled = exe
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("Resources")
+            .join(PLIST_FILENAME);
+        let mut fs = TempFs::new(tmp.path().join("home"));
+        fs.seed(bundled, SAMPLE_PLIST.into());
+
+        let mut runner = MockRunner::with_default_uid();
+        runner.set(
+            "launchctl bootstrap",
+            false,
+            "",
+            "Bootstrap failed: 5: Input/output error",
+        );
+        let env = FakeEnv::never_alive(exe);
+
+        let _ = ensure_daemon_running_inner(&mut runner, &mut fs, &env).unwrap();
+
+        // bootstrap must have been attempted twice (initial + one retry).
+        let bootstrap_count = runner
+            .calls
+            .iter()
+            .filter(|(prog, args)| prog == "launchctl" && args[0] == "bootstrap")
+            .count();
+        assert_eq!(
+            bootstrap_count, 2,
+            "error-5 bootstrap must be retried exactly once, got {bootstrap_count}"
+        );
     }
 }

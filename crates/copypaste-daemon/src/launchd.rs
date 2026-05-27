@@ -67,11 +67,27 @@ pub fn log_dir() -> PathBuf {
 ///
 /// `binary_path` should be an absolute path to the `copypaste-daemon` binary
 /// (typically resolved via `std::env::current_exe()`).
+///
+/// IMPORTANT: this output is kept byte-for-byte consistent (modulo the
+/// substituted `binary_path` and resolved log dir) with the single
+/// source-of-truth plist shipped in the app bundle,
+/// `packaging/macos/com.copypaste.daemon.plist`. Both must agree on
+/// `KeepAlive` (respawn only on crash, never on a clean exit so `bootout`
+/// and `daemon stop` work), `ProcessType`, the `daemon.out.log` /
+/// `daemon.err.log` filenames, and `ThrottleInterval`. If you change one,
+/// change the other (and the autostart render path in
+/// `crates/copypaste-ui/src/autostart.rs`).
 pub fn generate_plist(binary_path: &Path) -> String {
     let binary_str = binary_path.to_string_lossy();
     let log_dir = log_dir();
-    let stdout = log_dir.join("daemon.log").to_string_lossy().into_owned();
-    let stderr = log_dir.join("daemon.err").to_string_lossy().into_owned();
+    let stdout = log_dir
+        .join("daemon.out.log")
+        .to_string_lossy()
+        .into_owned();
+    let stderr = log_dir
+        .join("daemon.err.log")
+        .to_string_lossy()
+        .into_owned();
 
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -90,11 +106,23 @@ pub fn generate_plist(binary_path: &Path) -> String {
     <key>RunAtLoad</key>
     <true/>
 
+    <!--
+        Respawn only on crash; a clean exit (user invoked `daemon stop` or
+        the daemon shut down intentionally) must NOT trigger a relaunch.
+        Without this, `KeepAlive=<true/>` would fight `launchctl bootout`
+        and the UI's quit/restart flows. Keep in sync with
+        packaging/macos/com.copypaste.daemon.plist.
+    -->
     <key>KeepAlive</key>
     <dict>
         <key>SuccessfulExit</key>
         <false/>
+        <key>Crashed</key>
+        <true/>
     </dict>
+
+    <key>ProcessType</key>
+    <string>Interactive</string>
 
     <key>StandardOutPath</key>
     <string>{stdout}</string>
@@ -107,6 +135,13 @@ pub fn generate_plist(binary_path: &Path) -> String {
         <key>RUST_LOG</key>
         <string>info</string>
     </dict>
+
+    <!--
+        Bumped from 10 → 30 so a flapping daemon (e.g. config error,
+        permission denial) doesn't burn CPU in a tight respawn loop.
+    -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
 </dict>
 </plist>
 "#
@@ -247,14 +282,30 @@ mod tests {
         assert!(xml.contains("<key>KeepAlive</key>"));
         assert!(xml.contains("<key>SuccessfulExit</key>"));
         assert!(xml.contains("<false/>"));
+        // Reconciled with packaging/macos/com.copypaste.daemon.plist: respawn
+        // on crash only.
+        assert!(xml.contains("<key>Crashed</key>"));
+        assert!(xml.contains("<true/>"));
+    }
+
+    #[test]
+    fn plist_contains_process_type_and_throttle() {
+        // Both reconciled in from the packaged source-of-truth plist.
+        let binary = PathBuf::from("/tmp/test-daemon");
+        let xml = generate_plist(&binary);
+        assert!(xml.contains("<key>ProcessType</key>"));
+        assert!(xml.contains("<string>Interactive</string>"));
+        assert!(xml.contains("<key>ThrottleInterval</key>"));
+        assert!(xml.contains("<integer>30</integer>"));
     }
 
     #[test]
     fn plist_contains_log_paths() {
         let binary = PathBuf::from("/tmp/test-daemon");
         let xml = generate_plist(&binary);
-        assert!(xml.contains("daemon.log"));
-        assert!(xml.contains("daemon.err"));
+        // Filenames match the packaged plist: daemon.out.log / daemon.err.log.
+        assert!(xml.contains("daemon.out.log"));
+        assert!(xml.contains("daemon.err.log"));
         assert!(xml.contains("Library/Logs/CopyPaste"));
     }
 

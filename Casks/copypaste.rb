@@ -46,7 +46,16 @@ cask "copypaste" do
     The daemon runs as a LaunchAgent (#{ENV.fetch("USER", "current")} user). Logs at:
       ~/Library/Logs/copypaste/
 
-    First run starts the daemon automatically. To stop:
-      launchctl unload ~/Library/LaunchAgents/com.copypaste.daemon.plist
+    First run starts the daemon automatically.
+
+    To stop the daemon WITHOUT disabling it (so it restarts on next login or
+    app launch), use `bootout` — do NOT use `launchctl unload`/`-w`, which
+    writes a persistent disable override that prevents the daemon from ever
+    starting again:
+      launchctl bootout gui/$(id -u)/com.copypaste.daemon
+
+    To start it again (or recover from a previously disabled state):
+      launchctl enable gui/$(id -u)/com.copypaste.daemon
+      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.copypaste.daemon.plist
   EOS
 end
