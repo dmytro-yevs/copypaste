@@ -14,6 +14,11 @@ ruvector.db
 agentdb.rvf
 agentdb.rvf.lock
 
+# Ruflo session artifacts (regenerated each session)
+ruflo-fix.sh
+ruflo-reinit.sh
+ruflo-setup-log.md
+
 # IDE
 .idea/
 

@@ -1425,6 +1425,7 @@ dependencies = [
  "rcgen",
  "rustls",
  "sha2",
+ "subtle",
  "thiserror 1.0.69",
  "tokio",
  "tokio-rustls",

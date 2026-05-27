@@ -25,6 +25,8 @@ tokio = { workspace = true }
 # Crypto for fingerprint
 sha2.workspace = true
 hex.workspace = true
+# Constant-time comparison for cert fingerprints (audit LOW #1)
+subtle.workspace = true
 # PAKE (Password-Authenticated Key Exchange) for device pairing — see ADR-008.
 # Pinned to 3.0 (MSRV 1.74); 4.x is pre-release.
 opaque-ke = { version = "3.0", default-features = false, features = ["ristretto255-voprf", "argon2", "std"] }

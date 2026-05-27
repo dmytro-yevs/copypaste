@@ -14,6 +14,7 @@ use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, Server
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
 use rustls::{DigitallySignedStruct, DistinguishedName, Error as TlsError, SignatureScheme};
+use subtle::ConstantTimeEq;
 
 use crate::cert::fingerprint_of;
 use crate::transport::PairedPeers;
@@ -80,7 +81,9 @@ impl PeerCertVerifier {
                     rustls::CertificateError::ApplicationVerificationFailure,
                 ));
             }
-            if fp != *expected {
+            // Constant-time compare on the hex bytes (LOW #1). FP is public,
+            // so this is consistency hardening, not exploit mitigation.
+            if fp.as_bytes().ct_eq(expected.as_bytes()).unwrap_u8() != 1 {
                 tracing::warn!(
                     got = %fp,
                     expected = %expected,
