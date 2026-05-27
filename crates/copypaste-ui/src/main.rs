@@ -10,6 +10,7 @@
 //!   Slint callback → Rust callback closure → IPC call → slint::invoke_from_event_loop → Slint update
 
 mod ipc_client;
+mod root_window;
 
 use anyhow::Result;
 use ipc_client::{format_wall_time, IpcClient};
@@ -441,6 +442,29 @@ fn main() -> Result<()> {
         });
     }
 
+    // ── v0.4 RootWindow (T2.2) ─────────────────────────────────────────────
+    // Load UI preferences from disk and construct the new single-window shell
+    // alongside the legacy windows. The legacy HistoryWindow behaviour is
+    // unchanged; this window stays hidden until the user opens it via the
+    // tray "New Window (v0.4 preview)" item or it becomes the primary surface
+    // in v0.4 (T4.x).
+    let ui_prefs = copypaste_ui::ui_prefs::UiPrefs::load()
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "ui-prefs load failed — using defaults");
+            copypaste_ui::ui_prefs::UiPrefs::default()
+        });
+    let socket_path_str = lock_or_recover(&state)
+        .socket_path
+        .to_string_lossy()
+        .into_owned();
+    let root_window_handle = root_window::RootWindowHandle::new(&ui_prefs, &socket_path_str)?;
+    root_window_handle.set_app_version(env!("CARGO_PKG_VERSION"));
+
+    // macOS vibrancy stub — full implementation deferred to T3.5.
+    // When T3.5 lands, replace this comment with:
+    //   #[cfg(target_os = "macos")]
+    //   macos_vibrancy::apply_to_root_window(&root_window_handle);
+
     // Beta hot-fix: on macOS, install the Launch Agent plist + bootstrap the
     // daemon in the background so the user does not have to run
     // `copypaste daemon install && copypaste daemon start` after a fresh DMG
@@ -554,6 +578,24 @@ fn main() -> Result<()> {
                 activate_app();
             }
         });
+
+        // T2.2: capture a weak handle to the v0.4 RootWindow so the closure
+        // below is ready to wire once TrayCallbacks gains an on_open_preview
+        // field (T2.3). The closure is NOT yet registered — doing so requires
+        // a new field in tray_host::TrayCallbacks which is out of T2.2 scope.
+        //
+        // When T2.3 lands, move this closure into TrayCallbacks:
+        //   callbacks.on_open_preview = Some(on_open_preview_window);
+        let rw_weak = root_window_handle.as_weak();
+        let _on_open_preview_window: copypaste_ui::tray_host::ActionCb = Box::new(move || {
+            if let Some(w) = rw_weak.upgrade() {
+                set_activation_policy_regular();
+                w.show().ok();
+                activate_app();
+            }
+        });
+        // TODO(T2.3): add TrayCallbacks::on_open_preview and wire
+        // _on_open_preview_window to the "New Window (v0.4 preview)" menu item.
 
         // v0.3 T3: tray "Recent items" row click → paste via IPC. The
         // closure spawns a worker thread so we never block the UI on the
