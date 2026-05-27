@@ -64,7 +64,7 @@ fn relay_router(state: AppState, config: RelayConfig) -> axum::Router {
             "/devices",
             post(routes_devices::register).get(list_devices_handler),
         )
-        .route("/devices/:device_id", get(routes_devices::get_device))
+        .route("/devices/{device_id}", get(routes_devices::get_device))
         .with_state(state)
         .layer(axum::extract::DefaultBodyLimit::max(
             config.max_item_bytes + 4096,

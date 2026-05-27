@@ -39,13 +39,13 @@ fn relay_router(state: AppState, config: RelayConfig) -> axum::Router {
     axum::Router::new()
         .route("/health", get(routes_health::handle))
         .route("/devices", post(routes_devices::register))
-        .route("/devices/:device_id", get(routes_devices::get_device))
+        .route("/devices/{device_id}", get(routes_devices::get_device))
         .route(
-            "/devices/:device_id/items",
+            "/devices/{device_id}/items",
             get(routes_items::pull).post(routes_items::push),
         )
         .route(
-            "/devices/:device_id/items/:item_id",
+            "/devices/{device_id}/items/{item_id}",
             delete(routes_items::delete_item),
         )
         .with_state(state)

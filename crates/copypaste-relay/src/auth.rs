@@ -1,4 +1,3 @@
-use axum::async_trait;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 
@@ -8,7 +7,6 @@ use crate::error::RelayError;
 /// `Authorization: Bearer <token>` header.
 pub struct BearerToken(pub String);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for BearerToken
 where
     S: Send + Sync,

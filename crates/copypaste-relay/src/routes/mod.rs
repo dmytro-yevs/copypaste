@@ -109,22 +109,21 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
     );
 
     // ---- Device-scoped item routes (per-device + per-IP limits) ------------
+    // Note: axum 0.8 uses `{param}` syntax for path captures (`:param` is 0.7).
     let item_routes = Router::new()
         .route(
-            "/devices/:device_id/items",
+            "/devices/{device_id}/items",
             get(items::pull).post(items::push),
         )
         .route(
-            "/devices/:device_id/items/:item_id",
+            "/devices/{device_id}/items/{item_id}",
             delete(items::delete_item),
         )
         .with_state(state.clone())
-        .layer(GovernorLayer {
-            config: per_device_conf,
-        })
-        .layer(GovernorLayer {
-            config: per_ip_conf.clone(),
-        });
+        // In 0.8 GovernorLayer fields are private; use GovernorLayer::new() instead of
+        // struct literal syntax.
+        .layer(GovernorLayer::new(per_device_conf))
+        .layer(GovernorLayer::new(per_ip_conf.clone()));
 
     // ---- Device registration + info routes (per-IP limit only) -------------
     let device_routes = Router::new()
@@ -132,11 +131,9 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
             "/devices",
             get(list_devices_handler).post(devices::register),
         )
-        .route("/devices/:device_id", get(devices::get_device))
+        .route("/devices/{device_id}", get(devices::get_device))
         .with_state(state)
-        .layer(GovernorLayer {
-            config: per_ip_conf,
-        });
+        .layer(GovernorLayer::new(per_ip_conf));
 
     // ---- Merge all sub-routers + shared body-limit + config injection ------
     Router::new()

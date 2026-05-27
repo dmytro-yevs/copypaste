@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use axum::extract::{ConnectInfo, Path, State};
+use axum::extract::{ConnectInfo, Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -23,7 +23,11 @@ use crate::state::AppState;
 /// - 429 Too Many Requests — per-device registration rate limit (5/min) tripped
 pub async fn register(
     State(state): State<AppState>,
-    connect_info: Option<ConnectInfo<SocketAddr>>,
+    // In axum 0.8, `Option<ConnectInfo<T>>` no longer implements FromRequestParts.
+    // ConnectInfo is stored as an Extension, so we extract it as
+    // `Option<Extension<ConnectInfo<SocketAddr>>>` which uses the
+    // OptionalFromRequestParts impl on Extension.
+    connect_info: Option<Extension<ConnectInfo<SocketAddr>>>,
     Json(body): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<RegisterResponse>), Response> {
     // Validate device_id is a valid UUID (basic format check).
@@ -69,7 +73,7 @@ pub async fn register(
     // owner builds up from a different IP. When `ConnectInfo` is absent
     // (tests using `tower::ServiceExt::oneshot`) the IP becomes `None`,
     // preserving the previous per-device-only fallback for that path.
-    let client_ip = connect_info.map(|ConnectInfo(addr)| addr.ip());
+    let client_ip = connect_info.map(|Extension(ConnectInfo(addr))| addr.ip());
     {
         let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
         if let Err(retry_after) = store.check_registration_rate_limit(client_ip, &body.device_id) {
