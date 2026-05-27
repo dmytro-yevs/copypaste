@@ -1,16 +1,203 @@
 // MainWindow.slint — Single-window shell for CopyPaste v0.4 UI redesign.
 // T2.1: root window with collapsible sidebar + tab content area.
 // T3.4: placeholder Rectangles replaced with real view components.
+// T4.2: ItemDetailPanel component + MainWindow detail-* properties/callbacks.
 //
 // Tab indices:  0 = History  1 = Devices  2 = Pair  3 = Settings
 
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
-import { SidebarTab, SearchField, GhostButton } from "primitives.slint";
+import { SidebarTab, SearchField, GhostButton, PrimaryButton, DangerButton, SecondaryButton } from "primitives.slint";
 import { HistoryView, ClipItem } from "views/history.slint";
 import { DevicesView, DeviceEntry } from "views/devices.slint";
 import { PairView } from "views/pair.slint";
 import { SettingsView } from "views/settings.slint";
+
+// ---------------------------------------------------------------------------
+// ItemDetailPanel — 320px right-side panel showing full detail of a selected
+// clipboard item.  Visible only on the History tab (current-view == 0).
+//
+// Properties:
+//   item           — the ClipItem to display (set by RootWindowHandle)
+//   detail-visible — drives panel width (320px / 0px), animated
+// Callbacks:
+//   copy(), pin(), delete() — forwarded to RootWindowHandle for IPC dispatch
+// ---------------------------------------------------------------------------
+component ItemDetailPanel inherits Rectangle {
+    in property <ClipItem> item;
+    in property <bool> detail-visible: false;
+
+    callback copy();
+    callback pin();
+    callback delete();
+
+    width: root.detail-visible ? 320px : 0px;
+    clip: true;
+    background: Theme.surface-panel;
+
+    animate width { duration: 180ms; easing: ease-out; }
+
+    // Left hairline border separating panel from view area
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: 1px;
+        height: parent.height;
+        background: Theme.border-subtle;
+    }
+
+    // Main content — only rendered when panel is open to avoid layout work
+    if root.detail-visible: VerticalLayout {
+        x: 1px; // clear the hairline border
+        width: parent.width - 1px;
+        height: parent.height;
+        spacing: 0px;
+        padding-left: 16px;
+        padding-right: 16px;
+        padding-top: 16px;
+        padding-bottom: 16px;
+
+        // ── Kind badge + title row ─────────────────────────────────────────
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+
+            // Kind badge chip
+            Rectangle {
+                height: 20px;
+                width: kind-label.preferred-width + 12px;
+                border-radius: 4px;
+                background: Theme.surface-elevated;
+                border-width: 1px;
+                border-color: Theme.border-regular;
+
+                kind-label := Text {
+                    x: 6px;
+                    text: root.item.kind;
+                    font-size: 11px;
+                    color: Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Pin indicator
+            if root.item.pinned: Rectangle {
+                height: 20px;
+                width: pin-label.preferred-width + 12px;
+                border-radius: 4px;
+                background: Theme.surface-elevated;
+                border-width: 1px;
+                border-color: Theme.border-regular;
+
+                pin-label := Text {
+                    x: 6px;
+                    text: "pinned";
+                    font-size: 11px;
+                    color: Theme.accent-solid;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        Rectangle { height: 12px; background: transparent; }
+
+        // ── Full content preview ───────────────────────────────────────────
+        Rectangle {
+            vertical-stretch: 1;
+            background: Theme.surface-elevated;
+            border-radius: 6px;
+            border-width: 1px;
+            border-color: Theme.border-regular;
+            clip: true;
+
+            Flickable {
+                width: parent.width;
+                height: parent.height;
+                viewport-height: preview-text.preferred-height + 16px;
+
+                preview-text := Text {
+                    x: 8px;
+                    y: 8px;
+                    width: parent.width - 16px;
+                    text: root.item.redacted ? "[ sensitive — content hidden ]" : root.item.preview;
+                    font-size: 13px;
+                    color: root.item.redacted ? Theme.text-tertiary : Theme.text-primary;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        Rectangle { height: 12px; background: transparent; }
+
+        // ── Metadata rows ──────────────────────────────────────────────────
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+
+            Text {
+                text: "Time:";
+                font-size: 12px;
+                color: Theme.text-tertiary;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: root.item.wall-time;
+                font-size: 12px;
+                color: Theme.text-secondary;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle { height: 4px; background: transparent; }
+
+        if root.item.source-device != "": HorizontalLayout {
+            spacing: 6px;
+            alignment: start;
+
+            Text {
+                text: "Device:";
+                font-size: 12px;
+                color: Theme.text-tertiary;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: root.item.source-device;
+                font-size: 12px;
+                color: Theme.text-secondary;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        Rectangle { height: 16px; background: transparent; }
+
+        // ── Action buttons ─────────────────────────────────────────────────
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+
+            PrimaryButton {
+                icon: Icons.copy;
+                label: "Copy";
+                clicked => { root.copy(); }
+            }
+
+            SecondaryButton {
+                icon: root.item.pinned ? Icons.pin-off : Icons.pin;
+                label: root.item.pinned ? "Unpin" : "Pin";
+                clicked => { root.pin(); }
+            }
+
+            DangerButton {
+                icon: Icons.trash-2;
+                label: "Delete";
+                clicked => { root.delete(); }
+            }
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Sidebar — collapsible left navigation rail
@@ -204,6 +391,18 @@ export component MainWindow inherits Window {
     callback fetch-next-page();
     callback open-pair-view();
 
+    // ── Detail panel (T4.2) ─────────────────────────────────────────────────
+    /// The clipboard item currently shown in the right-side detail panel.
+    in property <ClipItem> detail-item;
+    /// Whether the detail panel is open (320px) or closed (0px).
+    in-out property <bool> detail-visible: false;
+    /// User pressed "Copy" in the detail panel.
+    callback detail-copy();
+    /// User pressed "Pin/Unpin" in the detail panel.
+    callback detail-pin();
+    /// User pressed "Delete" in the detail panel.
+    callback detail-delete();
+
     // ── Devices view ────────────────────────────────────────────────────────
     in property <[DeviceEntry]> devices: [];
     callback device-selected(int);
@@ -254,13 +453,17 @@ export component MainWindow inherits Window {
             tab-changed(i) => {
                 root.active-tab = i;
                 root.tab-changed(i);
+                // Closing the detail panel when switching away from History
+                if i != 0 {
+                    root.detail-visible = false;
+                }
             }
             toggle-sidebar => {
                 root.sidebar-collapsed = !root.sidebar-collapsed;
             }
         }
 
-        // Right column: top bar + content area
+        // Centre column: top bar + content area
         VerticalLayout {
             spacing: 0px;
             horizontal-stretch: 1;
@@ -361,6 +564,15 @@ export component MainWindow inherits Window {
                 reset-ui-prefs() => { root.reset-ui-prefs(); }
                 settings-tab-changed(t) => { root.settings-tab-changed(t); }
             }
+        }
+
+        // Right-side detail panel — visible only on History tab (tab 0)
+        ItemDetailPanel {
+            detail-visible: root.detail-visible && root.active-tab == 0;
+            item: root.detail-item;
+            copy => { root.detail-copy(); }
+            pin => { root.detail-pin(); }
+            delete => { root.detail-delete(); }
         }
     }
 }
