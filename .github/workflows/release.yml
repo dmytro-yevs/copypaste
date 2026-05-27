@@ -10,9 +10,6 @@
 # Required GitHub repository secrets:
 #   (none) — ad-hoc signing requires no certificates or secrets.
 #
-# Optional secrets (NOT consumed in this workflow — for future post-tag jobs):
-#   HOMEBREW_TAP_TOKEN — PAT for pushing formula to separate homebrew-tap repo.
-#
 # Pinned action versions (no @master or @v0 refs):
 #   actions/checkout@v4
 #   actions/upload-artifact@v4
@@ -52,6 +49,10 @@ jobs:
   build-macos:
     name: Build macOS (arm64)
     runs-on: macos-14
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     env:
       INPUT_VERSION: ${{ inputs.version }}
       TAG_NAME: ${{ github.ref_name }}
@@ -122,6 +123,11 @@ jobs:
             echo "::error::scripts/release/verify-checksum.sh missing — W1.4 not delivered yet"
             exit 1
           fi
+
+      - name: Attest DMG build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.dmg
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -249,18 +255,7 @@ jobs:
             2>/dev/null || true
           echo "ANDROID_USER_HOME=$HOME/.android" >> "$GITHUB_ENV"
 
-      - name: Build debug APK
-        working-directory: android
-        # Skip: buildCargoNdk (.so already placed above), lint/lintVitalRelease (slow,
-        # not needed for debug APK ship), test (separate CI job), assembleAndroidTest.
-        run: |
-          ./gradlew assembleDebug \
-            --no-daemon \
-            --build-cache \
-            -x buildCargoNdk \
-            -x lint \
-            -x lintVitalRelease \
-            -x test
+      # APK is built locally and uploaded as release asset; see ANDROID-RELEASE.md
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

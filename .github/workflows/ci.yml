@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust (stable) (with rustfmt)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           components: rustfmt
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust (stable) (with clippy)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
           components: clippy
@@ -66,7 +66,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
 
@@ -91,4 +91,9 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: cargo audit
-        run: cargo audit
+        # Option B: try --no-fetch first (uses runner's cached advisory-db if present),
+        # fall back to full network fetch. Trade-off: no explicit cache key means
+        # cold runners always fetch; Option A (actions/cache keyed by date) would
+        # save ~5s/run but adds cache-miss complexity. Revisit if advisory-db fetch
+        # becomes a bottleneck.
+        run: cargo audit --no-fetch || cargo audit
