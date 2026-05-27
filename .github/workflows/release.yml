@@ -255,7 +255,9 @@ jobs:
             2>/dev/null || true
           echo "ANDROID_USER_HOME=$HOME/.android" >> "$GITHUB_ENV"
 
-      # APK is built locally and uploaded as release asset; see ANDROID-RELEASE.md
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
