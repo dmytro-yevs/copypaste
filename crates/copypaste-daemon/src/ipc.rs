@@ -1983,7 +1983,7 @@ mod tests {
         let mut stream = UnixStream::connect(&sock).await.unwrap();
         stream
             .write_all(
-                b"{\"id\":\"p2\",\"method\":\"paste\",\"params\":{\"id\":\"nonexistent-id\"}}\n",
+                b"{\"id\":\"p2\",\"method\":\"paste\",\"params\":{\"id\":\"00000000-0000-0000-0000-000000000000\"}}\n",
             )
             .await
             .unwrap();
