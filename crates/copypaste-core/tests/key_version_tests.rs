@@ -430,6 +430,12 @@ fn t4_force_complete_if_no_v1_rows_clears_inprogress_state() {
         .unwrap();
     db.conn()
         .execute(
+            "DELETE FROM migration_state WHERE key = 'v4-key-version-sweep'",
+            [],
+        )
+        .unwrap();
+    db.conn()
+        .execute(
             "INSERT OR IGNORE INTO migration_state \
              (key, key_version_in_progress, last_processed_id, started_at) \
              VALUES ('v4-key-version-sweep', 2, 0, strftime('%s','now'))",
@@ -475,6 +481,12 @@ fn t4_force_complete_leaves_inprogress_when_v1_rows_exist() {
                 started_at              INTEGER,
                 completed_at            INTEGER
             );",
+            [],
+        )
+        .unwrap();
+    db.conn()
+        .execute(
+            "DELETE FROM migration_state WHERE key = 'v4-key-version-sweep'",
             [],
         )
         .unwrap();
