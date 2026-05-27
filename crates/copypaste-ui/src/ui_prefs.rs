@@ -134,8 +134,7 @@ impl UiPrefs {
                 .with_context(|| format!("creating prefs directory {}", parent.display()))?;
         }
 
-        let serialised =
-            toml::to_string_pretty(self).context("serialising UiPrefs to TOML")?;
+        let serialised = toml::to_string_pretty(self).context("serialising UiPrefs to TOML")?;
 
         // Atomic write: write to a sibling tmpfile, then rename.
         let tmp_path = path.with_extension("toml.tmp");
@@ -263,7 +262,11 @@ unknown_future_field = "ignored"
 "#;
         let result = toml::from_str::<UiPrefs>(toml_with_extra);
         // serde(default) + deny_unknown_fields is NOT set, so this should parse fine.
-        assert!(result.is_ok(), "unknown fields must not fail: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "unknown fields must not fail: {:?}",
+            result.err()
+        );
         let prefs = result.unwrap();
         assert!(prefs.compact);
         assert_eq!(prefs.accent, AccentColor::Purple);

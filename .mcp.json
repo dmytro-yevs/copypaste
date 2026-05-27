@@ -1,15 +1,31 @@
 {
   "mcpServers": {
-    "lsp-rust": {
-      "type": "stdio",
-      "command": "/Users/dmytro/go/bin/mcp-language-server",
+    "ruv-swarm": {
+      "command": "npx",
       "args": [
-        "--workspace",
-        "/Users/dmytro/Documents/CopyPaste",
-        "--lsp",
-        "/Users/dmytro/.cargo/bin/rust-analyzer"
+        "-y",
+        "ruv-swarm",
+        "mcp",
+        "start"
       ],
-      "env": {}
+      "env": {
+        "npm_config_update_notifier": "false"
+      },
+      "optional": true
+    },
+    "flow-nexus": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "flow-nexus@latest",
+        "mcp",
+        "start"
+      ],
+      "env": {
+        "npm_config_update_notifier": "false"
+      },
+      "optional": true,
+      "requiresAuth": true
     }
   }
 }

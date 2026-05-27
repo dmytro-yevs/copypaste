@@ -448,11 +448,10 @@ fn main() -> Result<()> {
     // unchanged; this window stays hidden until the user opens it via the
     // tray "New Window (v0.4 preview)" item or it becomes the primary surface
     // in v0.4 (T4.x).
-    let ui_prefs = copypaste_ui::ui_prefs::UiPrefs::load()
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "ui-prefs load failed — using defaults");
-            copypaste_ui::ui_prefs::UiPrefs::default()
-        });
+    let ui_prefs = copypaste_ui::ui_prefs::UiPrefs::load().unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "ui-prefs load failed — using defaults");
+        copypaste_ui::ui_prefs::UiPrefs::default()
+    });
     let socket_path_str = lock_or_recover(&state)
         .socket_path
         .to_string_lossy()
