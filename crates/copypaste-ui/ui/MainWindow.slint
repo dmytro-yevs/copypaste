@@ -2,6 +2,8 @@
 // T2.1: root window with collapsible sidebar + tab content area.
 // T3.4: placeholder Rectangles replaced with real view components.
 // T4.2: ItemDetailPanel component + MainWindow detail-* properties/callbacks.
+// T5.2: FocusScope keyboard handler (⌘1-4, ⌘\, ⌘K, ⌘F, ⌘P, ⌘N, ⌘,, ⌘W,
+//        ↑/↓ selection, ↵ copy, ⌫ delete, Esc layered dismiss).
 //
 // Tab indices:  0 = History  1 = Devices  2 = Pair  3 = Settings
 
@@ -12,6 +14,8 @@ import { HistoryView, ClipItem } from "views/history.slint";
 import { DevicesView, DeviceEntry } from "views/devices.slint";
 import { PairView } from "views/pair.slint";
 import { SettingsView } from "views/settings.slint";
+import { CommandPalette, PaletteAction } from "components/command_palette.slint";
+import { BottomTabBar } from "components/bottom_tab_bar.slint";
 
 // ---------------------------------------------------------------------------
 // ItemDetailPanel — 320px right-side panel showing full detail of a selected
@@ -370,6 +374,10 @@ export component MainWindow inherits Window {
     /// Application version string shown in sidebar footer
     in-out property <string> app-version: "";
 
+    /// Logical screen width in dp/px — set from Rust after window creation.
+    /// < 600px → bottom-tab layout (Android); ≥ 600px → sidebar layout (desktop/tablet).
+    in property <length> screen-width: 900px;
+
     /// Fired when the user selects a different sidebar tab.
     callback tab-changed(int);
 
@@ -378,6 +386,19 @@ export component MainWindow inherits Window {
 
     /// Fired when the user requests application quit (e.g. ⌘Q).
     callback request-quit();
+
+    // ── Keyboard / palette state (T5.1 + T5.2) ──────────────────────────────
+    /// Whether the command palette overlay is open.
+    /// When true, all shortcuts are no-ops except Esc.
+    in-out property <bool> palette-open: false;
+
+    /// Fired when the user activates a command palette action.
+    /// Receives the action id string (e.g. "history", "clear-history").
+    callback palette-action(string);
+
+    /// Set to true by ⌘F to request that the search field grabs focus.
+    /// The SearchField watches this and resets it after grabbing focus.
+    in-out property <bool> search-focused: false;
 
     // ── History view ────────────────────────────────────────────────────────
     in property <[ClipItem]> history-items: [];
@@ -432,7 +453,24 @@ export component MainWindow inherits Window {
     in-out property <bool> sync-enabled: false;
     in-out property <string> sync-url: "";
     in property <string> fingerprint: "";
-    in property <[{action: string, keys: string}]> shortcuts: [];
+    in property <[{action: string, keys: string}]> shortcuts: [
+        { action: "History",              keys: "⌘1" },
+        { action: "Devices",              keys: "⌘2" },
+        { action: "Pair",                 keys: "⌘3" },
+        { action: "Settings",             keys: "⌘4 / ⌘," },
+        { action: "Toggle sidebar",       keys: "⌘\\" },
+        { action: "Toggle detail panel",  keys: "⌘⌥\\" },
+        { action: "Command palette",      keys: "⌘K" },
+        { action: "Search",               keys: "⌘F" },
+        { action: "Move selection up",    keys: "↑" },
+        { action: "Move selection down",  keys: "↓" },
+        { action: "Copy item",            keys: "↵ / ⌘C" },
+        { action: "Pin / unpin item",     keys: "⌘P" },
+        { action: "Delete item",          keys: "⌫" },
+        { action: "New pair",             keys: "⌘N" },
+        { action: "Hide window",          keys: "⌘W" },
+        { action: "Dismiss / close",      keys: "Esc" },
+    ];
     callback save-prefs();
     callback save-app-settings();
     callback clear-history();
@@ -574,5 +612,27 @@ export component MainWindow inherits Window {
             pin => { root.detail-pin(); }
             delete => { root.detail-delete(); }
         }
+    }
+
+    // ── Command palette overlay (T5.1) — must be LAST child so z:100 wins ────
+    CommandPalette {
+        z: 100;
+        open <=> root.palette-open;
+        actions: [
+            { id: "history",       label: "Go to History",            shortcut: "⌘1" },
+            { id: "devices",       label: "Go to Devices",            shortcut: "⌘2" },
+            { id: "pair",          label: "Go to Pair",               shortcut: "⌘3" },
+            { id: "settings",      label: "Go to Settings",           shortcut: "⌘4" },
+            { id: "about",         label: "About CopyPaste",          shortcut: "" },
+            { id: "clear-history", label: "Clear clipboard history",  shortcut: "" },
+        ];
+        action-selected(id) => {
+            if id == "history"       { root.active-tab = 0; }
+            if id == "devices"       { root.active-tab = 1; }
+            if id == "pair"          { root.active-tab = 2; }
+            if id == "settings"      { root.active-tab = 3; }
+            root.palette-action(id);
+        }
+        closed => { root.palette-open = false; }
     }
 }
