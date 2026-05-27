@@ -7,6 +7,8 @@ use copypaste_core::{
     derive_v2, ensure_revoked_devices_table, fetch_text_preview, get_page, revoke_device,
     search_items, Database, EncryptError,
 };
+use copypaste_p2p::pake::{PakeInitiator, PakeResponder, PasswordFile};
+use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -171,6 +173,42 @@ fn is_valid_fingerprint(fp: &str) -> bool {
         .all(|g| g.len() == 2 && g.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
+/// In-progress PAKE handshake session stored between IPC round-trips.
+///
+/// Because IPC is request-response (single turn), the 3-message OPAQUE
+/// handshake is split across two calls on each side:
+///
+/// - Initiator: `pair_peer_with_password {step:"initiate"}` → stores
+///   `PakeSession::Initiator`; `pair_peer_with_password {step:"finish"}` →
+///   consumes it.
+/// - Responder: `pair_accept_password` → stores `PakeSession::Responder`;
+///   `pair_accept_finish` → consumes it.
+///
+/// Sessions are keyed by a UUID `session_id` that is returned to the caller
+/// and echoed back in the follow-up call. Stale sessions (e.g., client
+/// crashed between steps) are never explicitly GC'd in this implementation —
+/// the daemon is short-lived on the relevant dev pairing path, and the memory
+/// ceiling is one `PakeInitiator`/`PakeResponder` per in-flight session.
+enum PakeSession {
+    /// Initiator waiting for the server's `CredentialResponse` (message2)
+    /// to call `PakeInitiator::finish`. Boxed to equalise variant sizes and
+    /// satisfy `clippy::large_enum_variant`.
+    Initiator(Box<PakeInitiator>),
+    /// Responder waiting for the client's `CredentialFinalization` (message3)
+    /// to call `PakeResponder::finish`, plus the peer fingerprint needed to
+    /// store the resulting `PasswordFile`.
+    Responder {
+        responder: Box<PakeResponder>,
+        /// Persisted `PasswordFile` registered for this session's password.
+        /// Needed to re-drive `PakeResponder::respond` — already computed in
+        /// `pair_accept_password`, stored here so `pair_accept_finish` can
+        /// persist it without re-registering.
+        password_file: PasswordFile,
+        /// Fingerprint of the initiating peer; stored in peers.json on success.
+        peer_fingerprint: String,
+    },
+}
+
 pub struct IpcServer {
     db: Arc<Mutex<Database>>,
     /// Shared private-mode flag. When true, the clipboard monitor skips recording.
@@ -192,6 +230,12 @@ pub struct IpcServer {
     /// use (db is fully constructed before `IpcServer::new` is called); tests
     /// use [`IpcServer::new_with_ready`] to exercise the not-ready path.
     ready: Arc<AtomicBool>,
+    /// In-progress PAKE sessions keyed by session_id UUID string.
+    ///
+    /// Each entry lives from the first IPC call (initiate / accept) until the
+    /// matching finish call consumes it. Sessions are not evicted automatically;
+    /// the daemon is expected to restart between pairings in production.
+    pake_sessions: Arc<Mutex<HashMap<String, PakeSession>>>,
 }
 
 impl IpcServer {
@@ -207,6 +251,7 @@ impl IpcServer {
             local_key,
             device_public_key,
             ready: Arc::new(AtomicBool::new(true)),
+            pake_sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -228,6 +273,7 @@ impl IpcServer {
             local_key,
             device_public_key,
             ready,
+            pake_sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -1032,21 +1078,235 @@ impl IpcServer {
                 }
             }
 
-            // Beta W3.2 — PAKE-based password pairing.
+            // W2.4 — PAKE-based password pairing (initiator side).
             //
-            // Validates inputs and, in a full implementation, would:
-            //   1. Spawn a `PakeInitiator` keyed by `password`,
-            //   2. Route 3 handshake messages over the p2p Transport (W2.1)
-            //      to the peer identified by `peer_fingerprint`,
-            //   3. On success, persist the resulting `PasswordFile` in
-            //      SQLCipher and derive an XChaCha key into the keychain.
-            //
-            // Until the Transport message-routing layer for PAKE frames is
-            // wired (post-beta), we surface a `not_implemented` response so
-            // the UI can render an actionable status message. The handler
-            // still performs argument validation so callers exercise the
-            // full request/response path.
+            // Two-step protocol over IPC:
+            //   step="initiate": validates inputs, creates PakeInitiator,
+            //     stores session in pake_sessions, returns {session_id, message1_b64}.
+            //   step="finish": looks up PakeInitiator by session_id, completes
+            //     handshake with server's message2, stores peer, returns
+            //     {ok: true, message3_b64}.
             "pair_peer_with_password" => {
+                use base64::Engine as _;
+                let b64 = base64::engine::general_purpose::STANDARD;
+
+                let peer_fingerprint =
+                    match req.params.get("peer_fingerprint").and_then(|v| v.as_str()) {
+                        Some(s) => s.to_string(),
+                        None => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                "missing peer_fingerprint",
+                            )
+                        }
+                    };
+
+                if !is_valid_fingerprint(&peer_fingerprint) {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        format!("invalid peer_fingerprint format: {peer_fingerprint}"),
+                    );
+                }
+
+                let step = req
+                    .params
+                    .get("step")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("initiate")
+                    .to_string();
+
+                match step.as_str() {
+                    "initiate" => {
+                        let password = match req.params.get("password").and_then(|v| v.as_str()) {
+                            Some(s) => s.to_string(),
+                            None => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INVALID_ARGUMENT,
+                                    "missing password",
+                                )
+                            }
+                        };
+
+                        if password.chars().count() < 6 {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                "password must be at least 6 characters",
+                            );
+                        }
+
+                        let (initiator, msg1_bytes) = match PakeInitiator::new(&password) {
+                            Ok(pair) => pair,
+                            Err(e) => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("PAKE init failed: {e}"),
+                                )
+                            }
+                        };
+
+                        let session_id = uuid::Uuid::new_v4().to_string();
+                        let msg1_b64 = b64.encode(&msg1_bytes);
+
+                        self.pake_sessions.lock().await.insert(
+                            session_id.clone(),
+                            PakeSession::Initiator(Box::new(initiator)),
+                        );
+
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({
+                                "session_id": session_id,
+                                "message1_b64": msg1_b64,
+                            }),
+                        )
+                    }
+
+                    "finish" => {
+                        let session_id = match req.params.get("session_id").and_then(|v| v.as_str())
+                        {
+                            Some(s) => s.to_string(),
+                            None => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INVALID_ARGUMENT,
+                                    "missing session_id for step=finish",
+                                )
+                            }
+                        };
+                        let msg2_b64 = match req.params.get("message2_b64").and_then(|v| v.as_str())
+                        {
+                            Some(s) => s.to_string(),
+                            None => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INVALID_ARGUMENT,
+                                    "missing message2_b64 for step=finish",
+                                )
+                            }
+                        };
+
+                        let msg2_bytes = match b64.decode(&msg2_b64) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INVALID_ARGUMENT,
+                                    format!("invalid base64 in message2_b64: {e}"),
+                                )
+                            }
+                        };
+
+                        // Extract and consume the initiator session.
+                        let initiator = {
+                            let mut sessions = self.pake_sessions.lock().await;
+                            match sessions.remove(&session_id) {
+                                Some(PakeSession::Initiator(i)) => *i,
+                                Some(other) => {
+                                    // Wrong session type — put it back and error.
+                                    let key = session_id.clone();
+                                    sessions.insert(key, other);
+                                    return Response::err_with_code(
+                                        req.id,
+                                        ERR_CODE_INVALID_ARGUMENT,
+                                        "session_id refers to a responder session, not initiator",
+                                    );
+                                }
+                                None => {
+                                    return Response::err_with_code(
+                                        req.id,
+                                        ERR_CODE_INVALID_ARGUMENT,
+                                        format!("unknown session_id: {session_id}"),
+                                    )
+                                }
+                            }
+                        };
+
+                        let (_session_key, msg3_bytes) = match initiator.finish(&msg2_bytes) {
+                            Ok(pair) => pair,
+                            Err(e) => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_AUTH_FAILED,
+                                    format!("PAKE finish failed: {e}"),
+                                )
+                            }
+                        };
+
+                        let msg3_b64 = b64.encode(&msg3_bytes);
+
+                        // Store the paired peer on the initiator side (no PasswordFile).
+                        let added_at = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+
+                        match load_peers() {
+                            Ok(mut peers) => {
+                                // Only add if not already present.
+                                let already = peers.iter().any(|p| {
+                                    p.get("fingerprint")
+                                        .and_then(|v| v.as_str())
+                                        .map(|f| f == peer_fingerprint)
+                                        .unwrap_or(false)
+                                });
+                                if !already {
+                                    peers.push(serde_json::json!({
+                                        "fingerprint": peer_fingerprint,
+                                        "added_at": added_at,
+                                    }));
+                                    if let Err(e) = save_peers(&peers) {
+                                        return Response::err(
+                                            req.id,
+                                            format!("failed to save peers: {e}"),
+                                        );
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                return Response::err(req.id, format!("failed to load peers: {e}"))
+                            }
+                        }
+
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({
+                                "ok": true,
+                                "message3_b64": msg3_b64,
+                            }),
+                        )
+                    }
+
+                    other => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        format!("unknown step '{other}'; expected 'initiate' or 'finish'"),
+                    ),
+                }
+            }
+
+            // W2.4 — PAKE responder: receives message1 from initiator,
+            // runs PakeResponder::respond, stores session, returns message2.
+            // Params: {message1_b64, peer_fingerprint, password}
+            // Response: {session_id, message2_b64}
+            "pair_accept_password" => {
+                use base64::Engine as _;
+                let b64 = base64::engine::general_purpose::STANDARD;
+
+                let message1_b64 = match req.params.get("message1_b64").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing message1_b64",
+                        )
+                    }
+                };
                 let peer_fingerprint =
                     match req.params.get("peer_fingerprint").and_then(|v| v.as_str()) {
                         Some(s) => s.to_string(),
@@ -1077,15 +1337,182 @@ impl IpcServer {
                     );
                 }
 
-                if password.chars().count() < 6 {
+                let msg1_bytes = match b64.decode(&message1_b64) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            format!("invalid base64 in message1_b64: {e}"),
+                        )
+                    }
+                };
+
+                // Register the password so we have a PasswordFile for respond.
+                let password_file = match copypaste_p2p::pake::PasswordFile::register(&password) {
+                    Ok(pf) => pf,
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("PasswordFile::register failed: {e}"),
+                        )
+                    }
+                };
+
+                let (responder, msg2_bytes) =
+                    match PakeResponder::respond(&password_file, &msg1_bytes) {
+                        Ok(pair) => pair,
+                        Err(e) => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_AUTH_FAILED,
+                                format!("PAKE respond failed: {e}"),
+                            )
+                        }
+                    };
+
+                let session_id = uuid::Uuid::new_v4().to_string();
+                let msg2_b64 = b64.encode(&msg2_bytes);
+
+                self.pake_sessions.lock().await.insert(
+                    session_id.clone(),
+                    PakeSession::Responder {
+                        responder: Box::new(responder),
+                        password_file,
+                        peer_fingerprint,
+                    },
+                );
+
+                Response::ok(
+                    req.id,
+                    serde_json::json!({
+                        "session_id": session_id,
+                        "message2_b64": msg2_b64,
+                    }),
+                )
+            }
+
+            // W2.4 — PAKE responder finish: receives message3 from initiator,
+            // completes handshake, persists peer + PasswordFile.
+            // Params: {session_id, message3_b64, peer_fingerprint}
+            // Response: {ok: true}
+            "pair_accept_finish" => {
+                use base64::Engine as _;
+                let b64 = base64::engine::general_purpose::STANDARD;
+
+                let session_id = match req.params.get("session_id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing session_id",
+                        )
+                    }
+                };
+                let msg3_b64 = match req.params.get("message3_b64").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing message3_b64",
+                        )
+                    }
+                };
+
+                let msg3_bytes = match b64.decode(&msg3_b64) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            format!("invalid base64 in message3_b64: {e}"),
+                        )
+                    }
+                };
+
+                // Extract and consume the responder session.
+                let (responder, password_file, peer_fingerprint) = {
+                    let mut sessions = self.pake_sessions.lock().await;
+                    match sessions.remove(&session_id) {
+                        Some(PakeSession::Responder {
+                            responder,
+                            password_file,
+                            peer_fingerprint,
+                        }) => (*responder, password_file, peer_fingerprint),
+                        Some(other) => {
+                            let key = session_id.clone();
+                            sessions.insert(key, other);
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                "session_id refers to an initiator session, not responder",
+                            );
+                        }
+                        None => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                format!("unknown session_id: {session_id}"),
+                            )
+                        }
+                    }
+                };
+
+                // Finalize the handshake (validates the initiator's authenticator).
+                if let Err(e) = responder.finish(&msg3_bytes) {
                     return Response::err_with_code(
                         req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "password must be at least 6 characters",
+                        ERR_CODE_AUTH_FAILED,
+                        format!("PAKE accept_finish failed: {e}"),
                     );
                 }
 
-                Response::not_implemented(req.id, "pair-peer-with-password")
+                // Persist the peer with the PasswordFile blob on the responder side.
+                let password_file_b64 = b64.encode(&password_file.serialized);
+                let added_at = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+
+                match load_peers() {
+                    Ok(mut peers) => {
+                        let already = peers.iter().any(|p| {
+                            p.get("fingerprint")
+                                .and_then(|v| v.as_str())
+                                .map(|f| f == peer_fingerprint)
+                                .unwrap_or(false)
+                        });
+                        if !already {
+                            peers.push(serde_json::json!({
+                                "fingerprint": peer_fingerprint,
+                                "password_file_b64": password_file_b64,
+                                "added_at": added_at,
+                            }));
+                        } else {
+                            // Update existing peer with the new PasswordFile.
+                            for p in peers.iter_mut() {
+                                if p.get("fingerprint")
+                                    .and_then(|v| v.as_str())
+                                    .map(|f| f == peer_fingerprint)
+                                    .unwrap_or(false)
+                                {
+                                    p["password_file_b64"] =
+                                        serde_json::Value::String(password_file_b64.clone());
+                                    break;
+                                }
+                            }
+                        }
+                        if let Err(e) = save_peers(&peers) {
+                            return Response::err(req.id, format!("failed to save peers: {e}"));
+                        }
+                    }
+                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
+                }
+
+                Response::ok(req.id, serde_json::json!({ "ok": true }))
             }
 
             // ----------------------------------------------------------------
@@ -2465,15 +2892,203 @@ mod tests {
         assert_eq!(resp["ok"], false, "bad fingerprint must fail");
         assert_eq!(resp["error_code"], "invalid_argument");
 
-        // Valid request → not_implemented (Transport wiring is post-beta)
+        // Missing step → defaults to "initiate"; valid request returns session_id + message1_b64
         let body = format!(
-            r#"{{"id":"p5","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{valid_fp}","password":"hunter22"}}}}"#
+            r#"{{"id":"p5","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{valid_fp}","password":"hunter22","step":"initiate"}}}}"#
         );
         let resp = call(&sock, &body).await;
-        assert_eq!(resp["ok"], false, "stub must report not_implemented");
+        assert_eq!(resp["ok"], true, "initiate step must succeed: {resp}");
+        assert!(
+            resp["data"]["session_id"].is_string(),
+            "response must contain session_id"
+        );
+        assert!(
+            resp["data"]["message1_b64"].is_string(),
+            "response must contain message1_b64"
+        );
+    }
+
+    /// W2.4 — `pair_peer_with_password` with step="initiate" returns a
+    /// session_id and base64-encoded message1 to send to the responder.
+    #[tokio::test]
+    async fn pair_peer_with_password_initiate_returns_session_and_message1() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("test-pake-init.sock");
+        start_test_server(&sock).await;
+
+        let valid_fp = std::iter::repeat_n("ab", 32).collect::<Vec<_>>().join(":");
+        let body = format!(
+            r#"{{"id":"pi1","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{valid_fp}","password":"correct-horse","step":"initiate"}}}}"#
+        );
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream.write_all(body.as_bytes()).await.unwrap();
+        stream.write_all(b"\n").await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        assert_eq!(resp["ok"], true, "initiate must succeed: {resp}");
+        let session_id = resp["data"]["session_id"].as_str().unwrap();
+        assert!(!session_id.is_empty(), "session_id must not be empty");
+        let msg1_b64 = resp["data"]["message1_b64"].as_str().unwrap();
+        // Verify it decodes as valid base64 bytes
+        use base64::Engine as _;
+        let msg1_bytes = base64::engine::general_purpose::STANDARD
+            .decode(msg1_b64)
+            .expect("message1_b64 must be valid base64");
+        assert!(!msg1_bytes.is_empty(), "message1 must not be empty");
+    }
+
+    /// W2.4 — `pair_accept_password` returns a session_id and message2 in
+    /// response to a valid message1.
+    #[tokio::test]
+    async fn pair_accept_password_returns_session_and_message2() {
+        use base64::Engine as _;
+        use copypaste_p2p::pake::PakeInitiator;
+
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("test-pake-accept.sock");
+        start_test_server(&sock).await;
+
+        // Simulate the initiator side locally.
+        let password = "correct-horse";
+        let (_initiator, msg1_bytes) = PakeInitiator::new(password).expect("PakeInitiator::new");
+        let msg1_b64 = base64::engine::general_purpose::STANDARD.encode(&msg1_bytes);
+
+        let valid_fp = std::iter::repeat_n("cd", 32).collect::<Vec<_>>().join(":");
+        let body = format!(
+            r#"{{"id":"pa1","method":"pair_accept_password","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"{valid_fp}","password":"{password}"}}}}"#
+        );
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream.write_all(body.as_bytes()).await.unwrap();
+        stream.write_all(b"\n").await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+
         assert_eq!(
-            resp["error_code"], "not_implemented",
-            "valid request must report not_implemented until Transport is wired"
+            resp["ok"], true,
+            "pair_accept_password must succeed: {resp}"
+        );
+        assert!(
+            resp["data"]["session_id"].is_string(),
+            "must return session_id"
+        );
+        let msg2_b64 = resp["data"]["message2_b64"].as_str().unwrap();
+        let msg2_bytes = base64::engine::general_purpose::STANDARD
+            .decode(msg2_b64)
+            .expect("message2_b64 must be valid base64");
+        assert!(!msg2_bytes.is_empty(), "message2 must not be empty");
+    }
+
+    /// W2.4 — full PAKE round-trip through IPC: initiator initiate →
+    /// responder accept → initiator finish → responder finish → both sides
+    /// complete and peer is stored.
+    #[tokio::test]
+    async fn pair_peer_with_password_full_round_trip() {
+        use base64::Engine as _;
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::UnixStream;
+
+        let dir = tempdir().unwrap();
+        // Use two server instances to simulate two separate daemons.
+        let sock_a = dir.path().join("test-pake-rt-a.sock");
+        let sock_b = dir.path().join("test-pake-rt-b.sock");
+        start_test_server(&sock_a).await;
+        start_test_server(&sock_b).await;
+
+        // Helper closure for a single IPC call.
+        async fn call(sock: &std::path::Path, body: &str) -> serde_json::Value {
+            let mut stream = UnixStream::connect(sock).await.unwrap();
+            stream.write_all(body.as_bytes()).await.unwrap();
+            stream.write_all(b"\n").await.unwrap();
+            let mut lines = BufReader::new(&mut stream).lines();
+            let line = lines.next_line().await.unwrap().unwrap();
+            serde_json::from_str(&line).unwrap()
+        }
+
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let password = "correct-horse-battery";
+        let fp_a = std::iter::repeat_n("aa", 32).collect::<Vec<_>>().join(":");
+        let fp_b = std::iter::repeat_n("bb", 32).collect::<Vec<_>>().join(":");
+
+        // Step 1: Device A initiates.
+        let body = format!(
+            r#"{{"id":"rt1","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{fp_b}","password":"{password}","step":"initiate"}}}}"#
+        );
+        let resp = call(&sock_a, &body).await;
+        assert_eq!(resp["ok"], true, "initiate step failed: {resp}");
+        let session_id_a = resp["data"]["session_id"].as_str().unwrap().to_string();
+        let msg1_b64 = resp["data"]["message1_b64"].as_str().unwrap().to_string();
+
+        // Step 2: Device B accepts (responder side).
+        let body = format!(
+            r#"{{"id":"rt2","method":"pair_accept_password","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"{fp_a}","password":"{password}"}}}}"#
+        );
+        let resp = call(&sock_b, &body).await;
+        assert_eq!(resp["ok"], true, "pair_accept_password failed: {resp}");
+        let session_id_b = resp["data"]["session_id"].as_str().unwrap().to_string();
+        let msg2_b64 = resp["data"]["message2_b64"].as_str().unwrap().to_string();
+
+        // Step 3: Device A finishes.
+        let body = format!(
+            r#"{{"id":"rt3","method":"pair_peer_with_password","params":{{"step":"finish","session_id":"{session_id_a}","message2_b64":"{msg2_b64}","peer_fingerprint":"{fp_b}","password":"{password}"}}}}"#
+        );
+        let resp = call(&sock_a, &body).await;
+        assert_eq!(resp["ok"], true, "initiator finish failed: {resp}");
+        let msg3_b64 = resp["data"]["message3_b64"].as_str().unwrap().to_string();
+
+        // Step 4: Device B finishes.
+        let body = format!(
+            r#"{{"id":"rt4","method":"pair_accept_finish","params":{{"session_id":"{session_id_b}","message3_b64":"{msg3_b64}","peer_fingerprint":"{fp_a}"}}}}"#
+        );
+        let resp = call(&sock_b, &body).await;
+        assert_eq!(resp["ok"], true, "responder finish failed: {resp}");
+        assert_eq!(
+            resp["data"]["ok"], true,
+            "pair_accept_finish data.ok must be true"
+        );
+
+        // Verify Device B stored the peer (with password_file_b64) in peers.json.
+        // We check via the list_peers IPC method.
+        let list_resp = call(&sock_b, r#"{"id":"rt5","method":"list_peers","params":{}}"#).await;
+        assert_eq!(list_resp["ok"], true, "list_peers failed: {list_resp}");
+        let peers = list_resp["data"]["peers"].as_array().unwrap();
+        let stored = peers.iter().find(|p| {
+            p.get("fingerprint")
+                .and_then(|v| v.as_str())
+                .map(|f| f == fp_a)
+                .unwrap_or(false)
+        });
+        assert!(
+            stored.is_some(),
+            "peer {fp_a} must be stored on device B after finish"
+        );
+
+        // Verify the stored peer has the password_file_b64 field (PasswordFile blob).
+        let pf_b64 = stored
+            .unwrap()
+            .get("password_file_b64")
+            .and_then(|v| v.as_str());
+        assert!(pf_b64.is_some(), "peer must have password_file_b64 stored");
+        let pf_bytes = b64
+            .decode(pf_b64.unwrap())
+            .expect("password_file_b64 is valid base64");
+        assert!(!pf_bytes.is_empty(), "PasswordFile blob must not be empty");
+
+        // Verify Device A also stored the peer (without PasswordFile — initiator side).
+        let list_resp = call(&sock_a, r#"{"id":"rt6","method":"list_peers","params":{}}"#).await;
+        assert_eq!(list_resp["ok"], true, "list_peers on A failed: {list_resp}");
+        let peers = list_resp["data"]["peers"].as_array().unwrap();
+        let stored_a = peers.iter().find(|p| {
+            p.get("fingerprint")
+                .and_then(|v| v.as_str())
+                .map(|f| f == fp_b)
+                .unwrap_or(false)
+        });
+        assert!(
+            stored_a.is_some(),
+            "peer {fp_b} must be stored on device A after finish"
         );
     }
 
