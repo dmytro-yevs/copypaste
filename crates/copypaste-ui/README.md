@@ -1,45 +1,33 @@
 # copypaste-ui
 
 ## Purpose
-Slint-based desktop UI for CopyPaste. Provides the history window, settings, and the P2P pairing flow; runs in-process with the daemon and talks to it through the IPC client.
+Tauri v2 + React/TypeScript/Vite desktop UI for CopyPaste. Provides the history view, settings, and P2P pairing flow. Talks to the daemon through the IPC client over a Unix socket; does not link `copypaste-core`.
 
-## Public API
-Hybrid `bin` + `lib` crate. Binary entry point is `src/main.rs` (history window). Library re-exports (`src/lib.rs`):
+## Structure
 
-- `windows::SettingsWindowHandle` — app-settings window.
-- `windows::PairWindowHandle` — P2P pairing window.
-- `windows::{SearchableHistoryItem, filter_history_items}` — history filtering helpers.
-- `settings::{AppSettings, HistoryLimit, PairedDevice}`.
-- `tray_menu::{TrayMenuHandle, TrayMenuState, MenuEntry, RecentItem, TrayAction, MAX_PREVIEW_CHARS, MAX_RECENT_ITEMS}`.
-- `fingerprint::{format_fingerprint, format_fingerprint_short, format_fingerprint_long, format_fingerprint_truncated, is_valid_fingerprint}`.
-- `ipc_client` — async IPC client used by all windows (~30 KB).
-
-All Slint properties are one-way `in` bindings driven from Rust; callbacks register through `on_*` handle methods so callers never depend on generated Slint types directly.
+- `src/` — React + TypeScript frontend (Vite-built, bundled at release time).
+- `src-tauri/` — Rust Tauri backend: IPC bridge, tray host, vibrancy, activation policy.
+- `src-tauri` is the Cargo workspace member.
 
 ## Platform support
 - **macOS**: primary.
-- **Linux / Windows**: builds; tray integration disabled outside macOS.
+- **Windows / Linux**: Tauri supports these targets but they are untested and not actively maintained.
 - **Android**: not applicable.
 
 ## Status
 beta.
 
 ## Internal vs published
-Internal binary + library crate. Not published to crates.io.
+Internal crate. Not published to crates.io.
 
-## Quick example
-
-```bash
-# Run the UI alongside the daemon.
-cargo run -p copypaste-ui
-```
-
-## Tests
-2 integration tests under `tests/`: IPC client roundtrip, windows snapshot.
+## Quick start
 
 ```bash
-cargo test -p copypaste-ui
+# Run the UI alongside a running daemon.
+cd crates/copypaste-ui
+pnpm install
+pnpm tauri dev
 ```
 
 ## Related ADRs
-- [ADR-005](../../docs/adr/ADR-005-slint-ui-framework.md) — Slint chosen as the UI framework.
+- [ADR-013](../../docs/adr/ADR-013-tauri-ui.md) — Tauri v2 + React chosen as the UI framework (supersedes ADR-005).

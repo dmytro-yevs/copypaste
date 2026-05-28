@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **ui:** Replaced the Slint menu-bar UI with a Tauri v2 + React desktop app; dropped the `copypaste-ui-snapshot` crate; switched `tokio-tungstenite` and `sentry` to rustls (no more openssl/native-tls in the tree).
+
 ## [0.3.2] - 2026-05-24
 
 Post-install user feedback fixes from v0.3.1.

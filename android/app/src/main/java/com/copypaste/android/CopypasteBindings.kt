@@ -58,6 +58,9 @@ val isNativeLibraryLoaded: Boolean = run {
 // decrypt across reinstalls.
 // ---------------------------------------------------------------------------
 
+private external fun uniffiDeriveCloudSyncKey(passphrase: String): ByteArray
+private external fun uniffiCloudEncrypt(itemId: String, plaintext: ByteArray, syncKeyBytes: ByteArray): ByteArray
+private external fun uniffiCloudDecrypt(itemId: String, blob: ByteArray, syncKeyBytes: ByteArray): ByteArray
 private external fun uniffiEncryptText(itemId: String, bytes: ByteArray, key: ByteArray): EncryptedBlob
 private external fun uniffiDecryptText(itemId: String, ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray
 private external fun uniffiIsSensitive(text: String): Boolean
@@ -216,6 +219,93 @@ fun getHistoryCount(dbPath: String, key: ByteArray): Long {
         uniffiGetHistoryCount(dbPath, key)
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "getHistoryCount failed")
+    }
+}
+
+// ── Cloud sync crypto (cross-device SyncKey, CLOUD_AAD_SCHEMA_VERSION = 5) ──────
+//
+// These three functions expose the Argon2id-derived SyncKey and XChaCha20-
+// Poly1305 AEAD used by the macOS daemon's cloud.rs. Using the same passphrase
+// on Android and macOS produces the same key and therefore the same wire format
+// — items pushed from either side can be decrypted on the other.
+//
+// Wire format for `cloud_encrypt` output / `cloud_decrypt` input:
+//   nonce[24] || ciphertext_with_AEAD_tag  (raw bytes, NOT base64)
+// The SupabaseClient base64-encodes/decodes the blob for the `payload_ct` column.
+
+/**
+ * Derive the 32-byte shared sync key from [passphrase] using Argon2id.
+ *
+ * Deterministic: the same passphrase on any device (Android or macOS)
+ * produces the identical 32-byte key, enabling cross-device decryption.
+ *
+ * The returned [ByteArray] should be used in-memory and NOT persisted to disk.
+ * Pass it to [cloud_encrypt] / [cloud_decrypt] as `syncKeyBytes`.
+ *
+ * Throws [CopypasteException.EncryptionFailed] if Argon2id fails (should
+ * never happen with hardcoded parameters). Throws [IllegalStateException]
+ * if the native library is not loaded.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun derive_cloud_sync_key(passphrase: String): ByteArray {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; derive_cloud_sync_key is unavailable")
+    }
+    return try {
+        uniffiDeriveCloudSyncKey(passphrase)
+    } catch (e: Exception) {
+        throw CopypasteException.EncryptionFailed(e.message ?: "derive_cloud_sync_key failed")
+    }
+}
+
+/**
+ * Encrypt [plaintext] for cloud storage.
+ *
+ * [itemId] is bound into the AEAD AAD as `"{itemId}|5"`. It MUST be the UUID
+ * stored in the `item_id` column — a mismatch fails authentication on decrypt.
+ * [syncKeyBytes] must be the 32 bytes returned by [derive_cloud_sync_key].
+ *
+ * Returns raw bytes: `nonce[24] || ciphertext_with_tag`. Callers (e.g.
+ * [SupabaseClient]) must base64-encode this before storing in `payload_ct`.
+ *
+ * Throws [CopypasteException.EncryptionFailed] on AEAD failure;
+ * [CopypasteException.InvalidKeyLength] if key is not 32 bytes;
+ * [IllegalStateException] if native lib is absent.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun cloud_encrypt(itemId: String, plaintext: ByteArray, syncKeyBytes: ByteArray): ByteArray {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; cloud_encrypt is unavailable")
+    }
+    return try {
+        uniffiCloudEncrypt(itemId, plaintext, syncKeyBytes)
+    } catch (e: Exception) {
+        throw CopypasteException.EncryptionFailed(e.message ?: "cloud_encrypt failed")
+    }
+}
+
+/**
+ * Decrypt a cloud blob.
+ *
+ * [blob] is the raw bytes of `base64_decode(payload_ct)` from the Supabase row.
+ * [itemId] MUST match the `item_id` column value used during encryption.
+ * [syncKeyBytes] must be the same 32-byte key used during encryption.
+ *
+ * Returns plaintext bytes on success.
+ *
+ * Throws [CopypasteException.DecryptionFailed] if the key, item_id, or blob
+ * are wrong/tampered. Throws [CopypasteException.InvalidKeyLength] if key is
+ * not 32 bytes. Throws [IllegalStateException] if native lib is absent.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun cloud_decrypt(itemId: String, blob: ByteArray, syncKeyBytes: ByteArray): ByteArray {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; cloud_decrypt is unavailable")
+    }
+    return try {
+        uniffiCloudDecrypt(itemId, blob, syncKeyBytes)
+    } catch (e: Exception) {
+        throw CopypasteException.DecryptionFailed(e.message ?: "cloud_decrypt failed")
     }
 }
 

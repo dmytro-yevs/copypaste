@@ -5,8 +5,9 @@ use crate::{
     p2p, paths,
 };
 use copypaste_core::{
-    build_item_aad_v2, chunks_to_blob, derive_v2, detect, encode_image, encrypt_item_with_aad,
-    insert_item_with_fts, AppConfig, ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION_V4,
+    build_item_aad_v2, bump_item_recency, chunks_to_blob, derive_v2, detect, encode_image,
+    encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts, AppConfig,
+    ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION_V4,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -196,6 +197,23 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     #[cfg(not(target_os = "macos"))]
     let device_public_key_arc: Arc<[u8; 32]> = Arc::new([0u8; 32]);
 
+    // Load (or create on first run) the persistent device_id once so P2P,
+    // sync_orch, cloud push, and clipboard capture all share the same stable
+    // identity. Previously P2P and sync_orch each called load_or_create_device_id
+    // separately, and clipboard items were never stamped at all, causing every
+    // captured item to carry origin_device_id="" → each restart appeared as a
+    // new anonymous device in the Supabase peer list (duplicate devices bug).
+    let local_device_id: String = match load_or_create_device_id() {
+        Ok(id) => id.to_string(),
+        Err(e) => {
+            tracing::warn!(
+                "device_id load/create failed ({e}); using ephemeral UUID — \
+                 items captured this session will carry a one-time device_id"
+            );
+            uuid::Uuid::new_v4().to_string()
+        }
+    };
+
     // D1: create the process-wide cancellation token. Clones are passed to
     // every long-running task; calling `shutdown_token.cancel()` on SIGINT/
     // SIGTERM propagates to all of them simultaneously.
@@ -220,6 +238,18 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
 
     #[cfg(unix)]
     let socket_path = paths::socket_path();
+
+    // Create shared cloud-sync state here so the IPC handler and the cloud
+    // loops both observe the SAME Arcs. A `set_sync_passphrase` IPC call
+    // writes to `cloud_sync_key`; the cloud push/poll loops read it. The
+    // cloud loops write to `cloud_last_sync_ms`; `get_sync_status` reads it.
+    #[cfg(feature = "cloud-sync")]
+    let cloud_sync_key: std::sync::Arc<tokio::sync::Mutex<Option<copypaste_core::SyncKey>>> =
+        std::sync::Arc::new(tokio::sync::Mutex::new(None));
+    #[cfg(feature = "cloud-sync")]
+    let cloud_last_sync_ms: std::sync::Arc<std::sync::atomic::AtomicI64> =
+        std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
+
     // D2 (IPC): pass a token clone so the accept loop exits on shutdown.
     #[cfg(unix)]
     let _ipc_handle = {
@@ -230,11 +260,19 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         let socket_clone = socket_path.clone();
         let ipc_shutdown = shutdown_token.clone();
         let ipc_peers = p2p_peers.clone();
+        #[cfg(feature = "cloud-sync")]
+        let ipc_sync_key = cloud_sync_key.clone();
+        #[cfg(feature = "cloud-sync")]
+        let ipc_last_sync_ms = cloud_last_sync_ms.clone();
         tokio::spawn(async move {
             let mut server =
                 IpcServer::new(ipc_db, ipc_private_mode, ipc_local_key, ipc_device_pub);
             if let Some(peers) = ipc_peers {
                 server = server.with_p2p_peers(peers);
+            }
+            #[cfg(feature = "cloud-sync")]
+            {
+                server = server.with_cloud_sync_state(ipc_sync_key, ipc_last_sync_ms);
             }
             if let Err(e) = server.serve(&socket_clone, ipc_shutdown).await {
                 tracing::error!("IPC server error: {e}");
@@ -267,16 +305,10 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
 
     // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
     let _p2p_handle: Option<p2p::P2pHandle> = if let Some(p2p_peers) = p2p_peers {
-        // Persistent device_id: regenerating on every restart would break P2P
-        // pairing and cloud peer recognition (arch LOW #24). Read from disk,
-        // creating + writing a fresh UUID v4 on first run.
-        let device_id = match load_or_create_device_id() {
-            Ok(id) => id,
-            Err(e) => {
-                tracing::warn!("device_id load/create failed ({e}); using ephemeral UUID");
-                uuid::Uuid::new_v4()
-            }
-        };
+        // Reuse the persistent device_id loaded above (load_or_create_device_id
+        // was called once already; parsing it back to Uuid is cheap).
+        let device_id =
+            uuid::Uuid::parse_str(&local_device_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
         let device_name = std::env::var("HOSTNAME")
             .or_else(|_| std::env::var("COMPUTERNAME"))
             .unwrap_or_else(|_| "CopyPaste".to_string());
@@ -326,25 +358,10 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // is disabled — because the inbound side may still receive items from the
     // cloud-sync path once that worker (W2.3) wires its incoming sender in.
     //
-    // Persistent sync_device_id (audit HIGH #13).
-    //
-    // Previously this was `Uuid::new_v4().to_string()` on every startup,
-    // which broke sync orchestrator correlation: peers saw a brand-new
-    // device on every restart and could not deduplicate items by origin.
-    //
-    // We reuse the same on-disk identifier the P2P branch already loads
-    // via `load_or_create_device_id` so the daemon presents a single
-    // stable identity across the local-clipboard / P2P / sync surfaces.
-    let sync_device_id = match load_or_create_device_id() {
-        Ok(id) => id.to_string(),
-        Err(e) => {
-            tracing::warn!(
-                "sync_device_id load/create failed ({e}); falling back to ephemeral UUID — \
-                 sync orchestrator will treat this run as a new device"
-            );
-            uuid::Uuid::new_v4().to_string()
-        }
-    };
+    // Reuse the persistent device_id loaded once above — all subsystems
+    // (P2P, sync_orch, cloud push, clipboard capture) share the same stable
+    // identity across restarts.
+    let sync_device_id = local_device_id.clone();
     let sync_db = db.clone();
     let sync_rx = new_item_tx.subscribe();
     // D2 (sync_orch): pass a token clone so the orchestrator exits on shutdown.
@@ -376,7 +393,16 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             tracing::info!("cloud-sync: SUPABASE_URL found, starting cloud orchestrator");
             // Subscribe a new receiver from the existing sender.
             let rx = new_item_tx.subscribe();
-            match start_cloud(cloud_cfg, db.clone(), rx).await {
+            match start_cloud(
+                cloud_cfg,
+                db.clone(),
+                rx,
+                cloud_sync_key.clone(),
+                cloud_last_sync_ms.clone(),
+                local_key_arc.clone(),
+            )
+            .await
+            {
                 Ok(handle) => {
                     tracing::info!("cloud-sync: orchestrator started");
                     Some(handle)
@@ -421,7 +447,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx).await;
+                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -493,7 +519,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx).await;
+                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -577,6 +603,7 @@ async fn handle_tick(
     config: &AppConfig,
     private_mode: &Arc<AtomicBool>,
     new_item_tx: &broadcast::Sender<ClipboardItem>,
+    local_device_id: &str,
 ) {
     // Skip recording when private/pause mode is active
     if private_mode.load(Ordering::Relaxed) {
@@ -599,7 +626,7 @@ async fn handle_tick(
                 "clipboard captured: text ({} bytes)",
                 text.len()
             );
-            if let Some(item) = handle_text(text, db, local_key, config).await {
+            if let Some(item) = handle_text(text, db, local_key, config, local_device_id).await {
                 // Broadcast to P2P + cloud-sync subscribers (and any future consumer).
                 // A send error only means there are no active receivers —
                 // that is normal when both P2P and cloud-sync are disabled.
@@ -612,7 +639,9 @@ async fn handle_tick(
                 "clipboard captured: image ({} bytes raw)",
                 raw_bytes.len()
             );
-            if let Some(item) = handle_image(raw_bytes, db, local_key, config).await {
+            if let Some(item) =
+                handle_image(raw_bytes, db, local_key, config, local_device_id).await
+            {
                 let _ = new_item_tx.send(item);
             }
         }
@@ -673,6 +702,7 @@ async fn handle_text(
     db: &Arc<Mutex<Database>>,
     local_key: &[u8; 32],
     config: &AppConfig,
+    local_device_id: &str,
 ) -> Option<ClipboardItem> {
     // Migration gate is now enforced at the Database layer inside
     // `insert_item` / `insert_item_with_fts` (ItemsError::MigrationInProgress).
@@ -680,6 +710,81 @@ async fn handle_text(
 
     let is_sensitive = detect(&text).is_some();
 
+    // Compute SHA-256 content hash of the PLAINTEXT bytes.
+    // This is used for deduplication: if an identical item already exists in
+    // history (any age, not expired), we bump its wall_time/lamport_ts to now
+    // rather than inserting a duplicate row. The hash is stored on new inserts
+    // so future captures of the same content can find the existing row.
+    //
+    // NEVER log the plaintext or hash — the hash alone is not reversible but
+    // logging it alongside the content would create a correlation risk.
+    let hash_hex = {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(text.as_bytes()))
+    };
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    let db_guard = db.lock().await;
+
+    // Dedup: look for any non-expired row with the same content hash.
+    // `find_recent_by_hash` uses a generous window (i64::MAX) to cover ALL
+    // history, not just the last N minutes.  A pinned item is never expired
+    // so it will always be found and bumped, which is the correct behaviour.
+    match find_recent_by_hash(&db_guard, &hash_hex, now_ms, i64::MAX) {
+        Ok(Some(existing_id)) => {
+            // Identical content already in history: bump recency to now so the
+            // existing row rises to the top of the pinned-first, wall_time DESC
+            // sort. We do NOT insert a new row — the content and metadata are
+            // unchanged; only the recency is updated.
+            let new_lamport = now_ms; // use wall_time ms as lamport proxy
+            match bump_item_recency(&db_guard, &existing_id, now_ms, new_lamport) {
+                Ok(changed) if changed > 0 => {
+                    tracing::debug!(
+                        existing = %existing_id,
+                        "text dedup: bumped existing row to top (same content_hash)"
+                    );
+                }
+                Ok(_) => {
+                    // Row disappeared between find and bump (race on delete) —
+                    // fall through to a fresh insert on next poll. This poll
+                    // produces no item for the broadcast channel, which is safe:
+                    // the next poll will see a new changeCount and capture again.
+                    tracing::debug!(
+                        existing = %existing_id,
+                        "text dedup: existing row disappeared before bump (deleted concurrently)"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("text dedup bump failed: {e}");
+                }
+            }
+            // Return the bumped item so broadcast subscribers (P2P, sync) see
+            // the recency update. Fetch the full row to get the up-to-date
+            // wall_time and all fields.
+            return match get_item_by_id(&db_guard, &existing_id) {
+                Ok(Some(bumped)) => Some(bumped),
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::warn!("text dedup: could not re-fetch bumped item: {e}");
+                    None
+                }
+            };
+        }
+        Ok(None) => {
+            // No existing row with this hash — proceed with a fresh insert.
+        }
+        Err(e) => {
+            // DB error on the dedup lookup: log and fall through to insert.
+            // Inserting a duplicate is preferable to silently losing a capture.
+            tracing::warn!("text dedup hash lookup failed: {e}");
+        }
+    }
+
+    // Fresh insert path: encrypt then store.
     let item_id = uuid::Uuid::new_v4().to_string();
     let (nonce, ciphertext) = match encrypt_text_for_storage(text.as_bytes(), local_key, &item_id) {
         Ok(v) => v,
@@ -691,16 +796,19 @@ async fn handle_text(
     let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
     item.item_id = item_id;
     item.is_sensitive = is_sensitive;
+    // Stamp the stable on-disk device_id so cloud/P2P peers attribute every
+    // captured item to this specific machine across restarts. Without this,
+    // `origin_device_id` stays "" and each restart appears as a fresh
+    // anonymous device in the Supabase device list (root cause of duplicates).
+    item.origin_device_id = local_device_id.to_string();
+    // Store the content hash so future captures of identical content can find
+    // and bump this row instead of inserting a duplicate.
+    item.content_hash = Some(hash_hex);
 
     if is_sensitive {
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as i64;
         item.expires_at = Some(now_ms + (config.sensitive_ttl_local_secs as i64 * 1000));
     }
 
-    let db_guard = db.lock().await;
     // v0.3 post-T2: insert_item + upsert_fts collapsed into a single
     // transaction. Closes the TOCTOU window where a crash between the row
     // insert and the FTS upsert could leave a row that search would never
@@ -715,7 +823,7 @@ async fn handle_text(
                 tracing::debug!(
                     requested = %item.id,
                     existing = %stored_id,
-                    "text item deduped against existing row"
+                    "text item deduped against existing row (UNIQUE index race)"
                 );
             } else {
                 tracing::info!(
@@ -741,6 +849,7 @@ async fn handle_image(
     db: &Arc<Mutex<Database>>,
     local_key: &[u8; 32],
     config: &AppConfig,
+    local_device_id: &str,
 ) -> Option<ClipboardItem> {
     // Migration gate is now enforced at the Database layer inside
     // `insert_item` / `insert_item_with_fts` (ItemsError::MigrationInProgress).
@@ -759,7 +868,9 @@ async fn handle_image(
                 r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
                 meta.width, meta.height, meta.original_size, meta.chunk_count, meta.file_id
             );
-            let item = ClipboardItem::new_image(blob, meta_json, 0);
+            let mut item = ClipboardItem::new_image(blob, meta_json, 0);
+            // Stamp stable device identity (same fix as handle_text).
+            item.origin_device_id = local_device_id.to_string();
             tracing::debug!(
                 "image encoded: {}x{} px, {} chunks, original_size={}",
                 meta.width,
@@ -1283,7 +1394,7 @@ mod tests {
         let png = test_png();
 
         // Ingest: exactly what the monitor loop does on a fresh image capture.
-        let item = handle_image(png.clone(), &db, &local_key, &config)
+        let item = handle_image(png.clone(), &db, &local_key, &config, "test-device")
             .await
             .expect("handle_image must store the image");
         assert_eq!(item.content_type, "image");
@@ -1329,7 +1440,7 @@ mod tests {
         let png = test_png();
 
         // Capture an image under the OLD key.
-        handle_image(png.clone(), &db, &old_key, &config)
+        handle_image(png.clone(), &db, &old_key, &config, "test-device")
             .await
             .expect("handle_image must store the image");
 
@@ -1362,6 +1473,114 @@ mod tests {
         assert_eq!(
             recovered, reference_png,
             "under its original key the row decodes to the stored PNG"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // FIX 2: dedup-bump — identical content bumps the existing row to top
+    // -----------------------------------------------------------------------
+
+    /// Capturing the same text twice must NOT insert a second row. The existing
+    /// row's wall_time must be updated so it appears at the top of history.
+    #[tokio::test]
+    async fn handle_text_dedup_bumps_existing_row_not_inserts() {
+        let local_key = [0x42u8; 32];
+        let db = Arc::new(Mutex::new(Database::open_in_memory().expect("open db")));
+        let config = AppConfig::default();
+        let text = "duplicate clipboard text".to_string();
+
+        // First capture.
+        let item1 = handle_text(text.clone(), &db, &local_key, &config, "test-device")
+            .await
+            .expect("first capture must succeed");
+
+        // Verify content_hash is set after first insert.
+        {
+            let guard = db.lock().await;
+            let row = copypaste_core::get_item_by_id(&guard, &item1.id)
+                .unwrap()
+                .expect("first row must exist");
+            assert!(
+                row.content_hash.is_some(),
+                "content_hash must be set on new row"
+            );
+        }
+
+        // Second capture of the same text.
+        let _item2 = handle_text(text.clone(), &db, &local_key, &config, "test-device").await;
+
+        // Must still be exactly one row.
+        let guard = db.lock().await;
+        let total = copypaste_core::count_items(&guard).expect("count_items");
+        assert_eq!(
+            total, 1,
+            "identical text must not insert a duplicate row; expected 1 row, got {total}"
+        );
+    }
+
+    /// After a dedup bump, the bumped item has a wall_time >= the first
+    /// insert's wall_time, so it sorts to the top.
+    #[tokio::test]
+    async fn handle_text_dedup_bumped_item_has_updated_wall_time() {
+        let local_key = [0x42u8; 32];
+        let db = Arc::new(Mutex::new(Database::open_in_memory().expect("open db")));
+        let config = AppConfig::default();
+        let text = "text that will be bumped".to_string();
+
+        // Insert the item and record its initial wall_time.
+        let item1 = handle_text(text.clone(), &db, &local_key, &config, "test-device")
+            .await
+            .expect("first capture must succeed");
+        let wall_time_before = item1.wall_time;
+
+        // A tiny sleep to ensure a different wall_time on the bump.
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+
+        // Second capture: should bump, not insert.
+        handle_text(text.clone(), &db, &local_key, &config, "test-device").await;
+
+        let guard = db.lock().await;
+        let row = copypaste_core::get_item_by_id(&guard, &item1.id)
+            .unwrap()
+            .expect("original row must still exist after bump");
+
+        assert!(
+            row.wall_time >= wall_time_before,
+            "bumped wall_time ({}) must be >= original ({})",
+            row.wall_time,
+            wall_time_before
+        );
+    }
+
+    /// Capturing two DIFFERENT texts must insert two distinct rows.
+    #[tokio::test]
+    async fn handle_text_different_content_inserts_two_rows() {
+        let local_key = [0x42u8; 32];
+        let db = Arc::new(Mutex::new(Database::open_in_memory().expect("open db")));
+        let config = AppConfig::default();
+
+        handle_text(
+            "first distinct text".to_string(),
+            &db,
+            &local_key,
+            &config,
+            "test-device",
+        )
+        .await;
+        handle_text(
+            "second distinct text".to_string(),
+            &db,
+            &local_key,
+            &config,
+            "test-device",
+        )
+        .await;
+
+        let guard = db.lock().await;
+        let total = copypaste_core::count_items(&guard).expect("count_items");
+        assert_eq!(
+            total, 2,
+            "two distinct texts must produce two rows, got {total}"
         );
     }
 }

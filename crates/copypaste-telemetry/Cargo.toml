@@ -21,9 +21,10 @@ regex = "1"
 unicode-normalization = { workspace = true }
 # Sentry SDK — crate-local, NOT promoted to workspace so the telemetry
 # crate's outbound-network dependency stays isolated.
-# default-features disabled to avoid pulling reqwest's full feature set;
-# we re-enable only `transport` (reqwest + native-tls), `panic`, and `anyhow`.
-sentry = { version = "0.34", default-features = false, features = ["transport", "panic", "anyhow"] }
+# default-features disabled to avoid pulling reqwest's full feature set; we
+# enable the reqwest transport with rustls (not native-tls) so telemetry does
+# not drag openssl-sys into the workspace, plus `panic` and `anyhow`.
+sentry = { version = "0.34", default-features = false, features = ["reqwest", "rustls", "panic", "anyhow"] }
 
 [dev-dependencies]
 # `test` feature enables `sentry::test::with_captured_events` — required for

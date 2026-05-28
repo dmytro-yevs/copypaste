@@ -1,18 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Network: relay server + Supabase -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Foreground service (API 28+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- MED-12: Clipboard monitoring is not "data sync" per Play policy.
          FGS_SPECIAL_USE is the correct category for niche FGS purposes that
          don't fit dataSync / mediaPlayback / location etc. The Play Store
          requires a property element on the <service> declaring the use case. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <!-- Notification permission (runtime, Android 13 / API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Battery optimization exemption: lets us stay alive for polling.
+         Declared here; user is prompted at runtime via ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- WorkManager (Supabase background polling + ServiceRestartWorker) -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- WorkManager expedited jobs on Android 12+ require FOREGROUND_SERVICE.
+         Already declared above. No additional permission needed for expedited jobs. -->
 
     <application
         android:name=".CopyPasteApp"
         android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.CopyPaste">
+
+        <!-- Main entry point — hosts the bottom-nav shell (Clips / Devices / Settings) -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -24,6 +43,13 @@
             </intent-filter>
         </activity>
 
+        <!-- First-run onboarding: shown once by MainActivity when permissions are missing -->
+        <activity
+            android:name=".OnboardingActivity"
+            android:exported="false"
+            android:theme="@style/Theme.CopyPaste" />
+
+        <!-- Kept for deep-link / back-stack compatibility; content now also in bottom nav -->
         <activity
             android:name=".HistoryActivity"
             android:exported="false"
@@ -39,16 +65,72 @@
             android:exported="false"
             android:theme="@style/Theme.CopyPaste" />
 
+        <!--
+            Foreground clipboard-monitoring service.
+
+            foregroundServiceType="specialUse" — required on Android 14+ (API 34+).
+            "dataSync" was considered but rejected: clipboard monitoring is not a
+            data-upload/download operation. Play policy directs clipboard managers
+            to use specialUse (which also requires a PROPERTY_SPECIAL_USE_FGS_SUBTYPE
+            justification below). Using the wrong type would cause Play Store review
+            rejection.
+
+            PROPERTY_SPECIAL_USE_FGS_SUBTYPE is required by Google Play for all
+            specialUse foreground services. The value is reviewed by the Play team.
+        -->
         <service android:name=".ClipboardService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <!-- Required by Play policy for FGS_SPECIAL_USE: explain the
-                 niche purpose so reviewers and the Android Vitals tooling
-                 can confirm the category is not abused. -->
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <!-- Required by Play policy for FGS_SPECIAL_USE -->
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Encrypted clipboard sync between user's paired devices" />
         </service>
+
+        <!-- AccessibilityService: enables background clipboard reading on Android 10+.
+             User must manually enable in Settings > Accessibility. OnboardingActivity
+             prompts them with ACTION_ACCESSIBILITY_SETTINGS and explains why. -->
+        <service
+            android:name=".ClipboardAccessibilityService"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!--
+            BootReceiver: restarts the foreground service after device boot and
+            after OEM "quick-boot" / warm-boot cycles.
+
+            Declared exported=true because BOOT_COMPLETED is a system broadcast
+            that comes from outside our process (required on API 26+ for implicit
+            broadcast exceptions). RECEIVE_BOOT_COMPLETED ensures delivery.
+
+            QUICKBOOT_POWERON variants:
+            - android.intent.action.QUICKBOOT_POWERON       generic OEMs / custom ROMs
+            - com.android.intent.action.QUICKBOOT_POWERON   Xiaomi/MIUI fast-boot
+            - com.htc.intent.action.QUICKBOOT_POWERON       HTC quickboot
+            ACTION_LOCKED_BOOT_COMPLETED fires before the credential-encrypted
+            storage is unlocked on FBE devices; our service doesn't read the DB
+            at boot so it's safe to start early.
+        -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </receiver>
 
         <receiver android:name=".CaptureControlReceiver"
             android:exported="false">
@@ -57,5 +139,14 @@
                 <action android:name="com.copypaste.android.action.RESUME_CAPTURE" />
             </intent-filter>
         </receiver>
+
+        <!-- WorkManager: Supabase poll worker registered at runtime when backend = SUPABASE.
+             ServiceRestartWorker is also registered at runtime by WorkManager. -->
+        <provider
+            android:name="androidx.work.impl.WorkManagerInitializer"
+            android:authorities="${applicationId}.workmanager-init"
+            android:exported="false"
+            tools:node="remove"
+            xmlns:tools="http://schemas.android.com/tools" />
     </application>
 </manifest>

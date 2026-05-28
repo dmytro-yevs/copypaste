@@ -22,7 +22,13 @@
 /// previously aborted the JVM are now reported as
 /// `CopypasteError::Panicked` instead. Kotlin generated against ABI 2 is
 /// missing the new error variant and must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 3;
+///
+/// **ABI 4 (cloud sync):** Added three cloud-sync FFI functions:
+/// `derive_cloud_sync_key`, `cloud_encrypt`, `cloud_decrypt`. These expose
+/// the Argon2id-derived SyncKey and XChaCha20-Poly1305 AEAD (schema v5)
+/// used by the macOS daemon, enabling end-to-end Supabase sync from Android.
+/// Kotlin generated against ABI 3 lacks these symbols and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 4;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

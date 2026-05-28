@@ -5,9 +5,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -15,13 +19,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -32,22 +35,24 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CopyPasteTheme
 
 /**
- * Settings screen — toggles persist via the existing [Settings] SharedPreferences
- * helper. Compose composables read each property once into local state; on
- * change we both update local state (instant UI feedback) and write through to
- * the prefs (so the ClipboardService / SyncManager see the new value on next
- * read).
+ * Settings screen — toggles and Supabase config fields.
+ *
+ * Embedded in the bottom-nav shell via [showBackButton]=false. Also usable
+ * as a standalone activity (launched from a deep-link or legacy nav) with
+ * [showBackButton]=true.
  */
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             CopyPasteTheme {
-                SettingsScreen(onBack = { finish() })
+                SettingsScreen(showBackButton = true, onBack = { finish() })
             }
         }
     }
@@ -55,13 +60,32 @@ class SettingsActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit = {}) {
+fun SettingsScreen(
+    modifier: Modifier = Modifier,
+    showBackButton: Boolean = true,
+    onBack: () -> Unit = {},
+) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
 
+    // ── Toggle states ──
     var syncEnabled by remember { mutableStateOf(settings.syncEnabled) }
     var showWarnings by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
+
+    // ── Sync backend ──
+    var syncBackend by remember { mutableStateOf(settings.syncBackend) }
+
+    // ── Supabase fields ──
+    var supabaseUrl by remember { mutableStateOf(settings.supabaseUrl) }
+    var supabaseAnonKey by remember { mutableStateOf(settings.supabaseAnonKey) }
+    var cloudPassphrase by remember { mutableStateOf(settings.cloudSyncPassphrase) }
+    var supabaseEmail by remember { mutableStateOf(settings.supabaseEmail) }
+    var supabasePassword by remember { mutableStateOf(settings.supabasePassword) }
+
+    // ── Relay field ──
+    var relayUrl by remember { mutableStateOf(settings.relayUrl) }
+
     var settingsError by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val errorTemplate = stringResource(R.string.error_settings_save)
@@ -77,15 +101,18 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
     }
 
     Scaffold(
+        modifier = modifier,
         topBar = {
-            TopAppBar(
+            androidx.compose.material3.TopAppBar(
                 title = { Text(stringResource(R.string.title_settings)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
+                    if (showBackButton) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
+                        }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = MaterialTheme.colorScheme.onPrimary,
                     navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
@@ -97,21 +124,19 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.Top
         ) {
+            // ── General toggles ────────────────────────────────────────────────
             SettingsRow(
                 title = stringResource(R.string.setting_sync_enabled_title),
                 subtitle = stringResource(R.string.setting_sync_enabled_subtitle),
                 checked = syncEnabled,
                 onCheckedChange = {
-                    val previous = syncEnabled
-                    syncEnabled = it
-                    try {
-                        settings.syncEnabled = it
-                    } catch (e: Exception) {
-                        syncEnabled = previous
-                        settingsError = e.message ?: e.javaClass.simpleName
+                    val prev = syncEnabled; syncEnabled = it
+                    try { settings.syncEnabled = it } catch (e: Exception) {
+                        syncEnabled = prev; settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
@@ -121,13 +146,9 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
                 subtitle = stringResource(R.string.setting_sensitive_warnings_subtitle),
                 checked = showWarnings,
                 onCheckedChange = {
-                    val previous = showWarnings
-                    showWarnings = it
-                    try {
-                        settings.showSensitiveWarnings = it
-                    } catch (e: Exception) {
-                        showWarnings = previous
-                        settingsError = e.message ?: e.javaClass.simpleName
+                    val prev = showWarnings; showWarnings = it
+                    try { settings.showSensitiveWarnings = it } catch (e: Exception) {
+                        showWarnings = prev; settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
@@ -137,42 +158,178 @@ fun SettingsScreen(onBack: () -> Unit = {}) {
                 subtitle = stringResource(R.string.setting_mask_sensitive_subtitle),
                 checked = maskSensitive,
                 onCheckedChange = {
-                    val previous = maskSensitive
-                    maskSensitive = it
+                    val prev = maskSensitive; maskSensitive = it
+                    try { settings.maskSensitiveContent = it } catch (e: Exception) {
+                        maskSensitive = prev; settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                }
+            )
+            HorizontalDivider()
+
+            // ── Sync backend selector ──────────────────────────────────────────
+            SectionHeader("Sync Backend")
+            SettingsRow(
+                title = "Use Supabase Cloud Sync",
+                subtitle = "Cross-device sync via Supabase (end-to-end encrypted). Off = relay mode.",
+                checked = syncBackend == SyncBackend.SUPABASE,
+                onCheckedChange = { useSupabase ->
+                    val newBackend = if (useSupabase) SyncBackend.SUPABASE else SyncBackend.RELAY
+                    syncBackend = newBackend
                     try {
-                        settings.maskSensitiveContent = it
+                        settings.syncBackend = newBackend
+                        // Register or cancel the background poll worker
+                        SupabasePollWorker.schedule(ctx, enabled = useSupabase)
                     } catch (e: Exception) {
-                        maskSensitive = previous
+                        syncBackend = if (useSupabase) SyncBackend.RELAY else SyncBackend.SUPABASE
                         settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
             HorizontalDivider()
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = stringResource(R.string.setting_relay_url_label),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+
+            // ── Supabase config (visible only when SUPABASE selected) ──────────
+            if (syncBackend == SyncBackend.SUPABASE) {
+                SectionHeader("Supabase Configuration")
+
+                SettingsTextField(
+                    label = "Supabase URL",
+                    hint = "https://your-project.supabase.co",
+                    value = supabaseUrl,
+                    onValueChange = { supabaseUrl = it },
+                    onCommit = {
+                        try { settings.supabaseUrl = supabaseUrl.trim() }
+                        catch (e: Exception) { settingsError = e.message }
+                    },
                 )
-                Text(
-                    text = settings.relayUrl,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+
+                SettingsTextField(
+                    label = "Anon Key",
+                    hint = "eyJhbGci…",
+                    value = supabaseAnonKey,
+                    onValueChange = { supabaseAnonKey = it },
+                    onCommit = {
+                        try { settings.supabaseAnonKey = supabaseAnonKey.trim() }
+                        catch (e: Exception) { settingsError = e.message }
+                    },
+                    password = true,
                 )
+
+                SettingsTextField(
+                    label = "Sync Passphrase",
+                    hint = "Shared passphrase (same on all devices)",
+                    value = cloudPassphrase,
+                    onValueChange = { cloudPassphrase = it },
+                    onCommit = {
+                        try { settings.cloudSyncPassphrase = cloudPassphrase }
+                        catch (e: Exception) { settingsError = e.message }
+                    },
+                    password = true,
+                )
+
+                SectionHeader("Supabase Account (optional)")
+                Text(
+                    text = "If left blank, the anon key is used as bearer. " +
+                            "Sign-in enables Row Level Security policies.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+
+                SettingsTextField(
+                    label = "Email",
+                    hint = "user@example.com",
+                    value = supabaseEmail,
+                    onValueChange = { supabaseEmail = it },
+                    onCommit = {
+                        try { settings.supabaseEmail = supabaseEmail.trim() }
+                        catch (e: Exception) { settingsError = e.message }
+                    },
+                )
+
+                SettingsTextField(
+                    label = "Password",
+                    hint = "",
+                    value = supabasePassword,
+                    onValueChange = { supabasePassword = it },
+                    onCommit = {
+                        try { settings.supabasePassword = supabasePassword }
+                        catch (e: Exception) { settingsError = e.message }
+                    },
+                    password = true,
+                )
+
+                HorizontalDivider()
+            }
+
+            // ── Relay config (visible only when RELAY selected) ────────────────
+            if (syncBackend == SyncBackend.RELAY) {
+                SectionHeader("Relay Configuration")
+                SettingsTextField(
+                    label = stringResource(R.string.setting_relay_url_label),
+                    hint = "http://localhost:8080",
+                    value = relayUrl,
+                    onValueChange = { relayUrl = it },
+                    onCommit = {
+                        try { settings.relayUrl = relayUrl.trim() }
+                        catch (e: Exception) { settingsError = e.message }
+                    },
+                )
+                HorizontalDivider()
+            }
+
+            // ── Device ID (read-only) ──────────────────────────────────────────
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text(
                     text = stringResource(R.string.setting_device_id_label),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 12.dp)
                 )
                 Text(
                     text = settings.deviceId,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
     }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
+    )
+}
+
+@Composable
+private fun SettingsTextField(
+    label: String,
+    hint: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onCommit: () -> Unit,
+    password: Boolean = false,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = {
+            onValueChange(it)
+            onCommit()
+        },
+        label = { Text(label) },
+        placeholder = { Text(hint, style = MaterialTheme.typography.bodySmall) },
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        visualTransformation = if (password) PasswordVisualTransformation() else
+            androidx.compose.ui.text.input.VisualTransformation.None,
+        keyboardOptions = if (password) KeyboardOptions(keyboardType = KeyboardType.Password)
+            else KeyboardOptions.Default,
+    )
 }
 
 @Composable
@@ -182,14 +339,16 @@ private fun SettingsRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
-    androidx.compose.foundation.layout.Row(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Column(modifier = Modifier.padding(end = 12.dp)) {
+        Column(modifier = Modifier
+            .weight(1f)
+            .padding(end = 12.dp)) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,

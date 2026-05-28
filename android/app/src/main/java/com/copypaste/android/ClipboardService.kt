@@ -15,6 +15,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -22,19 +23,40 @@ import kotlinx.coroutines.launch
 import java.util.Calendar
 
 /**
- * Foreground service for clipboard monitoring on Android 8.0+ (API 26-28).
- * On Android 10+ (API 29+), clipboard access from background requires
- * the DEFAULT_INPUT_METHOD permission — not feasible for regular apps.
- * This service runs on API 26-28 where background clipboard access is allowed.
+ * Foreground service for clipboard monitoring.
  *
- * Uses [ClipboardManager.OnPrimaryClipChangedListener] registered on the main
- * thread (required by the framework), then dispatches encrypt + store work to
- * a coroutine on [Dispatchers.IO].
+ * ## Foreground service type (Android 14+)
+ * Declared as `specialUse` in the manifest with the required
+ * `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` property. We use `specialUse` rather than
+ * `dataSync` because clipboard monitoring is not "data sync" per Google Play
+ * policy — it is a niche, user-facing clipboard utility that does not fit any
+ * of the 12 named FGS types. Play policy explicitly directs developers to use
+ * `specialUse` for clipboard managers. The `dataSync` type is for
+ * upload/download/backup operations, not for event-driven clipboard capture.
+ * At runtime we pass `ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE` via
+ * ServiceCompat so API 34+ correctly tracks the type.
  *
- * v0.3 T4 polish: notification redesigned with dynamic title (Active/Paused),
- * today's capture count, and Pause/Resume + Open action buttons. The pause
- * toggle is wired through [CaptureControlReceiver] which flips the persisted
- * [Settings.captureEnabled] flag — checked here before each store.
+ * ## Background clipboard access (Android 10+)
+ * `ClipboardManager.getPrimaryClip()` is blocked from any non-foreground,
+ * non-IME, non-AccessibilityService context on API 29+. This service registers
+ * the `OnPrimaryClipChangedListener` on the main thread (framework requirement),
+ * which *fires* even from background — but `getPrimaryClip()` inside the
+ * callback will return null unless the process also has an enabled
+ * AccessibilityService. [ClipboardAccessibilityService] provides that binding.
+ * Without it this service still functions as a fallback on API 26-28 and while
+ * the activity is in the foreground.
+ *
+ * ## Restart on swipe-away ([onTaskRemoved])
+ * When the user swipes the app from the recents list, Android calls
+ * [onTaskRemoved] before killing the service. We post a JobScheduler-backed
+ * delayed restart via WorkManager. We do NOT call startForegroundService from
+ * onTaskRemoved because that is not an exempt background-start case on API 31+
+ * and would throw ForegroundServiceStartNotAllowedException. WorkManager
+ * schedules a one-time expedited job instead, which is the correct mechanism.
+ *
+ * ## Background sync loop
+ * [FgsSyncLoop] runs a 60-second Supabase poll inside this service (faster
+ * than the 15-min WorkManager fallback). See [FgsSyncLoop] for the rationale.
  */
 class ClipboardService : Service() {
 
@@ -43,6 +65,7 @@ class ClipboardService : Service() {
     private lateinit var repository: ClipboardRepository
     private lateinit var clipboardManager: ClipboardManager
     private lateinit var syncManager: SyncManager
+    private lateinit var fgsSyncLoop: FgsSyncLoop
 
     // HIGH-7: refresh the notification whenever a UI-side write flips a flag
     // the service cares about (capture pause, sync toggle). Retained as a
@@ -57,7 +80,10 @@ class ClipboardService : Service() {
     }
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
-        // primaryClip is non-null from background only on API 26-28
+        // primaryClip is non-null from background only on API 26-28 or when
+        // ClipboardAccessibilityService is enabled. On API 29+ without the
+        // accessibility service, this callback fires but getPrimaryClip() returns
+        // null — the early-return below handles that silently.
         val clip = clipboardManager.primaryClip ?: return@OnPrimaryClipChangedListener
         val text = clip.getItemAt(0)?.text?.toString()
             ?: return@OnPrimaryClipChangedListener
@@ -71,7 +97,8 @@ class ClipboardService : Service() {
         repository = ClipboardRepository(this)
 
         val relayClient = RelayClient(settings.relayUrl)
-        syncManager = SyncManager(relayClient, settings.deviceId, token = "")
+        syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
+        fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager)
 
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         ensureChannel(this)
@@ -88,7 +115,19 @@ class ClipboardService : Service() {
         // the user is foregrounded. Crashing here would kill the JVM and
         // break the app immediately on devices with strict policies.
         try {
-            startForeground(NOTIFICATION_ID, buildNotification(this))
+            // ServiceCompat.startForeground correctly passes the type constant
+            // on API 29+ (required on API 34+) while remaining compatible with
+            // older APIs. FOREGROUND_SERVICE_TYPE_SPECIAL_USE = 0x40000000.
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID,
+                buildNotification(this),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                } else {
+                    0
+                }
+            )
         } catch (e: Exception) {
             Log.w(
                 TAG,
@@ -98,12 +137,32 @@ class ClipboardService : Service() {
             return START_NOT_STICKY
         }
 
-        // Listener must be registered on the main thread (framework requirement)
+        // Listener must be registered on the main thread (framework requirement).
         Handler(Looper.getMainLooper()).post {
             monitorClipboard()
         }
 
+        // Start the FGS-internal 60-second sync loop for near-real-time incoming sync.
+        fgsSyncLoop.start(scope)
+
         return START_STICKY
+    }
+
+    /**
+     * Called when the user swipes this app from the Recents list.
+     *
+     * We schedule a one-time expedited WorkManager request to restart the service.
+     * We do NOT call startForegroundService here directly because [onTaskRemoved]
+     * runs in a background-disallowed context on API 31+ and would throw
+     * [android.app.ForegroundServiceStartNotAllowedException].
+     *
+     * WorkManager's expedited jobs bypass most battery-optimisation restrictions
+     * and will fire as soon as the system allows it (typically within a few seconds).
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.i(TAG, "onTaskRemoved — scheduling WorkManager restart")
+        ServiceRestartWorker.scheduleOnce(applicationContext)
     }
 
     /**
@@ -175,27 +234,52 @@ class ClipboardService : Service() {
         get() = applicationContext.getDatabasePath("copypaste.db").absolutePath
 
     private suspend fun notifySyncManager(plaintext: String, key: ByteArray) {
-        try {
-            // Generate the item id BEFORE encrypting so the same id can be
-            // bound into the AEAD AAD and forwarded to the relay. A mismatch
-            // would cause the receiver to fail decryption silently.
-            val itemId = java.util.UUID.randomUUID().toString()
-            val blob = try {
-                encryptText(itemId, plaintext.toByteArray(Charsets.UTF_8), key)
-            } catch (e: IllegalStateException) {
-                Log.d(TAG, "Native encryptText unavailable (${e.message}) — local AES")
-                ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
-            } catch (_: UnsatisfiedLinkError) {
-                ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+        when (settings.syncBackend) {
+            SyncBackend.SUPABASE -> {
+                // Supabase path: encrypt with cross-device SyncKey (schema v5),
+                // push to Supabase PostgREST. This interoperates with macOS daemon.
+                try {
+                    val id = syncManager.pushToSupabase(
+                        plaintext = plaintext.toByteArray(Charsets.UTF_8),
+                        contentType = "text",
+                        deviceId = settings.deviceId,
+                    )
+                    if (id != null) {
+                        Log.d(TAG, "Supabase push ok: $id")
+                    } else {
+                        Log.w(TAG, "Supabase push returned null (logged above)")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Supabase push failed: ${e.message}")
+                }
             }
-            val lamportTs = System.currentTimeMillis()
-            syncManager.uploadItem(itemId, blob.ciphertext, blob.nonce, "text/plain", lamportTs)
-        } catch (e: Exception) {
-            Log.w(TAG, "SyncManager upload failed: ${e.message}")
+            SyncBackend.RELAY -> {
+                // Relay path (original): encrypt with local device key + v3/v4 AAD,
+                // upload to custom relay server. Local-network only.
+                try {
+                    // Generate the item id BEFORE encrypting so the same id can be
+                    // bound into the AEAD AAD and forwarded to the relay. A mismatch
+                    // would cause the receiver to fail decryption silently.
+                    val itemId = java.util.UUID.randomUUID().toString()
+                    val blob = try {
+                        encryptText(itemId, plaintext.toByteArray(Charsets.UTF_8), key)
+                    } catch (e: IllegalStateException) {
+                        Log.d(TAG, "Native encryptText unavailable (${e.message}) — local AES")
+                        ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+                    } catch (_: UnsatisfiedLinkError) {
+                        ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+                    }
+                    val lamportTs = System.currentTimeMillis()
+                    syncManager.uploadItem(itemId, blob.ciphertext, blob.nonce, "text/plain", lamportTs)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Relay upload failed: ${e.message}")
+                }
+            }
         }
     }
 
     override fun onDestroy() {
+        fgsSyncLoop.stop()
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         settings.stopObserving(prefsListener)
         scope.cancel()

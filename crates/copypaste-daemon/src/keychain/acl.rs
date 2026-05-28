@@ -9,7 +9,7 @@
 //!
 //! * `copypaste-daemon` — background sync + storage
 //! * `copypaste`        — CLI used by `vacuum` and other admin commands
-//! * `copypaste-ui`     — Slint front-end
+//! * `copypaste-ui`     — Tauri desktop UI
 //!
 //! Anyone else asking for the entry triggers the standard macOS prompt
 //! ("APP_NAME wants to access key 'device-secret-key' in your keychain") that

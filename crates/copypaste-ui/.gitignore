@@ -1,0 +1,8 @@
+# Node / Vite
+node_modules
+dist
+*.local
+
+# Tauri
+src-tauri/target
+src-tauri/gen/schemas

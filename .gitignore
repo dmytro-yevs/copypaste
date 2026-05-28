@@ -40,3 +40,6 @@ fuzz/Cargo.lock
 
 # Coverage reports (cargo-llvm-cov output: HTML, LCOV, JSON)
 coverage/
+
+# stray build artifact
+rust_out

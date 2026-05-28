@@ -9,8 +9,7 @@ members = [
     "crates/copypaste-sync",
     "crates/copypaste-supabase",
     "crates/copypaste-android",
-    "crates/copypaste-ui",
-    "crates/copypaste-ui-snapshot",
+    "crates/copypaste-ui/src-tauri",
     "crates/copypaste-ipc",
     "crates/copypaste-bench",
     "crates/copypaste-telemetry",
@@ -96,13 +95,13 @@ base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }
-# WebSocket (pinned <=0.23 for tokio 1.x API stability; MSRV=1.86)
-tokio-tungstenite = { version = "0.23", features = ["native-tls"] }
+# WebSocket. rustls (webpki-roots) instead of native-tls so the openssl-sys C
+# build is dropped from the tree; supabase realtime uses plain `connect_async`,
+# so the TLS-backend swap needs no source changes. `connect` must be listed
+# explicitly because disabling default features also drops it.
+tokio-tungstenite = { version = "0.23", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 # Async stream combinators
 futures-util = "0.3"
-# Slint GUI toolkit (1.8 required for export re-export and modern syntax)
-slint = "=1.8.0"
-slint-build = "=1.8.0"
 
 # ---- Release profiles (v0.3 perf: thin LTO + strip + panic=abort) -----------
 # release: fast, distributable binary. Trade-off vs the prior `lto = "fat"`:
@@ -129,3 +128,16 @@ panic = "abort"
 inherits = "release"
 lto = "fat"
 opt-level = "z"
+
+# ---- Dev profile (fast edit->rebuild loop) ----------------------------------
+# No [profile.dev] existed before, so cargo defaults (full debuginfo, opt 0 on
+# deps) applied. line-tables-only debug + unpacked split-debuginfo cut link time
+# and target/ size on macOS; opt-level=1 on deps optimizes them once (they rarely
+# rebuild) without slowing incremental workspace rebuilds.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+opt-level = 1
+debug = false

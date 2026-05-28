@@ -73,7 +73,7 @@ If those 4 are accepted as-is, ship `v0.3.3` as a security/CI hygiene release. T
 | `858022b` | F+G | 4 | CT fingerprint compare in p2p verifier, subtle dep pull, `.gitignore` for ruflo session artifacts, Cargo.lock refresh |
 | `20aacf9` | E (Android) | 3 | compileSdk/targetSdk → 35, FGS-SPECIAL-USE justification, db_handles mutex poison recovery ×2 |
 | `2351162` | D (CI) | 8 | `@master` → `@stable` ×6 across 4 workflows, remove `gradlew assembleDebug` from release.yml, `cargo audit --no-fetch` fallback, drop `--features android-uniffi-live` on macOS runner, drop `windows-msvc` from deny.toml, add attest-build-provenance step, drop image crate `<0.25.10` cap, remove dead HOMEBREW_TAP_TOKEN |
-| `8665a2e` | C+F (UI) | 5 | ClipItem.id stays SharedString end-to-end (no i32 trunc), home_dir().expect → propagated, keyboard ↵/⌘C/⌘P/⌘D wired to IPC, settings error → Slint banner, peer JSON parse → tracing::warn, .ok()-swallow → if-let-Err |
+| `8665a2e` | C+F (UI) | 5 | ClipItem.id stays SharedString end-to-end (no i32 trunc), home_dir().expect → propagated, keyboard ↵/⌘C/⌘P/⌘D wired to IPC, settings error surfaced to UI, peer JSON parse → tracing::warn, .ok()-swallow → if-let-Err |
 | `5e57325` | B (Relay) | 2 | `#![deny(clippy::await_holding_lock)]`, token expiry check in `verify_token`, new test `verify_token_expired_is_unauthorized` |
 | `521d40a` | A (Security) | 5 | `#[deprecated]` on `secret_key_bytes` (use _zeroizing), `#[deprecated]` on empty-AAD `encrypt_item`/`decrypt_item`, `MAX_IMPORT_ITEM_BYTES = 4 MiB` pre-decode gate, drop redundant `Vec::clone` in `import` |
 
@@ -103,7 +103,7 @@ If those 4 are accepted as-is, ship `v0.3.3` as a security/CI hygiene release. T
 
 - Android Play Store submission prep: confirm targetSdk=35 doesn't break clipboard behavior on Android 15; finalize FGS justification copy.
 - P2P discovery interface scoping (`if-addrs` filter for non-loopback/non-virtual) — Wave F.L12 stub left in plan.
-- Slint runtime accessibility observation (reduced-motion OS toggle) — Wave F.L13 deferred.
+- UI accessibility observation (reduced-motion OS toggle) — deferred post-Tauri migration.
 - `tracing::warn` instead of `.ok()` swallow in remaining `crates/copypaste-ui/src/main.rs` window show/hide calls (Wave F.L7+L8 partially deferred for safety).
 
 ### Long-term (per release plan)
@@ -125,7 +125,7 @@ If those 4 are accepted as-is, ship `v0.3.3` as a security/CI hygiene release. T
 - `copypaste-sync` — frame-bounded LWW sync engine
 - `copypaste-supabase` — cloud sync fallback (OI-2 DEFERRED)
 - `copypaste-android` — UniFFI bindings (`#[uniffi::export]` + macro-generated FFI)
-- `copypaste-ui` — Slint UI (HistoryView, SettingsView, DevicesView, PairView, AboutView, CommandPalette ⌘K), macOS tray + vibrancy
+- `copypaste-ui` — Tauri v2 + React/TypeScript/Vite desktop app, macOS tray + vibrancy
 - `copypaste-ipc` — IPC schema
 - `copypaste-bench` — Criterion benches
 - `copypaste-telemetry` — opt-in telemetry stub

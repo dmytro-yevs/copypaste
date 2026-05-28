@@ -10,8 +10,8 @@ pub use version::{
 };
 
 use copypaste_core::{
-    build_item_aad, decrypt_item_with_aad, detect, encrypt_item_with_aad, AAD_SCHEMA_VERSION,
-    NONCE_SIZE,
+    build_item_aad, decrypt_from_cloud, decrypt_item_with_aad, derive_sync_key, detect,
+    encrypt_for_cloud, encrypt_item_with_aad, AAD_SCHEMA_VERSION, NONCE_SIZE,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -104,6 +104,91 @@ pub fn is_sensitive(text: String) -> bool {
 
 pub fn sensitive_kind(text: String) -> Option<String> {
     detect(&text).map(|k| format!("{:?}", k))
+}
+
+// ---------------------------------------------------------------------------
+// Cloud sync crypto — cross-device SyncKey (Argon2id-derived) + schema v5
+//
+// These FFI functions expose the SAME crypto used by the macOS daemon's
+// cloud.rs so Android can push/pull from the same Supabase table with
+// identical encrypted payloads.
+//
+// Key facts (MUST match cloud.rs):
+//   - KDF: Argon2id, 19 MiB / 2 passes / 1 lane, fixed domain salt
+//   - AEAD: XChaCha20-Poly1305, 24-byte random nonce prepended to ciphertext
+//   - AAD: "{item_id}|5"  (CLOUD_AAD_SCHEMA_VERSION = 5)
+//   - Blob wire format: base64(nonce[24] || ciphertext_with_tag)
+// ---------------------------------------------------------------------------
+
+/// Derive a 32-byte sync key from `passphrase` using Argon2id.
+///
+/// Returns the raw 32-byte key material. The caller (Kotlin) should treat
+/// these bytes as a short-lived secret: derive once at passphrase entry,
+/// use, then zero the array. Do NOT persist to disk or SharedPreferences.
+///
+/// Errors:
+///   - `EncryptionFailed` — Argon2 parameter or runtime failure (should not
+///     occur with the hardcoded constants; surfaces as non-panic error).
+pub fn derive_cloud_sync_key(passphrase: String) -> Result<Vec<u8>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key = derive_sync_key(&passphrase).map_err(|_| CopypasteError::EncryptionFailed)?;
+        Ok(key.as_bytes().to_vec())
+    })
+}
+
+/// Encrypt `plaintext` for cloud storage.
+///
+/// `sync_key_bytes` MUST be the 32 bytes returned by `derive_cloud_sync_key`.
+/// `item_id` is the item's UUID string — it is bound into the AEAD AAD so
+/// substituting the blob into a different item slot fails authentication.
+///
+/// Returns base64(nonce[24] || ciphertext_with_tag), matching exactly what
+/// the macOS daemon POSTs as `payload_ct`.
+///
+/// Errors: `EncryptionFailed` on AEAD failure, `InvalidKeyLength` if
+/// `sync_key_bytes` is not exactly 32 bytes.
+pub fn cloud_encrypt(
+    item_id: String,
+    plaintext: &[u8],
+    sync_key_bytes: &[u8],
+) -> Result<Vec<u8>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: [u8; 32] = sync_key_bytes
+            .try_into()
+            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let sync_key = copypaste_core::SyncKey::from_bytes(key_arr);
+        let blob = encrypt_for_cloud(&sync_key, &item_id, plaintext)
+            .map_err(|_| CopypasteError::EncryptionFailed)?;
+        Ok(blob)
+    })
+}
+
+/// Decrypt a cloud blob produced by `cloud_encrypt` (or the macOS daemon).
+///
+/// `sync_key_bytes` MUST be the same 32 bytes used during encryption.
+/// `item_id` MUST match the value bound into the AAD at encrypt time.
+/// `blob` is the raw bytes from base64-decoding the `payload_ct` column.
+///
+/// Returns the plaintext bytes on success.
+///
+/// Errors: `DecryptionFailed` if key, item_id, or ciphertext do not match;
+/// `InvalidKeyLength` if `sync_key_bytes` is not 32 bytes.
+pub fn cloud_decrypt(
+    item_id: String,
+    blob: &[u8],
+    sync_key_bytes: &[u8],
+) -> Result<Vec<u8>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: [u8; 32] = sync_key_bytes
+            .try_into()
+            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let sync_key = copypaste_core::SyncKey::from_bytes(key_arr);
+        decrypt_from_cloud(&sync_key, &item_id, blob).map_err(|e| {
+            CopypasteError::DecryptionFailed {
+                message: e.to_string(),
+            }
+        })
+    })
 }
 
 // Database handle table. OnceLock is stable on Rust 1.70+ (our MSRV is 1.75).
@@ -368,5 +453,94 @@ mod tests {
 
         let n = get_history_count(path.to_string_lossy().into_owned(), &key).expect("count");
         assert_eq!(n, 0, "no row inserted for sensitive content");
+    }
+
+    // ── Cloud sync crypto tests ──────────────────────────────────────────────
+
+    /// derive_cloud_sync_key must be deterministic: same passphrase → same bytes.
+    #[test]
+    fn derive_cloud_sync_key_is_deterministic() {
+        let k1 = derive_cloud_sync_key("shared-passphrase".into()).expect("derive 1");
+        let k2 = derive_cloud_sync_key("shared-passphrase".into()).expect("derive 2");
+        assert_eq!(k1, k2, "same passphrase must produce identical key bytes");
+        assert_eq!(k1.len(), 32, "key must be exactly 32 bytes");
+    }
+
+    /// Different passphrases must produce different keys.
+    #[test]
+    fn derive_cloud_sync_key_different_passphrases_differ() {
+        let k1 = derive_cloud_sync_key("passphrase-alpha".into()).expect("derive 1");
+        let k2 = derive_cloud_sync_key("passphrase-beta".into()).expect("derive 2");
+        assert_ne!(k1, k2, "different passphrases must yield different keys");
+    }
+
+    /// cloud_encrypt + cloud_decrypt must round-trip the plaintext.
+    #[test]
+    fn cloud_encrypt_decrypt_roundtrip() {
+        let key = derive_cloud_sync_key("round-trip-passphrase".into()).expect("derive");
+        let item_id = "android-cloud-item-001".to_string();
+        let plaintext = b"hello from android";
+
+        let blob = cloud_encrypt(item_id.clone(), plaintext, &key).expect("encrypt");
+        let recovered = cloud_decrypt(item_id, &blob, &key).expect("decrypt");
+        assert_eq!(recovered, plaintext);
+    }
+
+    /// Wrong passphrase must cause DecryptionFailed.
+    #[test]
+    fn cloud_decrypt_wrong_passphrase_fails() {
+        let enc_key = derive_cloud_sync_key("correct".into()).expect("derive enc");
+        let dec_key = derive_cloud_sync_key("wrong".into()).expect("derive dec");
+        let blob = cloud_encrypt("item-x".into(), b"data", &enc_key).expect("encrypt");
+        let result = cloud_decrypt("item-x".into(), &blob, &dec_key);
+        assert!(
+            matches!(result, Err(CopypasteError::DecryptionFailed { .. })),
+            "wrong passphrase must produce DecryptionFailed, got {result:?}"
+        );
+    }
+
+    /// Wrong item_id (AAD mismatch) must cause DecryptionFailed.
+    #[test]
+    fn cloud_decrypt_wrong_item_id_fails() {
+        let key = derive_cloud_sync_key("aad-test".into()).expect("derive");
+        let blob = cloud_encrypt("item-correct".into(), b"payload", &key).expect("encrypt");
+        let result = cloud_decrypt("item-wrong".into(), &blob, &key);
+        assert!(
+            matches!(result, Err(CopypasteError::DecryptionFailed { .. })),
+            "wrong item_id must produce DecryptionFailed, got {result:?}"
+        );
+    }
+
+    /// cloud_encrypt with a non-32-byte key must return InvalidKeyLength.
+    #[test]
+    fn cloud_encrypt_invalid_key_length() {
+        let result = cloud_encrypt("item-bad".into(), b"data", &[0u8; 16]);
+        assert!(
+            matches!(result, Err(CopypasteError::InvalidKeyLength)),
+            "16-byte key must return InvalidKeyLength"
+        );
+    }
+
+    /// cloud_decrypt with a non-32-byte key must return InvalidKeyLength.
+    #[test]
+    fn cloud_decrypt_invalid_key_length() {
+        let result = cloud_decrypt("item-bad".into(), &[0u8; 50], &[0u8; 16]);
+        assert!(
+            matches!(result, Err(CopypasteError::InvalidKeyLength)),
+            "16-byte key must return InvalidKeyLength"
+        );
+    }
+
+    /// Blob format: nonce[24] prepended, total length = 24 + plaintext + 16 (AEAD tag).
+    #[test]
+    fn cloud_encrypt_blob_format() {
+        let key = derive_cloud_sync_key("format-test".into()).expect("derive");
+        let plaintext = b"test blob format";
+        let blob = cloud_encrypt("item-fmt".into(), plaintext, &key).expect("encrypt");
+        assert_eq!(
+            blob.len(),
+            24 + plaintext.len() + 16,
+            "blob must be nonce(24) + plaintext + tag(16)"
+        );
     }
 }

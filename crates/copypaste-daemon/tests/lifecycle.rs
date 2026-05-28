@@ -118,25 +118,6 @@ fn sigkill_recovers_lamport() {
     );
 }
 
-/// SIGTERM mid-sync → no half-written items in DB.
-///
-/// Acceptance:
-/// 1. Spawn daemon with isolated DB.
-/// 2. Push ~50 clipboard updates rapidly (pbcopy on macOS, xclip elsewhere, or
-///    direct IPC).
-/// 3. SIGTERM during the burst.
-/// 4. Reopen DB and verify every row has non-NULL ciphertext + valid lamport.
-#[test]
-#[ignore = "requires built daemon binary + pbcopy/IPC injection"]
-fn sigterm_no_half_written() {
-    // TODO(wave3.2-followup): wire up once IPC injection helper exists.
-    // Scaffold: spawn daemon, fan out updates, send SIGTERM, sqlite-check.
-    let bin = daemon_bin();
-    let state = isolated_state_dir();
-    assert!(bin.parent().is_some(), "daemon bin path resolvable");
-    assert!(state.exists(), "isolated state dir created");
-}
-
 /// System sleep → wake → WS reconnects.
 ///
 /// Acceptance:

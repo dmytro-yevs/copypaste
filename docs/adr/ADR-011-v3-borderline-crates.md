@@ -67,7 +67,7 @@ Rationale:
 - Wire-in cost (daemon + cli + ui + relay refactor + IPC version bump per
   ADR-007) is high; user-visible benefit is zero.
 - Paths/ports/log-level today live where each consumer needs them
-  (`daemon::paths`, `cli` clap args, `ui` Slint properties, `relay` clap args).
+  (`daemon::paths`, `cli` clap args, `ui` Tauri invoke commands, `relay` clap args).
   None of these consumers have asked for unification.
 - arch-5 remains a tracked debt item; v0.4 may revisit it with the right
   scope.

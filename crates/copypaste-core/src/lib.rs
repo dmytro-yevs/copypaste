@@ -15,8 +15,10 @@ pub use crypto::encrypt::{
 #[allow(deprecated)]
 pub use crypto::encrypt::{decrypt_item, encrypt_item};
 pub use crypto::{
-    derive_storage_key_v1, derive_storage_key_v2, derive_sync_key_v2, derive_telemetry_key_v2,
-    derive_v2, DeviceKeypair, KeyError, HKDF_VERSION,
+    decrypt_from_cloud, derive_storage_key_v1, derive_storage_key_v2, derive_sync_key,
+    derive_sync_key_v2, derive_telemetry_key_v2, derive_v2, encrypt_for_cloud, DeviceKeypair,
+    KeyError, SyncKey, SyncKeyError, ARGON2_M_COST_KIB, ARGON2_P_COST, ARGON2_SYNC_SALT,
+    ARGON2_T_COST, CLOUD_AAD_SCHEMA_VERSION, HKDF_VERSION,
 };
 pub use image::{
     chunks_from_blob, chunks_to_blob, decode_clipboard_image, decode_image, encode_as_png,
@@ -31,9 +33,10 @@ pub use storage::devices::{
     DevicesError, RevokedDevice,
 };
 pub use storage::items::{
-    count_items, delete_expired, delete_fts, delete_item, delete_sensitive_expired,
-    fetch_text_preview, find_recent_by_hash, get_item_by_id, get_page, get_page_meta, insert_item,
-    insert_item_with_fts, pin_item, search_items, unpin_item, upsert_fts, ClipboardItem,
-    ItemsError, ITEM_KEY_VERSION_CURRENT, MAX_PREVIEW_BYTES,
+    bump_item_recency, count_items, delete_expired, delete_fts, delete_item,
+    delete_sensitive_expired, fetch_text_preview, find_recent_by_hash, get_item_by_id, get_page,
+    get_page_meta, get_page_pinned_first, insert_item, insert_item_with_fts, pin_item,
+    search_items, unpin_item, upsert_fts, ClipboardItem, ItemsError, ITEM_KEY_VERSION_CURRENT,
+    MAX_PREVIEW_BYTES,
 };
 pub use storage::{Database, DbError, MigrationState};

@@ -88,7 +88,9 @@ class HistoryActivity : ComponentActivity() {
 @Composable
 fun HistoryScreen(
     viewModel: ClipboardViewModel = viewModel(),
-    onBack: () -> Unit = {}
+    modifier: Modifier = Modifier,
+    showBackButton: Boolean = true,
+    onBack: () -> Unit = {},
 ) {
     val items by viewModel.items.observeAsState(emptyList())
     val loading by viewModel.loading.observeAsState(false)
@@ -109,12 +111,15 @@ fun HistoryScreen(
     }
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.title_history)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
+                    if (showBackButton) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
+                        }
                     }
                 },
                 actions = {

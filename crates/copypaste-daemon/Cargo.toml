@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [features]
 # Enables Supabase cloud sync (requires SUPABASE_URL + SUPABASE_ANON_KEY env vars at runtime).
-cloud-sync = ["reqwest", "copypaste-supabase"]
+cloud-sync = ["reqwest", "copypaste-supabase", "chacha20poly1305"]
 
 [dependencies]
 copypaste-core = { path = "../copypaste-core" }
@@ -46,6 +46,9 @@ uuid.workspace = true
 rusqlite.workspace = true
 # cloud-sync feature: HTTP client for Supabase REST + Realtime, base64 encoding
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false, optional = true }
+# cloud-sync feature: direct AEAD for the spawn_blocking decrypt helper (avoids
+# Arc<Mutex<SyncKey>> across the blocking boundary).
+chacha20poly1305 = { workspace = true, optional = true }
 # base64 is also required unconditionally for the `import` IPC method
 # (CLI sends content bytes as base64-encoded strings to keep the wire JSON-safe).
 base64 = { version = "0.22" }

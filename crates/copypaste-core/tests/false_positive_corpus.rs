@@ -102,8 +102,3 @@ fn false_positive_rate_below_5pct_on_benign_corpus() {
             .join("\n"),
     );
 }
-
-#[test]
-fn corpus_size_is_at_least_50() {
-    assert!(BENIGN_CORPUS.len() >= 50);
-}

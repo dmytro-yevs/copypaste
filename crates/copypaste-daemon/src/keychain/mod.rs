@@ -12,6 +12,10 @@ pub mod acl;
 
 pub(crate) const SERVICE: &str = "com.copypaste.daemon";
 pub(crate) const ACCOUNT: &str = "device-secret-key";
+/// Keychain account key for the cloud sync passphrase-derived key bytes.
+/// Stored under the same service as the device key but a distinct account
+/// so they are never confused.
+pub(crate) const CLOUD_SYNC_ACCOUNT: &str = "cloud-sync-key";
 
 /// Compute the canonical device fingerprint from a raw public key.
 ///

@@ -352,6 +352,59 @@ pub fn get_page(
     Ok(items)
 }
 
+/// Pinned-first variant of [`get_page`] for the history UI.
+///
+/// Returns items ordered by `pinned DESC, wall_time DESC` so pinned items
+/// always appear at the top of the list regardless of when they were captured.
+/// Within each group (pinned / unpinned) items are sorted newest-first.
+/// Respects the same `limit`/`offset` semantics as [`get_page`] and is
+/// capped to `MAX_PAGE` by the IPC layer before being called.
+///
+/// This is the function used by the `history_page` IPC verb. [`get_page`]
+/// is kept for callers that need a pure-recency order (e.g. tests, sync).
+pub fn get_page_pinned_first(
+    db: &Database,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<ClipboardItem>, ItemsError> {
+    let mut stmt = db.conn().prepare(
+        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+                content_hash, origin_device_id, key_version, pinned
+         FROM clipboard_items ORDER BY pinned DESC, wall_time DESC LIMIT ?1 OFFSET ?2",
+    )?;
+    let items = stmt
+        .query_map(params![limit as i64, offset as i64], row_to_item)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(items)
+}
+
+/// Bump an existing item's recency fields to `now_ms` without changing its
+/// content, sensitive-flag, or any other metadata.
+///
+/// Used by the dedup path in the clipboard capture pipeline: when the same
+/// plaintext is copied again, the existing row is promoted to the top of the
+/// history list rather than a duplicate row being inserted.
+///
+/// Specifically updates:
+///   * `wall_time` — sets the visible recency to `now_ms`.
+///   * `lamport_ts` — set to `new_lamport` so the sync layer recognises this
+///     as a newer item than its previous version.
+///
+/// Returns the number of rows actually updated (`0` if `id` does not exist).
+pub fn bump_item_recency(
+    db: &Database,
+    id: &str,
+    now_ms: i64,
+    new_lamport: i64,
+) -> Result<usize, ItemsError> {
+    let changed = db.conn().execute(
+        "UPDATE clipboard_items SET wall_time = ?1, lamport_ts = ?2 WHERE id = ?3",
+        params![now_ms, new_lamport, id],
+    )?;
+    Ok(changed)
+}
+
 /// List-view variant of [`get_page`] that omits the `content` blob.
 ///
 /// Returns the same `ClipboardItem` shape but with `content = None`. Used by
@@ -1231,5 +1284,243 @@ mod tests {
         let db = Database::open_in_memory().unwrap();
         let result = get_page_meta(&db, 50, 0).unwrap();
         assert!(result.is_empty(), "expected empty list for empty DB");
+    }
+
+    // --- FIX 1: get_page_pinned_first ---
+
+    /// Pinned items must appear before unpinned items regardless of wall_time.
+    #[test]
+    fn get_page_pinned_first_pins_before_unpinned() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Insert three items with ascending wall_time.
+        // item_a: oldest, will be pinned
+        // item_b: middle, unpinned
+        // item_c: newest, unpinned
+        let mut item_a = make_item(1);
+        item_a.wall_time = 1_000;
+        let id_a = item_a.id.clone();
+        insert_item(&db, &item_a).unwrap();
+
+        let mut item_b = make_item(2);
+        item_b.wall_time = 2_000;
+        insert_item(&db, &item_b).unwrap();
+
+        let mut item_c = make_item(3);
+        item_c.wall_time = 3_000;
+        insert_item(&db, &item_c).unwrap();
+
+        // Pin item_a (the oldest one).
+        pin_item(&db, &id_a).unwrap();
+
+        let page = get_page_pinned_first(&db, 10, 0).unwrap();
+        assert_eq!(page.len(), 3);
+        // Pinned item must be first, regardless of its wall_time.
+        assert_eq!(
+            page[0].id, id_a,
+            "pinned item must be first regardless of age"
+        );
+        assert!(page[0].pinned, "first item must have pinned=true");
+        // Remaining items must be sorted newest-first.
+        assert!(
+            page[1].wall_time >= page[2].wall_time,
+            "unpinned items must be newest-first"
+        );
+    }
+
+    /// Multiple pinned items are sorted newest-first within the pinned group.
+    #[test]
+    fn get_page_pinned_first_multiple_pins_sorted_by_recency() {
+        let db = Database::open_in_memory().unwrap();
+
+        let mut old_pin = make_item(1);
+        old_pin.wall_time = 100;
+        let old_pin_id = old_pin.id.clone();
+        insert_item(&db, &old_pin).unwrap();
+        pin_item(&db, &old_pin_id).unwrap();
+
+        let mut new_pin = make_item(2);
+        new_pin.wall_time = 900;
+        let new_pin_id = new_pin.id.clone();
+        insert_item(&db, &new_pin).unwrap();
+        pin_item(&db, &new_pin_id).unwrap();
+
+        let mut unpinned = make_item(3);
+        unpinned.wall_time = 500;
+        insert_item(&db, &unpinned).unwrap();
+
+        let page = get_page_pinned_first(&db, 10, 0).unwrap();
+        assert_eq!(page.len(), 3);
+        // Both pins first, sorted newest-first within the pinned group.
+        assert!(
+            page[0].pinned && page[1].pinned,
+            "first two items must be pinned"
+        );
+        assert!(
+            page[0].wall_time >= page[1].wall_time,
+            "pins must be newest-first within pin group"
+        );
+        // Then unpinned.
+        assert!(!page[2].pinned, "third item must not be pinned");
+    }
+
+    /// Unpinning an item moves it back into the unpinned group.
+    #[test]
+    fn pin_and_unpin_changes_sort_position() {
+        let db = Database::open_in_memory().unwrap();
+
+        let mut old = make_item(1);
+        old.wall_time = 100;
+        let old_id = old.id.clone();
+        insert_item(&db, &old).unwrap();
+
+        let mut new = make_item(2);
+        new.wall_time = 200;
+        insert_item(&db, &new).unwrap();
+
+        // Pin the old item — it should appear first.
+        pin_item(&db, &old_id).unwrap();
+        let page = get_page_pinned_first(&db, 10, 0).unwrap();
+        assert_eq!(page[0].id, old_id, "pinned old item must be first");
+
+        // Unpin it — it should fall back to recency order (last).
+        unpin_item(&db, &old_id).unwrap();
+        let page2 = get_page_pinned_first(&db, 10, 0).unwrap();
+        assert!(
+            !page2[0].pinned,
+            "after unpin, first item must not be pinned"
+        );
+        assert!(
+            page2[0].wall_time >= page2[1].wall_time,
+            "items must be newest-first after unpin"
+        );
+    }
+
+    // --- FIX 2: bump_item_recency + content_hash dedup ---
+
+    /// `bump_item_recency` updates wall_time and lamport_ts, returns 1 row changed.
+    #[test]
+    fn bump_item_recency_updates_wall_time_and_lamport() {
+        let db = Database::open_in_memory().unwrap();
+        let mut item = make_item(1);
+        item.wall_time = 1_000;
+        insert_item(&db, &item).unwrap();
+
+        let changed = bump_item_recency(&db, &item.id, 99_000, 99_000).unwrap();
+        assert_eq!(changed, 1, "one row must be updated");
+
+        let fetched = get_item_by_id(&db, &item.id).unwrap().unwrap();
+        assert_eq!(fetched.wall_time, 99_000, "wall_time must be bumped");
+        assert_eq!(fetched.lamport_ts, 99_000, "lamport_ts must be bumped");
+    }
+
+    /// `bump_item_recency` returns 0 when id does not exist (no row updated).
+    #[test]
+    fn bump_item_recency_returns_zero_for_missing_id() {
+        let db = Database::open_in_memory().unwrap();
+        let changed = bump_item_recency(&db, "nonexistent-id", 999, 999).unwrap();
+        assert_eq!(changed, 0, "no row matched; must return 0");
+    }
+
+    /// After `bump_item_recency`, the bumped item sorts to the top in
+    /// `get_page_pinned_first` because its wall_time is now the newest.
+    #[test]
+    fn bumped_item_sorts_to_top() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Three items, item_a is oldest.
+        let mut item_a = make_item(1);
+        item_a.wall_time = 100;
+        let id_a = item_a.id.clone();
+        insert_item(&db, &item_a).unwrap();
+
+        let mut item_b = make_item(2);
+        item_b.wall_time = 200;
+        insert_item(&db, &item_b).unwrap();
+
+        let mut item_c = make_item(3);
+        item_c.wall_time = 300;
+        insert_item(&db, &item_c).unwrap();
+
+        // Bump item_a to wall_time=999 (the new highest).
+        bump_item_recency(&db, &id_a, 999, 999).unwrap();
+
+        let page = get_page_pinned_first(&db, 10, 0).unwrap();
+        assert_eq!(page[0].id, id_a, "bumped item must appear at the top");
+        assert_eq!(page[0].wall_time, 999);
+    }
+
+    /// `find_recent_by_hash` finds a matching row when the window is wide open.
+    #[test]
+    fn find_recent_by_hash_finds_any_row_with_wide_window() {
+        let db = Database::open_in_memory().unwrap();
+        let mut item = make_item(1);
+        item.content_hash = Some("aabbcc".to_string());
+        item.wall_time = 1_000;
+        insert_item(&db, &item).unwrap();
+
+        // With i64::MAX window, any row with that hash should be found.
+        let now_ms = i64::MAX / 2;
+        let found = find_recent_by_hash(&db, "aabbcc", now_ms, i64::MAX).unwrap();
+        assert_eq!(
+            found,
+            Some(item.id),
+            "should find the row with matching hash"
+        );
+    }
+
+    /// `find_recent_by_hash` returns None when no row has the given hash.
+    #[test]
+    fn find_recent_by_hash_returns_none_for_missing_hash() {
+        let db = Database::open_in_memory().unwrap();
+        let found = find_recent_by_hash(&db, "deadbeef", 99_000, i64::MAX).unwrap();
+        assert!(found.is_none(), "no rows, must return None");
+    }
+
+    /// Dedup simulation: inserting the same content hash a second time via
+    /// find_recent_by_hash + bump avoids a second row, and the bumped item
+    /// sorts to the top.
+    #[test]
+    fn dedup_bump_prevents_duplicate_row_and_sorts_to_top() {
+        let db = Database::open_in_memory().unwrap();
+
+        // First capture: insert item with content_hash.
+        let hash = "cafebabe".to_string();
+        let mut item_first = make_item(1);
+        item_first.wall_time = 1_000;
+        item_first.content_hash = Some(hash.clone());
+        let id_first = item_first.id.clone();
+        insert_item(&db, &item_first).unwrap();
+
+        // Insert a second, newer item so there are two rows total.
+        let mut item_second = make_item(2);
+        item_second.wall_time = 2_000;
+        insert_item(&db, &item_second).unwrap();
+
+        // "Second capture" of the same content: simulate the daemon dedup path.
+        let now_ms: i64 = 9_999;
+        let existing_id = find_recent_by_hash(&db, &hash, now_ms, i64::MAX)
+            .unwrap()
+            .expect("existing row must be found");
+        assert_eq!(existing_id, id_first, "must find the original row");
+
+        // Bump it.
+        let changed = bump_item_recency(&db, &existing_id, now_ms, now_ms).unwrap();
+        assert_eq!(changed, 1, "bump must affect one row");
+
+        // Still only two rows total — no duplicate inserted.
+        let total = count_items(&db).unwrap();
+        assert_eq!(
+            total, 2,
+            "dedup must not insert a second row for the same hash"
+        );
+
+        // The bumped item now sorts to the top.
+        let page = get_page_pinned_first(&db, 10, 0).unwrap();
+        assert_eq!(
+            page[0].id, id_first,
+            "bumped item must appear first after recency update"
+        );
+        assert_eq!(page[0].wall_time, now_ms);
     }
 }

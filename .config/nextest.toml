@@ -1,0 +1,9 @@
+# cargo-nextest config. Honors the single-runner constraint for crates that
+# touch the SQLCipher DB / macOS Keychain by serializing their tests, while
+# letting the rest of the workspace run in parallel.
+[profile.default]
+failure-output = "immediate-final"
+
+[[profile.default.overrides]]
+filter = 'package(copypaste-core) | package(copypaste-daemon)'
+test-threads = 1

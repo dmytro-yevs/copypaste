@@ -279,24 +279,6 @@ fn concurrent_ten_clients_consistent_state() {
     );
 }
 
-/// **Edge MEDIUM #23** — IPC call before DB is ready must return the
-/// `IPC_NOT_READY` error code, not panic.
-///
-/// In the shipped binary the database is opened *before* the listener
-/// binds the socket (see `daemon.rs`), so this path cannot be reached
-/// through the subprocess. The path is covered by the in-process unit
-/// test `dispatch_returns_ipc_not_ready_when_not_ready` in
-/// `src/ipc.rs`; this integration test is left as documentation and
-/// will be re-enabled when the daemon grows a
-/// `COPYPASTE_BIND_BEFORE_DB_READY` knob for crash-recovery scenarios.
-#[test]
-#[ignore = "binary opens DB before bind — unit-tested in src/ipc.rs instead"]
-fn ipc_call_before_db_ready_returns_error() {
-    // Intentional no-op: see doc comment above for why this is `#[ignore]`d.
-    // The actual contract is verified in
-    // `crates/copypaste-daemon/src/ipc.rs::tests::dispatch_returns_ipc_not_ready_when_not_ready`.
-}
-
 /// **Edge MEDIUM #24** — `list` (and `history_page`) must clamp client-
 /// requested `limit` to `MAX_PAGE` (1000). A client asking for 5000
 /// items must receive at most 1000 and a successful response.

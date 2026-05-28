@@ -20,7 +20,7 @@ carried persistent cost without proportionate value:
   the only image that needs Tcl + an out-of-tree `.tar.zst` extraction.
   Cold builds run 8-12 GB RAM and routinely OOM on the standard
   GitHub-hosted runner.
-- The Slint UI's Windows backend was never validated end-to-end on a
+- The desktop UI's Windows backend was never validated end-to-end on a
   Windows host; the existing CI signal was "compiles" via mingw, not
   "runs".
 - The daemon's Windows IPC named-pipe implementation
@@ -92,7 +92,7 @@ Positive:
 Negative:
 
 - Windows users have no installer. WSL2 is a workable but unsupported
-  fallback (the daemon's Unix-socket IPC works inside WSL2; the Slint
+  fallback (the daemon's Unix-socket IPC works inside WSL2; the Tauri
   UI does not). This is an acknowledged regression vs. the v0.2-beta
   intent — but not vs. the v0.2-beta reality, which never shipped a
   working Windows binary.

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    AccessibilityService configuration for CopyPaste clipboard monitoring.
+
+    Android 10+ (API 29+) blocks background clipboard reads from regular apps.
+    The two sanctioned exceptions are:
+      1. Default Input Method Editor (IME) — not applicable here.
+      2. Enabled AccessibilityService — used here.
+
+    IMPORTANT LIMITS (Android 10+):
+    Even with an AccessibilityService enabled, OnPrimaryClipChangedListener still
+    fires to notify that the clipboard changed, but ClipboardManager.getPrimaryClip()
+    returns null from a background context UNLESS the process calling it is the
+    AccessibilityService process itself (which it is here — ClipboardAccessibilityService
+    runs in the same process). This means the AccessibilityService route DOES work for
+    capturing clipboard content, with two caveats:
+      a) The user must manually enable the service in Settings > Accessibility.
+      b) Some OEMs (e.g. MIUI) add extra restrictions on top of AOSP that may still
+         block clipboard reads even from an enabled AccessibilityService. There is no
+         workaround for those without root.
+
+    Android 12+ toast: The system shows a one-time "App accessed your clipboard" toast
+    the first time per-session that getPrimaryClip() is called. This is expected and
+    cannot be suppressed.
+
+    accessibilityEventTypes="0" — subscribe to NO window/view events.
+    feedbackType="feedbackGeneric" — minimal feedback declaration required by framework.
+    canRetrieveWindowContent="false" — explicitly opt-out of screen reading.
+    notificationTimeout="0" — not applicable since we subscribe to no events.
+
+    The service exists SOLELY to hold the AccessibilityService binding so that
+    ClipboardManager grants clipboard access to this process in the background.
+    It does NOT observe, read, or report any screen content, key events, or
+    accessibility events.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="0"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/accessibility_service_description"
+    android:notificationTimeout="0"
+    android:settingsActivity=".OnboardingActivity" />

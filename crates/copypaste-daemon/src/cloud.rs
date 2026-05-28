@@ -32,11 +32,16 @@
 //!   surfaced, and we do NOT crash-loop. See [`probe_keychain_with_retry`].
 
 use std::collections::VecDeque;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
-use copypaste_core::{ClipboardItem, Database};
+use copypaste_core::{
+    build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2, encrypt_for_cloud,
+    encrypt_item_with_aad, insert_item, ClipboardItem, Database, SyncKey, AAD_SCHEMA_VERSION_V4,
+    ITEM_KEY_VERSION_CURRENT,
+};
 
 // Beta W2.3 (arch-1): canonical auth client lives in copypaste-supabase. The
 // daemon's previous local `sign_in_with_password` stub is gone — `resolve_bearer`
@@ -106,17 +111,38 @@ pub struct CloudConfig {
 
 impl CloudConfig {
     /// Returns `Some(config)` if both `SUPABASE_URL` and `SUPABASE_ANON_KEY`
-    /// are set in the environment; otherwise `None`.
+    /// are available, checking (in order):
+    /// 1. `SUPABASE_URL` / `SUPABASE_ANON_KEY` environment variables.
+    /// 2. The persisted [`crate::ipc::AppConfig`] (`supabase_url` /
+    ///    `supabase_anon_key` fields set via the UI's `set_config` IPC call).
     ///
-    /// **Note**: this constructor performs no scheme validation — that happens
-    /// at `start_cloud` time via [`CloudError::InsecureUrl`]. Callers that want
-    /// to validate eagerly should use [`CloudConfig::new`] instead.
+    /// This lets the UI configure Supabase credentials without requiring the
+    /// operator to set environment variables manually.
+    ///
+    /// **Note**: `SUPABASE_EMAIL` / `SUPABASE_PASSWORD` for GoTrue sign-in are
+    /// intentionally env-only — they are credentials, not configuration, and
+    /// should not be persisted to disk via the config file.
+    ///
+    /// **Scheme validation** happens at `start_cloud` time via
+    /// [`CloudError::InsecureUrl`], not here.
     pub fn from_env() -> Option<Self> {
-        let supabase_url = std::env::var("SUPABASE_URL").ok()?;
-        let anon_key = std::env::var("SUPABASE_ANON_KEY").ok()?;
+        // Priority 1: environment variables.
+        if let (Ok(url), Ok(key)) = (
+            std::env::var("SUPABASE_URL"),
+            std::env::var("SUPABASE_ANON_KEY"),
+        ) {
+            return Some(Self {
+                supabase_url: url.trim_end_matches('/').to_owned(),
+                anon_key: key,
+            });
+        }
+        // Priority 2: persisted AppConfig (set via the UI).
+        let app_cfg = crate::ipc::read_config();
+        let url = app_cfg.supabase_url?;
+        let key = app_cfg.supabase_anon_key?;
         Some(Self {
-            supabase_url: supabase_url.trim_end_matches('/').to_owned(),
-            anon_key,
+            supabase_url: url.trim_end_matches('/').to_owned(),
+            anon_key: key,
         })
     }
 
@@ -310,12 +336,21 @@ impl Drop for CloudHandle {
 /// - `config` — Supabase credentials.
 /// - `db` — shared local database (used by the realtime/poll loop to insert remote items).
 /// - `new_item_rx` — broadcast receiver; every locally created item is pushed to Supabase.
+/// - `sync_key` — shared passphrase-derived cloud encryption key. When `None`,
+///   upload and download are skipped with a one-time `warn!`.
+/// - `last_sync_ms` — shared counter updated after each successful poll round.
+///   Read by `get_sync_status` IPC to surface a timestamp to the UI.
+/// - `local_key` — daemon's local XChaCha20-Poly1305 key, used to decrypt
+///   locally-stored ciphertext before re-encrypting for the cloud.
 ///
 /// Returns a [`CloudHandle`] that can be used to stop the tasks.
 pub async fn start_cloud(
     config: CloudConfig,
     db: Arc<Mutex<Database>>,
     new_item_rx: tokio::sync::broadcast::Receiver<ClipboardItem>,
+    sync_key: Arc<Mutex<Option<SyncKey>>>,
+    last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
+    local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
 ) -> anyhow::Result<CloudHandle> {
     // Defence-in-depth: re-validate the URL even though CloudConfig::new should
     // have rejected it already. Cheap, and protects callers that constructed
@@ -347,18 +382,33 @@ pub async fn start_cloud(
     let push_config = config.clone();
     let push_bearer = bearer.clone();
     let push_shutdown = shutdown.clone();
+    let push_sync_key = sync_key.clone();
+    let push_local_key = local_key.clone();
     tokio::spawn(push_loop(
         push_config,
         push_bearer,
         new_item_rx,
         push_shutdown,
+        push_sync_key,
+        push_local_key,
     ));
 
     // Task B: poll Supabase REST for remote items and insert unknown ones locally.
     let poll_config = config.clone();
     let poll_bearer = bearer.clone();
     let poll_shutdown = shutdown.clone();
-    tokio::spawn(realtime_loop(poll_config, poll_bearer, db, poll_shutdown));
+    let poll_sync_key = sync_key.clone();
+    let poll_local_key = local_key.clone();
+    let poll_last_sync_ms = last_sync_ms.clone();
+    tokio::spawn(realtime_loop(
+        poll_config,
+        poll_bearer,
+        db,
+        poll_shutdown,
+        poll_sync_key,
+        poll_local_key,
+        poll_last_sync_ms,
+    ));
 
     tracing::info!("cloud-sync started (url={})", config.supabase_url);
     Ok(CloudHandle {
@@ -454,29 +504,41 @@ async fn push_loop(
     bearer: Arc<RwLock<String>>,
     mut rx: tokio::sync::broadcast::Receiver<ClipboardItem>,
     shutdown: Arc<tokio::sync::Notify>,
+    sync_key: Arc<Mutex<Option<SyncKey>>>,
+    local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
 ) {
     let client = reqwest::Client::new();
     let rest_url = format!("{}/rest/v1/clipboard_items", config.supabase_url);
+    // Track whether we've already warned about a missing sync key so we don't
+    // spam the log on every item in a burst.
+    let mut warned_no_key = false;
 
-    // In-memory retry queue. Items land here after a transient failure and are
-    // drained on the next loop iteration (after we yield once so we don't
-    // spin-busy when the remote is down).
-    let mut retry_queue: VecDeque<ClipboardItem> = VecDeque::new();
+    // In-memory retry queue: (item, pre-computed payload_ct_b64).
+    // The cloud ciphertext is stored alongside the item so re-encryption
+    // does NOT happen on each retry attempt — the same blob is re-sent until
+    // it succeeds or is evicted by the capacity cap.
+    let mut retry_queue: VecDeque<(ClipboardItem, String)> = VecDeque::new();
 
     // Audit-concurrency HIGH #1 — `broadcast::Receiver::recv` is documented
     // cancellation-safe. We park each item in the retry queue immediately upon
     // receipt (before any network await), so if `shutdown.notified()` fires
     // between dequeue and push the item is visible in the retry-queue log and
-    // not silently dropped. We call `rx.recv().await` directly inside the
-    // select arm rather than pinning a long-lived future, which avoids the
-    // borrow-checker double-mutable-borrow that arises when `next.set(rx.recv())`
-    // is used while `next` is a `Pin<&mut Recv<'_, _>>` tied to `rx`.
+    // not silently dropped.
     loop {
         // Drain the retry queue first — if we made progress on backlog before
         // touching new items, recovery is observable and old items are not
         // perpetually starved by a steady stream of new work.
-        if let Some(item) = retry_queue.pop_front() {
-            match push_item_with_retries(&client, &rest_url, &config, &bearer, &item).await {
+        if let Some((item, payload_ct_b64)) = retry_queue.pop_front() {
+            match push_item_with_retries(
+                &client,
+                &rest_url,
+                &config,
+                &bearer,
+                &item,
+                &payload_ct_b64,
+            )
+            .await
+            {
                 Ok(()) => {
                     tracing::info!(
                         "cloud-sync flushed queued id={} (retry queue drained one)",
@@ -490,7 +552,7 @@ async fn push_loop(
                         item.id,
                         retry_queue.len() + 1,
                     );
-                    enqueue_for_retry(&mut retry_queue, item);
+                    enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
                     // Yield to the scheduler so we don't hot-loop while the
                     // remote is down; also lets shutdown.notified() get a turn.
                     tokio::select! {
@@ -522,19 +584,64 @@ async fn push_loop(
             result = rx.recv() => {
                 match result {
                     Ok(item) => {
-                        // Park the item in the retry queue first so it is owned
-                        // by us before any network await. If shutdown fires after
-                        // this point the item surfaces in the log above.
-                        enqueue_for_retry(&mut retry_queue, item);
-                        if let Some(item) = retry_queue.pop_front() {
-                            match push_item_with_retries(&client, &rest_url, &config, &bearer, &item).await {
+                        // Re-encrypt the item for the cloud using the current sync key.
+                        // If no sync key is set, skip with a one-time warning.
+                        let payload_ct_b64 = {
+                            let key_guard = sync_key.lock().await;
+                            match &*key_guard {
+                                None => {
+                                    if !warned_no_key {
+                                        tracing::warn!(
+                                            "cloud-sync push_loop: no sync passphrase set — \
+                                             skipping upload (call set_sync_passphrase first)"
+                                        );
+                                        warned_no_key = true;
+                                    }
+                                    continue;
+                                }
+                                Some(key) => {
+                                    // Decrypt local ciphertext → plaintext.
+                                    let plaintext = match decrypt_item_plaintext(&item, &local_key) {
+                                        Ok(p) => p,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "cloud-sync push_loop: failed to decrypt id={} for re-encryption: {e}; skipping",
+                                                item.id
+                                            );
+                                            continue;
+                                        }
+                                    };
+                                    // Re-encrypt for cloud with sync key + item_id AAD.
+                                    match encrypt_for_cloud(key, &item.item_id, &plaintext) {
+                                        Ok(blob) => {
+                                            use base64::Engine as _;
+                                            base64::engine::general_purpose::STANDARD.encode(&blob)
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "cloud-sync push_loop: cloud encrypt failed for id={}: {e}; skipping",
+                                                item.id
+                                            );
+                                            continue;
+                                        }
+                                    }
+                                }
+                            }
+                        };
+                        warned_no_key = false; // key is set, reset the warning gate
+
+                        // Park the (item, payload_ct_b64) in the retry queue first so it is
+                        // owned by us before any network await.
+                        enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
+                        if let Some((item, payload_ct_b64)) = retry_queue.pop_front() {
+                            match push_item_with_retries(&client, &rest_url, &config, &bearer, &item, &payload_ct_b64).await {
                                 Ok(()) => tracing::debug!("cloud-sync pushed id={}", item.id),
                                 Err(e) => {
                                     tracing::warn!(
                                         "cloud-sync push failed for id={}: {e}; queuing for retry",
                                         item.id
                                     );
-                                    enqueue_for_retry(&mut retry_queue, item);
+                                    enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
                                 }
                             }
                         }
@@ -555,11 +662,16 @@ async fn push_loop(
     }
 }
 
-/// Append `item` to the retry queue, evicting the oldest entry when the queue
-/// is at capacity. Bounded so a long outage cannot exhaust memory.
-fn enqueue_for_retry(queue: &mut VecDeque<ClipboardItem>, item: ClipboardItem) {
+/// Append `(item, payload_ct_b64)` to the retry queue, evicting the oldest
+/// entry when the queue is at capacity. Bounded so a long outage cannot exhaust
+/// memory.
+fn enqueue_for_retry(
+    queue: &mut VecDeque<(ClipboardItem, String)>,
+    item: ClipboardItem,
+    payload_ct_b64: String,
+) {
     if queue.len() >= PUSH_RETRY_QUEUE_CAP {
-        if let Some(dropped) = queue.pop_front() {
+        if let Some((dropped, _)) = queue.pop_front() {
             tracing::warn!(
                 "cloud-sync retry queue at cap ({}); dropping oldest id={}",
                 PUSH_RETRY_QUEUE_CAP,
@@ -567,7 +679,45 @@ fn enqueue_for_retry(queue: &mut VecDeque<ClipboardItem>, item: ClipboardItem) {
             );
         }
     }
-    queue.push_back(item);
+    queue.push_back((item, payload_ct_b64));
+}
+
+/// Decrypt a locally-stored [`ClipboardItem`]'s `content` field to plaintext
+/// using the daemon's local key and the item's `key_version`.
+///
+/// Returns the raw plaintext bytes on success, or an error string for logging.
+/// Never logs the plaintext or the key.
+fn decrypt_item_plaintext(
+    item: &ClipboardItem,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
+) -> Result<Vec<u8>, String> {
+    // Image items store multi-chunk data that is not a simple decrypt target;
+    // we only support re-encrypting text items for cloud sync today.
+    if item.content_type != "text" {
+        return Err(format!(
+            "unsupported content_type '{}' for cloud re-encryption",
+            item.content_type
+        ));
+    }
+    let content = item.content.as_deref().ok_or("item has no content")?;
+    let nonce_vec = item
+        .content_nonce
+        .as_deref()
+        .ok_or("item has no content_nonce")?;
+    let nonce: &[u8; 24] = nonce_vec
+        .try_into()
+        .map_err(|_| format!("content_nonce wrong length: {}", nonce_vec.len()))?;
+    let v1_key: [u8; 32] = **local_key;
+    let v2_key = derive_v2(&v1_key);
+    decrypt_item_by_version(
+        item.key_version,
+        &v1_key,
+        &v2_key,
+        &item.item_id,
+        nonce,
+        content,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Outcome of a single push attempt.
@@ -589,14 +739,19 @@ enum PushOutcome {
 
 /// One push attempt, surfacing structured outcomes so the caller can decide
 /// between refresh, backoff, and abort.
+///
+/// `payload_ct_b64` is the base64-encoded cloud ciphertext (nonce||ciphertext)
+/// produced by `encrypt_for_cloud`. It is pre-computed by the push loop so
+/// re-encryption only happens once even when the attempt is retried.
 async fn push_item_once(
     client: &reqwest::Client,
     url: &str,
     anon_key: &str,
     bearer: &str,
     item: &ClipboardItem,
+    payload_ct_b64: &str,
 ) -> PushOutcome {
-    let body = clipboard_item_to_json(item);
+    let body = clipboard_item_to_json(item, payload_ct_b64);
 
     let resp = match client
         .post(url)
@@ -662,6 +817,7 @@ pub(crate) async fn push_item_with_retries(
     config: &CloudConfig,
     bearer: &Arc<RwLock<String>>,
     item: &ClipboardItem,
+    payload_ct_b64: &str,
 ) -> Result<(), String> {
     let mut backoff = PUSH_INITIAL_BACKOFF;
     // Hard cap on attempts to avoid hot loops even if every attempt comes back
@@ -678,7 +834,7 @@ pub(crate) async fn push_item_with_retries(
 
     loop {
         let token = bearer.read().await.clone();
-        match push_item_once(client, url, &config.anon_key, &token, item).await {
+        match push_item_once(client, url, &config.anon_key, &token, item, payload_ct_b64).await {
             PushOutcome::Ok => return Ok(()),
 
             PushOutcome::Unauthorized if !refreshed_once => {
@@ -749,62 +905,195 @@ async fn refresh_bearer(config: &CloudConfig) -> Result<String, String> {
 
 /// Poll Supabase REST every 10 s for recent items from other devices and insert
 /// any that are not already in the local database.
+///
+/// Download path:
+/// 1. `GET /rest/v1/clipboard_items` → raw JSON rows.
+/// 2. For each row, base64-decode `payload_ct` → `decrypt_from_cloud(sync_key, item_id, blob)` → plaintext.
+/// 3. Re-encrypt plaintext with the local key → local [`ClipboardItem`].
+/// 4. Insert via `insert_item` (dedup by `id`).
+///
+/// If no sync key is set, the poll is skipped with a one-time warning.
+/// If decryption fails (wrong passphrase, tampered blob), the row is skipped
+/// and a `warn!` is emitted — we never crash, never log plaintext.
 async fn realtime_loop(
     config: CloudConfig,
     bearer: Arc<RwLock<String>>,
     db: Arc<Mutex<Database>>,
     shutdown: Arc<tokio::sync::Notify>,
+    sync_key: Arc<Mutex<Option<SyncKey>>>,
+    local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
+    last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
 ) {
     let client = reqwest::Client::new();
     let poll_url = format!(
-        "{}/rest/v1/clipboard_items?order=wall_time.desc&limit=20",
+        "{}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.desc&limit=20",
         config.supabase_url
     );
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+    let mut warned_no_key = false;
 
     loop {
         tokio::select! {
             _ = interval.tick() => {
+                // If no sync key is set, skip with a one-time warning.
+                let key_snapshot: Option<Vec<u8>> = {
+                    let guard = sync_key.lock().await;
+                    guard.as_ref().map(|k| k.as_bytes().to_vec())
+                };
+                let key_bytes = match key_snapshot {
+                    None => {
+                        if !warned_no_key {
+                            tracing::warn!(
+                                "cloud-sync poll: no sync passphrase set — \
+                                 skipping download (call set_sync_passphrase first)"
+                            );
+                            warned_no_key = true;
+                        }
+                        continue;
+                    }
+                    Some(b) => {
+                        warned_no_key = false;
+                        b
+                    }
+                };
+
                 let token = bearer.read().await.clone();
-                match fetch_remote_items(&client, &poll_url, &config.anon_key, &token).await {
+                match fetch_remote_rows(&client, &poll_url, &config.anon_key, &token).await {
                     Err(e) => tracing::warn!("cloud-sync poll failed: {e}"),
-                    Ok(remote_items) => {
-                        // Audit-concurrency HIGH #2 — the previous code held
-                        // `db.lock().await` across synchronous rusqlite IO,
-                        // blocking the runtime worker for the whole insert
-                        // fan-out. Mirror the pattern from ipc.rs:428: hop
-                        // into spawn_blocking, take the mutex with
-                        // `blocking_lock()`, and run the entire insert loop
-                        // synchronously off the async worker thread. The
-                        // HTTP poll itself stays on the async worker — only
-                        // the DB fan-out moves.
+                    Ok(rows) => {
+                        // Decrypt + re-encrypt + insert in a blocking task so
+                        // the async executor is not blocked by rusqlite IO.
+                        // We snapshot the key bytes (non-secret from the
+                        // perspective of the blocking thread, but never logged).
                         let db_arc = db.clone();
+                        let local_key_clone = local_key.clone();
                         let join = tokio::task::spawn_blocking(move || {
+                            // Reconstruct a SyncKey from the snapshot bytes.
+                            // We use a raw array so this is purely stack-local
+                            // and scrubbed when the closure returns.
+                            let mut key_arr = [0u8; 32];
+                            key_arr.copy_from_slice(&key_bytes);
                             let db_guard = db_arc.blocking_lock();
-                            for item in remote_items {
-                                match exists_item(&db_guard, &item.id) {
-                                    Ok(true) => {} // already local
-                                    Ok(false) => {
-                                        if let Err(e) = copypaste_core::insert_item(&db_guard, &item) {
+                            let mut synced = 0u32;
+                            for row in rows {
+                                let Some(id) = row["id"].as_str() else { continue };
+                                let Some(item_id) = row["item_id"].as_str() else { continue };
+                                // Dedup check before doing expensive decrypt.
+                                match exists_item(&db_guard, id) {
+                                    Ok(true) => continue,
+                                    Err(e) => {
+                                        tracing::warn!("cloud-sync: exists_item error for id={id}: {e}");
+                                        continue;
+                                    }
+                                    Ok(false) => {}
+                                }
+
+                                // Decode payload_ct (base64 → bytes).
+                                let payload_ct_b64 = match row["payload_ct"].as_str() {
+                                    Some(s) => s,
+                                    None => {
+                                        tracing::warn!("cloud-sync: row id={id} missing payload_ct; skipping");
+                                        continue;
+                                    }
+                                };
+                                use base64::Engine as _;
+                                let blob = match base64::engine::general_purpose::STANDARD.decode(payload_ct_b64) {
+                                    Ok(b) => b,
+                                    Err(e) => {
+                                        tracing::warn!("cloud-sync: base64 decode failed for id={id}: {e}; skipping");
+                                        continue;
+                                    }
+                                };
+
+                                // Decrypt with sync key (AAD = item_id + schema v5).
+                                // On failure: skip, warn, NEVER log the blob or key.
+                                //
+                                // We snapshot the sync key bytes before entering
+                                // spawn_blocking (SyncKey is not Send across the
+                                // async boundary). Reconstruct a temporary SyncKey
+                                // via `from_bytes` so the canonical `decrypt_from_cloud`
+                                // code path is used — same AEAD parameters as upload.
+                                let plaintext = {
+                                    let tmp_key = SyncKey::from_bytes(key_arr);
+                                    match decrypt_from_cloud(&tmp_key, item_id, &blob) {
+                                        Ok(p) => p,
+                                        Err(e) => {
+                                            // Never log plaintext or the key.
                                             tracing::warn!(
-                                                "cloud-sync: failed to insert remote id={}: {e}",
-                                                item.id
+                                                "cloud-sync: decrypt_from_cloud failed for id={id} \
+                                                 (wrong passphrase or tampered blob): {e}; skipping"
                                             );
-                                        } else {
-                                            tracing::info!("cloud-sync: synced remote id={}", item.id);
+                                            continue;
                                         }
+                                    }
+                                };
+
+                                // Re-encrypt with local key (v2 HKDF path).
+                                let content_type = row["content_type"]
+                                    .as_str()
+                                    .unwrap_or("text")
+                                    .to_owned();
+                                let lamport_ts = row["lamport_ts"].as_i64().unwrap_or(0);
+                                let wall_time = row["wall_time"].as_i64().unwrap_or(0);
+                                let expires_at = row["expires_at"].as_i64();
+                                let app_bundle_id = row["app_bundle_id"].as_str().map(str::to_owned);
+                                let origin_device_id = row["device_id"]
+                                    .as_str()
+                                    .map(str::to_owned)
+                                    .unwrap_or_default();
+
+                                let local_item = match build_local_item(
+                                    id,
+                                    item_id,
+                                    &content_type,
+                                    &plaintext,
+                                    lamport_ts,
+                                    wall_time,
+                                    expires_at,
+                                    app_bundle_id,
+                                    origin_device_id,
+                                    &local_key_clone,
+                                ) {
+                                    Ok(i) => i,
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "cloud-sync: local re-encrypt failed for id={id}: {e}; skipping"
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                match insert_item(&db_guard, &local_item) {
+                                    Ok(()) => {
+                                        synced += 1;
+                                        tracing::info!("cloud-sync: synced remote id={}", local_item.id);
                                     }
                                     Err(e) => {
                                         tracing::warn!(
-                                            "cloud-sync: exists_item error for id={}: {e}",
-                                            item.id,
+                                            "cloud-sync: failed to insert remote id={}: {e}",
+                                            local_item.id
                                         );
                                     }
                                 }
                             }
+                            // Zero the snapshot key bytes before the closure exits.
+                            key_arr.iter_mut().for_each(|b| *b = 0);
+                            synced
                         });
-                        if let Err(e) = join.await {
-                            tracing::warn!("cloud-sync: insert worker panicked or was cancelled: {e}");
+                        match join.await {
+                            Ok(synced) => {
+                                if synced > 0 {
+                                    // Record the wall-clock time of the last successful sync.
+                                    let now_ms = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis() as i64;
+                                    last_sync_ms.store(now_ms, Ordering::Relaxed);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("cloud-sync: insert worker panicked or was cancelled: {e}");
+                            }
                         }
                     }
                 }
@@ -817,13 +1106,73 @@ async fn realtime_loop(
     }
 }
 
-/// `GET /rest/v1/clipboard_items` and deserialise the response into a `Vec<ClipboardItem>`.
-async fn fetch_remote_items(
+/// Build a local [`ClipboardItem`] from decrypted plaintext by re-encrypting
+/// it with the daemon's local key (v2 HKDF path, `key_version = 2`).
+// Cloud items carry several independent metadata fields (timestamps, ids, type,
+// key material) that do not group naturally without adding an intermediate struct.
+// The function is internal-only; a struct parameter would add indirection without
+// clarity benefit.
+#[allow(clippy::too_many_arguments)]
+fn build_local_item(
+    id: &str,
+    item_id: &str,
+    content_type: &str,
+    plaintext: &[u8],
+    lamport_ts: i64,
+    wall_time: i64,
+    expires_at: Option<i64>,
+    app_bundle_id: Option<String>,
+    origin_device_id: String,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
+) -> Result<ClipboardItem, String> {
+    // Only text items are supported for cloud sync today; image items use
+    // multi-chunk storage that requires a different path.
+    if content_type != "text" {
+        return Err(format!(
+            "unsupported content_type '{content_type}' for cloud download"
+        ));
+    }
+    let v1_key: [u8; 32] = **local_key;
+    let v2_key = derive_v2(&v1_key);
+    // ITEM_KEY_VERSION_CURRENT is i64 (storage convention); build_item_aad_v2
+    // takes u32 and ClipboardItem.key_version is u8 — cast explicitly.
+    // Value is 2 (v2 HKDF key), which fits both u32 and u8.
+    let aad = build_item_aad_v2(
+        item_id,
+        AAD_SCHEMA_VERSION_V4,
+        ITEM_KEY_VERSION_CURRENT as u32,
+    );
+    let (nonce, ciphertext) =
+        encrypt_item_with_aad(plaintext, &v2_key, &aad).map_err(|e| e.to_string())?;
+    Ok(ClipboardItem {
+        id: id.to_owned(),
+        item_id: item_id.to_owned(),
+        content_type: content_type.to_owned(),
+        content: Some(ciphertext),
+        content_nonce: Some(nonce.to_vec()),
+        blob_ref: None,
+        is_sensitive: false,
+        is_synced: true,
+        lamport_ts,
+        wall_time,
+        expires_at,
+        app_bundle_id,
+        content_hash: None,
+        origin_device_id,
+        key_version: ITEM_KEY_VERSION_CURRENT as u8,
+        pinned: false,
+    })
+}
+
+/// `GET /rest/v1/clipboard_items` and return the raw JSON rows.
+///
+/// The caller is responsible for extracting and decrypting `payload_ct`.
+async fn fetch_remote_rows(
     client: &reqwest::Client,
     url: &str,
     anon_key: &str,
     bearer: &str,
-) -> anyhow::Result<Vec<ClipboardItem>> {
+) -> anyhow::Result<Vec<serde_json::Value>> {
     let resp = client
         .get(url)
         .header("apikey", anon_key)
@@ -838,11 +1187,7 @@ async fn fetch_remote_items(
     }
 
     let rows: Vec<serde_json::Value> = resp.json().await?;
-    let items = rows
-        .into_iter()
-        .filter_map(|v| json_to_clipboard_item(&v))
-        .collect();
-    Ok(items)
+    Ok(rows)
 }
 
 // ── Helper: exists_item ───────────────────────────────────────────────────────
@@ -862,77 +1207,33 @@ pub fn exists_item(db: &Database, id: &str) -> Result<bool, anyhow::Error> {
 
 // ── JSON serialisation helpers ────────────────────────────────────────────────
 
-/// Convert a [`ClipboardItem`] to the JSON shape expected by the Supabase REST API.
-/// Binary fields (`content`, `content_nonce`) are base64-encoded.
-fn clipboard_item_to_json(item: &ClipboardItem) -> serde_json::Value {
-    use base64::Engine as _;
-    let b64 = base64::engine::general_purpose::STANDARD;
-
+/// Convert a [`ClipboardItem`] to the JSON shape expected by the Supabase REST
+/// API, embedding the cloud-re-encrypted payload as `payload_ct` (base64).
+///
+/// Column mapping (matches `docs/supabase/schema.sql`):
+///   * `id`               — item UUID (PK)
+///   * `item_id`          — stable item identity UUID
+///   * `content_type`     — "text" | "image" | ...
+///   * `payload_ct`       — base64(nonce[24]||ciphertext) from `encrypt_for_cloud`
+///   * `lamport_ts`       — LWW clock
+///   * `wall_time`        — Unix ms
+///   * `expires_at`       — TTL (nullable)
+///   * `app_bundle_id`    — origin app (nullable)
+///   * `device_id`        — maps to `origin_device_id`
+///
+/// `user_id` is intentionally omitted — the default `auth.uid()` on the
+/// column fills it in automatically, and the RLS `with check` enforces it.
+fn clipboard_item_to_json(item: &ClipboardItem, payload_ct_b64: &str) -> serde_json::Value {
     serde_json::json!({
         "id":            item.id,
         "item_id":       item.item_id,
         "content_type":  item.content_type,
-        "content":       item.content.as_deref().map(|b| b64.encode(b)),
-        "content_nonce": item.content_nonce.as_deref().map(|b| b64.encode(b)),
-        "blob_ref":      item.blob_ref,
-        "is_sensitive":  item.is_sensitive,
-        "is_synced":     item.is_synced,
+        "payload_ct":    payload_ct_b64,
         "lamport_ts":    item.lamport_ts,
         "wall_time":     item.wall_time,
         "expires_at":    item.expires_at,
         "app_bundle_id": item.app_bundle_id,
-        "origin_device_id": item.origin_device_id,
-    })
-}
-
-/// Attempt to deserialise a Supabase REST row into a [`ClipboardItem`].
-/// Returns `None` if required fields are missing.
-fn json_to_clipboard_item(v: &serde_json::Value) -> Option<ClipboardItem> {
-    use base64::Engine as _;
-    let b64 = base64::engine::general_purpose::STANDARD;
-
-    let id = v["id"].as_str()?.to_owned();
-    let item_id = v["item_id"].as_str().unwrap_or(&id).to_owned();
-    let content_type = v["content_type"].as_str().unwrap_or("text").to_owned();
-
-    let content = v["content"].as_str().and_then(|s| b64.decode(s).ok());
-    let content_nonce = v["content_nonce"].as_str().and_then(|s| b64.decode(s).ok());
-
-    let blob_ref = v["blob_ref"].as_str().map(str::to_owned);
-    let is_sensitive = v["is_sensitive"].as_bool().unwrap_or(false);
-    let is_synced = v["is_synced"].as_bool().unwrap_or(true);
-    let lamport_ts = v["lamport_ts"].as_i64().unwrap_or(0);
-    let wall_time = v["wall_time"].as_i64().unwrap_or(0);
-    let expires_at = v["expires_at"].as_i64();
-    let app_bundle_id = v["app_bundle_id"].as_str().map(str::to_owned);
-    // Empty default mirrors the v2->v3 migration: rows that pre-date the
-    // origin-tracking column surface with `""` and are later stamped by
-    // `items::backfill_origin_device_id` once the local UUID is known.
-    let origin_device_id = v["origin_device_id"]
-        .as_str()
-        .map(str::to_owned)
-        .unwrap_or_default();
-
-    Some(ClipboardItem {
-        id,
-        item_id,
-        content_type,
-        content,
-        content_nonce,
-        blob_ref,
-        is_sensitive,
-        is_synced,
-        lamport_ts,
-        wall_time,
-        expires_at,
-        app_bundle_id,
-        content_hash: None,
-        origin_device_id,
-        // Cloud-synced items default to key_version=1 until the v4 sweep
-        // re-encrypts them to v2. This is conservative and correct.
-        key_version: 1,
-        // Cloud-synced items are never user-pinned at ingest time.
-        pinned: false,
+        "device_id":     item.origin_device_id,
     })
 }
 
@@ -1234,7 +1535,7 @@ mod tests {
         // test runner. 30s is well over the 1+2+4 = 7s worth of backoff.
         let result = tokio::time::timeout(
             Duration::from_secs(30),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA=="),
         )
         .await
         .expect("push pipeline must not hang");
@@ -1284,7 +1585,7 @@ mod tests {
 
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA=="),
         )
         .await
         .expect("must not hang");
@@ -1333,7 +1634,7 @@ mod tests {
         let start = std::time::Instant::now();
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA=="),
         )
         .await
         .expect("must not hang");
@@ -1506,11 +1807,15 @@ mod tests {
     /// outage.
     #[test]
     fn enqueue_for_retry_caps_at_max() {
-        let mut q: VecDeque<copypaste_core::ClipboardItem> = VecDeque::new();
+        let mut q: VecDeque<(copypaste_core::ClipboardItem, String)> = VecDeque::new();
         // Push CAP + 5 items; size must remain == CAP and the oldest must be
         // evicted.
         for i in 0..(PUSH_RETRY_QUEUE_CAP + 5) {
-            enqueue_for_retry(&mut q, test_item(&format!("item-{i}")));
+            enqueue_for_retry(
+                &mut q,
+                test_item(&format!("item-{i}")),
+                "dGVzdA==".to_owned(),
+            );
         }
         assert_eq!(
             q.len(),
@@ -1518,6 +1823,6 @@ mod tests {
             "queue must cap at PUSH_RETRY_QUEUE_CAP"
         );
         // Front of queue should now be `item-5` (the first 5 were evicted).
-        assert_eq!(q.front().expect("non-empty").id, "item-5");
+        assert_eq!(q.front().expect("non-empty").0.id, "item-5");
     }
 }

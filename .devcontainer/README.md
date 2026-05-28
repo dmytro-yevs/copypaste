@@ -1,7 +1,7 @@
 # CopyPaste Dev Container
 
 Cloud and local dev-container config for working on CopyPaste with a pre-provisioned
-Rust toolchain, Slint, SQLCipher, and D-Bus build dependencies — no host setup required.
+Rust toolchain, SQLCipher, and D-Bus build dependencies — no host setup required.
 
 ## Usage
 
@@ -11,7 +11,7 @@ Rust toolchain, Slint, SQLCipher, and D-Bus build dependencies — no host setup
 2. Click **Code -> Codespaces -> Create codespace on `release/v0.2.0-beta`**.
 3. Wait ~2-4 min for the image to build and `postCreateCommand` to finish
    (`cargo fetch` warms the registry cache).
-4. The Rust toolchain, rust-analyzer, Slint LSP, and LLDB are pre-installed.
+4. The Rust toolchain, rust-analyzer, and LLDB are pre-installed.
 5. Relay port `7777` is auto-forwarded — open the **Ports** panel for the URL.
 
 ### VS Code Remote Containers (local)
@@ -34,11 +34,14 @@ Rust toolchain, Slint, SQLCipher, and D-Bus build dependencies — no host setup
 - **VS Code extensions**:
   - `rust-lang.rust-analyzer` — Rust LSP.
   - `tamasfe.even-better-toml` — `Cargo.toml` editing.
-  - `slint-ui.slint` — Slint UI LSP and preview.
   - `vadimcn.vscode-lldb` — debugger (CodeLLDB).
+  - `dbaeumer.vscode-eslint` — TypeScript/React linting.
+  - `esbenp.prettier-vscode` — code formatting.
+  - `bradlc.vscode-tailwindcss` — Tailwind CSS IntelliSense.
 - **postCreateCommand**: installs native build deps
   (`pkg-config`, `libssl-dev`, `libsqlcipher-dev`, `libdbus-1-dev`), adds
-  `clippy` + `rustfmt` components, runs `cargo fetch`.
+  `clippy` + `rustfmt` components, runs `cargo fetch`, installs `pnpm` globally,
+  and runs `pnpm install` in `crates/copypaste-ui` to warm the frontend cache.
 - **Volumes**: `copypaste-cargo-cache` and `copypaste-target-cache` survive
   container rebuilds — keeps recompile time low.
 - **Forwarded ports**: `7777` (CopyPaste relay).

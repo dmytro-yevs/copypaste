@@ -9,6 +9,10 @@
         base parent compatible with edge-to-edge layouts.
     -->
     <style name="Theme.CopyPaste" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Brand accent — indigo #5A59E6 -->
+        <item name="colorPrimary">@color/copypaste_primary</item>
+        <item name="colorPrimaryDark">@color/copypaste_primary_dark</item>
+        <item name="colorAccent">@color/copypaste_primary</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
     </style>

@@ -24,8 +24,7 @@ ignore = [
     "RUSTSEC-2024-0418",
     "RUSTSEC-2024-0419",
     "RUSTSEC-2024-0420",
-    # paste 1.0.x unmaintained. Transitive via slint render stack.
-    # No safe upgrade upstream.
+    # paste 1.0.x unmaintained. No safe upgrade upstream.
     "RUSTSEC-2024-0436",
     # bincode 1.3.3 unmaintained (team disbanded after harassment incident).
     # Transitive via ruflo/agentdb dependencies. v1 is considered feature-complete
@@ -48,48 +47,12 @@ allow = [
     "Unicode-3.0",
     "Zlib",
     "MPL-2.0",
-    "BSL-1.0",                # Boost Software License — clipboard-win (transitive via slint)
+    "BSL-1.0",                # Boost Software License — clipboard-win
     "CC0-1.0",                # public-domain dedication used by a few transitives
     "CDLA-Permissive-2.0",    # webpki-roots (transitive via reqwest/hyper-rustls in copypaste-supabase)
 ]
 confidence-threshold = 0.8
 
-# Slint and its sub-crates dual-license under GPL-3.0-only OR royalty-free
-# commercial terms. We rely on the royalty-free LicenseRef branch, not GPL.
-# `exceptions` whitelists the LicenseRef strings on a per-crate basis.
-[[licenses.exceptions]]
-name = "slint"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "i-slint-backend-qt"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "i-slint-backend-selector"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "i-slint-backend-winit"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "i-slint-common"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "i-slint-compiler"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "i-slint-core"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "i-slint-core-macros"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "i-slint-renderer-femtovg"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "slint-build"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
-[[licenses.exceptions]]
-name = "slint-macros"
-allow = ["LicenseRef-Slint-Royalty-free-2.0"]
 
 [bans]
 multiple-versions = "warn"

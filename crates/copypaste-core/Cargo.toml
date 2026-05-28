@@ -11,6 +11,11 @@ crate-type = ["rlib"]
 [dependencies]
 x25519-dalek.workspace = true
 chacha20poly1305.workspace = true
+# Argon2id for passphrase-derived shared sync key (cross-device cloud encryption).
+# Version 0.5 is already in the workspace Cargo.lock (via copypaste-p2p / opaque-ke).
+# default-features = false avoids pulling in std-only password_hash formatting;
+# we only need the raw KDF output via hash_password_into.
+argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
 hkdf.workspace = true
 sha2.workspace = true
 zeroize.workspace = true

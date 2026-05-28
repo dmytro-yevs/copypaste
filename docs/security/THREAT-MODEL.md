@@ -5,7 +5,7 @@
 - **Status:** Living document — re-review on every minor release
 - **Methodology:** STRIDE per asset + trust-boundary analysis
 - **Related ADRs:** ADR-001 (XChaCha20), ADR-002 (Unix socket IPC), ADR-003
-  (SQLCipher), ADR-004 (SQLite WAL), ADR-005 (Slint UI), ADR-007 (IPC
+  (SQLCipher), ADR-004 (SQLite WAL), ADR-013 (Tauri UI), ADR-007 (IPC
   versioning), ADR-008 (PAKE), ADR-009 (relay storage), ADR-010 (codesigning)
 
 ---
@@ -20,7 +20,7 @@ This threat model covers the **v0.2.0-beta** surface of CopyPaste:
 - The local on-disk **SQLCipher database** (`agentdb.rvf` / clipboard store).
 - The OS **Keychain / Secret Service** entries holding the daemon's
   per-installation secrets (`db_key`, mTLS private key, device identity key).
-- The **Unix-domain socket IPC** between Slint UI and daemon.
+- The **Unix-domain socket IPC** between the Tauri UI and daemon.
 - The **mDNS + mTLS LAN sync path** between paired peers.
 - The **`copypaste-relay` HTTPS endpoint** used as a store-and-forward inbox
   when peers are not simultaneously online.
@@ -36,7 +36,7 @@ The following are acknowledged risks but are **not** mitigated by CopyPaste
 itself; users must rely on platform mechanisms:
 
 - **Host OS compromise.** Root/Administrator on the host can read process
-  memory, the Keychain, and the Slint UI's pixel buffer. No mitigation
+  memory, the Keychain, and the UI's pixel buffer. No mitigation
   possible at the application layer.
 - **Physical access to an unlocked device.** A user who hands over an
   unlocked machine cannot expect application-layer secrecy. Lock-screen and
@@ -107,7 +107,7 @@ Notes:
    │  Host OS process boundary                             │
    │                                                       │
    │   ┌──────────────┐  Unix socket  ┌──────────────┐    │
-   │   │  Slint UI    │ ◄──IPC──────► │   Daemon     │    │
+   │   │  Tauri UI    │ ◄──IPC──────► │   Daemon     │    │
    │   │  process     │   (boundary)  │  process     │    │
    │   └──────────────┘   ADR-002     └──────┬───────┘    │
    │                                          │            │
@@ -262,7 +262,7 @@ Notes:
 | T9.S                 | mDNS treated as hint; mTLS is sole trust anchor          | `core/src/discovery/`                    |
 | Code integrity       | Ad-hoc code signing (macOS) / signed APK (Android)      | ADR-010                                  |
 | Local data integrity | WAL + checksums                                         | ADR-004                                  |
-| UI tampering         | Slint compiled-in, no remote loading                    | ADR-005                                  |
+| UI tampering         | Tauri assets compiled-in, no remote code loading        | ADR-013                                  |
 | IPC schema drift     | Versioned IPC envelope, server rejects unknown ops      | ADR-007                                  |
 
 ---

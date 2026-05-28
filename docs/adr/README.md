@@ -13,7 +13,8 @@ original ADR template (see [`ADR-TEMPLATE.md`](./ADR-TEMPLATE.md)).
 | [002](./002-unix-socket-ipc.md) | Unix socket IPC | Accepted |
 | [003](./003-sqlcipher-at-rest.md) | SQLCipher at rest | Accepted |
 | [004](./004-sqlite-wal.md) | SQLite WAL mode | Accepted |
-| [005](./ADR-005-slint-ui-framework.md) | Slint as UI framework | Accepted |
+| 005 | Slint as UI framework | Superseded by ADR-013 (file removed) |
+| [013](./ADR-013-tauri-ui.md) | Tauri v2 + React as UI framework | Accepted |
 | [007](./ADR-007-ipc-protocol-versioning.md) | IPC protocol versioning | Accepted |
 | [008](./ADR-008-pake-protocol-choice.md) | PAKE protocol choice | Accepted |
 | [009](./ADR-009-relay-storage-choice.md) | Relay storage choice | Accepted |

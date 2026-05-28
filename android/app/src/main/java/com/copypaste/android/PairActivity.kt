@@ -74,7 +74,11 @@ class PairActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PairScreen(onBack: () -> Unit = {}) {
+fun PairScreen(
+    modifier: Modifier = Modifier,
+    showBackButton: Boolean = true,
+    onBack: () -> Unit = {},
+) {
     var token by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -111,12 +115,15 @@ fun PairScreen(onBack: () -> Unit = {}) {
     }
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.title_pair)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
+                    if (showBackButton) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(

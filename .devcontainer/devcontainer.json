@@ -9,6 +9,10 @@
     "ghcr.io/devcontainers/features/github-cli:1": {
       "version": "latest"
     },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "20",
+      "nodeGypDependencies": false
+    },
     "ghcr.io/devcontainers/features/common-utils:2": {
       "installZsh": true,
       "configureZshAsDefaultShell": false,
@@ -20,8 +24,10 @@
       "extensions": [
         "rust-lang.rust-analyzer",
         "tamasfe.even-better-toml",
-        "slint-ui.slint",
-        "vadimcn.vscode-lldb"
+        "vadimcn.vscode-lldb",
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "bradlc.vscode-tailwindcss"
       ],
       "settings": {
         "rust-analyzer.check.command": "clippy",
@@ -32,8 +38,10 @@
       }
     }
   },
-  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libsqlcipher-dev libdbus-1-dev && rustup component add clippy rustfmt && cargo fetch",
-  "forwardPorts": [7777],
+  "postCreateCommand": "sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev libsqlcipher-dev libdbus-1-dev && rustup component add clippy rustfmt && cargo fetch && npm install -g pnpm && cd crates/copypaste-ui && pnpm install --frozen-lockfile",
+  "forwardPorts": [
+    7777
+  ],
   "portsAttributes": {
     "7777": {
       "label": "CopyPaste Relay",

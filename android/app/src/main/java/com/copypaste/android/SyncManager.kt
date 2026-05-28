@@ -1,18 +1,43 @@
 package com.copypaste.android
 
 import android.util.Base64
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 /**
- * Manages sync between local database and relay server.
+ * Manages sync between local database and the configured cloud backend.
+ *
+ * Supports two backends, selected by [Settings.syncBackend]:
+ *
+ * - [SyncBackend.RELAY]    — custom relay server via [RelayClient]. Items are
+ *   encrypted with the local device key + v3/v4 AAD schema. Only devices
+ *   registered on the same relay can receive items (pair-based model).
+ *
+ * - [SyncBackend.SUPABASE] — Supabase PostgREST via [SupabaseClient]. Items
+ *   are re-encrypted with the cross-device SyncKey (Argon2id → 32 bytes) +
+ *   CLOUD_AAD_SCHEMA_VERSION = 5. Any device that knows the same passphrase
+ *   can decrypt items from any other device, including macOS. This is the
+ *   end-to-end cloud sync path.
+ *
+ * The Supabase path is the ONLY path that interoperates with the macOS daemon.
+ * The relay path remains available for local-network sync without a cloud
+ * account.
  */
 class SyncManager(
     private val relayClient: RelayClient,
     private val deviceId: String,
-    private val token: String
+    private val token: String,
+    private val settings: Settings? = null,
 ) {
+    companion object {
+        private const val TAG = "SyncManager"
+    }
+
     private var lastLamportTs: Long = 0
+
+    // ── Relay backend (original) ──────────────────────────────────────────────
 
     suspend fun syncIncoming(encryptionKey: ByteArray): List<String> =
         withContext(Dispatchers.IO) {
@@ -26,7 +51,9 @@ class SyncManager(
                     val plainBytes = decryptText(item.itemId, ciphertext, nonce, encryptionKey)
                     lastLamportTs = maxOf(lastLamportTs, item.lamportTs)
                     plainBytes.toString(Charsets.UTF_8)
-                } catch (e: Exception) { null }
+                } catch (e: Exception) {
+                    null
+                }
             }
         }
 
@@ -52,5 +79,125 @@ class SyncManager(
             lamportTs = lamportTs
         )
         return relayClient.uploadItem(deviceId, token, item)
+    }
+
+    // ── Supabase backend ──────────────────────────────────────────────────────
+
+    /**
+     * Push [plaintext] to Supabase using the cross-device sync key.
+     *
+     * Requires [settings] with a fully-configured Supabase backend
+     * ([Settings.isSupabaseConfigured] == true). Derives the sync key from
+     * [Settings.cloudSyncPassphrase] on each call (Argon2id is expensive;
+     * callers that push many items in a loop should cache the derived bytes).
+     *
+     * A fresh UUID is generated as the item id if [overrideId] is not supplied.
+     * The same UUID is used both as the `id` column PK and as the `item_id`
+     * bound into the AEAD AAD — this matches the macOS daemon's convention.
+     *
+     * Returns the item id on success, or `null` on any failure (which is logged
+     * at WARN). Callers should retry independently.
+     */
+    suspend fun pushToSupabase(
+        plaintext: ByteArray,
+        contentType: String = "text",
+        overrideId: String? = null,
+        deviceId: String = this.deviceId,
+    ): String? = withContext(Dispatchers.IO) {
+        val s = settings ?: run {
+            Log.w(TAG, "pushToSupabase: no Settings instance provided")
+            return@withContext null
+        }
+        if (!s.isSupabaseConfigured) {
+            Log.w(TAG, "pushToSupabase: Supabase not configured (url/anonKey/passphrase missing)")
+            return@withContext null
+        }
+
+        val client = SupabaseClient(s.supabaseUrl, s.supabaseAnonKey)
+
+        // Derive sync key from passphrase (Argon2id — expensive, ~50ms on device).
+        val syncKeyBytes = try {
+            derive_cloud_sync_key(s.cloudSyncPassphrase)
+        } catch (e: Exception) {
+            Log.w(TAG, "pushToSupabase: key derivation failed: ${e.message}")
+            return@withContext null
+        }
+
+        // Resolve bearer: try email/password sign-in if configured, else fall back to anon key.
+        val bearer = if (s.hasSupabaseCredentials) {
+            client.signIn(s.supabaseEmail, s.supabasePassword) ?: run {
+                Log.w(TAG, "pushToSupabase: sign-in failed, falling back to anon key")
+                s.supabaseAnonKey
+            }
+        } else {
+            s.supabaseAnonKey
+        }
+
+        val id = overrideId ?: UUID.randomUUID().toString()
+        val lamportTs = System.currentTimeMillis()
+
+        val ok = client.push(
+            bearerToken = bearer,
+            syncKeyBytes = syncKeyBytes,
+            id = id,
+            itemId = id, // item_id == id (same as daemon convention)
+            plaintext = plaintext,
+            contentType = contentType,
+            lamportTs = lamportTs,
+            wallTime = lamportTs,
+            deviceId = deviceId,
+        )
+        if (ok) id else null
+    }
+
+    /**
+     * Poll Supabase for new items from other devices and return the decrypted
+     * plaintexts.
+     *
+     * Filters by [sinceWallTime] (exclusive, Unix ms). Pass `0` to get the
+     * most recent [SupabaseClient.POLL_LIMIT] items regardless of age.
+     * Callers should pass the wall_time of the last successfully processed item
+     * to avoid re-processing duplicates (deduplication by `id` is also
+     * recommended at the storage layer).
+     *
+     * Returns list of [(id, itemId, plaintext)] tuples. The `id` can be used
+     * for local dedup checks before storing. Returns empty list on any error.
+     */
+    suspend fun pollFromSupabase(
+        sinceWallTime: Long = 0L,
+    ): List<SupabaseClient.DecryptedItem> = withContext(Dispatchers.IO) {
+        val s = settings ?: run {
+            Log.w(TAG, "pollFromSupabase: no Settings instance provided")
+            return@withContext emptyList()
+        }
+        if (!s.isSupabaseConfigured) {
+            Log.w(TAG, "pollFromSupabase: Supabase not configured")
+            return@withContext emptyList()
+        }
+
+        val client = SupabaseClient(s.supabaseUrl, s.supabaseAnonKey)
+
+        val syncKeyBytes = try {
+            derive_cloud_sync_key(s.cloudSyncPassphrase)
+        } catch (e: Exception) {
+            Log.w(TAG, "pollFromSupabase: key derivation failed: ${e.message}")
+            return@withContext emptyList()
+        }
+
+        // Resolve bearer: sign in with email/password if configured.
+        val bearer = if (s.hasSupabaseCredentials) {
+            client.signIn(s.supabaseEmail, s.supabasePassword) ?: run {
+                Log.w(TAG, "pollFromSupabase: sign-in failed, falling back to anon key")
+                s.supabaseAnonKey
+            }
+        } else {
+            s.supabaseAnonKey
+        }
+
+        client.poll(
+            bearerToken = bearer,
+            syncKeyBytes = syncKeyBytes,
+            sinceWallTime = sinceWallTime,
+        )
     }
 }

@@ -16,7 +16,7 @@ any explicit version field. As long as the daemon and every client were built
 from the same commit, this was fine. It stops being fine the moment we ship
 beta:
 
-* The CLI, the tray, the Slint UI, the Android relay client, and third-party
+* The CLI, the tray, the Tauri UI, the Android relay client, and third-party
   scripts all talk to the daemon over the same Unix socket.
 * They are upgraded independently. A user can run a newer daemon with an
   older CLI (or vice versa) for hours or days before noticing.

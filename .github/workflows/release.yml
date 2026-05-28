@@ -69,19 +69,35 @@ jobs:
         with:
           key: release-macos-arm64
 
-      - name: Build release (DMG binaries only)
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '9'
+
+      - name: Build release binaries (CLI, daemon, relay)
         run: |
-          # cloud-sync excluded from release build — requires Supabase credentials not present in CI
+          # cloud-sync enabled: the released daemon ships with Supabase sync support.
+          # Credentials (SUPABASE_URL / SUPABASE_ANON_KEY) are read at runtime from
+          # the app bundle's config, not at compile time — no CI secrets required.
           # copypaste-android excluded on macOS — needs aarch64-linux-android target (built in build-android job)
-          # Build only the four crates the DMG ships (copypaste CLI, daemon, UI, relay);
-          # skips copypaste-bench / copypaste-ui-snapshot under thin-LTO. The relay binary
-          # is bundled into CopyPaste.app by scripts/make_app_bundle.sh (REQUIRED_BINS),
+          # Build the non-UI crates the DMG ships (copypaste CLI, daemon, relay).
+          # The relay binary is bundled into CopyPaste.app (REQUIRED_BINS),
           # so it must be present in target/release/ before build-dmg-ci.sh runs.
           cargo build --release \
             -p copypaste-cli \
-            -p copypaste-daemon \
-            -p copypaste-ui \
+            -p copypaste-daemon --features copypaste-daemon/cloud-sync \
             -p copypaste-relay
+
+      - name: Build Tauri app (pnpm install + pnpm tauri build)
+        working-directory: crates/copypaste-ui
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm tauri build
 
       - name: Resolve release version
         id: ver

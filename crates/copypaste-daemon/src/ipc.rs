@@ -4,10 +4,13 @@ use crate::protocol::{
     MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 use copypaste_core::{
-    chunks_from_blob, count_items, decode_image, decrypt_item_by_version, delete_fts, delete_item,
-    derive_v2, ensure_revoked_devices_table, fetch_text_preview, get_item_by_id, get_page,
-    pin_item, revoke_device, revoke_devices, search_items, unpin_item, Database, EncryptError,
+    bump_item_recency, chunks_from_blob, count_items, decode_image, decrypt_item_by_version,
+    delete_fts, delete_item, derive_v2, ensure_revoked_devices_table, fetch_text_preview,
+    get_item_by_id, get_page, get_page_pinned_first, pin_item, revoke_device, revoke_devices,
+    search_items, unpin_item, Database, EncryptError,
 };
+#[cfg(feature = "cloud-sync")]
+use copypaste_core::{derive_sync_key, SyncKey};
 use copypaste_p2p::pake::{PakeInitiator, PakeResponder, PasswordFile};
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
@@ -58,7 +61,7 @@ fn config_path() -> Option<std::path::PathBuf> {
     dirs::config_dir().map(|d| d.join("copypaste").join("config.json"))
 }
 
-fn read_config() -> AppConfig {
+pub(crate) fn read_config() -> AppConfig {
     let Some(path) = config_path() else {
         return AppConfig::default();
     };
@@ -280,6 +283,18 @@ pub struct IpcServer {
     /// (the S10 grace path is exercised). `None` when P2P is disabled — the
     /// PAKE handlers then only persist to `peers.json` (loaded on next start).
     p2p_peers: Option<copypaste_p2p::transport::PairedPeers>,
+    /// Shared passphrase-derived cloud sync key (Argon2id, 32 bytes).
+    ///
+    /// `None` means the user has not yet configured a sync passphrase, so
+    /// cloud upload/download is skipped. Set via `set_sync_passphrase`; shared
+    /// with the cloud push/poll loops via `Arc<Mutex<Option<SyncKey>>>`.
+    #[cfg(feature = "cloud-sync")]
+    pub sync_key: Arc<Mutex<Option<SyncKey>>>,
+    /// Monotonic timestamp (ms since UNIX epoch) of the last successful cloud
+    /// sync round-trip. `0` means never synced. Shared with cloud loops so
+    /// `get_sync_status` returns a live value.
+    #[cfg(feature = "cloud-sync")]
+    pub last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
 }
 
 impl IpcServer {
@@ -297,6 +312,10 @@ impl IpcServer {
             ready: Arc::new(AtomicBool::new(true)),
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
             p2p_peers: None,
+            #[cfg(feature = "cloud-sync")]
+            sync_key: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "cloud-sync")]
+            last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }
 
@@ -308,6 +327,25 @@ impl IpcServer {
     /// daemon restart.
     pub fn with_p2p_peers(mut self, peers: copypaste_p2p::transport::PairedPeers) -> Self {
         self.p2p_peers = Some(peers);
+        self
+    }
+
+    /// Wire up shared cloud-sync state created by the daemon before spawning
+    /// the IPC server and `start_cloud`.
+    ///
+    /// By calling this the daemon guarantees both surfaces see the **same**
+    /// `Arc`s: a `set_sync_passphrase` IPC call writes to the same
+    /// `sync_key` `Mutex` that the cloud push/poll loops read from, and the
+    /// cloud loops write to the same `last_sync_ms` counter that
+    /// `get_sync_status` reads.
+    #[cfg(feature = "cloud-sync")]
+    pub fn with_cloud_sync_state(
+        mut self,
+        sync_key: Arc<Mutex<Option<SyncKey>>>,
+        last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
+    ) -> Self {
+        self.sync_key = sync_key;
+        self.last_sync_ms = last_sync_ms;
         self
     }
 
@@ -331,6 +369,10 @@ impl IpcServer {
             ready,
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
             p2p_peers: None,
+            #[cfg(feature = "cloud-sync")]
+            sync_key: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "cloud-sync")]
+            last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
     }
 
@@ -777,14 +819,30 @@ impl IpcServer {
                 .await;
                 match join {
                     Ok(Ok(Some(item))) => match self.write_to_pasteboard(&item) {
-                        Ok(()) => Response::ok(
-                            req.id,
-                            serde_json::json!({
-                                "id": item.id,
-                                "content_type": item.content_type,
-                                "written": true,
-                            }),
-                        ),
+                        Ok(()) => {
+                            // C. PROMOTE-ON-COPY: bump wall_time/lamport so this
+                            // item sorts to the top of history_page on the next
+                            // request, matching Maccy-style recency ordering.
+                            let db_arc2 = self.db.clone();
+                            let item_id_bump = item.id.clone();
+                            let _ = tokio::task::spawn_blocking(move || {
+                                let db = db_arc2.blocking_lock();
+                                let now_ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as i64)
+                                    .unwrap_or(0);
+                                let _ = bump_item_recency(&db, &item_id_bump, now_ms, now_ms);
+                            })
+                            .await;
+                            Response::ok(
+                                req.id,
+                                serde_json::json!({
+                                    "id": item.id,
+                                    "content_type": item.content_type,
+                                    "written": true,
+                                }),
+                            )
+                        }
                         Err(PasteboardError::DecryptFailed(msg)) => Response::err_with_code(
                             req.id,
                             ERR_CODE_AUTH_FAILED,
@@ -807,34 +865,24 @@ impl IpcServer {
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    let count = count_items(&db).unwrap_or(0);
-                    loop {
-                        match get_page(&db, 100, 0) {
-                            Ok(items) if items.is_empty() => break,
-                            Ok(items) => {
-                                for item in items {
-                                    if let Err(e) = delete_item(&db, &item.id) {
-                                        tracing::error!(
-                                            "ipc: delete_item failed for id={}: {e}",
-                                            &item.id
-                                        );
-                                    }
-                                    if let Err(e) = delete_fts(&db, &item.id) {
-                                        tracing::error!(
-                                            "ipc: delete_fts failed for id={}: {e}",
-                                            &item.id
-                                        );
-                                    }
-                                }
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                    count
+                    // Atomically delete every row from both tables inside a
+                    // single transaction so the history is never half-cleared
+                    // and FTS never drifts from clipboard_items.
+                    let conn = db.conn();
+                    let tx = conn.unchecked_transaction()?;
+                    let deleted = tx.execute("DELETE FROM clipboard_items", [])?;
+                    // Best-effort FTS purge — a failure here rolls back the
+                    // outer delete too so the two tables stay consistent.
+                    tx.execute("DELETE FROM clipboard_fts", [])?;
+                    tx.commit()?;
+                    Ok::<_, rusqlite::Error>(deleted)
                 })
                 .await;
                 match join {
-                    Ok(count) => Response::ok(req.id, serde_json::json!({"deleted": count})),
+                    Ok(Ok(deleted)) => {
+                        Response::ok(req.id, serde_json::json!({"deleted": deleted}))
+                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -1041,14 +1089,30 @@ impl IpcServer {
                 .await;
                 match join {
                     Ok(Ok(Some(item))) => match self.write_to_pasteboard(&item) {
-                        Ok(()) => Response::ok(
-                            req.id,
-                            serde_json::json!({
-                                "id": item.id,
-                                "content_type": item.content_type,
-                                "written": true,
-                            }),
-                        ),
+                        Ok(()) => {
+                            // C. PROMOTE-ON-COPY: bump wall_time/lamport so this
+                            // item sorts to the top of history_page on the next
+                            // request, matching Maccy-style recency ordering.
+                            let db_arc2 = self.db.clone();
+                            let item_id_bump = item.id.clone();
+                            let _ = tokio::task::spawn_blocking(move || {
+                                let db = db_arc2.blocking_lock();
+                                let now_ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as i64)
+                                    .unwrap_or(0);
+                                let _ = bump_item_recency(&db, &item_id_bump, now_ms, now_ms);
+                            })
+                            .await;
+                            Response::ok(
+                                req.id,
+                                serde_json::json!({
+                                    "id": item.id,
+                                    "content_type": item.content_type,
+                                    "written": true,
+                                }),
+                            )
+                        }
                         Err(PasteboardError::DecryptFailed(msg)) => Response::err_with_code(
                             req.id,
                             ERR_CODE_AUTH_FAILED,
@@ -1058,6 +1122,130 @@ impl IpcServer {
                             Response::err(req.id, format!("pasteboard write failed: {msg}"))
                         }
                     },
+                    Ok(Ok(None)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_NOT_FOUND,
+                        format!("item not found: {id}"),
+                    ),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
+            // A. get_item_image — decrypt and return an IMAGE item as a data URI.
+            //
+            // Params: {"id": "<uuid>"}
+            // Success: {"data_uri": "data:<content_type>;base64,<b64>"}
+            // Error: item not found, non-image content_type, or decrypt failure.
+            //
+            // Reuses the same chunk-decrypt path as write_to_pasteboard for images
+            // (chunks_from_blob → decode_image → PNG bytes), then base64-encodes
+            // the raw PNG bytes for the UI to render as a thumbnail without having
+            // to hit the pasteboard.
+            "get_item_image" => {
+                let id = match req.params.get("id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
+                };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
+                }
+                let db_arc = self.db.clone();
+                let id_for_task = id.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let item = get_item_by_id(&db, &id_for_task)?;
+                    Ok::<_, anyhow::Error>(item)
+                })
+                .await;
+                match join {
+                    Ok(Ok(Some(item))) => {
+                        // Only IMAGE items are supported; content_type == "image"
+                        // (legacy) or starts with "image/" (MIME-typed future rows).
+                        let is_image =
+                            item.content_type == "image" || item.content_type.starts_with("image/");
+                        if !is_image {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                format!(
+                                    "item {} is not an image (content_type: {})",
+                                    id, item.content_type
+                                ),
+                            );
+                        }
+                        let content = match &item.content {
+                            Some(b) => b.clone(),
+                            None => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("image item {} has no content blob", id),
+                                )
+                            }
+                        };
+                        let meta_json = match item.blob_ref.as_deref() {
+                            Some(s) => s.to_owned(),
+                            None => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("image item {} missing blob_ref metadata", id),
+                                )
+                            }
+                        };
+                        let file_id = match parse_image_file_id(&meta_json) {
+                            Ok(fid) => fid,
+                            Err(e) => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("image item {id} blob_ref parse error: {e}"),
+                                )
+                            }
+                        };
+                        let chunks = match chunks_from_blob(&content) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("image item {id} chunks_from_blob failed: {e}"),
+                                )
+                            }
+                        };
+                        let local_key: [u8; 32] = **self.local_key;
+                        let png_bytes = match decode_image(&chunks, &local_key, &file_id) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_AUTH_FAILED,
+                                    format!("image item {id} decode failed: {e}"),
+                                )
+                            }
+                        };
+                        use base64::Engine as _;
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                        // The stored content_type is "image" (legacy) or a real
+                        // MIME type. For the data URI we always emit "image/png"
+                        // because decode_image always returns PNG bytes.
+                        let data_uri = format!("data:image/png;base64,{b64}");
+                        Response::ok(req.id, serde_json::json!({ "data_uri": data_uri }))
+                    }
                     Ok(Ok(None)) => Response::err_with_code(
                         req.id,
                         ERR_CODE_NOT_FOUND,
@@ -1087,7 +1275,9 @@ impl IpcServer {
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    let items = get_page(&db, limit, offset)?;
+                    // Use pinned-first ordering: pinned items always appear at
+                    // the top, then unpinned items ordered newest-first.
+                    let items = get_page_pinned_first(&db, limit, offset)?;
                     let total = count_items(&db).unwrap_or(0);
                     // Build previews inside the blocking task while `db` is
                     // still held.  Text items: read from the FTS5 plaintext
@@ -1114,6 +1304,7 @@ impl IpcServer {
                                 "wall_time": item.wall_time,
                                 "lamport_ts": item.lamport_ts,
                                 "preview": preview,
+                                "pinned": item.pinned,
                             })
                         })
                         .collect();
@@ -1160,6 +1351,103 @@ impl IpcServer {
             }
             "cloud_sign_out" => {
                 tracing::info!("cloud_sign_out stub called");
+                Response::not_implemented(req.id, "cloud-sync")
+            }
+
+            // ── cloud-sync IPC methods ──────────────────────────────────────
+            //
+            // `set_sync_passphrase` and `get_sync_status` are the UI-facing
+            // surface for the cross-device shared encryption key. Both are
+            // compiled in only when the `cloud-sync` Cargo feature is active.
+            #[cfg(feature = "cloud-sync")]
+            "set_sync_passphrase" => {
+                let passphrase = match req.params.get("passphrase").and_then(|v| v.as_str()) {
+                    Some(p) if !p.is_empty() => p.to_owned(),
+                    _ => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing or empty param: passphrase",
+                        )
+                    }
+                };
+
+                // Derive the sync key via Argon2id (this is intentionally slow —
+                // one-time cost on passphrase entry, not per-item).
+                let new_key = match derive_sync_key(&passphrase) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        tracing::warn!("set_sync_passphrase: key derivation failed: {e}");
+                        return Response::err(req.id, format!("key derivation failed: {e}"));
+                    }
+                };
+
+                // Persist the raw key bytes to the macOS Keychain under the
+                // cloud-sync account so they survive a daemon restart.
+                #[cfg(target_os = "macos")]
+                {
+                    use security_framework::passwords::set_generic_password;
+                    if let Err(e) = set_generic_password(
+                        crate::keychain::SERVICE,
+                        crate::keychain::CLOUD_SYNC_ACCOUNT,
+                        new_key.as_bytes(),
+                    ) {
+                        tracing::warn!(
+                            "set_sync_passphrase: keychain persist failed ({e}); \
+                             key is active in-memory only until daemon restart"
+                        );
+                        // Non-fatal: the key is still active for this session.
+                    }
+                }
+
+                // Store in shared state so push/poll loops pick it up
+                // immediately (they hold an Arc to the same Mutex).
+                *self.sync_key.lock().await = Some(new_key);
+                tracing::info!("set_sync_passphrase: sync key updated");
+                Response::ok(req.id, serde_json::json!({"ok": true}))
+            }
+
+            #[cfg(feature = "cloud-sync")]
+            "get_sync_status" => {
+                let passphrase_set = self.sync_key.lock().await.is_some();
+                let app_cfg = read_config();
+                let supabase_configured = app_cfg.supabase_url.is_some()
+                    && app_cfg.supabase_anon_key.is_some()
+                    || std::env::var("SUPABASE_URL").is_ok();
+                // `signed_in` is true when we have a GoTrue session (anon key or
+                // email/password token). For now we report it as true when
+                // supabase is configured and we haven't seen an auth failure
+                // (the push/poll loops log failures but don't surface a flag
+                // here yet — that lives in a future wave).
+                let signed_in = supabase_configured;
+                let raw_ts = self.last_sync_ms.load(std::sync::atomic::Ordering::Relaxed);
+                let last_sync_ms_val: Option<i64> = if raw_ts > 0 { Some(raw_ts) } else { None };
+                // B. Expose the non-secret Supabase URL and email so the UI can
+                // show/prefill them. We do NOT expose the anon key, password, or
+                // passphrase. Priority: env vars override AppConfig (same as
+                // CloudConfig::from_env).
+                let supabase_url_val: Option<String> = std::env::var("SUPABASE_URL")
+                    .ok()
+                    .or_else(|| app_cfg.supabase_url.clone());
+                // SUPABASE_EMAIL is env-only (never persisted to config file).
+                let email_val: Option<String> = std::env::var("SUPABASE_EMAIL").ok();
+                Response::ok(
+                    req.id,
+                    serde_json::json!({
+                        "passphrase_set": passphrase_set,
+                        "supabase_configured": supabase_configured,
+                        "signed_in": signed_in,
+                        "last_sync_ms": last_sync_ms_val,
+                        "supabase_url": supabase_url_val,
+                        "email": email_val,
+                    }),
+                )
+            }
+
+            // When cloud-sync is not compiled in, return not_implemented so
+            // the UI gets a machine-readable code rather than "method not found".
+            #[cfg(not(feature = "cloud-sync"))]
+            "set_sync_passphrase" | "get_sync_status" => {
                 Response::not_implemented(req.id, "cloud-sync")
             }
             "set_private_mode" => {
@@ -3366,6 +3654,151 @@ mod tests {
             items.len() <= 1000,
             "history_page returned {} items, exceeds MAX_PAGE=1000",
             items.len()
+        );
+    }
+
+    // --- FIX 1: history_page returns pinned field and pinned-first order ---
+
+    /// Each item in `history_page` must carry a boolean `pinned` field.
+    #[tokio::test]
+    async fn history_page_items_include_pinned_field() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("hp_pinned_field.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // Seed one item.
+        {
+            let guard = db.lock().await;
+            let item = copypaste_core::ClipboardItem::new_text(vec![0xAA], vec![0u8; 24], 1);
+            copypaste_core::insert_item(&guard, &item).unwrap();
+        }
+
+        let resp = call_one(
+            &sock,
+            r#"{"id":"hpf1","method":"history_page","params":{"limit":10,"offset":0}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true);
+        let items = resp["data"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        // The `pinned` field must be present and be a boolean.
+        assert!(
+            items[0]["pinned"].is_boolean(),
+            "each item must have a boolean 'pinned' field, got: {}",
+            items[0]
+        );
+        assert_eq!(
+            items[0]["pinned"], false,
+            "freshly inserted item must have pinned=false"
+        );
+    }
+
+    /// `history_page` must return pinned items before unpinned items,
+    /// regardless of wall_time ordering.
+    #[tokio::test]
+    async fn history_page_pinned_items_sort_first() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("hp_pinned_sort.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // Insert two items: item_old (lower wall_time) and item_new (higher).
+        // Then pin item_old — it must appear first in history_page even though
+        // it is older.
+        let (id_old, _id_new) = {
+            let guard = db.lock().await;
+            let mut item_old =
+                copypaste_core::ClipboardItem::new_text(vec![0x01], vec![0u8; 24], 1);
+            item_old.wall_time = 1_000;
+            let id_old = item_old.id.clone();
+            copypaste_core::insert_item(&guard, &item_old).unwrap();
+
+            let mut item_new =
+                copypaste_core::ClipboardItem::new_text(vec![0x02], vec![0u8; 24], 2);
+            item_new.wall_time = 2_000;
+            let id_new = item_new.id.clone();
+            copypaste_core::insert_item(&guard, &item_new).unwrap();
+
+            (id_old, id_new)
+        };
+
+        // Pin the older item via the IPC verb.
+        let pin_body = format!(
+            r#"{{"id":"hps-pin","method":"pin_item","params":{{"id":"{id_old}","pinned":true}}}}"#
+        );
+        let pin_resp = call_one(&sock, &pin_body).await;
+        assert_eq!(pin_resp["ok"], true, "pin must succeed: {pin_resp}");
+
+        // Now history_page must return item_old first.
+        let hp_resp = call_one(
+            &sock,
+            r#"{"id":"hps-hp","method":"history_page","params":{"limit":10,"offset":0}}"#,
+        )
+        .await;
+        assert_eq!(hp_resp["ok"], true);
+        let items = hp_resp["data"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[0]["id"].as_str().unwrap(),
+            id_old,
+            "pinned (older) item must be first"
+        );
+        assert_eq!(items[0]["pinned"], true, "first item must have pinned=true");
+        assert_eq!(
+            items[1]["pinned"], false,
+            "second item must have pinned=false"
+        );
+    }
+
+    /// After unpinning, the item reverts to recency order in history_page.
+    #[tokio::test]
+    async fn history_page_unpinned_item_reverts_to_recency_order() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("hp_unpin.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        let (id_old, _id_new) = {
+            let guard = db.lock().await;
+            let mut item_old =
+                copypaste_core::ClipboardItem::new_text(vec![0x01], vec![0u8; 24], 1);
+            item_old.wall_time = 1_000;
+            let id_old = item_old.id.clone();
+            copypaste_core::insert_item(&guard, &item_old).unwrap();
+
+            let mut item_new =
+                copypaste_core::ClipboardItem::new_text(vec![0x02], vec![0u8; 24], 2);
+            item_new.wall_time = 2_000;
+            let id_new = item_new.id.clone();
+            copypaste_core::insert_item(&guard, &item_new).unwrap();
+
+            (id_old, id_new)
+        };
+
+        // Pin then unpin item_old.
+        let pin_body = format!(
+            r#"{{"id":"hpu-pin","method":"pin_item","params":{{"id":"{id_old}","pinned":true}}}}"#
+        );
+        call_one(&sock, &pin_body).await;
+        let unpin_body = format!(
+            r#"{{"id":"hpu-unpin","method":"pin_item","params":{{"id":"{id_old}","pinned":false}}}}"#
+        );
+        call_one(&sock, &unpin_body).await;
+
+        // After unpin, history_page must return newest-first (item_new first).
+        let hp_resp = call_one(
+            &sock,
+            r#"{"id":"hpu-hp","method":"history_page","params":{"limit":10,"offset":0}}"#,
+        )
+        .await;
+        assert_eq!(hp_resp["ok"], true);
+        let items = hp_resp["data"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items[0]["pinned"], false,
+            "first item must be unpinned after unpin"
+        );
+        assert!(
+            items[0]["wall_time"].as_i64().unwrap() >= items[1]["wall_time"].as_i64().unwrap(),
+            "items must be newest-first after unpin"
         );
     }
 

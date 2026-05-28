@@ -170,7 +170,7 @@ encodes Android-on-Linux-kernel (`aarch64-linux-android`) are NOT removable.
 
 - `crates/copypaste-config` — Has good integration tests but **no production
   consumer**. The daemon does its own config loading; CLI parses its own flags
-  via clap; UI reads Slint properties. Either:
+  via clap; UI uses Tauri commands. Either:
   (a) wire `AppConfig` into daemon `paths::Settings` (its declared purpose), OR
   (b) flag the crate as "future use" with a `publish = false` and a TODO, OR
   (c) delete the crate and reclaim 425 LOC.

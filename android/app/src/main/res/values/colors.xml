@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- CopyPaste brand palette -->
+    <!-- Primary indigo accent — matches the desktop AppIcon and Slint UI accent -->
+    <color name="copypaste_primary">#5A59E6</color>
+    <color name="copypaste_primary_dark">#4845C8</color>
+    <color name="copypaste_primary_light">#7A79EE</color>
+
+    <!-- Adaptive launcher icon background (white, icon motif carries the brand color) -->
+    <color name="ic_launcher_background">#FFFFFF</color>
+</resources>

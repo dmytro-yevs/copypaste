@@ -8,7 +8,7 @@ Date: 2026-05-22
 
 ## Context
 
-The daemon needs an IPC channel for the CLI and Slint UI to query clipboard history.
+The daemon needs an IPC channel for the CLI and Tauri UI to query clipboard history.
 
 ## Decision
 

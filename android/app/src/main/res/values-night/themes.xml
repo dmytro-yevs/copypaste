@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.CopyPaste" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Brand accent — indigo #5A59E6 (same in dark mode; luminance contrast is sufficient) -->
+        <item name="colorPrimary">@color/copypaste_primary</item>
+        <item name="colorPrimaryDark">@color/copypaste_primary_dark</item>
+        <item name="colorAccent">@color/copypaste_primary</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>

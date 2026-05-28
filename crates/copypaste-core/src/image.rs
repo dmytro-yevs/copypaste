@@ -80,7 +80,7 @@ pub fn decode_clipboard_image(raw: &[u8]) -> Result<DynamicImage, ImageError> {
 ///
 /// If the source image already fits the bounds the original pixels are
 /// returned (still as RGBA8), so callers always get a uniform pixel format
-/// suitable for `slint::Image::from_rgba8(...)`.
+/// suitable for display as an RGBA8 image.
 ///
 /// This is an additive Wave 3.4 helper used by the HistoryWindow to render
 /// inline previews of clipboard images without leaking the full bitmap

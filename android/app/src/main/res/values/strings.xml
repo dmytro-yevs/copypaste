@@ -51,6 +51,13 @@
     <string name="notif_action_resume">Resume</string>
     <string name="notif_action_open">Open</string>
 
+    <!-- Accessibility service -->
+    <string name="accessibility_service_description">Monitors clipboard changes in the background so CopyPaste can sync items even when the app is not in the foreground. Does not read screen content or intercept inputs.</string>
+
+    <!-- OEM autostart onboarding -->
+    <string name="onboarding_oem_title">OEM Autostart / Protected Apps</string>
+    <string name="onboarding_oem_button">Open OEM Settings</string>
+
     <!-- Content descriptions -->
     <string name="cd_back">Back</string>
     <string name="cd_refresh">Refresh</string>

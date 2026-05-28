@@ -40,7 +40,7 @@ body:
         - copypaste-core
         - copypaste-daemon
         - copypaste-cli
-        - copypaste-ui (Slint)
+        - copypaste-ui (Tauri)
         - copypaste-relay
         - Android app
         - Windows port

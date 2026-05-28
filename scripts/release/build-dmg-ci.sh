@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# build-dmg-ci.sh — package release binaries into a signed .app, then a .dmg.
+# build-dmg-ci.sh — copy Tauri's .app bundle + sibling binaries into dist/, then package a .dmg.
 #
 # Usage: scripts/release/build-dmg-ci.sh <version> [arch]
 #   <arch> defaults to host arch (arm64 on Apple Silicon, x86_64 on Intel).
 #
 # Preconditions:
-#   - `cargo build --release --workspace` has already been run.
+#   - `cargo build --release -p copypaste-cli -p copypaste-daemon -p copypaste-relay` done.
+#   - `cd crates/copypaste-ui && pnpm install && pnpm tauri build` done.
+#     Tauri writes its bundle to crates/copypaste-ui/src-tauri/target/release/bundle/macos/
 #   - macOS host with codesign + hdiutil (i.e. a real Mac runner).
 #
 # Output: dist/CopyPaste-v<version>-macos-<arch>.dmg + .sha256
@@ -45,20 +47,28 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
     exit 1
 fi
 
+# Tauri bundle output — `pnpm tauri build` writes the .app here.
+TAURI_BUNDLE_DIR="crates/copypaste-ui/src-tauri/target/release/bundle/macos"
+TAURI_APP="${TAURI_BUNDLE_DIR}/CopyPaste.app"
+
 BIN_CLI="target/release/copypaste"
 BIN_DAEMON="target/release/copypaste-daemon"
-BIN_UI="target/release/copypaste-ui"
+BIN_RELAY="target/release/copypaste-relay"
 
+if [[ ! -d "$TAURI_APP" ]]; then
+    echo "ERROR: $TAURI_APP not found — run 'cd crates/copypaste-ui && pnpm install && pnpm tauri build' first." >&2
+    exit 1
+fi
 if [[ ! -f "$BIN_CLI" ]]; then
-    echo "ERROR: $BIN_CLI not found — run 'cargo build --release --workspace' first." >&2
+    echo "ERROR: $BIN_CLI not found — run 'cargo build --release -p copypaste-cli' first." >&2
     exit 1
 fi
 if [[ ! -f "$BIN_DAEMON" ]]; then
-    echo "ERROR: $BIN_DAEMON not found — run 'cargo build --release --workspace' first." >&2
+    echo "ERROR: $BIN_DAEMON not found — run 'cargo build --release -p copypaste-daemon' first." >&2
     exit 1
 fi
-if [[ ! -f "$BIN_UI" ]]; then
-    echo "ERROR: $BIN_UI not found — run 'cargo build --release --workspace' first." >&2
+if [[ ! -f "$BIN_RELAY" ]]; then
+    echo "ERROR: $BIN_RELAY not found — run 'cargo build --release -p copypaste-relay' first." >&2
     exit 1
 fi
 
@@ -74,45 +84,29 @@ if [[ ! -f "$ENTITLEMENTS" ]]; then
     exit 1
 fi
 
-# 1) Build .app bundle. Reuse existing make_app_bundle.sh when present.
-# Use -f (exists) not -x (executable) so the primary path is taken even
-# when the CI checkout strips executable bits (git core.fileMode=false).
-if [[ -f "scripts/make_app_bundle.sh" ]]; then
-    echo "==> Building .app via scripts/make_app_bundle.sh $VERSION"
-    bash scripts/make_app_bundle.sh "$VERSION"
+# 1) Copy Tauri-produced .app into dist/ and inject sibling binaries.
+#    Tauri's bundler builds copypaste-ui (the Tauri shell). The daemon, CLI, and
+#    relay are built separately above and placed in Contents/MacOS/ so the app
+#    can launch them at runtime (daemon via launchd; relay as a sidecar).
+echo "==> Staging Tauri .app bundle from $TAURI_APP"
+rm -rf "$APP_DIR"
+cp -R "$TAURI_APP" "$APP_DIR"
+
+echo "==> Injecting sibling binaries into $APP_DIR/Contents/MacOS/"
+cp "$BIN_CLI"    "$APP_DIR/Contents/MacOS/"
+cp "$BIN_DAEMON" "$APP_DIR/Contents/MacOS/"
+cp "$BIN_RELAY"  "$APP_DIR/Contents/MacOS/"
+
+# LaunchAgent plist template: the Tauri setup code reads this from
+# Contents/Resources/com.copypaste.daemon.plist on first launch and
+# installs it into ~/Library/LaunchAgents/ (substituting USERNAME and
+# the /Applications path). Without this file the daemon never starts.
+LAUNCHD_PLIST_SRC="packaging/macos/com.copypaste.daemon.plist"
+if [[ -f "$LAUNCHD_PLIST_SRC" ]]; then
+    cp "$LAUNCHD_PLIST_SRC" "$APP_DIR/Contents/Resources/com.copypaste.daemon.plist"
 else
-    echo "==> Building minimal .app bundle in $APP_DIR"
-    rm -rf "$APP_DIR"
-    mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
-    # copypaste-ui is CFBundleExecutable — the process `open` launches.
-    # copypaste-daemon is a sibling binary started by the UI via launchd.
-    cp "$BIN_UI"     "$APP_DIR/Contents/MacOS/"
-    cp "$BIN_DAEMON" "$APP_DIR/Contents/MacOS/"
-    cp "$BIN_CLI"    "$APP_DIR/Contents/MacOS/"
-    # LaunchAgent plist template: autostart.rs reads this from
-    # Contents/Resources/com.copypaste.daemon.plist on first launch and
-    # installs it into ~/Library/LaunchAgents/ (substituting USERNAME and
-    # the hardcoded /Applications path). Without this file the daemon never
-    # starts — ensure_daemon_running_inner() returns FailedToStart immediately.
-    LAUNCHD_PLIST_SRC="packaging/macos/com.copypaste.daemon.plist"
-    if [[ -f "$LAUNCHD_PLIST_SRC" ]]; then
-        cp "$LAUNCHD_PLIST_SRC" "$APP_DIR/Contents/Resources/com.copypaste.daemon.plist"
-    else
-        echo "ERROR: $LAUNCHD_PLIST_SRC missing — daemon will not start on first launch" >&2
-        exit 1
-    fi
-    cat > "$APP_DIR/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>com.copypaste.app</string>
-  <key>CFBundleName</key><string>CopyPaste</string>
-  <key>CFBundleVersion</key><string>${VERSION}</string>
-  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
-  <key>CFBundleExecutable</key><string>copypaste-ui</string>
-  <key>NSHighResolutionCapable</key><true/>
-</dict></plist>
-PLIST
+    echo "ERROR: $LAUNCHD_PLIST_SRC missing — daemon will not start on first launch" >&2
+    exit 1
 fi
 
 if [[ ! -d "$APP_DIR" ]]; then

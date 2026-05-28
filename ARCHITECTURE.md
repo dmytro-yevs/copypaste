@@ -6,7 +6,7 @@
 copypaste-core          (library — no binary)
   ├── copypaste-daemon  (long-running background process)
   ├── copypaste-cli     (user-facing CLI, no core dep — speaks IPC only)
-  └── copypaste-ui      (Slint menu-bar UI, speaks IPC only)
+  └── copypaste-ui      (Tauri v2 + React desktop UI, speaks IPC only)
 
 copypaste-relay         (optional HTTP sync server — no core dep, standalone)
 ```
@@ -45,7 +45,7 @@ Unix socket  [~/.local/share/copypaste/copypaste.sock]
         │
   ┌─────┴──────┐
   ▼            ▼
-copypaste-cli  copypaste-ui (Slint)
+copypaste-cli  copypaste-ui (Tauri)
 (terminal)     (menu-bar tray)
 ```
 
@@ -118,7 +118,7 @@ WAL mode + 8 MB cache. Schema versioned via `PRAGMA user_version`.
 | 1b — Daemon | `copypaste-daemon`: clipboard polling, IPC server, keychain | Done |
 | 2 — CLI | `copypaste-cli`: list, count, delete, search, copy, export | Done |
 | 2a — FTS | Full-text search via FTS5, IPC `search` method | Done |
-| 3 — UI | `copypaste-ui`: Slint menu-bar tray, native history panel (see ADR-005) | Done |
+| 3 — UI | `copypaste-ui`: Tauri v2 + React desktop app, menu-bar tray (see ADR-013) | Done |
 | 3b — Linux | systemd user service unit + install script | Done |
 | 4 — Relay | `copypaste-relay`: device registration, upload/poll, quota | Done |
 | 5 — E2E sync | Daemon sync loop: push pending_uploads, poll inbox, decrypt | Planned |
@@ -126,10 +126,10 @@ WAL mode + 8 MB cache. Schema versioned via `PRAGMA user_version`.
 
 ## Key Design Decisions
 
-- **Slint UI (ADR-005)**: `copypaste-ui` uses Slint for native rendering — no WebView,
-  no JS toolchain, ~2 MB binary, <100 ms cold start, zero idle CPU thanks to
-  retained-mode rendering. macOS-only as of v0.3 (Windows port is frozen —
-  see ADR-012); the same `.slint` files remain portable for a future thaw.
+- **Tauri UI (ADR-013)**: `copypaste-ui` uses Tauri v2 + React/TypeScript/Vite for the
+  desktop frontend. The Rust Tauri layer bridges IPC calls to the daemon over the existing
+  Unix socket; no `copypaste-core` linkage. macOS-only as of v0.4 (Windows support is
+  frozen — see ADR-012).
 - **Lamport timestamps**: logical clock on `ClipboardItem` enables conflict-free ordering across
   devices without wall-clock trust.
 - **Fan-out at relay**: relay writes each uploaded item into every other registered device's

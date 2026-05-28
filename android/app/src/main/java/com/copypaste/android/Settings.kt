@@ -14,6 +14,14 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/** Which sync transport backend to use when sync is enabled. */
+enum class SyncBackend {
+    /** Original custom relay server (pair-based, local-network-friendly). */
+    RELAY,
+    /** Supabase PostgREST + GoTrue auth (cross-device, cloud-based, end-to-end encrypted). */
+    SUPABASE,
+}
+
 class Settings(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("copypaste", Context.MODE_PRIVATE)
 
@@ -49,6 +57,91 @@ class Settings(context: Context) {
     var syncEnabled: Boolean
         get() = prefs.getBoolean("sync_enabled", false)
         set(v) = prefs.edit().putBoolean("sync_enabled", v).apply()
+
+    // ── Supabase cloud sync ─────────────────────────────────────────────────
+
+    /**
+     * Supabase project URL, e.g. `https://abc.supabase.co`.
+     * Must use HTTPS. When blank, Supabase sync is disabled.
+     * Mirrors `CloudConfig::supabase_url` on the macOS daemon side.
+     */
+    var supabaseUrl: String
+        get() = prefs.getString("supabase_url", "") ?: ""
+        set(v) = prefs.edit().putString("supabase_url", v.trimEnd('/')).apply()
+
+    /**
+     * Supabase anonymous/public API key (`anon` role key from the project dashboard).
+     * Used as the `apikey` header on every REST request.
+     * Mirrors `CloudConfig::anon_key` on the macOS daemon side.
+     */
+    var supabaseAnonKey: String
+        get() = prefs.getString("supabase_anon_key", "") ?: ""
+        set(v) = prefs.edit().putString("supabase_anon_key", v).apply()
+
+    /**
+     * Shared sync passphrase for cross-device encryption.
+     *
+     * This value is run through Argon2id (via the Rust FFI [derive_cloud_sync_key])
+     * to produce a 32-byte symmetric key used with XChaCha20-Poly1305 AEAD.
+     * The SAME passphrase entered on macOS and Android will derive the SAME key,
+     * enabling bidirectional decryption of cloud blobs.
+     *
+     * Security: persisted in SharedPreferences (protected by the device lock screen
+     * on Android 6+). For higher security, clear this field when the app is
+     * backgrounded and re-prompt on next launch.
+     *
+     * DO NOT log or include in crash reports.
+     */
+    var cloudSyncPassphrase: String
+        get() = prefs.getString("cloud_sync_passphrase", "") ?: ""
+        set(v) = prefs.edit().putString("cloud_sync_passphrase", v).apply()
+
+    /**
+     * Which sync backend to use when [syncEnabled] is true.
+     * - [SyncBackend.RELAY]    — custom relay server (original, local-network-friendly)
+     * - [SyncBackend.SUPABASE] — Supabase PostgREST (cross-device, cloud-based)
+     */
+    var syncBackend: SyncBackend
+        get() = when (prefs.getString("sync_backend", SyncBackend.RELAY.name)) {
+            SyncBackend.SUPABASE.name -> SyncBackend.SUPABASE
+            else -> SyncBackend.RELAY
+        }
+        set(v) = prefs.edit().putString("sync_backend", v.name).apply()
+
+    /**
+     * Supabase account email for sign-in via GoTrue.
+     * Optional: when blank the anonKey is used as bearer (no Row Level Security).
+     */
+    var supabaseEmail: String
+        get() = prefs.getString("supabase_email", "") ?: ""
+        set(v) = prefs.edit().putString("supabase_email", v.trim()).apply()
+
+    /**
+     * Supabase account password for sign-in via GoTrue.
+     * Stored in SharedPreferences (protected by device lock on Android 6+).
+     * DO NOT log or include in crash reports.
+     */
+    var supabasePassword: String
+        get() = prefs.getString("supabase_password", "") ?: ""
+        set(v) = prefs.edit().putString("supabase_password", v).apply()
+
+    /** Returns true when Supabase sync is fully configured: URL, anon key, and passphrase. */
+    val isSupabaseConfigured: Boolean
+        get() = supabaseUrl.startsWith("https://") &&
+                supabaseAnonKey.isNotBlank() &&
+                cloudSyncPassphrase.isNotBlank()
+
+    /** Returns true when Supabase email+password are both non-empty. */
+    val hasSupabaseCredentials: Boolean
+        get() = supabaseEmail.isNotBlank() && supabasePassword.isNotBlank()
+
+    /**
+     * Wall-time (Unix ms) of the most recently processed Supabase poll item.
+     * [SupabasePollWorker] reads this to avoid re-processing already-seen rows.
+     */
+    var lastSupabasePollWallTime: Long
+        get() = prefs.getLong("supabase_last_poll_wall_time", 0L)
+        set(v) = prefs.edit().putLong("supabase_last_poll_wall_time", v).apply()
 
     val deviceId: String
         get() {

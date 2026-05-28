@@ -1,0 +1,719 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ViewShell } from "../components/ViewShell";
+import {
+  api,
+  IpcError,
+  getPopupShortcut,
+  setPopupShortcut,
+  type AppSettings,
+  type SyncStatus,
+} from "../lib/ipc";
+
+// ---------------------------------------------------------------------------
+// Toggle — iOS-style switch using ide tokens
+// ---------------------------------------------------------------------------
+
+function Toggle({
+  checked,
+  onChange,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (val: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={[
+        "relative inline-flex h-[18px] w-[32px] shrink-0 cursor-pointer items-center rounded-full",
+        "border transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-ide-accent focus:ring-offset-1 focus:ring-offset-ide-bg",
+        "disabled:cursor-not-allowed disabled:opacity-40",
+        checked
+          ? "border-ide-accent bg-ide-accent"
+          : "border-ide-border bg-ide-elevated",
+      ].join(" ")}
+    >
+      <span
+        className={[
+          "inline-block h-[12px] w-[12px] rounded-full bg-white shadow-sm transition-transform duration-150",
+          checked ? "translate-x-[16px]" : "translate-x-[2px]",
+        ].join(" ")}
+      />
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared layout primitives
+// ---------------------------------------------------------------------------
+
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <div className="mb-1 mt-5 first:mt-0 px-0 text-[11px] uppercase tracking-wide text-ide-faint">
+      {label}
+    </div>
+  );
+}
+
+function SettingsRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-h-[34px] items-center justify-between border-b border-ide-divider px-3 py-1.5 last:border-b-0">
+      <span className="text-[13px] text-ide-dim">{label}</span>
+      <div className="flex items-center gap-2">{children}</div>
+    </div>
+  );
+}
+
+function Panel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-ide border border-ide-border bg-ide-panel">
+      {children}
+    </div>
+  );
+}
+
+function StatusRow({ label, ok }: { label: string; ok: boolean }) {
+  return (
+    <div className="flex items-center gap-2 text-[13px] text-ide-dim">
+      <span className="w-[140px] shrink-0">{label}</span>
+      <span className={ok ? "text-ide-success" : "text-ide-faint"}>
+        {ok ? "✓" : "—"}
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatLastSync(ms: number | null): string {
+  if (ms === null) return "Never";
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return "Just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return new Date(ms).toLocaleString();
+}
+
+// ---------------------------------------------------------------------------
+// ShortcutCapture — focus to record a new key combo
+// ---------------------------------------------------------------------------
+
+/** Convert a KeyboardEvent into a Tauri accelerator string like "CmdOrCtrl+Shift+V". */
+function eventToAccelerator(e: React.KeyboardEvent<HTMLInputElement>): string | null {
+  // Ignore bare modifier keydowns (nothing to bind yet).
+  if (["Meta", "Control", "Alt", "Shift"].includes(e.key)) return null;
+
+  const parts: string[] = [];
+  // On macOS Cmd maps to Meta; on other platforms Ctrl maps to CmdOrCtrl.
+  // Tauri accepts "CmdOrCtrl" as a cross-platform alias.
+  if (e.metaKey || e.ctrlKey) parts.push("CmdOrCtrl");
+  if (e.altKey) parts.push("Alt");
+  if (e.shiftKey) parts.push("Shift");
+
+  // Normalize the key name to what Tauri/tao expects.
+  // Always derive the key from the PHYSICAL key (e.code), never e.key, so the
+  // shortcut is keyboard-layout-independent: the physical Q key records "Q"
+  // whether the active layout is English, Ukrainian, etc. e.key would yield the
+  // localized character (Cyrillic "й") or, with Option, a composed glyph ("Œ").
+  let key: string;
+  if (e.code.startsWith("Key")) {
+    key = e.code.slice(3); // "KeyQ" → "Q"
+  } else if (e.code.startsWith("Digit")) {
+    key = e.code.slice(5); // "Digit1" → "1"
+  } else {
+    key = e.code || e.key; // "Space", "Enter", "ArrowUp", "F5", ...
+  }
+
+  if (key.length === 1) {
+    key = key.toUpperCase();
+  } else {
+    // Map browser key names to Tauri accelerator key names.
+    const keyMap: Record<string, string> = {
+      ArrowUp: "Up",
+      ArrowDown: "Down",
+      ArrowLeft: "Left",
+      ArrowRight: "Right",
+      " ": "Space",
+      Space: "Space",
+      Escape: "Escape",
+      Enter: "Return",
+      Return: "Return",
+      Backspace: "Backspace",
+      Delete: "Delete",
+      Tab: "Tab",
+      Home: "Home",
+      End: "End",
+      PageUp: "PageUp",
+      PageDown: "PageDown",
+      F1: "F1",
+      F2: "F2",
+      F3: "F3",
+      F4: "F4",
+      F5: "F5",
+      F6: "F6",
+      F7: "F7",
+      F8: "F8",
+      F9: "F9",
+      F10: "F10",
+      F11: "F11",
+      F12: "F12",
+    };
+    key = keyMap[key] ?? key;
+  }
+  // Require at least one modifier for a meaningful global shortcut.
+  if (parts.length === 0) return null;
+
+  parts.push(key);
+  return parts.join("+");
+}
+
+function ShortcutCapture({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (accel: string) => void;
+}) {
+  const [capturing, setCapturing] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        setCapturing(false);
+        inputRef.current?.blur();
+        return;
+      }
+      const accel = eventToAccelerator(e);
+      if (accel !== null) {
+        onChange(accel);
+        setCapturing(false);
+        inputRef.current?.blur();
+      }
+    },
+    [onChange]
+  );
+
+  return (
+    <input
+      ref={inputRef}
+      readOnly
+      value={capturing ? "Press a shortcut…" : value}
+      onFocus={() => setCapturing(true)}
+      onBlur={() => setCapturing(false)}
+      onKeyDown={handleKeyDown}
+      className={[
+        "w-48 cursor-pointer rounded-ide border px-2.5 py-1.5 text-[13px] text-ide-text",
+        "outline-none select-none bg-ide-bg",
+        capturing
+          ? "border-ide-accent ring-1 ring-ide-accent"
+          : "border-ide-border hover:border-ide-accent",
+      ].join(" ")}
+      title="Click and press a key combination"
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main view
+// ---------------------------------------------------------------------------
+
+type LoadState = "loading" | "ready" | "offline";
+
+export function SettingsView() {
+  // General
+  const [privateMode, setPrivateMode] = useState(false);
+
+  // Sync
+  const [config, setConfig] = useState<AppSettings>({
+    p2p_enabled: false,
+    supabase_url: null,
+    supabase_anon_key: null,
+  });
+  const [supabaseUrl, setSupabaseUrl] = useState("");
+  const [supabaseKey, setSupabaseKey] = useState("");
+  const [savedMsg, setSavedMsg] = useState(false);
+
+  // Cloud sync passphrase
+  const [passphrase, setPassphrase] = useState("");
+  const [passphraseSavedMsg, setPassphraseSavedMsg] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+
+  // Shortcuts
+  const [currentShortcut, setCurrentShortcut] = useState("CmdOrCtrl+Shift+V");
+  const [pendingShortcut, setPendingShortcut] = useState("CmdOrCtrl+Shift+V");
+  const [shortcutMsg, setShortcutMsg] = useState<{ text: string; isError: boolean } | null>(null);
+  const shortcutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Data
+  const [deleteMsg, setDeleteMsg] = useState<{ text: string; isError: boolean } | null>(null);
+
+  // Global state
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+
+  // Save-config error (separate from the success "Saved")
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const saveErrTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Private-mode error
+  const [privateModeError, setPrivateModeError] = useState<string | null>(null);
+  const pmErrTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const passphraseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // -------------------------------------------------------------------------
+  // Load
+  // -------------------------------------------------------------------------
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoadState("loading");
+      // Load the popup shortcut independently — it's a Tauri-direct command,
+      // not a daemon IPC call, so it works even when the daemon is offline.
+      getPopupShortcut()
+        .then((s) => {
+          if (cancelled) return;
+          setCurrentShortcut(s);
+          setPendingShortcut(s);
+        })
+        .catch(() => {
+          // Keep default if the Tauri command fails (shouldn't happen in normal operation).
+        });
+
+      try {
+        const [pmResult, cfg, status] = await Promise.all([
+          api.getPrivateMode(),
+          api.getConfig(),
+          api.getSyncStatus().catch(() => null),
+        ]);
+        if (cancelled) return;
+        setPrivateMode(pmResult.private_mode);
+        setConfig(cfg);
+        // Prefill Supabase URL: prefer the stored config value, but fall back to
+        // the value reported by get_sync_status (may be set via env variable).
+        const urlFromStatus = status?.supabase_url ?? null;
+        setSupabaseUrl(cfg.supabase_url ?? urlFromStatus ?? "");
+        setSupabaseKey(cfg.supabase_anon_key ?? "");
+        setSyncStatus(status);
+        setLoadState("ready");
+      } catch (err) {
+        if (cancelled) return;
+        if (err instanceof IpcError && err.code === "daemon_offline") {
+          setLoadState("offline");
+        } else {
+          // Non-offline error: still show controls but set offline to block edits
+          setLoadState("offline");
+        }
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const offline = loadState !== "ready";
+
+  // -------------------------------------------------------------------------
+  // General — Private mode
+  // -------------------------------------------------------------------------
+
+  const handlePrivateMode = useCallback(
+    async (val: boolean) => {
+      setPrivateMode(val);
+      setPrivateModeError(null);
+      try {
+        await api.setPrivateMode(val);
+      } catch (err) {
+        // Revert on failure and show error
+        setPrivateMode(!val);
+        const msg = err instanceof IpcError ? err.message : "Failed to update private mode";
+        setPrivateModeError(msg);
+        if (pmErrTimer.current !== null) clearTimeout(pmErrTimer.current);
+        pmErrTimer.current = setTimeout(() => setPrivateModeError(null), 3500);
+      }
+    },
+    [pmErrTimer]
+  );
+
+  // -------------------------------------------------------------------------
+  // Sync — Save config
+  // -------------------------------------------------------------------------
+
+  const handleSaveConfig = useCallback(async () => {
+    const next: AppSettings = {
+      p2p_enabled: config.p2p_enabled,
+      supabase_url: supabaseUrl.trim() || null,
+      supabase_anon_key: supabaseKey.trim() || null,
+    };
+    setSaveError(null);
+    try {
+      await api.setConfig(next);
+      setConfig(next);
+      setSavedMsg(true);
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = setTimeout(() => setSavedMsg(false), 2500);
+    } catch (err) {
+      const msg = err instanceof IpcError ? err.message : "Save failed";
+      setSaveError(msg);
+      if (saveErrTimer.current !== null) clearTimeout(saveErrTimer.current);
+      saveErrTimer.current = setTimeout(() => setSaveError(null), 3500);
+    }
+  }, [config.p2p_enabled, supabaseUrl, supabaseKey, saveErrTimer]);
+
+  // -------------------------------------------------------------------------
+  // Shortcuts — Save popup shortcut
+  // -------------------------------------------------------------------------
+
+  const handleSaveShortcut = useCallback(async () => {
+    if (pendingShortcut === currentShortcut) return;
+    try {
+      await setPopupShortcut(pendingShortcut);
+      setCurrentShortcut(pendingShortcut);
+      setShortcutMsg({ text: "Saved", isError: false });
+      if (shortcutTimerRef.current !== null) clearTimeout(shortcutTimerRef.current);
+      shortcutTimerRef.current = setTimeout(() => setShortcutMsg(null), 2500);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to set shortcut";
+      setShortcutMsg({ text: msg, isError: true });
+      setPendingShortcut(currentShortcut); // revert capture display
+      if (shortcutTimerRef.current !== null) clearTimeout(shortcutTimerRef.current);
+      shortcutTimerRef.current = setTimeout(() => setShortcutMsg(null), 4000);
+    }
+  }, [pendingShortcut, currentShortcut]);
+
+  // -------------------------------------------------------------------------
+  // Cloud sync — Set passphrase
+  // -------------------------------------------------------------------------
+
+  const handleSetPassphrase = useCallback(async () => {
+    const trimmed = passphrase.trim();
+    if (!trimmed) return;
+    try {
+      await api.setSyncPassphrase(trimmed);
+      // Refresh sync status after setting
+      const status = await api.getSyncStatus().catch(() => null);
+      setSyncStatus(status);
+      setPassphrase("");
+      setPassphraseSavedMsg("Saved");
+      if (passphraseTimerRef.current !== null) clearTimeout(passphraseTimerRef.current);
+      passphraseTimerRef.current = setTimeout(() => setPassphraseSavedMsg(null), 2500);
+    } catch (err) {
+      const msg = err instanceof IpcError ? err.message : "Error";
+      setPassphraseSavedMsg(msg);
+      if (passphraseTimerRef.current !== null) clearTimeout(passphraseTimerRef.current);
+      passphraseTimerRef.current = setTimeout(() => setPassphraseSavedMsg(null), 3000);
+    }
+  }, [passphrase]);
+
+  // -------------------------------------------------------------------------
+  // Data — Delete all
+  // -------------------------------------------------------------------------
+
+  const handleDeleteAll = useCallback(async () => {
+    if (!window.confirm("Delete all clipboard history? This cannot be undone.")) return;
+    try {
+      const result = await api.deleteAll();
+      setDeleteMsg({
+        text: `Deleted ${result.deleted} item${result.deleted === 1 ? "" : "s"}`,
+        isError: false,
+      });
+      if (deleteTimerRef.current !== null) clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = setTimeout(() => setDeleteMsg(null), 3000);
+    } catch (err) {
+      const msg = err instanceof IpcError ? err.message : "Clear failed";
+      setDeleteMsg({ text: msg, isError: true });
+      if (deleteTimerRef.current !== null) clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = setTimeout(() => setDeleteMsg(null), 4000);
+    }
+  }, [deleteTimerRef]);
+
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
+
+  const inputCls = [
+    "w-64 rounded-ide border border-ide-border bg-ide-bg px-2.5 py-1.5 text-[13px] text-ide-text",
+    "outline-none focus:border-ide-accent placeholder:text-ide-faint",
+    "disabled:cursor-not-allowed disabled:opacity-40",
+  ].join(" ");
+
+  return (
+    <ViewShell title="Settings">
+      {/* Offline banner */}
+      {loadState === "offline" && (
+        <div className="mb-4 rounded-ide border border-ide-border bg-ide-elevated px-3 py-2 text-[13px] text-ide-dim">
+          Daemon not running — settings unavailable.
+        </div>
+      )}
+
+      {/* Loading */}
+      {loadState === "loading" && (
+        <div className="flex h-full items-center justify-center text-[13px] text-ide-dim">
+          Loading…
+        </div>
+      )}
+
+      {loadState !== "loading" && (
+        <div className="mx-auto max-w-xl space-y-1">
+          {/* General */}
+          <SectionHeader label="General" />
+          <Panel>
+            <SettingsRow label="Private mode">
+              <div className="flex items-center gap-2">
+                {privateModeError !== null && (
+                  <span className="text-[11px] text-ide-danger">{privateModeError}</span>
+                )}
+                <Toggle
+                  checked={privateMode}
+                  onChange={(v) => void handlePrivateMode(v)}
+                  disabled={offline}
+                />
+              </div>
+            </SettingsRow>
+          </Panel>
+
+          {/* Shortcuts */}
+          <SectionHeader label="Shortcuts" />
+          <Panel>
+            <SettingsRow label="Open popup">
+              <div className="flex flex-col items-end gap-1">
+                <div className="flex items-center gap-2">
+                  <ShortcutCapture
+                    value={pendingShortcut}
+                    onChange={setPendingShortcut}
+                  />
+                  <button
+                    type="button"
+                    disabled={pendingShortcut === currentShortcut}
+                    onClick={() => void handleSaveShortcut()}
+                    className={[
+                      "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+                      "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
+                    ].join(" ")}
+                  >
+                    Save
+                  </button>
+                </div>
+                {shortcutMsg !== null && (
+                  <span
+                    className={[
+                      "text-[11px]",
+                      shortcutMsg.isError ? "text-ide-danger" : "text-ide-success",
+                    ].join(" ")}
+                  >
+                    {shortcutMsg.text}
+                  </span>
+                )}
+                <span className="text-[11px] text-ide-faint">
+                  Click the field and press a key combo. OS-reserved combos (e.g.
+                  Cmd+Space, Cmd+Tab) cannot be overridden.
+                </span>
+              </div>
+            </SettingsRow>
+          </Panel>
+
+          {/* Sync */}
+          <SectionHeader label="Sync" />
+          {/* Connection status banner — shown when Supabase is configured */}
+          {syncStatus !== null && syncStatus.supabase_configured && (
+            <div className="mb-1 rounded-ide border border-ide-success/30 bg-ide-success/5 px-3 py-2 text-[12px] text-ide-success">
+              Connected ✓
+              {syncStatus.signed_in && syncStatus.email
+                ? ` — signed in as ${syncStatus.email}`
+                : syncStatus.signed_in
+                ? " — signed in"
+                : " — not signed in"}
+              {syncStatus.passphrase_set ? " — passphrase set ✓" : ""}
+            </div>
+          )}
+          <Panel>
+            <SettingsRow label="Supabase URL">
+              <input
+                type="url"
+                className={inputCls}
+                placeholder="https://your-project.supabase.co"
+                value={supabaseUrl}
+                onChange={(e) => setSupabaseUrl(e.target.value)}
+                disabled={offline}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </SettingsRow>
+            <SettingsRow label="Supabase anon key">
+              <div className="flex flex-col items-end gap-0.5">
+                <input
+                  type="password"
+                  className={inputCls}
+                  placeholder={
+                    syncStatus?.supabase_configured && !supabaseKey
+                      ? "set ✓ (leave blank to keep)"
+                      : "eyJ…"
+                  }
+                  value={supabaseKey}
+                  onChange={(e) => setSupabaseKey(e.target.value)}
+                  disabled={offline}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                {syncStatus?.supabase_configured && !supabaseKey && (
+                  <span className="text-[11px] text-ide-success">set ✓</span>
+                )}
+              </div>
+            </SettingsRow>
+            <div className="flex items-center justify-end gap-3 border-t border-ide-divider px-3 py-2">
+              {saveError !== null && (
+                <span className="text-[13px] text-ide-danger">{saveError}</span>
+              )}
+              {savedMsg && !saveError && (
+                <span className="text-[13px] text-ide-success">Saved</span>
+              )}
+              <button
+                type="button"
+                disabled={offline}
+                onClick={() => void handleSaveConfig()}
+                className={[
+                  "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+                  "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
+                ].join(" ")}
+              >
+                Save
+              </button>
+            </div>
+          </Panel>
+
+          {/* Cloud Sync */}
+          <SectionHeader label="Cloud Sync" />
+          <Panel>
+            <SettingsRow label="Sync passphrase">
+              <div className="flex flex-col items-end gap-1">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    className={inputCls}
+                    placeholder="Shared passphrase…"
+                    value={passphrase}
+                    onChange={(e) => setPassphrase(e.target.value)}
+                    disabled={offline}
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void handleSetPassphrase();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={offline || passphrase.trim() === ""}
+                    onClick={() => void handleSetPassphrase()}
+                    className={[
+                      "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+                      "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
+                    ].join(" ")}
+                  >
+                    Set
+                  </button>
+                </div>
+                {passphraseSavedMsg !== null && (
+                  <span
+                    className={[
+                      "text-[11px]",
+                      passphraseSavedMsg === "Saved"
+                        ? "text-ide-success"
+                        : "text-ide-danger",
+                    ].join(" ")}
+                  >
+                    {passphraseSavedMsg}
+                  </span>
+                )}
+                <span className="text-[11px] text-ide-faint">
+                  Enter the same passphrase on every device to sync.
+                </span>
+              </div>
+            </SettingsRow>
+            {/* Sync status block */}
+            <div className="border-t border-ide-divider px-3 py-2 space-y-1">
+              <div className="text-[11px] uppercase tracking-wide text-ide-faint mb-1">
+                Status
+              </div>
+              {syncStatus === null ? (
+                <div className="text-[13px] text-ide-dim">
+                  {offline
+                    ? "Unavailable (daemon offline)"
+                    : "Not available in this daemon build"}
+                </div>
+              ) : (
+                <div className="space-y-0.5">
+                  <StatusRow
+                    label="Passphrase set"
+                    ok={syncStatus.passphrase_set}
+                  />
+                  <StatusRow
+                    label="Supabase configured"
+                    ok={syncStatus.supabase_configured}
+                  />
+                  <StatusRow label="Signed in" ok={syncStatus.signed_in} />
+                  <div className="flex items-center gap-2 text-[13px] text-ide-dim pt-0.5">
+                    <span className="w-[140px] shrink-0">Last sync</span>
+                    <span className="text-ide-text">
+                      {formatLastSync(syncStatus.last_sync_ms)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </Panel>
+
+          {/* Data */}
+          <SectionHeader label="Data" />
+          <Panel>
+            <SettingsRow label="Clear clipboard history">
+              <div className="flex items-center gap-3">
+                {deleteMsg !== null && (
+                  <span
+                    className={[
+                      "text-[13px]",
+                      deleteMsg.isError ? "text-ide-danger" : "text-ide-dim",
+                    ].join(" ")}
+                  >
+                    {deleteMsg.text}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={offline}
+                  onClick={() => void handleDeleteAll()}
+                  className={[
+                    "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
+                    "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
+                  ].join(" ")}
+                >
+                  Clear history…
+                </button>
+              </div>
+            </SettingsRow>
+          </Panel>
+        </div>
+      )}
+    </ViewShell>
+  );
+}

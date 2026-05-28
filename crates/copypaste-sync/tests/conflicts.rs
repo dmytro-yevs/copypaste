@@ -1,20 +1,16 @@
-//! Beta-bonus integration tests for sync conflict resolution edge cases.
+//! Integration tests for sync conflict resolution edge cases.
 //!
 //! Complements `tests/lamport.rs` (clock-focused) and the in-module unit tests
 //! in `src/merge.rs`. These tests focus on the *boundaries* of LWW resolution:
 //!
 //!   1. Simultaneous edits with same logical id but different Lamport values.
 //!   2. Equal-Lamport ties broken by wall time.
-//!   3. Equal Lamport + equal wall time → device-id lex order
-//!      (DRIFT GUARD: pins current behavior; flags a suspected field mismatch
-//!      in `src/merge.rs:39` where `remote.origin_device_id` is compared
-//!      against `local.id` instead of a local origin-device identifier).
+//!   3. Equal Lamport + equal wall time → device-id lex order (deterministic
+//!      drift guard: both sides compare `origin_device_id`, larger wins).
 //!   4. Three-way re-application idempotence (A → B → A produces no flap).
 //!   5. Concurrent delete-vs-update LWW determinism.
 //!
-//! All tests use the public API (`resolve`, `MergeOutcome`, `WireItem`) and
-//! intentionally do not modify `src/`. Any bug exposed below is documented
-//! with `TODO(merge.rs:39)` and *not* fixed in this commit.
+//! All tests use the public API (`resolve`, `MergeOutcome`, `WireItem`).
 
 use copypaste_core::storage::items::ClipboardItem;
 use copypaste_sync::protocol::WireItem;
@@ -157,71 +153,67 @@ fn equal_lamport_uses_wall_time_tie_break() {
 }
 
 // ---------------------------------------------------------------------------
-// 3. DRIFT GUARD — equal lamport + equal wall → device-id lex order
-//    Pins ACTUAL behavior of `src/merge.rs:39`.
+// 3. Equal lamport + equal wall → device-id lex order (deterministic tie-break)
 // ---------------------------------------------------------------------------
 
-/// DRIFT GUARD for `src/merge.rs:39`.
+/// Regression test for the device-id tie-break in `src/merge.rs`.
 ///
-/// The tie-break documented in the module header is "lexicographically larger
-/// `origin_device_id` wins". However the implementation compares
-/// `remote.origin_device_id` against `local.id` (the row UUID), NOT against a
-/// `local.origin_device_id`. `ClipboardItem` has no `origin_device_id` field.
+/// When both Lamport timestamp and wall time are equal, the winner is
+/// determined by comparing `remote.origin_device_id` against
+/// `local.origin_device_id` lexicographically — the LARGER device id wins.
 ///
-/// This means the deciding comparison is between two semantically different
-/// strings (a device id and a row id). The result is deterministic for any
-/// fixed pair of inputs, but it does NOT match the documented contract and
-/// produces surprising outcomes when device-ids happen to lex-sort below the
-/// item's row id prefix.
+/// The local fixture has `origin_device_id = "device-local"`. Probes are
+/// chosen to straddle that value so the test verifies both directions of the
+/// comparison using the *same* field on both sides.
 ///
-/// We pin the *current* observed behavior so any future fix is intentional.
-/// TODO(merge.rs:39): compare `remote.origin_device_id` to a local
-/// `origin_device_id` (requires schema change to `ClipboardItem`).
+/// Historical note: a prior implementation compared `remote.origin_device_id`
+/// against `local.id` (the row UUID — a completely different identifier space).
+/// That made the tie-break non-deterministic across peers because row UUIDs are
+/// random per-write while device ids are stable per-peer. This test locks in
+/// the correct `origin_device_id` vs `origin_device_id` comparison.
 #[test]
 fn equal_lamport_and_wall_time_uses_device_id_lex_order_drift_guard() {
-    // Local row id begins with 'i' (0x69). Two device-id probes that
-    // straddle the boundary expose the field-mismatch bug.
+    // local.origin_device_id == "device-local".
     let local = local_item("item-001", 5, 1_000, b"local");
 
-    // device-id "zzz" > "item-001" → currently TakeRemote.
+    // "zzz" > "device-local" → remote wins.
     let remote_above = wire_item("item-001", 5, 1_000, "zzz", Some(b"r".to_vec()));
     assert_eq!(
         resolve(&local, &remote_above),
         MergeOutcome::TakeRemote,
-        "DRIFT GUARD: 'zzz' > 'item-001' lexicographically → remote wins under current impl"
+        "'zzz' > 'device-local' → remote origin_device_id wins"
     );
 
-    // device-id "aaa" < "item-001" → currently KeepLocal.
-    // If the comparison were properly device-id vs device-id, a separate
-    // local origin device would be needed; here we cannot even express that.
+    // "aaa" < "device-local" → local keeps.
     let remote_below = wire_item("item-001", 5, 1_000, "aaa", Some(b"r".to_vec()));
     assert_eq!(
         resolve(&local, &remote_below),
         MergeOutcome::KeepLocal,
-        "DRIFT GUARD: 'aaa' < 'item-001' lexicographically → local kept under current impl"
+        "'aaa' < 'device-local' → local origin_device_id wins"
     );
 
-    // Smoking-gun probe: a *plausible* peer device-id like "peer-A" wins
-    // simply because 'p' (0x70) > 'i' (0x69). The tie-break is effectively
-    // "device-ids that start with a letter > 'i' always win", which is NOT
-    // the documented behavior.
+    // "peer-A" > "device-local" ('p' > 'd') → remote wins.
     let remote_realistic = wire_item("item-001", 5, 1_000, "peer-A", Some(b"r".to_vec()));
     assert_eq!(
         resolve(&local, &remote_realistic),
         MergeOutcome::TakeRemote,
-        "DRIFT GUARD: realistic device id 'peer-A' beats row id 'item-001' due to \
-         merge.rs:39 comparing wrong fields — TODO(merge.rs:39): use a local origin_device_id"
+        "'peer-A' > 'device-local' → remote wins (correct device-id comparison)"
     );
 
-    // And a device-id that lex-sorts below the row prefix loses — even
-    // though by the documented rule it should be compared against the
-    // local device id, not the row id.
+    // "device-A" < "device-local" ('A' < 'l' at byte 7) → local keeps.
     let remote_realistic_lo = wire_item("item-001", 5, 1_000, "device-A", Some(b"r".to_vec()));
     assert_eq!(
         resolve(&local, &remote_realistic_lo),
         MergeOutcome::KeepLocal,
-        "DRIFT GUARD: 'device-A' < 'item-001' so local kept — \
-         contradicts documented per-device tie-break — TODO(merge.rs:39)"
+        "'device-A' < 'device-local' → local wins (correct device-id comparison)"
+    );
+
+    // Equal device ids → KeepLocal (strict `>`, not `>=`).
+    let remote_same = wire_item("item-001", 5, 1_000, "device-local", Some(b"r".to_vec()));
+    assert_eq!(
+        resolve(&local, &remote_same),
+        MergeOutcome::KeepLocal,
+        "identical origin_device_id → KeepLocal (strict greater-than)"
     );
 }
 
