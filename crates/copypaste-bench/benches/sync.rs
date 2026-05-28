@@ -35,6 +35,7 @@ fn make_wire_item(i: usize) -> WireItem {
         expires_at: None,
         app_bundle_id: Some("com.example.app".to_string()),
         origin_device_id: "device-bench".to_string(),
+        key_version: 2,
     }
 }
 

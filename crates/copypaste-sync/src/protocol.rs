@@ -48,6 +48,28 @@ pub struct WireItem {
     pub app_bundle_id: Option<String>,
     /// UUID of the device that originated this item.
     pub origin_device_id: String,
+    /// HKDF key generation the `content` ciphertext + AAD were produced under
+    /// (mirrors `ClipboardItem::key_version`). The sender stamps the row's real
+    /// `key_version` (2 for every freshly-captured item); the receiver MUST
+    /// persist this exact value so its read path (`decrypt_item_by_version`)
+    /// selects the matching key + AAD. Carrying it over the wire is what makes
+    /// a synced item decryptable on the receiver — see `merge::wire_to_local`.
+    ///
+    /// `#[serde(default = ...)]` keeps us wire-compatible with peers on a build
+    /// that predates this field: an absent value defaults to
+    /// [`default_key_version`] (= 2), the only version every supported build
+    /// encrypts under today (the v4 sweep rotates all local rows to 2 and
+    /// `merge::local_to_wire` stamps the row's real version for same-version
+    /// peers). Defaulting to 1 would resurrect the original bug — decrypting a
+    /// v2 ciphertext with the v1 key/AAD yields `AuthFailed`.
+    #[serde(default = "default_key_version")]
+    pub key_version: u8,
+}
+
+/// Default `key_version` for `WireItem`s deserialized from a peer that predates
+/// the on-wire `key_version` field. See the field docs on [`WireItem`].
+fn default_key_version() -> u8 {
+    2
 }
 
 /// Top-level protocol message enum.
@@ -160,6 +182,7 @@ mod tests {
             expires_at: None,
             app_bundle_id: None,
             origin_device_id: "device-a".to_string(),
+            key_version: 2,
         };
         let msg = Message::Items { items: vec![item] };
         assert_eq!(round_trip(msg.clone()), msg);

@@ -78,10 +78,14 @@ pub fn wire_to_local(wire: WireItem) -> ClipboardItem {
         // Preserve the peer's origin so future tie-breaks remain
         // deterministic regardless of which peer replays the merge.
         origin_device_id: wire.origin_device_id,
-        // WireItem does not carry key_version yet (added in wave1a-atomic).
-        // Default to 1 so the v4 sweep treats received items conservatively
-        // and re-encrypts them to v2 if needed.
-        key_version: 1,
+        // Preserve the sender's key_version. The `content` ciphertext + AAD
+        // were produced under THIS version on the sending device; the local
+        // read path (`decrypt_item_by_version`) dispatches on it to pick the
+        // matching key + AAD. Hard-coding 1 here (the prior bug) made every
+        // v2-encrypted synced item undecryptable on the receiver — the v1 key
+        // + v3 AAD never matched the v2 ciphertext, so reads failed with
+        // `EncryptError::AuthFailed`.
+        key_version: wire.key_version,
         // Received items are never pinned by default; the user must pin them
         // explicitly on this device after syncing.
         pinned: false,
@@ -114,6 +118,9 @@ pub fn local_to_wire(item: &ClipboardItem, local_device_id: &str) -> WireItem {
         expires_at: item.expires_at,
         app_bundle_id: item.app_bundle_id.clone(),
         origin_device_id: origin,
+        // Carry the row's real key_version so the receiver can select the
+        // correct key + AAD when decrypting `content` (see wire_to_local).
+        key_version: item.key_version,
     }
 }
 
@@ -157,6 +164,7 @@ mod tests {
             expires_at: None,
             app_bundle_id: None,
             origin_device_id: device_id.to_string(),
+            key_version: 2,
         }
     }
 
@@ -255,5 +263,88 @@ mod tests {
         assert_eq!(wire.lamport_ts, 3);
         assert_eq!(wire.origin_device_id, "my-device");
         assert_eq!(wire.content, item.content);
+    }
+
+    // --- key_version round-trip (crypto correctness regression) ---
+
+    /// v0.4 sync key-version regression (HIGH, crypto). The sending side
+    /// stamps the row's real `key_version` (2 for every freshly-captured
+    /// item) and the ciphertext/AAD are bound to that version. The receiver
+    /// MUST persist the same `key_version` so its production read path
+    /// (`decrypt_item_by_version`) selects the matching key + AAD and recovers
+    /// the original plaintext.
+    ///
+    /// This test reproduces the REAL data flow end-to-end:
+    ///   encrypt @ key_version=2 (v2 key + v4 AAD, exactly as `handle_text`)
+    ///     → `local_to_wire` → `wire_to_local` (the conversion under test)
+    ///     → `decrypt_item_by_version` (the production read path)
+    /// and asserts the original bytes survive.
+    ///
+    /// Before the fix `wire_to_local` HARD-CODED `key_version = 1`, so the
+    /// receiver decrypted a v2 ciphertext with the v1 key + v3 AAD → the AEAD
+    /// auth tag rejected it (`EncryptError::AuthFailed`). Net effect: every
+    /// item received via sync was undecryptable on the receiver.
+    #[test]
+    fn wire_round_trip_preserves_key_version_so_receiver_can_decrypt() {
+        use copypaste_core::{
+            build_item_aad_v2, decrypt_item_by_version, derive_v2, encrypt_item_with_aad,
+            AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
+        };
+
+        // The device's v1 storage seed (stands in for `load_local_key()`).
+        let seed = [0x42u8; 32];
+        let item_id = "iid-roundtrip".to_string();
+        let plaintext = b"sensitive clipboard payload synced from a peer";
+
+        // SENDER: encrypt exactly as `encrypt_text_for_storage` does —
+        // v2 key + v4 AAD bound to (item_id, schema_version=4, key_version=2).
+        let v2_key = derive_v2(&seed);
+        let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+        let (nonce, ciphertext) =
+            encrypt_item_with_aad(plaintext, &v2_key, &aad).expect("encrypt at key_version=2");
+
+        // The stored row is stamped key_version = 2 (ClipboardItem::new_text).
+        let mut sent = make_local(7, 2000);
+        sent.item_id = item_id.clone();
+        sent.content = Some(ciphertext.clone());
+        sent.content_nonce = Some(nonce.to_vec());
+        sent.key_version = 2;
+        sent.origin_device_id = "sender-device".to_string();
+
+        // local_to_wire → wire_to_local: the real conversion the daemon runs.
+        let wire = local_to_wire(&sent, "sender-device");
+        let received = wire_to_local(wire);
+
+        // The received row must carry the SAME key_version the ciphertext was
+        // produced under, otherwise the read path picks the wrong key/AAD.
+        assert_eq!(
+            received.key_version, 2,
+            "wire_to_local must preserve the sender's key_version (2), not \
+             hard-code 1 — otherwise the v2 ciphertext is decrypted with the \
+             v1 key + v3 AAD and fails with AuthFailed"
+        );
+
+        // RECEIVER read path: dispatch on the stored key_version exactly as
+        // `ipc::write_to_pasteboard` does (v1_key = seed, v2_key = derive_v2).
+        let v1_key = seed;
+        let stored_nonce = received.content_nonce.expect("nonce present");
+        let mut nonce_arr = [0u8; NONCE_SIZE];
+        nonce_arr.copy_from_slice(&stored_nonce);
+        let stored_content = received.content.expect("content present");
+
+        let recovered = decrypt_item_by_version(
+            received.key_version,
+            &v1_key,
+            &v2_key,
+            &received.item_id,
+            &nonce_arr,
+            &stored_content,
+        )
+        .expect("receiver read path must decrypt the synced item");
+
+        assert_eq!(
+            recovered, plaintext,
+            "synced item must read back as the original plaintext on the receiver"
+        );
     }
 }
