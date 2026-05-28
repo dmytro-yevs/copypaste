@@ -19,9 +19,29 @@ use crate::quota::{self, QuotaViolation, Tier};
 // Constants
 // ---------------------------------------------------------------------------
 
-/// Maximum number of push-sync items per device inbox.
+/// Absolute hard cap on push-sync items per device inbox, independent of tier.
 /// When exceeded, the oldest items (lowest wall_time) are pruned on insert.
+/// Acts as a memory-safety ceiling that no tier may exceed.
 const MAX_PUSH_ITEMS_PER_DEVICE: usize = 500;
+
+/// Effective per-inbox history cap for a device: the tighter of the absolute
+/// hard cap [`MAX_PUSH_ITEMS_PER_DEVICE`] and the device tier's
+/// `max_history_items` (`None` = unlimited tier history → only the hard cap
+/// applies). Enforced as a silent prune-oldest inside [`RelayStore::push_item`]
+/// — the sender is never told a recipient inbox is full, matching the existing
+/// hard-cap eviction behaviour (see the relay v2 quotas plan).
+fn effective_history_cap(tier: Tier) -> usize {
+    history_cap_for_limit(tier.max_history_items())
+}
+
+/// Core of [`effective_history_cap`]: clamp a tier's optional `max_history_items`
+/// against the absolute hard cap. `None` (unlimited tier history) yields the
+/// hard cap; a limit tighter than the hard cap wins. Split out so the
+/// clamp can be unit-tested with a genuinely sub-hard-cap limit (no live tier
+/// currently defines one — see `effective_history_cap_is_tier_aware`).
+fn history_cap_for_limit(tier_limit: Option<usize>) -> usize {
+    MAX_PUSH_ITEMS_PER_DEVICE.min(tier_limit.unwrap_or(usize::MAX))
+}
 
 /// Maximum number of devices a single logical "account" can register (free tier).
 #[allow(dead_code)]
@@ -52,6 +72,11 @@ pub struct DeviceRecord {
     /// Unix timestamp (seconds since epoch) when the token expires (1 year).
     pub expires_at_unix: i64,
     /// Subscription tier — determines device count and history quotas.
+    // Read by `push_item` via the per-device tier lookup, but live
+    // registration always stores `Tier::Free` today (token-/SQLite-driven tier
+    // selection is not wired to the in-memory store yet — see the relay v2
+    // quotas plan), so the compiler sees no production read and reports it as
+    // dead. Kept for the forthcoming tier-wiring.
     #[allow(dead_code)]
     pub tier: Tier,
 }
@@ -357,9 +382,10 @@ impl RelayStore {
         wall_time: u64,
         max_item_bytes: usize,
     ) -> Result<i64, RelayError> {
-        if !self.devices.contains_key(device_id) {
-            return Err(RelayError::DeviceNotFound);
-        }
+        let tier = match self.devices.get(device_id) {
+            Some(record) => record.tier,
+            None => return Err(RelayError::DeviceNotFound),
+        };
 
         if !matches!(content_type.as_str(), "text" | "image" | "file") {
             return Err(RelayError::BadRequest(
@@ -410,9 +436,18 @@ impl RelayStore {
             inserted_at_unix,
         });
 
-        if inbox.len() > MAX_PUSH_ITEMS_PER_DEVICE {
-            let overflow = inbox.len() - MAX_PUSH_ITEMS_PER_DEVICE;
-            inbox.drain(..overflow);
+        // History quota: cap the inbox at the tier-aware effective limit
+        // (the tighter of the absolute hard cap and the tier's
+        // `max_history_items`). Enforced as a silent prune of the oldest
+        // items rather than rejecting the push — the fan-out sender cannot
+        // know which recipient inboxes are full (see the relay v2 quotas
+        // plan). `effective_history_cap` already folds the tier history limit
+        // into the absolute hard cap, so this single guard subsumes the tier
+        // quota check for every current tier (Free's 1000 limit is looser than
+        // the 500 hard cap, Pro is unlimited).
+        let cap = effective_history_cap(tier);
+        if inbox.len() > cap {
+            inbox.drain(..inbox.len() - cap);
         }
 
         // Increment Prometheus counter — items_total tracks all accepted
@@ -962,5 +997,83 @@ mod tests {
             .register_device(unique_device_id(5), "Dev 5".into(), unique_key(5))
             .unwrap_err();
         assert!(matches!(err, RelayError::DeviceQuotaExceeded { limit: 5 }));
+    }
+
+    // ---- History quota enforcement (plan: silent drop) ---------------------
+
+    /// The history quota is enforced inside `push_item` keyed by the device's
+    /// tier. A push is never rejected with an error (the plan mandates a
+    /// "silent drop"): instead the inbox is capped at the effective limit —
+    /// `min(MAX_PUSH_ITEMS_PER_DEVICE, tier.max_history_items())` — by pruning
+    /// the oldest items, mirroring the existing hard-cap eviction behaviour.
+    #[test]
+    fn free_tier_inbox_never_exceeds_history_cap() {
+        let mut store = make_store();
+        store
+            .register_device_with_tier(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                Tier::Free,
+            )
+            .unwrap();
+
+        // The effective cap is min(500, 1000) = 500 for Free tier.
+        let effective_cap =
+            MAX_PUSH_ITEMS_PER_DEVICE.min(Tier::Free.max_history_items().unwrap_or(usize::MAX));
+
+        for t in 1u64..=(effective_cap as u64 + 50) {
+            // Pushes must always succeed (never error) — the cap is enforced
+            // by a silent drop of the oldest item, not a rejection.
+            push_text(&mut store, &device_a_id(), t);
+        }
+
+        let items = store.pull_items(&device_a_id(), 0).unwrap();
+        assert!(
+            items.len() <= effective_cap,
+            "inbox must never exceed the effective history cap ({effective_cap}), got {}",
+            items.len()
+        );
+    }
+
+    /// History-quota enforcement must consult the device's *tier*: a Pro device
+    /// (unlimited history) is bounded only by the absolute hard cap, never by a
+    /// tier history limit.
+    #[test]
+    fn pro_tier_history_is_bounded_only_by_hard_cap() {
+        let mut store = make_store();
+        store
+            .register_device_with_tier(device_a_id(), "Device A".into(), valid_key_b64(), Tier::Pro)
+            .unwrap();
+
+        for t in 1u64..=(MAX_PUSH_ITEMS_PER_DEVICE as u64 + 50) {
+            push_text(&mut store, &device_a_id(), t);
+        }
+
+        let items = store.pull_items(&device_a_id(), 0).unwrap();
+        // Pro tier has no history limit, so only the absolute hard cap applies.
+        assert_eq!(items.len(), MAX_PUSH_ITEMS_PER_DEVICE);
+    }
+
+    /// The effective per-inbox history cap is the tighter of the absolute hard
+    /// cap and the tier's `max_history_items`. This proves the enforcement path
+    /// genuinely consults the device tier (a tier with a sub-hard-cap limit
+    /// would bind below 500), rather than ignoring it.
+    #[test]
+    fn effective_history_cap_is_tier_aware() {
+        // Free's 1000-item tier limit is intentionally looser than the 500
+        // hard cap, so the cap clamps down to the hard cap, not the tier limit.
+        assert_eq!(effective_history_cap(Tier::Free), MAX_PUSH_ITEMS_PER_DEVICE);
+        // Pro: unlimited tier history → bounded only by the hard cap.
+        assert_eq!(effective_history_cap(Tier::Pro), MAX_PUSH_ITEMS_PER_DEVICE);
+        // A tier limit tighter than the hard cap must win, demonstrating the
+        // tier value is actually applied (not just the constant hard cap). No
+        // live tier defines a sub-hard-cap limit, so exercise the clamp helper
+        // directly with a genuinely tight limit.
+        let tight_tier_limit = 10usize;
+        assert!(tight_tier_limit < MAX_PUSH_ITEMS_PER_DEVICE);
+        assert_eq!(history_cap_for_limit(Some(tight_tier_limit)), 10);
+        // Unlimited tier history (`None`) clamps to the hard cap.
+        assert_eq!(history_cap_for_limit(None), MAX_PUSH_ITEMS_PER_DEVICE);
     }
 }

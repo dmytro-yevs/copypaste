@@ -1,11 +1,17 @@
 /// Device tier — determines quotas applied to a device.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[allow(dead_code)]
 pub enum Tier {
     /// Default tier: capped registration, history, and item size limits.
     #[default]
     Free,
     /// Paid tier: elevated limits.
+    //
+    // Live device registration always uses `Tier::Free` today — tier
+    // selection from the bearer token / SQLite `device_quotas` table is not
+    // wired to the in-memory store yet (see the relay v2 quotas plan). `Pro`
+    // is constructed only in tier-quota tests, so it reads as dead code to the
+    // production build despite being part of the public tier model.
+    #[allow(dead_code)]
     Pro,
 }
 
@@ -21,7 +27,6 @@ impl Tier {
 
     /// Maximum number of history items kept per device inbox.
     /// `None` means unlimited.
-    #[allow(dead_code)]
     pub fn max_history_items(self) -> Option<usize> {
         match self {
             Tier::Free => Some(1_000),
@@ -30,7 +35,6 @@ impl Tier {
     }
 
     /// Maximum decoded ciphertext size in bytes for a single clipboard item.
-    #[allow(dead_code)]
     pub fn max_item_bytes(self, content_type: &str) -> usize {
         match (self, content_type) {
             // Images: 10 MiB for both tiers (pro has no additional benefit here).
@@ -47,9 +51,14 @@ pub enum QuotaViolation {
     /// The account has reached the maximum number of registered devices.
     MaxDevicesExceeded { limit: usize },
     /// The uploaded item exceeds the size limit for its content type.
-    #[allow(dead_code)]
     ItemTooLarge { limit_bytes: usize },
     /// The device inbox has reached its maximum history count.
+    //
+    // Constructed only by `check_history_quota`, which `push_item` no longer
+    // calls: history enforcement is now a silent prune clamped to
+    // `effective_history_cap` (the tier limit folded into the hard cap), so no
+    // production path returns this variant. Retained as part of the public
+    // quota model and exercised by `check_history_quota`'s unit tests.
     #[allow(dead_code)]
     HistoryFull { limit: usize },
 }
@@ -71,7 +80,6 @@ pub fn check_device_quota(tier: Tier, current_device_count: usize) -> Result<(),
 ///
 /// `payload_bytes` is the number of decoded ciphertext bytes.
 /// `content_type` is e.g. `"text"`, `"image"`, or `"file"`.
-#[allow(dead_code)]
 pub fn check_item_size(
     tier: Tier,
     payload_bytes: usize,
@@ -88,6 +96,10 @@ pub fn check_item_size(
 /// Check whether the device inbox still has capacity for one more item.
 ///
 /// `current_count` is the number of items already in the inbox.
+//
+// No production caller: `push_item` enforces history via a silent prune
+// clamped to `effective_history_cap` rather than rejecting at the tier limit.
+// Kept as part of the public quota model and covered by the tests below.
 #[allow(dead_code)]
 pub fn check_history_quota(tier: Tier, current_count: usize) -> Result<(), QuotaViolation> {
     if let Some(limit) = tier.max_history_items() {

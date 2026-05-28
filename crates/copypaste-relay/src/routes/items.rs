@@ -1,11 +1,14 @@
 use axum::extract::{Extension, Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine;
 
 use crate::auth::BearerToken;
 use crate::config::RelayConfig;
 use crate::error::RelayError;
 use crate::models::{PullItem, PullParams, PushRequest, PushResponse};
+use crate::quota::{self, QuotaViolation, Tier};
 use crate::state::AppState;
 
 /// DELETE /devices/:device_id/items/:item_id
@@ -37,7 +40,14 @@ pub async fn delete_item(
 /// Response (201): `{ "id": <i64> }`
 ///
 /// Auth: `Authorization: Bearer <token>` — must match the token for `device_id`.
-/// Quota: decoded `content_b64` must not exceed `max_item_bytes` from config.
+/// Quota: the decoded `content_b64` must satisfy two independent size limits:
+///   1. The per-tier item-size quota (`quota::check_item_size`), checked here
+///      *before* acquiring the store mutex so an oversized payload is rejected
+///      cheaply with `413 ITEM_SIZE_EXCEEDED`. Free-tier limits are applied
+///      conservatively (text ≤ 1 MiB, image ≤ 10 MiB) regardless of the
+///      sender's tier — see the relay v2 quotas plan.
+///   2. The operator-configured `RELAY_MAX_ITEM_BYTES` body cap, still
+///      enforced inside `push_item` (returns `413 PAYLOAD_TOO_LARGE`).
 pub async fn push(
     State(state): State<AppState>,
     Extension(config): Extension<RelayConfig>,
@@ -45,6 +55,24 @@ pub async fn push(
     BearerToken(token): BearerToken,
     Json(body): Json<PushRequest>,
 ) -> Result<(StatusCode, Json<PushResponse>), RelayError> {
+    // Per-tier item-size quota — checked before taking the store mutex so an
+    // oversized payload never contends for the lock. We decode `content_b64`
+    // once here to measure the true ciphertext size; `push_item` re-validates
+    // the base64 (and the operator body cap) under the lock.
+    let decoded_len = B64
+        .decode(&body.content_b64)
+        .map_err(|_| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?
+        .len();
+    // Free-tier limits are applied conservatively for all senders (the relay
+    // does not yet look up the sender's tier from the bearer token).
+    quota::check_item_size(Tier::Free, decoded_len, &body.content_type).map_err(|v| match v {
+        QuotaViolation::ItemTooLarge { limit_bytes } => {
+            RelayError::ItemSizeExceeded { limit_bytes }
+        }
+        // `check_item_size` only ever returns `ItemTooLarge`.
+        _ => RelayError::Internal("unexpected quota violation in item-size check".into()),
+    })?;
+
     // Survive mutex poisoning (security HIGH #1).
     let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
 
