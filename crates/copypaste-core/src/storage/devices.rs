@@ -93,6 +93,50 @@ pub fn revoke_device(
     Ok(revoked_at)
 }
 
+/// Revoke many peers atomically.
+///
+/// Wraps the per-peer delete + audit-insert for every `(fingerprint, name)`
+/// pair in a single SQLite transaction: either every audit row is written and
+/// every matching `devices` row removed, or — on any error — the whole batch
+/// rolls back and nothing is persisted. This lets the caller clear its
+/// (separate JSON) peer store only after the audit log is durably committed,
+/// so the two stores can never drift into the "store empty but audit rows
+/// missing" state.
+///
+/// Returns the unix-seconds timestamp stamped on all rows in the batch.
+/// An empty `peers` slice is a no-op that still returns a timestamp.
+pub fn revoke_devices(conn: &Connection, peers: &[(String, String)]) -> Result<u64, DevicesError> {
+    ensure_revoked_devices_table(conn)?;
+
+    let revoked_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // `unchecked_transaction` (rather than `&mut self` `transaction`) matches
+    // the storage layer's convention (see `insert_item_with_fts`): the daemon
+    // holds the `Database` behind a `Mutex` and only ever hands out
+    // `&Connection`, so there is no concurrent borrow to guard against.
+    let tx = conn.unchecked_transaction()?;
+    for (fingerprint, name) in peers {
+        tx.execute(
+            "DELETE FROM devices WHERE fingerprint = ?1",
+            params![fingerprint],
+        )?;
+        tx.execute(
+            "INSERT INTO revoked_devices (fingerprint, name, revoked_at) \
+             VALUES (?1, ?2, ?3) \
+             ON CONFLICT(fingerprint) DO UPDATE SET \
+                 name       = excluded.name, \
+                 revoked_at = excluded.revoked_at",
+            params![fingerprint, name, revoked_at as i64],
+        )?;
+    }
+    tx.commit()?;
+
+    Ok(revoked_at)
+}
+
 /// A single audit row from `revoked_devices`. Returned by
 /// [`list_revoked_devices`] for tests and for the (future) v1.0 sync worker
 /// that will translate rows into outbound revocation markers.
@@ -207,6 +251,65 @@ mod tests {
         let rows = list_revoked_devices(db.conn()).unwrap();
         assert_eq!(rows.len(), 1, "fingerprint is PK; second call must UPSERT");
         assert_eq!(rows[0].name, "Phone (renamed)");
+    }
+
+    #[test]
+    fn revoke_devices_writes_all_audit_rows() {
+        let db = fresh_db();
+        let peers = vec![
+            ("aa:aa:aa:aa:aa:aa:aa:aa".to_string(), "Laptop".to_string()),
+            ("bb:bb:bb:bb:bb:bb:bb:bb".to_string(), "Phone".to_string()),
+            ("cc:cc:cc:cc:cc:cc:cc:cc".to_string(), "Tablet".to_string()),
+        ];
+        let ts = revoke_devices(db.conn(), &peers).unwrap();
+        assert!(ts > 0, "timestamp must be populated");
+
+        let rows = list_revoked_devices(db.conn()).unwrap();
+        assert_eq!(rows.len(), 3, "every peer must get an audit row");
+        for (fp, _name) in &peers {
+            assert!(
+                rows.iter().any(|r| &r.fingerprint == fp),
+                "audit row missing for {fp}"
+            );
+        }
+    }
+
+    #[test]
+    fn revoke_devices_empty_slice_is_noop() {
+        let db = fresh_db();
+        let ts = revoke_devices(db.conn(), &[]).unwrap();
+        assert!(ts > 0, "timestamp returned even for empty batch");
+        assert_eq!(
+            list_revoked_devices(db.conn()).unwrap().len(),
+            0,
+            "no rows written for empty batch"
+        );
+    }
+
+    #[test]
+    fn revoke_devices_removes_from_devices_table() {
+        let db = fresh_db();
+        let fp = "12:34:56:78:9a:bc:de:f0";
+        db.conn()
+            .execute(
+                "INSERT INTO devices (id, name, platform, public_key, fingerprint) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params!["dev-x", "Laptop", "macos", "PUBKEY", fp],
+            )
+            .unwrap();
+
+        revoke_devices(db.conn(), &[(fp.to_string(), "Laptop".to_string())]).unwrap();
+
+        let remaining: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM devices WHERE fingerprint = ?1",
+                params![fp],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(remaining, 0, "paired device row must be deleted in batch");
+        assert_eq!(list_revoked_devices(db.conn()).unwrap().len(), 1);
     }
 
     #[test]

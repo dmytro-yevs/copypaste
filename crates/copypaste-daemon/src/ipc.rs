@@ -1,11 +1,12 @@
 use crate::protocol::{
     Request, Response, CURRENT_PROTOCOL_VERSION, ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR,
-    ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, MIN_SUPPORTED_PROTOCOL_VERSION,
+    ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, ERR_CODE_NOT_FOUND,
+    MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 use copypaste_core::{
     chunks_from_blob, count_items, decode_image, decrypt_item_by_version, delete_fts, delete_item,
-    derive_v2, ensure_revoked_devices_table, fetch_text_preview, get_page, revoke_device,
-    search_items, Database, EncryptError,
+    derive_v2, ensure_revoked_devices_table, fetch_text_preview, get_item_by_id, get_page,
+    pin_item, revoke_device, revoke_devices, search_items, unpin_item, Database, EncryptError,
 };
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -244,12 +245,16 @@ impl IpcServer {
                 | "search"
                 | "copy"
                 | "paste"
+                | "copy_item"
                 | "delete_all"
+                | "delete_item"
                 | "stats"
                 | "pin"
+                | "pin_item"
                 | "history_page"
                 | "import"
                 | "revoke_peer"
+                | "revoke_all_peers"
         )
     }
 
@@ -589,8 +594,10 @@ impl IpcServer {
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    let items = copypaste_core::get_page(&db, 1000, 0)?;
-                    Ok::<_, anyhow::Error>(items.into_iter().find(|i| i.id == id_for_task))
+                    // Resolve directly by primary key — paging + linear scan
+                    // silently missed any item past position 1000 (data loss).
+                    let item = get_item_by_id(&db, &id_for_task)?;
+                    Ok::<_, anyhow::Error>(item)
                 })
                 .await;
                 match join {
@@ -707,6 +714,180 @@ impl IpcServer {
                     Ok(Ok(())) => {
                         Response::ok(req.id, serde_json::json!({"pinned": true, "id": id}))
                     }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
+            // T5.x — pin or unpin an item by id. Unlike the legacy `pin`
+            // verb (pin-only), this takes an explicit `pinned: bool` so the
+            // UI can toggle from a single callback. A `pinned=false` request
+            // clears the pin flag (restoring normal TTL behaviour).
+            "pin_item" => {
+                let id = match req.params.get("id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
+                };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
+                }
+                let pinned = match req.params.get("pinned").and_then(|v| v.as_bool()) {
+                    Some(b) => b,
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: pinned (bool)",
+                        )
+                    }
+                };
+                let db_arc = self.db.clone();
+                let id_for_task = id.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    if pinned {
+                        pin_item(&db, &id_for_task)
+                    } else {
+                        unpin_item(&db, &id_for_task)
+                    }
+                })
+                .await;
+                match join {
+                    Ok(Ok(())) => {
+                        Response::ok(req.id, serde_json::json!({"pinned": pinned, "id": id}))
+                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
+            // T5.x — delete a single item by id. Mirrors the legacy `delete`
+            // verb but uses the typed `invalid_argument` error code (the UI
+            // branches on `error_code`) and returns a structured `{deleted,
+            // id}` payload. FTS cleanup is best-effort (logged on failure).
+            "delete_item" => {
+                let id = match req.params.get("id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
+                };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
+                }
+                let db_arc = self.db.clone();
+                let id_for_task = id.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let del = delete_item(&db, &id_for_task);
+                    let fts = delete_fts(&db, &id_for_task);
+                    (del, fts)
+                })
+                .await;
+                match join {
+                    Ok((Ok(removed), fts_res)) => {
+                        if let Err(e) = fts_res {
+                            tracing::warn!("fts delete failed for id={id}: {e}");
+                        }
+                        // Report whether a row was actually removed so the
+                        // response matches reality: `deleted: false` for an id
+                        // that did not exist, instead of always claiming `true`.
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({"deleted": removed > 0, "id": id}),
+                        )
+                    }
+                    Ok((Err(e), _)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
+            // T5.x — copy an item back to the system clipboard by id. Same
+            // paste-back path as `copy`/`paste` (decrypt → NSPasteboard) but
+            // surfaces typed `invalid_argument` / `not_found` error codes so
+            // the UI can branch on `error_code` rather than parsing strings.
+            "copy_item" => {
+                let id = match req.params.get("id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
+                };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
+                }
+                let db_arc = self.db.clone();
+                let id_for_task = id.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    // Resolve the row directly by primary key. Previously this
+                    // paged `get_page(1000, 0)` and linear-scanned, so any item
+                    // beyond position 1000 silently returned `not_found`
+                    // (data-loss for power users). `get_item_by_id` is a single
+                    // indexed `SELECT ... WHERE id = ?1` with no window cap.
+                    let item = get_item_by_id(&db, &id_for_task)?;
+                    Ok::<_, anyhow::Error>(item)
+                })
+                .await;
+                match join {
+                    Ok(Ok(Some(item))) => match self.write_to_pasteboard(&item) {
+                        Ok(()) => Response::ok(
+                            req.id,
+                            serde_json::json!({
+                                "id": item.id,
+                                "content_type": item.content_type,
+                                "written": true,
+                            }),
+                        ),
+                        Err(PasteboardError::DecryptFailed(msg)) => Response::err_with_code(
+                            req.id,
+                            ERR_CODE_AUTH_FAILED,
+                            format!("paste decrypt failed: {msg}"),
+                        ),
+                        Err(PasteboardError::Other(msg)) => {
+                            Response::err(req.id, format!("pasteboard write failed: {msg}"))
+                        }
+                    },
+                    Ok(Ok(None)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_NOT_FOUND,
+                        format!("item not found: {id}"),
+                    ),
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
@@ -1030,6 +1211,87 @@ impl IpcServer {
                         format!("revoke task join error: {e}"),
                     ),
                 }
+            }
+
+            // T5.x — revoke ALL paired peers in one call (Settings →
+            // "Reset pairings"). Clears the local JSON peer store and writes
+            // a `revoked_devices` audit row for each peer, reusing the same
+            // single-peer `revoke_device` primitive. An empty store is a
+            // success returning `{revoked: 0}` rather than an error.
+            "revoke_all_peers" => {
+                // Snapshot the current peers (fingerprint + display name)
+                // before clearing the store so we can write audit rows.
+                let peers = match load_peers() {
+                    Ok(p) => p,
+                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
+                };
+                let captured: Vec<(String, String)> = peers
+                    .iter()
+                    .filter_map(|p| {
+                        let fp = p.get("fingerprint").and_then(|v| v.as_str())?.to_string();
+                        let name = p
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        Some((fp, name))
+                    })
+                    .collect();
+
+                // Write every audit row in a single transaction FIRST, and only
+                // clear the JSON peer store once that transaction has durably
+                // committed. The previous order (clear store → loop inserting
+                // audit rows, swallowing per-row errors) could leave the store
+                // empty with audit rows missing on a partial failure, with the
+                // loss only logged. With this order a failure leaves *both*
+                // stores untouched so the caller can safely retry.
+                let db_arc = self.db.clone();
+                let captured_for_db = captured.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    revoke_devices(db.conn(), &captured_for_db)
+                })
+                .await;
+
+                let revoked_at = match join {
+                    Ok(Ok(ts)) => ts,
+                    Ok(Err(e)) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("failed to record revocations: {e}"),
+                        )
+                    }
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("revoke_all task join error: {e}"),
+                        )
+                    }
+                };
+
+                // Audit log committed — now clear the local peer store. If this
+                // fails the audit rows are already durable (idempotent on a
+                // retry via the UPSERT), so we surface the error rather than
+                // silently leaving stale peers behind.
+                if let Err(e) = save_peers(&[]) {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("revocations recorded but failed to clear peers: {e}"),
+                    );
+                }
+
+                Response::ok(
+                    req.id,
+                    serde_json::json!({
+                        "ok": true,
+                        "revoked": captured.len(),
+                        "cleared": captured.len(),
+                        "revoked_at": revoked_at,
+                    }),
+                )
             }
 
             // Beta W3.2 — PAKE-based password pairing.
@@ -1541,6 +1803,54 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
 
+    // Env mutation (`set_var`/`remove_var`) is process-global and unsound under
+    // concurrent access — Rust 1.89 warns and edition 2024 makes it `unsafe`.
+    // Tests that redirect the config dir (peers.json location) serialise on this
+    // lock so no two run their env mutation concurrently.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// RAII guard that snapshots one or more env vars, sets them for the test,
+    /// and restores the previous values (or unsets them) on drop — even on
+    /// panic. Mirrors the pattern in `paths.rs`. Holds `ENV_LOCK` for its whole
+    /// lifetime so env state cannot race another serialised test.
+    struct EnvGuard {
+        saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvGuard {
+        /// Point every given env var at `value`. Used to redirect the config
+        /// dir to a temp path across platforms: `dirs::config_dir()` honours
+        /// `XDG_CONFIG_HOME` on Linux/BSD and `$HOME` (→ Library/Application
+        /// Support) on macOS, so callers set both.
+        fn set_all(keys: &[&'static str], value: &std::path::Path) -> Self {
+            let lock = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            let mut saved = Vec::with_capacity(keys.len());
+            for &key in keys {
+                saved.push((key, std::env::var_os(key)));
+                // SAFETY: serialised via `ENV_LOCK`; no other thread reads or
+                // writes these vars concurrently for the guard's lifetime.
+                unsafe { std::env::set_var(key, value) };
+            }
+            Self { saved, _lock: lock }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: still holding `ENV_LOCK` (`_lock`), so the restore is
+            // serialised against every other env-mutating test.
+            unsafe {
+                for (key, original) in self.saved.drain(..) {
+                    match original {
+                        Some(v) => std::env::set_var(key, v),
+                        None => std::env::remove_var(key),
+                    }
+                }
+            }
+        }
+    }
+
     async fn start_test_server(socket_path: &std::path::Path) -> Arc<AtomicBool> {
         start_test_server_with_mode(socket_path, false).await
     }
@@ -1549,13 +1859,24 @@ mod tests {
         socket_path: &std::path::Path,
         initial_private_mode: bool,
     ) -> Arc<AtomicBool> {
+        let (private_mode, _db) =
+            start_test_server_returning_db(socket_path, initial_private_mode).await;
+        private_mode
+    }
+
+    /// Like `start_test_server_with_mode` but also hands back the shared
+    /// `Database` handle so a test can seed rows / inspect audit tables.
+    async fn start_test_server_returning_db(
+        socket_path: &std::path::Path,
+        initial_private_mode: bool,
+    ) -> (Arc<AtomicBool>, Arc<Mutex<Database>>) {
         let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
         let private_mode = Arc::new(AtomicBool::new(initial_private_mode));
         // Dummy keys: in-process tests do not hit paste-back or fingerprint
         // surfaces — they only validate dispatch / state-machine behaviour.
         let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
         let device_pub = Arc::new([0u8; 32]);
-        let server = IpcServer::new(db, private_mode.clone(), local_key, device_pub);
+        let server = IpcServer::new(db.clone(), private_mode.clone(), local_key, device_pub);
         let path = socket_path.to_path_buf();
         tokio::spawn(async move {
             if let Err(e) = server.serve(&path, CancellationToken::new()).await {
@@ -1563,7 +1884,7 @@ mod tests {
             }
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        private_mode
+        (private_mode, db)
     }
 
     #[tokio::test]
@@ -2548,5 +2869,287 @@ mod tests {
         let rows = list_revoked_devices(db_guard.conn()).unwrap();
         assert_eq!(rows.len(), 1, "exactly one audit row expected");
         assert_eq!(rows[0].fingerprint, fp);
+    }
+
+    // ------------------------------------------------------------------
+    // T5.x — clipboard-history UI action wiring
+    //
+    // New verbs added so the UI can drive history actions end-to-end over
+    // the Unix socket: `pin_item`, `delete_item`, `copy_item`, and
+    // `revoke_all_peers`. Each validates its arguments and returns the
+    // documented error code on missing/bad params, mirroring the
+    // beta-W3.2 (`pair_peer_with_password`) and T4 (`revoke_peer`) tests.
+    // ------------------------------------------------------------------
+
+    async fn call_one(sock: &std::path::Path, body: &str) -> serde_json::Value {
+        let mut stream = UnixStream::connect(sock).await.unwrap();
+        stream.write_all(body.as_bytes()).await.unwrap();
+        stream.write_all(b"\n").await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        serde_json::from_str(&line).unwrap()
+    }
+
+    #[tokio::test]
+    async fn pin_item_missing_id_returns_invalid_argument() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("pin_item_missing.sock");
+        start_test_server(&sock).await;
+        let resp = call_one(
+            &sock,
+            r#"{"id":"pi1","method":"pin_item","params":{"pinned":true}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], false, "missing id must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+    }
+
+    #[tokio::test]
+    async fn pin_item_missing_pinned_returns_invalid_argument() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("pin_item_no_flag.sock");
+        start_test_server(&sock).await;
+        let fp_id = "00000000-0000-0000-0000-000000000000";
+        let body = format!(r#"{{"id":"pi2","method":"pin_item","params":{{"id":"{fp_id}"}}}}"#);
+        let resp = call_one(&sock, &body).await;
+        assert_eq!(resp["ok"], false, "missing pinned bool must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+    }
+
+    #[tokio::test]
+    async fn pin_item_bad_uuid_returns_invalid_argument() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("pin_item_bad_uuid.sock");
+        start_test_server(&sock).await;
+        let resp = call_one(
+            &sock,
+            r#"{"id":"pi3","method":"pin_item","params":{"id":"not-a-uuid","pinned":true}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], false, "bad uuid must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+    }
+
+    #[tokio::test]
+    async fn pin_item_valid_uuid_pins_and_unpins() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("pin_item_ok.sock");
+        start_test_server(&sock).await;
+        let id = "00000000-0000-0000-0000-000000000000";
+        // Pin: even when the row does not exist, the UPDATE affects 0 rows
+        // and succeeds (the UI optimistically pins; a stale id is harmless).
+        let body =
+            format!(r#"{{"id":"pi4","method":"pin_item","params":{{"id":"{id}","pinned":true}}}}"#);
+        let resp = call_one(&sock, &body).await;
+        assert_eq!(resp["ok"], true, "valid pin must succeed: {resp}");
+        assert_eq!(resp["data"]["pinned"], true);
+        assert_eq!(resp["data"]["id"], id);
+        // Unpin path.
+        let body = format!(
+            r#"{{"id":"pi5","method":"pin_item","params":{{"id":"{id}","pinned":false}}}}"#
+        );
+        let resp = call_one(&sock, &body).await;
+        assert_eq!(resp["ok"], true, "valid unpin must succeed: {resp}");
+        assert_eq!(resp["data"]["pinned"], false);
+    }
+
+    #[tokio::test]
+    async fn delete_item_missing_id_returns_invalid_argument() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("del_item_missing.sock");
+        start_test_server(&sock).await;
+        let resp = call_one(&sock, r#"{"id":"di1","method":"delete_item","params":{}}"#).await;
+        assert_eq!(resp["ok"], false, "missing id must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+    }
+
+    #[tokio::test]
+    async fn delete_item_bad_uuid_returns_invalid_argument() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("del_item_bad_uuid.sock");
+        start_test_server(&sock).await;
+        let resp = call_one(
+            &sock,
+            r#"{"id":"di2","method":"delete_item","params":{"id":"not-a-uuid"}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], false, "bad uuid must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+    }
+
+    #[tokio::test]
+    async fn delete_item_valid_uuid_succeeds() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("del_item_ok.sock");
+        start_test_server(&sock).await;
+        let id = "00000000-0000-0000-0000-000000000000";
+        let body = format!(r#"{{"id":"di3","method":"delete_item","params":{{"id":"{id}"}}}}"#);
+        let resp = call_one(&sock, &body).await;
+        // Deleting a non-existent row is a no-op DELETE → request still ok,
+        // but `deleted` reflects rows-affected (0 → false) so the response
+        // matches reality rather than always claiming a deletion happened.
+        assert_eq!(resp["ok"], true, "valid delete must succeed: {resp}");
+        assert_eq!(resp["data"]["deleted"], false, "no row existed: {resp}");
+        assert_eq!(resp["data"]["id"], id);
+    }
+
+    #[tokio::test]
+    async fn copy_item_missing_id_returns_invalid_argument() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("copy_item_missing.sock");
+        start_test_server(&sock).await;
+        let resp = call_one(&sock, r#"{"id":"ci1","method":"copy_item","params":{}}"#).await;
+        assert_eq!(resp["ok"], false, "missing id must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+    }
+
+    #[tokio::test]
+    async fn copy_item_bad_uuid_returns_invalid_argument() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("copy_item_bad_uuid.sock");
+        start_test_server(&sock).await;
+        let resp = call_one(
+            &sock,
+            r#"{"id":"ci2","method":"copy_item","params":{"id":"not-a-uuid"}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], false, "bad uuid must fail");
+        assert_eq!(resp["error_code"], "invalid_argument");
+    }
+
+    #[tokio::test]
+    async fn copy_item_unknown_id_returns_not_found() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("copy_item_unknown.sock");
+        start_test_server(&sock).await;
+        let id = "00000000-0000-0000-0000-000000000000";
+        let body = format!(r#"{{"id":"ci3","method":"copy_item","params":{{"id":"{id}"}}}}"#);
+        let resp = call_one(&sock, &body).await;
+        assert_eq!(resp["ok"], false, "unknown id must fail");
+        assert_eq!(resp["error_code"], "not_found");
+    }
+
+    #[tokio::test]
+    async fn copy_item_seeded_id_is_resolved() {
+        // Regression for the data-loss fix: copy_item must resolve a row by its
+        // primary key (`get_item_by_id`) rather than paging + scanning. We seed
+        // a text item with a deliberately wrong-length nonce so the paste-back
+        // path returns a deterministic error *without* touching the real
+        // NSPasteboard — the key assertion is that the lookup found the row, so
+        // the response is anything except `not_found`.
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("copy_item_seeded.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        let id = {
+            let guard = db.lock().await;
+            // 0xAA/0xBB content with a 1-byte nonce (invalid: must be 24) so
+            // write_to_pasteboard short-circuits before any NSPasteboard call.
+            let item = copypaste_core::ClipboardItem::new_text(vec![0xAA, 0xBB], vec![0u8; 1], 1);
+            let id = item.id.clone();
+            copypaste_core::insert_item(&guard, &item).unwrap();
+            id
+        };
+
+        let body = format!(r#"{{"id":"ci4","method":"copy_item","params":{{"id":"{id}"}}}}"#);
+        let resp = call_one(&sock, &body).await;
+        assert_ne!(
+            resp["error_code"], "not_found",
+            "seeded item must be resolved by id, not reported missing: {resp}"
+        );
+    }
+
+    #[tokio::test]
+    async fn revoke_all_peers_empty_store_succeeds() {
+        // With no peers.json present, revoke_all_peers must succeed and
+        // report zero revoked rather than erroring.
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("revoke_all_empty.sock");
+        // Isolate the config dir so this test never touches the developer's
+        // real peers.json. `dirs::config_dir()` reads XDG_CONFIG_HOME on
+        // Linux/BSD and $HOME (→ Library/Application Support) on macOS, so set
+        // both. Held until end of test (RAII restore).
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        start_test_server(&sock).await;
+        let resp = call_one(
+            &sock,
+            r#"{"id":"ra1","method":"revoke_all_peers","params":{}}"#,
+        )
+        .await;
+        assert_eq!(
+            resp["ok"], true,
+            "revoke_all on empty store must succeed: {resp}"
+        );
+        assert_eq!(
+            resp["data"]["revoked"].as_u64(),
+            Some(0),
+            "empty store revokes zero peers: {resp}"
+        );
+    }
+
+    #[tokio::test]
+    async fn revoke_all_peers_revokes_every_peer() {
+        // Happy path: seed N peers in peers.json, call revoke_all_peers, and
+        // assert all N are revoked, the store is cleared, and an audit row was
+        // written for each (atomic batch via revoke_devices).
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("revoke_all_n.sock");
+        // Redirect the config dir (both Linux XDG and macOS HOME) to a temp
+        // path so we read/write an isolated peers.json, never the real one.
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+
+        // Resolve the actual peers.json location the same way the daemon does
+        // (`dirs::config_dir()/copypaste/peers.json`) so the seed lands exactly
+        // where the handler will read it, on whatever platform we run.
+        let peers_dir = dirs::config_dir()
+            .expect("config_dir resolvable under redirected HOME/XDG_CONFIG_HOME")
+            .join("copypaste");
+        std::fs::create_dir_all(&peers_dir).unwrap();
+        let peers_json = peers_dir.join("peers.json");
+        let peers = serde_json::json!([
+            {"name": "Laptop", "fingerprint": "aa:aa:aa:aa:aa:aa:aa:aa", "added_at": 1},
+            {"name": "Phone",  "fingerprint": "bb:bb:bb:bb:bb:bb:bb:bb", "added_at": 2},
+            {"name": "Tablet", "fingerprint": "cc:cc:cc:cc:cc:cc:cc:cc", "added_at": 3},
+        ]);
+        std::fs::write(&peers_json, serde_json::to_string(&peers).unwrap()).unwrap();
+
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+        let resp = call_one(
+            &sock,
+            r#"{"id":"ra2","method":"revoke_all_peers","params":{}}"#,
+        )
+        .await;
+
+        assert_eq!(resp["ok"], true, "revoke_all must succeed: {resp}");
+        assert_eq!(
+            resp["data"]["revoked"].as_u64(),
+            Some(3),
+            "all three peers must be revoked: {resp}"
+        );
+        assert_eq!(resp["data"]["cleared"].as_u64(), Some(3));
+
+        // Store must now be empty.
+        let remaining = std::fs::read_to_string(&peers_json).unwrap_or_else(|_| "[]".into());
+        let remaining: Vec<serde_json::Value> = serde_json::from_str(&remaining).unwrap();
+        assert!(remaining.is_empty(), "peer store must be cleared");
+
+        // An audit row must exist for every revoked fingerprint.
+        let audit = {
+            let guard = db.lock().await;
+            copypaste_core::list_revoked_devices(guard.conn()).unwrap()
+        };
+        assert_eq!(audit.len(), 3, "one audit row per revoked peer");
+        for fp in [
+            "aa:aa:aa:aa:aa:aa:aa:aa",
+            "bb:bb:bb:bb:bb:bb:bb:bb",
+            "cc:cc:cc:cc:cc:cc:cc:cc",
+        ] {
+            assert!(
+                audit.iter().any(|r| r.fingerprint == fp),
+                "missing audit row for {fp}"
+            );
+        }
     }
 }

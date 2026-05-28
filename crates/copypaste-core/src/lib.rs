@@ -27,11 +27,12 @@ pub use sensitive::{
     SensitiveDetector, SensitiveKind,
 };
 pub use storage::devices::{
-    ensure_revoked_devices_table, list_revoked_devices, revoke_device, DevicesError, RevokedDevice,
+    ensure_revoked_devices_table, list_revoked_devices, revoke_device, revoke_devices,
+    DevicesError, RevokedDevice,
 };
 pub use storage::items::{
     count_items, delete_expired, delete_fts, delete_item, delete_sensitive_expired,
-    fetch_text_preview, find_recent_by_hash, get_page, get_page_meta, insert_item,
+    fetch_text_preview, find_recent_by_hash, get_item_by_id, get_page, get_page_meta, insert_item,
     insert_item_with_fts, pin_item, search_items, unpin_item, upsert_fts, ClipboardItem,
     ItemsError, MAX_PREVIEW_BYTES,
 };
