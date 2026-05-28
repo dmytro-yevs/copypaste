@@ -1387,6 +1387,7 @@ dependencies = [
  "futures-util",
  "hex",
  "home",
+ "image 0.25.9",
  "mdns-sd",
  "mockito",
  "objc2 0.5.2",
