@@ -49,14 +49,11 @@ jobs:
         with:
           key: macos-latest
 
-      - name: Build (macOS — full workspace)
-        run: cargo build --workspace
+      - name: Clippy (macOS — full workspace, all targets)
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test (macOS — full workspace)
         run: cargo test --workspace
-
-      - name: Clippy (macOS — full workspace)
-        run: cargo clippy --workspace -- -D warnings
 
   # Dedicated macOS job for the daemon with Keychain integration tests.
   test-macos-daemon:
@@ -87,13 +84,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Get week stamp for cache key
+        id: date
+        run: echo "week=$(date -u +%Y-%W)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache advisory-db
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/advisory-db
+          key: advisory-db-${{ steps.date.outputs.week }}
+          restore-keys: advisory-db-
+
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
 
       - name: cargo audit
-        # Option B: try --no-fetch first (uses runner's cached advisory-db if present),
-        # fall back to full network fetch. Trade-off: no explicit cache key means
-        # cold runners always fetch; Option A (actions/cache keyed by date) would
-        # save ~5s/run but adds cache-miss complexity. Revisit if advisory-db fetch
-        # becomes a bottleneck.
+        # --no-fetch uses the advisory-db restored by the cache step above
+        # (keyed on ISO week); falls back to a full network fetch on a cache
+        # miss (first run of the week or a cold runner).
         run: cargo audit --no-fetch || cargo audit

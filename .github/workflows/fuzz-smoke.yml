@@ -54,7 +54,9 @@ jobs:
           key: fuzz-${{ runner.os }}-${{ hashFiles('fuzz/Cargo.toml', 'crates/**/Cargo.toml') }}
 
       - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
 
       - name: Build fuzz target
         run: cargo +nightly fuzz build "$FUZZ_TARGET" --fuzz-dir fuzz

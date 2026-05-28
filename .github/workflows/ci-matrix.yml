@@ -1,7 +1,11 @@
 name: CI Matrix (beta-bonus)
 
 on:
+  # Beta-bonus matrix: scoped to the beta/release branches it is meant for.
+  # A normal PR into main runs ci.yml (+ coverage); it must NOT duplicate this
+  # matrix, so pull_request is restricted to release branches only.
   pull_request:
+    branches: [release/v0.2.0-beta]
   push:
     branches: [release/v0.2.0-beta]
   workflow_dispatch:
@@ -137,7 +141,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-machete
-        run: cargo install cargo-machete --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
 
       - name: cargo machete
         run: cargo machete

@@ -39,7 +39,9 @@ jobs:
        # the new flag. Unpinned install pulled 0.5.7 with --output-pattern
        # removed, breaking v0.2.0-beta.1 SBOM job (2026-05-23).
       - name: Install cargo-cyclonedx
-        run: cargo install cargo-cyclonedx --version 0.5.7 --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx@0.5.7
 
       - name: Generate SBOMs (JSON)
         run: bash scripts/gen-sbom.sh --format json --output-dir reports/sbom

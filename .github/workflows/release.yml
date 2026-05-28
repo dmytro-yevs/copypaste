@@ -69,12 +69,17 @@ jobs:
         with:
           key: release-macos-arm64
 
-      - name: Build release (workspace, explicit features)
+      - name: Build release (DMG binaries only)
         run: |
           # cloud-sync excluded from release build — requires Supabase credentials not present in CI
           # copypaste-android excluded on macOS — needs aarch64-linux-android target (built in build-android job)
-          cargo build --release --workspace \
-            --exclude copypaste-android
+          # Build only the three crates the DMG ships (copypaste CLI, daemon, UI);
+          # skips copypaste-bench / copypaste-ui-snapshot under thin-LTO. See
+          # scripts/release/build-dmg-ci.sh (BIN_CLI/BIN_DAEMON/BIN_UI).
+          cargo build --release \
+            -p copypaste-cli \
+            -p copypaste-daemon \
+            -p copypaste-ui
 
       - name: Resolve release version
         id: ver
@@ -160,10 +165,22 @@ jobs:
         with:
           key: release-android-arm64
 
-      - name: Install Android NDK and cargo-ndk
+      - name: Cache Android NDK
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+            ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
+          key: android-ndk-27.2.12479018-${{ runner.os }}
+          restore-keys: android-ndk-27.2.12479018-
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Install Android NDK
         run: |
-          # Install cargo-ndk (cross-compilation driver for Android targets)
-          cargo install cargo-ndk --locked
           # Install NDK via sdkmanager bundled with the ubuntu-latest runner
           echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
             "ndk;27.2.12479018" 2>/dev/null \
