@@ -460,9 +460,16 @@ impl IpcServer {
             }
         }
 
-        // Remove stale socket file
-        let _ = std::fs::remove_file(socket_path);
-        let listener = UnixListener::bind(socket_path)?;
+        // Self-heal stale sockets. A previous daemon that crashed or was
+        // killed (e.g. a v0.3.4 process replaced by a v0.4.0 upgrade) leaves
+        // the on-disk socket file behind. A plain `bind` over an existing path
+        // fails with `EADDRINUSE`, so the new daemon would never come up and
+        // the UI would see "process alive but socket not reachable". We probe
+        // the existing socket first: if NO live listener answers it, it is a
+        // stale file we may safely remove and rebind. If a live listener DOES
+        // answer, another healthy daemon already owns it — we must NOT steal
+        // the socket out from under it, so we surface a hard error instead.
+        let listener = bind_with_stale_cleanup(socket_path)?;
 
         // chmod 0600 — the IPC socket gives full control over the user's
         // clipboard history and peer database. It must not be world- or
@@ -2368,6 +2375,59 @@ impl IpcServer {
     }
 }
 
+/// Probe whether a Unix-domain socket at `socket_path` has a *live* listener.
+///
+/// A stale socket file (left behind by a daemon that crashed or was killed
+/// without a clean shutdown) still exists on disk but no process is accepting
+/// connections on it: `connect()` then fails with `ECONNREFUSED`. A socket
+/// owned by a running daemon accepts the connection. We connect and
+/// immediately drop the stream — this is a zero-byte probe the daemon's accept
+/// loop tolerates (it spawns a handler that reads EOF and exits).
+///
+/// Returns `false` when the path does not exist, is not a socket, or the
+/// connect is refused (stale). Returns `true` only when a live listener
+/// actually accepts the connection.
+fn is_socket_live(socket_path: &std::path::Path) -> bool {
+    if !socket_path.exists() {
+        return false;
+    }
+    std::os::unix::net::UnixStream::connect(socket_path).is_ok()
+}
+
+/// Bind a [`UnixListener`] at `socket_path`, self-healing a stale socket file.
+///
+/// macOS / Linux refuse to `bind()` over an existing socket path
+/// (`EADDRINUSE`), so a socket file left behind by a previous daemon would
+/// otherwise permanently block startup — the exact "process alive but IPC
+/// socket not reachable" symptom seen after a v0.3.4 → v0.4.0 upgrade where an
+/// old daemon died without cleaning up.
+///
+/// Policy:
+///   * No file present  → bind directly.
+///   * File present, NO live listener → stale; remove it and bind.
+///   * File present, live listener answers → another healthy daemon already
+///     owns the socket. Do NOT steal it (that would orphan the running
+///     daemon); return an error so the caller logs and exits cleanly.
+fn bind_with_stale_cleanup(socket_path: &std::path::Path) -> anyhow::Result<UnixListener> {
+    if socket_path.exists() {
+        if is_socket_live(socket_path) {
+            anyhow::bail!(
+                "another daemon is already listening on {} — refusing to steal the socket",
+                socket_path.display()
+            );
+        }
+        tracing::warn!(
+            "removing stale IPC socket at {} (no live listener answered)",
+            socket_path.display()
+        );
+        // Best-effort: if removal races with another process recreating it,
+        // the subsequent bind error is the authoritative signal.
+        let _ = std::fs::remove_file(socket_path);
+    }
+    let listener = UnixListener::bind(socket_path)?;
+    Ok(listener)
+}
+
 /// Internal error type for the paste-back path so the dispatcher can
 /// distinguish authentication / decryption failures (which deserve a
 /// dedicated error code so a tampered row is surfaced to the caller) from
@@ -2534,6 +2594,82 @@ mod tests {
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         (private_mode, db)
+    }
+
+    // -----------------------------------------------------------------------
+    // Stale-socket self-heal (fix/daemon-ipc-selfheal)
+    // -----------------------------------------------------------------------
+
+    /// A path that does not exist is never "live".
+    #[test]
+    fn is_socket_live_false_for_missing_path() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("missing.sock");
+        assert!(!is_socket_live(&sock));
+    }
+
+    /// A regular file sitting at the socket path is not a live listener —
+    /// `connect()` on a non-socket fails, so we treat it as not-live (and the
+    /// bind helper will clean it up).
+    #[test]
+    fn is_socket_live_false_for_stale_regular_file() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("stale.sock");
+        std::fs::write(&sock, b"not a socket").unwrap();
+        assert!(!is_socket_live(&sock));
+    }
+
+    /// A leftover socket *file* with no process accepting on it is stale:
+    /// `bind_with_stale_cleanup` must remove it and successfully rebind,
+    /// rather than failing with `EADDRINUSE`. This is the core self-heal for
+    /// the "process alive but socket not reachable" upgrade bug.
+    ///
+    /// Uses `std::os::unix::net::UnixListener` to seed the stale socket so the
+    /// "previous daemon" half does not depend on a Tokio reactor; the helper
+    /// under test (`bind_with_stale_cleanup`) binds a `tokio` listener, hence
+    /// `#[tokio::test]`.
+    #[tokio::test]
+    async fn bind_with_stale_cleanup_removes_dead_socket_and_rebinds() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("daemon.sock");
+
+        // Create a real socket then drop its listener so the path is left
+        // behind with no live acceptor — exactly what a crashed daemon leaves.
+        {
+            let dead = std::os::unix::net::UnixListener::bind(&sock).expect("seed bind");
+            drop(dead);
+        }
+        assert!(sock.exists(), "socket file must remain after listener drop");
+        assert!(
+            !is_socket_live(&sock),
+            "dropped listener must not be detected as live"
+        );
+
+        // The helper must clean up and bind successfully.
+        let listener =
+            bind_with_stale_cleanup(&sock).expect("must self-heal a stale socket and rebind");
+        assert!(is_socket_live(&sock), "rebound socket must accept connects");
+        drop(listener);
+    }
+
+    /// When a *live* daemon already owns the socket, the helper must refuse to
+    /// steal it (returning an error) so the running daemon is not orphaned.
+    #[tokio::test]
+    async fn bind_with_stale_cleanup_refuses_to_steal_live_socket() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("daemon.sock");
+
+        // Hold a live listener (std, no reactor needed) for the whole test.
+        let _live = std::os::unix::net::UnixListener::bind(&sock).expect("seed live bind");
+        assert!(is_socket_live(&sock), "seeded listener must be live");
+
+        let err =
+            bind_with_stale_cleanup(&sock).expect_err("must refuse to bind over a live socket");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("already listening"),
+            "expected a 'already listening' refusal, got: {msg}"
+        );
     }
 
     #[tokio::test]

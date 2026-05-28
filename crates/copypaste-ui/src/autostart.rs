@@ -196,13 +196,100 @@ where
         return Ok(DaemonStatus::Started);
     }
 
-    // Step 5: build an actionable failure message by interrogating launchd.
-    // "Socket did not appear" alone is useless — `launchctl print` exposes
-    // `pid` + `last exit code` which together distinguish: crash, never-
-    // loaded, alive-but-not-listening.
+    // Step 5: the socket never came up within budget. Before surfacing a
+    // dead-end error to the user, attempt to RECOVER the common
+    // "alive-but-socket-dead" case: launchd reports a live pid, but the
+    // process is wedged — e.g. an old v0.3.4 daemon that survived the upgrade,
+    // or a new daemon that bound nothing because a stale socket file blocked
+    // it. Everything is supposed to heal automatically; the user must not have
+    // to run Terminal commands.
+    if daemon_alive_but_socket_dead(runner, uid) {
+        tracing::warn!(
+            "autostart: daemon alive but IPC socket unreachable — recovering \
+             (bootout → enable → bootstrap)"
+        );
+        if let Some(status) =
+            recover_unresponsive_daemon(runner, uid, &dst_plist, &socket_path, env)
+        {
+            return Ok(status);
+        }
+    }
+
+    // Step 6: recovery did not apply or did not help — build an actionable
+    // failure message by interrogating launchd. "Socket did not appear" alone
+    // is useless — `launchctl print` exposes `pid` + `last exit code` which
+    // together distinguish: crash, never-loaded, alive-but-not-listening.
     Ok(DaemonStatus::FailedToStart(diagnose_launchd_failure(
         runner, uid,
     )))
+}
+
+/// Returns `true` when launchd reports the daemon as a *live* process
+/// (`pid != 0`) yet its IPC socket never became reachable. This is the
+/// "process alive but IPC socket not reachable" symptom: a wedged or stale
+/// daemon holding the launchd slot. The socket-unreachability is already
+/// established by the caller (the retry loop in
+/// [`ensure_daemon_running_inner`] exhausted its budget), so here we only need
+/// to confirm a live pid via `launchctl print`.
+fn daemon_alive_but_socket_dead<R: CommandRunner>(runner: &mut R, uid: u32) -> bool {
+    let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
+    let out = match runner.run("launchctl", &["print".into(), target.into()]) {
+        Ok(o) if o.success => o,
+        _ => return false,
+    };
+    let combined = format!("{}\n{}", out.stdout, out.stderr);
+    matches!(parse_kv_number(&combined, "pid"), Some(p) if p != 0)
+}
+
+/// Hard-recover a daemon that launchd reports as alive but whose IPC socket
+/// never came up. We `bootout` the wedged/stale process, clear any disabled
+/// override, `bootstrap` a fresh instance, then re-probe the socket within the
+/// startup budget.
+///
+/// Returns:
+///   * `Some(DaemonStatus::Started)` — recovery succeeded and the socket is up.
+///   * `Some(DaemonStatus::FailedToStart(_))` — the re-bootstrap itself failed
+///     hard (surfaces an actionable message).
+///   * `None` — bootstrap issued but the socket still did not appear; the
+///     caller falls through to `diagnose_launchd_failure` for a precise reason.
+fn recover_unresponsive_daemon<R, E>(
+    runner: &mut R,
+    uid: u32,
+    dst_plist: &Path,
+    socket_path: &Path,
+    env: &E,
+) -> Option<DaemonStatus>
+where
+    R: CommandRunner,
+    E: EnvOps,
+{
+    let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
+
+    // Terminate the unresponsive/stale daemon so launchd will start a clean
+    // one. Best-effort: a race where it already exited makes this a no-op.
+    let _ = runner.run("launchctl", &["bootout".into(), target.clone().into()]);
+
+    // The bootout'd daemon owned (or left behind) the IPC socket file. Remove
+    // any stale file so the fresh daemon's bind cannot trip over it — this
+    // mirrors the daemon-side self-heal but covers the case where the daemon
+    // exits before its own cleanup runs.
+    env.remove_file(socket_path);
+
+    // Re-run the full clear-disabled + bootstrap path. `loaded = false`
+    // because we just booted the service out.
+    if let Err(status) = recover_and_bootstrap(runner, uid, dst_plist, false) {
+        return Some(status);
+    }
+
+    // Re-probe within the same budget shape as Step 4.
+    for _ in 0..30 {
+        env.sleep(Duration::from_millis(500));
+        if ipc_ping(socket_path, env) {
+            tracing::info!("autostart: recovered unresponsive daemon — socket now reachable");
+            return Some(DaemonStatus::Started);
+        }
+    }
+    None
 }
 
 /// Shell out `launchctl print gui/<uid>/<label>` and translate the output
@@ -622,6 +709,10 @@ pub(crate) trait EnvOps {
     fn current_exe(&self) -> Result<PathBuf>;
     fn unix_stream_connect(&self, path: &Path) -> bool;
     fn sleep(&self, dur: Duration);
+    /// Best-effort removal of a stale socket file during recovery. Errors are
+    /// ignored — a missing file is success, and a still-bound file surfaces
+    /// later as a failed bind we already diagnose.
+    fn remove_file(&self, path: &Path);
 }
 
 #[derive(Default)]
@@ -679,6 +770,9 @@ impl EnvOps for SystemEnv {
     }
     fn sleep(&self, dur: Duration) {
         std::thread::sleep(dur);
+    }
+    fn remove_file(&self, path: &Path) {
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -810,6 +904,7 @@ mod tests {
         exe: PathBuf,
         socket_alive_after_calls: usize,
         calls: std::cell::Cell<usize>,
+        removed: std::cell::Cell<usize>,
     }
 
     impl FakeEnv {
@@ -818,6 +913,7 @@ mod tests {
                 exe,
                 socket_alive_after_calls: usize::MAX,
                 calls: std::cell::Cell::new(0),
+                removed: std::cell::Cell::new(0),
             }
         }
         fn always_alive(exe: PathBuf) -> Self {
@@ -825,6 +921,7 @@ mod tests {
                 exe,
                 socket_alive_after_calls: 0,
                 calls: std::cell::Cell::new(0),
+                removed: std::cell::Cell::new(0),
             }
         }
         fn alive_after(exe: PathBuf, n: usize) -> Self {
@@ -832,6 +929,7 @@ mod tests {
                 exe,
                 socket_alive_after_calls: n,
                 calls: std::cell::Cell::new(0),
+                removed: std::cell::Cell::new(0),
             }
         }
         #[allow(dead_code)]
@@ -843,7 +941,13 @@ mod tests {
                 exe,
                 socket_alive_after_calls: 31,
                 calls: std::cell::Cell::new(0),
+                removed: std::cell::Cell::new(0),
             }
+        }
+        /// Number of `remove_file` calls — lets recovery tests assert the
+        /// stale socket cleanup ran.
+        fn removed_count(&self) -> usize {
+            self.removed.get()
         }
     }
 
@@ -858,6 +962,9 @@ mod tests {
         }
         fn sleep(&self, _dur: Duration) {
             // Tests never actually sleep.
+        }
+        fn remove_file(&self, _path: &Path) {
+            self.removed.set(self.removed.get() + 1);
         }
     }
 
@@ -980,7 +1087,9 @@ mod tests {
         // then `launchctl enable` (unconditional disabled-override clear),
         // then `launchctl print-disabled` (sticky-disabled detection — not
         // disabled in the default mock, so no bootout), then
-        // `launchctl bootstrap gui/501 <plist>`, then a FINAL `launchctl
+        // `launchctl bootstrap gui/501 <plist>`, then a `launchctl print`
+        // from the Step-5 alive-but-socket-dead probe (default mock reports
+        // "not loaded", so recovery is SKIPPED), then a FINAL `launchctl
         // print` from the diagnose_launchd_failure path that turns "socket
         // never came up" into an actionable message.
         let programs: Vec<&str> = runner.calls.iter().map(|c| c.0.as_str()).collect();
@@ -988,6 +1097,7 @@ mod tests {
             programs,
             vec![
                 "id",
+                "launchctl",
                 "launchctl",
                 "launchctl",
                 "launchctl",
@@ -1016,8 +1126,14 @@ mod tests {
             "expected plist path as 3rd arg, got {bootstrap_args:?}"
         );
 
+        // Step-5 alive-but-socket-dead probe `launchctl print` (returns
+        // "not loaded" in the default mock → recovery skipped).
+        let alive_probe_args = &runner.calls[5].1;
+        assert_eq!(alive_probe_args[0], "print");
+        assert_eq!(alive_probe_args[1], "gui/501/com.copypaste.daemon");
+
         // Diagnostic `launchctl print` re-probe after the wait budget.
-        let diag_args = &runner.calls[5].1;
+        let diag_args = &runner.calls[6].1;
         assert_eq!(diag_args[0], "print");
         assert_eq!(diag_args[1], "gui/501/com.copypaste.daemon");
 
@@ -1570,5 +1686,158 @@ mod tests {
             bootstrap_count, 2,
             "error-5 bootstrap must be retried exactly once, got {bootstrap_count}"
         );
+    }
+
+    // -----------------------------------------------------------------------------
+    // fix/daemon-ipc-selfheal: alive-but-socket-dead recovery.
+    //
+    // A daemon that launchd reports as a live process (pid != 0) but whose IPC
+    // socket never comes up (stale upgrade leftover, wedged process) must be
+    // RECOVERED automatically — bootout the wedged daemon, clear stale socket,
+    // re-bootstrap, re-probe — rather than reported as a dead-end error.
+    // -----------------------------------------------------------------------------
+
+    /// `daemon_alive_but_socket_dead` returns true only when `launchctl print`
+    /// succeeds AND reports a nonzero pid.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn daemon_alive_but_socket_dead_detects_live_pid() {
+        let mut runner = MockRunner::with_default_uid();
+        runner.set(
+            "launchctl print",
+            true,
+            "com.copypaste.daemon = {\n\tpid = 31989\n}",
+            "",
+        );
+        assert!(daemon_alive_but_socket_dead(&mut runner, 501));
+
+        // pid = 0 (not actually running) → not the alive-but-dead case.
+        runner.set(
+            "launchctl print",
+            true,
+            "com.copypaste.daemon = {\n\tpid = 0\n}",
+            "",
+        );
+        assert!(!daemon_alive_but_socket_dead(&mut runner, 501));
+
+        // print fails entirely (never loaded) → not the alive-but-dead case.
+        runner.set("launchctl print", false, "", "Could not find service");
+        assert!(!daemon_alive_but_socket_dead(&mut runner, 501));
+    }
+
+    /// End-to-end: launchd reports a live pid but the socket never answers
+    /// within budget, so autostart must recover (bootout → remove stale socket
+    /// → enable → bootstrap), then the socket comes up → `Started`.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn autostart_recovers_alive_but_socket_dead_daemon() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = fake_app_exe(tmp.path());
+        let bundled = exe
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("Resources")
+            .join(PLIST_FILENAME);
+        let mut fs = TempFs::new(tmp.path().join("home"));
+        fs.seed(bundled, SAMPLE_PLIST.into());
+
+        let mut runner = MockRunner::with_default_uid();
+        // launchd consistently reports the daemon as a live process (pid set).
+        runner.set(
+            "launchctl print",
+            true,
+            "com.copypaste.daemon = {\n\tpid = 31989\n}",
+            "",
+        );
+
+        // Socket stays dead through: 1 (step-1 ping) + 30 (retry loop) + 1
+        // (long-tail) = 32 probes, then comes alive on the first recovery
+        // re-probe (call index 32).
+        let env = FakeEnv::alive_after(exe, 32);
+
+        let status = ensure_daemon_running_inner(&mut runner, &mut fs, &env)
+            .expect("autostart must not error on the alive-but-dead recovery path");
+
+        assert!(
+            matches!(status, DaemonStatus::Started),
+            "expected Started after alive-but-dead recovery, got {status:?}"
+        );
+
+        // The stale socket file removal must have been attempted during recovery.
+        assert!(
+            env.removed_count() >= 1,
+            "recovery must remove the stale socket at least once, got {}",
+            env.removed_count()
+        );
+
+        // A recovery bootout must have run, followed by a fresh bootstrap.
+        let bootout_count = runner
+            .calls
+            .iter()
+            .filter(|(prog, args)| prog == "launchctl" && args[0] == "bootout")
+            .count();
+        let bootstrap_count = runner
+            .calls
+            .iter()
+            .filter(|(prog, args)| prog == "launchctl" && args[0] == "bootstrap")
+            .count();
+        assert!(
+            bootout_count >= 1,
+            "recovery must bootout the wedged daemon, got {bootout_count}"
+        );
+        assert!(
+            bootstrap_count >= 2,
+            "recovery must issue a fresh bootstrap after the initial one, got {bootstrap_count}"
+        );
+    }
+
+    /// If recovery's re-bootstrap itself hard-fails, the user gets an
+    /// actionable `FailedToStart` rather than a silent hang.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn autostart_recovery_surfaces_failure_when_rebootstrap_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = fake_app_exe(tmp.path());
+        let bundled = exe
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("Resources")
+            .join(PLIST_FILENAME);
+        let mut fs = TempFs::new(tmp.path().join("home"));
+        fs.seed(bundled, SAMPLE_PLIST.into());
+
+        let mut runner = MockRunner::with_default_uid();
+        runner.set(
+            "launchctl print",
+            true,
+            "com.copypaste.daemon = {\n\tpid = 31989\n}",
+            "",
+        );
+        // Every bootstrap fails hard with error 5 — both the initial and the
+        // recovery one. Recovery must surface FailedToStart.
+        runner.set(
+            "launchctl bootstrap",
+            false,
+            "",
+            "Bootstrap failed: 5: Input/output error",
+        );
+        let env = FakeEnv::never_alive(exe);
+
+        let status = ensure_daemon_running_inner(&mut runner, &mut fs, &env).unwrap();
+        match status {
+            DaemonStatus::FailedToStart(msg) => {
+                assert!(
+                    msg.contains("disabled") || msg.contains("launchctl enable"),
+                    "expected actionable error-5 hint after recovery, got: {msg}"
+                );
+            }
+            other => {
+                panic!("expected FailedToStart after recovery bootstrap failure, got {other:?}")
+            }
+        }
     }
 }
