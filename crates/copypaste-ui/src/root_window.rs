@@ -650,6 +650,16 @@ impl RootWindowHandle {
         let _ = self.window.show();
     }
 
+    /// Show the window and run the Slint event loop until the loop is quit.
+    ///
+    /// This is the primary-window entry point: `main()` calls it once the
+    /// window + tray + background workers are wired, and it blocks for the
+    /// lifetime of the process (returning only when `slint::quit_event_loop`
+    /// fires, e.g. from the tray "Quit" item).
+    pub fn run(&self) -> Result<(), slint::PlatformError> {
+        self.window.run()
+    }
+
     /// Hide the window without destroying it.
     pub fn hide(&self) {
         let _ = self.window.hide();
