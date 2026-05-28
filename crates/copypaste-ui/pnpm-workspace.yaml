@@ -1,3 +1,10 @@
+# pnpm 9 (used by CI via pnpm/action-setup@v4 version: '9') treats the presence
+# of this file as a workspace root and REQUIRES a non-empty `packages:` field,
+# failing with "ERROR packages field missing or empty" otherwise. copypaste-ui is
+# a single Tauri app (not a monorepo), so the root `.` is the only entry. An empty
+# list ([]) is still rejected as "empty", so list the root package explicitly.
+packages:
+  - .
 allowBuilds:
   esbuild: true
 onlyBuiltDependencies:
