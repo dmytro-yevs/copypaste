@@ -20,6 +20,10 @@ tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1"
 # mDNS-SD service discovery
 mdns-sd.workspace = true
+# Network interface enumeration — used by `interfaces` to filter out
+# loopback/virtual/down NICs before advertising over mDNS (Wave F.L12).
+# Also a transitive dep of mdns-sd, so this pins the same major version.
+if-addrs = "0.15"
 # Async runtime
 tokio = { workspace = true }
 # Crypto for fingerprint
@@ -51,5 +55,3 @@ tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
 # Required for SinkExt on Framed streams in disconnect tests
 futures-util = { workspace = true, features = ["sink"] }
-# Network interface enumeration for network_scan tests (already transitive via mdns-sd).
-if-addrs = "0.15"

@@ -249,7 +249,7 @@ mod tests {
     #[test]
     fn empty_expected_fingerprint_is_rejected() {
         let cert = SelfSignedCert::generate("test-device").unwrap();
-        let mut peers = PairedPeers::new();
+        let peers = PairedPeers::new();
         // Register the cert's real fingerprint so the peers check would pass…
         peers.add(cert.fingerprint(), "test-device");
 
@@ -271,7 +271,7 @@ mod tests {
         let cert_a = SelfSignedCert::generate("device-a").unwrap();
         let cert_b = SelfSignedCert::generate("device-b").unwrap();
 
-        let mut peers = PairedPeers::new();
+        let peers = PairedPeers::new();
         peers.add(cert_a.fingerprint(), "device-a");
         peers.add(cert_b.fingerprint(), "device-b");
 
@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn correct_fingerprint_is_accepted() {
         let cert = SelfSignedCert::generate("device-ok").unwrap();
-        let mut peers = PairedPeers::new();
+        let peers = PairedPeers::new();
         peers.add(cert.fingerprint(), "device-ok");
 
         let verifier = PeerCertVerifier::new_with_expected(Arc::new(peers), &cert.fingerprint());

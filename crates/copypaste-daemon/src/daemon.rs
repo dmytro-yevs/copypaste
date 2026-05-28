@@ -146,6 +146,19 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // This is set/cleared via the IPC `set_private_mode` command.
     let private_mode = Arc::new(AtomicBool::new(false));
 
+    // fix/p2p-c-review #2: when P2P is enabled, the IPC PAKE handlers and the
+    // mTLS transport must share ONE live `PairedPeers` allowlist so a peer
+    // paired at runtime is accepted by the accept loop without a restart.
+    // Create it here (before both the IPC task and `start_p2p`) and hand each a
+    // clone; `PairedPeers` is interior-mutable, so clones observe one another.
+    // `None` when P2P is disabled — IPC pairing then only persists to peers.json.
+    let p2p_enabled = std::env::var("COPYPASTE_P2P").as_deref() == Ok("1");
+    let p2p_peers: Option<copypaste_p2p::transport::PairedPeers> = if p2p_enabled {
+        Some(copypaste_p2p::transport::PairedPeers::new())
+    } else {
+        None
+    };
+
     #[cfg(unix)]
     let socket_path = paths::socket_path();
     // D2 (IPC): pass a token clone so the accept loop exits on shutdown.
@@ -157,8 +170,13 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         let ipc_device_pub = device_public_key_arc.clone();
         let socket_clone = socket_path.clone();
         let ipc_shutdown = shutdown_token.clone();
+        let ipc_peers = p2p_peers.clone();
         tokio::spawn(async move {
-            let server = IpcServer::new(ipc_db, ipc_private_mode, ipc_local_key, ipc_device_pub);
+            let mut server =
+                IpcServer::new(ipc_db, ipc_private_mode, ipc_local_key, ipc_device_pub);
+            if let Some(peers) = ipc_peers {
+                server = server.with_p2p_peers(peers);
+            }
             if let Err(e) = server.serve(&socket_clone, ipc_shutdown).await {
                 tracing::error!("IPC server error: {e}");
             }
@@ -178,51 +196,69 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // hold the receivers, not this file.
     let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(256);
 
+    // Beta W2.2 (arch-1): create sync orchestrator channels up-front so they
+    // can be wired into the P2P subsystem below.
+    //
+    // W2.2: `sync_outbound_rx` is owned by the P2P accept/fanout tasks; items
+    // produced locally flow: sync_orch → sync_outbound_tx → sync_outbound_rx →
+    // P2P outbound_loop → connected peers. Items received from peers flow:
+    // P2P accept_loop → sync_incoming_tx → sync_incoming_rx → sync_orch.
+    let (sync_outbound_tx, sync_outbound_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
+    let (sync_incoming_tx, sync_incoming_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
+
     // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
-    let _p2p_handle: Option<p2p::P2pHandle> =
-        if std::env::var("COPYPASTE_P2P").as_deref() == Ok("1") {
-            // Persistent device_id: regenerating on every restart would break P2P
-            // pairing and cloud peer recognition (arch LOW #24). Read from disk,
-            // creating + writing a fresh UUID v4 on first run.
-            let device_id = match load_or_create_device_id() {
-                Ok(id) => id,
-                Err(e) => {
-                    tracing::warn!("device_id load/create failed ({e}); using ephemeral UUID");
-                    uuid::Uuid::new_v4()
-                }
-            };
-            let device_name = std::env::var("HOSTNAME")
-                .or_else(|_| std::env::var("COMPUTERNAME"))
-                .unwrap_or_else(|_| "CopyPaste".to_string());
-
-            let p2p_config = p2p::P2pConfig {
-                listen_port: 0,
-                device_name,
-                enabled: true,
-            };
-
-            match p2p::start_p2p(
-                p2p_config,
-                db.clone(),
-                device_id,
-                (*local_key_arc).clone(),
-                new_item_tx.subscribe(),
-            )
-            .await
-            {
-                Ok(handle) => {
-                    tracing::info!(port = handle.actual_port, "P2P subsystem running");
-                    Some(handle)
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to start P2P subsystem: {e}");
-                    None
-                }
+    let _p2p_handle: Option<p2p::P2pHandle> = if let Some(p2p_peers) = p2p_peers {
+        // Persistent device_id: regenerating on every restart would break P2P
+        // pairing and cloud peer recognition (arch LOW #24). Read from disk,
+        // creating + writing a fresh UUID v4 on first run.
+        let device_id = match load_or_create_device_id() {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!("device_id load/create failed ({e}); using ephemeral UUID");
+                uuid::Uuid::new_v4()
             }
-        } else {
-            tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
-            None
         };
+        let device_name = std::env::var("HOSTNAME")
+            .or_else(|_| std::env::var("COMPUTERNAME"))
+            .unwrap_or_else(|_| "CopyPaste".to_string());
+
+        let p2p_config = p2p::P2pConfig {
+            listen_port: 0,
+            device_name,
+            enabled: true,
+        };
+
+        // Hand the SAME live allowlist already shared with the IPC server
+        // (fix/p2p-c-review #2). `start_p2p` seeds it from peers.json.
+        match p2p::start_p2p(
+            p2p_config,
+            db.clone(),
+            device_id,
+            (*local_key_arc).clone(),
+            p2p_peers,
+            new_item_tx.subscribe(),
+            sync_incoming_tx.clone(),
+            sync_outbound_rx,
+        )
+        .await
+        {
+            Ok(handle) => {
+                tracing::info!(port = handle.actual_port, "P2P subsystem running");
+                Some(handle)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to start P2P subsystem: {e}");
+                None
+            }
+        }
+    } else {
+        tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
+        // Drop sync_outbound_rx — no consumer. sync_orch will log debug
+        // on each outbound send (harmless: closed receiver just means no
+        // peers are connected).
+        drop(sync_outbound_rx);
+        None
+    };
 
     // Beta W2.2 (arch-1): start the sync orchestrator.
     //
@@ -231,12 +267,6 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // is disabled — because the inbound side may still receive items from the
     // cloud-sync path once that worker (W2.3) wires its incoming sender in.
     //
-    // For now the outbound side has no live consumer (the P2P subsystem still
-    // owns its own subscriber loop, see `p2p::subscriber_loop`). Sending into
-    // a channel whose receiver is dropped is harmless: `outbound_tx.send`
-    // returns `Err`, which the orchestrator logs at debug and continues.
-    let (sync_outbound_tx, _sync_outbound_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
-    let (_sync_incoming_tx, sync_incoming_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
     // Persistent sync_device_id (audit HIGH #13).
     //
     // Previously this was `Uuid::new_v4().to_string()` on every startup,
@@ -274,13 +304,10 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             tracing::warn!("sync orchestrator exited with error: {e}");
         }
     });
-    // Keep the local channel endpoints alive across shutdown — dropping the
-    // inbound sender would close the orchestrator's incoming side prematurely,
-    // and dropping the outbound receiver would cause every local item to log
-    // a debug message. The transport worker will own its own clones once
-    // integration lands.
-    let _keep_alive_sync_incoming = _sync_incoming_tx;
-    let _keep_alive_sync_outbound = _sync_outbound_rx;
+    // Keep the incoming sender alive so the P2P accept loop can always push
+    // received items into sync_orch even after the P2P handle has been taken.
+    // Dropping this would close sync_orch's incoming side prematurely.
+    let _keep_alive_sync_incoming = sync_incoming_tx;
 
     // Start optional cloud-sync if credentials are present.
     #[cfg(feature = "cloud-sync")]

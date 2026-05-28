@@ -25,7 +25,12 @@ copypaste-sync = { path = "../copypaste-sync" }
 tokio.workspace = true
 # D1-D5 graceful shutdown: CancellationToken coordinates across IPC/sync/P2P tasks.
 # Already a transitive dep (0.7.x) — pinned here so the feature set is explicit.
-tokio-util = { version = "0.7", features = ["rt"] }
+tokio-util = { version = "0.7", features = ["rt", "codec"] }
+# W2.2: SinkExt / StreamExt for the Framed P2P read/write loops.
+# `sink` feature required for SinkExt (send()) on Framed streams.
+futures-util = { version = "0.3", features = ["sink"] }
+# W2.2: Bytes payload from LengthDelimitedCodec.
+bytes = "1"
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

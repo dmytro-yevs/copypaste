@@ -20,8 +20,8 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, ServerConfig};
@@ -54,14 +54,57 @@ use crate::verifier::PeerCertVerifier;
 /// encoded as lowercase hex.
 pub type DeviceFingerprint = String;
 
+/// Default window during which a peer's *previous* certificate fingerprint is
+/// still accepted after a rotation (S10 — cert rotation race). Sized to
+/// comfortably cover an in-flight handshake plus `connect_with_retry`'s full
+/// retry budget; short enough that a revoked/rotated cert is not honoured for
+/// long. See [`PairedPeers::rotate_peer`].
+pub const CERT_ROTATION_GRACE: Duration = Duration::from_secs(60);
+
+/// A peer fingerprint that has been superseded by a rotation but is still
+/// accepted until `expires_at` to avoid the cert-rotation race (S10).
+#[derive(Clone, Debug)]
+struct SupersededFingerprint {
+    display_name: String,
+    expires_at: Instant,
+}
+
+/// Inner, lock-guarded state of [`PairedPeers`].
+#[derive(Default, Debug)]
+struct PairedPeersInner {
+    /// Current (active) fingerprints → display name.
+    inner: HashMap<DeviceFingerprint, String>,
+    /// Recently-rotated-away fingerprints, accepted until their grace expiry.
+    superseded: HashMap<DeviceFingerprint, SupersededFingerprint>,
+}
+
 /// Map of known paired peers: their fingerprint → optional display name.
 ///
 /// Before the TLS handshake, the transport checks that the peer's certificate
 /// fingerprint is in this map. Connections from unknown fingerprints are
 /// rejected.
+///
+/// # Interior mutability (fix/p2p-c-review #2)
+///
+/// The allowlist is wrapped in an `Arc<RwLock<…>>` so a single `PairedPeers`
+/// handle can be shared (via `clone()`) between the long-running mTLS transport
+/// (which only reads, via [`is_known`](Self::is_known)) and the IPC pairing
+/// handlers (which mutate it via [`add`](Self::add) /
+/// [`rotate_peer`](Self::rotate_peer) when a PAKE handshake finishes). All
+/// mutators therefore take `&self`; clones observe one another's updates.
+///
+/// # Cert rotation (S10)
+///
+/// When a peer rotates its certificate, the new fingerprint is unknown to us
+/// until we learn it out-of-band. Meanwhile any TLS handshake already in flight
+/// (or retried by [`PeerTransport::connect_with_retry`]) still presents the
+/// *old* cert. To close that race, [`rotate_peer`](Self::rotate_peer) installs
+/// the new fingerprint as current while keeping the previous one valid for a
+/// bounded grace window ([`CERT_ROTATION_GRACE`]). [`is_known`](Self::is_known)
+/// accepts either, transparently expiring stale superseded fingerprints.
 #[derive(Clone, Default, Debug)]
 pub struct PairedPeers {
-    inner: HashMap<DeviceFingerprint, String>,
+    state: Arc<RwLock<PairedPeersInner>>,
 }
 
 impl PairedPeers {
@@ -70,13 +113,130 @@ impl PairedPeers {
     }
 
     /// Register a paired peer. `fingerprint` is hex(SHA-256(cert_der)).
-    pub fn add(&mut self, fingerprint: impl Into<String>, display_name: impl Into<String>) {
-        self.inner.insert(fingerprint.into(), display_name.into());
+    pub fn add(&self, fingerprint: impl Into<String>, display_name: impl Into<String>) {
+        // A poisoned lock means another thread panicked mid-mutation; recover
+        // the guard and continue — the allowlist is plain data, not an
+        // invariant-bearing structure, so reading through poison is safe.
+        let mut state = self.state.write().unwrap_or_else(|e| e.into_inner());
+        state.inner.insert(fingerprint.into(), display_name.into());
+    }
+
+    /// Atomically rotate a peer from `old_fingerprint` to `new_fingerprint`.
+    ///
+    /// The new fingerprint becomes the active identity immediately, while the
+    /// old fingerprint stays accepted for [`CERT_ROTATION_GRACE`] so an
+    /// in-flight handshake (or a `connect_with_retry` attempt) that still
+    /// presents the previous certificate does not fail spuriously (S10).
+    ///
+    /// The display name is carried over from the old entry when present, else
+    /// from `display_name`. If `old_fingerprint` is not currently known this is
+    /// equivalent to [`add`](Self::add) for the new fingerprint (no superseded
+    /// entry is created — there is nothing to grace).
+    pub fn rotate_peer(
+        &self,
+        old_fingerprint: &str,
+        new_fingerprint: impl Into<String>,
+        display_name: impl Into<String>,
+    ) {
+        self.rotate_peer_at(
+            old_fingerprint,
+            new_fingerprint,
+            display_name,
+            Instant::now(),
+        )
+    }
+
+    /// Test/seam variant of [`rotate_peer`](Self::rotate_peer) that takes an
+    /// explicit `now` so grace-window expiry can be exercised deterministically.
+    fn rotate_peer_at(
+        &self,
+        old_fingerprint: &str,
+        new_fingerprint: impl Into<String>,
+        display_name: impl Into<String>,
+        now: Instant,
+    ) {
+        let new_fp = new_fingerprint.into();
+        let mut state = self.state.write().unwrap_or_else(|e| e.into_inner());
+        // Remember whether we actually knew the old fingerprint: only a
+        // previously-known fingerprint is worth gracing (there is nothing to
+        // race against if we never accepted it in the first place).
+        let previous_name = state.inner.remove(old_fingerprint);
+        let name = previous_name.clone().unwrap_or_else(|| display_name.into());
+
+        // Grace the old fingerprint only when (a) we actually knew it, (b) it is
+        // non-empty, and (c) it is not the same as the new active fingerprint.
+        if previous_name.is_some() && !old_fingerprint.is_empty() && old_fingerprint != new_fp {
+            state.superseded.insert(
+                old_fingerprint.to_owned(),
+                SupersededFingerprint {
+                    display_name: name.clone(),
+                    expires_at: now + CERT_ROTATION_GRACE,
+                },
+            );
+        }
+
+        state.inner.insert(new_fp, name);
     }
 
     /// Returns `true` if `fingerprint` belongs to a known paired peer.
+    ///
+    /// Accepts both active fingerprints and superseded ones still within their
+    /// rotation grace window (S10). Expired superseded fingerprints are treated
+    /// as unknown (and lazily pruned via [`prune_expired`](Self::prune_expired)).
     pub fn is_known(&self, fingerprint: &str) -> bool {
-        self.inner.contains_key(fingerprint)
+        self.is_known_at(fingerprint, Instant::now())
+    }
+
+    /// Test/seam variant of [`is_known`](Self::is_known) with an explicit clock.
+    fn is_known_at(&self, fingerprint: &str, now: Instant) -> bool {
+        let state = self.state.read().unwrap_or_else(|e| e.into_inner());
+        if state.inner.contains_key(fingerprint) {
+            return true;
+        }
+        state
+            .superseded
+            .get(fingerprint)
+            .is_some_and(|s| s.expires_at > now)
+    }
+
+    /// Drop any superseded fingerprints whose grace window has elapsed.
+    ///
+    /// Called opportunistically; correctness does not depend on it because
+    /// [`is_known`](Self::is_known) already enforces expiry, but pruning keeps
+    /// the map from growing across many rotations.
+    pub fn prune_expired(&self) {
+        let now = Instant::now();
+        let mut state = self.state.write().unwrap_or_else(|e| e.into_inner());
+        state.superseded.retain(|_, s| s.expires_at > now);
+    }
+
+    /// Number of fingerprints currently in the rotation grace window.
+    /// Exposed for tests and diagnostics.
+    pub fn superseded_count(&self) -> usize {
+        let state = self.state.read().unwrap_or_else(|e| e.into_inner());
+        state.superseded.len()
+    }
+
+    /// Number of active (non-superseded) paired fingerprints.
+    /// Exposed for tests and diagnostics (e.g. confirming `peers.json` loaded).
+    pub fn active_count(&self) -> usize {
+        let state = self.state.read().unwrap_or_else(|e| e.into_inner());
+        state.inner.len()
+    }
+
+    /// Display name associated with a fingerprint, whether it is an active or a
+    /// still-graced superseded fingerprint. Returns `None` for unknown/expired
+    /// fingerprints. Used by diagnostics/UI that surface in-flight rotations.
+    pub fn display_name_for(&self, fingerprint: &str) -> Option<String> {
+        let state = self.state.read().unwrap_or_else(|e| e.into_inner());
+        if let Some(name) = state.inner.get(fingerprint) {
+            return Some(name.clone());
+        }
+        state
+            .superseded
+            .get(fingerprint)
+            .filter(|s| s.expires_at > Instant::now())
+            .map(|s| s.display_name.clone())
     }
 }
 
@@ -158,12 +318,17 @@ impl PeerTransport {
 
     /// Bind a TCP listener on `addr` and wait for one incoming mutual-TLS connection.
     ///
-    /// On success, returns the remote `SocketAddr` and a framed stream ready for
-    /// message exchange.
+    /// On success, returns the remote `SocketAddr`, the verified peer
+    /// certificate fingerprint, and a framed stream ready for message exchange.
+    ///
+    /// The fingerprint is the stable device identity (independent of the
+    /// peer's ephemeral source port) — callers key per-peer connection state by
+    /// it so a reconnect from a new port replaces, rather than duplicates, the
+    /// previous connection (fix/p2p-c-review #4).
     pub async fn accept(
         &self,
         listener: &TcpListener,
-    ) -> Result<(SocketAddr, PeerStream), TransportError> {
+    ) -> Result<(SocketAddr, DeviceFingerprint, PeerStream), TransportError> {
         let server_config = self.build_server_config()?;
         let acceptor = TlsAcceptor::from(Arc::new(server_config));
 
@@ -193,7 +358,7 @@ impl PeerTransport {
         tracing::info!(peer_addr = %peer_addr, peer_fingerprint = %peer_fp, "peer authenticated");
 
         let framed = Framed::new(tls_stream, LengthDelimitedCodec::new());
-        Ok((peer_addr, framed))
+        Ok((peer_addr, peer_fp, framed))
     }
 
     /// Connect to a peer at `addr` using mutual TLS.
@@ -457,6 +622,126 @@ mod tests {
     use super::*;
     use tokio::net::TcpListener;
 
+    // ── S10: cert rotation race — grace-period dual-fingerprint acceptance ───
+
+    #[test]
+    fn rotate_peer_accepts_both_old_and_new_during_grace() {
+        let peers = PairedPeers::new();
+        peers.add("old_fp", "Alice's Mac");
+        assert!(peers.is_known("old_fp"));
+
+        peers.rotate_peer("old_fp", "new_fp", "Alice's Mac");
+
+        // New fingerprint is active; old one is still graced.
+        assert!(peers.is_known("new_fp"), "rotated-to fp must be active");
+        assert!(
+            peers.is_known("old_fp"),
+            "previous fp must stay valid during the grace window (S10)"
+        );
+        assert_eq!(peers.superseded_count(), 1);
+    }
+
+    #[test]
+    fn rotate_peer_old_fingerprint_rejected_after_grace_expires() {
+        let peers = PairedPeers::new();
+        peers.add("old_fp", "Alice's Mac");
+
+        // Rotate at a fixed instant in the past so the grace window is already
+        // over by `now`.
+        let past = Instant::now() - (CERT_ROTATION_GRACE + Duration::from_secs(1));
+        peers.rotate_peer_at("old_fp", "new_fp", "Alice's Mac", past);
+
+        assert!(peers.is_known("new_fp"), "new fp always valid");
+        assert!(
+            !peers.is_known("old_fp"),
+            "old fp must be rejected once the grace window elapses (S10)"
+        );
+    }
+
+    #[test]
+    fn is_known_at_honours_explicit_clock() {
+        let peers = PairedPeers::new();
+        peers.add("old_fp", "dev");
+        let t0 = Instant::now();
+        peers.rotate_peer_at("old_fp", "new_fp", "dev", t0);
+
+        // Just inside the window: old fp accepted.
+        let inside = t0 + CERT_ROTATION_GRACE - Duration::from_secs(1);
+        assert!(peers.is_known_at("old_fp", inside));
+
+        // Just past the window: old fp rejected.
+        let outside = t0 + CERT_ROTATION_GRACE + Duration::from_secs(1);
+        assert!(!peers.is_known_at("old_fp", outside));
+        assert!(peers.is_known_at("new_fp", outside));
+    }
+
+    #[test]
+    fn rotate_peer_carries_over_display_name() {
+        let peers = PairedPeers::new();
+        peers.add("old_fp", "Bob's Laptop");
+        peers.rotate_peer("old_fp", "new_fp", "ignored-when-old-known");
+        assert_eq!(
+            peers.display_name_for("new_fp").as_deref(),
+            Some("Bob's Laptop")
+        );
+        assert_eq!(
+            peers.display_name_for("old_fp").as_deref(),
+            Some("Bob's Laptop")
+        );
+    }
+
+    #[test]
+    fn rotate_peer_with_unknown_old_fp_just_adds_new() {
+        let peers = PairedPeers::new();
+        // No prior `add` for "old_fp".
+        peers.rotate_peer("old_fp", "new_fp", "Carol");
+        assert!(peers.is_known("new_fp"));
+        assert!(
+            !peers.is_known("old_fp"),
+            "an unknown old fp must not be graced — nothing to grace"
+        );
+        assert_eq!(peers.superseded_count(), 0);
+    }
+
+    #[test]
+    fn prune_expired_drops_only_stale_superseded() {
+        let peers = PairedPeers::new();
+        peers.add("a", "dev");
+        // Expired rotation.
+        peers.rotate_peer_at(
+            "a",
+            "b",
+            "dev",
+            Instant::now() - (CERT_ROTATION_GRACE + Duration::from_secs(5)),
+        );
+        // Fresh rotation away from the now-current "b".
+        peers.rotate_peer("b", "c", "dev");
+
+        assert_eq!(peers.superseded_count(), 2, "two superseded before prune");
+        peers.prune_expired();
+        assert_eq!(
+            peers.superseded_count(),
+            1,
+            "stale entry pruned, fresh kept"
+        );
+        assert!(peers.is_known("c"));
+        assert!(peers.is_known("b"), "freshly-superseded still graced");
+        assert!(!peers.is_known("a"), "long-expired stays rejected");
+    }
+
+    #[test]
+    fn rotation_into_same_fingerprint_creates_no_superseded() {
+        let peers = PairedPeers::new();
+        peers.add("fp", "dev");
+        peers.rotate_peer("fp", "fp", "dev");
+        assert!(peers.is_known("fp"));
+        assert_eq!(
+            peers.superseded_count(),
+            0,
+            "rotating to the same fp must not grace it against itself"
+        );
+    }
+
     /// Spin up a server and client in-process over TCP loopback, perform a
     /// mutual-TLS handshake, and verify both sides get a usable stream.
     #[tokio::test]
@@ -469,10 +754,10 @@ mod tests {
         let client_fp = client_cert.fingerprint();
 
         // Server knows the client; client knows the server.
-        let mut server_peers = PairedPeers::new();
+        let server_peers = PairedPeers::new();
         server_peers.add(client_fp.clone(), "client-device");
 
-        let mut client_peers = PairedPeers::new();
+        let client_peers = PairedPeers::new();
         client_peers.add(server_fp.clone(), "server-device");
 
         let server_transport =
@@ -490,7 +775,8 @@ mod tests {
 
         let (server_result, client_result) = tokio::join!(server_fut, client_fut);
 
-        let (_peer_addr, _server_stream) = server_result.expect("server accept must succeed");
+        let (_peer_addr, _peer_fp, _server_stream) =
+            server_result.expect("server accept must succeed");
         let _client_stream = client_result.expect("client connect must succeed");
     }
 
@@ -506,7 +792,7 @@ mod tests {
         let server_peers = PairedPeers::new();
 
         // Client pretends to know the server, but the server won't accept the client.
-        let mut client_peers = PairedPeers::new();
+        let client_peers = PairedPeers::new();
         client_peers.add(server_fp.clone(), "server-device");
 
         let server_transport =
@@ -541,7 +827,7 @@ mod tests {
         // Use a bogus expected fingerprint — verifier never runs because the
         // handshake stalls long before any cert is received.
         let bogus_fp = "0".repeat(64);
-        let mut client_peers = PairedPeers::new();
+        let client_peers = PairedPeers::new();
         client_peers.add(bogus_fp.clone(), "dead-peer");
 
         let client_transport =
@@ -638,7 +924,7 @@ mod tests {
 
         let client_cert = SelfSignedCert::generate("client-device").unwrap();
         let bogus_fp = "0".repeat(64);
-        let mut client_peers = PairedPeers::new();
+        let client_peers = PairedPeers::new();
         client_peers.add(bogus_fp.clone(), "dead-peer");
 
         let client_transport =
@@ -654,11 +940,21 @@ mod tests {
         let (result, _) = tokio::join!(connect_fut, advance_fut);
 
         let err = result.expect_err("must fail after exhausting retries");
-        // The final surfaced error must still be transient — meaning we did
-        // genuinely exhaust the retry budget on a transient kind.
+        // The final surfaced error must be a *non-permanent* failure — proof we
+        // exhausted the retry budget on a recoverable condition rather than
+        // short-circuiting on a permanent rejection (contrast with the
+        // `_does_not_retry_permanent_errors` test below).
+        //
+        // The expected condition is a transient I/O error (ECONNREFUSED on the
+        // just-released port). On some hosts the released ephemeral port is
+        // not refused at the TCP layer — the connect succeeds and the absent
+        // peer never finishes the TLS handshake — surfacing as
+        // `HandshakeTimeout`. Both outcomes are non-permanent and demonstrate
+        // the same retry-exhaustion behaviour, so accept either to keep the
+        // test deterministic across platforms.
         assert!(
-            is_transient_transport_error(&err),
-            "expected a transient I/O error to surface, got {:?}",
+            is_transient_transport_error(&err) || matches!(err, TransportError::HandshakeTimeout),
+            "expected a non-permanent failure after exhausting retries, got {:?}",
             err
         );
     }
@@ -684,9 +980,9 @@ mod tests {
         let real_server_fp = real_server_cert.fingerprint();
         let client_fp = client_cert.fingerprint();
 
-        let mut rogue_server_peers = PairedPeers::new();
+        let rogue_server_peers = PairedPeers::new();
         rogue_server_peers.add(client_fp.clone(), "client-device");
-        let mut client_peers = PairedPeers::new();
+        let client_peers = PairedPeers::new();
         client_peers.add(real_server_fp.clone(), "real-server");
 
         let rogue_transport = PeerTransport::from_cert(
@@ -736,10 +1032,10 @@ mod tests {
         // The rogue server happens to know the client (so the server-side
         // ClientCertVerifier would pass), but the client has only ever paired
         // with `real_server_fp` — never with `rogue_server_fp`.
-        let mut rogue_server_peers = PairedPeers::new();
+        let rogue_server_peers = PairedPeers::new();
         rogue_server_peers.add(client_fp.clone(), "client-device");
 
-        let mut client_peers = PairedPeers::new();
+        let client_peers = PairedPeers::new();
         client_peers.add(real_server_fp.clone(), "real-server");
 
         let rogue_transport = PeerTransport::from_cert(

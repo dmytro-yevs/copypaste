@@ -7,13 +7,20 @@
 use std::path::Path;
 
 /// A device that has been paired with this instance.
+///
+/// `name` / `added_at` are `#[serde(default)]` so this type can also parse the
+/// leaner records written by the IPC PAKE pairing handlers
+/// (`{"fingerprint":…, "added_at":…}`, sometimes `"password_file_b64"`), which
+/// omit a display name. Unknown fields (e.g. `password_file_b64`) are ignored.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct PairedDevice {
     /// SHA-256 fingerprint of the peer's TLS certificate, lowercase hex.
     pub fingerprint: String,
     /// Human-readable display name of the device.
+    #[serde(default)]
     pub name: String,
     /// Unix timestamp (seconds) when this device was paired.
+    #[serde(default)]
     pub added_at: i64,
 }
 
