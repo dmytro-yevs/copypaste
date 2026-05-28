@@ -22,7 +22,7 @@ case "$CMD" in
     echo "Installing and starting daemon..."
     cd "$(dirname "$0")/.." && bash launch/install.sh ;;
   daemon-logs)
-    tail -f /tmp/copypaste-daemon.log ;;
+    tail -f "$HOME/Library/Logs/CopyPaste/daemon.out.log" "$HOME/Library/Logs/CopyPaste/daemon.err.log" ;;
   daemon-status)
     echo '{"id":"1","method":"status"}' | nc -U ~/Library/Application\ Support/CopyPaste/daemon.sock 2>/dev/null || echo "daemon not running" ;;
   list)

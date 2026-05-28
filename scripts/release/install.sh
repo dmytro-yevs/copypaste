@@ -82,11 +82,17 @@ hdiutil detach "$MOUNT_POINT" -quiet
 trap - EXIT
 rm -rf "$TMP"
 
-# Optional: load launchd agent if user already has one configured.
+# Optional: (re)load launchd agent if user already has one configured.
+# Use the modern bootout → enable → bootstrap flow. We deliberately avoid
+# `launchctl unload -w` / `load -w`: the `-w` flag writes a *persistent
+# disable override* that prevents the daemon from ever restarting (the v0.4
+# startup bug). `enable` is idempotent and clears any pre-existing override.
 if [[ -f "$LAUNCH_AGENT" ]]; then
-    echo "==> Loading launchd agent at $LAUNCH_AGENT"
-    launchctl unload -w "$LAUNCH_AGENT" 2>/dev/null || true
-    launchctl load   -w "$LAUNCH_AGENT" 2>/dev/null || true
+    echo "==> (Re)loading launchd agent at $LAUNCH_AGENT"
+    UID_NUM="$(id -u)"
+    launchctl bootout "gui/${UID_NUM}/com.copypaste.daemon" 2>/dev/null || true
+    launchctl enable "gui/${UID_NUM}/com.copypaste.daemon" 2>/dev/null || true
+    launchctl bootstrap "gui/${UID_NUM}" "$LAUNCH_AGENT" 2>/dev/null || true
 else
     echo "==> No launchd agent at $LAUNCH_AGENT (skipping autostart wiring)"
     echo "    To enable autostart later, run: copypaste daemon install"

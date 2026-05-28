@@ -56,11 +56,15 @@ if launchctl print "gui/${UID_NUM}/${LABEL}" >/dev/null 2>&1; then
     launchctl bootout "gui/${UID_NUM}/${LABEL}" 2>/dev/null || true
 fi
 
+# Clear any persistent disabled override BEFORE bootstrap. A prior
+# `launchctl unload -w` / `disable` (or even a plain `bootout`) can leave the
+# label on launchd's per-user disabled list, which makes `bootstrap` fail with
+# "Bootstrap failed: 5: Input/output error". `enable` is idempotent.
+echo "==> enabling agent (clearing any disabled override)"
+launchctl enable "gui/${UID_NUM}/${LABEL}"
+
 echo "==> bootstrapping agent into gui/${UID_NUM}"
 launchctl bootstrap "gui/${UID_NUM}" "${TARGET_PLIST}"
-
-echo "==> enabling agent"
-launchctl enable "gui/${UID_NUM}/${LABEL}"
 
 echo "==> kickstarting agent"
 launchctl kickstart -k "gui/${UID_NUM}/${LABEL}"

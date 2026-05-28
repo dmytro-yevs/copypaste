@@ -9,9 +9,12 @@
 //! 2. Surface an [`UpdateStatus`] the UI layer can show as a banner /
 //!    tray-menu badge.
 //! 3. Apply the upgrade on user confirmation via
-//!    `brew upgrade --cask copypaste` followed by `launchctl bootout
-//!    gui/$UID/com.copypaste.daemon` so launchd respawns the daemon from
-//!    the new install.
+//!    `brew upgrade --cask copypaste`, then restart the daemon so the new
+//!    binary is loaded: `launchctl bootout` (tear the old service down) →
+//!    `launchctl enable` (clear any disabled override) → `launchctl
+//!    bootstrap gui/$UID <plist>` (load + RunAtLoad respawns it). `bootout`
+//!    alone is NOT enough — it removes the service and `RunAtLoad` only fires
+//!    on the *next* `bootstrap`, which must be issued explicitly.
 //!
 //! All shell invocations go through the [`CommandRunner`] trait so the unit
 //! tests can drive deterministic mock output without touching the real
@@ -168,12 +171,31 @@ fn parse_outdated_json(stdout: &str) -> UpdateStatus {
     })
 }
 
+/// Path to the per-user LaunchAgent plist that `apply_update` re-bootstraps
+/// after upgrading. Mirrors the install location used by the autostart flow
+/// (`~/Library/LaunchAgents/com.copypaste.daemon.plist`).
+fn user_plist_path() -> Option<std::path::PathBuf> {
+    home::home_dir().map(|h| {
+        h.join("Library/LaunchAgents")
+            .join(format!("{DAEMON_LAUNCHD_LABEL}.plist"))
+    })
+}
+
 /// Apply the update by running `brew upgrade --cask copypaste`, then
-/// asking launchd to boot out the running daemon so it respawns from the
-/// new bundle (launchd's `RunAtLoad=true` plist handles the relaunch).
+/// restarting the daemon so it respawns from the new bundle.
 ///
-/// Returns the upgraded version string on success, or a human-readable
-/// error otherwise.
+/// Restart sequence (the v0.4 in-app-updater fix): `bootout` removes the
+/// running service, but `RunAtLoad=true` only fires on the *next* explicit
+/// `bootstrap` — there is no implicit relaunch. So after `bootout` we must
+/// `enable` (clear any disabled override left behind) and then `bootstrap`
+/// the installed plist back in. Skipping the explicit bootstrap is exactly
+/// what left the daemon down after an in-app update.
+///
+/// Returns `Ok(())` on success, or a human-readable error otherwise. The
+/// launchd restart steps after a successful `brew upgrade` are best-effort:
+/// the upgrade itself succeeded, and the daemon will also come back on the
+/// next app launch via the autostart flow, so we do not fail the whole
+/// update if a single launchctl step reports an error.
 pub fn apply_update(runner: &dyn CommandRunner) -> Result<(), String> {
     // Step 1 — upgrade the cask.
     let upgrade = runner
@@ -193,12 +215,26 @@ pub fn apply_update(runner: &dyn CommandRunner) -> Result<(), String> {
         ));
     }
 
-    // Step 2 — restart the daemon so the new binary is loaded.
-    // We deliberately ignore the bootout exit status: if the daemon was
-    // already gone, that's still a success from the user's POV.
+    // Step 2 — restart the daemon so the new binary is loaded. We ignore the
+    // individual exit statuses (best-effort, see doc comment): if the daemon
+    // was already gone or already loaded, that's still a success from the
+    // user's POV, and the next app launch will reconcile via autostart.
     let uid = nix_uid();
-    let target = format!("gui/{uid}/{DAEMON_LAUNCHD_LABEL}");
+    let domain = format!("gui/{uid}");
+    let target = format!("{domain}/{DAEMON_LAUNCHD_LABEL}");
+
+    // 2a. Tear the old (pre-upgrade) service down.
     let _ = runner.run("launchctl", &["bootout", &target]);
+    // 2b. Clear any disabled override so the bootstrap below isn't rejected
+    //     with error 5 ("Input/output error"). `enable` is idempotent.
+    let _ = runner.run("launchctl", &["enable", &target]);
+    // 2c. Bootstrap the installed plist back in — THIS is what relaunches the
+    //     daemon (RunAtLoad fires on bootstrap). Without it the daemon stays
+    //     down after an in-app update.
+    if let Some(plist) = user_plist_path() {
+        let plist_str = plist.to_string_lossy().into_owned();
+        let _ = runner.run("launchctl", &["bootstrap", &domain, &plist_str]);
+    }
 
     Ok(())
 }
@@ -374,26 +410,60 @@ mod tests {
     }
 
     #[test]
-    fn apply_update_invokes_brew_upgrade_then_bootout() {
+    fn apply_update_invokes_brew_upgrade_then_bootout_enable_bootstrap() {
         let runner = MockRunner::new(vec![
             ok_output(""), // brew upgrade
             ok_output(""), // launchctl bootout
+            ok_output(""), // launchctl enable
+            ok_output(""), // launchctl bootstrap
         ]);
         apply_update(&runner).expect("apply_update succeeds");
 
         let calls = runner.calls();
-        assert_eq!(calls.len(), 2);
+        // brew upgrade + bootout + enable. The trailing bootstrap is emitted
+        // only when $HOME resolves (always true in CI), so allow 3 or 4.
+        assert!(
+            calls.len() == 3 || calls.len() == 4,
+            "expected 3-4 calls (upgrade, bootout, enable, [bootstrap]), got {}: {calls:?}",
+            calls.len()
+        );
+
         assert_eq!(calls[0].0, "brew");
         assert_eq!(calls[0].1, vec!["upgrade", "--cask", "copypaste"]);
+
+        // bootout — tear down the old service.
         assert_eq!(calls[1].0, "launchctl");
-        // launchctl args = ["bootout", "gui/<uid>/com.copypaste.daemon"]
-        assert_eq!(calls[1].1.len(), 2);
         assert_eq!(calls[1].1[0], "bootout");
         assert!(
             calls[1].1[1].starts_with("gui/") && calls[1].1[1].ends_with("/com.copypaste.daemon"),
             "unexpected bootout target: {}",
             calls[1].1[1]
         );
+
+        // enable — clear any disabled override before bootstrap.
+        assert_eq!(calls[2].0, "launchctl");
+        assert_eq!(calls[2].1[0], "enable");
+        assert!(
+            calls[2].1[1].starts_with("gui/") && calls[2].1[1].ends_with("/com.copypaste.daemon"),
+            "unexpected enable target: {}",
+            calls[2].1[1]
+        );
+
+        // bootstrap — the explicit relaunch (this is the v0.4 fix).
+        if let Some(bootstrap) = calls.get(3) {
+            assert_eq!(bootstrap.0, "launchctl");
+            assert_eq!(bootstrap.1[0], "bootstrap");
+            assert!(
+                bootstrap.1[1].starts_with("gui/"),
+                "bootstrap domain must be gui/<uid>, got {}",
+                bootstrap.1[1]
+            );
+            assert!(
+                bootstrap.1[2].ends_with("com.copypaste.daemon.plist"),
+                "bootstrap must target the installed plist, got {}",
+                bootstrap.1[2]
+            );
+        }
     }
 
     #[test]
