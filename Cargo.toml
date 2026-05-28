@@ -10,6 +10,7 @@ members = [
     "crates/copypaste-supabase",
     "crates/copypaste-android",
     "crates/copypaste-ui",
+    "crates/copypaste-ui-snapshot",
     "crates/copypaste-ipc",
     "crates/copypaste-bench",
     "crates/copypaste-telemetry",
