@@ -5,9 +5,8 @@ use crate::{
     p2p, paths,
 };
 use copypaste_core::{
-    build_item_aad_v2, chunks_to_blob, derive_storage_key_v1, derive_v2, detect, encode_image,
-    encrypt_item_with_aad, insert_item_with_fts, AppConfig, ClipboardItem, Database, DeviceKeypair,
-    AAD_SCHEMA_VERSION_V4,
+    build_item_aad_v2, chunks_to_blob, derive_v2, detect, encode_image, encrypt_item_with_aad,
+    insert_item_with_fts, AppConfig, ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION_V4,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -92,11 +91,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // immediately. Mirrors COPYPASTE_NO_AUTO_MIGRATE. The corrupt rows are
         // left untouched (they were already unreadable).
         let force_complete = std::env::var_os("COPYPASTE_FORCE_MIGRATION_COMPLETE").is_some();
-        // Derive both keys from the raw seed once; the seed is the value
-        // stored in the Keychain / returned by load_local_key().
+        // Derive both sweep keys from the seed the same way the read path does
+        // (see `sweep_keys`). The seed is the value stored in the Keychain /
+        // returned by `load_local_key()`, which is ALREADY the v1 storage key
+        // (`DeviceKeypair::local_enc_key`).
         let seed: [u8; 32] = **local_key_arc;
-        let v1_key: [u8; 32] = derive_storage_key_v1(&seed);
-        let v2_key: [u8; 32] = derive_v2(&seed);
+        let (v1_key, v2_key) = sweep_keys(&seed);
         let sweep_db = db.clone();
         match tokio::task::spawn_blocking(move || {
             // Acquire the lock inside the blocking thread so the async
@@ -747,6 +747,29 @@ fn prune_history(db: &Database, config: &AppConfig) {
     }
 }
 
+/// Derive the `(v1_key, v2_key)` pair used by the v4 key-version migration
+/// sweep, from the raw `seed` returned by [`load_local_key`].
+///
+/// **Critical:** `seed` is ALREADY the v1 storage key —
+/// [`load_local_key`] returns `DeviceKeypair::local_enc_key()`, which is
+/// `HKDF-SHA256(secret) == derive_storage_key_v1(secret)`. The read path
+/// (`ipc::write_to_pasteboard`, text branch) therefore decrypts
+/// `key_version = 1` rows with this seed **directly** (`v1_key = **local_key`)
+/// and derives the v2 key as `derive_v2(seed)`. The sweep MUST use the
+/// identical keys, otherwise it cannot decrypt any real legacy v1 row.
+///
+/// A previous version passed `derive_storage_key_v1(seed)` as the v1 key,
+/// double-deriving it (`derive_storage_key_v1(local_enc_key)`). That key never
+/// matched what real v1 rows were encrypted under, so every legacy
+/// `key_version = 1` row failed with an auth-tag mismatch and was never
+/// rotated.
+fn sweep_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+    // v1_key: the seed itself, used directly — exactly as the read path uses
+    //         `**self.local_key` for `key_version = 1` rows.
+    // v2_key: `derive_v2(seed)`, matching the read path's `derive_v2(&v1_key)`.
+    (*seed, derive_v2(seed))
+}
+
 #[tracing::instrument(name = "load_local_key")]
 fn load_local_key() -> zeroize::Zeroizing<[u8; 32]> {
     #[cfg(target_os = "macos")]
@@ -843,7 +866,204 @@ fn load_or_create_device_id() -> anyhow::Result<uuid::Uuid> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use copypaste_core::{decrypt_item_by_version, NONCE_SIZE};
+    use copypaste_core::{
+        build_item_aad, decrypt_item_by_version, encrypt_item_with_aad, Database,
+        AAD_SCHEMA_VERSION, NONCE_SIZE,
+    };
+
+    /// Seed a `key_version = 1` text row encrypted EXACTLY the way real legacy
+    /// rows were written: under the device's v1 storage key — i.e. the seed
+    /// returned by `load_local_key()` used DIRECTLY (`local_enc_key`) — with the
+    /// v3-format AAD `build_item_aad(item_id, 3)`. Returns the row's `id` and
+    /// `item_id` so the caller can read it back.
+    fn seed_real_v1_text_row(
+        db: &Database,
+        v1_key: &[u8; 32],
+        plaintext: &[u8],
+    ) -> (String, String) {
+        let row_id = uuid::Uuid::new_v4().to_string();
+        let item_id = uuid::Uuid::new_v4().to_string();
+        let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+        let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, v1_key, &aad).expect("encrypt");
+        db.conn()
+            .execute(
+                "INSERT INTO clipboard_items \
+                 (id, item_id, content_type, content, content_nonce, \
+                  is_sensitive, is_synced, lamport_ts, wall_time, key_version) \
+                 VALUES (?1,?2,'text',?3,?4,0,0,?5,?5,1)",
+                rusqlite::params![row_id, item_id, ciphertext, nonce.to_vec(), 1i64],
+            )
+            .expect("insert v1 row");
+        (row_id, item_id)
+    }
+
+    fn key_version_of(db: &Database, row_id: &str) -> i64 {
+        db.conn()
+            .query_row(
+                "SELECT key_version FROM clipboard_items WHERE id = ?1",
+                rusqlite::params![row_id],
+                |r| r.get(0),
+            )
+            .expect("row exists")
+    }
+
+    /// Read a row back through the SAME crypto the daemon's read path uses
+    /// (`ipc::write_to_pasteboard`): derive `v2_key = derive_v2(seed)` and
+    /// dispatch on the stored `key_version` via `decrypt_item_by_version`,
+    /// with `v1_key = seed` directly.
+    fn read_back(db: &Database, seed: &[u8; 32], row_id: &str) -> Vec<u8> {
+        let (item_id, content, nonce_vec, key_version): (String, Vec<u8>, Vec<u8>, i64) = db
+            .conn()
+            .query_row(
+                "SELECT item_id, content, content_nonce, key_version \
+                 FROM clipboard_items WHERE id = ?1",
+                rusqlite::params![row_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .expect("row exists");
+        let mut nonce = [0u8; NONCE_SIZE];
+        nonce.copy_from_slice(&nonce_vec);
+        // Read path: v1_key = seed directly; v2_key = derive_v2(seed).
+        let v1_key: [u8; 32] = *seed;
+        let v2_key = derive_v2(seed);
+        decrypt_item_by_version(
+            key_version as u8,
+            &v1_key,
+            &v2_key,
+            &item_id,
+            &nonce,
+            &content,
+        )
+        .expect("read path must decrypt the row")
+    }
+
+    /// v0.4 sweep key-correctness regression (HIGH, crypto): a real legacy
+    /// `key_version = 1` row — written under the device's v1 storage key
+    /// (`load_local_key()` / `local_enc_key`) + the v3 AAD — MUST be rotated by
+    /// the production sweep to `key_version = 2` AND remain readable through the
+    /// normal v2 read path afterward.
+    ///
+    /// Before the fix, the daemon passed `derive_storage_key_v1(seed)` as the
+    /// sweep's v1 key, double-deriving it. That key never matched what real v1
+    /// rows were encrypted under, so this row failed to decrypt (auth-tag
+    /// mismatch) and stayed at `key_version = 1` forever.
+    #[test]
+    fn sweep_rotates_real_v1_row_and_it_stays_readable() {
+        let db = Database::open_in_memory().expect("open db");
+        // `seed` stands in for load_local_key() — already the v1 storage key.
+        let seed = [0x42u8; 32];
+        let plaintext = b"legacy clipboard payload that must survive rotation";
+
+        let (row_id, _item_id) = seed_real_v1_text_row(&db, &seed, plaintext);
+        assert_eq!(
+            key_version_of(&db, &row_id),
+            1,
+            "precondition: row starts at key_version = 1"
+        );
+
+        // Run the production sweep with the keys the daemon derives from seed.
+        let (v1_key, v2_key) = sweep_keys(&seed);
+        let rotated = db
+            .migration_v4_sweep_resumable(&v1_key, &v2_key)
+            .expect("sweep must not error");
+
+        // (a) the row is rotated to key_version = 2.
+        assert_eq!(rotated, 1, "the real v1 row must be rotated");
+        assert_eq!(
+            key_version_of(&db, &row_id),
+            2,
+            "row must be at key_version = 2 after the sweep"
+        );
+
+        // (b) the rotated row decrypts back to the original plaintext via the
+        // normal v2 read path.
+        let recovered = read_back(&db, &seed, &row_id);
+        assert_eq!(
+            recovered, plaintext,
+            "rotated row must read back as the original plaintext"
+        );
+    }
+
+    /// A row already correctly at `key_version = 2` must be left untouched by
+    /// the sweep (the `WHERE key_version = 1` predicate skips it) and remain
+    /// readable through the v2 read path.
+    #[test]
+    fn sweep_leaves_existing_v2_row_untouched_and_readable() {
+        let db = Database::open_in_memory().expect("open db");
+        let seed = [0x77u8; 32];
+        let plaintext = b"already-v2 payload";
+
+        // Write the row exactly as fresh ingest does: v2 key + v4 AAD,
+        // stamped key_version = 2.
+        let item_id = uuid::Uuid::new_v4().to_string();
+        let row_id = uuid::Uuid::new_v4().to_string();
+        let v2_key = derive_v2(&seed);
+        let aad_v2 = copypaste_core::build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+        let (nonce, ciphertext) =
+            encrypt_item_with_aad(plaintext, &v2_key, &aad_v2).expect("encrypt v2");
+        db.conn()
+            .execute(
+                "INSERT INTO clipboard_items \
+                 (id, item_id, content_type, content, content_nonce, \
+                  is_sensitive, is_synced, lamport_ts, wall_time, key_version) \
+                 VALUES (?1,?2,'text',?3,?4,0,0,?5,?5,2)",
+                rusqlite::params![row_id, item_id, ciphertext, nonce.to_vec(), 1i64],
+            )
+            .expect("insert v2 row");
+        let content_before: Vec<u8> = db
+            .conn()
+            .query_row(
+                "SELECT content FROM clipboard_items WHERE id = ?1",
+                rusqlite::params![row_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        let (v1_key, v2_sweep_key) = sweep_keys(&seed);
+        let rotated = db
+            .migration_v4_sweep_resumable(&v1_key, &v2_sweep_key)
+            .expect("sweep must not error");
+
+        assert_eq!(rotated, 0, "an already-v2 row must not be rotated");
+        assert_eq!(
+            key_version_of(&db, &row_id),
+            2,
+            "the v2 row stays at key_version = 2"
+        );
+        let content_after: Vec<u8> = db
+            .conn()
+            .query_row(
+                "SELECT content FROM clipboard_items WHERE id = ?1",
+                rusqlite::params![row_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            content_before, content_after,
+            "the v2 row's ciphertext must be byte-for-byte untouched"
+        );
+
+        // Still readable via the v2 read path.
+        let recovered = read_back(&db, &seed, &row_id);
+        assert_eq!(recovered, plaintext, "untouched v2 row stays readable");
+    }
+
+    /// `sweep_keys` must produce EXACTLY the keys the read path uses for each
+    /// version: `v1_key == seed` (used directly) and `v2_key == derive_v2(seed)`.
+    #[test]
+    fn sweep_keys_match_read_path_keys() {
+        let seed = [0x5Au8; 32];
+        let (v1_key, v2_key) = sweep_keys(&seed);
+        assert_eq!(
+            v1_key, seed,
+            "sweep v1_key must be the seed used directly (the read path's `**local_key`)"
+        );
+        assert_eq!(
+            v2_key,
+            derive_v2(&seed),
+            "sweep v2_key must equal derive_v2(seed) (the read path's derive_v2(&v1_key))"
+        );
+    }
 
     /// v0.4 ingest round-trip (HIGH): a freshly-captured text item must be
     /// readable through the SAME path the daemon uses on paste-back. The read
