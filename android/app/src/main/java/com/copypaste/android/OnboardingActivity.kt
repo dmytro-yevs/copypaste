@@ -96,7 +96,7 @@ class OnboardingActivity : ComponentActivity() {
         setContent {
             CopyPasteTheme {
                 val trigger by refreshTrigger
-                @Suppress("UNUSED_VARIABLE") val _ = trigger // read so Compose tracks it
+                @Suppress("UNUSED_EXPRESSION") trigger // read so Compose tracks it
                 OnboardingScreen(
                     onRequestNotification = { requestNotificationPermission() },
                     onOpenAccessibility = { openAccessibilitySettings() },
