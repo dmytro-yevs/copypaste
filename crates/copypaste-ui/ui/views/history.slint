@@ -15,10 +15,14 @@ import { IconButton, GhostButton, EmptyState, SearchField } from "../primitives.
 // ---------------------------------------------------------------------------
 // ClipItem — data model for a single clipboard entry.
 // Matches the Rust-side `UiClipItem` that will be bound via the Slint
-// generated API.  `id` is an int so comparisons stay cheap in expressions.
+// generated API.  `id` is the daemon's UUID string — it must round-trip
+// verbatim so the `copy_item` / `pin_item` / `delete_item` IPC verbs (which
+// reject anything that is not a valid UUID) can resolve the row.  A previous
+// `int` typing forced `entry_to_clip_item` to mangle every UUID into a
+// sentinel integer, which made all per-item actions fail daemon-side.
 // ---------------------------------------------------------------------------
 export struct ClipItem {
-    id: int,
+    id: string,
     preview: string,
     kind: string,          // "text" | "image" | "link" | "code" | "file" | "color"
     wall-time: string,     // formatted timestamp, e.g. "12:04" or "Yesterday"

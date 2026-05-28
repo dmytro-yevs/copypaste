@@ -41,16 +41,13 @@ fn content_type_to_kind(content_type: &str) -> slint::SharedString {
 /// Convert a [`crate::ipc_client::HistoryEntry`] to a Slint [`ClipItem`].
 fn entry_to_clip_item(entry: &crate::ipc_client::HistoryEntry) -> ClipItem {
     ClipItem {
-        // H1: parse as i64 first, then clamp to i32.  i32::MAX (2_147_483_647)
-        // is used as the sentinel for out-of-range / unparseable IDs; daemon
-        // IDs are small positive integers so MAX cannot collide with a real entry,
-        // unlike the previous sentinel of 0 which aliases the "unset" state.
-        id: entry
-            .id
-            .parse::<i64>()
-            .ok()
-            .and_then(|n| i32::try_from(n).ok())
-            .unwrap_or(i32::MAX),
+        // The daemon's `id` is a UUID string. It must round-trip verbatim
+        // because the `copy_item` / `pin_item` / `delete_item` IPC verbs
+        // reject any id that is not a valid UUID. A previous version parsed
+        // this as an integer and stored `i32::MAX` on failure (which is
+        // always, for a UUID), so every per-item action silently failed
+        // daemon-side with "invalid param: id must be a valid UUID".
+        id: entry.id.clone().into(),
         preview: entry.preview.clone().into(),
         kind: content_type_to_kind(&entry.content_type),
         wall_time: format_wall_time(entry.wall_time).into(),
@@ -303,7 +300,7 @@ mod tests {
         let m = make_model();
         // Manually place items and offsets to simulate a partially loaded state.
         m.inner.push(ClipItem {
-            id: 1,
+            id: "11111111-1111-1111-1111-111111111111".into(),
             preview: "test".into(),
             kind: "text".into(),
             wall_time: "2025-01-01".into(),
@@ -339,14 +336,16 @@ mod tests {
     #[test]
     fn entry_to_clip_item_maps_fields() {
         let entry = crate::ipc_client::HistoryEntry {
-            id: "42".to_owned(),
+            id: "550e8400-e29b-41d4-a716-446655440000".to_owned(),
             content_type: "image/png".to_owned(),
             preview: "screenshot.png".to_owned(),
             is_sensitive: true,
             wall_time: 0, // zero → em-dash
         };
         let item = entry_to_clip_item(&entry);
-        assert_eq!(item.id, 42);
+        // The UUID id must round-trip verbatim (no integer mangling) so the
+        // copy_item / pin_item / delete_item verbs can resolve the row.
+        assert_eq!(item.id, "550e8400-e29b-41d4-a716-446655440000");
         assert_eq!(item.preview, "screenshot.png");
         assert_eq!(item.kind, "image");
         assert!(item.redacted);

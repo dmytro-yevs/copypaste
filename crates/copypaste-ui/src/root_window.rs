@@ -190,10 +190,18 @@ impl RootWindowHandle {
             });
         }
 
-        // ── item-clicked callback — open detail panel ──────────────────────
+        // ── item-clicked callback — copy to clipboard + open detail panel ───
+        //
+        // Clicking a row is the primary "give me that clip back" gesture, so
+        // it must copy the item to the system clipboard via the daemon
+        // `copy_item` verb. We ALSO open the detail panel so the user can see
+        // the full content / pin / delete. Previously this callback only
+        // opened the detail panel, so a plain click never copied anything —
+        // the user had to find the hover mini-toolbar copy button.
         {
             let vm = Rc::clone(&view_model);
             let win_weak = window.as_weak();
+            let socket = socket_path.to_string();
             window.on_item_clicked(move |idx| {
                 let win = match win_weak.upgrade() {
                     Some(w) => w,
@@ -204,6 +212,20 @@ impl RootWindowHandle {
                 }
                 match vm.row_data(idx as usize) {
                     Some(clip) => {
+                        let id = clip.id.to_string();
+                        tracing::info!("item-clicked (copy): id={id}");
+                        // Copy to the system clipboard. Daemon-offline / failure
+                        // is logged but must not block opening the detail panel.
+                        match IpcClient::connect(socket.as_ref()) {
+                            Ok(mut c) => {
+                                if let Err(e) = c.copy_item(&id) {
+                                    tracing::warn!(error = %e, "item-clicked: IPC copy_item failed");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "item-clicked: daemon offline");
+                            }
+                        }
                         win.set_detail_item(clip);
                         win.set_detail_visible(true);
                     }
@@ -224,10 +246,12 @@ impl RootWindowHandle {
             });
         }
 
-        // ── T5.2: item-copy callback (keyboard ↵ / ⌘C on selected item) ─────
-        // H8: wired to IpcClient::paste — the daemon's "paste" verb copies the
-        // selected entry into the system clipboard and brings the target app to
-        // front, which is the correct semantic for a keyboard-triggered copy.
+        // ── T5.2: item-copy callback (keyboard ↵ / ⌘C, hover toolbar) ───────
+        // Wired to IpcClient::copy_item — the daemon decrypts the stored
+        // ciphertext and writes plaintext to the system clipboard, returning
+        // typed invalid_argument / not_found / auth_failed error codes. This
+        // is the correct semantic for an explicit "copy" gesture and matches
+        // the detail-panel Copy button (which already uses copy_item).
         {
             let vm = Rc::clone(&view_model);
             let socket = socket_path.to_string();
@@ -241,8 +265,8 @@ impl RootWindowHandle {
                         tracing::info!("item-copy (keyboard): id={id}");
                         match IpcClient::connect(socket.as_ref()) {
                             Ok(mut c) => {
-                                if let Err(e) = c.paste(&id) {
-                                    tracing::warn!(error = %e, "item-copy: IPC paste failed");
+                                if let Err(e) = c.copy_item(&id) {
+                                    tracing::warn!(error = %e, "item-copy: IPC copy_item failed");
                                 }
                             }
                             Err(e) => {
@@ -560,6 +584,49 @@ impl RootWindowHandle {
                 tracing::warn!("initial history load failed (daemon offline?): {e}");
             }
             sync_view_model(&borrow, &view_model);
+        }
+
+        // ── Live auto-refresh (ISSUE 1) ─────────────────────────────────────
+        // The daemon has no change/subscribe verb, so we poll. Re-fetch the
+        // first page (preserving the active search query) on a repeating
+        // timer so newly-copied clips appear without a manual refresh. We skip
+        // the IPC round-trip entirely when the window is hidden, and skip
+        // while a fetch is already in flight (HistoryModel guards `loading`)
+        // so a pagination fetch is never clobbered.
+        //
+        // `reset_with_query` re-fetches from offset 0 — newest items sort to
+        // the top, which is exactly what "show me new clips" needs. Any extra
+        // pages the user had scrolled to are re-loadable via scroll.
+        {
+            const ROOT_AUTO_REFRESH_INTERVAL: std::time::Duration =
+                std::time::Duration::from_millis(1500);
+            let win_weak = window.as_weak();
+            let model = Rc::clone(&history_model);
+            let vm = Rc::clone(&view_model);
+            let timer = slint::Timer::default();
+            timer.start(
+                slint::TimerMode::Repeated,
+                ROOT_AUTO_REFRESH_INTERVAL,
+                move || {
+                    let Some(win) = win_weak.upgrade() else {
+                        return;
+                    };
+                    if !win.window().is_visible() {
+                        return;
+                    }
+                    // Don't fight an in-flight pagination / search fetch.
+                    if model.borrow().is_loading() {
+                        return;
+                    }
+                    let query = win.get_search_query().to_string();
+                    if let Err(e) = model.borrow().reset_with_query(&query) {
+                        tracing::debug!("auto-refresh: reset_with_query failed: {e}");
+                    }
+                    sync_view_model(&model.borrow(), &vm);
+                },
+            );
+            // Leak so the timer ticks for the lifetime of the window.
+            std::mem::forget(timer);
         }
 
         Ok(Self {

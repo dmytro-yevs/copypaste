@@ -562,6 +562,12 @@ fn main() -> Result<()> {
                 // NSApplication::activate brings the process + its visible
                 // windows to the foreground.
                 activate_app();
+                // ISSUE 1 (refresh-on-show): fetch immediately when the window
+                // is opened so the user sees current history without waiting
+                // up to one auto-refresh tick. Routed through the existing
+                // coalesced `refresh-requested` callback so it shares the
+                // InFlight guard with the auto-refresh timer.
+                win.invoke_refresh_requested();
             }
         });
 
@@ -662,7 +668,13 @@ fn main() -> Result<()> {
         });
     }
 
-    // --- Wire: item-clicked (paste) ---
+    // --- Wire: item-clicked (copy to clipboard) ---
+    //
+    // Clicking a history row copies that item back to the system clipboard.
+    // Uses the daemon `copy_item` verb (typed error codes, "copy" semantic)
+    // rather than the older `paste` alias — both decrypt the row and write it
+    // to the pasteboard, but `copy_item` surfaces invalid_argument / not_found
+    // / auth_failed so failures are diagnosable instead of an opaque string.
     {
         let window_weak = window.as_weak();
         let state = Arc::clone(&state);
@@ -674,7 +686,7 @@ fn main() -> Result<()> {
             };
             let id_str = id.to_string();
             std::thread::spawn(move || {
-                let result = paste_item(&socket_path, &id_str);
+                let result = copy_item(&socket_path, &id_str);
                 if let Err(e) = slint::invoke_from_event_loop(move || {
                     if let Some(win) = window_weak.upgrade() {
                         match result {
@@ -684,9 +696,9 @@ fn main() -> Result<()> {
                                 // multi-byte UTF-8 codepoint. Use a char-based take so
                                 // any well-formed `String` works, regardless of script.
                                 let short: String = id_str.chars().take(8).collect();
-                                win.set_status_text(format!("Pasted: {short}").into());
+                                win.set_status_text(format!("Copied: {short}").into());
                             }
-                            Err(e) => win.set_status_text(format!("Paste failed: {e}").into()),
+                            Err(e) => win.set_status_text(format!("Copy failed: {e}").into()),
                         }
                     }
                 }) {
@@ -918,6 +930,16 @@ fn main() -> Result<()> {
         });
     }
 
+    // --- Auto-refresh: poll the daemon for new clips while the window is open ---
+    //
+    // ISSUE 1 fix: previously the history list only updated on startup, on
+    // manual Refresh, or on pagination. New clips copied after the window
+    // opened never appeared until the user clicked Refresh. We install a
+    // repeating Slint timer that re-fetches the *current* page (so the cost is
+    // one bounded IPC round-trip, not a full scan) whenever the window is
+    // visible, and stops doing IPC work when it is hidden.
+    spawn_history_auto_refresh(window.as_weak(), Arc::clone(&state), in_flight.clone());
+
     // --- Wire: window close → revert to .accessory activation policy ---
     //
     // When the user closes the History window the app should disappear from
@@ -1095,9 +1117,97 @@ fn refresh_history_after_autostart(
 }
 
 /// Call `paste` on the daemon.
+///
+/// Retained for the tray "Recent items" row action, which keeps the legacy
+/// `paste` semantic. The in-window click path uses [`copy_item`] instead.
 fn paste_item(socket_path: &std::path::Path, id: &str) -> std::result::Result<String, String> {
     let mut client = IpcClient::connect(socket_path).map_err(|e| format!("daemon offline: {e}"))?;
     client.paste(id).map_err(|e| e.to_string())
+}
+
+/// Call `copy_item` on the daemon to copy a history item to the system
+/// clipboard. Used by the in-window click-to-copy path; surfaces the daemon's
+/// typed error codes (invalid_argument / not_found / auth_failed) verbatim.
+fn copy_item(socket_path: &std::path::Path, id: &str) -> std::result::Result<String, String> {
+    let mut client = IpcClient::connect(socket_path).map_err(|e| format!("daemon offline: {e}"))?;
+    client.copy_item(id).map_err(|e| e.to_string())
+}
+
+/// ISSUE 1 fix: keep the History window in sync with the daemon without the
+/// user having to click Refresh.
+///
+/// The daemon exposes no change/subscribe IPC verb, so we poll. The poll is
+/// kept cheap by these constraints:
+///   - **Window-visibility gated.** When the window is hidden we skip the IPC
+///     round-trip entirely (the tray has its own, separate refresh loop), so a
+///     backgrounded app does no socket work on this timer.
+///   - **Current page only.** We re-fetch the page the user is currently
+///     looking at (`current_offset`, `PAGE_SIZE`) — a single bounded
+///     `history_page` call, not a full-history scan.
+///   - **Coalesced with manual Refresh / pagination.** We reserve the shared
+///     `InFlight.refresh` slot before fetching, so an auto-refresh tick that
+///     lands while a manual Refresh / Next / Prev is in flight is dropped on
+///     the floor and a stale response can never clobber a newer one.
+///
+/// The fetch runs off the UI thread; results are applied via
+/// `slint::invoke_from_event_loop` through the same `apply_history_result`
+/// path as every other load, so the pending search query is preserved.
+///
+/// Runs on a repeating `slint::Timer` (UI thread). The timer is leaked so it
+/// outlives this function and ticks for the lifetime of the process.
+fn spawn_history_auto_refresh(
+    window_weak: slint::Weak<HistoryWindow>,
+    state: Arc<Mutex<AppState>>,
+    in_flight: InFlight,
+) {
+    // 1.5s is responsive enough to feel "live" while staying gentle on the
+    // single-threaded daemon socket.
+    const AUTO_REFRESH_INTERVAL: Duration = Duration::from_millis(1500);
+
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::Repeated,
+        AUTO_REFRESH_INTERVAL,
+        move || {
+            // Only poll while the window is actually on screen. `is_visible`
+            // is read on the UI thread (this closure runs there).
+            let Some(win) = window_weak.upgrade() else {
+                return;
+            };
+            if !win.window().is_visible() {
+                return;
+            }
+
+            // Coalesce with manual Refresh / pagination: if a refresh is
+            // already running, skip this tick. The guard is released when the
+            // worker thread (or this closure, on the no-spawn path) drops it.
+            let Some(guard) = InFlightGuard::acquire(Arc::clone(&in_flight.refresh)) else {
+                return;
+            };
+
+            let window_weak = window_weak.clone();
+            let state = Arc::clone(&state);
+            std::thread::spawn(move || {
+                let _guard = guard; // released on thread exit (incl. panic)
+                let (socket_path, offset) = {
+                    let s = lock_or_recover(&state);
+                    (s.socket_path.clone(), s.current_offset)
+                };
+                let result = load_history_page(&socket_path, PAGE_SIZE, offset);
+                let state_for_apply = Arc::clone(&state);
+                if let Err(e) = slint::invoke_from_event_loop(move || {
+                    if let Some(win) = window_weak.upgrade() {
+                        apply_history_result(&win, &state_for_apply, result, offset);
+                    }
+                }) {
+                    tracing::debug!(error = %e, "auto-refresh ui update dropped during shutdown");
+                }
+            });
+        },
+    );
+    // Leak so the timer outlives this scope and keeps ticking for the process
+    // lifetime — same pattern as `spawn_tray_recents_refresh`.
+    std::mem::forget(timer);
 }
 
 /// v0.3 T3: keep the tray's "Recent items" block in sync with the daemon.
