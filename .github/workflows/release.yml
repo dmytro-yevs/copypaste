@@ -164,9 +164,13 @@ jobs:
           retention-days: 14
 
   # PR2a — Android arm64-v8a build (runs in parallel with build-macos, no dependency)
+  # TEMPORARILY NON-BLOCKING (v0.5.0): the Android build is known-broken and the
+  # macOS DMG must ship now. continue-on-error keeps the .so/APK logs flowing for
+  # the later Android fix without failing the overall Release run or gating macOS.
   build-android:
     name: Build Android (arm64-v8a)
     runs-on: ubuntu-latest
+    continue-on-error: true
     env:
       INPUT_VERSION: ${{ inputs.version }}
       TAG_NAME: ${{ github.ref_name }}
@@ -383,10 +387,14 @@ jobs:
             -d "{\"event_type\":\"release-published\",\"client_payload\":{\"version\":\"${BARE_VERSION}\"}}"
           echo "Tap dispatch sent for version ${BARE_VERSION}"
 
+  # TEMPORARILY NON-BLOCKING (v0.5.0): Android APK is deferred to a later release.
+  # continue-on-error + fail_on_unmatched_files:false mean a missing/failed Android
+  # artifact never fails the Release run or blocks the macOS DMG publish above.
   publish-android:
     name: Publish Android Release
     if: startsWith(github.ref, 'refs/tags/')
     needs: [build-android]
+    continue-on-error: true
     runs-on: ubuntu-latest
     env:
       INPUT_VERSION: ${{ inputs.version }}
@@ -403,12 +411,16 @@ jobs:
 
       - name: Download Android .so artifact
         uses: actions/download-artifact@v4
+        # Android build may be skipped/failed (non-blocking) — don't fail if the
+        # artifact is absent. The publish step uploads only what exists.
+        continue-on-error: true
         with:
           name: CopyPaste-${{ steps.ver.outputs.version }}-android-arm64
           path: dist/android
 
       - name: Download Android APK
         uses: actions/download-artifact@v4
+        continue-on-error: true
         with:
           name: android-debug-apk-${{ steps.ver.outputs.version }}
           path: dist/android
@@ -422,4 +434,5 @@ jobs:
             dist/android/*.apk
           generate_release_notes: true
           prerelease: ${{ contains(steps.ver.outputs.version, '-alpha') || contains(steps.ver.outputs.version, '-beta') || contains(steps.ver.outputs.version, '-rc') }}
-          fail_on_unmatched_files: true
+          # APK deferred to a later release — a missing .so/.apk must not fail the run.
+          fail_on_unmatched_files: false
