@@ -130,34 +130,47 @@ impl ClipboardMonitor {
         {
             use copypaste_core::MAX_IMAGE_BYTES;
             use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
-            use objc2_foundation::NSData;
+            use objc2_foundation::{NSArray, NSData, NSString};
 
-            let (count, text, image_bytes, had_image_alongside_text, unsupported_kinds) = unsafe {
-                let pb = NSPasteboard::generalPasteboard();
-                let count = pb.changeCount() as i64;
+            // Drain the autorelease pool at the end of every poll. Without
+            // this, each NSPasteboard read leaks autoreleased Cocoa objects
+            // (NSString, and multi-MB image NSData) that are never freed on
+            // this tokio thread, blowing up reserved virtual memory.
+            let read = objc2::rc::autoreleasepool(|_pool| {
+                let pb = unsafe { NSPasteboard::generalPasteboard() };
+                let count = unsafe { pb.changeCount() } as i64;
+
+                // changeCount-first: if the pasteboard is unchanged, return
+                // before touching any stringForType/dataForType so an idle
+                // clipboard allocates nothing. `None` signals "unchanged".
+                if count == self.last_change_count {
+                    return None;
+                }
+
+                let png_type = NSString::from_str("public.png");
+                let tiff_type = NSString::from_str("public.tiff");
 
                 // Text
-                let text = pb
-                    .stringForType(NSPasteboardTypeString)
-                    .map(|ns| ns.to_string());
+                let text = unsafe {
+                    pb.stringForType(NSPasteboardTypeString)
+                        .map(|ns| ns.to_string())
+                };
 
-                let png_type = objc2_foundation::NSString::from_str("public.png");
-                let tiff_type = objc2_foundation::NSString::from_str("public.tiff");
+                // Probe image presence WITHOUT copying the bytes: ask the
+                // pasteboard whether any image type is available rather than
+                // materialising the (potentially multi-MB) NSData (#6).
+                let image_types = NSArray::from_id_slice(&[png_type.clone(), tiff_type.clone()]);
+                let image_present = unsafe { pb.availableTypeFromArray(&image_types) }.is_some();
+                let had_image_alongside_text = text.is_some() && image_present;
 
-                // Always probe for image presence (cheap — just dataForType).
-                // We need to know whether an image co-existed with text so
-                // we can log the silent drop (#6).
-                let png_present = pb.dataForType(&png_type).is_some();
-                let tiff_present = pb.dataForType(&tiff_type).is_some();
-                let had_image_alongside_text = text.is_some() && (png_present || tiff_present);
-
-                // Only materialise image bytes when text is absent.
-                let image_bytes: Option<Vec<u8>> = if text.is_none() {
-                    let png_data = pb.dataForType(&png_type);
+                // Only materialise image bytes when text is absent and an
+                // image is actually present.
+                let image_bytes: Option<Vec<u8>> = if text.is_none() && image_present {
+                    let png_data = unsafe { pb.dataForType(&png_type) };
                     if let Some(ref d) = png_data {
                         Some(d.bytes().to_vec())
                     } else {
-                        let tiff_data = pb.dataForType(&tiff_type);
+                        let tiff_data = unsafe { pb.dataForType(&tiff_type) };
                         tiff_data.as_deref().map(|d: &NSData| d.bytes().to_vec())
                     }
                 } else {
@@ -180,27 +193,32 @@ impl ClipboardMonitor {
                         "com.apple.pasteboard.promised-file-url",
                     ];
                     for kind in probes {
-                        let ns_kind = objc2_foundation::NSString::from_str(kind);
-                        if pb.dataForType(&ns_kind).is_some()
-                            || pb.stringForType(&ns_kind).is_some()
-                        {
+                        let ns_kind = NSString::from_str(kind);
+                        let present = unsafe {
+                            pb.dataForType(&ns_kind).is_some()
+                                || pb.stringForType(&ns_kind).is_some()
+                        };
+                        if present {
                             unsupported_kinds.push((*kind).to_string());
                         }
                     }
                 }
 
-                (
+                Some((
                     count,
                     text,
                     image_bytes,
                     had_image_alongside_text,
                     unsupported_kinds,
-                )
-            };
+                ))
+            });
 
-            if count == self.last_change_count {
+            // Unchanged pasteboard — nothing read, nothing allocated.
+            let Some((count, text, image_bytes, had_image_alongside_text, unsupported_kinds)) =
+                read
+            else {
                 return Ok(None);
-            }
+            };
 
             // Compute delta BEFORE we update the cursor. On first poll
             // (sentinel -1) we suppress the burst signal.
