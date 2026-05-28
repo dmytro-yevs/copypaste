@@ -168,8 +168,32 @@ fn set_popup_shortcut(
     // Unregister the old shortcut (best-effort; ignore errors if it wasn't registered).
     let _ = handle.global_shortcut().unregister(old.as_str());
 
-    // Attempt to register the new one.
-    register_popup_shortcut(&handle, &accelerator).map_err(|e| e.to_string())?;
+    // Fix #2: attempt to register via the plugin.  On macOS, OS-reserved or
+    // shift+alt combos (e.g. Alt+Shift+Q which produces "Œ") may fail here.
+    // When the CGEventTap is active it will handle the shortcut anyway, so we
+    // treat the plugin registration error as a non-fatal warning in that case.
+    let plugin_result = register_popup_shortcut(&handle, &accelerator);
+    #[cfg(target_os = "macos")]
+    {
+        let tap_active = handle
+            .try_state::<TapActive>()
+            .map(|s| *s.0.lock().expect("mutex poisoned"))
+            .unwrap_or(false);
+        if !tap_active {
+            // No tap — plugin must succeed.
+            plugin_result.map_err(|e| e.to_string())?;
+        } else {
+            // Tap is running; log plugin failure but don't surface it as an error.
+            if let Err(e) = plugin_result {
+                tracing::warn!(
+                    "plugin global-shortcut registration for '{accelerator}' failed \
+                     (CGEventTap will handle it): {e}"
+                );
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    plugin_result.map_err(|e| e.to_string())?;
 
     // Persist the new accelerator.
     let new_cfg = UiConfig {
@@ -451,6 +475,17 @@ fn toggle_popup(handle: &tauri::AppHandle) {
 
     position_popup_near_cursor(&popup);
 
+    // Fix #3: record which app was frontmost BEFORE we bring our popup to focus,
+    // so paste_to_frontmost can return focus there (not to the main window).
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(state) = handle.try_state::<PriorApp>() {
+            let bundle_id = frontmost_bundle_id();
+            let mut guard = state.0.lock().expect("mutex poisoned");
+            *guard = bundle_id;
+        }
+    }
+
     let _ = popup.show();
     let _ = popup.set_focus();
 }
@@ -458,14 +493,17 @@ fn toggle_popup(handle: &tauri::AppHandle) {
 /// Position the popup window near the current cursor, clamped to the monitor
 /// that contains the cursor.
 ///
+/// Fix #4: iterate all available monitors and pick the one whose physical-pixel
+/// bounds contain the cursor (handles negative coordinates on secondary monitors
+/// and avoids `monitor_from_point` misses on multi-display setups).
+///
 /// All arithmetic is done in physical pixels:
-///   - `cursor_position()` returns physical px (tao converts NSEvent.mouseLocation via scale)
-///   - `monitor.position()` / `monitor.size()` are already in physical px from tao
-///   - `monitor.scale_factor()` is used only to convert the logical popup dimensions
-///     (from tauri.conf.json) to physical pixels for clamping
+///   - `cursor_position()` returns physical px
+///   - `monitor.position()` / `monitor.size()` are already in physical px
+///   - `monitor.scale_factor()` converts logical popup dims to physical px
 ///   - `set_position(PhysicalPosition)` places the window in physical px
 fn position_popup_near_cursor(win: &tauri::WebviewWindow) {
-    // cursor_position() → physical pixels, primary-monitor DPI reference.
+    // cursor_position() → physical pixels.
     let cursor_pos: tauri::PhysicalPosition<i32> = win
         .cursor_position()
         .map(|p| tauri::PhysicalPosition {
@@ -483,20 +521,43 @@ fn position_popup_near_cursor(win: &tauri::WebviewWindow) {
     let mut x = cursor_pos.x + OFFSET;
     let mut y = cursor_pos.y + OFFSET;
 
-    // Find the monitor containing the cursor; fall back to no clamping if unavailable.
-    if let Ok(Some(monitor)) = win.monitor_from_point(cursor_pos.x as f64, cursor_pos.y as f64) {
-        let pos = monitor.position(); // physical px, top-left of monitor
-        let size = monitor.size(); // physical px — already scaled, do NOT multiply by scale again
+    // Fix #4: find the monitor whose physical bounds contain the cursor by
+    // iterating all monitors instead of relying on monitor_from_point, which
+    // can pick the wrong display on some multi-monitor configurations.
+    let monitors = win.available_monitors().unwrap_or_default();
+
+    // Helper: check if cursor falls within a monitor's physical rect.
+    let find_monitor = |cx: i32, cy: i32| -> Option<tauri::Monitor> {
+        monitors
+            .iter()
+            .find(|m| {
+                let pos = m.position();
+                let size = m.size();
+                let mx = pos.x;
+                let my = pos.y;
+                let mw = size.width as i32;
+                let mh = size.height as i32;
+                cx >= mx && cx < mx + mw && cy >= my && cy < my + mh
+            })
+            .cloned()
+    };
+
+    // Try the cursor position first; fall back to primary monitor.
+    let monitor_opt =
+        find_monitor(cursor_pos.x, cursor_pos.y).or_else(|| win.primary_monitor().ok().flatten());
+
+    if let Some(monitor) = monitor_opt {
+        let pos = monitor.position();
+        let size = monitor.size();
         let scale = monitor.scale_factor();
 
-        // Convert logical popup dimensions to physical pixels for this monitor.
         let popup_w = (POPUP_W_LOGICAL * scale) as i32;
         let popup_h = (POPUP_H_LOGICAL * scale) as i32;
 
         let mon_x = pos.x;
         let mon_y = pos.y;
-        let mon_w = size.width as i32; // already physical
-        let mon_h = size.height as i32; // already physical
+        let mon_w = size.width as i32;
+        let mon_h = size.height as i32;
 
         let max_x = mon_x + mon_w - popup_w;
         let max_y = mon_y + mon_h - popup_h;

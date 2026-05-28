@@ -7,7 +7,7 @@ use copypaste_core::{
     bump_item_recency, chunks_from_blob, count_items, decode_image, decrypt_item_by_version,
     delete_fts, delete_item, derive_v2, ensure_revoked_devices_table, fetch_text_preview,
     get_item_by_id, get_page, get_page_pinned_first, pin_item, revoke_device, revoke_devices,
-    search_items, unpin_item, Database, EncryptError,
+    search_items, unpin_item, Database, EncryptError, SensitiveDetector,
 };
 #[cfg(feature = "cloud-sync")]
 use copypaste_core::{derive_sync_key, SyncKey};
@@ -140,7 +140,36 @@ pub(crate) fn peers_file_path() -> PathBuf {
     base.join("copypaste").join("peers.json")
 }
 
+/// Return `true` when a colon-hex fingerprint is a placeholder/test value —
+/// i.e. all groups are the same repeated byte (e.g. "aa:aa:aa:..." or
+/// "bb:bb:bb:...").  Real device fingerprints are SHA-256 of a TLS cert DER
+/// and will never consist of a single repeated byte.
+///
+/// Filters out test fixtures that accidentally ended up in `peers.json`
+/// (fix FAKE-PEERS #31).
+fn is_placeholder_fingerprint(fp: &str) -> bool {
+    // Must have at least one colon to be a colon-hex fingerprint at all.
+    if !fp.contains(':') {
+        return false;
+    }
+    let groups: Vec<&str> = fp.split(':').collect();
+    if groups.is_empty() {
+        return false;
+    }
+    // All groups must be valid two-hex-digit bytes AND all identical.
+    let all_valid = groups
+        .iter()
+        .all(|g| g.len() == 2 && g.chars().all(|c| c.is_ascii_hexdigit()));
+    if !all_valid {
+        return false;
+    }
+    groups.iter().all(|g| *g == groups[0])
+}
+
 /// Load peers list from peers.json; returns empty vec if file is absent.
+///
+/// Filters out any peer whose fingerprint is an all-same-repeated-byte
+/// placeholder (fix FAKE-PEERS #31 — test fixtures must not leak into runtime).
 fn load_peers() -> anyhow::Result<Vec<serde_json::Value>> {
     let path = peers_file_path();
     if !path.exists() {
@@ -148,7 +177,27 @@ fn load_peers() -> anyhow::Result<Vec<serde_json::Value>> {
     }
     let data = std::fs::read_to_string(&path)?;
     let peers: Vec<serde_json::Value> = serde_json::from_str(&data)?;
-    Ok(peers)
+    // Strip placeholder fingerprints.  Log once so the admin knows the file
+    // had stale test data; do NOT auto-delete peers.json (non-destructive).
+    let filtered: Vec<serde_json::Value> = peers
+        .into_iter()
+        .filter(|p| {
+            let fp = p
+                .get("fingerprint")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if is_placeholder_fingerprint(fp) {
+                tracing::warn!(
+                    fingerprint = %fp,
+                    "list_peers: skipping placeholder/test fingerprint in peers.json (all-same-byte)"
+                );
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    Ok(filtered)
 }
 
 /// Persist peers list to peers.json, creating directories as needed.
@@ -268,6 +317,12 @@ pub struct IpcServer {
     /// use (db is fully constructed before `IpcServer::new` is called); tests
     /// use [`IpcServer::new_with_ready`] to exercise the not-ready path.
     ready: Arc<AtomicBool>,
+    /// DUP-ON-COPY fix: after `write_to_pasteboard` completes, record the new
+    /// NSPasteboard `changeCount` here. The clipboard monitor reads this on
+    /// the next tick and skips recording when it matches — preventing the
+    /// daemon's own pasteboard writes from being captured as new clipboard events.
+    /// Sentinel -1 means "no pending self-write".
+    pub self_write_change_count: Arc<std::sync::atomic::AtomicI64>,
     /// In-progress PAKE sessions keyed by session_id UUID string.
     ///
     /// Each entry lives from the first IPC call (initiate / accept) until the
@@ -312,6 +367,7 @@ impl IpcServer {
             ready: Arc::new(AtomicBool::new(true)),
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
             p2p_peers: None,
+            self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
             #[cfg(feature = "cloud-sync")]
             sync_key: Arc::new(Mutex::new(None)),
             #[cfg(feature = "cloud-sync")]
@@ -369,6 +425,7 @@ impl IpcServer {
             ready,
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
             p2p_peers: None,
+            self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
             #[cfg(feature = "cloud-sync")]
             sync_key: Arc::new(Mutex::new(None)),
             #[cfg(feature = "cloud-sync")]
@@ -1284,6 +1341,15 @@ impl IpcServer {
                     // index (capped at MAX_PREVIEW_BYTES = 1 KiB).
                     // Image items: return a placeholder (full preview in v0.4).
                     // Sensitive items: never expose plaintext in list view.
+                    //
+                    // Fix SENSITIVE-SPAN #38: for non-sensitive text items,
+                    // run the sensitive detector against the preview string and
+                    // include `sensitive_spans: [[start,end],...]` (char offsets
+                    // into the preview) so the UI can redact just the secret
+                    // substrings rather than masking the whole row. Only exposed
+                    // on text items where `is_sensitive == false` — items already
+                    // flagged sensitive have their preview suppressed entirely.
+                    let detector = SensitiveDetector::new();
                     let json_items: Vec<serde_json::Value> = items
                         .iter()
                         .map(|item| {
@@ -1297,6 +1363,35 @@ impl IpcServer {
                                 // image (and any future non-text type)
                                 format!("[image — id:{}]", &item.id[..8])
                             };
+
+                            // Compute sensitive_spans for non-sensitive text items.
+                            // We run the detector against the *preview* (the same
+                            // UTF-8 string the UI will display) so the char offsets
+                            // are correct without the UI having to re-detect.
+                            // For sensitive items the spans are empty — the whole
+                            // preview is already replaced with a placeholder.
+                            let sensitive_spans: Vec<serde_json::Value> = if !item.is_sensitive
+                                && item.content_type == "text"
+                            {
+                                detector
+                                    .detect(&preview)
+                                    .into_iter()
+                                    .map(|m| {
+                                        // matched_range is a byte range over the
+                                        // NFKC-normalised string; convert to char
+                                        // offsets into the original preview for the UI.
+                                        // We use char indices because the UI is likely
+                                        // JavaScript / Rust and both work in chars.
+                                        let start =
+                                            preview[..m.matched_range.start].chars().count();
+                                        let end = preview[..m.matched_range.end].chars().count();
+                                        serde_json::json!([start, end])
+                                    })
+                                    .collect()
+                            } else {
+                                vec![]
+                            };
+
                             serde_json::json!({
                                 "id": item.id,
                                 "content_type": item.content_type,
@@ -1305,6 +1400,7 @@ impl IpcServer {
                                 "lamport_ts": item.lamport_ts,
                                 "preview": preview,
                                 "pinned": item.pinned,
+                                "sensitive_spans": sensitive_spans,
                             })
                         })
                         .collect();
@@ -2529,6 +2625,19 @@ impl IpcServer {
                 None => return Err(PasteboardError::other("item has no content")),
             };
 
+            // DUP-ON-COPY helper: reads and stores the post-write changeCount so
+            // the monitor's next tick can identify and suppress this self-write.
+            // Defined as a closure to avoid repeating the unsafe block.
+            let record_self_write = |self_write_cc: &Arc<std::sync::atomic::AtomicI64>| {
+                use objc2_app_kit::NSPasteboard;
+                let new_count = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                self_write_cc.store(new_count, std::sync::atomic::Ordering::Release);
+                tracing::debug!(
+                    change_count = new_count,
+                    "clipboard: recorded self-write changeCount to suppress re-capture"
+                );
+            };
+
             use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
             use objc2_foundation::{NSData, NSString};
 
@@ -2601,6 +2710,7 @@ impl IpcServer {
                         ));
                     }
                 }
+                record_self_write(&self.self_write_change_count);
                 Ok(())
             } else if item.content_type == "image" {
                 // ----- image: reassemble chunks → decrypt → write as PNG -----
@@ -2630,6 +2740,7 @@ impl IpcServer {
                         ));
                     }
                 }
+                record_self_write(&self.self_write_change_count);
                 Ok(())
             } else {
                 // Unknown content_type — keep a best-effort raw-bytes write,
@@ -2650,6 +2761,7 @@ impl IpcServer {
                         )));
                     }
                 }
+                record_self_write(&self.self_write_change_count);
                 Ok(())
             }
         }
@@ -2800,16 +2912,12 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
 
-    // Env mutation (`set_var`/`remove_var`) is process-global and unsound under
-    // concurrent access — Rust 1.89 warns and edition 2024 makes it `unsafe`.
-    // Tests that redirect the config dir (peers.json location) serialise on this
-    // lock so no two run their env mutation concurrently.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     /// RAII guard that snapshots one or more env vars, sets them for the test,
     /// and restores the previous values (or unsets them) on drop — even on
-    /// panic. Mirrors the pattern in `paths.rs`. Holds `ENV_LOCK` for its whole
-    /// lifetime so env state cannot race another serialised test.
+    /// panic.  Holds `crate::TEST_ENV_LOCK` (the *process-wide* env lock shared
+    /// with every other daemon test module) for its whole lifetime so env state
+    /// cannot race tests in `paths`, `keychain`, or any other module that also
+    /// mutates `HOME`/`XDG_CONFIG_HOME`.
     struct EnvGuard {
         saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
         _lock: std::sync::MutexGuard<'static, ()>,
@@ -2821,12 +2929,15 @@ mod tests {
         /// `XDG_CONFIG_HOME` on Linux/BSD and `$HOME` (→ Library/Application
         /// Support) on macOS, so callers set both.
         fn set_all(keys: &[&'static str], value: &std::path::Path) -> Self {
-            let lock = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+            let lock = crate::TEST_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             let mut saved = Vec::with_capacity(keys.len());
             for &key in keys {
                 saved.push((key, std::env::var_os(key)));
-                // SAFETY: serialised via `ENV_LOCK`; no other thread reads or
-                // writes these vars concurrently for the guard's lifetime.
+                // SAFETY: serialised via `crate::TEST_ENV_LOCK`; no other
+                // thread reads or writes these vars concurrently for the
+                // guard's lifetime.
                 unsafe { std::env::set_var(key, value) };
             }
             Self { saved, _lock: lock }
@@ -2835,8 +2946,8 @@ mod tests {
 
     impl Drop for EnvGuard {
         fn drop(&mut self) {
-            // SAFETY: still holding `ENV_LOCK` (`_lock`), so the restore is
-            // serialised against every other env-mutating test.
+            // SAFETY: still holding `crate::TEST_ENV_LOCK` (`_lock`), so the
+            // restore is serialised against every other env-mutating test.
             unsafe {
                 for (key, original) in self.saved.drain(..) {
                     match original {
@@ -4103,6 +4214,14 @@ mod tests {
         use tokio::net::UnixStream;
 
         let dir = tempdir().unwrap();
+        // Redirect config dir so the pairing handlers never write to the
+        // developer's real peers.json — and so concurrent tests that also
+        // redirect HOME (e.g. revoke_all_peers_revokes_every_peer) don't pick
+        // up peers.json entries written by this test's servers. `EnvGuard`
+        // holds ENV_LOCK for the duration, serialising env mutations.
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+
         // Use two server instances to simulate two separate daemons.
         let sock_a = dir.path().join("test-pake-rt-a.sock");
         let sock_b = dir.path().join("test-pake-rt-b.sock");
@@ -4121,8 +4240,11 @@ mod tests {
 
         let b64 = base64::engine::general_purpose::STANDARD;
         let password = "correct-horse-battery";
-        let fp_a = std::iter::repeat_n("aa", 32).collect::<Vec<_>>().join(":");
-        let fp_b = std::iter::repeat_n("bb", 32).collect::<Vec<_>>().join(":");
+        // Use realistic (non-placeholder) fingerprints — the daemon filters out
+        // all-same-byte fingerprints (e.g. aa:aa:...) to drop stale test data
+        // from peers.json.
+        let fp_a = "a1:b2:c3:d4:e5:f6:07:18:29:3a:4b:5c:6d:7e:8f:90:a1:b2:c3:d4:e5:f6:07:18:29:3a:4b:5c:6d:7e:8f:90";
+        let fp_b = "f0:e1:d2:c3:b4:a5:96:87:78:69:5a:4b:3c:2d:1e:0f:f0:e1:d2:c3:b4:a5:96:87:78:69:5a:4b:3c:2d:1e:0f";
 
         // Step 1: Device A initiates.
         let body = format!(
@@ -4643,10 +4765,13 @@ mod tests {
             .join("copypaste");
         std::fs::create_dir_all(&peers_dir).unwrap();
         let peers_json = peers_dir.join("peers.json");
+        // Use realistic (non-placeholder) fingerprints — the daemon filters out
+        // all-same-byte fingerprints (e.g. aa:aa:aa:aa:aa:aa:aa:aa) to drop
+        // stale test data from peers.json.
         let peers = serde_json::json!([
-            {"name": "Laptop", "fingerprint": "aa:aa:aa:aa:aa:aa:aa:aa", "added_at": 1},
-            {"name": "Phone",  "fingerprint": "bb:bb:bb:bb:bb:bb:bb:bb", "added_at": 2},
-            {"name": "Tablet", "fingerprint": "cc:cc:cc:cc:cc:cc:cc:cc", "added_at": 3},
+            {"name": "Laptop", "fingerprint": "a1:b2:c3:d4:e5:f6:07:18", "added_at": 1},
+            {"name": "Phone",  "fingerprint": "f0:e1:d2:c3:b4:a5:96:87", "added_at": 2},
+            {"name": "Tablet", "fingerprint": "12:34:56:78:9a:bc:de:f0", "added_at": 3},
         ]);
         std::fs::write(&peers_json, serde_json::to_string(&peers).unwrap()).unwrap();
 
@@ -4677,9 +4802,9 @@ mod tests {
         };
         assert_eq!(audit.len(), 3, "one audit row per revoked peer");
         for fp in [
-            "aa:aa:aa:aa:aa:aa:aa:aa",
-            "bb:bb:bb:bb:bb:bb:bb:bb",
-            "cc:cc:cc:cc:cc:cc:cc:cc",
+            "a1:b2:c3:d4:e5:f6:07:18",
+            "f0:e1:d2:c3:b4:a5:96:87",
+            "12:34:56:78:9a:bc:de:f0",
         ] {
             assert!(
                 audit.iter().any(|r| r.fingerprint == fp),

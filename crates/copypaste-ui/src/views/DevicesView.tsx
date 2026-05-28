@@ -244,7 +244,8 @@ export function DevicesView() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <p className="truncate text-[13px] font-medium text-ide-text">
-                    {peer.name}
+                    {/* Fix #8: friendly label — use peer.name; show short fingerprint prefix if blank */}
+                    {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
                   </p>
                   {isThisDevice && (
                     <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium bg-ide-accent/15 text-ide-accent">
@@ -252,8 +253,14 @@ export function DevicesView() {
                     </span>
                   )}
                 </div>
-                <p className="truncate font-mono text-[11px] text-ide-dim">
-                  {peer.fingerprint}
+                {/* Fix #8: truncated fingerprint so the row stays compact */}
+                <p
+                  className="font-mono text-[11px] text-ide-dim"
+                  title={peer.fingerprint}
+                >
+                  {peer.fingerprint.length > 32
+                    ? `${peer.fingerprint.slice(0, 16)}…${peer.fingerprint.slice(-8)}`
+                    : peer.fingerprint}
                 </p>
                 {revokedAt !== null && (
                   <p className="text-[11px] text-ide-accent">

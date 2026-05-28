@@ -8,6 +8,7 @@ import {
   type AppSettings,
   type SyncStatus,
 } from "../lib/ipc";
+import { useUI } from "../store";
 
 // ---------------------------------------------------------------------------
 // Toggle — iOS-style switch using ide tokens
@@ -54,7 +55,8 @@ function Toggle({
 
 function SectionHeader({ label }: { label: string }) {
   return (
-    <div className="mb-1 mt-5 first:mt-0 px-0 text-[11px] uppercase tracking-wide text-ide-faint">
+    // Fix #9: more vertical breathing room between sections
+    <div className="mb-2 mt-8 first:mt-0 px-0 text-[11px] uppercase tracking-wide text-ide-faint">
       {label}
     </div>
   );
@@ -236,6 +238,9 @@ function ShortcutCapture({
 type LoadState = "loading" | "ready" | "offline";
 
 export function SettingsView() {
+  // Display prefs (localStorage-persisted, no daemon needed)
+  const { prefs, setPrefs } = useUI((s) => ({ prefs: s.prefs, setPrefs: s.setPrefs }));
+
   // General
   const [privateMode, setPrivateMode] = useState(false);
 
@@ -475,7 +480,7 @@ export function SettingsView() {
       )}
 
       {loadState !== "loading" && (
-        <div className="mx-auto max-w-xl space-y-1">
+        <div className="mx-auto max-w-xl space-y-2">
           {/* General */}
           <SectionHeader label="General" />
           <Panel>
@@ -490,6 +495,45 @@ export function SettingsView() {
                   disabled={offline}
                 />
               </div>
+            </SettingsRow>
+          </Panel>
+
+          {/* Display — Fix #5, #6, #7 */}
+          <SectionHeader label="Display" />
+          <Panel>
+            <SettingsRow label="Preview lines">
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={1}
+                  max={6}
+                  step={1}
+                  value={prefs.previewLines}
+                  onChange={(e) => setPrefs({ previewLines: Number(e.target.value) })}
+                  className="w-28 accent-ide-accent"
+                />
+                <span className="w-4 text-center text-[13px] text-ide-text">{prefs.previewLines}</span>
+              </div>
+            </SettingsRow>
+            <SettingsRow label="Row height">
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={24}
+                  max={64}
+                  step={4}
+                  value={prefs.previewSize}
+                  onChange={(e) => setPrefs({ previewSize: Number(e.target.value) })}
+                  className="w-28 accent-ide-accent"
+                />
+                <span className="w-8 text-center text-[13px] text-ide-text">{prefs.previewSize}px</span>
+              </div>
+            </SettingsRow>
+            <SettingsRow label="Mask sensitive data">
+              <Toggle
+                checked={prefs.maskSensitive}
+                onChange={(v) => setPrefs({ maskSensitive: v })}
+              />
             </SettingsRow>
           </Panel>
 

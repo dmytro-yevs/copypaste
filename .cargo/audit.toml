@@ -1,0 +1,10 @@
+# cargo-audit configuration
+# See: https://docs.rs/cargo-audit/latest/cargo_audit/config/struct.AuditConfig.html
+
+[yanked]
+# Disable the yank-check: on a fresh CI runner (ubuntu-latest) there is no
+# pre-populated crates.io registry index, so CachedIndex::open() returns
+# "No such crate in crates.io index" for every package, causing the audit job
+# to fail with errors for every crate even though no crates are actually yanked.
+# Advisory (CVE) scanning is unaffected — only yank-status detection is skipped.
+enabled = false

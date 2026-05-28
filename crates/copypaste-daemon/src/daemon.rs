@@ -251,33 +251,35 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
 
     // D2 (IPC): pass a token clone so the accept loop exits on shutdown.
+    // DUP-ON-COPY fix: build IpcServer before spawning so we can extract
+    // `self_write_change_count` and wire it into ClipboardMonitor below.
+    // When `write_to_pasteboard` runs it stamps the post-write NSPasteboard
+    // changeCount into this Arc; the monitor's next `poll()` skips that count.
     #[cfg(unix)]
-    let _ipc_handle = {
-        let ipc_db = db.clone();
-        let ipc_private_mode = private_mode.clone();
-        let ipc_local_key = local_key_arc.clone();
-        let ipc_device_pub = device_public_key_arc.clone();
+    let (self_write_change_count_arc, _ipc_handle) = {
+        let mut server = IpcServer::new(
+            db.clone(),
+            private_mode.clone(),
+            local_key_arc.clone(),
+            device_public_key_arc.clone(),
+        );
+        if let Some(peers) = p2p_peers.clone() {
+            server = server.with_p2p_peers(peers);
+        }
+        #[cfg(feature = "cloud-sync")]
+        {
+            server =
+                server.with_cloud_sync_state(cloud_sync_key.clone(), cloud_last_sync_ms.clone());
+        }
+        let swcc = server.self_write_change_count.clone();
         let socket_clone = socket_path.clone();
         let ipc_shutdown = shutdown_token.clone();
-        let ipc_peers = p2p_peers.clone();
-        #[cfg(feature = "cloud-sync")]
-        let ipc_sync_key = cloud_sync_key.clone();
-        #[cfg(feature = "cloud-sync")]
-        let ipc_last_sync_ms = cloud_last_sync_ms.clone();
-        tokio::spawn(async move {
-            let mut server =
-                IpcServer::new(ipc_db, ipc_private_mode, ipc_local_key, ipc_device_pub);
-            if let Some(peers) = ipc_peers {
-                server = server.with_p2p_peers(peers);
-            }
-            #[cfg(feature = "cloud-sync")]
-            {
-                server = server.with_cloud_sync_state(ipc_sync_key, ipc_last_sync_ms);
-            }
+        let handle = tokio::spawn(async move {
             if let Err(e) = server.serve(&socket_clone, ipc_shutdown).await {
                 tracing::error!("IPC server error: {e}");
             }
-        })
+        });
+        (swcc, handle)
     };
 
     // Broadcast channel: carries newly-inserted clipboard items to any
@@ -419,6 +421,13 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     };
 
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
+    // DUP-ON-COPY fix: share the self-write sentinel with the IpcServer so
+    // write_to_pasteboard can stamp the post-write changeCount and the monitor
+    // can suppress the immediately-following re-capture of that same write.
+    #[cfg(unix)]
+    {
+        monitor.self_write_change_count = self_write_change_count_arc;
+    }
     let mut ticker = interval(Duration::from_millis(config.poll_interval_ms));
     let mut cleanup_ticks: u64 = 0;
     // Sensitive TTL cleanup runs every 5 seconds; track elapsed ticks separately.

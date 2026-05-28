@@ -24,9 +24,16 @@ unicode-normalization = { workspace = true }
 # default-features disabled to avoid pulling reqwest's full feature set; we
 # enable the reqwest transport with rustls (not native-tls) so telemetry does
 # not drag openssl-sys into the workspace, plus `panic` and `anyhow`.
-sentry = { version = "0.34", default-features = false, features = ["reqwest", "rustls", "panic", "anyhow"] }
+#
+# Pinned to >=0.35: sentry 0.34 pulled `rustls 0.22` (its own optional
+# ureq/curl transport dep) which dragged in the vulnerable
+# `rustls-webpki 0.102.8` (RUSTSEC-2026-0049/0098/0099/0104). We only use the
+# reqwest transport, so that path was unused, but 0.35 drops the direct
+# `rustls 0.22` dep entirely and resolves to the patched `rustls-webpki
+# 0.103.13` (still on the `ring` backend — no aws-lc-rs/cmake pulled in).
+sentry = { version = "0.35", default-features = false, features = ["reqwest", "rustls", "panic", "anyhow"] }
 
 [dev-dependencies]
 # `test` feature enables `sentry::test::with_captured_events` — required for
 # the in-memory transport used by `tests/sentry_backend.rs`.
-sentry = { version = "0.34", default-features = false, features = ["test"] }
+sentry = { version = "0.35", default-features = false, features = ["test"] }

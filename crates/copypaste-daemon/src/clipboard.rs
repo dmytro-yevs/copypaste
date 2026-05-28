@@ -1,7 +1,8 @@
 //! Clipboard monitor: polls NSPasteboard (macOS) for text and image changes.
 
 use std::collections::HashSet;
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -102,6 +103,11 @@ fn reset_unsupported_kinds_for_test() {
 pub struct ClipboardMonitor {
     last_change_count: i64,
     max_text_bytes: u64,
+    /// changeCount recorded after a daemon self-write to NSPasteboard (copy_item /
+    /// "copy" IPC handler). When the next poll sees this exact changeCount the daemon
+    /// caused the change itself — skip recording to prevent a duplicate row.
+    /// Shared with `write_to_pasteboard` via an `Arc<AtomicI64>`.
+    pub self_write_change_count: Arc<AtomicI64>,
 }
 
 impl ClipboardMonitor {
@@ -109,6 +115,7 @@ impl ClipboardMonitor {
         Self {
             last_change_count: -1,
             max_text_bytes,
+            self_write_change_count: Arc::new(AtomicI64::new(-1)),
         }
     }
 
@@ -219,6 +226,25 @@ impl ClipboardMonitor {
             else {
                 return Ok(None);
             };
+
+            // Self-write suppression (fix DUP-ON-COPY): when the daemon itself
+            // wrote to the pasteboard (copy_item / "copy" handler), the next
+            // poll will see a changeCount increment caused by our own write.
+            // We must advance `last_change_count` (so we don't re-fire on the
+            // same count on the *next* poll) but must NOT record the content —
+            // the existing item was already promoted to the top of history by
+            // `bump_item_recency`. Clear the sentinel after consuming it.
+            let self_write_cc = self.self_write_change_count.load(Ordering::Acquire);
+            if self_write_cc >= 0 && count == self_write_cc {
+                self.last_change_count = count;
+                // Consume the sentinel — only suppress once per self-write.
+                self.self_write_change_count.store(-1, Ordering::Release);
+                tracing::debug!(
+                    change_count = count,
+                    "clipboard: skipping self-write (copy_item/copy handler wrote this change)"
+                );
+                return Ok(None);
+            }
 
             // Compute delta BEFORE we update the cursor. On first poll
             // (sentinel -1) we suppress the burst signal.

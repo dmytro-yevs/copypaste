@@ -379,11 +379,15 @@ pub async fn start_cloud(
     });
 
     // Task A: push new local items to Supabase REST.
+    // Also passes `db` (for startup backlog) and `last_sync_ms` (so every
+    // successful push updates the timestamp, not only poll-side syncs).
     let push_config = config.clone();
     let push_bearer = bearer.clone();
     let push_shutdown = shutdown.clone();
     let push_sync_key = sync_key.clone();
     let push_local_key = local_key.clone();
+    let push_db = db.clone();
+    let push_last_sync_ms = last_sync_ms.clone();
     tokio::spawn(push_loop(
         push_config,
         push_bearer,
@@ -391,6 +395,8 @@ pub async fn start_cloud(
         push_shutdown,
         push_sync_key,
         push_local_key,
+        push_db,
+        push_last_sync_ms,
     ));
 
     // Task B: poll Supabase REST for remote items and insert unknown ones locally.
@@ -499,6 +505,14 @@ async fn sign_in_with_password(
 ///   token on a 401 and retries the request once.
 /// - **#21 429 Retry-After**: the helper honours `Retry-After` (seconds form)
 ///   and otherwise applies bounded exponential backoff (1s → 30s).
+///
+/// Fix CLOUD-BACKLOG #33: on startup the loop loads ALL existing local items
+/// (not yet synced, i.e. `is_synced = 0`) and enqueues them in the retry queue
+/// so the existing history uploads to Supabase, not only future captures.
+/// `last_sync_ms` is now stamped after every successful push (not just polls)
+/// so the UI sees a non-null `last_sync_ms` even when there are no new remote
+/// items to poll.
+#[allow(clippy::too_many_arguments)]
 async fn push_loop(
     config: CloudConfig,
     bearer: Arc<RwLock<String>>,
@@ -506,6 +520,8 @@ async fn push_loop(
     shutdown: Arc<tokio::sync::Notify>,
     sync_key: Arc<Mutex<Option<SyncKey>>>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
+    db: Arc<Mutex<Database>>,
+    last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
 ) {
     let client = reqwest::Client::new();
     let rest_url = format!("{}/rest/v1/clipboard_items", config.supabase_url);
@@ -518,6 +534,123 @@ async fn push_loop(
     // does NOT happen on each retry attempt — the same blob is re-sent until
     // it succeeds or is evicted by the capacity cap.
     let mut retry_queue: VecDeque<(ClipboardItem, String)> = VecDeque::new();
+
+    // ── Startup backlog push (fix #33) ────────────────────────────────────────
+    // Load all text items that have not yet been synced (`is_synced = 0`).
+    // We only need to queue them here; the main loop below will drain the
+    // retry queue before accepting new broadcast items, so existing history
+    // flows to Supabase first, in chronological order.
+    //
+    // We snapshot the sync key now — if it is not set yet the backlog items
+    // are NOT encrypted/queued (they'd be skipped anyway in the main loop).
+    // They will be picked up by the next `set_sync_passphrase` call only
+    // indirectly (via re-capture or manual re-sync); a future enhancement
+    // could re-trigger the backlog sweep on key-set. For now this is
+    // consistent with the existing no-key warning behaviour.
+    {
+        let key_snapshot: Option<Vec<u8>> = {
+            let guard = sync_key.lock().await;
+            guard.as_ref().map(|k| k.as_bytes().to_vec())
+        };
+        if let Some(ref key_bytes) = key_snapshot {
+            let db_arc = db.clone();
+            let local_key_clone = local_key.clone();
+            let mut key_arr = [0u8; 32];
+            key_arr.copy_from_slice(key_bytes);
+            // Load unsynced items on the blocking pool (rusqlite is sync).
+            let backlog_items: Vec<ClipboardItem> = tokio::task::spawn_blocking(move || {
+                let db = db_arc.blocking_lock();
+                // Fetch up to PUSH_RETRY_QUEUE_CAP unsynced text items,
+                // oldest first, so the timeline on Supabase is chronological.
+                let mut stmt = match db.conn().prepare(
+                    "SELECT id, item_id, content_type, content, content_nonce, \
+                     blob_ref, is_sensitive, is_synced, lamport_ts, wall_time, \
+                     expires_at, app_bundle_id, content_hash, origin_device_id, \
+                     key_version, pinned \
+                     FROM clipboard_items \
+                     WHERE is_synced = 0 AND content_type = 'text' \
+                     ORDER BY wall_time ASC \
+                     LIMIT ?1",
+                ) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!("cloud-sync backlog query prepare failed: {e}");
+                        return vec![];
+                    }
+                };
+                let _ = local_key_clone; // keep the Arc alive
+                stmt.query_map(rusqlite::params![PUSH_RETRY_QUEUE_CAP as i64], |row| {
+                    Ok(ClipboardItem {
+                        id: row.get(0)?,
+                        item_id: row.get(1)?,
+                        content_type: row.get(2)?,
+                        content: row.get(3)?,
+                        content_nonce: row.get(4)?,
+                        blob_ref: row.get(5)?,
+                        is_sensitive: row.get(6)?,
+                        is_synced: row.get(7)?,
+                        lamport_ts: row.get(8)?,
+                        wall_time: row.get(9)?,
+                        expires_at: row.get(10)?,
+                        app_bundle_id: row.get(11)?,
+                        content_hash: row.get(12)?,
+                        origin_device_id: row.get(13).unwrap_or_default(),
+                        key_version: row.get::<_, i64>(14).unwrap_or(2) as u8,
+                        pinned: row.get(15).unwrap_or(false),
+                    })
+                })
+                .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
+                .unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default();
+
+            let count = backlog_items.len();
+            if count > 0 {
+                tracing::info!(
+                    "cloud-sync backlog: found {count} unsynced text items — queuing for push"
+                );
+                let tmp_key = SyncKey::from_bytes(key_arr);
+                for item in backlog_items {
+                    let plaintext = match decrypt_item_plaintext(&item, &local_key) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            tracing::warn!(
+                                "cloud-sync backlog: decrypt failed for id={}: {e}; skipping",
+                                item.id
+                            );
+                            continue;
+                        }
+                    };
+                    match encrypt_for_cloud(&tmp_key, &item.item_id, &plaintext) {
+                        Ok(blob) => {
+                            use base64::Engine as _;
+                            let payload_ct_b64 =
+                                base64::engine::general_purpose::STANDARD.encode(&blob);
+                            enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "cloud-sync backlog: encrypt failed for id={}: {e}; skipping",
+                                item.id
+                            );
+                        }
+                    }
+                }
+                // Zero the key bytes.
+                key_arr.iter_mut().for_each(|b| *b = 0);
+                tracing::info!(
+                    "cloud-sync backlog: {} items queued for upload",
+                    retry_queue.len()
+                );
+            }
+        } else {
+            tracing::debug!(
+                "cloud-sync backlog: no sync passphrase set at startup — \
+                 skipping backlog pre-load (call set_sync_passphrase first)"
+            );
+        }
+    }
 
     // Audit-concurrency HIGH #1 — `broadcast::Receiver::recv` is documented
     // cancellation-safe. We park each item in the retry queue immediately upon
@@ -544,6 +677,14 @@ async fn push_loop(
                         "cloud-sync flushed queued id={} (retry queue drained one)",
                         item.id
                     );
+                    // Fix #33: stamp last_sync_ms on every successful push so
+                    // get_sync_status returns a non-null timestamp even when
+                    // no remote items were polled.
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as i64;
+                    last_sync_ms.store(now_ms, Ordering::Relaxed);
                     continue;
                 }
                 Err(e) => {
@@ -634,8 +775,25 @@ async fn push_loop(
                         // owned by us before any network await.
                         enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
                         if let Some((item, payload_ct_b64)) = retry_queue.pop_front() {
-                            match push_item_with_retries(&client, &rest_url, &config, &bearer, &item, &payload_ct_b64).await {
-                                Ok(()) => tracing::debug!("cloud-sync pushed id={}", item.id),
+                            match push_item_with_retries(
+                                &client,
+                                &rest_url,
+                                &config,
+                                &bearer,
+                                &item,
+                                &payload_ct_b64,
+                            )
+                            .await
+                            {
+                                Ok(()) => {
+                                    tracing::info!("cloud-sync pushed id={}", item.id);
+                                    // Fix #33: update last_sync_ms on every successful push.
+                                    let now_ms = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap_or_default()
+                                        .as_millis() as i64;
+                                    last_sync_ms.store(now_ms, Ordering::Relaxed);
+                                }
                                 Err(e) => {
                                     tracing::warn!(
                                         "cloud-sync push failed for id={}: {e}; queuing for retry",

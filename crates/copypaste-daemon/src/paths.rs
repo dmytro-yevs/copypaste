@@ -279,14 +279,19 @@ pub fn device_id_path() -> Result<PathBuf, PathsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    // Env mutation is process-global; serialise the XDG-helper tests so
-    // they don't race on the COPYPASTE_*_DIR vars.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    // Use the process-wide env lock shared with every other daemon test
+    // module (ipc, keychain, etc.) so that a `HOME` removal here cannot
+    // race a `HOME` redirect running concurrently in another module.
+    // The lock lives in `crate::TEST_ENV_LOCK` (lib.rs, #[cfg(test)]).
+    use crate::TEST_ENV_LOCK;
 
     /// RAII guard that snapshots an env var, lets the test mutate it, and
     /// restores the previous value on drop — even on panic.
+    ///
+    /// The caller is responsible for holding `TEST_ENV_LOCK` before
+    /// constructing this guard so that the snapshot → mutate → restore
+    /// window is atomic with respect to all other env-mutating tests.
     struct EnvGuard {
         key: &'static str,
         original: Option<std::ffi::OsString>,
@@ -295,7 +300,7 @@ mod tests {
     impl EnvGuard {
         fn set(key: &'static str, value: &std::path::Path) -> Self {
             let original = std::env::var_os(key);
-            // SAFETY: tests are serialised via `ENV_LOCK`.
+            // SAFETY: tests are serialised via `TEST_ENV_LOCK`.
             unsafe { std::env::set_var(key, value) };
             Self { key, original }
         }
@@ -303,7 +308,7 @@ mod tests {
 
     impl Drop for EnvGuard {
         fn drop(&mut self) {
-            // SAFETY: restoring snapshotted value under `ENV_LOCK`.
+            // SAFETY: restoring snapshotted value under `TEST_ENV_LOCK`.
             unsafe {
                 match self.original.take() {
                     Some(v) => std::env::set_var(self.key, v),
@@ -352,24 +357,28 @@ mod tests {
     /// the absence of panics in `paths_returns_error_when_home_unset`.
     #[test]
     fn paths_returns_error_when_home_unset() {
-        // SAFETY: env mutation is process-global and racy with parallel
-        // tests. We snapshot, clear, run, restore — and accept that on
-        // platforms where home_dir() has additional fallbacks (e.g. getpwuid)
-        // the call may still succeed. The assertion is: *no panic*.
+        // Acquire the process-wide env lock FIRST so this test's HOME
+        // removal cannot race a concurrent test (e.g. in `ipc`) that has
+        // redirected HOME to a temp dir and is in the middle of an async
+        // operation that reads it.
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        // SAFETY: env mutation is process-global; serialised via
+        // `TEST_ENV_LOCK` above. We snapshot, clear, run, restore so the
+        // lock is held for the entire mutation window.
         let snapshot_home = std::env::var_os("HOME");
         let snapshot_userprofile = std::env::var_os("USERPROFILE");
 
-        // SAFETY: temporary env mutation for this test only.
         unsafe {
             std::env::remove_var("HOME");
             std::env::remove_var("USERPROFILE");
         }
 
-        // Catch any panic so that env restoration always runs.
+        // Catch any panic so that env restoration always runs even if the
+        // function under test panics unexpectedly.
         let result = std::panic::catch_unwind(try_app_support_dir);
 
-        // Restore env before assertions.
-        // SAFETY: restoring previously-snapshotted env values.
+        // Restore env before assertions (still holding the lock).
         unsafe {
             if let Some(v) = snapshot_home {
                 std::env::set_var("HOME", v);
@@ -393,7 +402,7 @@ mod tests {
 
     #[test]
     fn ensure_dirs_creates_all_required_dirs() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         let data = tmp.path().join("data");
         let cache = tmp.path().join("cache");
@@ -414,7 +423,7 @@ mod tests {
 
     #[test]
     fn ensure_dirs_idempotent_rerun_safe() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         let data = tmp.path().join("d");
         let cache = tmp.path().join("c");
@@ -440,7 +449,7 @@ mod tests {
 
     #[test]
     fn env_override_respected_for_each_dir() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().expect("tempdir");
         let d = tmp.path().join("data-override");
         let c = tmp.path().join("cache-override");
@@ -460,7 +469,7 @@ mod tests {
 
     #[test]
     fn platform_specific_paths_match_convention() {
-        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Clear any inherited overrides for this test.
         let _g1 = EnvGuard {
             key: ENV_DATA_DIR,
@@ -478,7 +487,7 @@ mod tests {
             key: ENV_LOG_DIR,
             original: std::env::var_os(ENV_LOG_DIR),
         };
-        // SAFETY: serialised via ENV_LOCK.
+        // SAFETY: serialised via TEST_ENV_LOCK.
         unsafe {
             std::env::remove_var(ENV_DATA_DIR);
             std::env::remove_var(ENV_CACHE_DIR);

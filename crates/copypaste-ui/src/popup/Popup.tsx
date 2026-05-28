@@ -1,11 +1,31 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { api, HistoryEntry, IpcError } from "../lib/ipc";
+import { useUI } from "../store";
 
-const ITEM_HEIGHT = 28; // px — compact single-line row height (Maccy-style)
+const DEFAULT_ITEM_HEIGHT = 28; // px — default compact single-line row height
 const MAX_ITEMS = 50;
 
+/** Redact sensitive spans within text, same logic as HistoryView. */
+function applySpanMasking(text: string, spans: Array<[number, number]>): string {
+  if (spans.length === 0) return text;
+  let result = "";
+  let cursor = 0;
+  const sorted = [...spans].sort((a, b) => a[0] - b[0]);
+  for (const [start, end] of sorted) {
+    const s = Math.min(Math.max(start, cursor), text.length);
+    const e = Math.min(end, text.length);
+    if (s > cursor) result += text.slice(cursor, s);
+    if (e > s) result += "•".repeat(e - s);
+    cursor = Math.max(cursor, e);
+  }
+  result += text.slice(cursor);
+  return result;
+}
+
 export function Popup() {
+  const { maskSensitive, previewSize = DEFAULT_ITEM_HEIGHT } = useUI((s) => s.prefs);
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -85,12 +105,15 @@ export function Popup() {
   const confirmSelection = useCallback(async () => {
     const item = filtered[selectedIdx];
     if (!item) return;
+    // Fix #3: hide popup first, then copy + paste — never touch the main window
+    hide();
     try {
       await api.copyItem(item.id);
+      // Synthesise Cmd+V into the previously-focused app.
+      await invoke("paste_to_frontmost");
     } catch {
       // Ignore errors on paste — the item might have been deleted.
     }
-    hide();
   }, [filtered, selectedIdx, hide]);
 
   const handleKeyDown = useCallback(
@@ -184,16 +207,18 @@ export function Popup() {
               key={item.id}
               item={item}
               selected={idx === selectedIdx}
-              itemHeight={ITEM_HEIGHT}
+              itemHeight={previewSize}
+              maskSensitive={maskSensitive}
               onMouseEnter={() => setSelectedIdx(idx)}
               onClick={async () => {
-                // Copy the specific item that was clicked (not just selectedIdx).
+                // Fix #3: hide first, copy, then paste — don't activate main window
+                hide();
                 try {
                   await api.copyItem(item.id);
+                  await invoke("paste_to_frontmost");
                 } catch {
                   // Ignore errors on paste.
                 }
-                hide();
               }}
             />
           ))}
@@ -213,21 +238,28 @@ interface PopupRowProps {
   item: HistoryEntry;
   selected: boolean;
   itemHeight: number;
+  maskSensitive: boolean;
   onMouseEnter: () => void;
   onClick: () => void;
 }
 
-function PopupRow({ item, selected, onMouseEnter, onClick }: PopupRowProps) {
-  const isImage = item.content_type.startsWith("image/");
+function PopupRow({ item, selected, itemHeight, maskSensitive, onMouseEnter, onClick }: PopupRowProps) {
+  // Fix #1: bare "image" content_type stored by daemon
+  const isImage = item.content_type === "image" || item.content_type.startsWith("image/");
   const isSensitive = item.is_sensitive;
 
   // For images, show a compact "[Image]" label instead of a thumbnail.
-  // For text, collapse newlines and truncate — rendered via CSS single-line truncation.
-  const label = isImage
-    ? "[Image]"
-    : isSensitive
-    ? "••••••••"
-    : item.preview.replace(/\s+/g, " ").trim() || "(empty)";
+  // Fix #7: apply span masking when enabled and sensitive_spans are provided.
+  let label: string;
+  if (isImage) {
+    label = "[Image]";
+  } else if (isSensitive) {
+    label = "••••••••";
+  } else if (maskSensitive && item.sensitive_spans && item.sensitive_spans.length > 0) {
+    label = applySpanMasking(item.preview, item.sensitive_spans).replace(/\s+/g, " ").trim() || "(empty)";
+  } else {
+    label = item.preview.replace(/\s+/g, " ").trim() || "(empty)";
+  }
 
   return (
     <li
@@ -235,6 +267,7 @@ function PopupRow({ item, selected, onMouseEnter, onClick }: PopupRowProps) {
         "popup-row flex items-center gap-2 px-3 cursor-pointer transition-colors duration-75 select-none",
         selected ? "bg-white/10" : "hover:bg-white/5",
       ].join(" ")}
+      style={{ minHeight: itemHeight }}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     >

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ViewShell } from "../components/ViewShell";
 import { api, formatWallTime, IpcError, type HistoryEntry } from "../lib/ipc";
+import { useUI } from "../store";
 
 // ---------------------------------------------------------------------------
 // Image thumbnail cache — keyed by item id, value is the data URI (or null
@@ -199,18 +200,59 @@ function ImageThumbnail({ id }: { id: string }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Sensitive-span masking helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Redact the char-index ranges in `sensitive_spans` from `text`, replacing
+ * each range with bullet characters. Ranges are clamped to text length.
+ */
+function applySpanMasking(text: string, spans: Array<[number, number]>): string {
+  if (spans.length === 0) return text;
+  let result = "";
+  let cursor = 0;
+  // Sort spans by start index so we process left-to-right.
+  const sorted = [...spans].sort((a, b) => a[0] - b[0]);
+  for (const [start, end] of sorted) {
+    const s = Math.min(Math.max(start, cursor), text.length);
+    const e = Math.min(end, text.length);
+    if (s > cursor) result += text.slice(cursor, s);
+    if (e > s) result += "•".repeat(e - s);
+    cursor = Math.max(cursor, e);
+  }
+  result += text.slice(cursor);
+  return result;
+}
+
 interface RowProps {
   entry: HistoryEntry;
   selected: boolean;
+  previewLines: number;
+  previewSize: number;
+  maskSensitive: boolean;
   onSelect: () => void;
   onCopy: () => void;
   onPin: () => void;
   onDelete: () => void;
 }
 
-function HistoryRow({ entry, selected, onSelect, onCopy, onPin, onDelete }: RowProps) {
-  const isImage = entry.content_type.startsWith("image/");
-  const preview = entry.is_sensitive ? "•••••• (sensitive)" : entry.preview;
+function HistoryRow({ entry, selected, previewLines, previewSize, maskSensitive, onSelect, onCopy, onPin, onDelete }: RowProps) {
+  // Fix #1: bare "image" content_type stored by daemon
+  const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
+
+  let preview: string;
+  if (entry.is_sensitive) {
+    preview = "•••••• (sensitive)";
+  } else if (maskSensitive && entry.sensitive_spans && entry.sensitive_spans.length > 0) {
+    // Fix #7: redact only sensitive spans, show the rest
+    preview = applySpanMasking(entry.preview, entry.sensitive_spans);
+  } else {
+    preview = entry.preview;
+  }
+
+  // Fix #6: row height driven by previewSize setting
+  const rowH = isImage ? Math.max(previewSize + 6, 34) : previewSize;
 
   return (
     <div
@@ -218,7 +260,6 @@ function HistoryRow({ entry, selected, onSelect, onCopy, onPin, onDelete }: RowP
       aria-selected={selected}
       className={[
         "group relative flex cursor-pointer select-none items-center gap-2 px-3",
-        isImage ? "h-[34px]" : "h-[30px]",
         "border-b text-[13px]",
         entry.pinned ? "border-ide-warning/20 bg-ide-warning/5" : "border-ide-divider/40",
         selected
@@ -227,6 +268,7 @@ function HistoryRow({ entry, selected, onSelect, onCopy, onPin, onDelete }: RowP
           ? "text-ide-text hover:bg-ide-warning/10"
           : "text-ide-text hover:bg-ide-hover",
       ].join(" ")}
+      style={{ minHeight: rowH }}
       onClick={() => { onSelect(); onCopy(); }}
     >
       {/* Pin indicator (only on pinned rows) */}
@@ -238,14 +280,26 @@ function HistoryRow({ entry, selected, onSelect, onCopy, onPin, onDelete }: RowP
 
       {/* Type glyph */}
       <span className="flex w-4 shrink-0 items-center justify-center">
-        <ContentIcon type={entry.content_type} />
+        <ContentIcon type={isImage ? "image" : entry.content_type} />
       </span>
 
-      {/* Image thumbnail (lazy-loaded, cached) */}
+      {/* Image thumbnail (lazy-loaded, cached) — only shown for images */}
       {isImage && <ImageThumbnail id={entry.id} />}
 
-      {/* Preview */}
-      <span className={["flex-1 truncate", entry.is_sensitive ? "italic text-ide-dim" : ""].join(" ")}>
+      {/* Preview — Fix #5: multi-line via previewLines clamped with webkit-line-clamp */}
+      <span
+        className={["flex-1 min-w-0 break-words", entry.is_sensitive ? "italic text-ide-dim" : ""].join(" ")}
+        style={
+          previewLines > 1
+            ? {
+                display: "-webkit-box",
+                WebkitLineClamp: previewLines,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+              }
+            : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+        }
+      >
         {isImage && !entry.is_sensitive ? `[Image] ${entry.preview}`.trim() : preview}
       </span>
 
@@ -308,6 +362,7 @@ interface ToastState {
 let _toastSeq = 0;
 
 export function HistoryView() {
+  const { previewLines, previewSize, maskSensitive } = useUI((s) => s.prefs);
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [search, setSearch] = useState("");
@@ -591,6 +646,9 @@ export function HistoryView() {
             key={entry.id}
             entry={entry}
             selected={entry.id === selectedId}
+            previewLines={previewLines}
+            previewSize={previewSize}
+            maskSensitive={maskSensitive}
             onSelect={() => {
               setSelectedId(entry.id);
               listRef.current?.focus();

@@ -23,7 +23,8 @@
     the first time per-session that getPrimaryClip() is called. This is expected and
     cannot be suppressed.
 
-    accessibilityEventTypes="0" — subscribe to NO window/view events.
+    accessibilityEventTypes="typeWindowStateChanged" — a single minimal flag
+      (AAPT rejects "0"/none); the service ignores the events anyway.
     feedbackType="feedbackGeneric" — minimal feedback declaration required by framework.
     canRetrieveWindowContent="false" — explicitly opt-out of screen reading.
     notificationTimeout="0" — not applicable since we subscribe to no events.
@@ -34,7 +35,7 @@
     accessibility events.
 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="0"
+    android:accessibilityEventTypes="typeWindowStateChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagDefault"
     android:canRetrieveWindowContent="false"

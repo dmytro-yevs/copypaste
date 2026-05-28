@@ -51,6 +51,8 @@ export interface HistoryEntry {
   content_type: string;
   preview: string;
   is_sensitive: boolean;
+  /** Byte-index ranges within `preview` that are sensitive, e.g. [[0,4],[10,16]]. */
+  sensitive_spans?: Array<[number, number]>;
   /** Unix epoch milliseconds. */
   wall_time: number;
   pinned: boolean;
