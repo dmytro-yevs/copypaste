@@ -252,6 +252,9 @@ export component SearchField inherits Rectangle {
     in-out property <string> text: "";
     in property <string> placeholder: "Search…";
     in property <bool> enabled: true;
+    // Optional keyboard-shortcut hint rendered as a small key-cap on the right
+    // edge of the field (e.g. "⌘K"). Hidden while the field has content.
+    in property <string> shortcut-hint: "";
     callback edited(string);
 
     height: 28px;
@@ -304,6 +307,25 @@ export component SearchField inherits Rectangle {
                 height: parent.height;
                 vertical-alignment: center;
                 edited => { root.text = self.text; root.edited(self.text); }
+            }
+        }
+
+        // Shortcut-hint key-cap (e.g. "⌘K") — only when empty so it never
+        // collides with the clear button below.
+        if root.shortcut-hint != "" && root.text == "": Rectangle {
+            height: 18px;
+            width: hint-label.preferred-width + 10px;
+            border-radius: 4px;
+            background: Theme.surface-elevated;
+            border-width: 1px;
+            border-color: Theme.border-regular;
+
+            hint-label := Text {
+                text: root.shortcut-hint;
+                font-size: Theme.font-caption;
+                color: Theme.text-tertiary;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
         }
 

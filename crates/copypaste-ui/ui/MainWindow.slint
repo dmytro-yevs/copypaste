@@ -9,7 +9,7 @@
 
 import { Theme } from "theme.slint";
 import { Icons } from "icons.slint";
-import { SidebarTab, SearchField, GhostButton, PrimaryButton, DangerButton, SecondaryButton } from "primitives.slint";
+import { SidebarTab, GhostButton, PrimaryButton, DangerButton, SecondaryButton } from "primitives.slint";
 import { HistoryView, ClipItem } from "views/history.slint";
 import { DevicesView, DeviceEntry } from "views/devices.slint";
 import { PairView } from "views/pair.slint";
@@ -494,7 +494,7 @@ export component MainWindow inherits Window {
                 vertical-stretch: 1;
                 items: root.history-items;
                 loading: root.history-loading;
-                search-query: root.search-query;
+                search-query <=> root.search-query;
                 error-message: root.history-error;
                 selected-index <=> root.selected-history-index;
                 item-clicked(idx) => { root.item-clicked(idx); }
@@ -586,42 +586,17 @@ export component MainWindow inherits Window {
             spacing: 0px;
             horizontal-stretch: 1;
 
-            // ── Top bar ────────────────────────────────────────────────────
-            Rectangle {
-                height: 44px;
-                background: Theme.surface-sidebar;
-
-                Rectangle {
-                    x: 0;
-                    y: parent.height - 1px;
-                    width: parent.width;
-                    height: 1px;
-                    background: Theme.border-subtle;
-                }
-
-                HorizontalLayout {
-                    padding-left: 12px;
-                    padding-right: 12px;
-                    padding-top: 8px;
-                    padding-bottom: 8px;
-                    spacing: 8px;
-                    alignment: center;
-
-                    SearchField {
-                        horizontal-stretch: 1;
-                        text <=> root.search-query;
-                        placeholder: "Search…";
-                        edited(q) => { root.search-changed(q); }
-                    }
-                }
-            }
+            // Each view owns its own header/toolbar (History has the only
+            // search field, on its own toolbar). There is intentionally no
+            // shared top bar here — a global SearchField used to float across
+            // every view as a misplaced chip overlapping the top edge.
 
             // ── Content area ──────────────────────────────────────────────
             if root.active-tab == 0: HistoryView {
                 vertical-stretch: 1;
                 items: root.history-items;
                 loading: root.history-loading;
-                search-query: root.search-query;
+                search-query <=> root.search-query;
                 error-message: root.history-error;
                 selected-index <=> root.selected-history-index;
                 item-clicked(idx) => { root.item-clicked(idx); }
@@ -635,6 +610,7 @@ export component MainWindow inherits Window {
 
             if root.active-tab == 1: DevicesView {
                 vertical-stretch: 1;
+                horizontal-stretch: 1;
                 devices: root.devices;
                 device-selected(idx) => { root.device-selected(idx); }
                 open-pair() => { root.open-pair(); }
@@ -644,6 +620,7 @@ export component MainWindow inherits Window {
 
             if root.active-tab == 2: PairView {
                 vertical-stretch: 1;
+                horizontal-stretch: 1;
                 pair-mode <=> root.pair-mode;
                 qr-image: root.qr-image;
                 pair-code: root.pair-code;
@@ -657,6 +634,7 @@ export component MainWindow inherits Window {
 
             if root.active-tab == 3: SettingsView {
                 vertical-stretch: 1;
+                horizontal-stretch: 1;
                 settings-tab <=> root.settings-tab;
                 accent <=> root.accent;
                 compact <=> root.compact;

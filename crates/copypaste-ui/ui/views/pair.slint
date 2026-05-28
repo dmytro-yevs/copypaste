@@ -180,46 +180,51 @@ export component PairView inherits Rectangle {
                 spacing: Theme.section-gap;
                 padding: Theme.section-gap;
 
-                // QR image area
-                Rectangle {
-                    height: 200px;
-                    width: 200px;
-                    border-radius: Theme.radius-panel;
-                    background: #FFFFFF;  // QR always on white
-                    border-width: 2px;
-                    border-color: Theme.border-regular;
+                // QR image area — wrapped in a centering row so the fixed-width
+                // card sits in the horizontal middle of the pane.
+                HorizontalLayout {
+                    alignment: center;
 
-                    HorizontalLayout {
-                        alignment: center;
+                    Rectangle {
+                        height: 200px;
+                        width: 200px;
+                        border-radius: Theme.radius-panel;
+                        background: #FFFFFF;  // QR always on white
+                        border-width: 2px;
+                        border-color: Theme.border-regular;
 
-                        VerticalLayout {
+                        HorizontalLayout {
                             alignment: center;
 
-                            // Show QR image if available, else placeholder
-                            if root.qr-image.width > 0: Image {
-                                source: root.qr-image;
-                                width: 180px;
-                                height: 180px;
-                                image-fit: contain;
-                            }
-
-                            if root.qr-image.width == 0: VerticalLayout {
+                            VerticalLayout {
                                 alignment: center;
-                                spacing: Theme.space-2;
 
-                                Image {
-                                    source: Icons.qr-code;
-                                    width: 64px;
-                                    height: 64px;
-                                    colorize: #888888;
-                                    horizontal-alignment: center;
+                                // Show QR image if available, else placeholder
+                                if root.qr-image.width > 0: Image {
+                                    source: root.qr-image;
+                                    width: 180px;
+                                    height: 180px;
+                                    image-fit: contain;
                                 }
 
-                                Text {
-                                    text: "Generating QR…";
-                                    font-size: Theme.font-caption;
-                                    color: #888888;
-                                    horizontal-alignment: center;
+                                if root.qr-image.width == 0: VerticalLayout {
+                                    alignment: center;
+                                    spacing: Theme.space-2;
+
+                                    Image {
+                                        source: Icons.qr-code;
+                                        width: 64px;
+                                        height: 64px;
+                                        colorize: #888888;
+                                        horizontal-alignment: center;
+                                    }
+
+                                    Text {
+                                        text: "Generating QR…";
+                                        font-size: Theme.font-caption;
+                                        color: #888888;
+                                        horizontal-alignment: center;
+                                    }
                                 }
                             }
                         }

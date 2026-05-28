@@ -193,6 +193,9 @@ export component DevicesView inherits Rectangle {
         spacing: 0px;
 
         // ── Toolbar ─────────────────────────────────────────────────────────
+        // Full-width header: title left-aligned, "+ Pair" right-aligned. The
+        // view spans the full content pane because the empty-state / card grid
+        // below is wrapped in an unbounded-width Rectangle (see content area).
         toolbar := Rectangle {
             height: 48px;
             background: Theme.surface-sidebar;
@@ -212,10 +215,15 @@ export component DevicesView inherits Rectangle {
                     vertical-alignment: center;
                 }
 
-                PrimaryButton {
-                    icon: Icons.plus;
-                    label: "+ Pair";
-                    clicked => { root.open-pair(); }
+                // Vertically centre the fixed-height button within the 48px bar.
+                VerticalLayout {
+                    alignment: center;
+
+                    PrimaryButton {
+                        icon: Icons.plus;
+                        label: "+ Pair";
+                        clicked => { root.open-pair(); }
+                    }
                 }
             }
         }
@@ -227,18 +235,27 @@ export component DevicesView inherits Rectangle {
         }
 
         // ── Content area ─────────────────────────────────────────────────────
-        if root.devices.length == 0: EmptyState {
+        // Wrap the empty state in a plain (unbounded-max-width) Rectangle so the
+        // whole column — toolbar included — spans the full content pane and the
+        // empty state centres in it. A bare EmptyState here has a finite
+        // intrinsic width that otherwise shrink-wraps the view (mirrors the
+        // PairView content-area / History content-area pattern).
+        if root.devices.length == 0: Rectangle {
             vertical-stretch: 1;
-            title: "No paired devices";
-            body: "Pair a device to start syncing your clipboard.";
-            icon: Icons.monitor-smartphone;
-            cta-label: "+ Pair Device";
-            cta-icon: Icons.link-2;
-            cta-clicked => { root.open-pair(); }
+            background: Theme.surface-base;
+            EmptyState {
+                title: "No paired devices";
+                body: "Pair a device to start syncing your clipboard.";
+                icon: Icons.monitor-smartphone;
+                cta-label: "+ Pair Device";
+                cta-icon: Icons.link-2;
+                cta-clicked => { root.open-pair(); }
+            }
         }
 
         if root.devices.length > 0: ScrollView {
             vertical-stretch: 1;
+            horizontal-stretch: 1;
 
             // Card grid — 3-up wrapping using a flow-like HorizontalLayout
             // Note: Slint does not have a native wrapping grid; we use a

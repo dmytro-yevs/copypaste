@@ -242,7 +242,7 @@ export component HistoryView inherits Rectangle {
     // ── Inputs ──────────────────────────────────────────────────────────────
     in property <[ClipItem]> items: [];
     in property <bool> loading: false;
-    in property <string> search-query: "";
+    in-out property <string> search-query: "";
     in property <string> error-message: "";  // non-empty → error banner shown
 
     // ── In-out ──────────────────────────────────────────────────────────────
@@ -301,17 +301,12 @@ export component HistoryView inherits Rectangle {
                     vertical-alignment: center;
                     horizontal-stretch: 1;
                 }
-
-                // ⌘K hint button
-                IconButton {
-                    icon: Icons.command;
-                    label: "K";
-                    style: "secondary";
-                }
             }
         }
 
-        // ── Search bar ──────────────────────────────────────────────────────
+        // ── Search bar — the single clipboard search field. The ⌘K hint is
+        //    shown inline inside the field (key-cap affix), not as a floating
+        //    badge by the title.
         Rectangle {
             height: 44px;
             background: Theme.surface-base;
@@ -328,11 +323,11 @@ export component HistoryView inherits Rectangle {
                 padding-top: Theme.space-2;
                 padding-bottom: Theme.space-2;
                 spacing: Theme.space-2;
-                alignment: center;
 
                 search-field := SearchField {
-                    text: root.search-query;
-                    placeholder: @tr("Search clipboard…  ⌘F");
+                    text <=> root.search-query;
+                    placeholder: @tr("Search clipboard…");
+                    shortcut-hint: "⌘K";
                     horizontal-stretch: 1;
                     edited(q) => {
                         debounce-timer.running = false;
