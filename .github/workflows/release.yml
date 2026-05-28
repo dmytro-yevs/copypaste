@@ -73,13 +73,15 @@ jobs:
         run: |
           # cloud-sync excluded from release build — requires Supabase credentials not present in CI
           # copypaste-android excluded on macOS — needs aarch64-linux-android target (built in build-android job)
-          # Build only the three crates the DMG ships (copypaste CLI, daemon, UI);
-          # skips copypaste-bench / copypaste-ui-snapshot under thin-LTO. See
-          # scripts/release/build-dmg-ci.sh (BIN_CLI/BIN_DAEMON/BIN_UI).
+          # Build only the four crates the DMG ships (copypaste CLI, daemon, UI, relay);
+          # skips copypaste-bench / copypaste-ui-snapshot under thin-LTO. The relay binary
+          # is bundled into CopyPaste.app by scripts/make_app_bundle.sh (REQUIRED_BINS),
+          # so it must be present in target/release/ before build-dmg-ci.sh runs.
           cargo build --release \
             -p copypaste-cli \
             -p copypaste-daemon \
-            -p copypaste-ui
+            -p copypaste-ui \
+            -p copypaste-relay
 
       - name: Resolve release version
         id: ver
