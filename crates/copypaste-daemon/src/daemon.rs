@@ -1184,4 +1184,125 @@ mod tests {
             assert_eq!(mode, 0o600, "device_id file must be chmod 0600");
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Image round-trip coverage (fix/import-and-rt-tests)
+    // -----------------------------------------------------------------------
+
+    /// Build a valid 2×2 white PNG via the `image` crate. Generating it (vs a
+    /// hand-crafted byte array) keeps the test robust against the PNG
+    /// decoder's strictness — mirrors `copypaste_core::image`'s own tests.
+    fn test_png() -> Vec<u8> {
+        use image::{DynamicImage, ImageBuffer, Rgb};
+        let img = ImageBuffer::from_fn(2, 2, |_, _| Rgb([255u8, 255u8, 255u8]));
+        copypaste_core::encode_as_png(&DynamicImage::ImageRgb8(img)).expect("encode test PNG")
+    }
+
+    /// Read the single stored image row's `(content_blob, blob_ref)` back.
+    fn read_image_row(db: &Database) -> (Vec<u8>, String) {
+        db.conn()
+            .query_row(
+                "SELECT content, blob_ref FROM clipboard_items \
+                 WHERE content_type = 'image' LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("image row exists")
+    }
+
+    /// GAP closer (image): drive the REAL image write path
+    /// (`handle_image` → `encode_image` with the device's real `local_key`,
+    /// producing the daemon's real chunk blob + `blob_ref` metadata JSON) and
+    /// read it back through the REAL read path
+    /// (`ipc::parse_image_file_id` → `chunks_from_blob` → `decode_image`),
+    /// asserting the PNG bytes recover. Mirrors the text round-trip test.
+    #[tokio::test]
+    async fn fresh_image_capture_round_trips_through_read_path() {
+        let local_key = [0x42u8; 32]; // stands in for load_local_key()
+        let db = Arc::new(Mutex::new(Database::open_in_memory().expect("open db")));
+        let config = AppConfig::default();
+        let png = test_png();
+
+        // Ingest: exactly what the monitor loop does on a fresh image capture.
+        let item = handle_image(png.clone(), &db, &local_key, &config)
+            .await
+            .expect("handle_image must store the image");
+        assert_eq!(item.content_type, "image");
+
+        // Read path: pull the stored blob + metadata and decrypt exactly as
+        // ipc::write_to_pasteboard's image branch does.
+        let guard = db.lock().await;
+        let (blob, meta_json) = read_image_row(&guard);
+        let file_id =
+            crate::ipc::parse_image_file_id(&meta_json).expect("file_id parses from blob_ref");
+        let chunks = copypaste_core::chunks_from_blob(&blob).expect("chunks deserialize");
+        let recovered_png =
+            copypaste_core::decode_image(&chunks, &local_key, &file_id).expect("decode_image");
+
+        // `handle_image` re-encodes the raw clipboard bytes to PNG before
+        // chunking, so the recovered bytes are the canonical PNG of the
+        // decoded image — compute the same reference and compare.
+        let reference_png = copypaste_core::encode_as_png(
+            &copypaste_core::decode_clipboard_image(&png).expect("decode raw"),
+        )
+        .expect("encode reference png");
+        assert_eq!(
+            recovered_png, reference_png,
+            "image must round-trip through the read path to the stored PNG"
+        );
+    }
+
+    /// GAP closer (image, key rotation): an image row encrypted under the
+    /// pre-rotation `local_key` MUST, after a local key rotation, either still
+    /// decode OR fail with a clear, explicit error — never silent corruption.
+    ///
+    /// Image chunks are AEAD-encrypted with the raw `local_key` directly
+    /// (no key_version dispatch — see `ipc::write_to_pasteboard`'s image
+    /// branch and `crypto::chunks`). A rotated key therefore cannot satisfy
+    /// the per-chunk auth tag, so `decode_image` MUST return an explicit
+    /// `ImageError` (auth failure) rather than returning wrong/garbage bytes.
+    /// This test pins that intended behaviour.
+    #[tokio::test]
+    async fn image_row_survives_local_key_rotation_or_errors_cleanly() {
+        let old_key = [0x42u8; 32];
+        let db = Arc::new(Mutex::new(Database::open_in_memory().expect("open db")));
+        let config = AppConfig::default();
+        let png = test_png();
+
+        // Capture an image under the OLD key.
+        handle_image(png.clone(), &db, &old_key, &config)
+            .await
+            .expect("handle_image must store the image");
+
+        let guard = db.lock().await;
+        let (blob, meta_json) = read_image_row(&guard);
+        let file_id =
+            crate::ipc::parse_image_file_id(&meta_json).expect("file_id parses from blob_ref");
+        let chunks = copypaste_core::chunks_from_blob(&blob).expect("chunks deserialize");
+
+        // Rotate the local key (simulate a key rotation / new device secret).
+        let rotated_key = [0x99u8; 32];
+        assert_ne!(old_key, rotated_key, "precondition: key actually changed");
+
+        // Decoding the pre-rotation row under the rotated key must FAIL
+        // explicitly — never silently return corrupted/garbage bytes.
+        let result = copypaste_core::decode_image(&chunks, &rotated_key, &file_id);
+        assert!(
+            result.is_err(),
+            "a pre-rotation image row must NOT silently decode under a rotated key"
+        );
+
+        // And the original key must still decode it (rotation does not destroy
+        // the existing row's recoverability under its own key).
+        let recovered = copypaste_core::decode_image(&chunks, &old_key, &file_id)
+            .expect("the pre-rotation row must still decode under its original key");
+        let reference_png = copypaste_core::encode_as_png(
+            &copypaste_core::decode_clipboard_image(&png).expect("decode raw"),
+        )
+        .expect("encode reference png");
+        assert_eq!(
+            recovered, reference_png,
+            "under its original key the row decodes to the stored PNG"
+        );
+    }
 }

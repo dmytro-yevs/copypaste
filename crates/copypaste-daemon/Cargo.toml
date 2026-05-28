@@ -153,6 +153,9 @@ serial_test = "3"
 # Beta-bonus pairing-e2e tests need a raw mDNS daemon with per-test unique
 # service types (DiscoveryService hard-codes `_copypaste._tcp.local.`).
 mdns-sd = { workspace = true }
+# Image round-trip tests build a valid PNG via the `image` crate rather than
+# hand-crafting fragile byte arrays (matches copypaste-core's own test style).
+image = { workspace = true }
 
 # Beta-bonus keychain tests need direct access to set/get/delete primitives
 # (the wrapper uses a hardcoded SERVICE/ACCOUNT so tests use unique account

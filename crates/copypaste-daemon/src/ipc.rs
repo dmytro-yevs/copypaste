@@ -2088,6 +2088,11 @@ impl IpcServer {
                 //    For each item: hash; if a row with the same hash exists
                 //    within the dedupe window, skip; otherwise insert.
                 let db_arc = self.db.clone();
+                // Move a copy of the device's v1 storage key into the blocking
+                // task so imported content can be ENCRYPTED with the same
+                // (key, AAD, key_version) the normal ingest path uses — see
+                // the per-item block below.
+                let local_key_v1: [u8; 32] = **self.local_key;
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     // v0.3 post-T2: dedup is now enforced atomically by the
@@ -2100,27 +2105,61 @@ impl IpcServer {
                     // which we treat as a dedup skip.
                     let mut inserted: u32 = 0;
                     let mut skipped: u32 = 0;
+                    // Derive the v2 storage key once: imported content is
+                    // encrypted exactly as `daemon::encrypt_text_for_storage`
+                    // does (v2 key + v4 AAD, stamped key_version = 2), so the
+                    // read path (`decrypt_item_by_version`, dispatched by the
+                    // `copy`/`paste` IPC verb) can decrypt it.
+                    let v2_key = derive_v2(&local_key_v1);
                     for item in decoded {
                         let mut hasher = Sha256::new();
                         hasher.update(&item.bytes);
                         let hash_hex = hex::encode(hasher.finalize());
 
-                        // Imported items have no encryption nonce — the bytes
-                        // are stored verbatim as the "content" field. This
-                        // mirrors how alpha-era exports were laid out and
-                        // keeps the import path round-trip-safe.
+                        // Audit fix (import round-trip): previously imported
+                        // bytes were stored VERBATIM with an EMPTY nonce while
+                        // `ClipboardItem::new_text` stamped key_version = 2.
+                        // The read path then tried to XChaCha20-Poly1305-decrypt
+                        // them under the v2 key and failed with AuthFailed, so
+                        // imported items could never be retrieved.
+                        //
+                        // Now we ENCRYPT the content the same way fresh ingest
+                        // does: build the AAD from the row's own item_id with
+                        // the v4 schema + key_version 2, encrypt with the v2
+                        // key, and store the real (nonce, ciphertext). The row
+                        // stays at key_version = 2 (set by new_text) so the
+                        // read path selects the matching key/AAD.
+                        //
                         // lamport_ts = 0 is a deliberate "imported, unknown
                         // origin" sentinel; sync will reassign on first push.
+                        let item_id = uuid::Uuid::new_v4().to_string();
+                        let aad = copypaste_core::build_item_aad_v2(
+                            &item_id,
+                            copypaste_core::AAD_SCHEMA_VERSION_V4,
+                            copypaste_core::ITEM_KEY_VERSION_CURRENT as u32,
+                        );
+                        let (nonce, ciphertext) =
+                            match copypaste_core::encrypt_item_with_aad(&item.bytes, &v2_key, &aad)
+                            {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    return Err::<(u32, u32), anyhow::Error>(anyhow::anyhow!(
+                                        "encrypt imported item failed: {e}"
+                                    ));
+                                }
+                            };
                         let mut clip =
-                            copypaste_core::ClipboardItem::new_text(item.bytes, Vec::new(), 0);
+                            copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
+                        clip.item_id = item_id;
                         clip.content_type = item.content_type;
                         clip.wall_time = item.created_at_ms;
                         clip.content_hash = Some(hash_hex);
 
-                        // Imported items have no plaintext available here
-                        // (the bytes are stored verbatim, often already
-                        // encrypted or binary), so we pass "" to skip FTS
-                        // indexing — matches the image path semantics.
+                        // FTS indexing: pass "" to skip the FTS write. The
+                        // searchable plaintext is no longer available as a
+                        // stored column (content is now ciphertext), matching
+                        // the image path semantics — search over imported
+                        // items is out of scope for this fix.
                         let requested_id = clip.id.clone();
                         match copypaste_core::insert_item_with_fts(&db, &clip, "") {
                             Ok(stored_id) if stored_id == requested_id => {
@@ -2353,8 +2392,13 @@ impl PasteboardError {
 /// image item's `blob_ref`. The metadata shape is produced by
 /// `daemon::handle_image` (`{"width":...,"file_id":[u8; 16]}` — Rust
 /// `{:?}` debug formatting of the byte array).
-#[cfg(target_os = "macos")]
-fn parse_image_file_id(meta_json: &str) -> Result<[u8; 16], String> {
+///
+/// Lives here as `pub(crate)` (not behind `#[cfg(macos)]`) so the daemon's
+/// image round-trip tests can drive the exact same read-path parser on any
+/// host. Only the macOS `write_to_pasteboard` path calls it at runtime, hence
+/// the dead-code allowance on non-macOS builds.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn parse_image_file_id(meta_json: &str) -> Result<[u8; 16], String> {
     let value: serde_json::Value =
         serde_json::from_str(meta_json).map_err(|e| format!("image meta_json parse error: {e}"))?;
     let arr = value
