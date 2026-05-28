@@ -8,7 +8,8 @@
 #
 # Preconditions:
 #   - `cd crates/copypaste-ui && pnpm install && pnpm tauri build` already ran.
-#     Tauri writes its .app to crates/copypaste-ui/src-tauri/target/release/bundle/macos/
+#     src-tauri is a workspace member, so Tauri writes its .app to the
+#     WORKSPACE-ROOT target/release/bundle/macos/ (not crate-local).
 #   - `cargo build --release -p copypaste-cli -p copypaste-daemon -p copypaste-relay`
 #     already ran (or supply cross-compiled bins via target-triple).
 #
@@ -28,21 +29,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Resolve build output dir: prefer per-triple build when triple given.
+# src-tauri is a workspace member, so the Tauri bundler and sibling binaries
+# both land under the WORKSPACE-ROOT target/ (per-triple when --target used).
+if [[ -n "$TRIPLE" ]]; then
+    BIN_DIR="target/${TRIPLE}/release"
+else
+    BIN_DIR="target/release"
+fi
+
 # Tauri bundle output path (relative to repo root).
-TAURI_BUNDLE_DIR="crates/copypaste-ui/src-tauri/target/release/bundle/macos"
+TAURI_BUNDLE_DIR="${BIN_DIR}/bundle/macos"
 TAURI_APP="${TAURI_BUNDLE_DIR}/CopyPaste.app"
 
 if [[ ! -d "$TAURI_APP" ]]; then
     echo "ERROR: Tauri bundle not found at $TAURI_APP." >&2
     echo "       Run: cd crates/copypaste-ui && pnpm install && pnpm tauri build" >&2
     exit 1
-fi
-
-# Resolve sibling binary dir: prefer per-triple build when triple given.
-if [[ -n "$TRIPLE" ]]; then
-    BIN_DIR="target/${TRIPLE}/release"
-else
-    BIN_DIR="target/release"
 fi
 
 SIBLING_BINS=(copypaste-daemon copypaste copypaste-relay)

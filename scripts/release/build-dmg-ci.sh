@@ -7,7 +7,8 @@
 # Preconditions:
 #   - `cargo build --release -p copypaste-cli -p copypaste-daemon -p copypaste-relay` done.
 #   - `cd crates/copypaste-ui && pnpm install && pnpm tauri build` done.
-#     Tauri writes its bundle to crates/copypaste-ui/src-tauri/target/release/bundle/macos/
+#     src-tauri is a workspace member, so Tauri writes its bundle to the
+#     WORKSPACE-ROOT target/release/bundle/macos/ (not crate-local).
 #   - macOS host with codesign + hdiutil (i.e. a real Mac runner).
 #
 # Output: dist/CopyPaste-v<version>-macos-<arch>.dmg + .sha256
@@ -48,7 +49,9 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 # Tauri bundle output — `pnpm tauri build` writes the .app here.
-TAURI_BUNDLE_DIR="crates/copypaste-ui/src-tauri/target/release/bundle/macos"
+# crates/copypaste-ui/src-tauri is a workspace member, so Cargo (and the Tauri
+# bundler) emit into the WORKSPACE-ROOT target/, not a crate-local target/.
+TAURI_BUNDLE_DIR="target/release/bundle/macos"
 TAURI_APP="${TAURI_BUNDLE_DIR}/CopyPaste.app"
 
 BIN_CLI="target/release/copypaste"
