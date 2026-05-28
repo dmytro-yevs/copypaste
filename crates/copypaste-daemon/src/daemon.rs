@@ -62,14 +62,41 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
 
     let db_path = paths::db_path();
     let db = Arc::new(Mutex::new(
-        if std::env::var_os("COPYPASTE_NO_AUTO_MIGRATE").is_some() {
+        match if std::env::var_os("COPYPASTE_NO_AUTO_MIGRATE").is_some() {
             // A.M1 Option C: operator opted out of silent plaintext→SQLCipher migration.
             // Returns DbError::PlaintextMigrationBlocked if a legacy database is found.
             Database::open_no_auto_migrate(&db_path, &local_key_arc)
         } else {
             Database::open(&db_path, &local_key_arc)
-        }
-        .map_err(|e| anyhow::anyhow!("Database: {e}"))?,
+        } {
+            Ok(db) => db,
+            Err(e) => {
+                // Fix B: fail with an actionable error instead of a bare bail.
+                // The most common opaque failure here is SQLCipher's
+                // "file is not a database" (SQLITE_NOTADB), which on an
+                // *encrypted* file means the device key did not match — e.g.
+                // the macOS Keychain returned a different key than the one the
+                // DB was created under (re-keyed device, restored Keychain, or
+                // a failed ThisDeviceOnly accessibility migration). Surface the
+                // path + likely cause so the failure is diagnosable from the
+                // daemon log alone rather than a cryptic one-liner.
+                tracing::error!(
+                    db_path = %db_path.display(),
+                    error = %e,
+                    "failed to open clipboard database — if this reports \
+                     'file is not a database', the SQLCipher key from the \
+                     Keychain does not match the key the DB was encrypted with \
+                     (re-keyed device, restored/!=device Keychain entry, or a \
+                     missing keychain entitlement). The daemon cannot continue \
+                     without the correct key; the encrypted data is intact on \
+                     disk and recoverable once the matching key is restored."
+                );
+                return Err(anyhow::anyhow!(
+                    "Database open failed at {}: {e}",
+                    db_path.display()
+                ));
+            }
+        },
     ));
     tracing::info!("database opened at {}", db_path.display());
 
@@ -91,6 +118,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // immediately. Mirrors COPYPASTE_NO_AUTO_MIGRATE. The corrupt rows are
         // left untouched (they were already unreadable).
         let force_complete = std::env::var_os("COPYPASTE_FORCE_MIGRATION_COMPLETE").is_some();
+        // Opt-in destructive purge of the permanently-undecryptable
+        // `key_version = 1` rows (auth-tag mismatch — never rotatable). Off by
+        // default: we never delete user data without an explicit flag. When
+        // unset we only WARN with the count + this guidance (see below).
+        let purge_dead = std::env::var_os("COPYPASTE_PURGE_DEAD_V1_ROWS").is_some();
         // Derive both sweep keys from the seed the same way the read path does
         // (see `sweep_keys`). The seed is the value stored in the Keychain /
         // returned by `load_local_key()`, which is ALREADY the v1 storage key
@@ -107,12 +139,39 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             let rotated = guard.migration_v4_sweep_resumable(&v1_key, &v2_key)?;
             guard.force_complete_if_no_v1_rows()?;
-            Ok::<usize, copypaste_core::DbError>(rotated)
+            // After the sweep, surface any rows that stayed at key_version=1 —
+            // these are permanently undecryptable legacy ciphertexts (auth-tag
+            // mismatch) and are dead weight. Purge only if explicitly opted in.
+            let dead = guard.count_dead_v1_rows()?;
+            let purged = if dead > 0 && purge_dead {
+                guard.purge_dead_v1_rows()?
+            } else {
+                0
+            };
+            Ok::<(usize, usize, usize), copypaste_core::DbError>((rotated, dead, purged))
         })
         .await
         {
-            Ok(Ok(rotated)) => {
+            Ok(Ok((rotated, dead, purged))) => {
                 tracing::info!(rotated, "v4 key-version migration sweep complete");
+                if purged > 0 {
+                    tracing::warn!(
+                        purged,
+                        "v4 migration: purged {purged} permanently-undecryptable \
+                         key_version=1 row(s) (COPYPASTE_PURGE_DEAD_V1_ROWS=1)"
+                    );
+                } else if dead > 0 {
+                    // One-time actionable WARN: these rows can never be
+                    // decrypted or rotated. Tell the user how to remove them.
+                    tracing::warn!(
+                        dead,
+                        "v4 migration: {dead} legacy key_version=1 row(s) are \
+                         permanently undecryptable (auth-tag mismatch — re-keyed \
+                         device or lost key generation) and cannot be rotated. \
+                         They are dead weight in the database. To purge them, \
+                         restart the daemon once with COPYPASTE_PURGE_DEAD_V1_ROWS=1."
+                    );
+                }
             }
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "v4 migration sweep failed — writes remain gated until next restart");

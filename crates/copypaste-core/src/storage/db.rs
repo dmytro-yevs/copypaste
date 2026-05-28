@@ -799,6 +799,58 @@ impl Database {
         );
         Ok(())
     }
+
+    /// Count the rows still stranded at `key_version = 1` after a completed
+    /// v4 sweep. These are legacy ciphertexts whose AEAD auth tag does not
+    /// verify under the current v1 key (re-keyed device, lost key generation,
+    /// or a pre-fix double-derivation bug). They can never be decrypted or
+    /// rotated and are permanent dead weight in the database.
+    ///
+    /// Surfaced (not silently ignored) so the daemon can WARN with a count and
+    /// point the user at the purge affordance.
+    pub fn count_dead_v1_rows(&self) -> Result<usize, DbError> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_items WHERE key_version = 1",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(n as usize)
+    }
+
+    /// Permanently delete every row still stranded at `key_version = 1` — the
+    /// undecryptable legacy ciphertexts that the v4 sweep could not rotate.
+    ///
+    /// This DESTROYS user data and is therefore opt-in only: it is the backing
+    /// primitive for the `COPYPASTE_PURGE_DEAD_V1_ROWS=1` environment variable
+    /// (mirrors `COPYPASTE_FORCE_MIGRATION_COMPLETE` / `COPYPASTE_NO_AUTO_MIGRATE`).
+    /// The rows it removes are already permanently unreadable — there is no
+    /// recoverable content — but we still gate the deletion behind an explicit
+    /// flag rather than auto-deleting, per the "never delete user data without
+    /// a flag" rule.
+    ///
+    /// Associated FTS rows are removed too so the search index stays consistent
+    /// (the FTS `id` mirrors `clipboard_items.id`). Returns the number of rows
+    /// deleted from `clipboard_items`.
+    pub fn purge_dead_v1_rows(&self) -> Result<usize, DbError> {
+        // Remove the matching FTS entries first (no ON DELETE CASCADE wires the
+        // external-content FTS table to clipboard_items), then the rows.
+        self.conn.execute(
+            "DELETE FROM clipboard_fts \
+             WHERE id IN (SELECT id FROM clipboard_items WHERE key_version = 1)",
+            [],
+        )?;
+        let deleted = self
+            .conn
+            .execute("DELETE FROM clipboard_items WHERE key_version = 1", [])?;
+        if deleted > 0 {
+            tracing::warn!(
+                deleted,
+                "purge_dead_v1_rows: permanently removed {deleted} undecryptable \
+                 key_version=1 row(s) (COPYPASTE_PURGE_DEAD_V1_ROWS=1)"
+            );
+        }
+        Ok(deleted)
+    }
 }
 
 #[cfg(test)]
@@ -1064,5 +1116,74 @@ mod tests {
         let item = make_text_item();
         crate::storage::items::insert_item(&db, &item)
             .expect("insert must succeed after force_migration_complete");
+    }
+
+    // ── Fix A: surfacing + purging permanently-dead key_version=1 rows ─────
+
+    #[test]
+    fn count_and_purge_dead_v1_rows() {
+        let db = Database::open_in_memory().unwrap();
+        let foreign = [0xCDu8; 32];
+
+        // Seed 7 undecryptable legacy rows + 1 readable v2 row (must survive).
+        for _ in 0..7 {
+            seed_unrotatable_v1_text_row(&db, &foreign);
+        }
+        let live = make_text_item();
+        crate::storage::items::insert_item(&db, &live).expect("insert live v2 row");
+
+        // count_dead_v1_rows surfaces exactly the stranded rows.
+        assert_eq!(db.count_dead_v1_rows().unwrap(), 7);
+
+        // purge removes only the v1 rows and reports the deleted count.
+        let deleted = db.purge_dead_v1_rows().unwrap();
+        assert_eq!(deleted, 7, "purge must delete all undecryptable v1 rows");
+        assert_eq!(db.count_dead_v1_rows().unwrap(), 0, "no dead rows remain");
+
+        // The live v2 row is untouched.
+        let total: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(total, 1, "the readable v2 row must survive the purge");
+
+        // Purge is idempotent — a second run deletes nothing.
+        assert_eq!(db.purge_dead_v1_rows().unwrap(), 0);
+    }
+
+    #[test]
+    fn purge_dead_v1_rows_removes_orphaned_fts_entries() {
+        let db = Database::open_in_memory().unwrap();
+        let foreign = [0xEFu8; 32];
+
+        // Seed a dead v1 row and give it a matching FTS entry, mirroring the
+        // (id, content_text) shape that insert_item writes.
+        seed_unrotatable_v1_text_row(&db, &foreign);
+        let dead_id: String = db
+            .conn()
+            .query_row(
+                "SELECT id FROM clipboard_items WHERE key_version = 1 LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, 'stale text')",
+                rusqlite::params![dead_id],
+            )
+            .unwrap();
+
+        db.purge_dead_v1_rows().unwrap();
+
+        let fts_remaining: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                rusqlite::params![dead_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_remaining, 0, "orphaned FTS entry must be purged too");
     }
 }

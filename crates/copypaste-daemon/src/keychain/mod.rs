@@ -88,11 +88,35 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
                 // stop syncing to iCloud Keychain on the next run. Failure
                 // here is logged but not fatal — the keypair load itself
                 // succeeded, and we retry on every cold start.
-                if let Err(e) = migrate_legacy_accessibility_if_needed(&arr) {
-                    tracing::warn!(
-                        error = %e,
-                        "could not migrate device key to ThisDeviceOnly accessibility; will retry on next launch"
-                    );
+                //
+                // Fix C: a `SecAccessControl` with `ThisDeviceOnly`
+                // accessibility requires the `keychain-access-groups`
+                // entitlement, which an ad-hoc-signed binary CANNOT carry
+                // (see `set_generic_password_locked_down`). On those builds
+                // `SecItemAdd`/`SecItemUpdate` returns
+                // `errSecMissingEntitlement` (-34018, "A required entitlement
+                // isn't present"). We treat that one error code as an EXPECTED
+                // degraded state and log it at debug — not warn — so the daemon
+                // does not spam an error on every cold start it can never fix.
+                // The keypair is still fully usable; only the
+                // iCloud-sync-suppression hardening is skipped.
+                match migrate_legacy_accessibility_if_needed(&arr) {
+                    Ok(()) => {}
+                    Err(e) if is_missing_entitlement(&e) => {
+                        tracing::debug!(
+                            "device key ThisDeviceOnly accessibility hardening \
+                             skipped: required keychain entitlement is absent \
+                             (expected on ad-hoc-signed builds). The key is \
+                             usable; iCloud-sync suppression needs a \
+                             Developer-ID-signed build with keychain-access-groups."
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "could not migrate device key to ThisDeviceOnly accessibility; will retry on next launch"
+                        );
+                    }
                 }
                 Ok(DeviceKeypair::from_secret_bytes(&arr)?)
             }
@@ -235,6 +259,24 @@ fn set_generic_password_locked_down(
     }
 }
 
+/// macOS `errSecMissingEntitlement` ("A required entitlement isn't present").
+///
+/// Not exported by `security-framework-sys`, so we pin the literal from
+/// `<Security/SecBase.h>`. Returned by `SecItemAdd`/`SecItemUpdate` when a
+/// `SecAccessControl` requiring `ThisDeviceOnly` accessibility is used by a
+/// binary lacking the `keychain-access-groups` entitlement (i.e. any ad-hoc
+/// signed build — ad-hoc signatures cannot carry that entitlement).
+#[cfg(target_os = "macos")]
+const ERR_SEC_MISSING_ENTITLEMENT: i32 = -34018;
+
+/// True iff `e` is the keychain `errSecMissingEntitlement` failure. Used to
+/// downgrade the `ThisDeviceOnly` migration failure from a per-launch WARN to
+/// a one-line DEBUG on builds that can never carry the entitlement.
+#[cfg(target_os = "macos")]
+fn is_missing_entitlement(e: &KeychainError) -> bool {
+    matches!(e, KeychainError::Keychain(sf) if sf.code() == ERR_SEC_MISSING_ENTITLEMENT)
+}
+
 /// Re-write the existing device-key entry under the locked-down ACL.
 ///
 /// Called from `load_or_create`'s read path so any item written by a
@@ -251,6 +293,23 @@ fn migrate_legacy_accessibility_if_needed(secret: &[u8; 32]) -> Result<(), Keych
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fix C: the `errSecMissingEntitlement` classifier must recognise
+    /// OSStatus -34018 (and only that code) so the daemon downgrades the
+    /// ThisDeviceOnly migration failure to a quiet DEBUG on ad-hoc builds.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn is_missing_entitlement_matches_only_minus_34018() {
+        let missing = KeychainError::Keychain(SfError::from_code(ERR_SEC_MISSING_ENTITLEMENT));
+        assert!(is_missing_entitlement(&missing));
+
+        // A different keychain error must NOT be classified as missing-entitlement.
+        let other = KeychainError::Keychain(SfError::from_code(-25300)); // errSecItemNotFound
+        assert!(!is_missing_entitlement(&other));
+
+        // A non-keychain variant must not match either.
+        assert!(!is_missing_entitlement(&KeychainError::InvalidLength(7)));
+    }
 
     #[test]
     fn own_fingerprint_is_sha256_prefix() {
