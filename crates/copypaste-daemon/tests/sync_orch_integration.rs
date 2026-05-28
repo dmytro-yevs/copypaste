@@ -63,6 +63,7 @@ fn make_wire(id: &str, lamport: i64, content: u8) -> WireItem {
         expires_at: None,
         app_bundle_id: None,
         origin_device_id: "remote-device".to_string(),
+        key_version: 2,
     }
 }
 

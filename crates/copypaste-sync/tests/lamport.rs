@@ -194,6 +194,7 @@ fn make_remote(id: &str, lamport: i64, wall: i64, device_id: &str) -> WireItem {
         expires_at: None,
         app_bundle_id: None,
         origin_device_id: device_id.to_string(),
+        key_version: 2,
     }
 }
 

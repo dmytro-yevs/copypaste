@@ -41,6 +41,7 @@ fn sample_wire_item() -> WireItem {
         expires_at: Some(1_800_000_000_000),
         app_bundle_id: Some("com.example.app".to_string()),
         origin_device_id: "device-uuid-aaaa".to_string(),
+        key_version: 2,
     }
 }
 

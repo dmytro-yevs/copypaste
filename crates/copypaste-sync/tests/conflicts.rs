@@ -70,6 +70,7 @@ fn wire_item(
         expires_at: None,
         app_bundle_id: None,
         origin_device_id: origin_device_id.to_string(),
+        key_version: 2,
     }
 }
 
