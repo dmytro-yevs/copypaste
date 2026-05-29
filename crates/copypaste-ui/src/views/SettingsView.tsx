@@ -253,6 +253,11 @@ export function SettingsView() {
   const [supabaseUrl, setSupabaseUrl] = useState("");
   const [supabaseKey, setSupabaseKey] = useState("");
   const [savedMsg, setSavedMsg] = useState(false);
+  // Cloud connection test result (null = not yet run / cleared).
+  const [testMsg, setTestMsg] = useState<{ text: string; ok: boolean } | null>(
+    null,
+  );
+  const [testing, setTesting] = useState(false);
 
   // Cloud sync passphrase
   const [passphrase, setPassphrase] = useState("");
@@ -385,6 +390,27 @@ export function SettingsView() {
       saveErrTimer.current = setTimeout(() => setSaveError(null), 3500);
     }
   }, [config.p2p_enabled, supabaseUrl, supabaseKey, saveErrTimer]);
+
+  // Run the daemon-side end-to-end Supabase probe and surface a precise,
+  // actionable diagnostic instead of leaving the user to guess why sync is
+  // silent. Saves the current credentials first so the test reflects the form.
+  const handleTestConnection = useCallback(async () => {
+    setTesting(true);
+    setTestMsg(null);
+    try {
+      await handleSaveConfig();
+      const result = await api.testCloudConnection();
+      setTestMsg({ text: result.message, ok: result.ok });
+    } catch (err) {
+      const msg =
+        err instanceof IpcError
+          ? err.message
+          : "Connection test unavailable (daemon offline or cloud-sync not built in)";
+      setTestMsg({ text: msg, ok: false });
+    } finally {
+      setTesting(false);
+    }
+  }, [handleSaveConfig]);
 
   // -------------------------------------------------------------------------
   // Shortcuts — Save popup shortcut
@@ -625,6 +651,17 @@ export function SettingsView() {
                 )}
               </div>
             </SettingsRow>
+            {testMsg !== null && (
+              <div
+                className={[
+                  "border-t border-ide-divider px-3 py-2 text-[12px]",
+                  testMsg.ok ? "text-ide-success" : "text-ide-danger",
+                ].join(" ")}
+              >
+                {testMsg.ok ? "✓ " : "✗ "}
+                {testMsg.text}
+              </div>
+            )}
             <div className="flex items-center justify-end gap-3 border-t border-ide-divider px-3 py-2">
               {saveError !== null && (
                 <span className="text-[13px] text-ide-danger">{saveError}</span>
@@ -632,6 +669,17 @@ export function SettingsView() {
               {savedMsg && !saveError && (
                 <span className="text-[13px] text-ide-success">Saved</span>
               )}
+              <button
+                type="button"
+                disabled={offline || testing}
+                onClick={() => void handleTestConnection()}
+                className={[
+                  "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+                  "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
+                ].join(" ")}
+              >
+                {testing ? "Testing…" : "Test connection"}
+              </button>
               <button
                 type="button"
                 disabled={offline}

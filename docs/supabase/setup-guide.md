@@ -27,23 +27,32 @@ In the dashboard sidebar: **Project Settings → API**.
 
 Do **not** export `service_role` keys. The daemon only ever needs `anon`.
 
-## 3. Run the schema
+## 3. Provision the schema + RLS (one paste)
+
+The fastest path is the combined, idempotent script:
+
+```sh
+copypaste cloud setup-sql | pbcopy   # copies schema + RLS to the clipboard
+```
 
 1. Sidebar: **SQL Editor → New query**.
-2. Paste the entire contents of [`schema.sql`](./schema.sql).
+2. Paste (it's now on your clipboard) — or open
+   [`setup.sql`](./setup.sql) and paste its contents.
 3. Click **Run**. You should see "Success. No rows returned."
 
-This creates the `public.clipboard_items` table, indexes, and the
-`updated_at` trigger.
+This creates the `public.clipboard_items` table, indexes, the `updated_at`
+trigger, and the Row-Level Security policies in one go (so every user only
+ever sees rows they own — see the design note at the top of
+[`rls-policies.sql`](./rls-policies.sql)).
 
-## 4. Enable Row-Level Security
+> Why isn't this fully automatic? Creating tables/policies is DDL, which the
+> public `anon` key cannot run (by design). Zero-touch provisioning would
+> require a privileged `service_role` key or a Supabase Management API access
+> token — secrets CopyPaste deliberately never asks for or stores. The
+> one-paste step above is the safe minimum.
 
-1. SQL Editor → New query.
-2. Paste the entire contents of [`rls-policies.sql`](./rls-policies.sql).
-3. Click **Run**.
-
-This activates RLS so every user only ever sees rows they own
-(see the design note at the top of `rls-policies.sql`).
+If you prefer the two-file split, run [`schema.sql`](./schema.sql) then
+[`rls-policies.sql`](./rls-policies.sql) in that order instead.
 
 ## 5. Add the table to the Realtime publication
 
@@ -76,9 +85,32 @@ The daemon authenticates via email/password (GoTrue password grant).
 * **Production path**: build a signup flow in your app of choice — the
   daemon doesn't ship a signup UI yet.
 
-## 7. Export env vars before starting the daemon
+## 7. Give the daemon your credentials
 
-The daemon reads these from its process environment. Required:
+### Easiest: one command (no env vars, no restart)
+
+```sh
+copypaste cloud setup \
+  --url "https://YOUR-PROJECT.supabase.co" \
+  --anon-key "eyJhbGciOi..."
+copypaste cloud test     # verifies URL + key + table + RLS, prints what's wrong
+```
+
+`cloud setup` writes the URL and anon key into the daemon config
+(`config.json`, same file the desktop UI's Settings → Sync writes) with
+`0600` perms. The running daemon picks them up — no env vars or restart
+needed for the credentials. The desktop UI offers the same form plus a
+**Test connection** button.
+
+> Email/password sign-in (`SUPABASE_EMAIL` / `SUPABASE_PASSWORD`) is still
+> env-only — those are user credentials, not configuration, and are
+> deliberately never persisted to disk. Without them the daemon uses the
+> anon key (which RLS treats as the `anon` role); set them to get the
+> `authenticated` scope your RLS policies require.
+
+### Alternative: export env vars before starting the daemon
+
+The daemon also reads these from its process environment. Required:
 
 ```sh
 export SUPABASE_URL="https://YOUR-PROJECT.supabase.co"

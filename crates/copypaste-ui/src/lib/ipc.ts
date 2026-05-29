@@ -86,6 +86,18 @@ export interface PairedDevice {
   name: string;
 }
 
+/** Result of `cloud_test_connection` — an end-to-end Supabase probe. */
+export interface CloudTestResult {
+  /** True when cloud sync is fully reachable and ready. */
+  ok: boolean;
+  /** Whether Supabase credentials are present at all. */
+  configured: boolean;
+  /** Which step the probe reached: config/url/auth/network/schema/rls/done. */
+  stage: string;
+  /** Human-readable, actionable diagnostic. Never contains secrets. */
+  message: string;
+}
+
 /** Server-enforced page cap; mirrored so the UI can clamp before sending. */
 export const MAX_PAGE = 1000;
 
@@ -112,6 +124,8 @@ export const api = {
   setSyncPassphrase: (passphrase: string) =>
     ipcCall("set_sync_passphrase", { passphrase }),
   getSyncStatus: () => ipcCall<SyncStatus>("get_sync_status", {}),
+  testCloudConnection: () =>
+    ipcCall<CloudTestResult>("cloud_test_connection", {}),
 
   getItemImage: (id: string) => ipcCall<{ data_uri: string }>("get_item_image", { id }),
 
