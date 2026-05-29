@@ -79,6 +79,11 @@ impl Daemon {
             .env("COPYPASTE_CACHE_DIR", &cache_dir)
             .env("COPYPASTE_LOG_DIR", &log_dir)
             .env("COPYPASTE_DEVICE_ID_PATH", &device_id_path)
+            // Use an ephemeral in-memory encryption key so the daemon never
+            // touches the macOS login Keychain: this avoids the password prompt
+            // (ad-hoc-signed dev builds invalidate the Keychain ACL on every
+            // rebuild) and the slow one-time ACL-rotation delay on cold start.
+            .env("COPYPASTE_EPHEMERAL_KEY", "1")
             // Step A keeps P2P OFF: do not set COPYPASTE_P2P.
             .env("RUST_LOG", "error") // keep test output quiet
             .spawn()

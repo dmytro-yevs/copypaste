@@ -978,6 +978,19 @@ fn sweep_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
 
 #[tracing::instrument(name = "load_local_key")]
 fn load_local_key() -> zeroize::Zeroizing<[u8; 32]> {
+    // Dev/test escape hatch: skip the macOS Keychain entirely and use an
+    // ephemeral in-memory key. Ad-hoc-signed dev builds change signature on
+    // every rebuild, invalidating the Keychain item ACL and triggering a
+    // login-keychain password prompt. Setting COPYPASTE_EPHEMERAL_KEY avoids
+    // that. The normal (unset) path below is unchanged: real users still get
+    // the persistent Keychain-backed key.
+    if std::env::var_os("COPYPASTE_EPHEMERAL_KEY").is_some() {
+        tracing::warn!(
+            "COPYPASTE_EPHEMERAL_KEY set: using ephemeral in-memory key, skipping macOS Keychain"
+        );
+        return DeviceKeypair::generate().local_enc_key();
+    }
+
     #[cfg(target_os = "macos")]
     {
         match crate::keychain::load_or_create() {
