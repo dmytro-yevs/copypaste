@@ -44,10 +44,37 @@ if [[ ! -d "$APP_DIR" ]]; then
     exit 1
 fi
 
-# 2) Ad-hoc sign with hardened runtime + entitlements.
-echo "==> Ad-hoc signing $APP_DIR"
+# 2) Sign with hardened runtime + entitlements.
+#
+# Identity defaults to ad-hoc (`--sign -`); set MACOS_SIGN_IDENTITY to a
+# Developer ID Application identity for a notarisable build. See the longer
+# note in scripts/release/build-dmg-ci.sh. Inner binaries get a STABLE -i
+# identifier so the identifier stops rotating across rebuilds — but under
+# ad-hoc the cdhash (designated requirement) still changes every build, so the
+# real fix for the recurring Keychain prompt is the non-prompting 0600 file key
+# store (crates/copypaste-daemon/src/keychain/file_store.rs).
+SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:--}"
+
+echo "==> Signing inner binaries with stable identifiers (identity: $SIGN_IDENTITY)"
+declare -A INNER_IDS=(
+    [copypaste-daemon]="com.copypaste.daemon"
+    [copypaste]="com.copypaste.cli"
+    [copypaste-relay]="com.copypaste.relay"
+)
+for bin in copypaste-daemon copypaste copypaste-relay; do
+    if [[ -f "$APP_DIR/Contents/MacOS/$bin" ]]; then
+        codesign --force \
+            --sign "$SIGN_IDENTITY" \
+            --identifier "${INNER_IDS[$bin]}" \
+            --options runtime \
+            --timestamp=none \
+            "$APP_DIR/Contents/MacOS/$bin"
+    fi
+done
+
+echo "==> Signing $APP_DIR"
 codesign --force --deep \
-    --sign - \
+    --sign "$SIGN_IDENTITY" \
     --options runtime \
     --entitlements "$ENTITLEMENTS" \
     --timestamp=none \
