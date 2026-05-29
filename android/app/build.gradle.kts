@@ -192,6 +192,10 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.zxing.embedded)
 
+    // JVM unit tests (src/test) — pure logic, no Android/FFI deps. Runs via
+    // `./gradlew testDebugUnitTest` without an emulator.
+    testImplementation("junit:junit:4.13.2")
+
     // Instrumented tests (androidTest) — cross-language crypto conformance.
     // AndroidX Test runner + ext-junit drive CryptoConformanceTest on a device
     // or emulator. JNA is already an `implementation` dep (loaded into the app

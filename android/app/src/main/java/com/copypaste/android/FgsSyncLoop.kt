@@ -9,6 +9,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uniffi.copypaste_android.syncWithPeer
 
 /**
  * Runs an incoming-sync poll loop inside the always-alive foreground service,
@@ -53,6 +54,7 @@ class FgsSyncLoop(
     private val settings: Settings,
     private val repository: ClipboardRepository,
     private val syncManager: SyncManager,
+    private val deviceKeyStore: DeviceKeyStore,
 ) {
     private var job: Job? = null
 
@@ -71,6 +73,9 @@ class FgsSyncLoop(
 
         /** How many consecutive empty polls before we slow down to IDLE interval. */
         private const val IDLE_THRESHOLD_POLLS = 3
+
+        /** Cap on local items pushed per background P2P dial (mirrors PairActivity). */
+        private const val P2P_LOCAL_ITEM_LIMIT = 200
     }
 
     /**
@@ -91,6 +96,14 @@ class FgsSyncLoop(
                 }
 
                 delay(interval)
+                if (!isActive) break
+
+                // Background Android→macOS LAN P2P dial. Independent of the
+                // Supabase path below: whenever we hold a complete set of
+                // persisted pairing credentials we dial the paired peer so a
+                // one-time pair keeps syncing unattended. Failures are logged,
+                // never fatal.
+                dialPairedPeer()
                 if (!isActive) break
 
                 // Only run when Supabase sync is enabled and configured.
@@ -151,5 +164,67 @@ class FgsSyncLoop(
         }
 
         newCount
+    }
+
+    /**
+     * One background P2P dial against the paired macOS peer (Android-as-initiator),
+     * reusing the credentials persisted by [PairActivity] at pairing time.
+     *
+     * Gated by [P2pDialerGate.shouldDial]: only runs when the peer address,
+     * fingerprint, and the KEK-wrapped PAKE session key are all present. The FFI
+     * call mirrors `PairActivity.runPairAndSync` exactly, minus the
+     * `bootstrapPairInitiator` step (that produced the now-persisted session key).
+     *
+     * All failures (no LAN route, peer asleep, TLS/handshake error) are caught
+     * and logged — the loop must never crash the foreground service.
+     *
+     * NOTE: this only drives the Android→macOS direction. macOS→Android still
+     * requires an Android-side mTLS listener, which does not exist yet (see the
+     * note in PairActivity.runPairAndSync).
+     */
+    private suspend fun dialPairedPeer() = withContext(Dispatchers.IO) {
+        val peerAddr = settings.pairedPeerSyncAddr
+        val peerFingerprint = settings.pairedPeerFingerprint
+        val sessionKey = settings.pairedPeerSessionKey
+
+        if (!P2pDialerGate.shouldDial(peerAddr, peerFingerprint, sessionKey)) return@withContext
+
+        // A device cert is mandatory for mTLS; if pairing never generated one
+        // there is nothing to dial with.
+        val cert = deviceKeyStore.peek() ?: run {
+            Log.w(TAG, "P2P dial skipped: no device cert (never paired?)")
+            return@withContext
+        }
+
+        val key = settings.encryptionKey
+        try {
+            val localItems = repository.localItemsForSync(key, limit = P2P_LOCAL_ITEM_LIMIT)
+            val result = syncWithPeer(
+                peerAddr = peerAddr,
+                peerFingerprint = peerFingerprint,
+                sessionKey = sessionKey.map { it.toUByte() },
+                certDer = cert.certDer,
+                keyDer = cert.keyDer,
+                localItems = localItems,
+            )
+            var stored = 0
+            for (item in result.items) {
+                val plaintext = String(
+                    ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
+                    Charsets.UTF_8,
+                )
+                if (repository.storeItem(plaintext, key)) stored += 1
+            }
+            if (result.itemsReceived > 0 || result.itemsSent > 0) {
+                Log.i(
+                    TAG,
+                    "P2P dial: received ${result.itemsReceived} (stored $stored), sent ${result.itemsSent}",
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "P2P dial to paired peer failed: ${e.message}")
+        }
     }
 }

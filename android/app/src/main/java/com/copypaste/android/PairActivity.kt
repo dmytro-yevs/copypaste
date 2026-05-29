@@ -240,9 +240,14 @@ fun PairScreen(
                         )
                         if (repository.storeItem(plaintext, key)) stored += 1
                     }
-                    // Persist the peer for future syncs.
+                    // Persist the peer for future syncs. The session key is
+                    // stored securely (KEK-wrapped) so the background dialer in
+                    // FgsSyncLoop can re-open a sync session unattended without
+                    // re-running the PAKE bootstrap / re-scanning a QR.
                     settings.pairedPeerFingerprint = bootstrap.peerFingerprint
                     settings.pairedPeerSyncAddr = bootstrap.peerSyncAddr
+                    settings.pairedPeerSessionKey =
+                        ByteArray(bootstrap.sessionKey.size) { bootstrap.sessionKey[it].toByte() }
                     "Paired with ${peer.deviceName.ifBlank { "device" }} — received ${result.itemsReceived} item(s), stored $stored, sent ${result.itemsSent}."
                 }
                 syncResult = message
