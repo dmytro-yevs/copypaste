@@ -250,6 +250,28 @@ pub(crate) fn canonical_fingerprint(fp: &str) -> String {
     fp.replace(':', "").to_ascii_lowercase()
 }
 
+/// Render a colon-free hex fingerprint (the mTLS layer's canonical form,
+/// `hex(SHA-256(cert_der))`) into the user-facing `XX:XX:...` colon-grouped
+/// form the pairing surface expects.
+///
+/// This is the inverse of [`canonical_fingerprint`] for the grouping: it pairs
+/// the hex digits and joins them with `:` so the value passes
+/// [`is_valid_fingerprint`] and round-trips back to the same canonical bytes
+/// the verifier ([`copypaste_p2p::cert::fingerprint_of`]) compares against.
+/// Input is lowercased; any `:` already present is stripped first so the
+/// function is idempotent. An odd-length input (never produced by
+/// `fingerprint_of`) keeps its trailing nibble in the final group rather than
+/// panicking.
+pub(crate) fn display_fingerprint(fp: &str) -> String {
+    let canonical = canonical_fingerprint(fp);
+    let bytes = canonical.as_bytes();
+    bytes
+        .chunks(2)
+        .map(|pair| std::str::from_utf8(pair).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
 /// Maximum lifetime of an in-progress PAKE session before it is evicted as
 /// stale (fix/p2p-c-review #1 — DoS). The full 3-message handshake is two
 /// user-driven IPC round-trips; 120 s is generous for a human typing a
@@ -319,10 +341,17 @@ pub struct IpcServer {
     /// ciphertext bytes back, so paste produced "content is not valid
     /// UTF-8" for text and garbage for images.
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
-    /// Device public-key bytes — used by `get_own_fingerprint` to derive
-    /// the canonical user-visible fingerprint (`keychain::own_fingerprint`).
-    /// Audit HIGH #6: previously the handler used DefaultHasher(hostname,
-    /// pid), which changed every restart and was not collision-resistant.
+    /// Device public-key bytes (X25519). Historically `get_own_fingerprint`
+    /// derived its value from this via `keychain::own_fingerprint` (audit HIGH
+    /// #6, superseding an unstable DefaultHasher scheme). CRITICAL-1: pairing
+    /// now advertises the mTLS **cert** fingerprint (`cert_fingerprint`)
+    /// instead, since the device-key fingerprint is never what the mTLS layer
+    /// pins. The bytes are retained here — they remain part of the
+    /// `IpcServer::new` contract and the device identity is still useful for
+    /// future non-pairing surfaces.
+    // Retained for API stability / future use; no current read path. The cert
+    // fingerprint, not this device-key fingerprint, is what pairing advertises.
+    #[allow(dead_code)]
     device_public_key: Arc<[u8; 32]>,
     /// Readiness gate. While `false`, all data-touching methods return
     /// `IPC_NOT_READY` instead of dispatching. Default `true` for production
@@ -361,6 +390,22 @@ pub struct IpcServer {
     /// (the S10 grace path is exercised). `None` when P2P is disabled — the
     /// PAKE handlers then only persist to `peers.json` (loaded on next start).
     p2p_peers: Option<copypaste_p2p::transport::PairedPeers>,
+    /// Our live mTLS **certificate** fingerprint in user-facing colon-hex form,
+    /// i.e. `display_fingerprint(hex(SHA-256(cert_der)))` for the exact same
+    /// cert the running `PeerTransport` presents and that peers pin
+    /// ([`copypaste_p2p::transport::PeerTransport::fingerprint`] /
+    /// [`copypaste_p2p::cert::fingerprint_of`]).
+    ///
+    /// CRITICAL-1 fix: pairing (`pair_generate_qr`, `get_own_fingerprint`)
+    /// MUST advertise this value — NOT the device-key fingerprint
+    /// (`keychain::own_fingerprint`, SHA-256 of the X25519 public key), which
+    /// the mTLS allowlist never compares against, so cert-pinning could never
+    /// match and pairing could never authenticate.
+    ///
+    /// `None` when P2P is disabled (`COPYPASTE_P2P` unset): no transport runs,
+    /// so there is no cert to advertise and the pairing handlers return a clear
+    /// error rather than a fingerprint that cannot authenticate any channel.
+    cert_fingerprint: Option<String>,
     /// Shared passphrase-derived cloud sync key (Argon2id, 32 bytes).
     ///
     /// `None` means the user has not yet configured a sync passphrase, so
@@ -391,12 +436,25 @@ impl IpcServer {
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
             pending_qr_token: Arc::new(Mutex::new(None)),
             p2p_peers: None,
+            cert_fingerprint: None,
             self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
             #[cfg(feature = "cloud-sync")]
             sync_key: Arc::new(Mutex::new(None)),
             #[cfg(feature = "cloud-sync")]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
+    }
+
+    /// Attach the live mTLS certificate fingerprint that pairing advertises.
+    ///
+    /// CRITICAL-1: this MUST be the fingerprint of the same cert the running
+    /// `PeerTransport` presents (`display_fingerprint(transport.fingerprint())`)
+    /// so a scanning/pairing peer pins a value the mTLS layer actually compares
+    /// against. The daemon generates the cert once and hands the same cert to
+    /// `start_p2p` and the colon-hex fingerprint here, guaranteeing they agree.
+    pub fn with_cert_fingerprint(mut self, fingerprint: impl Into<String>) -> Self {
+        self.cert_fingerprint = Some(fingerprint.into());
+        self
     }
 
     /// Attach the live P2P paired-peer allowlist (fix/p2p-c-review #2).
@@ -450,6 +508,7 @@ impl IpcServer {
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
             pending_qr_token: Arc::new(Mutex::new(None)),
             p2p_peers: None,
+            cert_fingerprint: None,
             self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
             #[cfg(feature = "cloud-sync")]
             sync_key: Arc::new(Mutex::new(None)),
@@ -1612,19 +1671,27 @@ impl IpcServer {
             // P2P IPC methods
             // ------------------------------------------------------------------
             "get_own_fingerprint" => {
-                // Audit HIGH #6 fix: use the canonical SHA-256-of-public-key
-                // fingerprint derived from the device's persistent keypair
-                // (loaded by the daemon at startup via
-                // `keychain::load_or_create` and passed into `IpcServer::new`).
+                // CRITICAL-1 fix: advertise the live mTLS **certificate**
+                // fingerprint — the value peers pin and the mTLS verifier
+                // compares (`PeerTransport::fingerprint` / `fingerprint_of`) —
+                // NOT the device-key fingerprint
+                // (`keychain::own_fingerprint`, SHA-256 of the X25519 public
+                // key). The latter is never compared by the mTLS allowlist, so
+                // pinning it could never authenticate a channel.
                 //
-                // The previous DefaultHasher(hostname, pid) scheme:
-                //   * changed on every restart (pid varies),
-                //   * was not collision-resistant across hosts that share a
-                //     hostname (common in containers / dev VMs),
-                //   * could not be reconciled with the canonical fingerprint
-                //     the UI / pair_peer paths already used.
-                let fingerprint = crate::keychain::own_fingerprint(self.device_public_key.as_ref());
-                Response::ok(req.id, serde_json::json!({ "fingerprint": fingerprint }))
+                // When P2P is disabled there is no running transport and thus
+                // no cert to advertise; return a clear error rather than a
+                // fingerprint that cannot authenticate anything.
+                match self.cert_fingerprint.as_ref() {
+                    Some(fingerprint) => {
+                        Response::ok(req.id, serde_json::json!({ "fingerprint": fingerprint }))
+                    }
+                    None => Response::err(
+                        req.id,
+                        "P2P is disabled (set COPYPASTE_P2P=1): no mTLS certificate \
+                         to advertise for pairing",
+                    ),
+                }
             }
 
             "list_peers" => match load_peers() {
@@ -2401,7 +2468,27 @@ impl IpcServer {
             // Response data: { "qr": "CPPAIR1...", "expires_in_secs": <u64> }
             // ----------------------------------------------------------------
             "pair_generate_qr" => {
-                let fingerprint = crate::keychain::own_fingerprint(self.device_public_key.as_ref());
+                // CRITICAL-1 fix: the QR must carry the live mTLS **certificate**
+                // fingerprint (the value the scanner pins and the mTLS verifier
+                // compares — `PeerTransport::fingerprint` / `fingerprint_of`),
+                // NOT the device-key fingerprint (`keychain::own_fingerprint`).
+                // The QR payload already documents this field as the cert
+                // fingerprint (see `copypaste_core::crypto::pairing_qr`), so the
+                // payload format/version is unchanged — only the value sourced
+                // here was wrong, making cert-pinning unable to ever match.
+                //
+                // No cert exists when P2P is disabled; refuse rather than
+                // advertise a fingerprint that cannot authenticate the channel.
+                let fingerprint = match self.cert_fingerprint.as_ref() {
+                    Some(fp) => fp.clone(),
+                    None => {
+                        return Response::err(
+                            req.id,
+                            "P2P is disabled (set COPYPASTE_P2P=1): cannot generate a \
+                             pairing QR without an mTLS certificate to advertise",
+                        )
+                    }
+                };
 
                 // Device name mirrors the P2P subsystem's source (HOSTNAME /
                 // COMPUTERNAME, falling back to "CopyPaste") so the scanning
@@ -3405,7 +3492,14 @@ mod tests {
         // surfaces — they only validate dispatch / state-machine behaviour.
         let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
         let device_pub = Arc::new([0u8; 32]);
-        let server = IpcServer::new(db.clone(), private_mode.clone(), local_key, device_pub);
+        // Give the test server a realistic mTLS cert fingerprint (colon-hex of a
+        // 32-byte SHA-256) so the pairing handlers (`pair_generate_qr`,
+        // `get_own_fingerprint`) behave as they do with P2P enabled. Generating a
+        // real cert keeps this honest: the advertised value is exactly what the
+        // transport would pin.
+        let cert = copypaste_p2p::cert::SelfSignedCert::generate("test-device").unwrap();
+        let server = IpcServer::new(db.clone(), private_mode.clone(), local_key, device_pub)
+            .with_cert_fingerprint(display_fingerprint(&cert.fingerprint()));
         let path = socket_path.to_path_buf();
         tokio::spawn(async move {
             if let Err(e) = server.serve(&path, CancellationToken::new()).await {
@@ -4958,6 +5052,85 @@ mod tests {
             Arc::new(zeroize::Zeroizing::new([0u8; 32])),
             Arc::new([0u8; 32]),
         )
+    }
+
+    /// CRITICAL-1: `display_fingerprint` renders the mTLS canonical fingerprint
+    /// (colon-free 64-hex from `fingerprint_of`) into the user-facing colon-hex
+    /// form, and `canonical_fingerprint` round-trips it back to the exact value
+    /// the mTLS verifier compares — so a pinned QR fingerprint authenticates.
+    #[test]
+    fn display_fingerprint_round_trips_cert_fingerprint() {
+        let cert = copypaste_p2p::cert::SelfSignedCert::generate("rt-device").unwrap();
+        let canonical = cert.fingerprint(); // hex(SHA-256(cert_der)), 64 hex chars, no colons
+        assert_eq!(canonical.len(), 64, "cert fingerprint must be 64 hex chars");
+
+        let display = display_fingerprint(&canonical);
+        // 32 colon-separated 2-hex groups.
+        assert_eq!(
+            display.split(':').count(),
+            32,
+            "must be 32 colon groups: {display}"
+        );
+        assert!(
+            is_valid_fingerprint(&display),
+            "display form must validate: {display}"
+        );
+
+        // The mTLS boundary strips colons; it MUST equal the original canonical
+        // value the verifier (`fingerprint_of`) produces.
+        assert_eq!(
+            canonical_fingerprint(&display),
+            canonical,
+            "round-trip must recover the exact canonical fingerprint the verifier pins"
+        );
+    }
+
+    /// CRITICAL-1: with no cert fingerprint set (P2P disabled), the pairing
+    /// handlers must refuse rather than advertise the device-key fingerprint the
+    /// mTLS layer never pins.
+    #[tokio::test]
+    async fn pairing_handlers_error_when_p2p_disabled() {
+        let server = bare_server(); // no .with_cert_fingerprint → cert_fingerprint == None
+
+        let resp = server
+            .dispatch(r#"{"id":"f1","method":"get_own_fingerprint","params":{}}"#)
+            .await;
+        assert!(!resp.ok, "get_own_fingerprint must error without a cert");
+        assert!(
+            resp.error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("P2P is disabled"),
+            "must be the disabled-P2P error, not a parse error: {resp:?}"
+        );
+
+        let resp = server
+            .dispatch(r#"{"id":"q1","method":"pair_generate_qr","params":{}}"#)
+            .await;
+        assert!(!resp.ok, "pair_generate_qr must error without a cert");
+        assert!(
+            resp.error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("P2P is disabled"),
+            "must be the disabled-P2P error, not a parse error: {resp:?}"
+        );
+    }
+
+    /// CRITICAL-1: when a cert fingerprint IS configured, `get_own_fingerprint`
+    /// returns exactly that colon-hex cert fingerprint (not the device key).
+    #[tokio::test]
+    async fn get_own_fingerprint_returns_cert_fingerprint() {
+        let cert = copypaste_p2p::cert::SelfSignedCert::generate("own-fp-device").unwrap();
+        let expected = display_fingerprint(&cert.fingerprint());
+        let server = bare_server().with_cert_fingerprint(expected.clone());
+
+        let resp = server
+            .dispatch(r#"{"id":"f2","method":"get_own_fingerprint","params":{}}"#)
+            .await;
+        assert!(resp.ok, "must succeed with a cert: {resp:?}");
+        let data = resp.data.expect("data present");
+        assert_eq!(data["fingerprint"], serde_json::Value::String(expected));
     }
 
     /// fix/p2p-c-review #1 — a session older than `PAKE_SESSION_TTL` is evicted

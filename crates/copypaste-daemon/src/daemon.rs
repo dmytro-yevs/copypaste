@@ -236,6 +236,33 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         None
     };
 
+    // CRITICAL-1: generate the mTLS self-signed cert ONCE, here, before both the
+    // IPC server and `start_p2p`. The IPC pairing handlers advertise this cert's
+    // fingerprint (in colon-hex user-facing form) and `start_p2p` makes the
+    // transport present the SAME cert — so a scanning/pairing peer pins exactly
+    // the value the mTLS verifier compares (`fingerprint_of(cert_der)`), instead
+    // of the device-key fingerprint the allowlist never checks.
+    //
+    // `None` when P2P is disabled: no transport runs, so there is no cert to
+    // advertise; the pairing IPC handlers then return a clear error.
+    let p2p_cert: Option<copypaste_p2p::cert::SelfSignedCert> = if p2p_enabled {
+        match copypaste_p2p::cert::SelfSignedCert::generate(&local_device_id) {
+            Ok(cert) => Some(cert),
+            Err(e) => {
+                tracing::warn!("mTLS cert generation failed ({e}); pairing disabled this session");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    // Colon-hex (user-facing) form of the cert fingerprint for the pairing
+    // surface; `display_fingerprint` round-trips back to `fingerprint_of` via
+    // `canonical_fingerprint` at the mTLS boundary.
+    let cert_fingerprint_display: Option<String> = p2p_cert
+        .as_ref()
+        .map(|c| crate::ipc::display_fingerprint(&c.fingerprint()));
+
     #[cfg(unix)]
     let socket_path = paths::socket_path();
 
@@ -265,6 +292,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         );
         if let Some(peers) = p2p_peers.clone() {
             server = server.with_p2p_peers(peers);
+        }
+        if let Some(ref fp) = cert_fingerprint_display {
+            server = server.with_cert_fingerprint(fp.clone());
         }
         #[cfg(feature = "cloud-sync")]
         {
@@ -306,52 +336,59 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let (sync_incoming_tx, sync_incoming_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
 
     // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
-    let _p2p_handle: Option<p2p::P2pHandle> = if let Some(p2p_peers) = p2p_peers {
-        // Reuse the persistent device_id loaded above (load_or_create_device_id
-        // was called once already; parsing it back to Uuid is cheap).
-        let device_id =
-            uuid::Uuid::parse_str(&local_device_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
-        let device_name = std::env::var("HOSTNAME")
-            .or_else(|_| std::env::var("COMPUTERNAME"))
-            .unwrap_or_else(|_| "CopyPaste".to_string());
+    // Both the live allowlist and the cert must be present: the cert is the
+    // identity the transport presents and that pairing advertises, so without
+    // it there is nothing for peers to pin (CRITICAL-1).
+    let _p2p_handle: Option<p2p::P2pHandle> =
+        if let (Some(p2p_peers), Some(p2p_cert)) = (p2p_peers, p2p_cert) {
+            // Reuse the persistent device_id loaded above (load_or_create_device_id
+            // was called once already; parsing it back to Uuid is cheap).
+            let device_id =
+                uuid::Uuid::parse_str(&local_device_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
+            let device_name = std::env::var("HOSTNAME")
+                .or_else(|_| std::env::var("COMPUTERNAME"))
+                .unwrap_or_else(|_| "CopyPaste".to_string());
 
-        let p2p_config = p2p::P2pConfig {
-            listen_port: 0,
-            device_name,
-            enabled: true,
+            let p2p_config = p2p::P2pConfig {
+                listen_port: 0,
+                device_name,
+                enabled: true,
+            };
+
+            // Hand the SAME live allowlist already shared with the IPC server
+            // (fix/p2p-c-review #2) and the SAME cert whose fingerprint the IPC
+            // pairing handlers advertise (CRITICAL-1). `start_p2p` seeds the
+            // allowlist from peers.json.
+            match p2p::start_p2p(
+                p2p_config,
+                db.clone(),
+                device_id,
+                (*local_key_arc).clone(),
+                p2p_cert,
+                p2p_peers,
+                new_item_tx.subscribe(),
+                sync_incoming_tx.clone(),
+                sync_outbound_rx,
+            )
+            .await
+            {
+                Ok(handle) => {
+                    tracing::info!(port = handle.actual_port, "P2P subsystem running");
+                    Some(handle)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to start P2P subsystem: {e}");
+                    None
+                }
+            }
+        } else {
+            tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
+            // Drop sync_outbound_rx — no consumer. sync_orch will log debug
+            // on each outbound send (harmless: closed receiver just means no
+            // peers are connected).
+            drop(sync_outbound_rx);
+            None
         };
-
-        // Hand the SAME live allowlist already shared with the IPC server
-        // (fix/p2p-c-review #2). `start_p2p` seeds it from peers.json.
-        match p2p::start_p2p(
-            p2p_config,
-            db.clone(),
-            device_id,
-            (*local_key_arc).clone(),
-            p2p_peers,
-            new_item_tx.subscribe(),
-            sync_incoming_tx.clone(),
-            sync_outbound_rx,
-        )
-        .await
-        {
-            Ok(handle) => {
-                tracing::info!(port = handle.actual_port, "P2P subsystem running");
-                Some(handle)
-            }
-            Err(e) => {
-                tracing::warn!("Failed to start P2P subsystem: {e}");
-                None
-            }
-        }
-    } else {
-        tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
-        // Drop sync_outbound_rx — no consumer. sync_orch will log debug
-        // on each outbound send (harmless: closed receiver just means no
-        // peers are connected).
-        drop(sync_outbound_rx);
-        None
-    };
 
     // Beta W2.2 (arch-1): start the sync orchestrator.
     //

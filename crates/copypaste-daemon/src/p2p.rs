@@ -211,11 +211,16 @@ fn load_peers_from_path_into(path: &std::path::Path, peers: &PairedPeers) -> usi
 /// # Errors
 /// Returns an error if the TCP listener cannot be bound, or if the discovery
 /// service fails to register / start.
+#[allow(clippy::too_many_arguments)]
+// CRITICAL-1: `cert` is threaded in so the transport presents the SAME cert
+// whose fingerprint the IPC pairing handlers advertise. One extra argument is
+// the minimal way to keep advertised and pinned fingerprints provably equal.
 pub async fn start_p2p(
     config: P2pConfig,
     _db: Arc<Mutex<Database>>,
     device_id: uuid::Uuid,
     _db_key: zeroize::Zeroizing<[u8; 32]>,
+    cert: copypaste_p2p::cert::SelfSignedCert,
     peers: PairedPeers,
     new_item_rx: broadcast::Receiver<ClipboardItem>,
     incoming_tx: mpsc::Sender<WireItem>,
@@ -235,8 +240,10 @@ pub async fn start_p2p(
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     // ── mTLS transport ────────────────────────────────────────────────────────
-    // Generate a fresh self-signed cert for this session. The cert fingerprint
-    // is the stable device identity that peers verify at handshake time.
+    // Use the cert generated once by the daemon (CRITICAL-1). Its fingerprint
+    // is the stable device identity peers verify at handshake time — and the
+    // SAME value the IPC pairing handlers advertise, because the daemon derived
+    // their `cert_fingerprint` from this exact cert before calling us.
     //
     // fix/p2p-c-review #2: `peers` is the SAME live allowlist the IPC PAKE
     // handlers mutate (interior-mutable `PairedPeers`). We seed it from the
@@ -248,8 +255,8 @@ pub async fn start_p2p(
         active_peers = peers.active_count(),
         "P2P allowlist seeded from peers.json"
     );
-    let transport = PeerTransport::new_with_generated_cert(&device_id.to_string(), peers.clone())
-        .map_err(|e| anyhow::anyhow!("PeerTransport init failed: {e}"))?;
+    let transport = PeerTransport::from_cert(cert.cert_der, cert.key_der, peers.clone());
+    tracing::info!(fingerprint = %transport.fingerprint(), "P2P mTLS transport identity");
     let transport = Arc::new(transport);
 
     // ── peer sinks map ────────────────────────────────────────────────────────
