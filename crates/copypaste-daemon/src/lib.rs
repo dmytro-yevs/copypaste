@@ -18,7 +18,6 @@ pub mod daemon;
 #[cfg(unix)]
 pub mod ipc;
 pub mod keychain;
-pub mod launchd;
 pub mod logging;
 pub mod p2p;
 pub mod paths;
