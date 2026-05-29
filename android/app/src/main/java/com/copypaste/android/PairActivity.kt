@@ -185,9 +185,28 @@ fun PairScreen(
     // (Android-as-initiator). Runs entirely off the main thread; result text is
     // shown on completion. All FFI errors surface as a snackbar (no crash).
     //
-    // NOTE (L4): the macOS side currently advertises addr_hint as 127.0.0.1:<port>
-    // (loopback only), so a live emulator↔host connection will fail here until
-    // macOS advertises a host-reachable address. That is a separate task.
+    // NOTE (L4, RESOLVED on the macOS side): the daemon now advertises a real
+    // LAN-routable host:port (via copypaste_p2p::interfaces::advertise_sync_addr)
+    // in BOTH the QR addr_hint AND the in-band P2P sync-listener address, instead
+    // of 127.0.0.1. So `bootstrap.peerSyncAddr` persisted below in
+    // `settings.pairedPeerSyncAddr` is now dialable from a real phone over Wi-Fi
+    // (it is loopback only when the Mac has no LAN interface at all).
+    //
+    // REMAINING Android work for UNATTENDED background sync (Android→macOS):
+    // this `runPairAndSync` only performs ONE sync at pairing time. To sync in
+    // the background after pairing, add a periodic caller (e.g. in FgsSyncLoop,
+    // gated on a non-blank `settings.pairedPeerSyncAddr` /
+    // `settings.pairedPeerFingerprint`) that, on each tick, loads the device
+    // cert + session-derived key and calls `syncWithPeer(peerAddr =
+    // settings.pairedPeerSyncAddr, ...)` exactly as below. The macOS daemon's
+    // accept loop (binds 0.0.0.0) already receives such dials, so no macOS change
+    // is needed for that direction. The reverse (macOS→Android) additionally
+    // needs an Android-side mTLS LISTENER, which does not exist yet.
+    //
+    // NOTE: the session key must be persisted/re-derived for repeat syncs — the
+    // current flow only has it transiently from `bootstrapPairInitiator`. Persist
+    // `bootstrap.sessionKey` securely at pairing time so the background caller can
+    // reuse it. Requires an on-device verification (phone + Mac on same Wi-Fi).
     fun runPairAndSync(peer: ScannedPairing) {
         if (syncing) return
         scope.launch {

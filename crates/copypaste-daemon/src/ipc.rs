@@ -3049,23 +3049,14 @@ impl IpcServer {
                                 // every interface — but the QR must carry one
                                 // concrete host. A loopback hint (127.0.0.1) is
                                 // unreachable from another device/emulator, so we
-                                // advertise the host's primary LAN-routable IPv4
-                                // instead. Reuse the P2P interface filter
-                                // (`usable_advertise_addrs`) which already excludes
-                                // loopback, link-local and virtual adapters. Prefer
-                                // IPv4 (cleanest cross-device/emulator case); accept
-                                // any usable addr otherwise; fall back to 127.0.0.1
-                                // only when no LAN interface exists so same-host
-                                // (and loopback-test) pairing still works.
-                                let usable = copypaste_p2p::interfaces::usable_advertise_addrs();
-                                let host = usable
-                                    .iter()
-                                    .find(|ip| ip.is_ipv4())
-                                    .or_else(|| usable.first())
-                                    .copied()
-                                    .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
+                                // advertise a real LAN-routable host via the shared
+                                // `advertise_sync_addr` policy (same selection the
+                                // in-band sync-listener address uses), falling back
+                                // to 127.0.0.1 only when no LAN interface exists so
+                                // same-host (and loopback-test) pairing still works.
                                 let hint =
-                                    std::net::SocketAddr::new(host, local.port()).to_string();
+                                    copypaste_p2p::interfaces::advertise_sync_addr(local.port())
+                                        .to_string();
                                 self.spawn_bootstrap_responder(responder, password.clone());
                                 hint
                             }
