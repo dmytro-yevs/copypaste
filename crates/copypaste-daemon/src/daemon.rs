@@ -12,6 +12,20 @@ use copypaste_core::{
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Upper bound on the synchronous Keychain read that fetches the SQLCipher
+/// device key at startup.
+///
+/// LIVE-CONFIRMED REGRESSION: after the macOS app is reinstalled the daemon
+/// binary's code signature changes, so the Keychain ACL on the stored key no
+/// longer trusts it. An interactive launch then BLOCKS FOREVER on a
+/// SecurityAgent (Keychain password) GUI prompt inside the Security-framework
+/// call — the daemon never reaches "IPC listening" and never binds the socket.
+/// We run the read on a dedicated thread and abandon it after this timeout so
+/// startup always proceeds to a defined state (degraded) in bounded time. The
+/// abandoned thread may stay parked on the OS prompt; that is acceptable — it
+/// holds only a clone of nothing and is reaped when the process exits.
+const KEYCHAIN_READ_TIMEOUT: Duration = Duration::from_secs(8);
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::time::interval;
 // D1: CancellationToken for coordinated graceful shutdown across all tasks.
@@ -52,6 +66,17 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // `keychain::file_store`) and there is no Keychain ACL to rotate — calling
     // the rotation there would read/delete/recreate a Keychain item and raise
     // the very login-password prompt this whole change exists to eliminate.
+    //
+    // CHICKEN-AND-EGG (acceptance criterion #4): after a reinstall the binary's
+    // code signature changes and the Keychain ACL no longer trusts it, so
+    // `rotate_acl_to_current_install` ITSELF calls `get_generic_password` first
+    // to read the secret it would re-store — the very read that now prompts /
+    // is denied. It therefore cannot re-establish trust without the access it
+    // is trying to repair. We keep it best-effort here (it succeeds on the
+    // benign install-moved case) and rely on the DEGRADED startup path below as
+    // the safety net for the untrusted-binary case. Real recovery is a one-time
+    // user re-grant of the Keychain prompt on a subsequent launch, after which
+    // this rotation pins the new binary so later launches stay quiet.
     #[cfg(target_os = "macos")]
     if crate::keychain::signing::choose_key_backend()
         == crate::keychain::signing::KeyBackend::Keychain
@@ -66,17 +91,56 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         }
     }
 
-    // dedup-keychain: load the device keypair ONCE here and derive both the
-    // local storage key and the X25519 public bytes from it. Previously
-    // `load_local_key()` (here) and `device_public_key_arc` (below) each called
-    // `crate::keychain::load_or_create()` separately, doing two Keychain reads +
-    // two legacy-accessibility migration writes per startup. The COPYPASTE_
-    // EPHEMERAL_KEY bypass is still honoured centrally inside `load_or_create`.
-    let (local_enc_key, device_public_key) = load_local_key_material();
-    let local_key_arc: Arc<zeroize::Zeroizing<[u8; 32]>> = Arc::new(local_enc_key);
+    // dedup-keychain + bounded/degraded startup, combined: load the device
+    // keypair material (local enc key + X25519 public bytes) ONCE via the
+    // bounded reader so we (a) never hang on a Keychain GUI prompt
+    // (acceptance #1), (b) avoid a second Keychain read for the public bytes,
+    // and (c) decide the DB-open plan from the key outcome + whether encrypted
+    // data already exists. When the key is unavailable AND an encrypted DB
+    // exists, we MUST NOT fall back to an ephemeral key against that DB (that
+    // yields SQLITE_NOTADB and a dead daemon); instead we go DEGRADED — alive,
+    // socket bound, recovery status served, DB untouched. COPYPASTE_EPHEMERAL_KEY
+    // is honoured centrally inside `load_or_create`.
+    let db_path = paths::db_path();
+    let key_load = load_local_key_bounded();
+    let db_exists = encrypted_db_exists(&db_path);
+    let plan = decide_db_startup(&key_load, db_exists);
+
+    // The key + public bytes to hand subsystems. For `Open` they are the real
+    // material just read; for `OpenEphemeral` a fresh ephemeral keypair (no real
+    // data to protect); the `Degraded` path never reaches the key-using
+    // subsystems (it returns early below).
+    let (local_key_arc, device_public_key): (Arc<zeroize::Zeroizing<[u8; 32]>>, [u8; 32]) =
+        match plan {
+            DbStartupPlan::Open => match key_load {
+                KeyLoad::Ready(enc, pubk) => (Arc::new(enc), pubk),
+                // unreachable: `Open` is only produced for `Ready`.
+                KeyLoad::Locked => unreachable!("Open plan implies a Ready key"),
+            },
+            DbStartupPlan::OpenEphemeral => {
+                let kp = DeviceKeypair::generate();
+                (Arc::new(kp.local_enc_key()), kp.public_key_bytes())
+            }
+            DbStartupPlan::Degraded { reason } => {
+                // Safety net for the post-reinstall regression: do NOT open,
+                // write, or recreate the existing encrypted DB (acceptance #3).
+                // Bring the daemon up alive with the socket bound and a clear
+                // recovery status, and wait for shutdown. Recovery happens on a
+                // later launch once the Keychain access is re-granted.
+                tracing::warn!(
+                    reason,
+                    db_path = %db_path.display(),
+                    "starting in DEGRADED mode: the SQLCipher key is unavailable and an \
+                     encrypted database already exists. The daemon will stay alive and \
+                     serve a recovery status; the encrypted data is left UNTOUCHED on \
+                     disk and is recoverable once the Keychain key is restored \
+                     (re-grant the Keychain prompt and relaunch)."
+                );
+                return run_degraded(reason, quit_flag).await;
+            }
+        };
     tracing::info!("local encryption key ready");
 
-    let db_path = paths::db_path();
     let db = Arc::new(Mutex::new(
         match if std::env::var_os("COPYPASTE_NO_AUTO_MIGRATE").is_some() {
             // A.M1 Option C: operator opted out of silent plaintext→SQLCipher migration.
@@ -87,30 +151,27 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         } {
             Ok(db) => db,
             Err(e) => {
-                // Fix B: fail with an actionable error instead of a bare bail.
-                // The most common opaque failure here is SQLCipher's
-                // "file is not a database" (SQLITE_NOTADB), which on an
-                // *encrypted* file means the device key did not match — e.g.
-                // the macOS Keychain returned a different key than the one the
-                // DB was created under (re-keyed device, restored Keychain, or
-                // a failed ThisDeviceOnly accessibility migration). Surface the
-                // path + likely cause so the failure is diagnosable from the
-                // daemon log alone rather than a cryptic one-liner.
+                // Belt-and-suspenders: `decide_db_startup` already routes the
+                // common "key unavailable + encrypted DB exists" case to the
+                // DEGRADED path above, so we should not normally reach an open
+                // failure here. If we still do (e.g. the key WAS read but is the
+                // wrong one — restored/!=device Keychain entry — surfacing as
+                // SQLITE_NOTADB "file is not a database"), degrade instead of
+                // exiting: keep the process alive, bind the socket, and leave
+                // the encrypted file untouched so a later correct-key launch can
+                // open it. Never `Error:`/exit on this condition.
                 tracing::error!(
                     db_path = %db_path.display(),
                     error = %e,
                     "failed to open clipboard database — if this reports \
-                     'file is not a database', the SQLCipher key from the \
-                     Keychain does not match the key the DB was encrypted with \
-                     (re-keyed device, restored/!=device Keychain entry, or a \
-                     missing keychain entitlement). The daemon cannot continue \
-                     without the correct key; the encrypted data is intact on \
-                     disk and recoverable once the matching key is restored."
+                     'file is not a database', the SQLCipher key does not match \
+                     the key the DB was encrypted with (re-keyed device, \
+                     restored/!=device Keychain entry, or a missing keychain \
+                     entitlement). Entering DEGRADED mode; the encrypted data is \
+                     intact on disk and recoverable once the matching key is \
+                     restored."
                 );
-                return Err(anyhow::anyhow!(
-                    "Database open failed at {}: {e}",
-                    db_path.display()
-                ));
+                return run_degraded(crate::ipc::DEGRADED_REASON_KEYCHAIN_LOCKED, quit_flag).await;
             }
         },
     ));
@@ -812,6 +873,115 @@ async fn run_ttl_cleanup(
     }
 }
 
+/// Run the daemon in DEGRADED mode (acceptance criteria #1–#3).
+///
+/// Entered when the SQLCipher key is unavailable (Keychain ACL no longer trusts
+/// this binary after a reinstall, prompt unanswered, access denied) AND an
+/// encrypted DB already exists, OR when an opened key turns out to be the wrong
+/// one (SQLITE_NOTADB). We:
+///
+/// * NEVER `Error:`/exit — the process stays alive so the UI keeps a live
+///   socket and can show a recovery banner instead of a dead daemon.
+/// * Bind the IPC socket with `ready = false` and a `degraded_reason`, so every
+///   DB-touching method returns `IPC_NOT_READY` and `status` reports
+///   `status="degraded"` + `degraded_reason`.
+/// * NEVER open / write / recreate the real encrypted DB. The IpcServer needs
+///   *a* `Database` handle, so we hand it a throwaway in-memory one — the real
+///   `~/.../clipboard.db` on disk is left byte-for-byte untouched and remains
+///   recoverable on a later correct-key launch.
+/// * Do NOT start the clipboard monitor, P2P, sync, or cloud subsystems — there
+///   is no usable key, and writing captures with an ephemeral key would corrupt
+///   nothing on disk but would also be pointless and confusing.
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+async fn run_degraded(reason: &'static str, quit_flag: Arc<AtomicBool>) -> anyhow::Result<()> {
+    let shutdown_token = CancellationToken::new();
+
+    #[cfg(unix)]
+    {
+        // Throwaway in-memory DB: satisfies IpcServer's type contract WITHOUT
+        // touching the encrypted file on disk. `ready = false` gates every
+        // DB-touching method, so this in-memory DB is never actually queried
+        // for user data — it only backs the `ensure_revoked_devices_table` DDL
+        // in `serve()` and the readiness gate.
+        let placeholder_db =
+            Arc::new(Mutex::new(Database::open_in_memory().map_err(|e| {
+                anyhow::anyhow!("degraded: in-memory placeholder DB: {e}")
+            })?));
+        let private_mode = Arc::new(AtomicBool::new(false));
+        // An ephemeral key for the placeholder server — never used against real
+        // data (DB methods are gated off by `ready = false`).
+        let dummy_key: Arc<zeroize::Zeroizing<[u8; 32]>> =
+            Arc::new(DeviceKeypair::generate().local_enc_key());
+        let dummy_pub: Arc<[u8; 32]> = Arc::new([0u8; 32]);
+
+        let ready = Arc::new(AtomicBool::new(false));
+        let server = crate::ipc::IpcServer::new_with_ready(
+            placeholder_db,
+            private_mode,
+            dummy_key,
+            dummy_pub,
+            ready,
+        )
+        .with_degraded_reason(reason);
+
+        let socket_path = paths::socket_path();
+        let socket_clone = socket_path.clone();
+        let ipc_shutdown = shutdown_token.clone();
+        let ipc_handle = tokio::spawn(async move {
+            if let Err(e) = server.serve(&socket_clone, ipc_shutdown).await {
+                tracing::error!("degraded IPC server error: {e}");
+            }
+        });
+
+        tracing::warn!(
+            reason,
+            "DEGRADED daemon running: IPC socket bound, DB-touching requests \
+             return IPC_NOT_READY, `status` reports degraded_reason. Re-grant \
+             the Keychain prompt and relaunch to recover."
+        );
+
+        // Wait for shutdown (tray quit flag, SIGINT, or SIGTERM), mirroring the
+        // healthy loop's shutdown wiring but with no clipboard polling.
+        #[cfg(unix)]
+        let mut sigterm = {
+            use tokio::signal::unix::{signal, SignalKind};
+            signal(SignalKind::terminate())?
+        };
+        let mut quit_ticker = interval(Duration::from_millis(250));
+        loop {
+            if quit_flag.load(Ordering::Relaxed) {
+                tracing::info!("quit flag set, shutting down degraded daemon");
+                break;
+            }
+            tokio::select! {
+                _ = quit_ticker.tick() => { /* re-check quit_flag at the top */ }
+                _ = tokio::signal::ctrl_c() => {
+                    tracing::info!("SIGINT received, shutting down degraded daemon");
+                    break;
+                }
+                _ = sigterm.recv() => {
+                    tracing::info!("SIGTERM received, shutting down degraded daemon");
+                    break;
+                }
+            }
+        }
+
+        shutdown_token.cancel();
+        let _ = ipc_handle.await;
+        let _ = std::fs::remove_file(&socket_path);
+    }
+
+    #[cfg(not(unix))]
+    {
+        // No Unix socket transport on non-unix; just wait for Ctrl+C so the
+        // process does not busy-exit. Degraded mode is a macOS/unix concern.
+        let _ = tokio::signal::ctrl_c().await;
+    }
+
+    tracing::info!("degraded daemon stopped");
+    Ok(())
+}
+
 #[tracing::instrument(skip_all, name = "clipboard_tick")]
 async fn handle_tick(
     monitor: &mut ClipboardMonitor,
@@ -1213,14 +1383,144 @@ fn sweep_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     (*seed, derive_v2(seed))
 }
 
+/// Outcome of the bounded startup key read.
+///
+/// `Ready` carries the device's local storage key. `Locked` means the key
+/// could not be obtained in bounded time / at all — the Keychain ACL no longer
+/// trusts this binary (post-reinstall), the read is blocked on an unanswered
+/// GUI prompt, or access was denied (launchd, no interactive session). We do
+/// NOT synthesize an ephemeral key here: doing so against an EXISTING encrypted
+/// DB yields "file is not a database" and a dead daemon (the exact regression).
+enum KeyLoad {
+    /// Carries the device's local storage key AND the X25519 public-key bytes,
+    /// loaded once together (see `load_local_key_material`).
+    Ready(zeroize::Zeroizing<[u8; 32]>, [u8; 32]),
+    Locked,
+}
+
+/// The plan for opening the database at startup, derived from the key-load
+/// outcome and whether an encrypted DB already exists. Pure + total so it is
+/// unit-testable without a Keychain or a real DB.
+#[derive(Debug, PartialEq, Eq)]
+enum DbStartupPlan {
+    /// Open (or create) the DB with the obtained key. Normal path, and also the
+    /// correct path on a brand-new install where no DB exists yet.
+    Open,
+    /// Bring the daemon up in DEGRADED mode: bind the IPC socket, serve a clear
+    /// `keychain_locked` status, and DO NOT touch the existing encrypted DB.
+    /// `reason` is the canonical `status.degraded_reason` value.
+    Degraded { reason: &'static str },
+    /// Use an ephemeral key against a fresh/ephemeral DB. Reached on the
+    /// `COPYPASTE_EPHEMERAL_KEY` dev/test bypass and on a brand-new install
+    /// where the key is unavailable but there is no existing data to protect.
+    /// Distinct from `Degraded` so the bypass keeps working exactly as before.
+    OpenEphemeral,
+}
+
+/// Decide how to open the DB given the key-load outcome and whether an
+/// encrypted DB already exists. This is the heart of the regression fix:
+///
+/// * key Ready                              → `Open` (normal).
+/// * key Locked AND an encrypted DB exists  → `Degraded` — NEVER fall back to
+///   an ephemeral key against real data (that is what produced the dead
+///   daemon). Keep the process alive and surface a recovery status.
+/// * key Locked AND no DB exists yet        → `OpenEphemeral` — there is no
+///   user data to protect; an ephemeral key lets a brand-new install still run
+///   this session (matching the long-standing keychain-unavailable behaviour
+///   where data is simply not persisted across restarts).
+fn decide_db_startup(key: &KeyLoad, encrypted_db_exists: bool) -> DbStartupPlan {
+    match key {
+        KeyLoad::Ready(..) => DbStartupPlan::Open,
+        KeyLoad::Locked if encrypted_db_exists => DbStartupPlan::Degraded {
+            reason: crate::ipc::DEGRADED_REASON_KEYCHAIN_LOCKED,
+        },
+        KeyLoad::Locked => DbStartupPlan::OpenEphemeral,
+    }
+}
+
+/// True if an encrypted database file already exists at `path` with content.
+///
+/// A zero-length file (or a missing file) is treated as "no DB" — there is no
+/// user data to protect, so the degraded gate does not engage. SQLCipher
+/// `Database::open` would happily (re)initialize an empty file under any key.
+fn encrypted_db_exists(path: &std::path::Path) -> bool {
+    std::fs::metadata(path)
+        .map(|m| m.is_file() && m.len() > 0)
+        .unwrap_or(false)
+}
+
+/// Read the device key with a hard timeout so startup can never hang on a
+/// Keychain GUI prompt (acceptance criterion #1).
+///
+/// The blocking Security-framework read runs on a dedicated `std::thread`; we
+/// wait on a channel for at most [`KEYCHAIN_READ_TIMEOUT`]. On timeout we
+/// return [`KeyLoad::Locked`] and let the abandoned thread sit on the prompt
+/// (harmless — it dies with the process). The dev/test bypass
+/// (`COPYPASTE_EPHEMERAL_KEY`) short-circuits to a ready ephemeral key without
+/// spawning a thread, preserving the existing fast, prompt-free test path.
+#[cfg_attr(not(target_os = "macos"), allow(clippy::unnecessary_wraps))]
+fn load_local_key_bounded() -> KeyLoad {
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Non-macOS has no Keychain; the existing behaviour is an ephemeral
+        // key. Treat that as "Ready" so the platform's data-not-persisted
+        // contract is unchanged (no degraded banner where there was never a
+        // persistent key to begin with).
+        let (enc, pubk) = load_local_key_material();
+        KeyLoad::Ready(enc, pubk)
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // Dev/test bypass: keychain is bypassed centrally; reading is instant
+        // and never prompts, so there is no need for the timeout dance.
+        if crate::keychain::keychain_bypassed() {
+            let (enc, pubk) = load_local_key_material();
+            return KeyLoad::Ready(enc, pubk);
+        }
+
+        let (tx, rx) = std::sync::mpsc::sync_channel::<(zeroize::Zeroizing<[u8; 32]>, [u8; 32])>(1);
+        // A plain OS thread (not a tokio task): the Security-framework call is
+        // blocking and may park on a GUI prompt indefinitely. We must be able
+        // to walk away from it without blocking a runtime worker.
+        let _ = std::thread::Builder::new()
+            .name("keychain-read".into())
+            .spawn(move || {
+                let material = load_local_key_material();
+                // Receiver may already be gone (we timed out) — ignore.
+                let _ = tx.send(material);
+            });
+
+        match rx.recv_timeout(KEYCHAIN_READ_TIMEOUT) {
+            Ok((enc, pubk)) => KeyLoad::Ready(enc, pubk),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                tracing::error!(
+                    timeout_secs = KEYCHAIN_READ_TIMEOUT.as_secs(),
+                    "Keychain read did not complete within the startup timeout — \
+                     the stored SQLCipher key is unreachable (the Keychain ACL no \
+                     longer trusts this binary after a reinstall, or a password \
+                     prompt is unanswered). Continuing in DEGRADED mode without \
+                     touching the encrypted database."
+                );
+                KeyLoad::Locked
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                tracing::error!(
+                    "Keychain read thread ended without producing a key; \
+                     continuing in DEGRADED mode."
+                );
+                KeyLoad::Locked
+            }
+        }
+    }
+}
+
 /// Load the device keypair ONCE and return both the local storage key and the
 /// X25519 public-key bytes derived from it.
 ///
-/// dedup-keychain: previously the daemon called `crate::keychain::load_or_create`
-/// twice at startup — once for the local enc key and once for the public bytes —
-/// each triggering a Keychain read plus the legacy-accessibility migration write
-/// (a redundant Security-framework round-trip and ACL prompt risk). This single
-/// call derives both from the same keypair.
+/// dedup-keychain: a single `crate::keychain::load_or_create` call derives both
+/// the local enc key and the X25519 public bytes, avoiding a second Keychain
+/// read + legacy-accessibility migration write at startup.
 ///
 /// Dev/test escape hatch: COPYPASTE_EPHEMERAL_KEY is honored centrally inside
 /// `crate::keychain` — `load_or_create` short-circuits to a fresh ephemeral
@@ -1377,6 +1677,74 @@ mod tests {
         build_item_aad, decrypt_item_by_version, encrypt_item_with_aad, Database,
         AAD_SCHEMA_VERSION, NONCE_SIZE,
     };
+
+    // -----------------------------------------------------------------------
+    // Keychain-locked degraded-startup decision logic (regression: daemon hung
+    // or died after reinstall when the SQLCipher key became unreadable).
+    // -----------------------------------------------------------------------
+
+    fn ready_key() -> KeyLoad {
+        KeyLoad::Ready(zeroize::Zeroizing::new([0x11u8; 32]), [0x22u8; 32])
+    }
+
+    /// A readable key always opens the DB normally, regardless of whether a DB
+    /// already exists.
+    #[test]
+    fn decide_db_startup_ready_key_opens_normally() {
+        assert_eq!(decide_db_startup(&ready_key(), true), DbStartupPlan::Open);
+        assert_eq!(decide_db_startup(&ready_key(), false), DbStartupPlan::Open);
+    }
+
+    /// THE REGRESSION GUARD: when the key is locked AND an encrypted DB already
+    /// exists, the plan MUST be `Degraded` (never `OpenEphemeral` against real
+    /// data — that produced "file is not a database" and a dead daemon). The
+    /// reason must be the canonical value the UI keys its banner off.
+    #[test]
+    fn decide_db_startup_locked_key_with_existing_db_degrades() {
+        assert_eq!(
+            decide_db_startup(&KeyLoad::Locked, true),
+            DbStartupPlan::Degraded {
+                reason: crate::ipc::DEGRADED_REASON_KEYCHAIN_LOCKED
+            }
+        );
+        assert_eq!(
+            crate::ipc::DEGRADED_REASON_KEYCHAIN_LOCKED,
+            "keychain_locked",
+            "the UI consumes this exact string"
+        );
+    }
+
+    /// A brand-new install (no DB yet) with a locked key may run this session
+    /// with an ephemeral key — there is no user data to protect, so we do NOT
+    /// degrade. This preserves first-run usability on platforms / states where
+    /// the persistent key is unavailable.
+    #[test]
+    fn decide_db_startup_locked_key_without_db_uses_ephemeral() {
+        assert_eq!(
+            decide_db_startup(&KeyLoad::Locked, false),
+            DbStartupPlan::OpenEphemeral
+        );
+    }
+
+    /// `encrypted_db_exists` must treat a missing file and a zero-length file
+    /// as "no DB" (nothing to protect), and a non-empty file as "DB present".
+    #[test]
+    fn encrypted_db_exists_classifies_file_states() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let missing = tmp.path().join("nope.db");
+        assert!(!encrypted_db_exists(&missing), "missing file → no DB");
+
+        let empty = tmp.path().join("empty.db");
+        std::fs::write(&empty, b"").expect("write empty");
+        assert!(!encrypted_db_exists(&empty), "zero-length file → no DB");
+
+        let nonempty = tmp.path().join("data.db");
+        std::fs::write(&nonempty, b"not a real sqlite header but non-empty").expect("write");
+        assert!(
+            encrypted_db_exists(&nonempty),
+            "non-empty file → DB present"
+        );
+    }
 
     /// Seed a `key_version = 1` text row encrypted EXACTLY the way real legacy
     /// rows were written: under the device's v1 storage key — i.e. the seed
