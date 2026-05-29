@@ -1,0 +1,49 @@
+name: Acceptance (real artifacts)
+
+# Pre-release gate: exercises the ACTUAL built binaries end-to-end on macOS —
+# daemon startup / IPC / DB / round-trip (smoke_test.sh) and two-process P2P
+# clipboard sync (p2p_smoke_test.sh). Catches build-skew, daemon-can't-start,
+# real socket/DB, and cross-device sync regressions that unit tests miss.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Never touch the macOS Keychain on the runner: forces the in-memory ephemeral
+  # encryption key. The P2P script also sets this per-process, but exporting it
+  # job-wide keeps the single-daemon smoke isolated from any login keychain too.
+  COPYPASTE_EPHEMERAL_KEY: "1"
+
+jobs:
+  acceptance:
+    name: Acceptance harness (macos-latest)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: acceptance-macos
+
+      # The harness uses `nc -U` (BSD netcat ships on macOS), base64, and bash —
+      # all present on macos-latest. No keychain or network egress required:
+      # P2P pairing dials a loopback bootstrap listener between two local
+      # daemons, so it is fully green-able on a sandboxed runner.
+      - name: Run acceptance harness
+        run: bash scripts/acceptance.sh
