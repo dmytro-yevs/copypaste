@@ -1096,6 +1096,107 @@ mod tests {
         );
     }
 
+    /// REGRESSION (live emulator↔macOS divergence): after a real network PAKE
+    /// pairing the macOS daemon (PAKE **responder**) re-keys catch-up items under
+    /// the content sync key it derives from its pairing result, and the Android
+    /// FFI (PAKE **initiator**) must derive the IDENTICAL key from the
+    /// `session_key` the FFI returns — otherwise `decrypt_from_cloud` rejects
+    /// every pushed item (itemsReceived=N, items=[]), the exact symptom seen live.
+    ///
+    /// This drives the real `BootstrapResponder::run` + `bootstrap_pair_initiator`
+    /// over a loopback TLS socket, then derives the content sync key two ways: the
+    /// DAEMON way (`derive_peer_sync_key_b64`'s exact derivation from the
+    /// responder's `BootstrapPairing.session_key`) and the ANDROID way
+    /// (`shared_sync_key_from_session` from the initiator's returned
+    /// `BootstrapResult.session_key`). It asserts the two `SyncKey`s are
+    /// byte-equal AND that a blob the daemon would push (`encrypt_for_cloud` under
+    /// the daemon key) decrypts under the Android key. A divergence in which key
+    /// (raw vs channel-bound) each side feeds into derivation makes this fail.
+    #[test]
+    fn pairing_derives_matching_content_sync_key_daemon_and_ffi() {
+        use copypaste_p2p::bootstrap::BootstrapResponder;
+        use std::sync::mpsc;
+
+        let responder_cert = generate_device_cert().expect("responder cert");
+        let initiator_cert = generate_device_cert().expect("initiator cert");
+
+        let password = "shared-qr-secret-rekey";
+        let resp_sync_addr = "127.0.0.1:7101";
+        let init_sync_addr = "127.0.0.1:7102";
+
+        // Responder (== macOS daemon role) on its own runtime / OS thread so the
+        // main thread can call the synchronous FFI initiator wrapper.
+        let (port_tx, port_rx) = mpsc::channel::<u16>();
+        let resp_cert_der = responder_cert.cert_der.clone();
+        let resp_key_der = responder_cert.key_der.clone();
+        let pw = password.to_string();
+        let responder_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("responder runtime");
+            rt.block_on(async move {
+                let responder = BootstrapResponder::bind(resp_cert_der, resp_key_der)
+                    .await
+                    .expect("bind responder");
+                let port = responder.local_addr().expect("local addr").port();
+                port_tx.send(port).expect("send port");
+                responder.run(&pw, resp_sync_addr).await
+            })
+        });
+
+        let port = port_rx.recv().expect("responder port");
+        let addr_hint = format!("127.0.0.1:{port}");
+
+        let init_result = bootstrap_pair_initiator(
+            addr_hint,
+            &initiator_cert.cert_der,
+            &initiator_cert.key_der,
+            password.to_string(),
+            init_sync_addr.to_string(),
+        )
+        .expect("FFI bootstrap pairing must succeed over loopback");
+
+        let resp_pairing = responder_thread
+            .join()
+            .expect("responder thread join")
+            .expect("responder pairing");
+
+        // DAEMON derivation: `derive_peer_sync_key_b64` persists
+        // `session_key.derive_xchacha_key(P2P_SYNC_KEY_SALT)` into peers.json and
+        // `SyncCrypto::shared_sync_key` reads it back through a lossless base64
+        // round-trip, so the effective key is exactly these derived bytes from
+        // the responder's pairing result.
+        let daemon_key = copypaste_core::SyncKey::from_bytes(
+            resp_pairing
+                .session_key
+                .derive_xchacha_key(P2P_SYNC_KEY_SALT),
+        );
+
+        // ANDROID derivation: the exact FFI path from the session_key the FFI
+        // returned to Kotlin.
+        let android_key = shared_sync_key_from_session(&init_result.session_key)
+            .expect("FFI derives content sync key from returned session_key");
+
+        // The two derived content keys MUST be byte-equal, or every catch-up
+        // item the daemon pushes fails to decrypt on Android.
+        assert_eq!(
+            daemon_key.as_bytes(),
+            android_key.as_bytes(),
+            "daemon (responder) and Android FFI (initiator) must derive the IDENTICAL content sync key"
+        );
+
+        // And concretely: a blob the daemon would push must decrypt under the
+        // Android key (the live `itemsReceived=N, items=[]` symptom).
+        let item_id = uuid::Uuid::new_v4().to_string();
+        let plaintext = b"catch-up item from the macOS daemon".to_vec();
+        let blob = encrypt_for_cloud(&daemon_key, &item_id, &plaintext)
+            .expect("daemon wraps catch-up item under its content key");
+        let recovered = decrypt_from_cloud(&android_key, &item_id, &blob)
+            .expect("Android must decrypt the daemon's catch-up blob");
+        assert_eq!(recovered, plaintext);
+    }
+
     /// A malformed `addr_hint` must surface as `P2pError`, not a panic.
     #[test]
     fn bootstrap_pair_initiator_rejects_bad_addr() {

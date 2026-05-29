@@ -258,10 +258,40 @@ fn pairing_persists_peer_fingerprint_and_address_on_both_sides() {
         .unwrap_or("");
     assert!(
         !b_addr.is_empty(),
-        "A's peers.json must record B's sync address, got record: {b_record}"
+        "A's peers.json must record B's sync address, got record: {b_addr}"
     );
     assert!(
         b_addr.contains(':'),
         "B's persisted address must be host:port, got: {b_addr}"
+    );
+
+    // ── Shared content sync key MUST match on both sides ─────────────────────
+    // REGRESSION (live emulator↔macOS): both daemons derive the per-peer content
+    // sync key (`derive_peer_sync_key_b64`) from the PAKE session key they each
+    // hold and persist it as `sync_key_b64`. After a successful pairing both
+    // sides hold the IDENTICAL session key, so the persisted keys MUST be
+    // byte-equal — otherwise the responder's catch-up blobs (encrypted under its
+    // key) fail to decrypt on the initiator (the live `itemsReceived=N, items=[]`
+    // symptom). `SyncCrypto::shared_sync_key` reads exactly this value back.
+    let a_sync_key = a_record
+        .get("sync_key_b64")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let b_sync_key = b_record
+        .get("sync_key_b64")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    assert!(
+        !a_sync_key.is_empty(),
+        "B's peers.json must record a content sync key for A, got record: {a_record}"
+    );
+    assert!(
+        !b_sync_key.is_empty(),
+        "A's peers.json must record a content sync key for B, got record: {b_record}"
+    );
+    assert_eq!(
+        a_sync_key, b_sync_key,
+        "both daemons must persist the IDENTICAL content sync key after pairing \
+         (responder's catch-up encryption key == initiator's decryption key)"
     );
 }
