@@ -313,7 +313,11 @@ pub fn add_clipboard_item(
         let _: [u8; 32] = key
             .try_into()
             .map_err(|_| CopypasteError::InvalidKeyLength)?;
-        Ok("stub-uniffi-not-live".to_string())
+        // Return empty string so Kotlin callers treat this as "not stored
+        // natively" and fall through to the SharedPreferences repository.
+        // Previously returned "stub-uniffi-not-live" which was non-empty and
+        // caused ClipboardService to skip the fallback store entirely (items lost).
+        Ok(String::new())
     })
 }
 
@@ -411,10 +415,16 @@ mod tests {
 
     #[cfg(not(feature = "android-uniffi-live"))]
     #[test]
-    fn add_clipboard_item_returns_stub_when_feature_off() {
+    fn add_clipboard_item_returns_empty_when_feature_off() {
         let id =
             add_clipboard_item("/dev/null".into(), &test_key(), "hello".into()).expect("stub path");
-        assert_eq!(id, "stub-uniffi-not-live");
+        // Empty string signals "not stored natively" so Kotlin falls back to
+        // SharedPreferences. A non-empty stub value would wrongly suppress the
+        // fallback and silently discard every clipboard item.
+        assert!(
+            id.is_empty(),
+            "stub path must return empty string, got {id:?}"
+        );
         let n = get_history_count("/dev/null".into(), &test_key()).expect("stub count");
         assert_eq!(n, 0);
     }
