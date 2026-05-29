@@ -157,6 +157,16 @@ pub fn get_own_fingerprint(public_key: &[u8]) -> String {
 /// duplicate that would double-fan-out every item (fix/p2p-c-review #4).
 type PeerSinks = Arc<Mutex<HashMap<DeviceFingerprint, mpsc::Sender<WireItem>>>>;
 
+/// Catch-up provider: produces the current local history as `WireItem`s already
+/// re-keyed under the shared sync key, so a freshly-connected peer receives every
+/// item that predates the link (fanout is otherwise fire-and-forget to whatever
+/// sinks happen to be live at the moment an item is produced).
+///
+/// Built in `daemon.rs` from the DB + `SyncCrypto`; called once per established
+/// connection (both the accept path and the connector path) right after the
+/// peer sink is registered. LWW on the receiver makes the replay idempotent.
+pub type CatchupProvider = Arc<dyn Fn() -> Vec<WireItem> + Send + Sync>;
+
 /// Load peers persisted in `peers.json` into the live `PairedPeers` allowlist
 /// (fix/p2p-c-review #2).
 ///
@@ -227,6 +237,7 @@ pub async fn start_p2p(
     new_item_rx: broadcast::Receiver<ClipboardItem>,
     incoming_tx: mpsc::Sender<WireItem>,
     outbound_rx: mpsc::Receiver<WireItem>,
+    catchup: CatchupProvider,
 ) -> anyhow::Result<P2pHandle> {
     let bind_addr = format!("0.0.0.0:{}", config.listen_port);
     let listener = TcpListener::bind(&bind_addr).await?;
@@ -282,8 +293,17 @@ pub async fn start_p2p(
         let transport = Arc::clone(&transport);
         let peer_sinks = Arc::clone(&peer_sinks);
         let incoming_tx = incoming_tx.clone();
+        let catchup = Arc::clone(&catchup);
         tokio::spawn(async move {
-            accept_loop(listener, shutdown_rx, transport, peer_sinks, incoming_tx).await;
+            accept_loop(
+                listener,
+                shutdown_rx,
+                transport,
+                peer_sinks,
+                incoming_tx,
+                catchup,
+            )
+            .await;
         });
     }
 
@@ -307,8 +327,9 @@ pub async fn start_p2p(
         let peer_sinks = Arc::clone(&peer_sinks);
         let incoming_tx = incoming_tx.clone();
         let own_fp = transport.fingerprint().to_string();
+        let catchup = Arc::clone(&catchup);
         tokio::spawn(async move {
-            peer_connector_loop(transport, peer_sinks, incoming_tx, own_fp).await;
+            peer_connector_loop(transport, peer_sinks, incoming_tx, own_fp, catchup).await;
         });
     }
 
@@ -352,6 +373,7 @@ async fn accept_loop(
     transport: Arc<PeerTransport>,
     peer_sinks: PeerSinks,
     incoming_tx: mpsc::Sender<WireItem>,
+    catchup: CatchupProvider,
 ) {
     // fix/p2p-c-review #3: the previous `"unknown".parse().unwrap()` fallback
     // panicked because `"unknown"` is not a valid `SocketAddr`. `local_addr`
@@ -384,12 +406,33 @@ async fn accept_loop(
                         // after being superseded by a reconnect under the same key.
                         let cleanup_tx = peer_tx.clone();
 
+                        // Churn fix: do NOT replace a still-healthy sink for the
+                        // same fingerprint. When both daemons dial each other a
+                        // duplicate connection arrives here; overwriting the live
+                        // sink resets the healthy link ("connection reset by
+                        // peer"). Keep the existing connection and drop this
+                        // duplicate instead. A sink whose receiver was dropped
+                        // (peer task exited) is closed → we may replace it.
                         {
                             let mut sinks = peer_sinks.lock().await;
-                            if sinks.insert(peer_key.clone(), peer_tx).is_some() {
-                                tracing::debug!(%peer_fp, "replaced existing peer sink (reconnect)");
+                            let healthy = sinks
+                                .get(&peer_key)
+                                .is_some_and(|tx| !tx.is_closed());
+                            if healthy {
+                                drop(sinks);
+                                tracing::debug!(%peer_fp, "duplicate inbound connection — existing sink healthy, dropping duplicate");
+                                drop(framed);
+                                continue;
                             }
+                            sinks.insert(peer_key.clone(), peer_tx);
                         }
+
+                        // Sync-on-connect catch-up: push the current local history
+                        // ONCE into this peer's sink so items produced before the
+                        // link came up are delivered. Items are already re-keyed
+                        // under the shared sync key by the provider; LWW on the
+                        // receiver makes the replay idempotent.
+                        push_catchup(&catchup, &cleanup_tx).await;
 
                         let incoming_tx = incoming_tx.clone();
                         let peer_sinks = Arc::clone(&peer_sinks);
@@ -508,6 +551,7 @@ async fn peer_connector_loop(
     peer_sinks: PeerSinks,
     incoming_tx: mpsc::Sender<WireItem>,
     own_fp: DeviceFingerprint,
+    catchup: CatchupProvider,
 ) {
     tracing::debug!(%own_fp, "P2P peer connector loop running");
     let peers_path = crate::ipc::peers_file_path();
@@ -573,6 +617,10 @@ async fn peer_connector_loop(
                         drop(sinks);
 
                         tracing::info!(fingerprint = %peer.fingerprint, addr = %peer.addr, "connector established outbound mTLS link");
+
+                        // Sync-on-connect catch-up: replay local history once so
+                        // items produced before this link came up reach the peer.
+                        push_catchup(&catchup, &cleanup_tx).await;
 
                         let incoming_tx = incoming_tx.clone();
                         let peer_sinks = Arc::clone(&peer_sinks);
@@ -771,6 +819,29 @@ async fn outbound_loop(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Push the catch-up history into a single freshly-connected peer's sink.
+///
+/// Calls the [`CatchupProvider`] (which reads local history and re-keys it under
+/// the shared sync key) and forwards each item to `sink`. Best-effort: a closed
+/// sink (peer already gone) just stops the replay. Called exactly once per
+/// established connection, before/at the start of the duplex pump.
+async fn push_catchup(catchup: &CatchupProvider, sink: &mpsc::Sender<WireItem>) {
+    let items = catchup();
+    if items.is_empty() {
+        return;
+    }
+    tracing::debug!(
+        count = items.len(),
+        "P2P sync-on-connect: replaying local history to peer"
+    );
+    for item in items {
+        if sink.send(item).await.is_err() {
+            tracing::debug!("P2P sync-on-connect: peer sink closed mid-replay");
+            return;
         }
     }
 }

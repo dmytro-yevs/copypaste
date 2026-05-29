@@ -371,6 +371,30 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 enabled: true,
             };
 
+            // P2P Phase 3 (sync-on-connect catch-up): build a provider that
+            // replays the current local history — already re-keyed under the
+            // shared sync key, exactly like normal outbound — into each peer the
+            // instant a link is established. Without this, an item produced
+            // before the link came up is never delivered (fanout is
+            // fire-and-forget to currently-connected sinks). Uses the same
+            // `SyncCrypto` construction as the orchestrator below.
+            let catchup: p2p::CatchupProvider = {
+                let catchup_db = db.clone();
+                let catchup_device_id = local_device_id.clone();
+                let catchup_seed: [u8; 32] = **local_key_arc;
+                Arc::new(move || {
+                    let crypto =
+                        sync_orch::SyncCrypto::new(catchup_seed, crate::ipc::peers_file_path());
+                    // The closure is `Fn` (sync) but the DB sits behind a tokio
+                    // Mutex; `block_in_place` + `blocking_lock` safely acquires
+                    // it on the multi-thread runtime without blocking the worker.
+                    tokio::task::block_in_place(|| {
+                        let db = catchup_db.blocking_lock();
+                        sync_orch::catchup_items(&db, &catchup_device_id, &crypto)
+                    })
+                })
+            };
+
             // Hand the SAME live allowlist already shared with the IPC server
             // (fix/p2p-c-review #2) and the SAME cert whose fingerprint the IPC
             // pairing handlers advertise (CRITICAL-1). `start_p2p` seeds the
@@ -385,6 +409,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 new_item_tx.subscribe(),
                 sync_incoming_tx.clone(),
                 sync_outbound_rx,
+                catchup,
             )
             .await
             {
