@@ -283,7 +283,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // When `write_to_pasteboard` runs it stamps the post-write NSPasteboard
     // changeCount into this Arc; the monitor's next `poll()` skips that count.
     #[cfg(unix)]
-    let (self_write_change_count_arc, _ipc_handle) = {
+    let (self_write_change_count_arc, p2p_sync_addr_slot, _ipc_handle) = {
         let mut server = IpcServer::new(
             db.clone(),
             private_mode.clone(),
@@ -310,6 +310,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 server.with_cloud_sync_state(cloud_sync_key.clone(), cloud_last_sync_ms.clone());
         }
         let swcc = server.self_write_change_count.clone();
+        // P2P Phase 2: grab a handle to the shared slot holding this daemon's
+        // own P2P sync-listener address. `start_p2p` (below) binds an
+        // OS-assigned port, so we populate this slot only once that port is
+        // known; the pairing handlers then send it in-band over the bootstrap
+        // channel so the peer can persist it for the Phase 3 connector.
+        let sync_addr_slot = server.p2p_sync_addr_slot();
         let socket_clone = socket_path.clone();
         let ipc_shutdown = shutdown_token.clone();
         let handle = tokio::spawn(async move {
@@ -317,7 +323,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 tracing::error!("IPC server error: {e}");
             }
         });
-        (swcc, handle)
+        (swcc, sync_addr_slot, handle)
     };
 
     // Broadcast channel: carries newly-inserted clipboard items to any
@@ -382,6 +388,18 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             {
                 Ok(handle) => {
                     tracing::info!(port = handle.actual_port, "P2P subsystem running");
+                    // P2P Phase 2: publish this daemon's now-bound sync-listener
+                    // address into the shared slot the IPC pairing handlers read.
+                    // 127.0.0.1 is fine for the single-host / loopback case; a
+                    // real LAN address is a later refinement (see Phase 2 design).
+                    #[cfg(unix)]
+                    {
+                        let addr = format!("127.0.0.1:{}", handle.actual_port);
+                        let mut slot = p2p_sync_addr_slot
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        *slot = Some(addr);
+                    }
                     Some(handle)
                 }
                 Err(e) => {

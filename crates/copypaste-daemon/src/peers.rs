@@ -22,6 +22,14 @@ pub struct PairedDevice {
     /// Unix timestamp (seconds) when this device was paired.
     #[serde(default)]
     pub added_at: i64,
+    /// The peer's P2P sync-listener address (`host:port`), learned in-band
+    /// during PAKE pairing. Used by the Phase 3 outbound connector to dial an
+    /// already-paired peer directly (loopback mDNS filters 127.0.0.1 and is
+    /// unreliable, so the connector relies on this persisted address rather than
+    /// mDNS). `#[serde(default)]` keeps backward compatibility with older
+    /// `peers.json` records that predate this field (they deserialise to `None`).
+    #[serde(default)]
+    pub address: Option<String>,
 }
 
 /// Load the list of paired devices from `path`.
@@ -51,6 +59,13 @@ pub fn save_peers(path: &Path, peers: &[PairedDevice]) -> anyhow::Result<()> {
     }
     let json = serde_json::to_string_pretty(peers)?;
     std::fs::write(path, json)?;
+    // chmod 0600 — peer cert fingerprints + addresses are sensitive identifiers
+    // and must never be world-readable. Mirrors the IPC peers-surface writer.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
     Ok(())
 }
 
@@ -64,6 +79,7 @@ mod tests {
             fingerprint: fp.to_string(),
             name: name.to_string(),
             added_at: 1_700_000_000,
+            address: Some("127.0.0.1:4242".to_string()),
         }
     }
 
@@ -91,5 +107,22 @@ mod tests {
         let path = dir.path().join("peers.json");
         std::fs::write(&path, b"not json").unwrap();
         assert!(load_peers(&path).is_empty());
+    }
+
+    /// A `peers.json` written before the `address` field existed must still
+    /// deserialise (the field defaults to `None`) — backward compatibility.
+    #[test]
+    fn legacy_record_without_address_loads_as_none() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        std::fs::write(
+            &path,
+            br#"[{"fingerprint":"aabbcc","name":"Old","added_at":1700000000}]"#,
+        )
+        .unwrap();
+        let loaded = load_peers(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].fingerprint, "aabbcc");
+        assert_eq!(loaded[0].address, None);
     }
 }

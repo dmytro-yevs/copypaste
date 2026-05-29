@@ -33,17 +33,28 @@
 //! Initiator (client)                         Responder (server)
 //!   | --- 1. PAKE message1            -->  |
 //!   | --- 2. own cert fingerprint     -->  |
-//!   | <-- 3. PAKE message2             --- |
-//!   | <-- 4. own cert fingerprint      --- |
-//!   | --- 5. PAKE message3            -->  |
+//!   | --- 3. own P2P sync addr        -->  |
+//!   | <-- 4. PAKE message2             --- |
+//!   | <-- 5. own cert fingerprint      --- |
+//!   | <-- 6. own P2P sync addr         --- |
+//!   | --- 7. PAKE message3            -->  |
 //!   | == both sides hold the same SessionKey == |
 //! ```
 //!
-//! On success each side returns the *peer's* cert fingerprint and the derived
-//! [`crate::pake::SessionKey`]. The peer fingerprint sent in the frame is
-//! cross-checked against the fingerprint of the certificate actually presented
-//! during the TLS handshake, so a peer cannot advertise one fingerprint in the
-//! frame while presenting a different certificate.
+//! On success each side returns the *peer's* cert fingerprint, the peer's P2P
+//! sync-listener address, and the derived [`crate::pake::SessionKey`]. The peer
+//! fingerprint sent in the frame is cross-checked against the fingerprint of the
+//! certificate actually presented during the TLS handshake, so a peer cannot
+//! advertise one fingerprint in the frame while presenting a different
+//! certificate.
+//!
+//! ## Wire protocol version
+//!
+//! The sync-address frames (3 and 6) were added in P2P Phase 2. Both ends are
+//! shipped together (there is no mixed-version pairing across hosts at this
+//! stage), so the frame order is fixed rather than negotiated; the address frame
+//! immediately follows each side's fingerprint frame. If cross-version pairing
+//! ever becomes a requirement, prepend a version byte here.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -194,6 +205,11 @@ pub struct BootstrapPairing {
     /// observed on the TLS handshake AND confirmed to match the value the peer
     /// sent in-band. This is the value the caller pins in `PairedPeers`.
     pub peer_fingerprint: DeviceFingerprint,
+    /// The peer's P2P sync-listener address (`host:port`), sent in-band during
+    /// the exchange. The caller persists this to `peers.json` so the Phase 3
+    /// outbound connector can dial the peer directly. May be empty if the peer
+    /// did not advertise an address.
+    pub peer_sync_addr: String,
     /// The 32-byte PAKE session key (identical on both sides on success).
     pub session_key: SessionKey,
 }
@@ -260,6 +276,8 @@ impl BootstrapResponder {
     ///
     /// `password` is the PAKE password derived from the QR token. A fresh
     /// [`PasswordFile`] is registered from it for this single handshake.
+    /// `sync_addr` is this device's own P2P sync-listener `host:port`, sent
+    /// in-band so the initiator can persist it for the Phase 3 connector.
     ///
     /// # Errors
     /// * [`TransportError::HandshakeTimeout`] if no connection / TLS handshake
@@ -267,7 +285,11 @@ impl BootstrapResponder {
     /// * [`TransportError::Io`] for socket / framing errors or a PAKE failure
     ///   (surfaced as `io::Error::other`), or a fingerprint mismatch between the
     ///   TLS cert and the in-band frame.
-    pub async fn run(self, password: &str) -> Result<BootstrapPairing, TransportError> {
+    pub async fn run(
+        self,
+        password: &str,
+        sync_addr: &str,
+    ) -> Result<BootstrapPairing, TransportError> {
         // Accept exactly one inbound TCP connection within the window.
         let (tcp_stream, peer_addr) =
             match tokio::time::timeout(BOOTSTRAP_ACCEPT_TIMEOUT, self.listener.accept()).await {
@@ -311,6 +333,8 @@ impl BootstrapResponder {
         let msg1 = recv_frame(&mut framed).await?;
         // Frame 2 ← initiator's cert fingerprint.
         let frame_peer_fp = recv_fingerprint(&mut framed).await?;
+        // Frame 3 ← initiator's P2P sync-listener address (Phase 2).
+        let peer_sync_addr = recv_sync_addr(&mut framed).await?;
 
         // The fingerprint the peer claims in-band MUST match the cert it
         // presented in the TLS handshake — otherwise a peer could pin us to a
@@ -324,12 +348,14 @@ impl BootstrapResponder {
         let (responder, msg2) = PakeResponder::respond(&password_file, &msg1)
             .map_err(|e| io_other(format!("PAKE respond: {e}")))?;
 
-        // Frame 3 → our PAKE message2.
+        // Frame 4 → our PAKE message2.
         send_frame(&mut framed, &msg2).await?;
-        // Frame 4 → our cert fingerprint.
+        // Frame 5 → our cert fingerprint.
         send_frame(&mut framed, self.own_fingerprint.as_bytes()).await?;
+        // Frame 6 → our P2P sync-listener address (Phase 2).
+        send_frame(&mut framed, sync_addr.as_bytes()).await?;
 
-        // Frame 5 ← initiator's PAKE finalisation.
+        // Frame 7 ← initiator's PAKE finalisation.
         let msg3 = recv_frame(&mut framed).await?;
         let session_key = responder
             .finish(&msg3)
@@ -342,6 +368,7 @@ impl BootstrapResponder {
 
         Ok(BootstrapPairing {
             peer_fingerprint: tls_peer_fp,
+            peer_sync_addr,
             session_key,
         })
     }
@@ -352,7 +379,9 @@ impl BootstrapResponder {
 ///
 /// `cert_der` / `key_der` are this device's self-signed cert and key (presented
 /// to the responder so it learns our fingerprint). `password` is the PAKE
-/// password derived from the QR token.
+/// password derived from the QR token. `sync_addr` is this device's own P2P
+/// sync-listener `host:port`, sent in-band so the responder can persist it for
+/// the Phase 3 connector.
 ///
 /// # Errors
 /// Mirrors [`BootstrapResponder::run`] — TLS / socket / framing errors and PAKE
@@ -362,6 +391,7 @@ pub async fn run_initiator(
     cert_der: Vec<u8>,
     key_der: Vec<u8>,
     password: &str,
+    sync_addr: &str,
 ) -> Result<BootstrapPairing, TransportError> {
     let own_fingerprint = fingerprint_of(&cert_der);
 
@@ -420,11 +450,15 @@ pub async fn run_initiator(
     send_frame(&mut framed, &msg1).await?;
     // Frame 2 → our cert fingerprint.
     send_frame(&mut framed, own_fingerprint.as_bytes()).await?;
+    // Frame 3 → our P2P sync-listener address (Phase 2).
+    send_frame(&mut framed, sync_addr.as_bytes()).await?;
 
-    // Frame 3 ← responder's PAKE message2.
+    // Frame 4 ← responder's PAKE message2.
     let msg2 = recv_frame(&mut framed).await?;
-    // Frame 4 ← responder's cert fingerprint.
+    // Frame 5 ← responder's cert fingerprint.
     let frame_peer_fp = recv_fingerprint(&mut framed).await?;
+    // Frame 6 ← responder's P2P sync-listener address (Phase 2).
+    let peer_sync_addr = recv_sync_addr(&mut framed).await?;
 
     if frame_peer_fp != tls_peer_fp {
         return Err(io_other(format!(
@@ -436,11 +470,12 @@ pub async fn run_initiator(
         .finish(&msg2)
         .map_err(|e| io_other(format!("PAKE finish: {e}")))?;
 
-    // Frame 5 → our PAKE finalisation.
+    // Frame 7 → our PAKE finalisation.
     send_frame(&mut framed, &msg3).await?;
 
     Ok(BootstrapPairing {
         peer_fingerprint: tls_peer_fp,
+        peer_sync_addr,
         session_key,
     })
 }
@@ -504,6 +539,35 @@ where
     Ok(fp)
 }
 
+/// Upper bound on a peer's advertised sync-listener address. A `host:port` is at
+/// most a few dozen bytes (IPv6 + port ≈ 47); 256 is a generous ceiling that
+/// still rejects a desynced peer sending a huge frame in this slot.
+const MAX_SYNC_ADDR_BYTES: usize = 256;
+
+/// Receive a peer's P2P sync-listener `host:port` address frame (Phase 2).
+///
+/// The address is opaque to the bootstrap layer (it is parsed/validated by the
+/// daemon when it dials in Phase 3); this only enforces UTF-8 and a sane length
+/// bound so a malformed frame cannot smuggle arbitrary bytes into `peers.json`.
+/// An empty frame is accepted and returned as an empty string (the peer simply
+/// did not advertise an address).
+async fn recv_sync_addr<S>(
+    framed: &mut Framed<S, LengthDelimitedCodec>,
+) -> Result<String, TransportError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let bytes = recv_frame(framed).await?;
+    if bytes.len() > MAX_SYNC_ADDR_BYTES {
+        return Err(io_other(format!(
+            "bootstrap: peer sync address too long ({} bytes)",
+            bytes.len()
+        )));
+    }
+    String::from_utf8(bytes)
+        .map_err(|e| io_other(format!("bootstrap: sync address not UTF-8: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,16 +597,19 @@ mod tests {
         assert_eq!(resp_fp_expected, responder_fp);
 
         let pw = password.to_string();
-        let responder_task = tokio::spawn(async move { responder.run(&pw).await });
+        let resp_sync_addr = "127.0.0.1:7001";
+        let responder_task = tokio::spawn(async move { responder.run(&pw, resp_sync_addr).await });
 
         let addr: SocketAddr = ([127, 0, 0, 1], port).into();
         let init_pw = password.to_string();
+        let init_sync_addr = "127.0.0.1:7002";
         let initiator_task = tokio::spawn(async move {
             run_initiator(
                 addr,
                 initiator_cert.cert_der,
                 initiator_cert.key_der,
                 &init_pw,
+                init_sync_addr,
             )
             .await
         });
@@ -561,6 +628,10 @@ mod tests {
         // Each side learned the other's real cert fingerprint.
         assert_eq!(resp.peer_fingerprint, initiator_fp);
         assert_eq!(init.peer_fingerprint, responder_fp);
+
+        // Phase 2: each side also learned the other's P2P sync-listener address.
+        assert_eq!(resp.peer_sync_addr, init_sync_addr);
+        assert_eq!(init.peer_sync_addr, resp_sync_addr);
     }
 
     /// Wrong password: the initiator's PAKE finish must fail, and the responder
@@ -578,7 +649,10 @@ mod tests {
         .expect("bind responder");
         let port = responder.local_addr().expect("local addr").port();
 
-        let responder_task = tokio::spawn(async move { responder.run("the-right-password").await });
+        let responder_task =
+            tokio::spawn(
+                async move { responder.run("the-right-password", "127.0.0.1:7003").await },
+            );
 
         let addr: SocketAddr = ([127, 0, 0, 1], port).into();
         let initiator_task = tokio::spawn(async move {
@@ -587,6 +661,7 @@ mod tests {
                 initiator_cert.cert_der,
                 initiator_cert.key_der,
                 "the-WRONG-password",
+                "127.0.0.1:7004",
             )
             .await
         });

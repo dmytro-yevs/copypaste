@@ -138,17 +138,27 @@ fn format_fingerprint(bytes: &[u8]) -> String {
 }
 
 /// Path to peers.json in the app config directory.
+///
+/// Honours the `COPYPASTE_CONFIG_DIR` override (used by the isolated integration
+/// harness, and any deployment that relocates config) before falling back to the
+/// platform `dirs::config_dir()`. In all cases the file lives under a
+/// `copypaste/` subdirectory so the path is stable across the override and the
+/// default.
 pub(crate) fn peers_file_path() -> PathBuf {
     static FALLBACK_WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    let base = dirs::config_dir().unwrap_or_else(|| {
-        FALLBACK_WARNED.get_or_init(|| {
-            tracing::warn!(
-                "dirs::config_dir() unavailable — falling back to CWD for peers.json. \
-                 Set $XDG_CONFIG_HOME or $HOME to silence this warning."
-            );
+    let base = std::env::var_os("COPYPASTE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(dirs::config_dir)
+        .unwrap_or_else(|| {
+            FALLBACK_WARNED.get_or_init(|| {
+                tracing::warn!(
+                    "neither COPYPASTE_CONFIG_DIR nor dirs::config_dir() available — \
+                     falling back to CWD for peers.json. Set $XDG_CONFIG_HOME or $HOME \
+                     to silence this warning."
+                );
+            });
+            PathBuf::from(".")
         });
-        PathBuf::from(".")
-    });
     base.join("copypaste").join("peers.json")
 }
 
@@ -420,6 +430,14 @@ pub struct IpcServer {
     /// (best-effort fallback — loopback mDNS is unreliable, so `addr_hint` is
     /// the primary path). `None` when P2P discovery is not wired in.
     discovery: Option<Arc<copypaste_p2p::discovery::DiscoveryService>>,
+    /// This daemon's own P2P sync-listener address (`host:port`), filled once
+    /// `start_p2p` has bound its accept loop (the port is OS-assigned, so it is
+    /// not known when `IpcServer` is constructed). The pairing handlers send
+    /// this value in-band over the bootstrap channel so the peer can persist it
+    /// for the Phase 3 outbound connector. A `std::sync::Mutex` (not tokio's) is
+    /// used because the critical section is a trivial clone with no `.await`.
+    /// Holds `None` until populated, or when P2P is disabled.
+    p2p_sync_addr: Arc<std::sync::Mutex<Option<String>>>,
     /// Shared passphrase-derived cloud sync key (Argon2id, 32 bytes).
     ///
     /// `None` means the user has not yet configured a sync passphrase, so
@@ -453,6 +471,7 @@ impl IpcServer {
             cert_fingerprint: None,
             p2p_cert: None,
             discovery: None,
+            p2p_sync_addr: Arc::new(std::sync::Mutex::new(None)),
             self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
             #[cfg(feature = "cloud-sync")]
             sync_key: Arc::new(Mutex::new(None)),
@@ -506,6 +525,34 @@ impl IpcServer {
         self
     }
 
+    /// Return a handle to the shared slot holding this daemon's own P2P
+    /// sync-listener address (`host:port`).
+    ///
+    /// The IPC server is constructed before `start_p2p` binds its accept loop,
+    /// so the OS-assigned port is not known yet. The daemon calls
+    /// [`set_p2p_sync_addr`](Self::set_p2p_sync_addr) (via this same Arc) once
+    /// `start_p2p` returns the bound port; the pairing handlers then read it and
+    /// send it in-band over the bootstrap channel. Returning the Arc lets the
+    /// daemon populate the slot after the server has been moved into its task.
+    pub fn p2p_sync_addr_slot(&self) -> Arc<std::sync::Mutex<Option<String>>> {
+        Arc::clone(&self.p2p_sync_addr)
+    }
+
+    /// Populate the shared slot with this daemon's bound P2P sync-listener
+    /// address. Convenience wrapper over [`p2p_sync_addr_slot`](Self::p2p_sync_addr_slot)
+    /// for callers that still hold the server (e.g. tests).
+    ///
+    /// A poisoned mutex (a prior panic while holding the lock) is recovered
+    /// rather than propagated — the slot holds only a non-secret address string,
+    /// so reusing it after a panic is safe and keeps pairing functional.
+    pub fn set_p2p_sync_addr(&self, addr: impl Into<String>) {
+        let mut slot = self
+            .p2p_sync_addr
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *slot = Some(addr.into());
+    }
+
     /// Wire up shared cloud-sync state created by the daemon before spawning
     /// the IPC server and `start_cloud`.
     ///
@@ -549,6 +596,7 @@ impl IpcServer {
             cert_fingerprint: None,
             p2p_cert: None,
             discovery: None,
+            p2p_sync_addr: Arc::new(std::sync::Mutex::new(None)),
             self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
             #[cfg(feature = "cloud-sync")]
             sync_key: Arc::new(Mutex::new(None)),
@@ -623,6 +671,73 @@ impl IpcServer {
         }
     }
 
+    /// This daemon's own P2P sync-listener address (`host:port`), if `start_p2p`
+    /// has bound it. Sent in-band over the bootstrap channel so the peer can
+    /// persist it for the Phase 3 connector. Returns an empty string when the
+    /// port is not yet known (P2P disabled or not yet bound) — the bootstrap
+    /// wire tolerates an empty address frame.
+    fn own_sync_addr(&self) -> String {
+        self.p2p_sync_addr
+            .lock()
+            .map(|slot| slot.clone().unwrap_or_default())
+            .unwrap_or_else(|poisoned| poisoned.into_inner().clone().unwrap_or_default())
+    }
+
+    /// Durably persist a freshly-paired peer to `peers.json` (P2P Phase 2), in
+    /// addition to the in-memory allowlist registration.
+    ///
+    /// `peer_fp_canonical` is the canonical (colon-free, lowercase) cert
+    /// fingerprint the bootstrap channel reports; it is stored in the
+    /// user-facing colon-hex form so the rest of the IPC peers surface
+    /// (`list_peers`, revoke, etc.) and `load_persisted_peers_into` round-trip
+    /// it consistently. `peer_sync_addr` is the peer's P2P sync-listener address
+    /// learned in-band, stored so the Phase 3 connector can dial it directly
+    /// (loopback mDNS filters 127.0.0.1 and is unreliable).
+    ///
+    /// Idempotent: if a record with the same fingerprint already exists it is
+    /// replaced (address/name refreshed) rather than duplicated. Failures are
+    /// logged and swallowed — pairing already succeeded in memory, and a persist
+    /// failure must not turn a successful pair into an IPC error.
+    ///
+    /// A free function (not a `&self` method) so the detached bootstrap-responder
+    /// task can call it after `self` has been moved/borrowed away.
+    fn persist_paired_peer(peer_fp_canonical: &str, peer_sync_addr: &str) {
+        let display = display_fingerprint(peer_fp_canonical);
+        let added_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let address = if peer_sync_addr.is_empty() {
+            None
+        } else {
+            Some(peer_sync_addr.to_string())
+        };
+
+        let path = peers_file_path();
+        let mut peers = crate::peers::load_peers(&path);
+        // Drop any prior record for the same peer (canonical compare) so a
+        // re-pair refreshes the address/name instead of duplicating the entry.
+        peers.retain(|p| canonical_fingerprint(&p.fingerprint) != peer_fp_canonical);
+        peers.push(crate::peers::PairedDevice {
+            fingerprint: display,
+            name: String::new(),
+            added_at,
+            address,
+        });
+
+        match crate::peers::save_peers(&path, &peers) {
+            Ok(()) => tracing::info!(
+                fingerprint = %peer_fp_canonical,
+                addr = %peer_sync_addr,
+                "persisted paired peer to peers.json"
+            ),
+            Err(e) => tracing::warn!(
+                fingerprint = %peer_fp_canonical,
+                "failed to persist paired peer to peers.json: {e}"
+            ),
+        }
+    }
+
     /// Spawn the responder side of the P2P Phase 1 bootstrap PAKE handshake.
     ///
     /// The `responder` already owns the bound, TLS-wrapped ephemeral listener
@@ -641,11 +756,15 @@ impl IpcServer {
         password: String,
     ) {
         let peers = self.p2p_peers.clone();
+        // Our own P2P sync-listener address, sent in-band so the initiator can
+        // persist it; and used by nothing else here. Captured before the move.
+        let own_sync_addr = self.own_sync_addr();
         tokio::spawn(async move {
-            match responder.run(&password).await {
+            match responder.run(&password, &own_sync_addr).await {
                 Ok(outcome) => {
                     tracing::info!(
                         peer_fingerprint = %outcome.peer_fingerprint,
+                        peer_sync_addr = %outcome.peer_sync_addr,
                         "bootstrap PAKE responder completed over network channel"
                     );
                     // Register the freshly-paired peer in the live allowlist.
@@ -658,6 +777,10 @@ impl IpcServer {
                             String::new(),
                         );
                     }
+                    // P2P Phase 2: durably persist the peer (fingerprint +
+                    // sync-listener address) so it survives a restart and the
+                    // Phase 3 connector can dial it directly.
+                    Self::persist_paired_peer(&outcome.peer_fingerprint, &outcome.peer_sync_addr);
                 }
                 Err(e) => {
                     tracing::warn!("bootstrap PAKE responder failed: {e}");
@@ -713,10 +836,22 @@ impl IpcServer {
         };
 
         let (cert_der, key_der) = (cert.0.clone(), cert.1.clone());
-        match copypaste_p2p::bootstrap::run_initiator(addr, cert_der, key_der, &password).await {
+        // Our own P2P sync-listener address, sent in-band so the responder can
+        // persist it for its Phase 3 connector.
+        let own_sync_addr = self.own_sync_addr();
+        match copypaste_p2p::bootstrap::run_initiator(
+            addr,
+            cert_der,
+            key_der,
+            &password,
+            &own_sync_addr,
+        )
+        .await
+        {
             Ok(outcome) => {
                 tracing::info!(
                     peer_fingerprint = %outcome.peer_fingerprint,
+                    peer_sync_addr = %outcome.peer_sync_addr,
                     "bootstrap PAKE initiator completed over network channel"
                 );
                 if let Some(ref peers) = self.p2p_peers {
@@ -726,6 +861,10 @@ impl IpcServer {
                         String::new(),
                     );
                 }
+                // P2P Phase 2: durably persist the peer (fingerprint + the
+                // sync-listener address it advertised) for restart-survival and
+                // the Phase 3 outbound connector.
+                Self::persist_paired_peer(&outcome.peer_fingerprint, &outcome.peer_sync_addr);
                 Response::ok(
                     req_id,
                     serde_json::json!({
