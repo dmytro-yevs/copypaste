@@ -32,6 +32,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private val scope = CoroutineScope(Dispatchers.IO)
     private lateinit var settings: Settings
     private lateinit var repository: ClipboardRepository
+    private lateinit var syncManager: SyncManager
     private lateinit var clipboardManager: ClipboardManager
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
@@ -45,6 +46,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         settings = Settings(this)
         repository = ClipboardRepository(this)
+        val relayClient = RelayClient(settings.relayUrl)
+        syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager.addPrimaryClipChangedListener(clipListener)
         Log.i(TAG, "ClipboardAccessibilityService connected — background clipboard access active")
@@ -66,10 +69,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     private suspend fun handleClip(text: String) {
-        if (!settings.captureEnabled) return
-        val key = settings.encryptionKey
-        repository.storeItem(text, key)
-        Log.d(TAG, "AccessibilityService stored background clip")
+        // HIGH-2: route through the same store + count + sync pipeline as the
+        // foreground service so background-captured clips are synced and counted,
+        // not just stored locally.
+        ClipboardService.captureClip(this, text, settings, repository, syncManager)
+        Log.d(TAG, "AccessibilityService captured background clip")
     }
 
     companion object {

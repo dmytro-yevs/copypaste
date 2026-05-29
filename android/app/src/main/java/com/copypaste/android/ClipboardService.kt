@@ -182,105 +182,7 @@ class ClipboardService : Service() {
      * Pause/Resume action.
      */
     private suspend fun handleClipboardChange(text: String) {
-        if (text.isBlank()) return
-
-        // Notification-driven pause: drop the change on the floor but keep the
-        // listener registered so resuming is instant (no service restart).
-        if (!settings.captureEnabled) {
-            Log.d(TAG, "Capture paused — dropping clipboard change")
-            return
-        }
-
-        val sensitive = try { isSensitive(text) } catch (_: UnsatisfiedLinkError) { false }
-        if (sensitive) {
-            Log.d(TAG, "Sensitive clip detected — skipping storage")
-            return
-        }
-
-        val key = settings.encryptionKey
-
-        // Native SQLite insert (sync subsystem only). In the live build this
-        // writes the encrypted row into copypaste-core's DB so the sync engine
-        // can pick it up. The UI does NOT read this DB — it reads the
-        // SharedPreferences repository — so this insert is fire-and-forget and
-        // must NOT gate the repository.storeItem() call below. Treating a
-        // successful native insert as "done" was the bug that made captured
-        // items invisible in shipped APKs (write to SQLite, read from prefs).
-        try {
-            val nativeId = addClipboardItem(databasePath, key, text)
-            if (nativeId.isNotEmpty()) {
-                Log.d(TAG, "Native insert ok: $nativeId")
-            }
-        } catch (e: UnsatisfiedLinkError) {
-            Log.d(TAG, "Native addClipboardItem unavailable (no live .so)")
-        } catch (e: CopypasteException) {
-            Log.w(TAG, "Native addClipboardItem failed (${e.message})")
-        }
-
-        // Always persist to the SharedPreferences repository — this is the
-        // single source the UI reads (ClipboardViewModel → repository.getItems).
-        // The sensitive check above already filtered this content once; the
-        // repository repeats the cheap check defensively but won't double-store.
-        val stored = repository.storeItem(text, key)
-        if (stored) {
-            Log.d(TAG, "Clipboard item stored successfully")
-            // Bump today's counter so the next notification update shows the new
-            // value; refresh the notification so users see live progress.
-            bumpTodayCounter(this)
-            refreshNotification(this)
-            if (settings.syncEnabled) {
-                notifySyncManager(text, key)
-            }
-        }
-    }
-
-    /** Path to the app-private encrypted SQLite DB used by the UniFFI live binding. */
-    private val databasePath: String
-        get() = applicationContext.getDatabasePath("copypaste.db").absolutePath
-
-    private suspend fun notifySyncManager(plaintext: String, key: ByteArray) {
-        when (settings.syncBackend) {
-            SyncBackend.SUPABASE -> {
-                // Supabase path: encrypt with cross-device SyncKey (schema v5),
-                // push to Supabase PostgREST. This interoperates with macOS daemon.
-                try {
-                    val id = syncManager.pushToSupabase(
-                        plaintext = plaintext.toByteArray(Charsets.UTF_8),
-                        contentType = "text",
-                        deviceId = settings.deviceId,
-                    )
-                    if (id != null) {
-                        Log.d(TAG, "Supabase push ok: $id")
-                    } else {
-                        Log.w(TAG, "Supabase push returned null (logged above)")
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Supabase push failed: ${e.message}")
-                }
-            }
-            SyncBackend.RELAY -> {
-                // Relay path (original): encrypt with local device key + v3/v4 AAD,
-                // upload to custom relay server. Local-network only.
-                try {
-                    // Generate the item id BEFORE encrypting so the same id can be
-                    // bound into the AEAD AAD and forwarded to the relay. A mismatch
-                    // would cause the receiver to fail decryption silently.
-                    val itemId = java.util.UUID.randomUUID().toString()
-                    val blob = try {
-                        encryptText(itemId, plaintext.toByteArray(Charsets.UTF_8), key)
-                    } catch (e: IllegalStateException) {
-                        Log.d(TAG, "Native encryptText unavailable (${e.message}) — local AES")
-                        ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
-                    } catch (_: UnsatisfiedLinkError) {
-                        ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
-                    }
-                    val lamportTs = System.currentTimeMillis()
-                    syncManager.uploadItem(itemId, blob.ciphertext, blob.nonce, "text/plain", lamportTs)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Relay upload failed: ${e.message}")
-                }
-            }
-        }
+        captureClip(this, text, settings, repository, syncManager)
     }
 
     override fun onDestroy() {
@@ -301,6 +203,126 @@ class ClipboardService : Service() {
         private const val PREFS_NAME = "copypaste_notif"
         private const val KEY_DAY_BUCKET = "day_bucket"
         private const val KEY_TODAY_COUNT = "today_count"
+
+        /**
+         * Shared capture pipeline: store + count + sync. HIGH-2.
+         *
+         * Both the foreground [ClipboardService] and the background
+         * [ClipboardAccessibilityService] funnel captures through here so that
+         * a11y-captured clips (the PRIMARY background path on Android 10+, where
+         * the FGS's getPrimaryClip() returns null) are stored, counted in the
+         * notification, AND pushed to sync — exactly like foreground captures.
+         * Previously the a11y service only called repository.storeItem, so
+         * backgrounded copies were stored locally but never synced/counted.
+         *
+         * The native SQLite insert and the repository store mirror
+         * [ClipboardService]'s original logic: the native insert is
+         * fire-and-forget (the UI reads the SharedPreferences repository, not
+         * the native DB), so it must not gate repository.storeItem.
+         */
+        suspend fun captureClip(
+            context: Context,
+            text: String,
+            settings: Settings,
+            repository: ClipboardRepository,
+            syncManager: SyncManager,
+        ) {
+            if (text.isBlank()) return
+
+            // Notification-driven pause: drop the change but keep listeners
+            // registered so resuming is instant (no service restart).
+            if (!settings.captureEnabled) {
+                Log.d(TAG, "Capture paused — dropping clipboard change")
+                return
+            }
+
+            val sensitive = try { isSensitive(text) } catch (_: UnsatisfiedLinkError) { false }
+            if (sensitive) {
+                Log.d(TAG, "Sensitive clip detected — skipping storage")
+                return
+            }
+
+            val key = settings.encryptionKey
+
+            // Native SQLite insert (sync subsystem only) — fire-and-forget.
+            try {
+                val nativeId = addClipboardItem(databasePath(context), key, text)
+                if (nativeId.isNotEmpty()) {
+                    Log.d(TAG, "Native insert ok: $nativeId")
+                }
+            } catch (e: UnsatisfiedLinkError) {
+                Log.d(TAG, "Native addClipboardItem unavailable (no live .so)")
+            } catch (e: CopypasteException) {
+                Log.w(TAG, "Native addClipboardItem failed (${e.message})")
+            }
+
+            // Persist to the SharedPreferences repository — the single source the
+            // UI reads. storeItem performs cross-listener dedup (HIGH-3) so a
+            // single copy seen by multiple owners is stored (and counted) once.
+            val stored = repository.storeItem(text, key)
+            if (stored) {
+                Log.d(TAG, "Clipboard item stored successfully")
+                bumpTodayCounter(context)
+                refreshNotification(context)
+                if (settings.syncEnabled) {
+                    notifySyncManager(text, key, settings, syncManager)
+                }
+            }
+        }
+
+        /** Path to the app-private encrypted SQLite DB used by the UniFFI live binding. */
+        private fun databasePath(context: Context): String =
+            context.applicationContext.getDatabasePath("copypaste.db").absolutePath
+
+        private suspend fun notifySyncManager(
+            plaintext: String,
+            key: ByteArray,
+            settings: Settings,
+            syncManager: SyncManager,
+        ) {
+            when (settings.syncBackend) {
+                SyncBackend.SUPABASE -> {
+                    // Supabase path: encrypt with cross-device SyncKey (schema v5),
+                    // push to Supabase PostgREST. Interoperates with macOS daemon.
+                    try {
+                        val id = syncManager.pushToSupabase(
+                            plaintext = plaintext.toByteArray(Charsets.UTF_8),
+                            contentType = "text",
+                            deviceId = settings.deviceId,
+                        )
+                        if (id != null) {
+                            Log.d(TAG, "Supabase push ok: $id")
+                        } else {
+                            Log.w(TAG, "Supabase push returned null (logged above)")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Supabase push failed: ${e.message}")
+                    }
+                }
+                SyncBackend.RELAY -> {
+                    // Relay path: encrypt with local device key + v3/v4 AAD,
+                    // upload to custom relay server. Local-network only.
+                    try {
+                        // Generate the item id BEFORE encrypting so the same id can
+                        // be bound into the AEAD AAD and forwarded to the relay. A
+                        // mismatch would fail decryption on the receiver silently.
+                        val itemId = java.util.UUID.randomUUID().toString()
+                        val blob = try {
+                            encryptText(itemId, plaintext.toByteArray(Charsets.UTF_8), key)
+                        } catch (e: IllegalStateException) {
+                            Log.d(TAG, "Native encryptText unavailable (${e.message}) — local AES")
+                            ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+                        } catch (_: UnsatisfiedLinkError) {
+                            ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+                        }
+                        val lamportTs = System.currentTimeMillis()
+                        syncManager.uploadItem(itemId, blob.ciphertext, blob.nonce, "text/plain", lamportTs)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Relay upload failed: ${e.message}")
+                    }
+                }
+            }
+        }
 
         /**
          * Ensure the foreground service channel exists. Idempotent — calling

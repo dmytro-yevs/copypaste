@@ -27,6 +27,9 @@ class ClipboardRepository(context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("copypaste_items", Context.MODE_PRIVATE)
 
+    /** Read fresh each store so a UI change to the cap takes effect immediately. */
+    private val settings = Settings(context)
+
     /**
      * Guard for read-modify-write on the comma-joined "item_ids" index.
      * SharedPreferences is process-wide, so without this lock two coroutines
@@ -34,6 +37,23 @@ class ClipboardRepository(context: Context) {
      * the loser's update silently drops the winner's entry. See HIGH-8.
      */
     private val idsWriteLock = Any()
+
+    /**
+     * In-memory dedup window. Multiple OnPrimaryClipChangedListener owners
+     * (ClipboardService, ClipboardAccessibilityService, MainActivity) each fire
+     * on the same copy, so without this guard one copy creates 2-3 duplicate
+     * rows (HIGH-3). We skip a store when an identical-content item was stored
+     * within [DEDUP_WINDOW_MS]. The time window preserves the legitimate
+     * "same text copied again later" case — re-copying after the window stores
+     * a fresh row as expected.
+     */
+    @Volatile
+    private var lastStoredHash: Int = 0
+
+    @Volatile
+    private var lastStoredAtMs: Long = 0L
+
+    private val dedupLock = Any()
 
     suspend fun getItems(limit: Int = 50): List<ClipboardItem> = withContext(Dispatchers.IO) {
         val ids = storedIds().takeLast(limit)
@@ -66,6 +86,21 @@ class ClipboardRepository(context: Context) {
     suspend fun storeItem(plaintext: String, key: ByteArray): Boolean = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext false
 
+        // ── HIGH-3: cross-listener dedup. The same physical copy fires the
+        // clip-changed listener in every owner (FGS, a11y service, activity).
+        // Skip if identical content was stored within the recent window so a
+        // single copy yields a single row, while a later re-copy still stores.
+        val hash = plaintext.hashCode()
+        synchronized(dedupLock) {
+            val now = System.currentTimeMillis()
+            if (hash == lastStoredHash && now - lastStoredAtMs < DEDUP_WINDOW_MS) {
+                Log.d(TAG, "Duplicate clip within ${DEDUP_WINDOW_MS}ms — skipping")
+                return@withContext false
+            }
+            lastStoredHash = hash
+            lastStoredAtMs = now
+        }
+
         val sensitive = try {
             isSensitive(plaintext)
         } catch (_: UnsatisfiedLinkError) {
@@ -91,7 +126,22 @@ class ClipboardRepository(context: Context) {
         // cannot clobber each other's entries in the comma-joined index.
         synchronized(idsWriteLock) {
             val ids = storedIds().toMutableList().also { it.add(id) }
-            prefs.edit()
+
+            // ── CRITICAL-1: enforce Settings.maxHistoryItems. Without this the
+            // ids index and the per-item "item_<id>" prefs entries grew forever
+            // (getItems only ever read the last 50, so the overflow was invisible
+            // yet kept bloating the prefs file). Drop the oldest ids past the cap
+            // and remove their backing entries in the same edit.
+            val editor = prefs.edit()
+            val maxItems = settings.maxHistoryItems.coerceAtLeast(1)
+            if (ids.size > maxItems) {
+                val dropCount = ids.size - maxItems
+                repeat(dropCount) {
+                    val droppedId = ids.removeAt(0)
+                    editor.remove("item_$droppedId")
+                }
+            }
+            editor
                 .putString("item_$id", encoded)
                 .putString("item_ids", ids.joinToString(","))
                 .apply()
@@ -138,6 +188,10 @@ class ClipboardRepository(context: Context) {
 
     companion object {
         private const val TAG = "ClipboardRepository"
+
+        /** Window in which an identical-content store is treated as a duplicate. */
+        private const val DEDUP_WINDOW_MS = 2_000L
+
         private const val AES_TRANSFORMATION = "AES/GCM/NoPadding"
         private const val GCM_TAG_BITS = 128
         private const val GCM_NONCE_BYTES = 12
