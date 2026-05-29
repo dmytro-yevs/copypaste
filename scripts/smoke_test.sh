@@ -2,9 +2,24 @@
 # smoke_test.sh — end-to-end macOS smoke test for CopyPaste
 # Tests: build, daemon startup, IPC status, clipboard capture, list, stats, cleanup.
 #
-# Usage: bash scripts/smoke_test.sh [--skip-build]
+# Usage:
+#   bash scripts/smoke_test.sh [--skip-build]
+#   bash scripts/smoke_test.sh --from-bundle <path-to-CopyPaste.app>
 #
-# Requirements: macOS, Rust toolchain, nc (netcat), pbcopy, jq (optional)
+# Modes:
+#   (default)        Build/use the release binaries in target/release; runs
+#                    against the user's normal Application Support socket/DB so
+#                    real clipboard polling is exercised (with backup/restore).
+#   --from-bundle    Run the SHIPPED daemon + CLI from inside a built
+#                    CopyPaste.app (Contents/MacOS/). Uses a fully ISOLATED
+#                    temp environment (own socket/DB/dirs, ephemeral key) so it
+#                    never touches the real Keychain or user data — this proves
+#                    the actual shipped daemon starts, binds its IPC socket,
+#                    opens its DB, and round-trips a copied string. On startup
+#                    failure it FAILS LOUDLY with the daemon's stderr.
+#
+# Requirements: macOS, Rust toolchain (unless --from-bundle/--skip-build),
+#               nc (netcat with -U), pbcopy/pbpaste, base64, jq (optional)
 
 set -euo pipefail
 
@@ -17,31 +32,79 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Colour
 
 # ---------------------------------------------------------------------------
-# Paths — daemon and CLI hardcode these; no env-var override exists.
+# Argument parsing
 # ---------------------------------------------------------------------------
-SUPPORT_DIR="$HOME/Library/Application Support/CopyPaste"
-SOCKET_PATH="$SUPPORT_DIR/daemon.sock"
-DB_PATH="$SUPPORT_DIR/clipboard.db"
+SKIP_BUILD=false
+FROM_BUNDLE=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-build) SKIP_BUILD=true; shift ;;
+    --from-bundle) FROM_BUNDLE="${2:?--from-bundle needs a path to CopyPaste.app}"; shift 2 ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
 
-DAEMON_BIN="./target/release/copypaste-daemon"
-# Package name is `copypaste-cli` but the produced binary is `copypaste`.
-CLI_BIN="./target/release/copypaste"
+# ---------------------------------------------------------------------------
+# Paths and binaries — depend on the mode.
+#
+# Default mode: the daemon/CLI use their built-in Application Support paths
+# (real clipboard polling, backup/restore of user data).
+#
+# --from-bundle mode: run the SHIPPED binaries from the .app and point them at
+# an ISOLATED temp environment via COPYPASTE_* env overrides (own socket/DB/
+# dirs + ephemeral key), so nothing touches the real Keychain or user data.
+# ---------------------------------------------------------------------------
+ISOLATED=false
+ISO_ROOT=""
+DAEMON_STDERR=""
+
+if [[ -n "$FROM_BUNDLE" ]]; then
+  ISOLATED=true
+  DAEMON_BIN="$FROM_BUNDLE/Contents/MacOS/copypaste-daemon"
+  CLI_BIN="$FROM_BUNDLE/Contents/MacOS/copypaste"
+  [[ -x "$DAEMON_BIN" ]] || { echo "FAIL: daemon not found in bundle: $DAEMON_BIN" >&2; exit 1; }
+  [[ -x "$CLI_BIN" ]]    || { echo "FAIL: CLI not found in bundle: $CLI_BIN" >&2; exit 1; }
+
+  ISO_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/copypaste-smoke-bundle.XXXXXX")"
+  mkdir -p "$ISO_ROOT/data" "$ISO_ROOT/config" "$ISO_ROOT/cache" "$ISO_ROOT/logs"
+  SOCKET_PATH="$ISO_ROOT/copypaste.sock"
+  DB_PATH="$ISO_ROOT/clipboard.db"
+  DAEMON_STDERR="$ISO_ROOT/daemon.stderr"
+
+  # Export the isolation env so BOTH the daemon and the CLI agree on paths.
+  export COPYPASTE_SOCKET="$SOCKET_PATH"
+  export COPYPASTE_DB="$DB_PATH"
+  export COPYPASTE_DATA_DIR="$ISO_ROOT/data"
+  export COPYPASTE_CONFIG_DIR="$ISO_ROOT/config"
+  export COPYPASTE_CACHE_DIR="$ISO_ROOT/cache"
+  export COPYPASTE_LOG_DIR="$ISO_ROOT/logs"
+  export COPYPASTE_DEVICE_ID_PATH="$ISO_ROOT/device_id"
+  export COPYPASTE_EPHEMERAL_KEY=1
+else
+  SUPPORT_DIR="$HOME/Library/Application Support/CopyPaste"
+  SOCKET_PATH="$SUPPORT_DIR/daemon.sock"
+  DB_PATH="$SUPPORT_DIR/clipboard.db"
+  DAEMON_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/target/release/copypaste-daemon"
+  # Package name is `copypaste-cli` but the produced binary is `copypaste`.
+  CLI_BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/target/release/copypaste"
+fi
 
 DAEMON_PID=""
 DAEMON_OWNED=false      # true only if THIS script started the daemon
 BACKUP_SOCK=""
 BACKUP_DB=""
 
-SKIP_BUILD=false
-if [[ "${1:-}" == "--skip-build" ]]; then
-  SKIP_BUILD=true
-fi
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 fail() {
   echo -e "${RED}FAIL: $*${NC}" >&2
+  # Surface the daemon's stderr so startup failures are diagnosable (bundle mode
+  # always captures it; default mode inherits the terminal's stderr).
+  if [[ -n "$DAEMON_STDERR" && -s "$DAEMON_STDERR" ]]; then
+    echo -e "${YELLOW}--- daemon stderr ($DAEMON_STDERR) ---${NC}" >&2
+    tail -n 80 "$DAEMON_STDERR" >&2 || true
+  fi
   cleanup
   exit 1
 }
@@ -80,18 +143,26 @@ cleanup() {
   elif [[ -n "$BACKUP_DB" ]]; then
     rm -f "$DB_PATH" 2>/dev/null || true
   fi
+
+  # Remove the isolated temp root used by --from-bundle mode.
+  if [[ -n "$ISO_ROOT" && -d "$ISO_ROOT" ]]; then
+    rm -rf "$ISO_ROOT" 2>/dev/null || true
+    ISO_ROOT=""
+  fi
 }
 trap 'cleanup' EXIT
 
 # ---------------------------------------------------------------------------
-# STEP 1 — Build binaries (unless --skip-build and both exist)
+# STEP 1 — Build binaries (skipped in --from-bundle mode and with --skip-build)
 # ---------------------------------------------------------------------------
 run_step "Build release binaries"
 
-if [[ "$SKIP_BUILD" == "true" && -x "$DAEMON_BIN" && -x "$CLI_BIN" ]]; then
+if [[ "$ISOLATED" == "true" ]]; then
+  pass_step "Using SHIPPED binaries from bundle (no build): $DAEMON_BIN"
+elif [[ "$SKIP_BUILD" == "true" && -x "$DAEMON_BIN" && -x "$CLI_BIN" ]]; then
   pass_step "Skipping build (--skip-build, binaries present)"
 else
-  cargo build --release -p copypaste-daemon -p copypaste-cli \
+  ( cd "$(dirname "${BASH_SOURCE[0]}")/.." && cargo build --release -p copypaste-daemon -p copypaste-cli ) \
     || fail "cargo build failed"
   pass_step "Binaries built: $DAEMON_BIN, $CLI_BIN"
 fi
@@ -103,38 +174,59 @@ fi
 # STEP 2 — Ensure app support dir exists
 # ---------------------------------------------------------------------------
 run_step "Ensure support directory"
-mkdir -p "$SUPPORT_DIR" || fail "cannot create $SUPPORT_DIR"
-pass_step "Support dir ready: $SUPPORT_DIR"
-
-# ---------------------------------------------------------------------------
-# STEP 3 — Handle existing daemon / back up existing data
-# ---------------------------------------------------------------------------
-run_step "Check for existing daemon"
-
-EXISTING_DAEMON=false
-if [[ -S "$SOCKET_PATH" ]]; then
-  # Test if something is actually listening
-  if echo '{"id":"pre","method":"status","params":{}}' \
-       | nc -U "$SOCKET_PATH" -w1 2>/dev/null \
-       | grep -q '"ok":true'; then
-    EXISTING_DAEMON=true
-    echo "  Note: existing daemon detected at $SOCKET_PATH — will test against it (no restart)"
-  fi
+if [[ "$ISOLATED" == "true" ]]; then
+  pass_step "Isolated env ready: $ISO_ROOT"
+else
+  mkdir -p "$SUPPORT_DIR" || fail "cannot create $SUPPORT_DIR"
+  pass_step "Support dir ready: $SUPPORT_DIR"
 fi
 
-if [[ "$EXISTING_DAEMON" == "false" ]]; then
-  # Back up existing socket and db so we can restore them after the test
-  BACKUP_SOCK=$(mktemp "/tmp/copypaste-smoke-sock-backup.XXXXXX") && rm -f "$BACKUP_SOCK"
-  BACKUP_DB=$(mktemp "/tmp/copypaste-smoke-db-backup.XXXXXX")    && rm -f "$BACKUP_DB"
-
-  [[ -S "$SOCKET_PATH" ]] && mv "$SOCKET_PATH" "$BACKUP_SOCK" || BACKUP_SOCK="__none__"
-  [[ -f "$DB_PATH"     ]] && mv "$DB_PATH"     "$BACKUP_DB"   || BACKUP_DB="__none__"
-
-  run_step "Start fresh daemon"
-  RUST_LOG=error "$DAEMON_BIN" &
+# ---------------------------------------------------------------------------
+# STEP 3 — Start the daemon.
+#
+# Bundle/isolated mode ALWAYS starts a fresh daemon from the shipped binary in
+# its own temp environment (no existing-daemon reuse, no user-data backup —
+# everything lives in $ISO_ROOT and is wiped on exit). Default mode reuses a
+# running daemon if present, otherwise backs up user data and starts fresh.
+# ---------------------------------------------------------------------------
+if [[ "$ISOLATED" == "true" ]]; then
+  run_step "Start fresh SHIPPED daemon (isolated env, ephemeral key)"
+  "$DAEMON_BIN" >/dev/null 2>"$DAEMON_STDERR" &
   DAEMON_PID=$!
   DAEMON_OWNED=true
+  # If it dies immediately, fail loudly with its stderr.
+  sleep 0.3
+  if ! kill -0 "$DAEMON_PID" 2>/dev/null; then
+    fail "shipped daemon exited immediately on startup"
+  fi
   pass_step "Daemon started (PID=$DAEMON_PID)"
+else
+  run_step "Check for existing daemon"
+  EXISTING_DAEMON=false
+  if [[ -S "$SOCKET_PATH" ]]; then
+    # Test if something is actually listening
+    if echo '{"id":"pre","method":"status","params":{}}' \
+         | nc -U "$SOCKET_PATH" -w1 2>/dev/null \
+         | grep -q '"ok":true'; then
+      EXISTING_DAEMON=true
+      echo "  Note: existing daemon detected at $SOCKET_PATH — will test against it (no restart)"
+    fi
+  fi
+
+  if [[ "$EXISTING_DAEMON" == "false" ]]; then
+    # Back up existing socket and db so we can restore them after the test
+    BACKUP_SOCK=$(mktemp "/tmp/copypaste-smoke-sock-backup.XXXXXX") && rm -f "$BACKUP_SOCK"
+    BACKUP_DB=$(mktemp "/tmp/copypaste-smoke-db-backup.XXXXXX")    && rm -f "$BACKUP_DB"
+
+    [[ -S "$SOCKET_PATH" ]] && mv "$SOCKET_PATH" "$BACKUP_SOCK" || BACKUP_SOCK="__none__"
+    [[ -f "$DB_PATH"     ]] && mv "$DB_PATH"     "$BACKUP_DB"   || BACKUP_DB="__none__"
+
+    run_step "Start fresh daemon"
+    RUST_LOG=error "$DAEMON_BIN" &
+    DAEMON_PID=$!
+    DAEMON_OWNED=true
+    pass_step "Daemon started (PID=$DAEMON_PID)"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -237,6 +329,45 @@ if [[ "$CAPTURED" == "false" ]]; then
 else
   pass_step "Clipboard captured (count: $COUNT_BEFORE_NUM → $COUNT_AFTER_NUM)"
 fi
+
+# ---------------------------------------------------------------------------
+# STEP 9b — Deterministic round-trip through REAL IPC (import -> history_page).
+#
+# NSPasteboard polling is gated behind macOS Input Monitoring permission, which
+# CI cannot grant — so the pbcopy path above is best-effort. This step instead
+# pushes a unique item through the daemon's `import` IPC method (encrypt + DB
+# insert) and reads it back via `history_page` (DB read), proving the daemon
+# opened its DB and round-trips an item end-to-end over the real socket.
+#
+# We assert on the item's unique `wall_time` (= the `created_at_ms` we sent),
+# NOT on the preview text: imported items are stored encrypted and their FTS
+# plaintext preview is intentionally not populated by the import path (the
+# list view shows a "[text — id:…]" placeholder for them), so matching the
+# marker in the preview would be wrong. A unique millisecond timestamp is a
+# stable, mode-independent witness that the exact row we inserted came back.
+# This is asserted in ALL modes and is the load-bearing "an item round-trips
+# through real IPC" check for the shipped daemon.
+# ---------------------------------------------------------------------------
+run_step "Round-trip an item through real IPC (import -> history_page)"
+
+# Unique wall_time witness: epoch seconds * 1000 + a random sub-second component
+# so two runs (and the two history rows from this run vs prior) never collide.
+RT_WALL_TIME=$(( $(date +%s) * 1000 + RANDOM % 1000 ))
+RT_MARKER="copypaste-ipc-roundtrip-${RT_WALL_TIME}"
+RT_B64=$(printf '%s' "$RT_MARKER" | base64 | tr -d '\n')
+RT_IMPORT_BODY="{\"id\":\"rti\",\"method\":\"import\",\"params\":{\"items\":[{\"content_type\":\"text\",\"content_bytes_b64\":\"$RT_B64\",\"created_at_ms\":$RT_WALL_TIME}]}}"
+
+RT_IMPORT_RESP=$(printf '%s\n' "$RT_IMPORT_BODY" | nc -U "$SOCKET_PATH" -w5)
+echo "$RT_IMPORT_RESP" | grep -q '"ok":true'     || fail "IPC import failed: $RT_IMPORT_RESP"
+echo "$RT_IMPORT_RESP" | grep -q '"inserted":1'  || fail "IPC import did not insert item: $RT_IMPORT_RESP"
+
+RT_HISTORY_RESP=$(echo '{"id":"rth","method":"history_page","params":{"limit":50,"offset":0}}' \
+  | nc -U "$SOCKET_PATH" -w5)
+echo "$RT_HISTORY_RESP" | grep -q '"ok":true' \
+  || fail "history_page IPC failed (DB read): $RT_HISTORY_RESP"
+echo "$RT_HISTORY_RESP" | grep -q "\"wall_time\":$RT_WALL_TIME" \
+  || fail "imported item (wall_time=$RT_WALL_TIME) did not round-trip back via history_page (DB read failed): $RT_HISTORY_RESP"
+pass_step "IPC round-trip OK: imported and read back item wall_time=$RT_WALL_TIME"
 
 # ---------------------------------------------------------------------------
 # STEP 10 — List history
