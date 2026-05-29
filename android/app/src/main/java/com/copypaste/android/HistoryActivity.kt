@@ -5,6 +5,7 @@ package com.copypaste.android
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -89,6 +90,9 @@ class HistoryActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Draw edge-to-edge so the dark background fills the status-bar / cutout
+        // strip; the screen's TopAppBar applies the matching inset as padding.
+        enableEdgeToEdge()
         setContent {
             CopyPasteTheme {
                 HistoryScreen(
@@ -177,9 +181,13 @@ fun HistoryScreen(
                     actionIconContentColor = IdeDim,
                     navigationIconContentColor = IdeDim,
                 ),
-                // Constrain to 44 dp (matches macOS h-11 = 44 px) to keep the
-                // header compact like a JetBrains IDE toolbar.
-                modifier = Modifier.height(44.dp),
+                // Apply the status-bar / display-cutout inset as TOP PADDING so the
+                // bar's content sits *below* the notch, never under it. We must NOT
+                // pin a fixed total height here (that was the bug: a hard 44 dp
+                // clipped the header on notched phones because the inset ate into
+                // it). The bar now measures as (status-bar inset + compact content)
+                // and the default M3 TopAppBar height keeps it visually compact.
+                windowInsets = TopAppBarDefaults.windowInsets,
             )
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },

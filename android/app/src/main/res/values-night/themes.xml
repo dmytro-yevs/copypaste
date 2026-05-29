@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <style name="Theme.CopyPaste" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <!-- Brand accent — indigo #5A59E6 (same in dark mode; luminance contrast is sufficient) -->
         <item name="colorPrimary">@color/copypaste_primary</item>
         <item name="colorPrimaryDark">@color/copypaste_primary_dark</item>
         <item name="colorAccent">@color/copypaste_primary</item>
+        <!-- Edge-to-edge: transparent system bars; Compose applies the insets. -->
         <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Always-dark UI → light status-bar icons. -->
         <item name="android:windowLightStatusBar">false</item>
+        <!-- Use the display cutout (notch / punch-hole) area on the short edges. -->
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
     </style>
 </resources>
