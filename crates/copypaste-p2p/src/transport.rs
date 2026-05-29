@@ -986,11 +986,21 @@ mod tests {
     /// a non-transient TLS / I/O error. The retry helper should propagate
     /// after the first failure without burning the full attempt budget.
     ///
-    /// We can't directly observe attempt count from outside, but we can
-    /// bound test wall time: with paused time the test runs in microseconds,
-    /// and the result must be the same kind of error `connect()` would
-    /// have returned on its own.
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    /// We can't directly observe attempt count from outside, but the
+    /// behaviour is observable indirectly: a permanent rejection short-circuits
+    /// before any inter-attempt backoff sleep, so the future resolves promptly
+    /// against a real socket without burning the retry budget.
+    ///
+    /// This test deliberately uses *real* (un-paused) time. The sibling
+    /// `_exhausts_attempts_on_persistent_refusal` can pause virtual time
+    /// because its only future doing real I/O is the instantly-refused
+    /// `connect`. Here, the concurrent `accept()` performs a real TLS
+    /// handshake on a real socket, which keeps the current-thread runtime
+    /// non-idle; under `start_paused` tokio only auto-advances virtual time
+    /// when the runtime is fully idle, so the retry helper's `sleep` would
+    /// never fire and the test would deadlock. Real time is fine because a
+    /// permanent error fails fast — no full backoff budget is ever waited.
+    #[tokio::test(flavor = "current_thread")]
     async fn connect_with_retry_does_not_retry_permanent_errors() {
         // Set up a server that will accept TCP but reject in TLS verify
         // (mismatched fingerprint). This produces a non-transient error.
@@ -1019,12 +1029,12 @@ mod tests {
 
         let server_fut = rogue_transport.accept(&listener);
         let client_fut = client_transport.connect_with_retry(addr, &real_server_fp);
-        // Advance virtual time so any retry sleeps complete instantly.
-        let advance_fut = async {
-            tokio::time::sleep(Duration::from_secs(60)).await;
-        };
 
-        let (_server_result, client_result, _) = tokio::join!(server_fut, client_fut, advance_fut);
+        // No virtual-time advance: a permanent (fingerprint-mismatch) rejection
+        // short-circuits before any backoff sleep, so this resolves in real time
+        // within milliseconds. If `connect_with_retry` regressed to retrying a
+        // permanent error, it would block on a real backoff sleep here.
+        let (_server_result, client_result) = tokio::join!(server_fut, client_fut);
 
         assert!(
             client_result.is_err(),
