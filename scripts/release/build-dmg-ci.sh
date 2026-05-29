@@ -25,6 +25,12 @@ if [[ -z "$VERSION" ]]; then
     echo "ERROR: version required. Usage: $0 <version> [arch:arm64|x86_64]" >&2
     exit 1
 fi
+# Normalize to a BARE version (strip any leading 'v'). The CI caller passes the
+# git tag (e.g. v0.5.1) while manual callers may pass a bare version; the DMG
+# filename template below always re-adds a single 'v' prefix. Stripping here
+# guarantees the canonical single-'v' name CopyPaste-v<version>-... and avoids
+# the historical double-'v' (CopyPaste-vv0.5.1-...) bug.
+VERSION="${VERSION#v}"
 
 ARCH="${2:-}"
 if [[ -z "$ARCH" ]]; then

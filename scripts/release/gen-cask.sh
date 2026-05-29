@@ -68,9 +68,9 @@ else
     VERSION="${TAG#v}"
 
     # The CI DMG filename pattern:
-    #   build-dmg-ci.sh produces CopyPaste-v<tag>-macos-arm64.dmg
-    #   where <tag> already has the leading 'v', giving the double-vv prefix.
-    DMG_NAME="CopyPaste-v${TAG}-macos-arm64.dmg"
+    #   build-dmg-ci.sh produces CopyPaste-v<version>-macos-arm64.dmg
+    #   where <version> is BARE (no leading 'v'), giving a single-'v' prefix.
+    DMG_NAME="CopyPaste-v${VERSION}-macos-arm64.dmg"
     # gh's --jq is a single-string filter (no --arg). Use bash to embed the name.
     DMG_URL="$(gh release view --repo "$REPO" --json assets \
         --jq ".assets[] | select(.name==\"${DMG_NAME}\") | .url")"
