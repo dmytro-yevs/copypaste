@@ -83,6 +83,16 @@ export interface SyncStatus {
   supabase_url?: string | null;
   /** Signed-in account email, if available. */
   email?: string | null;
+  /**
+   * Optional, best-effort degraded-state flags the daemon MAY report when it is
+   * up but cannot do crypto/storage (e.g. the macOS Keychain is locked or the
+   * SQLCipher DB could not be opened). Treated as optional: the UI surfaces a
+   * banner when present but never depends on them.
+   */
+  keychain_locked?: boolean;
+  db_unavailable?: boolean;
+  /** Optional human-readable degraded-state reason, if the daemon supplies one. */
+  degraded_reason?: string | null;
 }
 
 export interface PairedDevice {
