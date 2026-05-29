@@ -1,13 +1,39 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ViewShell } from "../components/ViewShell";
 import { api, formatWallTime, IpcError, type HistoryEntry } from "../lib/ipc";
+import { applySpanMasking } from "../lib/masking";
 import { useUI } from "../store";
 
 // ---------------------------------------------------------------------------
 // Image thumbnail cache — keyed by item id, value is the data URI (or null
 // when the fetch failed / item is not an image).
+//
+// Bounded LRU: the cache is module-level and survives component unmount, so an
+// unbounded Map would leak forever. We cap it at IMAGE_CACHE_MAX entries and
+// evict the least-recently-used (oldest insertion / re-touched) entry. A plain
+// Map preserves insertion order, so "delete then re-set on access" gives LRU.
 // ---------------------------------------------------------------------------
+const IMAGE_CACHE_MAX = 50;
 const imageCache = new Map<string, string | null>();
+
+function imageCacheGet(id: string): string | null | undefined {
+  if (!imageCache.has(id)) return undefined;
+  const value = imageCache.get(id);
+  // Touch: move to most-recently-used position.
+  imageCache.delete(id);
+  imageCache.set(id, value as string | null);
+  return value;
+}
+
+function imageCacheSet(id: string, value: string | null): void {
+  if (imageCache.has(id)) imageCache.delete(id);
+  imageCache.set(id, value);
+  while (imageCache.size > IMAGE_CACHE_MAX) {
+    const oldest = imageCache.keys().next().value;
+    if (oldest === undefined) break;
+    imageCache.delete(oldest);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Toast — ephemeral one-liner feedback strip
@@ -173,18 +199,18 @@ function PinIndicator() {
 // ---------------------------------------------------------------------------
 
 function ImageThumbnail({ id }: { id: string }) {
-  const [src, setSrc] = useState<string | null>(imageCache.get(id) ?? null);
+  const [src, setSrc] = useState<string | null>(imageCacheGet(id) ?? null);
 
   useEffect(() => {
-    if (imageCache.has(id)) return; // already fetched (hit or miss)
+    if (imageCacheGet(id) !== undefined) return; // already fetched (hit or miss)
     api
       .getItemImage(id)
       .then(({ data_uri }) => {
-        imageCache.set(id, data_uri);
+        imageCacheSet(id, data_uri);
         setSrc(data_uri);
       })
       .catch(() => {
-        imageCache.set(id, null);
+        imageCacheSet(id, null);
       });
   }, [id]);
 
@@ -198,31 +224,6 @@ function ImageThumbnail({ id }: { id: string }) {
       loading="lazy"
     />
   );
-}
-
-// ---------------------------------------------------------------------------
-// Sensitive-span masking helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Redact the char-index ranges in `sensitive_spans` from `text`, replacing
- * each range with bullet characters. Ranges are clamped to text length.
- */
-function applySpanMasking(text: string, spans: Array<[number, number]>): string {
-  if (spans.length === 0) return text;
-  let result = "";
-  let cursor = 0;
-  // Sort spans by start index so we process left-to-right.
-  const sorted = [...spans].sort((a, b) => a[0] - b[0]);
-  for (const [start, end] of sorted) {
-    const s = Math.min(Math.max(start, cursor), text.length);
-    const e = Math.min(end, text.length);
-    if (s > cursor) result += text.slice(cursor, s);
-    if (e > s) result += "•".repeat(e - s);
-    cursor = Math.max(cursor, e);
-  }
-  result += text.slice(cursor);
-  return result;
 }
 
 interface RowProps {
@@ -413,13 +414,46 @@ export function HistoryView() {
     void load(false);
   }, [load]);
 
-  // Auto-refresh every 1200ms; preserve search + selectedId across ticks.
+  // Auto-refresh while the window is visible; preserve search + selectedId
+  // across ticks. Paused when the menu-bar window is hidden (no point polling a
+  // window the user can't see) and backed off when the daemon is unreachable so
+  // we don't hammer a dead daemon at full rate.
   useEffect(() => {
-    const id = setInterval(() => {
-      void load(true);
-    }, 1200);
-    return () => clearInterval(id);
-  }, [load]);
+    const ACTIVE_MS = 1200;
+    const BACKOFF_MS = 5000;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const intervalFor = () =>
+      loadState === "offline" || loadState === "error" ? BACKOFF_MS : ACTIVE_MS;
+
+    const stop = () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    const start = () => {
+      stop();
+      timer = setInterval(() => void load(true), intervalFor());
+    };
+
+    const sync = () => {
+      if (document.visibilityState === "visible") {
+        void load(true); // refresh immediately on becoming visible
+        start();
+      } else {
+        stop();
+      }
+    };
+
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [load, loadState]);
 
   // -------------------------------------------------------------------------
   // Filtered list
@@ -544,6 +578,7 @@ export function HistoryView() {
       setSelectedId(null);
       // Immediately clear the list so the view empties without waiting for the reload.
       setItems([]);
+      imageCache.clear(); // the items are gone; drop their cached thumbnails too
       sigRef.current = ""; // force re-render even if daemon returns identical sig
       showToast(`Cleared ${result.deleted} item${result.deleted === 1 ? "" : "s"}`, "success");
       void load(true);
