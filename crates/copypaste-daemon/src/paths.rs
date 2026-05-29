@@ -276,6 +276,16 @@ pub fn device_id_path() -> Result<PathBuf, PathsError> {
     Ok(try_app_support_dir()?.join("device_id"))
 }
 
+/// Path to the persisted private-mode flag. Stored as a tiny `"1"`/`"0"` file in
+/// the app-support dir so private mode survives a daemon restart. Overridable
+/// via `COPYPASTE_PRIVATE_MODE_PATH` (used by tests).
+pub fn private_mode_path() -> Result<PathBuf, PathsError> {
+    if let Ok(p) = std::env::var("COPYPASTE_PRIVATE_MODE_PATH") {
+        return Ok(PathBuf::from(p));
+    }
+    Ok(try_app_support_dir()?.join("private_mode"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

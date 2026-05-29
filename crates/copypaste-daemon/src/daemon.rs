@@ -58,7 +58,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         }
     }
 
-    let local_key_arc: Arc<zeroize::Zeroizing<[u8; 32]>> = Arc::new(load_local_key());
+    // dedup-keychain: load the device keypair ONCE here and derive both the
+    // local storage key and the X25519 public bytes from it. Previously
+    // `load_local_key()` (here) and `device_public_key_arc` (below) each called
+    // `crate::keychain::load_or_create()` separately, doing two Keychain reads +
+    // two legacy-accessibility migration writes per startup. The COPYPASTE_
+    // EPHEMERAL_KEY bypass is still honoured centrally inside `load_or_create`.
+    let (local_enc_key, device_public_key) = load_local_key_material();
+    let local_key_arc: Arc<zeroize::Zeroizing<[u8; 32]>> = Arc::new(local_enc_key);
     tracing::info!("local encryption key ready");
 
     let db_path = paths::db_path();
@@ -186,16 +193,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // Device-keypair public bytes — passed into IpcServer so
     // `get_own_fingerprint` returns a stable cryptographic fingerprint
     // (audit HIGH #6: DefaultHasher(hostname,pid) changed every restart).
-    // On non-macOS we don't have a keychain-backed keypair; use a zero
-    // placeholder. Memory: Windows/Linux are cfg-frozen (macOS+Android only).
-    #[cfg(target_os = "macos")]
-    let device_public_key_arc: Arc<[u8; 32]> = {
-        let kp = crate::keychain::load_or_create()
-            .map_err(|e| anyhow::anyhow!("keychain load_or_create: {e}"))?;
-        Arc::new(kp.public_key_bytes())
-    };
-    #[cfg(not(target_os = "macos"))]
-    let device_public_key_arc: Arc<[u8; 32]> = Arc::new([0u8; 32]);
+    // dedup-keychain: reuse the public bytes derived from the single
+    // `load_local_key_material()` call above instead of a second
+    // `load_or_create()`. On non-macOS this is the zero placeholder that
+    // `load_local_key_material` returns. Memory: Windows/Linux are cfg-frozen.
+    let device_public_key_arc: Arc<[u8; 32]> = Arc::new(device_public_key);
 
     // Load (or create on first run) the persistent device_id once so P2P,
     // sync_orch, cloud push, and clipboard capture all share the same stable
@@ -220,8 +222,15 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let shutdown_token = CancellationToken::new();
 
     // Shared private-mode flag: when true, the clipboard monitor skips recording.
-    // This is set/cleared via the IPC `set_private_mode` command.
-    let private_mode = Arc::new(AtomicBool::new(false));
+    // This is set/cleared via the IPC `set_private_mode` command, which also
+    // persists the new value to disk. We restore the persisted value here so
+    // private mode survives a daemon restart (previously it always reset to
+    // false on startup, silently resuming clipboard capture).
+    let private_mode = Arc::new(AtomicBool::new(load_private_mode()));
+    tracing::info!(
+        private_mode = private_mode.load(Ordering::Relaxed),
+        "restored persisted private-mode state"
+    );
 
     // fix/p2p-c-review #2: when P2P is enabled, the IPC PAKE handlers and the
     // mTLS transport must share ONE live `PairedPeers` allowlist so a peer
@@ -569,38 +578,22 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     // `poll_interval_ms > 5000` the quotient is 0, which would
                     // make this branch fire every tick. Clamp the threshold to
                     // at least 1 so the cleanup runs (at most) every tick.
-                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)).max(1) {
+                    let do_sensitive =
+                        sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)).max(1);
+                    if do_sensitive {
                         sensitive_cleanup_ticks = 0;
-                        let db_guard = db.lock().await;
-                        // `unwrap_or_default()` matches the pattern at ipc.rs:799
-                        // — clock skew (system clock moved backwards past UNIX
-                        // epoch) must not panic the daemon.
-                        let now_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as i64;
-                        match copypaste_core::delete_sensitive_expired(&db_guard, now_ms, sensitive_ttl_ms) {
-                            Ok(n) if n > 0 => tracing::info!("sensitive TTL cleanup: wiped {n} sensitive items"),
-                            Ok(_) => {}
-                            Err(e) => tracing::warn!("sensitive TTL cleanup error: {e}"),
-                        }
                     }
-
                     // General expires_at TTL: run every 60 seconds. Same
                     // integer-division clamp as above.
-                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)).max(1) {
+                    let do_general =
+                        cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)).max(1);
+                    if do_general {
                         cleanup_ticks = 0;
-                        let db_guard = db.lock().await;
-                        let now_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as i64;
-                        match copypaste_core::delete_expired(&db_guard, now_ms) {
-                            Ok(n) if n > 0 => tracing::info!("TTL cleanup: removed {n} expired items"),
-                            Ok(_) => {}
-                            Err(e) => tracing::warn!("TTL cleanup error: {e}"),
-                        }
                     }
+                    // daemon-core L1: the deletes are synchronous rusqlite. Run
+                    // them on a blocking thread (like the IPC path) so the async
+                    // executor is never blocked while the DB lock is held.
+                    run_ttl_cleanup(&db, sensitive_ttl_ms, do_sensitive, do_general).await;
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down");
@@ -637,34 +630,19 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     sensitive_cleanup_ticks += 1;
 
                     // Sensitive item TTL: run every 5 seconds.
-                    if sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)).max(1) {
+                    let do_sensitive =
+                        sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)).max(1);
+                    if do_sensitive {
                         sensitive_cleanup_ticks = 0;
-                        let db_guard = db.lock().await;
-                        let now_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as i64;
-                        match copypaste_core::delete_sensitive_expired(&db_guard, now_ms, sensitive_ttl_ms) {
-                            Ok(n) if n > 0 => tracing::info!("sensitive TTL cleanup: wiped {n} sensitive items"),
-                            Ok(_) => {}
-                            Err(e) => tracing::warn!("sensitive TTL cleanup error: {e}"),
-                        }
                     }
-
                     // General expires_at TTL: run every 60 seconds.
-                    if cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)).max(1) {
+                    let do_general =
+                        cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)).max(1);
+                    if do_general {
                         cleanup_ticks = 0;
-                        let db_guard = db.lock().await;
-                        let now_ms = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_millis() as i64;
-                        match copypaste_core::delete_expired(&db_guard, now_ms) {
-                            Ok(n) if n > 0 => tracing::info!("TTL cleanup: removed {n} expired items"),
-                            Ok(_) => {}
-                            Err(e) => tracing::warn!("TTL cleanup error: {e}"),
-                        }
                     }
+                    // daemon-core L1: offload the synchronous rusqlite deletes.
+                    run_ttl_cleanup(&db, sensitive_ttl_ms, do_sensitive, do_general).await;
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down");
@@ -706,6 +684,66 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     drop(db);
     tracing::info!("daemon stopped");
     Ok(())
+}
+
+/// Run the sensitive- and/or general-TTL deletes on a blocking thread.
+///
+/// daemon-core L1: both `delete_sensitive_expired` and `delete_expired` are
+/// synchronous rusqlite calls. Previously they ran inline inside the `select!`
+/// loop under `db.lock().await` while holding the tokio Mutex, blocking the
+/// async worker for the duration of the SQL. We now mirror the IPC path:
+/// acquire the lock and run the SQL inside `spawn_blocking`. The clock-skew-safe
+/// `unwrap_or_default()` on the timestamp is preserved.
+async fn run_ttl_cleanup(
+    db: &Arc<Mutex<Database>>,
+    sensitive_ttl_ms: i64,
+    do_sensitive: bool,
+    do_general: bool,
+) {
+    if !do_sensitive && !do_general {
+        return;
+    }
+    let db = db.clone();
+    let join = tokio::task::spawn_blocking(move || {
+        let guard = db.blocking_lock();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        let sensitive = if do_sensitive {
+            Some(copypaste_core::delete_sensitive_expired(
+                &guard,
+                now_ms,
+                sensitive_ttl_ms,
+            ))
+        } else {
+            None
+        };
+        let general = if do_general {
+            Some(copypaste_core::delete_expired(&guard, now_ms))
+        } else {
+            None
+        };
+        (sensitive, general)
+    })
+    .await;
+    let (sensitive, general) = match join {
+        Ok(pair) => pair,
+        Err(e) => {
+            tracing::warn!("TTL cleanup blocking task failed: {e}");
+            return;
+        }
+    };
+    match sensitive {
+        Some(Ok(n)) if n > 0 => tracing::info!("sensitive TTL cleanup: wiped {n} sensitive items"),
+        Some(Err(e)) => tracing::warn!("sensitive TTL cleanup error: {e}"),
+        _ => {}
+    }
+    match general {
+        Some(Ok(n)) if n > 0 => tracing::info!("TTL cleanup: removed {n} expired items"),
+        Some(Err(e)) => tracing::warn!("TTL cleanup error: {e}"),
+        _ => {}
+    }
 }
 
 #[tracing::instrument(skip_all, name = "clipboard_tick")]
@@ -841,117 +879,130 @@ async fn handle_text(
         .unwrap_or_default()
         .as_millis() as i64;
 
-    let db_guard = db.lock().await;
+    // daemon-core L1: every DB touch below is synchronous rusqlite. Run the
+    // whole dedup-lookup / bump-or-insert / prune sequence on a blocking thread
+    // (mirroring the IPC path) so the async worker is not blocked while the
+    // tokio Mutex is held. Inputs are moved in; the resulting item (if any) is
+    // returned for the broadcast channel.
+    let db = db.clone();
+    let config = config.clone();
+    let local_key = *local_key;
+    let local_device_id = local_device_id.to_string();
+    let join = tokio::task::spawn_blocking(move || {
+        let db_guard = db.blocking_lock();
 
-    // Dedup: look for any non-expired row with the same content hash.
-    // `find_recent_by_hash` uses a generous window (i64::MAX) to cover ALL
-    // history, not just the last N minutes.  A pinned item is never expired
-    // so it will always be found and bumped, which is the correct behaviour.
-    match find_recent_by_hash(&db_guard, &hash_hex, now_ms, i64::MAX) {
-        Ok(Some(existing_id)) => {
-            // Identical content already in history: bump recency to now so the
-            // existing row rises to the top of the pinned-first, wall_time DESC
-            // sort. We do NOT insert a new row — the content and metadata are
-            // unchanged; only the recency is updated.
-            let new_lamport = now_ms; // use wall_time ms as lamport proxy
-            match bump_item_recency(&db_guard, &existing_id, now_ms, new_lamport) {
-                Ok(changed) if changed > 0 => {
-                    tracing::debug!(
-                        existing = %existing_id,
-                        "text dedup: bumped existing row to top (same content_hash)"
-                    );
+        // Dedup: look for any non-expired row with the same content hash.
+        // `find_recent_by_hash` uses a generous window (i64::MAX) to cover ALL
+        // history, not just the last N minutes.  A pinned item is never expired
+        // so it will always be found and bumped, which is the correct behaviour.
+        match find_recent_by_hash(&db_guard, &hash_hex, now_ms, i64::MAX) {
+            Ok(Some(existing_id)) => {
+                // Identical content already in history: bump recency to now so
+                // the existing row rises to the top of the pinned-first,
+                // wall_time DESC sort. We do NOT insert a new row.
+                let new_lamport = now_ms; // use wall_time ms as lamport proxy
+                match bump_item_recency(&db_guard, &existing_id, now_ms, new_lamport) {
+                    Ok(changed) if changed > 0 => {
+                        tracing::debug!(
+                            existing = %existing_id,
+                            "text dedup: bumped existing row to top (same content_hash)"
+                        );
+                    }
+                    Ok(_) => {
+                        // Row disappeared between find and bump (race on delete) —
+                        // fall through to a fresh insert on next poll. This poll
+                        // produces no item for the broadcast channel, which is
+                        // safe: the next poll sees a new changeCount and captures
+                        // again.
+                        tracing::debug!(
+                            existing = %existing_id,
+                            "text dedup: existing row disappeared before bump (deleted concurrently)"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("text dedup bump failed: {e}");
+                    }
                 }
-                Ok(_) => {
-                    // Row disappeared between find and bump (race on delete) —
-                    // fall through to a fresh insert on next poll. This poll
-                    // produces no item for the broadcast channel, which is safe:
-                    // the next poll will see a new changeCount and capture again.
-                    tracing::debug!(
-                        existing = %existing_id,
-                        "text dedup: existing row disappeared before bump (deleted concurrently)"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!("text dedup bump failed: {e}");
-                }
+                // Return the bumped item so broadcast subscribers (P2P, sync) see
+                // the recency update. Fetch the full row for up-to-date fields.
+                return match get_item_by_id(&db_guard, &existing_id) {
+                    Ok(Some(bumped)) => Some(bumped),
+                    Ok(None) => None,
+                    Err(e) => {
+                        tracing::warn!("text dedup: could not re-fetch bumped item: {e}");
+                        None
+                    }
+                };
             }
-            // Return the bumped item so broadcast subscribers (P2P, sync) see
-            // the recency update. Fetch the full row to get the up-to-date
-            // wall_time and all fields.
-            return match get_item_by_id(&db_guard, &existing_id) {
-                Ok(Some(bumped)) => Some(bumped),
-                Ok(None) => None,
+            Ok(None) => {
+                // No existing row with this hash — proceed with a fresh insert.
+            }
+            Err(e) => {
+                // DB error on the dedup lookup: log and fall through to insert.
+                // Inserting a duplicate is preferable to silently losing a capture.
+                tracing::warn!("text dedup hash lookup failed: {e}");
+            }
+        }
+
+        // Fresh insert path: encrypt then store.
+        let item_id = uuid::Uuid::new_v4().to_string();
+        let (nonce, ciphertext) =
+            match encrypt_text_for_storage(text.as_bytes(), &local_key, &item_id) {
+                Ok(v) => v,
                 Err(e) => {
-                    tracing::warn!("text dedup: could not re-fetch bumped item: {e}");
-                    None
+                    tracing::warn!("encrypt_text_for_storage failed for text: {e}");
+                    return None;
                 }
             };
-        }
-        Ok(None) => {
-            // No existing row with this hash — proceed with a fresh insert.
-        }
-        Err(e) => {
-            // DB error on the dedup lookup: log and fall through to insert.
-            // Inserting a duplicate is preferable to silently losing a capture.
-            tracing::warn!("text dedup hash lookup failed: {e}");
-        }
-    }
+        let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
+        item.item_id = item_id;
+        item.is_sensitive = is_sensitive;
+        // Stamp the stable on-disk device_id so cloud/P2P peers attribute every
+        // captured item to this specific machine across restarts.
+        item.origin_device_id = local_device_id;
+        // Store the content hash so future captures of identical content can
+        // find and bump this row instead of inserting a duplicate.
+        item.content_hash = Some(hash_hex);
 
-    // Fresh insert path: encrypt then store.
-    let item_id = uuid::Uuid::new_v4().to_string();
-    let (nonce, ciphertext) = match encrypt_text_for_storage(text.as_bytes(), local_key, &item_id) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!("encrypt_text_for_storage failed for text: {e}");
-            return None;
+        if is_sensitive {
+            item.expires_at = Some(now_ms + (config.sensitive_ttl_local_secs as i64 * 1000));
         }
-    };
-    let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
-    item.item_id = item_id;
-    item.is_sensitive = is_sensitive;
-    // Stamp the stable on-disk device_id so cloud/P2P peers attribute every
-    // captured item to this specific machine across restarts. Without this,
-    // `origin_device_id` stays "" and each restart appears as a fresh
-    // anonymous device in the Supabase device list (root cause of duplicates).
-    item.origin_device_id = local_device_id.to_string();
-    // Store the content hash so future captures of identical content can find
-    // and bump this row instead of inserting a duplicate.
-    item.content_hash = Some(hash_hex);
 
-    if is_sensitive {
-        item.expires_at = Some(now_ms + (config.sensitive_ttl_local_secs as i64 * 1000));
-    }
-
-    // v0.3 post-T2: insert_item + upsert_fts collapsed into a single
-    // transaction. Closes the TOCTOU window where a crash between the row
-    // insert and the FTS upsert could leave a row that search would never
-    // find. Also handles the v5 UNIQUE-index dedup race internally — if
-    // another writer wins the (content_hash, minute) race we get back the
-    // existing row's id rather than a SQLITE_CONSTRAINT error.
-    match insert_item_with_fts(&db_guard, &item, &text) {
-        Ok(stored_id) => {
-            // beta.5 Bug-1 visibility: promoted from debug! to info! so users
-            // can verify in `daemon.out.log` that captured items reach the DB.
-            if stored_id != item.id {
-                tracing::debug!(
-                    requested = %item.id,
-                    existing = %stored_id,
-                    "text item deduped against existing row (UNIQUE index race)"
-                );
-            } else {
-                tracing::info!(
-                    id = %item.id,
-                    sensitive = is_sensitive,
-                    "stored text item id={} sensitive={}",
-                    item.id,
-                    is_sensitive
-                );
+        // v0.3 post-T2: insert_item + upsert_fts collapsed into a single
+        // transaction. Closes the TOCTOU window where a crash between the row
+        // insert and the FTS upsert could leave a row that search would never
+        // find. Also handles the v5 UNIQUE-index dedup race internally.
+        match insert_item_with_fts(&db_guard, &item, &text) {
+            Ok(stored_id) => {
+                if stored_id != item.id {
+                    tracing::debug!(
+                        requested = %item.id,
+                        existing = %stored_id,
+                        "text item deduped against existing row (UNIQUE index race)"
+                    );
+                } else {
+                    tracing::info!(
+                        id = %item.id,
+                        sensitive = is_sensitive,
+                        "stored text item id={} sensitive={}",
+                        item.id,
+                        is_sensitive
+                    );
+                }
+                prune_history(&db_guard, &config);
+                Some(item)
             }
-            prune_history(&db_guard, config);
-            Some(item)
+            Err(e) => {
+                tracing::warn!("failed to store text item: {e}");
+                None
+            }
         }
+    })
+    .await;
+    match join {
+        Ok(item) => item,
         Err(e) => {
-            tracing::warn!("failed to store text item: {e}");
+            tracing::warn!("handle_text blocking task failed: {e}");
             None
         }
     }
@@ -968,57 +1019,73 @@ async fn handle_image(
     // `insert_item` / `insert_item_with_fts` (ItemsError::MigrationInProgress).
     // The call-site guard that used to live here has been removed.
 
-    // Derive a stable file_id from SHA-256(raw_bytes)[..16] — a 128-bit
-    // collision-resistant content hash. This is deterministic so identical
-    // images dedup naturally, and replaces the prior `DefaultHasher XOR
-    // nanos` scheme (Wave 2.1 security LOW #19).
-    let file_id = crate::clipboard::image_content_hash(&raw_bytes);
+    // daemon-core L1: the image encode (CPU-heavy compression + encryption) and
+    // the rusqlite insert/prune are all synchronous. Run the whole sequence on a
+    // blocking thread, mirroring the IPC path, so the async worker is never
+    // blocked while the tokio Mutex is held.
+    let db = db.clone();
+    let config = config.clone();
+    let local_key = *local_key;
+    let local_device_id = local_device_id.to_string();
+    let join = tokio::task::spawn_blocking(move || {
+        // Derive a stable file_id from SHA-256(raw_bytes)[..16] — a 128-bit
+        // collision-resistant content hash. Deterministic so identical images
+        // dedup naturally (Wave 2.1 security LOW #19).
+        let file_id = crate::clipboard::image_content_hash(&raw_bytes);
 
-    match encode_image(&raw_bytes, local_key, &file_id) {
-        Ok((meta, chunks)) => {
-            let blob = chunks_to_blob(&chunks);
-            let meta_json = format!(
-                r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
-                meta.width, meta.height, meta.original_size, meta.chunk_count, meta.file_id
-            );
-            let mut item = ClipboardItem::new_image(blob, meta_json, 0);
-            // Stamp stable device identity (same fix as handle_text).
-            item.origin_device_id = local_device_id.to_string();
-            tracing::debug!(
-                "image encoded: {}x{} px, {} chunks, original_size={}",
-                meta.width,
-                meta.height,
-                meta.chunk_count,
-                meta.original_size
-            );
+        match encode_image(&raw_bytes, &local_key, &file_id) {
+            Ok((meta, chunks)) => {
+                let blob = chunks_to_blob(&chunks);
+                let meta_json = format!(
+                    r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
+                    meta.width, meta.height, meta.original_size, meta.chunk_count, meta.file_id
+                );
+                let mut item = ClipboardItem::new_image(blob, meta_json, 0);
+                // Stamp stable device identity (same fix as handle_text).
+                item.origin_device_id = local_device_id;
+                tracing::debug!(
+                    "image encoded: {}x{} px, {} chunks, original_size={}",
+                    meta.width,
+                    meta.height,
+                    meta.chunk_count,
+                    meta.original_size
+                );
 
-            let db_guard = db.lock().await;
-            // Atomic insert: images have no searchable text, so we pass "" to
-            // skip the FTS write (insert_item_with_fts treats empty as
-            // "image item" and only writes the row).
-            match insert_item_with_fts(&db_guard, &item, "") {
-                Ok(stored_id) => {
-                    // beta.5 Bug-1 visibility: promoted from debug! to info!.
-                    if stored_id != item.id {
-                        tracing::debug!(
-                            requested = %item.id,
-                            existing = %stored_id,
-                            "image item deduped against existing row"
-                        );
-                    } else {
-                        tracing::info!(id = %item.id, "stored image item id={}", item.id);
+                let db_guard = db.blocking_lock();
+                // Atomic insert: images have no searchable text, so we pass "" to
+                // skip the FTS write (insert_item_with_fts treats empty as
+                // "image item" and only writes the row).
+                match insert_item_with_fts(&db_guard, &item, "") {
+                    Ok(stored_id) => {
+                        if stored_id != item.id {
+                            tracing::debug!(
+                                requested = %item.id,
+                                existing = %stored_id,
+                                "image item deduped against existing row"
+                            );
+                        } else {
+                            tracing::info!(id = %item.id, "stored image item id={}", item.id);
+                        }
+                        prune_history(&db_guard, &config);
+                        Some(item)
                     }
-                    prune_history(&db_guard, config);
-                    Some(item)
-                }
-                Err(e) => {
-                    tracing::warn!("failed to store image item: {e}");
-                    None
+                    Err(e) => {
+                        tracing::warn!("failed to store image item: {e}");
+                        None
+                    }
                 }
             }
+            Err(e) => {
+                tracing::warn!("image encode failed (skipping): {e}");
+                None
+            }
         }
+    })
+    .await;
+    match join {
+        Ok(item) => item,
         Err(e) => {
-            tracing::warn!("image encode failed (skipping): {e}");
+            tracing::warn!("handle_image blocking task failed: {e}");
             None
         }
     }
@@ -1058,10 +1125,10 @@ fn prune_history(db: &Database, config: &AppConfig) {
 }
 
 /// Derive the `(v1_key, v2_key)` pair used by the v4 key-version migration
-/// sweep, from the raw `seed` returned by [`load_local_key`].
+/// sweep, from the raw `seed` returned by [`load_local_key_material`].
 ///
 /// **Critical:** `seed` is ALREADY the v1 storage key —
-/// [`load_local_key`] returns `DeviceKeypair::local_enc_key()`, which is
+/// [`load_local_key_material`] returns `DeviceKeypair::local_enc_key()`, which is
 /// `HKDF-SHA256(secret) == derive_storage_key_v1(secret)`. The read path
 /// (`ipc::write_to_pasteboard`, text branch) therefore decrypts
 /// `key_version = 1` rows with this seed **directly** (`v1_key = **local_key`)
@@ -1080,35 +1147,45 @@ fn sweep_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     (*seed, derive_v2(seed))
 }
 
-#[tracing::instrument(name = "load_local_key")]
-fn load_local_key() -> zeroize::Zeroizing<[u8; 32]> {
-    // Dev/test escape hatch: COPYPASTE_EPHEMERAL_KEY is honored centrally
-    // inside `crate::keychain` — `load_or_create` short-circuits to a fresh
-    // ephemeral keypair before any Security-framework call, so the macOS
-    // login-keychain password prompt is never raised. Ad-hoc-signed dev
-    // builds change signature on every rebuild, invalidating the Keychain
-    // item ACL and triggering that prompt; the env var avoids it. Production
-    // (env unset) is unchanged: real users still get the persistent
-    // Keychain-backed key.
+/// Load the device keypair ONCE and return both the local storage key and the
+/// X25519 public-key bytes derived from it.
+///
+/// dedup-keychain: previously the daemon called `crate::keychain::load_or_create`
+/// twice at startup — once for the local enc key and once for the public bytes —
+/// each triggering a Keychain read plus the legacy-accessibility migration write
+/// (a redundant Security-framework round-trip and ACL prompt risk). This single
+/// call derives both from the same keypair.
+///
+/// Dev/test escape hatch: COPYPASTE_EPHEMERAL_KEY is honored centrally inside
+/// `crate::keychain` — `load_or_create` short-circuits to a fresh ephemeral
+/// keypair before any Security-framework call, so the macOS login-keychain
+/// password prompt is never raised. Ad-hoc-signed dev builds change signature on
+/// every rebuild, invalidating the Keychain item ACL and triggering that prompt;
+/// the env var avoids it. Production (env unset) is unchanged: real users still
+/// get the persistent Keychain-backed key.
+#[tracing::instrument(name = "load_local_key_material")]
+fn load_local_key_material() -> (zeroize::Zeroizing<[u8; 32]>, [u8; 32]) {
     #[cfg(target_os = "macos")]
     {
         match crate::keychain::load_or_create() {
             Ok(kp) => {
                 tracing::info!("device fingerprint={}", kp.fingerprint());
-                kp.local_enc_key()
+                (kp.local_enc_key(), kp.public_key_bytes())
             }
             Err(e) => {
                 tracing::warn!("Keychain unavailable ({e}), using ephemeral key");
-                DeviceKeypair::generate().local_enc_key()
+                let kp = DeviceKeypair::generate();
+                (kp.local_enc_key(), kp.public_key_bytes())
             }
         }
     }
     #[cfg(not(target_os = "macos"))]
     {
         // Keychain not available on non-macOS; use an ephemeral key for CI/Linux builds.
-        // On production macOS this branch is never compiled in.
+        // On production macOS this branch is never compiled in. The public bytes
+        // are a zero placeholder — there is no keychain-backed identity here.
         tracing::warn!("Non-macOS platform: using ephemeral encryption key (data not persisted across restarts)");
-        DeviceKeypair::generate().local_enc_key()
+        (DeviceKeypair::generate().local_enc_key(), [0u8; 32])
     }
 }
 
@@ -1179,6 +1256,52 @@ fn load_or_create_device_id() -> anyhow::Result<uuid::Uuid> {
 
     tracing::info!(device_id = %id, path = %path.display(), "created persistent device_id");
     Ok(id)
+}
+
+/// Restore the persisted private-mode flag at startup.
+///
+/// Returns `false` (capture enabled) when the file is absent, unreadable, or
+/// holds anything other than `"1"` — a missing/corrupt flag must never leave
+/// the daemon stuck in private mode, and on first run there is no file yet.
+fn load_private_mode() -> bool {
+    let path = match crate::paths::private_mode_path() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("could not resolve private_mode path ({e}); defaulting to disabled");
+            return false;
+        }
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(contents) => contents.trim() == "1",
+        Err(_) => false, // absent on first run; not an error
+    }
+}
+
+/// Persist the private-mode flag so it survives a daemon restart.
+///
+/// Best-effort: a write failure is logged but does not fail the IPC call —
+/// the in-memory atomic is still authoritative for the running process.
+pub(crate) fn persist_private_mode(enabled: bool) {
+    let path = match crate::paths::private_mode_path() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("could not resolve private_mode path ({e}); not persisting");
+            return;
+        }
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::warn!("could not create private_mode parent dir ({e}); not persisting");
+            return;
+        }
+    }
+    if let Err(e) = std::fs::write(&path, if enabled { "1" } else { "0" }) {
+        tracing::warn!(
+            path = %path.display(),
+            error = %e,
+            "could not persist private_mode flag"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1474,6 +1597,58 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode, 0o600, "device_id file must be chmod 0600");
         }
+    }
+
+    /// daemon-core backlog #1 regression: private mode must survive a daemon
+    /// restart. `persist_private_mode(true)` writes the flag; a fresh
+    /// `load_private_mode()` (simulating the next startup) must read it back as
+    /// `true`. Toggling back to `false` must also round-trip.
+    #[test]
+    fn private_mode_persists_across_restart() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("private_mode");
+
+        // Serialise env mutation with every other env-mutating daemon test.
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_PRIVATE_MODE_PATH");
+        // SAFETY: held under TEST_ENV_LOCK; restored before returning.
+        unsafe {
+            std::env::set_var("COPYPASTE_PRIVATE_MODE_PATH", &path);
+        }
+
+        // First run: absent file => disabled.
+        assert!(
+            !load_private_mode(),
+            "missing private_mode file must default to disabled"
+        );
+
+        // Enable + simulate restart: the next load must see it enabled.
+        persist_private_mode(true);
+        assert!(path.exists(), "persisting must create the flag file");
+        let after_enable = load_private_mode();
+
+        // Disable + reload: must round-trip back to false.
+        persist_private_mode(false);
+        let after_disable = load_private_mode();
+
+        // Restore env before assertions so a failure doesn't leak state.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_PRIVATE_MODE_PATH", v),
+                None => std::env::remove_var("COPYPASTE_PRIVATE_MODE_PATH"),
+            }
+        }
+
+        assert!(
+            after_enable,
+            "enabled private mode must persist across restart"
+        );
+        assert!(
+            !after_disable,
+            "disabled private mode must persist across restart"
+        );
     }
 
     // -----------------------------------------------------------------------
