@@ -191,10 +191,26 @@ class OnboardingActivity : ComponentActivity() {
      * guarded so an unresolvable OEM intent can never crash the app.
      */
     private fun openOemAutoStart() {
-        val oem = OemAutoStartHelper.getOemIntentCandidates(this)
+        // Try resolvable OEM-specific candidates first, then ALL OEM candidates
+        // (in case resolveActivity under-reports a hidden-but-launchable
+        // component), then the generic battery → app-details → settings chain.
+        // launchGated walks the list and uses the first that actually launches,
+        // catching ActivityNotFoundException per-candidate so a missing OEM
+        // component can never crash or dead-end the flow.
+        val resolvable = OemAutoStartHelper.getOemIntentCandidates(this)
             .filter { OemAutoStartHelper.isResolvable(this, it) }
+        val allOem = OemAutoStartHelper.getOemIntentCandidates(this)
         val fallback = OemAutoStartHelper.getBatteryFallbackCandidates(this)
-        launchGated(oem + fallback)
+        val launched = launchGated(resolvable + allOem + fallback)
+        if (launched) {
+            val label = OemAutoStartHelper.oemSettingsLabel(this)
+            val hint = if (label != null) {
+                getString(R.string.oem_autostart_toast_labeled, label)
+            } else {
+                getString(R.string.oem_autostart_toast_generic)
+            }
+            android.widget.Toast.makeText(this, hint, android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     companion object {

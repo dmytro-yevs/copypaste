@@ -3,7 +3,6 @@ package com.copypaste.android
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -62,17 +61,35 @@ object OemAutoStartHelper {
 
     // ── Private helpers ─────────────────────────────────────────────────────
 
-    private enum class Manufacturer {
+    /**
+     * Manufacturer buckets we have a known autostart/protected-apps screen for.
+     * Internal (not private) so the pure-logic [detectManufacturer] selector can
+     * be unit-tested on the JVM without an Android runtime.
+     */
+    internal enum class Manufacturer {
         XIAOMI, HUAWEI, OPPO, VIVO, SAMSUNG, ONEPLUS, ASUS, LETV, NOKIA, MEIZU, HTC, UNKNOWN
     }
 
-    private fun manufacturer(): Manufacturer {
-        val mfr = Build.MANUFACTURER.lowercase()
+    private fun manufacturer(): Manufacturer = detectManufacturer(Build.MANUFACTURER)
+
+    /**
+     * Pure mapping from a raw `Build.MANUFACTURER` string to a [Manufacturer]
+     * bucket. Extracted as a standalone function (no Android deps) so the OEM
+     * selection logic is unit-testable without an instrumented device.
+     *
+     * Order matters: the OnePlus-on-Oppo-ROM special case must be evaluated
+     * before the bare `oneplus` branch, and `oppo`/`realme` before it too, so a
+     * genuine OnePlus device (OxygenOS) still resolves to [Manufacturer.ONEPLUS]
+     * while OnePlus models shipping a ColorOS base resolve to [Manufacturer.OPPO].
+     */
+    internal fun detectManufacturer(rawManufacturer: String): Manufacturer {
+        val mfr = rawManufacturer.lowercase()
         return when {
             mfr.contains("xiaomi") || mfr.contains("poco") || mfr.contains("redmi") -> Manufacturer.XIAOMI
             mfr.contains("huawei") || mfr.contains("honor") -> Manufacturer.HUAWEI
-            mfr.contains("oppo") || mfr.contains("realme") || mfr.contains("oneplus") &&
-                    mfr.contains("oppo") -> Manufacturer.OPPO
+            // OnePlus models on a ColorOS/Oppo base, or genuine Oppo/Realme.
+            mfr.contains("oppo") || mfr.contains("realme") ||
+                    (mfr.contains("oneplus") && mfr.contains("oppo")) -> Manufacturer.OPPO
             mfr.contains("vivo") || mfr.contains("iqoo") -> Manufacturer.VIVO
             mfr.contains("samsung") -> Manufacturer.SAMSUNG
             mfr.contains("oneplus") -> Manufacturer.ONEPLUS
@@ -248,14 +265,25 @@ object OemAutoStartHelper {
         ).map { it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
     }
 
-    /** Returns true if the intent can be resolved by at least one activity on this device. */
-    fun isResolvable(context: Context, intent: Intent): Boolean {
-        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            PackageManager.MATCH_DEFAULT_ONLY
-        } else {
-            @Suppress("DEPRECATION")
-            0
-        }
-        return context.packageManager.resolveActivity(intent, flags) != null
-    }
+    /**
+     * Returns true if the intent can be resolved by at least one activity on this
+     * device.
+     *
+     * IMPORTANT: we must NOT pass `PackageManager.MATCH_DEFAULT_ONLY` here. That
+     * flag additionally requires the target activity to declare
+     * `CATEGORY_DEFAULT` in an intent-filter. OEM autostart / protected-apps
+     * activities (MIUI's AutoStartManagementActivity, EMUI's StartupNormalAppList
+     * Activity, ColorOS StartupAppListActivity, etc.) are launched internally by
+     * the ROM and almost never declare CATEGORY_DEFAULT — so resolving them with
+     * MATCH_DEFAULT_ONLY returns null *even when the component is present and
+     * exported*. That false-negative was the root cause of the "OEM settings
+     * screen never opens" bug: every OEM candidate got filtered out before launch.
+     *
+     * For an explicit-component Intent, `resolveActivity` with flags `0` matches
+     * purely by component existence + exported/visible state, which is exactly
+     * what we want. For action-based fallback Intents (battery/app-details) flags
+     * `0` is also correct — those system activities are always resolvable.
+     */
+    fun isResolvable(context: Context, intent: Intent): Boolean =
+        context.packageManager.resolveActivity(intent, 0) != null
 }
