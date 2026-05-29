@@ -34,6 +34,20 @@ fn canonical(fp: &str) -> String {
     fp.replace(':', "").to_lowercase()
 }
 
+/// Extract the `addr_hint` field from an encoded v1 pairing QR
+/// (`CPPAIR1.<fp>.<token>.<device_id>.<name>.<addr_hint>`). addr_hint is the
+/// final field and may itself contain '.' (dotted-quad IPv4) and ':', so we
+/// split structurally: strip the magic, then take the 5th body field. This is
+/// host-IP-agnostic (works whether the daemon advertised a LAN ip:port or the
+/// 127.0.0.1 loopback fallback).
+fn addr_hint_from_qr(qr: &str) -> String {
+    let (_magic, body) = qr.split_once('.').expect("QR must have magic prefix");
+    body.splitn(5, '.')
+        .nth(4)
+        .expect("QR body must have addr_hint field")
+        .to_string()
+}
+
 /// Poll `daemon`'s `peers.json` until it contains a record whose canonical
 /// fingerprint equals `want_fp_canonical`, returning that record. The responder
 /// side persists from a detached task after PAKE completes, so a short poll
@@ -91,13 +105,16 @@ fn two_daemons_complete_pake_over_network_bootstrap() {
         .to_string();
     assert!(qr.starts_with("CPPAIR1."), "QR must use the v1 magic: {qr}");
 
-    // The QR must carry a non-empty addr_hint (the bootstrap listener address).
-    // addr_hint is the final field; it contains ':' and dotted IP octets, so we
-    // assert the loopback host:port marker is present rather than re-splitting on
-    // '.' (which would also split the IP).
+    // The QR must carry a non-empty, reachable addr_hint (the bootstrap listener
+    // address). The daemon advertises the host's primary LAN-routable IPv4 when
+    // one exists and falls back to 127.0.0.1 only on loopback-only hosts, so we
+    // assert the hint is a valid host:port (LAN ip:port OR loopback) rather than
+    // pinning it to 127.0.0.1. The listener binds 0.0.0.0, so either form is
+    // reachable from this same host and the end-to-end PAKE below still succeeds.
+    let hint = addr_hint_from_qr(&qr);
     assert!(
-        qr.contains("127.0.0.1:"),
-        "QR addr_hint must point at A's bootstrap listener, got QR: {qr}"
+        hint.parse::<std::net::SocketAddr>().is_ok(),
+        "QR addr_hint must be a valid reachable host:port, got: {hint:?} (QR: {qr})"
     );
 
     // Step 2 — B accepts the QR over the NETWORK: decode, dial A's addr_hint
@@ -156,12 +173,13 @@ fn network_pairing_fails_on_unreachable_addr_hint() {
     let qr_resp = daemon_tmp.request(r#"{"id":"qt","method":"pair_generate_qr","params":{}}"#);
     let qr = qr_resp["data"]["qr"].as_str().expect("tmp QR").to_string();
 
-    // Replace the trailing addr_hint (the real `127.0.0.1:<port>` field) with an
-    // almost-certainly-closed port so the bootstrap dial is refused. The addr
-    // marker `127.0.0.1:` appears only in the addr_hint field (the fingerprint
-    // field is colon-hex, never dotted-quad), so splitting there is unambiguous.
-    let marker_pos = qr.rfind("127.0.0.1:").expect("tmp QR must carry addr_hint");
-    let bad_qr = format!("{}127.0.0.1:1", &qr[..marker_pos]);
+    // Replace the trailing addr_hint field (whatever host the daemon advertised
+    // — LAN ip:port or loopback) with an almost-certainly-closed loopback port so
+    // the bootstrap dial is refused. addr_hint is the final field; strip it off
+    // structurally (host-IP-agnostic) and re-append an unreachable one.
+    let real_hint = addr_hint_from_qr(&qr);
+    let prefix_len = qr.len() - real_hint.len();
+    let bad_qr = format!("{}127.0.0.1:1", &qr[..prefix_len]);
     let _ = &fp_display;
 
     let accept_body = serde_json::json!({
