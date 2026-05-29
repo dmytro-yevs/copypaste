@@ -189,6 +189,17 @@ class ClipboardRepository(context: Context) {
     companion object {
         private const val TAG = "ClipboardRepository"
 
+        /**
+         * Map a stored MIME-style content type to the canonical token the Rust
+         * FFI send path (`sync_with_peer`) accepts when re-keying items for
+         * peers. Stored text items use "text/plain"; the FFI only re-keys items
+         * whose content type is exactly "text", so any "text/*" value must be
+         * collapsed to "text" at the sync boundary or the item is silently
+         * dropped (items_sent = 0). Non-text types pass through unchanged.
+         */
+        fun normalizeContentTypeForSync(stored: String): String =
+            if (stored == "text" || stored.startsWith("text/")) "text" else stored
+
         /** Window in which an identical-content store is treated as a duplicate. */
         private const val DEDUP_WINDOW_MS = 2_000L
 
@@ -234,7 +245,13 @@ class ClipboardRepository(context: Context) {
             try {
                 val parts = raw.split("|")
                 val wallTimeMs = parts[0].toLong()
-                val contentType = parts[1]
+                // Normalize the stored MIME-style content type ("text/plain",
+                // "text/*") to the canonical "text" token the FFI send path
+                // (`sync_with_peer`) re-keys and offers to peers. Without this
+                // mapping every Android item is filtered out and ZERO items are
+                // sent. We only normalize at the sync boundary; the on-disk
+                // value is left untouched.
+                val contentType = normalizeContentTypeForSync(parts[1])
                 val nonce = Base64.decode(parts[3], Base64.NO_WRAP)
                 val ciphertext = Base64.decode(parts[4], Base64.NO_WRAP)
                 val plain = decryptText(id, ciphertext, nonce, key)
