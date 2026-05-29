@@ -103,6 +103,14 @@ private fun encodeQrBitmap(text: String, sizePx: Int): Bitmap {
     return bmp
 }
 
+/**
+ * Build the human-readable label shown after a successful scan, e.g.
+ * `"Pixel 8 (a1b2c3…)"`. Pure (no Android/FFI deps) so it is unit-testable on
+ * the JVM. A blank device name falls back to the literal "device".
+ */
+internal fun formatScannedInfo(deviceName: String, fingerprint: String): String =
+    "${deviceName.ifBlank { "device" }} ($fingerprint)"
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PairScreen(
@@ -141,7 +149,7 @@ fun PairScreen(
             // then drive the PAKE bootstrap + one sync (initiator side).
             scannedPeer = info
             syncResult = null
-            scannedInfo = "${info.deviceName.ifBlank { "device" }} (${info.fingerprint})"
+            scannedInfo = formatScannedInfo(info.deviceName, info.fingerprint)
         } catch (e: Exception) {
             errorMessage = e.message ?: "Invalid pairing code"
         }
@@ -152,8 +160,23 @@ fun PairScreen(
             .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
             .setPrompt("Scan the pairing QR on the other device")
             .setBeepEnabled(false)
-            .setOrientationLocked(false)
-        scanLauncher.launch(options)
+            // Route to our portrait-locked capture activity (see
+            // PortraitCaptureActivity) so the preview is upright on phones held
+            // in portrait. setOrientationLocked(true) keeps ZXing from trying to
+            // re-orient on top of our fixed-portrait activity.
+            .setOrientationLocked(true)
+            .setCaptureActivity(PortraitCaptureActivity::class.java)
+        // Launching the scanner can fail (e.g. ActivityNotFoundException if the
+        // capture activity is missing, or the camera is unavailable). Surface it
+        // as a graceful error instead of letting the activity result launcher
+        // crash the host screen.
+        try {
+            scanLauncher.launch(options)
+        } catch (e: Exception) {
+            errorMessage = "Could not open the camera scanner: " +
+                (e.message ?: e.javaClass.simpleName) +
+                ". You can pair by displaying this device's QR instead."
+        }
     }
 
     // Runtime CAMERA permission. ZXing's embedded scanner needs the camera; we

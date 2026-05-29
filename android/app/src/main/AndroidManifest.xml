@@ -68,6 +68,27 @@
             android:exported="false"
             android:theme="@style/Theme.CopyPaste" />
 
+        <!--
+            Portrait-locked ZXing QR scanner used by the pairing flow.
+
+            Declared explicitly (instead of relying on the library-merged
+            com.journeyapps.barcodescanner.CaptureActivity) so we can:
+              * lock the camera preview to portrait (screenOrientation="portrait")
+                — the default scanner rendered the preview rotated 90° on phones
+                held upright;
+              * pin a known-compatible theme rather than inheriting the app theme
+                onto the library activity, which could crash on inflation when the
+                scanner opened.
+            ScanOptions.setCaptureActivity(PortraitCaptureActivity::class) in
+            PairActivity points the scan launcher here.
+        -->
+        <activity
+            android:name=".PortraitCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:stateNotNeeded="true"
+            android:theme="@style/Theme.CopyPaste" />
+
         <activity
             android:name=".SettingsActivity"
             android:exported="false"

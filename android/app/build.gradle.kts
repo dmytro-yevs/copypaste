@@ -174,6 +174,10 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.zxing.embedded)
 
+    // Local JVM unit tests (src/test) — pure-Kotlin helpers with no Android or
+    // native (FFI) dependencies, e.g. PairUtilsTest.formatScannedInfo.
+    testImplementation("junit:junit:4.13.2")
+
     // Instrumented tests (androidTest) — cross-language crypto conformance.
     // AndroidX Test runner + ext-junit drive CryptoConformanceTest on a device
     // or emulator. JNA is already an `implementation` dep (loaded into the app
