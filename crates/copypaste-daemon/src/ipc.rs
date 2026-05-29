@@ -331,6 +331,17 @@ pub struct IpcServer {
     /// are evicted on every insert, and the live count is capped at
     /// [`MAX_PAKE_SESSIONS`]. See [`IpcServer::insert_pake_session`].
     pake_sessions: Arc<Mutex<HashMap<String, StampedPakeSession>>>,
+    /// The single active QR-pairing token issued by `pair_generate_qr`, with
+    /// its issue time for TTL eviction.
+    ///
+    /// QR pairing is the displaying-device-is-responder flow: this device
+    /// generates a fresh token, renders it in the QR, and stores it here so the
+    /// `pair_accept_qr` handler can re-derive the same PAKE password when the
+    /// scanning device's `message1` arrives — without the user re-typing
+    /// anything. Only one QR is active at a time (regenerating replaces it),
+    /// matching the single-token pairing UX. Bounded by [`PAKE_SESSION_TTL`].
+    /// `None` until the first `pair_generate_qr` call.
+    pending_qr_token: Arc<Mutex<Option<(copypaste_core::PairingToken, std::time::Instant)>>>,
     /// Live P2P paired-peer allowlist, shared with the running mTLS transport
     /// (fix/p2p-c-review #2). When a PAKE handshake finishes, the newly-paired
     /// peer fingerprint is fed into this same instance via
@@ -366,6 +377,7 @@ impl IpcServer {
             device_public_key,
             ready: Arc::new(AtomicBool::new(true)),
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
+            pending_qr_token: Arc::new(Mutex::new(None)),
             p2p_peers: None,
             self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
             #[cfg(feature = "cloud-sync")]
@@ -424,6 +436,7 @@ impl IpcServer {
             device_public_key,
             ready,
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
+            pending_qr_token: Arc::new(Mutex::new(None)),
             p2p_peers: None,
             self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
             #[cfg(feature = "cloud-sync")]
@@ -2344,6 +2357,201 @@ impl IpcServer {
                 self.register_live_peer(&peer_fingerprint);
 
                 Response::ok(req.id, serde_json::json!({ "ok": true }))
+            }
+
+            // ----------------------------------------------------------------
+            // QR pairing — displaying side. Generate a fresh pairing token,
+            // store it for the matching `pair_accept_qr` step, and return a
+            // single-line QR payload (the `copypaste-core::PairingPayload`
+            // wire form) the *other* device scans. The token is the PAKE
+            // password; the scanner derives it from the QR and drives the
+            // existing `pair_peer_with_password` initiator flow. No new crypto:
+            // QR is purely a transport for the token + this device's
+            // fingerprint. See `copypaste_core::crypto::pairing_qr`.
+            //
+            // Request params: {} (device identity is taken from daemon state).
+            // Response data: { "qr": "CPPAIR1...", "expires_in_secs": <u64> }
+            // ----------------------------------------------------------------
+            "pair_generate_qr" => {
+                let fingerprint = crate::keychain::own_fingerprint(self.device_public_key.as_ref());
+
+                // Device name mirrors the P2P subsystem's source (HOSTNAME /
+                // COMPUTERNAME, falling back to "CopyPaste") so the scanning
+                // device shows a consistent label.
+                let device_name = std::env::var("HOSTNAME")
+                    .or_else(|_| std::env::var("COMPUTERNAME"))
+                    .unwrap_or_else(|_| "CopyPaste".to_string());
+
+                // device_id is best-effort: the canonical fingerprint doubles
+                // as a stable identifier when no UUID is threaded here. The QR
+                // `device_id` field is informational on the scanning side; peer
+                // pinning uses the fingerprint.
+                let device_id = fingerprint.clone();
+
+                let payload = match copypaste_core::PairingPayload::new(
+                    fingerprint,
+                    device_id,
+                    device_name,
+                    String::new(), // addr_hint: discovery is mDNS-only for now.
+                ) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("failed to build pairing payload: {e}"),
+                        )
+                    }
+                };
+
+                let qr = payload.encode();
+
+                // Store the token (replacing any prior active QR) so
+                // `pair_accept_qr` can re-derive the same PAKE password. The
+                // token is moved out of the payload to avoid a second copy.
+                {
+                    let mut slot = self.pending_qr_token.lock().await;
+                    *slot = Some((payload.token, std::time::Instant::now()));
+                }
+
+                Response::ok(
+                    req.id,
+                    serde_json::json!({
+                        "qr": qr,
+                        "expires_in_secs": PAKE_SESSION_TTL.as_secs(),
+                    }),
+                )
+            }
+
+            // ----------------------------------------------------------------
+            // QR pairing — displaying side, accept step. The scanning device
+            // (initiator) has derived the PAKE password from the QR token and
+            // sent `message1`. We look up the stored token, re-derive the same
+            // password, register a PasswordFile and respond exactly as
+            // `pair_accept_password` does — but without the user typing the
+            // password (it came from the QR we generated). The follow-up
+            // `pair_accept_finish` step is unchanged.
+            //
+            // Request params: { "message1_b64", "peer_fingerprint" }
+            // Response data:  { "session_id", "message2_b64" }
+            // ----------------------------------------------------------------
+            "pair_accept_qr" => {
+                use base64::Engine as _;
+                let b64 = base64::engine::general_purpose::STANDARD;
+
+                let message1_b64 = match req.params.get("message1_b64").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing message1_b64",
+                        )
+                    }
+                };
+                let peer_fingerprint =
+                    match req.params.get("peer_fingerprint").and_then(|v| v.as_str()) {
+                        Some(s) => s.to_string(),
+                        None => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                "missing peer_fingerprint",
+                            )
+                        }
+                    };
+
+                if !is_valid_fingerprint(&peer_fingerprint) {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        format!("invalid peer_fingerprint format: {peer_fingerprint}"),
+                    );
+                }
+
+                // Retrieve the active QR token, enforcing the TTL. Take it out
+                // so a stale/expired token cannot linger.
+                let password = {
+                    let mut slot = self.pending_qr_token.lock().await;
+                    match slot.take() {
+                        Some((token, issued)) if issued.elapsed() < PAKE_SESSION_TTL => {
+                            token.to_pake_password()
+                        }
+                        Some(_) => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                "QR pairing token expired; regenerate the code",
+                            )
+                        }
+                        None => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                "no active QR pairing token; generate a code first",
+                            )
+                        }
+                    }
+                };
+
+                let msg1_bytes = match b64.decode(&message1_b64) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            format!("invalid base64 in message1_b64: {e}"),
+                        )
+                    }
+                };
+
+                let password_file = match copypaste_p2p::pake::PasswordFile::register(&password) {
+                    Ok(pf) => pf,
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("PasswordFile::register failed: {e}"),
+                        )
+                    }
+                };
+
+                let (responder, msg2_bytes) =
+                    match PakeResponder::respond(&password_file, &msg1_bytes) {
+                        Ok(pair) => pair,
+                        Err(e) => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_AUTH_FAILED,
+                                format!("PAKE respond failed: {e}"),
+                            )
+                        }
+                    };
+
+                let session_id = uuid::Uuid::new_v4().to_string();
+                let msg2_b64 = b64.encode(&msg2_bytes);
+
+                if let Err(msg) = self
+                    .insert_pake_session(
+                        session_id.clone(),
+                        PakeSession::Responder {
+                            responder: Box::new(responder),
+                            password_file,
+                            peer_fingerprint,
+                        },
+                    )
+                    .await
+                {
+                    return Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, msg);
+                }
+
+                Response::ok(
+                    req.id,
+                    serde_json::json!({
+                        "session_id": session_id,
+                        "message2_b64": msg2_b64,
+                    }),
+                )
             }
 
             // ----------------------------------------------------------------
@@ -4323,6 +4531,115 @@ mod tests {
         assert!(
             stored_a.is_some(),
             "peer {fp_b} must be stored on device A after finish"
+        );
+    }
+
+    /// QR pairing end-to-end: device B (displaying) generates a QR, device A
+    /// (scanning) decodes it via `copypaste_core::PairingPayload`, derives the
+    /// PAKE password from the embedded token, and completes the 4-message
+    /// handshake using `pair_accept_qr` on B in place of `pair_accept_password`.
+    /// No password is ever typed — it travels in the QR token.
+    #[tokio::test]
+    async fn pair_qr_full_round_trip() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::UnixStream;
+
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+
+        let sock_a = dir.path().join("test-qr-a.sock");
+        let sock_b = dir.path().join("test-qr-b.sock");
+        start_test_server(&sock_a).await;
+        start_test_server(&sock_b).await;
+
+        async fn call(sock: &std::path::Path, body: &str) -> serde_json::Value {
+            let mut stream = UnixStream::connect(sock).await.unwrap();
+            stream.write_all(body.as_bytes()).await.unwrap();
+            stream.write_all(b"\n").await.unwrap();
+            let mut lines = BufReader::new(&mut stream).lines();
+            let line = lines.next_line().await.unwrap().unwrap();
+            serde_json::from_str(&line).unwrap()
+        }
+
+        // Realistic non-placeholder fingerprints (all-same-byte ones are
+        // filtered as stale test data by the peer store).
+        let fp_a = "a1:b2:c3:d4:e5:f6:07:18:29:3a:4b:5c:6d:7e:8f:90:a1:b2:c3:d4:e5:f6:07:18:29:3a:4b:5c:6d:7e:8f:90";
+
+        // Step 0: Device B generates a QR pairing code.
+        let resp = call(
+            &sock_b,
+            r#"{"id":"qr0","method":"pair_generate_qr","params":{}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "pair_generate_qr failed: {resp}");
+        let qr = resp["data"]["qr"].as_str().unwrap().to_string();
+        assert!(qr.starts_with("CPPAIR1."), "QR must use the v1 magic: {qr}");
+
+        // Step 0b: Device A scans + decodes the QR and derives the PAKE password.
+        let payload = copypaste_core::PairingPayload::decode(&qr)
+            .expect("scanning device must decode the QR");
+        let password = payload.token.to_pake_password();
+        // The fingerprint A pins is the one carried in the QR (B's fingerprint).
+        let fp_b = payload.fingerprint.clone();
+        assert!(!fp_b.is_empty(), "QR must carry B's fingerprint");
+
+        // Step 1: Device A initiates using the QR-derived password.
+        let body = format!(
+            r#"{{"id":"qr1","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{fp_b}","password":"{password}","step":"initiate"}}}}"#
+        );
+        let resp = call(&sock_a, &body).await;
+        assert_eq!(resp["ok"], true, "initiate failed: {resp}");
+        let session_id_a = resp["data"]["session_id"].as_str().unwrap().to_string();
+        let msg1_b64 = resp["data"]["message1_b64"].as_str().unwrap().to_string();
+
+        // Step 2: Device B accepts via pair_accept_qr (looks up its stored token).
+        let body = format!(
+            r#"{{"id":"qr2","method":"pair_accept_qr","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"{fp_a}"}}}}"#
+        );
+        let resp = call(&sock_b, &body).await;
+        assert_eq!(resp["ok"], true, "pair_accept_qr failed: {resp}");
+        let session_id_b = resp["data"]["session_id"].as_str().unwrap().to_string();
+        let msg2_b64 = resp["data"]["message2_b64"].as_str().unwrap().to_string();
+
+        // Step 3: Device A finishes.
+        let body = format!(
+            r#"{{"id":"qr3","method":"pair_peer_with_password","params":{{"step":"finish","session_id":"{session_id_a}","message2_b64":"{msg2_b64}","peer_fingerprint":"{fp_b}","password":"{password}"}}}}"#
+        );
+        let resp = call(&sock_a, &body).await;
+        assert_eq!(resp["ok"], true, "initiator finish failed: {resp}");
+        let msg3_b64 = resp["data"]["message3_b64"].as_str().unwrap().to_string();
+
+        // Step 4: Device B finishes — the OPAQUE authenticator must validate,
+        // proving both sides agreed on the QR token as the shared secret.
+        let body = format!(
+            r#"{{"id":"qr4","method":"pair_accept_finish","params":{{"session_id":"{session_id_b}","message3_b64":"{msg3_b64}","peer_fingerprint":"{fp_a}"}}}}"#
+        );
+        let resp = call(&sock_b, &body).await;
+        assert_eq!(resp["ok"], true, "responder finish failed: {resp}");
+        assert_eq!(resp["data"]["ok"], true, "pair_accept_finish must succeed");
+    }
+
+    /// `pair_accept_qr` with no prior `pair_generate_qr` must be rejected
+    /// rather than registering an empty/garbage PasswordFile.
+    #[tokio::test]
+    async fn pair_accept_qr_without_token_is_rejected() {
+        use base64::Engine as _;
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        let sock = dir.path().join("test-qr-notoken.sock");
+        start_test_server(&sock).await;
+
+        let fp = "a1:b2:c3:d4:e5:f6:07:18:29:3a:4b:5c:6d:7e:8f:90:a1:b2:c3:d4:e5:f6:07:18:29:3a:4b:5c:6d:7e:8f:90";
+        let msg1 = base64::engine::general_purpose::STANDARD.encode([0u8; 32]);
+        let body = format!(
+            r#"{{"id":"nt1","method":"pair_accept_qr","params":{{"message1_b64":"{msg1}","peer_fingerprint":"{fp}"}}}}"#
+        );
+        let resp = call_one(&sock, &body).await;
+        assert_eq!(
+            resp["ok"], false,
+            "pair_accept_qr without a generated token must fail: {resp}"
         );
     }
 

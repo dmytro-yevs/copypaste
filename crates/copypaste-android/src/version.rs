@@ -28,7 +28,13 @@
 /// the Argon2id-derived SyncKey and XChaCha20-Poly1305 AEAD (schema v5)
 /// used by the macOS daemon, enabling end-to-end Supabase sync from Android.
 /// Kotlin generated against ABI 3 lacks these symbols and must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 4;
+///
+/// **ABI 5 (QR pairing):** Added `build_pairing_qr` / `parse_pairing_qr` plus
+/// the `PairingQrPayload` / `ScannedPairing` records. These expose the
+/// `copypaste-core` QR pairing payload (a transport for the existing PAKE
+/// material — no new crypto). Kotlin generated against ABI 4 lacks these
+/// symbols and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 5;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

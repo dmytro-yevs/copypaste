@@ -134,6 +134,16 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Display a QR code other devices can scan to pair with this one.
+    ///
+    /// Asks the daemon for a fresh, short-lived pairing token and renders it as
+    /// a QR code in the terminal. Scan it from the CopyPaste Android app (or
+    /// another desktop) to complete pairing automatically — no typing a code.
+    PairQr {
+        /// Print the raw payload string instead of rendering the QR code.
+        #[arg(long)]
+        raw: bool,
+    },
     /// Reclaim free pages (VACUUM) and rebuild indexes (REINDEX) in the local DB
     ///
     /// Daemon MUST be stopped first — VACUUM takes an exclusive lock.
@@ -231,6 +241,7 @@ fn main() {
             force,
             dry_run,
         } => commands::backup::run_restore(&socket, &path, force, dry_run),
+        Commands::PairQr { raw } => commands::pair_qr::run(&socket, raw),
         Commands::Vacuum {
             dry_run,
             reindex_only,

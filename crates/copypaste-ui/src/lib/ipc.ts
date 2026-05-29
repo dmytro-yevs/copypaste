@@ -116,6 +116,15 @@ export const api = {
   getItemImage: (id: string) => ipcCall<{ data_uri: string }>("get_item_image", { id }),
 
   getOwnFingerprint: () => ipcCall<{ fingerprint: string }>("get_own_fingerprint"),
+  /**
+   * Ask the daemon for a fresh QR pairing payload. The returned `qr` string is
+   * the `copypaste-core` pairing payload (`CPPAIR1.…`) another device scans to
+   * pair automatically; `expires_in_secs` is how long the embedded token stays
+   * valid. The QR is a transport for the existing PAKE pairing material — no
+   * new crypto.
+   */
+  generatePairingQr: () =>
+    ipcCall<{ qr: string; expires_in_secs: number }>("pair_generate_qr", {}),
   listPeers: () => ipcCall<{ peers: PairedDevice[] }>("list_peers"),
   pairWithPassword: (peer_fingerprint: string, password: string) =>
     ipcCall("pair_peer_with_password", { peer_fingerprint, password }),
@@ -153,6 +162,30 @@ export async function getPopupShortcut(): Promise<string> {
 export async function setPopupShortcut(accelerator: string): Promise<void> {
   try {
     await invoke<void>("set_popup_shortcut", { accelerator });
+  } catch (e) {
+    throw new Error(String(e));
+  }
+}
+
+/** Result of {@link pairingQrSvg}. */
+export interface PairingQr {
+  /** Inline SVG markup of the pairing QR code. */
+  svg: string;
+  /** Raw `CPPAIR1.…` payload string (copy/fallback target). */
+  payload: string;
+  /** Seconds until the embedded pairing token expires. */
+  expires_in_secs: number;
+}
+
+/**
+ * Generate a scannable pairing QR for this device. The Tauri backend asks the
+ * daemon for a fresh pairing token and renders it as an inline SVG. Scanning it
+ * from another device pairs automatically. Throws a plain `Error` on failure
+ * (e.g. the daemon being offline). This calls the Tauri command directly.
+ */
+export async function pairingQrSvg(): Promise<PairingQr> {
+  try {
+    return await invoke<PairingQr>("pairing_qr_svg");
   } catch (e) {
     throw new Error(String(e));
   }

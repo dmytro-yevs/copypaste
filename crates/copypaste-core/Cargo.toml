@@ -37,6 +37,10 @@ tracing-appender = "0.2"
 thiserror.workspace = true
 uuid.workspace = true
 image.workspace = true
+# QR pairing payload: base64url field encoding + constant-time token compare.
+# Both are already in the workspace Cargo.lock via other crates.
+base64.workspace = true
+subtle.workspace = true
 
 [dev-dependencies]
 # Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+

@@ -69,10 +69,11 @@ private external fun uniffiOpenDatabase(path: String, key: ByteArray): Long
 private external fun uniffiCloseDatabase(handle: Long)
 private external fun uniffiAddClipboardItem(dbPath: String, key: ByteArray, text: String): String
 private external fun uniffiGetHistoryCount(dbPath: String, key: ByteArray): Long
-// Pairing stub — real UDL function will be `start_pairing() -> string` returning
-// a QR-encodable token. Native binding not yet wired; Kotlin returns a fake
-// token so the PairActivity flow can be exercised on devices without the .so.
-private external fun uniffiStartPairing(): String
+// QR pairing is provided by the generated UniFFI bindings (ABI 5):
+// `buildPairingQr` / `parsePairingQr` in the
+// `com.copypaste.generated.uniffi.copypaste_android` package. We delegate to
+// them directly (see startPairing / parsePairing below) rather than declaring
+// separate `external fun`s.
 
 // ---------------------------------------------------------------------------
 // Public API — matches UDL, wraps JNI calls with stub fallback.
@@ -310,29 +311,55 @@ fun cloud_decrypt(itemId: String, blob: ByteArray, syncKeyBytes: ByteArray): Byt
 }
 
 /**
- * Begin device pairing. When the native binding lands this will return a
- * QR-encodable string containing the device id + ephemeral pairing token
- * (see ADR for pairing flow). For now, if the .so is unavailable we emit a
- * deterministic fake token so the [PairActivity] UI can be exercised end-to-end
- * on developer devices without the Rust core present.
- *
- * Format (stub): `copypaste-pair://stub/<random-hex-16>`
+ * Result of [startPairing]: the encoded QR payload to display plus the PAKE
+ * password derived from its single-use token. The displaying device must use
+ * [pakePassword] when it answers the scanning device's PAKE handshake.
  */
-fun startPairing(): String {
+data class PairingQrResult(val qr: String, val pakePassword: String)
+
+/**
+ * Begin device pairing (display side). Builds a QR payload via the Rust core
+ * (`buildPairingQr`) containing [deviceId] as the device identifier, a fresh
+ * single-use token, and metadata. The QR is purely a transport for the existing
+ * PAKE pairing material — no new crypto. Render [PairingQrResult.qr] as a QR
+ * code; the scanning device reads it and drives the password-authenticated
+ * handshake.
+ *
+ * If the native .so is unavailable, returns a deterministic stub payload so the
+ * [PairActivity] UI can still be exercised on devices without the Rust core.
+ */
+fun startPairing(deviceId: String, deviceName: String): PairingQrResult {
     if (!isNativeLibraryLoaded) {
-        Log.w(TAG, "startPairing: stub — returning fake QR token")
+        Log.w(TAG, "startPairing: stub — native library not loaded")
         val hex = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
-        return "copypaste-pair://stub/$hex"
+        return PairingQrResult(qr = "copypaste-pair://stub/$hex", pakePassword = hex)
     }
     return try {
-        uniffiStartPairing()
-    } catch (_: UnsatisfiedLinkError) {
-        Log.w(TAG, "startPairing: native symbol missing — falling back to stub")
-        val hex = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
-        "copypaste-pair://stub/$hex"
+        val payload = uniffi.copypaste_android.buildPairingQr(
+            fingerprint = deviceId,
+            deviceId = deviceId,
+            deviceName = deviceName,
+            addrHint = "",
+        )
+        PairingQrResult(qr = payload.qr, pakePassword = payload.pakePassword)
     } catch (e: Exception) {
         Log.w(TAG, "startPairing: native call threw — falling back to stub: ${e.message}")
         val hex = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
-        "copypaste-pair://stub/$hex"
+        PairingQrResult(qr = "copypaste-pair://stub/$hex", pakePassword = hex)
     }
+}
+
+/**
+ * Parse a scanned QR payload (scan side). Returns the peer's pairing material —
+ * fingerprint, device id/name, optional address hint, and the PAKE password to
+ * feed into the initiator handshake. Throws [CopypasteException] if the payload
+ * is malformed or uses an unsupported version, or [IllegalStateException] if the
+ * native library is not loaded.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun parsePairing(payload: String): uniffi.copypaste_android.ScannedPairing {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; parsePairing is unavailable")
+    }
+    return uniffi.copypaste_android.parsePairingQr(payload)
 }

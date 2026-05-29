@@ -191,6 +191,73 @@ pub fn cloud_decrypt(
     })
 }
 
+// ── QR device pairing ───────────────────────────────────────────────────────
+//
+// The QR code is purely a transport for the existing PAKE pairing material.
+// `pake_password` is the base64url rendering of the single-use token; it is fed
+// into the existing password-authenticated pairing flow in place of the
+// manually-typed code, preserving every property of that handshake.
+
+/// FFI result of [`build_pairing_qr`].
+pub struct PairingQrPayload {
+    pub qr: String,
+    pub pake_password: String,
+}
+
+/// FFI result of [`parse_pairing_qr`].
+pub struct ScannedPairing {
+    pub fingerprint: String,
+    pub device_id: String,
+    pub device_name: String,
+    pub addr_hint: String,
+    pub pake_password: String,
+}
+
+/// Build a QR pairing payload (display side). Generates a fresh single-use
+/// token internally and returns both the encoded QR string and the PAKE
+/// password derived from that token.
+pub fn build_pairing_qr(
+    fingerprint: String,
+    device_id: String,
+    device_name: String,
+    addr_hint: String,
+) -> Result<PairingQrPayload, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let payload =
+            copypaste_core::PairingPayload::new(fingerprint, device_id, device_name, addr_hint)
+                .map_err(|e| CopypasteError::DecryptionFailed {
+                    message: e.to_string(),
+                })?;
+        let pake_password = payload.token.to_pake_password();
+        let qr = payload.encode();
+        Ok(PairingQrPayload { qr, pake_password })
+    })
+}
+
+/// Parse a scanned QR payload (scan side). Returns the peer pairing material,
+/// including the PAKE password to drive the initiator handshake.
+///
+/// A malformed or unsupported-version payload yields
+/// [`CopypasteError::DecryptionFailed`] (reused as the generic parse error so
+/// no new FFI error variant / ABI break is needed).
+pub fn parse_pairing_qr(payload: String) -> Result<ScannedPairing, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let parsed = copypaste_core::PairingPayload::decode(&payload).map_err(|e| {
+            CopypasteError::DecryptionFailed {
+                message: e.to_string(),
+            }
+        })?;
+        let pake_password = parsed.token.to_pake_password();
+        Ok(ScannedPairing {
+            fingerprint: parsed.fingerprint,
+            device_id: parsed.device_id,
+            device_name: parsed.device_name,
+            addr_hint: parsed.addr_hint,
+            pake_password,
+        })
+    })
+}
+
 // Database handle table. OnceLock is stable on Rust 1.70+ (our MSRV is 1.75).
 static DB_HANDLES: OnceLock<Mutex<HashMap<u64, copypaste_core::Database>>> = OnceLock::new();
 static NEXT_HANDLE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);

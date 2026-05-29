@@ -702,6 +702,26 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -717,18 +737,38 @@ internal interface UniffiLib : Library {
         
     }
 
+    fun uniffi_copypaste_android_fn_func_add_clipboard_item(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_build_pairing_qr(`fingerprint`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`addrHint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_check_compatibility(`kotlinAbiVersion`: Int,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_copypaste_android_fn_func_close_database(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_copypaste_android_fn_func_decrypt_text(`ciphertext`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_cloud_decrypt(`itemId`: RustBuffer.ByValue,`blob`: RustBuffer.ByValue,`syncKeyBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_copypaste_android_fn_func_encrypt_text(`bytes`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_cloud_encrypt(`itemId`: RustBuffer.ByValue,`plaintext`: RustBuffer.ByValue,`syncKeyBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_core_version(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_decrypt_text(`itemId`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_derive_cloud_sync_key(`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_encrypt_text(`itemId`: RustBuffer.ByValue,`bytes`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_get_history_count(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     fun uniffi_copypaste_android_fn_func_is_sensitive(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_copypaste_android_fn_func_open_database(`path`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    fun uniffi_copypaste_android_fn_func_parse_pairing_qr(`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_sensitive_kind(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_uniffi_abi_version(uniffi_out_err: UniffiRustCallStatus, 
+    ): Int
     fun ffi_copypaste_android_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_copypaste_android_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -841,17 +881,37 @@ internal interface UniffiLib : Library {
     ): Unit
     fun ffi_copypaste_android_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_copypaste_android_checksum_func_add_clipboard_item(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_build_pairing_qr(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_check_compatibility(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_close_database(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_cloud_decrypt(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_cloud_encrypt(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_core_version(
     ): Short
     fun uniffi_copypaste_android_checksum_func_decrypt_text(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_derive_cloud_sync_key(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_encrypt_text(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_get_history_count(
     ): Short
     fun uniffi_copypaste_android_checksum_func_is_sensitive(
     ): Short
     fun uniffi_copypaste_android_checksum_func_open_database(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_parse_pairing_qr(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_sensitive_kind(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_uniffi_abi_version(
     ): Short
     fun ffi_copypaste_android_uniffi_contract_version(
     ): Int
@@ -870,13 +930,37 @@ private fun uniffiCheckContractApiVersion(lib: UniffiLib) {
 
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: UniffiLib) {
+    if (lib.uniffi_copypaste_android_checksum_func_add_clipboard_item() != 1001.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_build_pairing_qr() != 8917.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_check_compatibility() != 4328.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_copypaste_android_checksum_func_close_database() != 50151.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_decrypt_text() != 15160.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_cloud_decrypt() != 33830.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_encrypt_text() != 23788.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_cloud_encrypt() != 36592.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_core_version() != 36895.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_decrypt_text() != 62492.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_derive_cloud_sync_key() != 34994.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_encrypt_text() != 17889.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_get_history_count() != 4701.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_is_sensitive() != 38750.toShort()) {
@@ -885,7 +969,13 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_open_database() != 37477.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_copypaste_android_checksum_func_parse_pairing_qr() != 38365.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_copypaste_android_checksum_func_sensitive_kind() != 9170.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_uniffi_abi_version() != 6036.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -945,6 +1035,26 @@ public object FfiConverterUByte: FfiConverter<UByte, Byte> {
 
     override fun write(value: UByte, buf: ByteBuffer) {
         buf.put(value.toByte())
+    }
+}
+
+public object FfiConverterUInt: FfiConverter<UInt, Int> {
+    override fun lift(value: Int): UInt {
+        return value.toUInt()
+    }
+
+    override fun read(buf: ByteBuffer): UInt {
+        return lift(buf.getInt())
+    }
+
+    override fun lower(value: UInt): Int {
+        return value.toInt()
+    }
+
+    override fun allocationSize(value: UInt) = 4UL
+
+    override fun write(value: UInt, buf: ByteBuffer) {
+        buf.putInt(value.toInt())
     }
 }
 
@@ -1073,6 +1183,76 @@ public object FfiConverterTypeEncryptedBlob: FfiConverterRustBuffer<EncryptedBlo
 
 
 
+data class PairingQrPayload (
+    var `qr`: kotlin.String, 
+    var `pakePassword`: kotlin.String
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypePairingQrPayload: FfiConverterRustBuffer<PairingQrPayload> {
+    override fun read(buf: ByteBuffer): PairingQrPayload {
+        return PairingQrPayload(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PairingQrPayload) = (
+            FfiConverterString.allocationSize(value.`qr`) +
+            FfiConverterString.allocationSize(value.`pakePassword`)
+    )
+
+    override fun write(value: PairingQrPayload, buf: ByteBuffer) {
+            FfiConverterString.write(value.`qr`, buf)
+            FfiConverterString.write(value.`pakePassword`, buf)
+    }
+}
+
+
+
+data class ScannedPairing (
+    var `fingerprint`: kotlin.String, 
+    var `deviceId`: kotlin.String, 
+    var `deviceName`: kotlin.String, 
+    var `addrHint`: kotlin.String, 
+    var `pakePassword`: kotlin.String
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeScannedPairing: FfiConverterRustBuffer<ScannedPairing> {
+    override fun read(buf: ByteBuffer): ScannedPairing {
+        return ScannedPairing(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ScannedPairing) = (
+            FfiConverterString.allocationSize(value.`fingerprint`) +
+            FfiConverterString.allocationSize(value.`deviceId`) +
+            FfiConverterString.allocationSize(value.`deviceName`) +
+            FfiConverterString.allocationSize(value.`addrHint`) +
+            FfiConverterString.allocationSize(value.`pakePassword`)
+    )
+
+    override fun write(value: ScannedPairing, buf: ByteBuffer) {
+            FfiConverterString.write(value.`fingerprint`, buf)
+            FfiConverterString.write(value.`deviceId`, buf)
+            FfiConverterString.write(value.`deviceName`, buf)
+            FfiConverterString.write(value.`addrHint`, buf)
+            FfiConverterString.write(value.`pakePassword`, buf)
+    }
+}
+
+
+
 
 
 sealed class CopypasteException: Exception() {
@@ -1084,25 +1264,33 @@ sealed class CopypasteException: Exception() {
     }
     
     class DecryptionFailed(
-
-        val `messageText`: kotlin.String
+        
+        val `message`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `messageText` }"
+            get() = "message=${ `message` }"
     }
-
+    
     class DatabaseException(
-
-        val `messageText`: kotlin.String
+        
+        val `message`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `messageText` }"
+            get() = "message=${ `message` }"
     }
     
     class InvalidKeyLength(
         ) : CopypasteException() {
         override val message
             get() = ""
+    }
+    
+    class Panicked(
+        
+        val `message`: kotlin.String
+        ) : CopypasteException() {
+        override val message
+            get() = "message=${ `message` }"
     }
     
 
@@ -1126,6 +1314,9 @@ public object FfiConverterTypeCopypasteError : FfiConverterRustBuffer<CopypasteE
                 FfiConverterString.read(buf),
                 )
             4 -> CopypasteException.InvalidKeyLength()
+            5 -> CopypasteException.Panicked(
+                FfiConverterString.read(buf),
+                )
             else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
         }
     }
@@ -1150,6 +1341,11 @@ public object FfiConverterTypeCopypasteError : FfiConverterRustBuffer<CopypasteE
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
             )
+            is CopypasteException.Panicked -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterString.allocationSize(value.`message`)
+            )
         }
     }
 
@@ -1171,6 +1367,72 @@ public object FfiConverterTypeCopypasteError : FfiConverterRustBuffer<CopypasteE
             }
             is CopypasteException.InvalidKeyLength -> {
                 buf.putInt(4)
+                Unit
+            }
+            is CopypasteException.Panicked -> {
+                buf.putInt(5)
+                FfiConverterString.write(value.`message`, buf)
+                Unit
+            }
+        }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
+    }
+
+}
+
+
+
+
+
+sealed class VersionException: Exception() {
+    
+    class Incompatible(
+        
+        val `rustAbi`: kotlin.UInt, 
+        
+        val `kotlinAbi`: kotlin.UInt
+        ) : VersionException() {
+        override val message
+            get() = "rustAbi=${ `rustAbi` }, kotlinAbi=${ `kotlinAbi` }"
+    }
+    
+
+    companion object ErrorHandler : UniffiRustCallStatusErrorHandler<VersionException> {
+        override fun lift(error_buf: RustBuffer.ByValue): VersionException = FfiConverterTypeVersionError.lift(error_buf)
+    }
+
+    
+}
+
+public object FfiConverterTypeVersionError : FfiConverterRustBuffer<VersionException> {
+    override fun read(buf: ByteBuffer): VersionException {
+        
+
+        return when(buf.getInt()) {
+            1 -> VersionException.Incompatible(
+                FfiConverterUInt.read(buf),
+                FfiConverterUInt.read(buf),
+                )
+            else -> throw RuntimeException("invalid error enum value, something is very wrong!!")
+        }
+    }
+
+    override fun allocationSize(value: VersionException): ULong {
+        return when(value) {
+            is VersionException.Incompatible -> (
+                // Add the size for the Int that specifies the variant plus the size needed for all fields
+                4UL
+                + FfiConverterUInt.allocationSize(value.`rustAbi`)
+                + FfiConverterUInt.allocationSize(value.`kotlinAbi`)
+            )
+        }
+    }
+
+    override fun write(value: VersionException, buf: ByteBuffer) {
+        when(value) {
+            is VersionException.Incompatible -> {
+                buf.putInt(1)
+                FfiConverterUInt.write(value.`rustAbi`, buf)
+                FfiConverterUInt.write(value.`kotlinAbi`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }
@@ -1230,7 +1492,43 @@ public object FfiConverterSequenceUByte: FfiConverterRustBuffer<List<kotlin.UByt
             FfiConverterUByte.write(it, buf)
         }
     }
-} fun `closeDatabase`(`handle`: kotlin.ULong)
+}
+    @Throws(CopypasteException::class) fun `addClipboardItem`(`dbPath`: kotlin.String, `key`: List<kotlin.UByte>, `text`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_add_clipboard_item(
+        FfiConverterString.lower(`dbPath`),FfiConverterSequenceUByte.lower(`key`),FfiConverterString.lower(`text`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Build a QR pairing payload for this device (display side). Generates a
+         * fresh single-use token internally. Returns the encoded `qr` string to
+         * render plus the `pake_password` derived from the token — the displaying
+         * device must use that same password when it answers the scanner's PAKE
+         * handshake. `addr_hint` may be empty (mDNS-only discovery).
+         */
+    @Throws(CopypasteException::class) fun `buildPairingQr`(`fingerprint`: kotlin.String, `deviceId`: kotlin.String, `deviceName`: kotlin.String, `addrHint`: kotlin.String): PairingQrPayload {
+            return FfiConverterTypePairingQrPayload.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_build_pairing_qr(
+        FfiConverterString.lower(`fingerprint`),FfiConverterString.lower(`deviceId`),FfiConverterString.lower(`deviceName`),FfiConverterString.lower(`addrHint`),_status)
+}
+    )
+    }
+    
+
+    @Throws(VersionException::class) fun `checkCompatibility`(`kotlinAbiVersion`: kotlin.UInt)
+        = 
+    uniffiRustCallWithError(VersionException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_check_compatibility(
+        FfiConverterUInt.lower(`kotlinAbiVersion`),_status)
+}
+    
+    
+ fun `closeDatabase`(`handle`: kotlin.ULong)
         = 
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_close_database(
@@ -1239,21 +1537,85 @@ public object FfiConverterSequenceUByte: FfiConverterRustBuffer<List<kotlin.UByt
     
     
 
-    @Throws(CopypasteException::class) fun `decryptText`(`ciphertext`: List<kotlin.UByte>, `nonce`: List<kotlin.UByte>, `key`: List<kotlin.UByte>): List<kotlin.UByte> {
+        /**
+         * Decrypt a cloud blob (raw nonce||ciphertext bytes, base64-decoded).
+         * `item_id` must match the value used during encryption.
+         * Returns plaintext bytes on success.
+         */
+    @Throws(CopypasteException::class) fun `cloudDecrypt`(`itemId`: kotlin.String, `blob`: List<kotlin.UByte>, `syncKeyBytes`: List<kotlin.UByte>): List<kotlin.UByte> {
             return FfiConverterSequenceUByte.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
-    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_decrypt_text(
-        FfiConverterSequenceUByte.lower(`ciphertext`),FfiConverterSequenceUByte.lower(`nonce`),FfiConverterSequenceUByte.lower(`key`),_status)
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_cloud_decrypt(
+        FfiConverterString.lower(`itemId`),FfiConverterSequenceUByte.lower(`blob`),FfiConverterSequenceUByte.lower(`syncKeyBytes`),_status)
 }
     )
     }
     
 
-    @Throws(CopypasteException::class) fun `encryptText`(`bytes`: List<kotlin.UByte>, `key`: List<kotlin.UByte>): EncryptedBlob {
+        /**
+         * Encrypt `plaintext` with the sync key, bound to `item_id` via AAD.
+         * Returns raw bytes: nonce[24] || ciphertext_with_tag (NOT base64).
+         * Caller must base64-encode before storing in `payload_ct`.
+         */
+    @Throws(CopypasteException::class) fun `cloudEncrypt`(`itemId`: kotlin.String, `plaintext`: List<kotlin.UByte>, `syncKeyBytes`: List<kotlin.UByte>): List<kotlin.UByte> {
+            return FfiConverterSequenceUByte.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_cloud_encrypt(
+        FfiConverterString.lower(`itemId`),FfiConverterSequenceUByte.lower(`plaintext`),FfiConverterSequenceUByte.lower(`syncKeyBytes`),_status)
+}
+    )
+    }
+    
+ fun `coreVersion`(): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_core_version(
+        _status)
+}
+    )
+    }
+    
+
+    @Throws(CopypasteException::class) fun `decryptText`(`itemId`: kotlin.String, `ciphertext`: List<kotlin.UByte>, `nonce`: List<kotlin.UByte>, `key`: List<kotlin.UByte>): List<kotlin.UByte> {
+            return FfiConverterSequenceUByte.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_decrypt_text(
+        FfiConverterString.lower(`itemId`),FfiConverterSequenceUByte.lower(`ciphertext`),FfiConverterSequenceUByte.lower(`nonce`),FfiConverterSequenceUByte.lower(`key`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Derive the 32-byte shared sync key from `passphrase` (Argon2id).
+         * Deterministic: same passphrase → same key on every device.
+         * Returns raw 32-byte key material. Caller MUST NOT persist to disk.
+         */
+    @Throws(CopypasteException::class) fun `deriveCloudSyncKey`(`passphrase`: kotlin.String): List<kotlin.UByte> {
+            return FfiConverterSequenceUByte.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_derive_cloud_sync_key(
+        FfiConverterString.lower(`passphrase`),_status)
+}
+    )
+    }
+    
+
+    @Throws(CopypasteException::class) fun `encryptText`(`itemId`: kotlin.String, `bytes`: List<kotlin.UByte>, `key`: List<kotlin.UByte>): EncryptedBlob {
             return FfiConverterTypeEncryptedBlob.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_encrypt_text(
-        FfiConverterSequenceUByte.lower(`bytes`),FfiConverterSequenceUByte.lower(`key`),_status)
+        FfiConverterString.lower(`itemId`),FfiConverterSequenceUByte.lower(`bytes`),FfiConverterSequenceUByte.lower(`key`),_status)
+}
+    )
+    }
+    
+
+    @Throws(CopypasteException::class) fun `getHistoryCount`(`dbPath`: kotlin.String, `key`: List<kotlin.UByte>): kotlin.ULong {
+            return FfiConverterULong.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_get_history_count(
+        FfiConverterString.lower(`dbPath`),FfiConverterSequenceUByte.lower(`key`),_status)
 }
     )
     }
@@ -1277,11 +1639,36 @@ public object FfiConverterSequenceUByte: FfiConverterRustBuffer<List<kotlin.UByt
     )
     }
     
+
+        /**
+         * Parse a scanned QR payload (scan side). Returns the peer's pairing info,
+         * including the `pake_password` to feed into the PAKE initiator flow.
+         * Throws `DecryptionFailed` (reused as a generic parse error) if the payload
+         * is malformed or uses an unsupported version.
+         */
+    @Throws(CopypasteException::class) fun `parsePairingQr`(`payload`: kotlin.String): ScannedPairing {
+            return FfiConverterTypeScannedPairing.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_parse_pairing_qr(
+        FfiConverterString.lower(`payload`),_status)
+}
+    )
+    }
+    
  fun `sensitiveKind`(`text`: kotlin.String): kotlin.String? {
             return FfiConverterOptionalString.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_sensitive_kind(
         FfiConverterString.lower(`text`),_status)
+}
+    )
+    }
+    
+ fun `uniffiAbiVersion`(): kotlin.UInt {
+            return FfiConverterUInt.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_uniffi_abi_version(
+        _status)
 }
     )
     }
