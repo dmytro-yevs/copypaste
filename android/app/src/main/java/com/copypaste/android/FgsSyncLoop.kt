@@ -41,9 +41,11 @@ import kotlinx.coroutines.withContext
  *
  * ## Interval tuning
  * - POLL_INTERVAL_MS = 60_000 (1 min) while the FGS is alive and network is up.
- * - RETRY_BACKOFF_MS = 30_000 (30 s) after a transient network error.
- * - IDLE_POLL_INTERVAL_MS = 300_000 (5 min) when the FGS is alive but screen
- *   has been off for > IDLE_THRESHOLD_MS (battery courtesy for long idle periods).
+ * - RETRY_BACKOFF_BASE_MS = 30_000 (30 s) — first retry after a transient error;
+ *   doubles each consecutive failure up to RETRY_BACKOFF_MAX_MS (real exponential
+ *   backoff, reset to 0 failures on the first success).
+ * - IDLE_POLL_INTERVAL_MS = 300_000 (5 min) after IDLE_THRESHOLD_POLLS empty polls
+ *   (battery courtesy for long idle periods).
  *
  * Note: this class does NOT hold an explicit WakeLock. Foreground services
  * on Android 8+ implicitly prevent CPU sleep while the FGS notification is
@@ -62,15 +64,47 @@ class FgsSyncLoop(
         /** Normal poll interval when the FGS is running and network is available. */
         private const val POLL_INTERVAL_MS = 60_000L
 
-        /** Reduced poll interval when no new items arrived in the last poll
-         *  (exponential back-off cap — save battery when nothing is changing). */
+        /** Reduced poll interval after several consecutive empty polls — save
+         *  battery when nothing is changing. */
         private const val IDLE_POLL_INTERVAL_MS = 300_000L
 
-        /** Backoff delay after a transient network failure. */
-        private const val RETRY_BACKOFF_MS = 30_000L
+        /** First retry delay after a transient network failure; doubled per
+         *  consecutive failure up to [RETRY_BACKOFF_MAX_MS]. */
+        private const val RETRY_BACKOFF_BASE_MS = 30_000L
+
+        /** Upper bound on the exponential retry backoff. */
+        private const val RETRY_BACKOFF_MAX_MS = 480_000L // 8 min
 
         /** How many consecutive empty polls before we slow down to IDLE interval. */
         private const val IDLE_THRESHOLD_POLLS = 3
+
+        /**
+         * M6: pure exponential-backoff computation, extracted so it can be unit
+         * tested on the JVM without Android. [failures] is the number of
+         * consecutive failures *including* the one that just occurred (>= 1).
+         *
+         * Returns base * 2^(failures-1), clamped to [RETRY_BACKOFF_MAX_MS].
+         * Guards against shift overflow for large failure counts.
+         */
+        fun backoffMs(
+            failures: Int,
+            base: Long = RETRY_BACKOFF_BASE_MS,
+            max: Long = RETRY_BACKOFF_MAX_MS,
+        ): Long {
+            if (failures <= 0) return 0L
+            // Cap the exponent so the shift cannot overflow Long; once the
+            // unclamped value would exceed `max` the result is `max` anyway.
+            val exponent = (failures - 1).coerceAtMost(40)
+            val scaled = base.toDouble() * (1L shl exponent).toDouble()
+            return if (scaled >= max.toDouble()) max else scaled.toLong()
+        }
+
+        /**
+         * M6: the steady-state poll interval given a run of [consecutiveEmpty]
+         * polls that produced no new items. Pure for unit testing.
+         */
+        fun intervalForEmptyStreak(consecutiveEmpty: Int): Long =
+            if (consecutiveEmpty >= IDLE_THRESHOLD_POLLS) IDLE_POLL_INTERVAL_MS else POLL_INTERVAL_MS
     }
 
     /**
@@ -82,41 +116,53 @@ class FgsSyncLoop(
         job = scope.launch(Dispatchers.IO) {
             Log.i(TAG, "FgsSyncLoop started")
             var consecutiveEmpty = 0
+            var consecutiveFailures = 0
 
             while (isActive) {
-                val interval = if (consecutiveEmpty >= IDLE_THRESHOLD_POLLS) {
-                    IDLE_POLL_INTERVAL_MS
+                // M6: poll FIRST, then delay. The previous loop delayed a full
+                // POLL_INTERVAL_MS *before* the first poll, so incoming sync was
+                // dead for the first minute after the FGS started.
+                //
+                // Skip the network call when sync is disabled/unconfigured, but
+                // still apply the normal interval (treated as an "empty" tick).
+                val enabled = settings.syncEnabled &&
+                    settings.syncBackend == SyncBackend.SUPABASE &&
+                    settings.isSupabaseConfigured
+
+                val nextDelay: Long
+                if (!enabled) {
+                    consecutiveEmpty++
+                    consecutiveFailures = 0
+                    nextDelay = intervalForEmptyStreak(consecutiveEmpty)
                 } else {
-                    POLL_INTERVAL_MS
+                    val newCount = try {
+                        poll()
+                    } catch (e: CancellationException) {
+                        throw e // let coroutine cancel normally
+                    } catch (e: Exception) {
+                        // M6: real exponential backoff. The old code did an
+                        // unconditional 30 s delay HERE and *then* delayed the
+                        // full interval at the top of the next loop (double
+                        // delay), while the comment falsely claimed exponential
+                        // backoff. Now a single backoff governs the next wait.
+                        consecutiveFailures++
+                        val backoff = backoffMs(consecutiveFailures)
+                        Log.w(TAG, "Poll failed (#$consecutiveFailures): ${e.message} — backing off ${backoff}ms")
+                        delay(backoff)
+                        if (!isActive) break
+                        continue // re-poll immediately after the backoff sleep
+                    }
+
+                    consecutiveFailures = 0
+                    consecutiveEmpty = if (newCount > 0) 0 else consecutiveEmpty + 1
+                    if (newCount > 0) {
+                        Log.d(TAG, "FgsSyncLoop: $newCount new item(s) stored")
+                    }
+                    nextDelay = intervalForEmptyStreak(consecutiveEmpty)
                 }
 
-                delay(interval)
+                delay(nextDelay)
                 if (!isActive) break
-
-                // Only run when Supabase sync is enabled and configured.
-                if (!settings.syncEnabled || settings.syncBackend != SyncBackend.SUPABASE) {
-                    consecutiveEmpty++
-                    continue
-                }
-                if (!settings.isSupabaseConfigured) {
-                    consecutiveEmpty++
-                    continue
-                }
-
-                val newCount = try {
-                    poll()
-                } catch (e: CancellationException) {
-                    throw e // let coroutine cancel normally
-                } catch (e: Exception) {
-                    Log.w(TAG, "Poll failed: ${e.message} — backing off ${RETRY_BACKOFF_MS}ms")
-                    delay(RETRY_BACKOFF_MS)
-                    0
-                }
-
-                consecutiveEmpty = if (newCount > 0) 0 else consecutiveEmpty + 1
-                if (newCount > 0) {
-                    Log.d(TAG, "FgsSyncLoop: $newCount new item(s) stored")
-                }
             }
             Log.i(TAG, "FgsSyncLoop stopped")
         }

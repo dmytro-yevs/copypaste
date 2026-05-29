@@ -654,6 +654,46 @@ fn db_handles() -> &'static Mutex<HashMap<u64, copypaste_core::Database>> {
     DB_HANDLES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+// M5: path-keyed cache of open `Database` connections for the *live* FFI calls
+// (`add_clipboard_item` / `get_history_count`). Previously each of those calls
+// did `Database::open(...)` — a full SQLCipher open (PRAGMA key + key
+// derivation + WAL setup) — and dropped the connection at function exit, i.e.
+// one open+close per clipboard event. We now open once per `db_path` and reuse
+// the connection for the life of the process.
+//
+// `Database` wraps a `rusqlite::Connection` (Send, !Sync) — serialising all
+// access behind this `Mutex` keeps it sound, exactly like the handle table.
+#[cfg(feature = "android-uniffi-live")]
+static DB_BY_PATH: OnceLock<Mutex<HashMap<String, copypaste_core::Database>>> = OnceLock::new();
+
+#[cfg(feature = "android-uniffi-live")]
+fn db_by_path() -> &'static Mutex<HashMap<String, copypaste_core::Database>> {
+    DB_BY_PATH.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Run `f` against the cached `Database` for `db_path`, opening (and caching)
+/// it on first use with `key`. The connection is reused across calls.
+#[cfg(feature = "android-uniffi-live")]
+fn with_cached_db<T>(
+    db_path: &str,
+    key: &[u8; 32],
+    f: impl FnOnce(&copypaste_core::Database) -> Result<T, CopypasteError>,
+) -> Result<T, CopypasteError> {
+    let mut map = db_by_path().lock().unwrap_or_else(|e| e.into_inner());
+    if !map.contains_key(db_path) {
+        let db =
+            copypaste_core::Database::open(std::path::Path::new(db_path), key).map_err(|e| {
+                CopypasteError::DatabaseError {
+                    message: e.to_string(),
+                }
+            })?;
+        map.insert(db_path.to_string(), db);
+    }
+    // Just inserted or already present → unwrap is safe.
+    let db = map.get(db_path).expect("db just inserted/present in cache");
+    f(db)
+}
+
 /// Open (or create) an encrypted SQLite database at `path` using the 32-byte `key`.
 /// Returns an opaque handle for subsequent calls.
 pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
@@ -724,12 +764,6 @@ pub fn add_clipboard_item(
             return Ok(String::new());
         }
 
-        let db = copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr).map_err(
-            |e| CopypasteError::DatabaseError {
-                message: e.to_string(),
-            },
-        )?;
-
         // v0.3: pre-generate item_id so the AAD baked into the ciphertext matches
         // the value persisted in the row — decryption later rebuilds the AAD from
         // the stored item_id (AAD_SCHEMA_VERSION = 3). Legacy empty-AAD fallback
@@ -749,8 +783,11 @@ pub fn add_clipboard_item(
         item.item_id = item_id;
         let id = item.id.clone();
 
-        copypaste_core::insert_item(&db, &item).map_err(|e| CopypasteError::DatabaseError {
-            message: e.to_string(),
+        // M5: reuse a cached connection instead of open-per-call.
+        with_cached_db(&db_path, &key_arr, |db| {
+            copypaste_core::insert_item(db, &item).map_err(|e| CopypasteError::DatabaseError {
+                message: e.to_string(),
+            })
         })?;
 
         Ok(id)
@@ -782,13 +819,11 @@ pub fn get_history_count(db_path: String, key: &[u8]) -> Result<u64, CopypasteEr
         let key_arr: [u8; 32] = key
             .try_into()
             .map_err(|_| CopypasteError::InvalidKeyLength)?;
-        let db = copypaste_core::Database::open(std::path::Path::new(&db_path), &key_arr).map_err(
-            |e| CopypasteError::DatabaseError {
+        // M5: reuse a cached connection instead of open-per-call.
+        let n = with_cached_db(&db_path, &key_arr, |db| {
+            copypaste_core::count_items(db).map_err(|e| CopypasteError::DatabaseError {
                 message: e.to_string(),
-            },
-        )?;
-        let n = copypaste_core::count_items(&db).map_err(|e| CopypasteError::DatabaseError {
-            message: e.to_string(),
+            })
         })?;
         Ok(n.max(0) as u64)
     })
@@ -901,6 +936,36 @@ mod tests {
 
         let n = get_history_count(path.to_string_lossy().into_owned(), &key).expect("count");
         assert_eq!(n, 1);
+    }
+
+    /// M5: repeated inserts on the same db_path must reuse one cached
+    /// connection (no open-per-call) and the count must accumulate correctly
+    /// through that shared handle.
+    #[cfg(feature = "android-uniffi-live")]
+    #[test]
+    fn live_calls_reuse_cached_connection() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("reuse.db").to_string_lossy().into_owned();
+        let key = test_key();
+
+        for i in 0..5 {
+            let id = add_clipboard_item(path.clone(), &key, format!("item {i}")).expect("insert");
+            assert!(!id.is_empty(), "real insert returns a uuid");
+        }
+
+        // Every call above (and this count) went through with_cached_db for the
+        // same path, so the same Database connection serviced all of them.
+        let n = get_history_count(path.clone(), &key).expect("count");
+        assert_eq!(n, 5, "all 5 inserts visible through the reused connection");
+
+        // The path is cached after first use.
+        assert!(
+            db_by_path()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&path),
+            "db_path must be cached after first live call"
+        );
     }
 
     #[cfg(feature = "android-uniffi-live")]

@@ -141,6 +141,8 @@ dependencies {
     implementation(libs.material)
     implementation(libs.kotlinx.coroutines.android)
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
+    // M7: Activity.lifecycleScope for auto-cancelled clipboard coroutines.
+    implementation(libs.lifecycle.runtime.ktx)
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 
     // Compose BOM — manages versions of all compose libs.
@@ -173,6 +175,9 @@ dependencies {
     // (android-embedded) so another device's QR can be read to pair.
     implementation(libs.zxing.core)
     implementation(libs.zxing.embedded)
+
+    // Local JVM unit tests (src/test) — pure-logic backoff/interval math.
+    testImplementation("junit:junit:4.13.2")
 
     // Instrumented tests (androidTest) — cross-language crypto conformance.
     // AndroidX Test runner + ext-junit drive CryptoConformanceTest on a device
