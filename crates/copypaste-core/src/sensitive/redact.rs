@@ -26,9 +26,15 @@ pub fn redact(text: &str, matches: &[PatternMatch]) -> String {
     let merged = merge_spans(spans);
 
     // Build output by stitching literal segments with REDACTED placeholders.
+    // Span bounds are snapped to UTF-8 char boundaries before slicing: a
+    // caller passing un-normalised offsets that land mid-codepoint would
+    // otherwise panic on `text[..]`. Snapping outward keeps the redaction
+    // conservative (it can only ever cover *more* of the matched bytes).
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0usize;
     for (start, end) in merged {
+        let start = floor_char_boundary(text, start);
+        let end = ceil_char_boundary(text, end);
         if start > cursor {
             out.push_str(&text[cursor..start]);
         }
@@ -39,6 +45,25 @@ pub fn redact(text: &str, matches: &[PatternMatch]) -> String {
         out.push_str(&text[cursor..]);
     }
     out
+}
+
+/// Largest char boundary `<= i` (clamped to `text.len()`).
+fn floor_char_boundary(text: &str, i: usize) -> usize {
+    let mut i = i.min(text.len());
+    while i > 0 && !text.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Smallest char boundary `>= i` (clamped to `text.len()`).
+fn ceil_char_boundary(text: &str, i: usize) -> usize {
+    let len = text.len();
+    let mut i = i.min(len);
+    while i < len && !text.is_char_boundary(i) {
+        i += 1;
+    }
+    i
 }
 
 fn merge_spans(sorted: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
@@ -139,6 +164,37 @@ mod tests {
         let text = "FULLSECRET";
         let m = make_match(0, 10, "test");
         assert_eq!(redact(text, &[m]), "***REDACTED***");
+    }
+
+    #[test]
+    fn match_bounds_mid_codepoint_do_not_panic() {
+        // "héllo" — 'é' is 2 bytes (0xC3 0xA9) occupying byte indices 1..3.
+        // A range of [1, 2) lands *inside* the 'é' codepoint on both ends.
+        // Naive `text[1..2]` slicing would panic; snapping to char
+        // boundaries must instead redact the whole 'é'.
+        let text = "héllo";
+        let m = make_match(1, 2, "test");
+        let result = redact(text, &[m]);
+        assert!(result.starts_with('h'));
+        assert!(result.contains(super::REDACTED));
+        assert!(result.ends_with("llo"));
+        // 'é' is fully covered; the raw codepoint must not survive.
+        assert!(!result.contains('é'));
+    }
+
+    #[test]
+    fn multibyte_match_redacts_full_token() {
+        // Emoji + multibyte text around a secret-looking span.
+        let text = "🔑clé=hunter2🚀";
+        // Redact the "hunter2" run; offsets computed from the byte layout.
+        let start = text.find("hunter2").unwrap();
+        let end = start + "hunter2".len();
+        let m = make_match(start, end, "test");
+        let result = redact(text, &[m]);
+        assert!(!result.contains("hunter2"));
+        assert!(result.contains("🔑clé="));
+        assert!(result.contains('🚀'));
+        assert!(result.contains(super::REDACTED));
     }
 
     #[test]

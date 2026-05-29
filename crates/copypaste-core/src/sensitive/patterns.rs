@@ -177,14 +177,26 @@ pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[
 ];
 
 pub fn pattern_set() -> &'static RegexSet {
-    PATTERN_SET.get_or_init(|| RegexSet::new(RAW_PATTERNS.iter().map(|(_, p, _, _)| *p)).unwrap())
+    // `RAW_PATTERNS` are compile-time constants validated by the test suite
+    // (`all_raw_patterns_compile`), so construction is provably infallible in
+    // practice. To uphold the no-`unwrap()` rule without changing this
+    // `&'static`-returning signature, an unexpected compile failure degrades
+    // to an empty `RegexSet` (detection simply matches nothing) rather than
+    // panicking on the hot clipboard-scan path.
+    PATTERN_SET.get_or_init(|| {
+        RegexSet::new(RAW_PATTERNS.iter().map(|(_, p, _, _)| *p))
+            .unwrap_or_else(|_| RegexSet::empty())
+    })
 }
 
 pub fn patterns() -> &'static Vec<Regex> {
+    // Same provably-infallible-but-degrade-safe contract as `pattern_set`:
+    // any constant that somehow fails to compile is dropped rather than
+    // panicking, so a malformed pattern can never abort the daemon mid-scan.
     PATTERNS.get_or_init(|| {
         RAW_PATTERNS
             .iter()
-            .map(|(_, p, _, _)| Regex::new(p).unwrap())
+            .filter_map(|(_, p, _, _)| Regex::new(p).ok())
             .collect()
     })
 }
@@ -205,4 +217,33 @@ pub fn pattern_confidence(index: usize) -> f32 {
         .get(index)
         .map(|(_, _, _, conf)| *conf)
         .unwrap_or(0.5)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Underpins the "provably infallible" claim on the degrade-safe
+    /// `pattern_set()` / `patterns()` lazy initialisers: every constant in
+    /// `RAW_PATTERNS` must compile, so the empty-fallback branch is never
+    /// actually taken at runtime.
+    #[test]
+    fn all_raw_patterns_compile() {
+        for (name, raw, _, _) in RAW_PATTERNS {
+            assert!(
+                Regex::new(raw).is_ok(),
+                "pattern `{name}` failed to compile: {raw}"
+            );
+        }
+        // The RegexSet (used by `pattern_set`) must also build from the full set.
+        assert!(RegexSet::new(RAW_PATTERNS.iter().map(|(_, p, _, _)| *p)).is_ok());
+    }
+
+    /// The lazy getters must expose every pattern and a same-sized RegexSet —
+    /// confirms the degrade-safe init did not silently drop any constant.
+    #[test]
+    fn lazy_getters_expose_all_patterns() {
+        assert_eq!(patterns().len(), RAW_PATTERNS.len());
+        assert_eq!(pattern_set().len(), RAW_PATTERNS.len());
+    }
 }

@@ -181,8 +181,11 @@ pub fn decrypt_item_by_version(
             let aad = build_item_aad(item_id, AAD_SCHEMA_VERSION);
             decrypt_item_with_aad(ciphertext, nonce, v1_key, &aad)
         }
-        2 => {
-            let aad = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, 2);
+        v @ 2 => {
+            // Bind the AAD's key_version to the actual matched version rather
+            // than a hardcoded literal, so the value stays correct if the v2
+            // arm ever widens to a range.
+            let aad = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, u32::from(v));
             decrypt_item_with_aad(ciphertext, nonce, v2_key, &aad)
         }
         v => Err(EncryptError::UnknownKeyVersion(v)),

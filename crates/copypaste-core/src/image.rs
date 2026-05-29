@@ -138,7 +138,7 @@ pub fn encode_image(
 
     let png_bytes = encode_as_png(&img)?;
 
-    let chunks = encrypt_chunks(&png_bytes, key, file_id, IMAGE_CHUNK_SIZE);
+    let chunks = encrypt_chunks(&png_bytes, key, file_id, IMAGE_CHUNK_SIZE)?;
     let chunk_count = chunks.len() as u32;
 
     let meta = ImageMeta {
@@ -343,7 +343,7 @@ mod tests {
         let file_id = test_file_id();
         // Generate data larger than one chunk
         let data = vec![0xABu8; IMAGE_CHUNK_SIZE + 100];
-        let chunks = encrypt_chunks(&data, &key, &file_id, IMAGE_CHUNK_SIZE);
+        let chunks = encrypt_chunks(&data, &key, &file_id, IMAGE_CHUNK_SIZE).unwrap();
         assert_eq!(chunks.len(), 2);
         let recovered = decrypt_chunks(&chunks, &key, &file_id).unwrap();
         assert_eq!(recovered, data);
@@ -363,7 +363,7 @@ mod tests {
         let key = test_key();
         let file_id = test_file_id();
         let data = b"round-trip chunk blob test data";
-        let chunks = encrypt_chunks(data, &key, &file_id, 10);
+        let chunks = encrypt_chunks(data, &key, &file_id, 10).unwrap();
         assert!(chunks.len() > 1);
 
         let blob = chunks_to_blob(&chunks);
@@ -379,7 +379,7 @@ mod tests {
         let key = test_key();
         let file_id = test_file_id();
         let data = b"small";
-        let chunks = encrypt_chunks(data, &key, &file_id, 64 * 1024);
+        let chunks = encrypt_chunks(data, &key, &file_id, 64 * 1024).unwrap();
         assert_eq!(chunks.len(), 1);
 
         let blob = chunks_to_blob(&chunks);
@@ -392,7 +392,7 @@ mod tests {
     fn truncated_blob_returns_error() {
         let key = test_key();
         let file_id = test_file_id();
-        let chunks = encrypt_chunks(b"test", &key, &file_id, 64 * 1024);
+        let chunks = encrypt_chunks(b"test", &key, &file_id, 64 * 1024).unwrap();
         let blob = chunks_to_blob(&chunks);
         // Truncate to just the count field
         let truncated = &blob[..4];
@@ -420,7 +420,7 @@ mod tests {
         // rather than reserving capacity for the bogus count.
         let key = test_key();
         let file_id = test_file_id();
-        let chunks = encrypt_chunks(b"hi", &key, &file_id, 64 * 1024);
+        let chunks = encrypt_chunks(b"hi", &key, &file_id, 64 * 1024).unwrap();
         assert_eq!(chunks.len(), 1);
         let mut blob = chunks_to_blob(&chunks);
         blob[0..4].copy_from_slice(&u32::MAX.to_be_bytes());

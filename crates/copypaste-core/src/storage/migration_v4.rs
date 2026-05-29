@@ -122,6 +122,13 @@ pub enum MigrationV4Error {
         #[source]
         source: ChunkError,
     },
+    /// Per-chunk re-encryption with the v2 key failed for an image row.
+    #[error("Image chunk re-encrypt failed for item {id}: {source}")]
+    ImageChunkEncrypt {
+        id: String,
+        #[source]
+        source: ChunkError,
+    },
 }
 
 /// Run the v1 → v2 key rotation across every row still at `key_version = 1`,
@@ -493,7 +500,13 @@ fn rotate_one_image(
     })?;
 
     // Re-encrypt with the v2 key (fresh per-chunk nonces) and re-serialise.
-    let v2_chunks = encrypt_chunks(&plaintext, v2_key, &file_id, IMAGE_CHUNK_SIZE);
+    let v2_chunks =
+        encrypt_chunks(&plaintext, v2_key, &file_id, IMAGE_CHUNK_SIZE).map_err(|e| {
+            MigrationV4Error::ImageChunkEncrypt {
+                id: row.id.clone(),
+                source: e,
+            }
+        })?;
     let v2_blob = chunks_to_blob(&v2_chunks);
 
     // Atomically swap to v2. The WHERE re-asserts key_version=1 so a concurrent
@@ -717,7 +730,7 @@ mod tests {
         let item_id = Uuid::new_v4().to_string();
         let file_id: [u8; 16] = *Uuid::new_v4().as_bytes();
 
-        let chunks = encrypt_chunks(plaintext, v1_key, &file_id, chunk_size);
+        let chunks = encrypt_chunks(plaintext, v1_key, &file_id, chunk_size).unwrap();
         let blob = chunks_to_blob(&chunks);
 
         // Mirror the JSON shape from daemon::handle_image: a `file_id` array
