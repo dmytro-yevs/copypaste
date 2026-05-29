@@ -51,7 +51,11 @@ export interface HistoryEntry {
   content_type: string;
   preview: string;
   is_sensitive: boolean;
-  /** Byte-index ranges within `preview` that are sensitive, e.g. [[0,4],[10,16]]. */
+  /**
+   * Unicode scalar (code-point / character) offset ranges within `preview` that
+   * are sensitive, e.g. [[0,4],[10,16]]. These are character offsets, NOT
+   * UTF-16 units or bytes — the daemon counts characters. See `lib/masking.ts`.
+   */
   sensitive_spans?: Array<[number, number]>;
   /** Unix epoch milliseconds. */
   wall_time: number;

@@ -2,27 +2,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { api, HistoryEntry, IpcError } from "../lib/ipc";
+import { applySpanMasking } from "../lib/masking";
 import { useUI } from "../store";
 
 const DEFAULT_ITEM_HEIGHT = 28; // px — default compact single-line row height
 const MAX_ITEMS = 50;
-
-/** Redact sensitive spans within text, same logic as HistoryView. */
-function applySpanMasking(text: string, spans: Array<[number, number]>): string {
-  if (spans.length === 0) return text;
-  let result = "";
-  let cursor = 0;
-  const sorted = [...spans].sort((a, b) => a[0] - b[0]);
-  for (const [start, end] of sorted) {
-    const s = Math.min(Math.max(start, cursor), text.length);
-    const e = Math.min(end, text.length);
-    if (s > cursor) result += text.slice(cursor, s);
-    if (e > s) result += "•".repeat(e - s);
-    cursor = Math.max(cursor, e);
-  }
-  result += text.slice(cursor);
-  return result;
-}
 
 export function Popup() {
   const { maskSensitive, previewSize = DEFAULT_ITEM_HEIGHT } = useUI((s) => s.prefs);
