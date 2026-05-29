@@ -1340,7 +1340,8 @@ public object FfiConverterTypeLocalItem: FfiConverterRustBuffer<LocalItem> {
 data class P2pSyncResult (
     var `itemsReceived`: kotlin.ULong, 
     var `itemsSent`: kotlin.ULong, 
-    var `items`: List<SyncedItem>
+    var `items`: List<SyncedItem>, 
+    var `itemsSkippedLegacy`: kotlin.UInt
 ) {
     
     companion object
@@ -1352,19 +1353,22 @@ public object FfiConverterTypeP2pSyncResult: FfiConverterRustBuffer<P2pSyncResul
             FfiConverterULong.read(buf),
             FfiConverterULong.read(buf),
             FfiConverterSequenceTypeSyncedItem.read(buf),
+            FfiConverterUInt.read(buf),
         )
     }
 
     override fun allocationSize(value: P2pSyncResult) = (
             FfiConverterULong.allocationSize(value.`itemsReceived`) +
             FfiConverterULong.allocationSize(value.`itemsSent`) +
-            FfiConverterSequenceTypeSyncedItem.allocationSize(value.`items`)
+            FfiConverterSequenceTypeSyncedItem.allocationSize(value.`items`) +
+            FfiConverterUInt.allocationSize(value.`itemsSkippedLegacy`)
     )
 
     override fun write(value: P2pSyncResult, buf: ByteBuffer) {
             FfiConverterULong.write(value.`itemsReceived`, buf)
             FfiConverterULong.write(value.`itemsSent`, buf)
             FfiConverterSequenceTypeSyncedItem.write(value.`items`, buf)
+            FfiConverterUInt.write(value.`itemsSkippedLegacy`, buf)
     }
 }
 
@@ -1488,19 +1492,19 @@ sealed class CopypasteException: Exception() {
     }
     
     class DecryptionFailed(
-
-        val `messageText`: kotlin.String
+        
+        val `message`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `messageText` }"
+            get() = "message=${ `message` }"
     }
     
     class DatabaseException(
-
-        val `messageText`: kotlin.String
+        
+        val `message`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `messageText` }"
+            get() = "message=${ `message` }"
     }
     
     class InvalidKeyLength(
@@ -1510,19 +1514,19 @@ sealed class CopypasteException: Exception() {
     }
     
     class P2pException(
-
-        val `messageText`: kotlin.String
+        
+        val `message`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `messageText` }"
+            get() = "message=${ `message` }"
     }
     
     class Panicked(
-
-        val `messageText`: kotlin.String
+        
+        val `message`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `messageText` }"
+            get() = "message=${ `message` }"
     }
     
 
