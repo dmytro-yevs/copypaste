@@ -5,9 +5,9 @@
 //! retention worker never auto-deletes it.
 //!
 //! Wire format mirrors the rest of the CLI: a single line of JSON over the
-//! unix socket. The daemon's allow-list already accepts `"pin"`; `"unpin"`
-//! is forwarded as-is so that when the daemon side lands it works without
-//! a CLI re-release.
+//! unix socket. Both `pin` and `unpin` map to the daemon's single
+//! `pin_item` handler, which takes `{id, pinned: bool}`. There is no
+//! separate `unpin` method on the daemon, so we must not send one.
 
 use anyhow::{anyhow, Result};
 use std::path::Path;
@@ -44,7 +44,8 @@ fn validate_uuid(id: &str) -> Result<()> {
 pub fn run_pin(socket_path: &Path, id: &str) -> Result<()> {
     validate_uuid(id)?;
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({"id": "1", "method": "pin", "params": {"id": id}});
+    let req =
+        serde_json::json!({"id": "1", "method": "pin_item", "params": {"id": id, "pinned": true}});
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
@@ -55,7 +56,8 @@ pub fn run_pin(socket_path: &Path, id: &str) -> Result<()> {
 pub fn run_unpin(socket_path: &Path, id: &str) -> Result<()> {
     validate_uuid(id)?;
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({"id": "1", "method": "unpin", "params": {"id": id}});
+    let req =
+        serde_json::json!({"id": "1", "method": "pin_item", "params": {"id": id, "pinned": false}});
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
@@ -107,8 +109,9 @@ mod tests {
 
         let req_line = rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
         let v: serde_json::Value = serde_json::from_str(req_line.trim()).unwrap();
-        assert_eq!(v["method"], "pin");
+        assert_eq!(v["method"], "pin_item");
         assert_eq!(v["params"]["id"], VALID_UUID);
+        assert_eq!(v["params"]["pinned"], true);
     }
 
     #[test]
@@ -125,8 +128,9 @@ mod tests {
 
         let req_line = rx.recv_timeout(std::time::Duration::from_secs(1)).unwrap();
         let v: serde_json::Value = serde_json::from_str(req_line.trim()).unwrap();
-        assert_eq!(v["method"], "unpin");
+        assert_eq!(v["method"], "pin_item");
         assert_eq!(v["params"]["id"], VALID_UUID);
+        assert_eq!(v["params"]["pinned"], false);
     }
 
     #[test]
