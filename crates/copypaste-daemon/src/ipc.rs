@@ -460,7 +460,25 @@ pub struct IpcServer {
     /// here lets `import` broadcast each inserted row so it syncs like a captured
     /// one. `None` when the daemon did not provide a sender (e.g. unit tests).
     new_item_tx: Option<tokio::sync::broadcast::Sender<copypaste_core::ClipboardItem>>,
+    /// Degraded-startup reason, surfaced verbatim in the `status` response so
+    /// the UI can render a recovery banner instead of treating an unreachable
+    /// socket as a dead daemon.
+    ///
+    /// `None` in the normal case (DB opened, key available). `Some(reason)`
+    /// when the daemon came up in degraded mode — e.g. the SQLCipher key could
+    /// not be obtained from the Keychain (`keychain_locked`) so the existing
+    /// encrypted DB could not be opened (`db_unavailable`). In degraded mode
+    /// `ready` is `false`, so every DB-touching method already returns
+    /// `IPC_NOT_READY`; this field tells the client *why* and that recovery is
+    /// possible (re-grant Keychain access, then relaunch). See the
+    /// [`DEGRADED_REASON_KEYCHAIN_LOCKED`] constant for the canonical value.
+    degraded_reason: Option<String>,
 }
+
+/// Canonical `status.degraded_reason` value for the keychain-locked /
+/// DB-unavailable degraded startup (the post-reinstall regression). The UI
+/// keys its recovery banner off this exact string.
+pub const DEGRADED_REASON_KEYCHAIN_LOCKED: &str = "keychain_locked";
 
 impl IpcServer {
     pub fn new(
@@ -488,7 +506,17 @@ impl IpcServer {
             #[cfg(feature = "cloud-sync")]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             new_item_tx: None,
+            degraded_reason: None,
         }
+    }
+
+    /// Mark this server as serving a degraded startup (e.g. keychain-locked /
+    /// db-unavailable). The reason is echoed in the `status` response so the UI
+    /// can show a recovery banner. Pair this with `new_with_ready(.., false)`
+    /// so DB-touching methods return `IPC_NOT_READY`.
+    pub fn with_degraded_reason(mut self, reason: impl Into<String>) -> Self {
+        self.degraded_reason = Some(reason.into());
+        self
     }
 
     /// Attach the live mTLS certificate fingerprint that pairing advertises.
@@ -624,6 +652,7 @@ impl IpcServer {
             #[cfg(feature = "cloud-sync")]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             new_item_tx: None,
+            degraded_reason: None,
         }
     }
 
@@ -2056,10 +2085,35 @@ impl IpcServer {
             }
             "status" => {
                 let enabled = self.private_mode.load(Ordering::Relaxed);
-                Response::ok(
-                    req.id,
-                    serde_json::json!({"status": "running", "private_mode": enabled}),
-                )
+                // In degraded startup the daemon is alive and the socket is
+                // bound, but the backing DB is unavailable (e.g. the Keychain
+                // SQLCipher key could not be read after a reinstall). Report
+                // status="degraded" + a machine-readable reason + a flag so the
+                // UI shows a recovery banner instead of treating the reachable
+                // socket as "everything is fine". When healthy, `ready` is true
+                // and `degraded_reason` is absent — unchanged shape for clients
+                // that only read `status`/`private_mode`.
+                match self.degraded_reason.as_deref() {
+                    Some(reason) => Response::ok(
+                        req.id,
+                        serde_json::json!({
+                            "status": "degraded",
+                            "private_mode": enabled,
+                            "ready": false,
+                            "degraded": true,
+                            "degraded_reason": reason,
+                        }),
+                    ),
+                    None => Response::ok(
+                        req.id,
+                        serde_json::json!({
+                            "status": "running",
+                            "private_mode": enabled,
+                            "ready": self.ready.load(Ordering::Relaxed),
+                            "degraded": false,
+                        }),
+                    ),
+                }
             }
 
             // ------------------------------------------------------------------
