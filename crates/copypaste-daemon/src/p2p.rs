@@ -20,6 +20,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
 
 use copypaste_core::{ClipboardItem, Database};
 use copypaste_p2p::{
+    connector::{should_dial_peer, DialBackoff},
     discovery::{DiscoveryService, PeerInfo},
     transport::{DeviceFingerprint, PairedPeers, PeerTransport},
 };
@@ -469,20 +470,6 @@ async fn accept_loop(
 /// connected peers to dial.
 const CONNECTOR_TICK: Duration = Duration::from_secs(3);
 
-/// Per-peer backoff schedule (seconds) applied after a failed dial. The dialer
-/// advances one step on each consecutive failure and resets to the first step
-/// on success, so a peer that is simply offline is retried with increasing
-/// spacing (5s → 30s → 60s, capped) rather than hammered every tick.
-const CONNECTOR_BACKOFF_STEPS: [u64; 3] = [5, 30, 60];
-
-/// Per-peer dial state tracked by the connector loop across ticks.
-struct PeerDialState {
-    /// Index into [`CONNECTOR_BACKOFF_STEPS`] for the next failure delay.
-    backoff_idx: usize,
-    /// Earliest instant we may dial this peer again. `None` = dial now.
-    next_attempt: Option<Instant>,
-}
-
 /// A dialable paired peer resolved from `peers.json`.
 struct DialablePeer {
     /// Canonical (colon-free, lowercase) cert fingerprint — the mTLS pin.
@@ -555,7 +542,7 @@ async fn peer_connector_loop(
 ) {
     tracing::debug!(%own_fp, "P2P peer connector loop running");
     let peers_path = crate::ipc::peers_file_path();
-    let mut dial_state: HashMap<DeviceFingerprint, PeerDialState> = HashMap::new();
+    let mut dial_state: HashMap<DeviceFingerprint, DialBackoff> = HashMap::new();
 
     loop {
         tokio::time::sleep(CONNECTOR_TICK).await;
@@ -575,21 +562,34 @@ async fn peer_connector_loop(
                 continue;
             }
 
-            // Skip peers we already have a live sink for. Brief lock.
-            {
+            // M1: skip peers we already have a *healthy* live sink for, but
+            // force-replace a stale (closed-but-unreaped) one. Checking only
+            // `contains_key` let a dead connection block reconnection until the
+            // cleanup pass evicted it. Mirror the accept path's health check.
+            let sink_health = {
                 let sinks = peer_sinks.lock().await;
-                if sinks.contains_key(&peer.fingerprint) {
-                    continue;
+                sinks.get(&peer.fingerprint).map(|tx| !tx.is_closed())
+            };
+            let now = Instant::now();
+            if !should_dial_peer(sink_health) {
+                // A healthy connection is live. M3: this is also the moment to
+                // reset the peer's backoff — but only once the link has proven
+                // stable for MIN_HEALTHY_DWELL, so a flapping peer never resets.
+                if let Some(state) = dial_state.get_mut(&peer.fingerprint) {
+                    if state.maybe_reset_after_dwell(now) {
+                        tracing::debug!(
+                            fingerprint = %peer.fingerprint,
+                            "connector: connection healthy past dwell — backoff reset"
+                        );
+                    }
                 }
+                continue;
             }
 
             // Respect per-peer backoff.
-            let now = Instant::now();
             if let Some(state) = dial_state.get(&peer.fingerprint) {
-                if let Some(next) = state.next_attempt {
-                    if now < next {
-                        continue;
-                    }
+                if !state.may_dial(now) {
+                    continue;
                 }
             }
 
@@ -638,28 +638,21 @@ async fn peer_connector_loop(
                             tracing::debug!(fingerprint = %peer_key, "connector outbound connection closed");
                         });
                     }
-                    // Success → reset backoff.
-                    dial_state.insert(
-                        peer.fingerprint.clone(),
-                        PeerDialState {
-                            backoff_idx: 0,
-                            next_attempt: None,
-                        },
-                    );
+                    // M3: a successful connect records the connection start but
+                    // does NOT reset the backoff yet — a flapping peer that
+                    // connects then immediately drops must not wipe accumulated
+                    // backoff. The reset is gated on MIN_HEALTHY_DWELL and
+                    // applied lazily on a later tick (see the skip branch above).
+                    dial_state
+                        .entry(peer.fingerprint.clone())
+                        .or_default()
+                        .record_connected(Instant::now());
                 }
                 Err(e) => {
-                    let entry =
-                        dial_state
-                            .entry(peer.fingerprint.clone())
-                            .or_insert(PeerDialState {
-                                backoff_idx: 0,
-                                next_attempt: None,
-                            });
-                    let step = CONNECTOR_BACKOFF_STEPS
-                        [entry.backoff_idx.min(CONNECTOR_BACKOFF_STEPS.len() - 1)];
-                    entry.next_attempt = Some(Instant::now() + Duration::from_secs(step));
-                    entry.backoff_idx =
-                        (entry.backoff_idx + 1).min(CONNECTOR_BACKOFF_STEPS.len() - 1);
+                    let step = dial_state
+                        .entry(peer.fingerprint.clone())
+                        .or_default()
+                        .record_failure(Instant::now());
                     tracing::debug!(
                         fingerprint = %peer.fingerprint,
                         addr = %peer.addr,
