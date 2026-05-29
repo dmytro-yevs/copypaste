@@ -126,6 +126,24 @@ fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
 /// Switching the call site below to `own_fingerprint` would change the
 /// IPC contract (length + content) and is therefore deferred to post-alpha
 /// along with the cross-crate consolidation into `copypaste-core`.
+/// Convert a byte offset into `s` to a char offset, clamping to a valid char
+/// boundary so it never panics.
+///
+/// list_view (`history_page`) maps the sensitive detector's byte ranges to char
+/// offsets for the UI. The detector reports ranges over the NFKC-normalised
+/// string; if a `byte` lands past the end of `s` or mid-codepoint (which can
+/// happen on width-changing normalisation or any offset/string mismatch),
+/// slicing `s[..byte]` would panic with "byte index is not a char boundary".
+/// We clamp `byte` to `s.len()`, then walk back to the nearest char boundary at
+/// or below it, and count the chars up to there.
+fn byte_to_char_offset(s: &str, byte: usize) -> usize {
+    let mut idx = byte.min(s.len());
+    while idx > 0 && !s.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    s[..idx].chars().count()
+}
+
 fn format_fingerprint(bytes: &[u8]) -> String {
     let encoded = hex::encode(bytes);
     encoded
@@ -1064,6 +1082,13 @@ impl IpcServer {
         tracing::info!("IPC listening on {} (mode=0600)", socket_path.display());
 
         let server = Arc::new(self);
+        // daemon-core L2: track in-flight per-connection tasks in a JoinSet so
+        // they can be aborted on shutdown instead of being orphaned. Previously
+        // each `tokio::spawn` was fire-and-forget: on `shutdown.cancelled()` the
+        // accept loop returned while connection tasks kept running (benign today
+        // since the process exits shortly after, but it leaked tasks that could
+        // hold the DB Mutex past the documented drain point).
+        let mut conns: tokio::task::JoinSet<()> = tokio::task::JoinSet::new();
         loop {
             tokio::select! {
                 // D2: stop accepting new connections on daemon-wide shutdown.
@@ -1071,11 +1096,16 @@ impl IpcServer {
                     tracing::info!("IPC server: shutdown signal received, stopping accept loop");
                     break;
                 }
+                // Reap finished connection tasks so the JoinSet does not grow
+                // unbounded over the daemon's lifetime. `join_next` resolves to
+                // `None` only when the set is empty, in which case this branch is
+                // disabled by the `if` guard and never busy-loops.
+                _ = conns.join_next(), if !conns.is_empty() => {}
                 result = listener.accept() => {
                     match result {
                         Ok((stream, _)) => {
                             let s = server.clone();
-                            tokio::spawn(async move {
+                            conns.spawn(async move {
                                 if let Err(e) = s.handle_connection(stream).await {
                                     tracing::warn!("IPC connection error: {e}");
                                 }
@@ -1086,6 +1116,11 @@ impl IpcServer {
                 }
             }
         }
+        // daemon-core L2: abort any still-running connection tasks. The daemon's
+        // drain step (`_ipc_handle.await` in daemon.rs) then completes promptly
+        // instead of waiting on a client that never closes its socket.
+        conns.abort_all();
+        while conns.join_next().await.is_some() {}
         Ok(())
     }
 
@@ -1306,11 +1341,14 @@ impl IpcServer {
                     Some(s) => s.to_string(),
                     None => return Response::err(req.id, "missing param: query"),
                 };
-                let limit = req
+                // Clamp to MAX_PAGE like `list` / `history_page` so an oversized
+                // `limit` cannot make `search_items` allocate/scan unbounded rows.
+                let limit = (req
                     .params
                     .get("limit")
                     .and_then(|v| v.as_u64())
-                    .unwrap_or(20) as usize;
+                    .unwrap_or(20) as usize)
+                    .min(MAX_PAGE);
 
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
@@ -1859,18 +1897,26 @@ impl IpcServer {
                             let sensitive_spans: Vec<serde_json::Value> = if !item.is_sensitive
                                 && item.content_type == "text"
                             {
+                                // `detector.detect` returns byte ranges over the
+                                // NFKC-NORMALISED form of its input, NOT over the
+                                // string we pass. Slicing the original `preview`
+                                // with those byte offsets panicked whenever NFKC
+                                // changed widths (ligatures, full-width forms),
+                                // because the offsets could land mid-char or past
+                                // the end. Run the detector against the SAME string
+                                // we slice (the NFKC form), then map byte offsets
+                                // to char offsets with `byte_to_char_offset`, which
+                                // clamps to a valid char boundary and never panics.
+                                let normalised =
+                                    copypaste_core::sensitive::nfkc_normalize(&preview);
                                 detector
-                                    .detect(&preview)
+                                    .detect(&normalised)
                                     .into_iter()
                                     .map(|m| {
-                                        // matched_range is a byte range over the
-                                        // NFKC-normalised string; convert to char
-                                        // offsets into the original preview for the UI.
-                                        // We use char indices because the UI is likely
-                                        // JavaScript / Rust and both work in chars.
                                         let start =
-                                            preview[..m.matched_range.start].chars().count();
-                                        let end = preview[..m.matched_range.end].chars().count();
+                                            byte_to_char_offset(&normalised, m.matched_range.start);
+                                        let end =
+                                            byte_to_char_offset(&normalised, m.matched_range.end);
                                         serde_json::json!([start, end])
                                     })
                                     .collect()
@@ -2081,6 +2127,10 @@ impl IpcServer {
                     None => return Response::err(req.id, "missing param: enabled (bool)"),
                 };
                 self.private_mode.store(enabled, Ordering::Relaxed);
+                // Persist so the setting survives a daemon restart (restored by
+                // `daemon::load_private_mode` at startup). Best-effort: the
+                // in-memory atomic above is authoritative for this process.
+                crate::daemon::persist_private_mode(enabled);
                 tracing::info!("private mode set to {enabled}");
                 Response::ok(req.id, serde_json::json!({"private_mode": enabled}))
             }
@@ -4820,6 +4870,107 @@ mod tests {
             "history_page returned {} items, exceeds MAX_PAGE=1000",
             items.len()
         );
+    }
+
+    /// daemon-core backlog #2: the `search` handler must clamp an oversized
+    /// `limit` to MAX_PAGE just like `list` / `history_page`. We seed more than
+    /// MAX_PAGE rows all matching one FTS term, then request `limit=5000`. The
+    /// SQL applies `LIMIT ?`, so without the `.min(MAX_PAGE)` clamp the response
+    /// would carry > MAX_PAGE items; with it, exactly MAX_PAGE.
+    #[tokio::test]
+    async fn search_clamps_oversize_limit_to_max_page() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("cap_search.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // Seed MAX_PAGE + 5 text rows whose FTS plaintext all contains "needle".
+        {
+            let guard = db.lock().await;
+            for i in 0..(MAX_PAGE + 5) {
+                let item = copypaste_core::ClipboardItem::new_text(
+                    vec![0xAB],
+                    vec![0u8; 24],
+                    i as i64 + 1,
+                );
+                copypaste_core::insert_item_with_fts(&guard, &item, &format!("needle row {i}"))
+                    .unwrap();
+            }
+        }
+
+        let resp = call_one(
+            &sock,
+            r#"{"id":"cap-search","method":"search","params":{"query":"needle","limit":5000}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "search should be ok: {resp}");
+        let items = resp["data"]["items"].as_array().unwrap();
+        assert_eq!(
+            items.len(),
+            MAX_PAGE,
+            "search must clamp to MAX_PAGE={MAX_PAGE}, got {} items",
+            items.len()
+        );
+    }
+
+    /// daemon-core backlog #3: list_view (`history_page`) preview offsets must
+    /// not panic on width-changing Unicode normalisation. The sensitive detector
+    /// reports byte ranges over the NFKC-normalised string; slicing the original
+    /// preview with those offsets used to panic on a non-char-boundary. With a
+    /// secret embedded after a ligature/full-width run, the handler must return
+    /// without panicking and produce in-range, ordered char offsets.
+    #[tokio::test]
+    async fn history_page_adversarial_unicode_preview_no_panic() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("adv_unicode.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // Full-width "AKIA" (U+FF21..) + 16 ASCII chars normalises (NFKC) to a
+        // valid AWS access-key id, which the detector flags. The full-width
+        // prefix is 3 bytes/char in the original but 1 byte/char after NFKC, so
+        // the detector's byte offsets do not line up with the original string —
+        // exactly the mismatch that triggered the slice panic.
+        let plaintext = "ＡＫＩＡ0123456789ABCDEF and some trailing prose";
+        {
+            let guard = db.lock().await;
+            let item = copypaste_core::ClipboardItem::new_text(vec![0xCD], vec![0u8; 24], 1);
+            copypaste_core::insert_item_with_fts(&guard, &item, plaintext).unwrap();
+        }
+
+        // Must not panic — a panic in the blocking task would surface as an
+        // internal error / dropped connection rather than an `ok` response.
+        let resp = call_one(
+            &sock,
+            r#"{"id":"adv","method":"history_page","params":{"limit":10,"offset":0}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "history_page must not panic: {resp}");
+        let items = resp["data"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        let preview = items[0]["preview"].as_str().unwrap();
+        let preview_char_len = preview.chars().count();
+        let spans = items[0]["sensitive_spans"].as_array().unwrap();
+        for span in spans {
+            let pair = span.as_array().unwrap();
+            let start = pair[0].as_u64().unwrap() as usize;
+            let end = pair[1].as_u64().unwrap() as usize;
+            assert!(start <= end, "span start {start} must be <= end {end}");
+            assert!(
+                end <= preview_char_len,
+                "span end {end} must be within preview char-len {preview_char_len}"
+            );
+        }
+    }
+
+    /// `byte_to_char_offset` clamps out-of-range and mid-codepoint byte indices
+    /// to a valid char boundary and never panics.
+    #[test]
+    fn byte_to_char_offset_clamps_and_never_panics() {
+        let s = "café"; // 'é' is 2 bytes (0xC3 0xA9): bytes 0..5, chars 0..4
+        assert_eq!(byte_to_char_offset(s, 0), 0);
+        assert_eq!(byte_to_char_offset(s, 3), 3); // boundary before 'é'
+        assert_eq!(byte_to_char_offset(s, 4), 3); // mid-'é' → walk back → 3 chars
+        assert_eq!(byte_to_char_offset(s, 5), 4); // end
+        assert_eq!(byte_to_char_offset(s, 9999), 4); // past end → clamp to char-len
     }
 
     // --- FIX 1: history_page returns pinned field and pinned-first order ---
