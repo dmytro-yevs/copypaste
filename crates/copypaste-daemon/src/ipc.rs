@@ -450,6 +450,16 @@ pub struct IpcServer {
     /// `get_sync_status` returns a live value.
     #[cfg(feature = "cloud-sync")]
     pub last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
+    /// Broadcast sender for newly-ingested clipboard items, shared with the
+    /// clipboard monitor and the sync orchestrator (P2P Phase 3).
+    ///
+    /// Captured-by-polling items already flow through this channel from the
+    /// monitor. The `import` IPC method historically inserted straight into the
+    /// DB without notifying anyone, so imported items never reached the sync
+    /// orchestrator and could not be pushed to a paired peer. Wiring the sender
+    /// here lets `import` broadcast each inserted row so it syncs like a captured
+    /// one. `None` when the daemon did not provide a sender (e.g. unit tests).
+    new_item_tx: Option<tokio::sync::broadcast::Sender<copypaste_core::ClipboardItem>>,
 }
 
 impl IpcServer {
@@ -477,6 +487,7 @@ impl IpcServer {
             sync_key: Arc::new(Mutex::new(None)),
             #[cfg(feature = "cloud-sync")]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            new_item_tx: None,
         }
     }
 
@@ -572,6 +583,16 @@ impl IpcServer {
         self
     }
 
+    /// Attach the broadcast sender for newly-ingested clipboard items so the
+    /// `import` IPC method can notify the sync orchestrator (P2P Phase 3).
+    pub fn with_new_item_tx(
+        mut self,
+        tx: tokio::sync::broadcast::Sender<copypaste_core::ClipboardItem>,
+    ) -> Self {
+        self.new_item_tx = Some(tx);
+        self
+    }
+
     /// Construct with an explicit readiness flag. The returned handle can be
     /// flipped to `true` once initialization completes. Intended for tests
     /// and for callers that want to bind the socket before the database is
@@ -602,6 +623,7 @@ impl IpcServer {
             sync_key: Arc::new(Mutex::new(None)),
             #[cfg(feature = "cloud-sync")]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            new_item_tx: None,
         }
     }
 
@@ -683,6 +705,24 @@ impl IpcServer {
             .unwrap_or_else(|poisoned| poisoned.into_inner().clone().unwrap_or_default())
     }
 
+    /// Derive the base64-encoded shared content sync key for a peer from the
+    /// PAKE [`SessionKey`](copypaste_p2p::pake::SessionKey).
+    ///
+    /// Uses `SessionKey::derive_xchacha_key` with a fixed domain-separation
+    /// salt so the derivation is (a) deterministic — both paired devices hold
+    /// the same `SessionKey` and therefore derive the IDENTICAL content key —
+    /// and (b) domain-separated from any other use of the same session key
+    /// (e.g. TLS channel binding). The resulting 32-byte key is the
+    /// XChaCha20-Poly1305 key the sync orchestrator feeds to
+    /// `encrypt_for_cloud` / `decrypt_from_cloud` for cross-device item payloads.
+    fn derive_peer_sync_key_b64(session_key: &copypaste_p2p::pake::SessionKey) -> String {
+        use base64::Engine as _;
+        // Fixed, non-secret domain-separation salt for the P2P content sync key.
+        const P2P_SYNC_KEY_SALT: &[u8] = b"copypaste/p2p/content-sync-key/v1";
+        let key = session_key.derive_xchacha_key(P2P_SYNC_KEY_SALT);
+        base64::engine::general_purpose::STANDARD.encode(key)
+    }
+
     /// Durably persist a freshly-paired peer to `peers.json` (P2P Phase 2), in
     /// addition to the in-memory allowlist registration.
     ///
@@ -701,7 +741,11 @@ impl IpcServer {
     ///
     /// A free function (not a `&self` method) so the detached bootstrap-responder
     /// task can call it after `self` has been moved/borrowed away.
-    fn persist_paired_peer(peer_fp_canonical: &str, peer_sync_addr: &str) {
+    fn persist_paired_peer(
+        peer_fp_canonical: &str,
+        peer_sync_addr: &str,
+        session_key: &copypaste_p2p::pake::SessionKey,
+    ) {
         let display = display_fingerprint(peer_fp_canonical);
         let added_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -713,6 +757,13 @@ impl IpcServer {
             Some(peer_sync_addr.to_string())
         };
 
+        // P2P Phase 3 (cross-device readability): derive the shared content sync
+        // key from the PAKE session key. Both sides hold the SAME session key
+        // after a successful handshake, so each persists the IDENTICAL bytes —
+        // that is what lets a peer decrypt items this device sends (and vice
+        // versa). The derived key is base64-encoded into peers.json (chmod 0600).
+        let sync_key_b64 = Some(Self::derive_peer_sync_key_b64(session_key));
+
         let path = peers_file_path();
         let mut peers = crate::peers::load_peers(&path);
         // Drop any prior record for the same peer (canonical compare) so a
@@ -723,6 +774,7 @@ impl IpcServer {
             name: String::new(),
             added_at,
             address,
+            sync_key_b64,
         });
 
         match crate::peers::save_peers(&path, &peers) {
@@ -780,7 +832,11 @@ impl IpcServer {
                     // P2P Phase 2: durably persist the peer (fingerprint +
                     // sync-listener address) so it survives a restart and the
                     // Phase 3 connector can dial it directly.
-                    Self::persist_paired_peer(&outcome.peer_fingerprint, &outcome.peer_sync_addr);
+                    Self::persist_paired_peer(
+                        &outcome.peer_fingerprint,
+                        &outcome.peer_sync_addr,
+                        &outcome.session_key,
+                    );
                 }
                 Err(e) => {
                     tracing::warn!("bootstrap PAKE responder failed: {e}");
@@ -864,7 +920,11 @@ impl IpcServer {
                 // P2P Phase 2: durably persist the peer (fingerprint + the
                 // sync-listener address it advertised) for restart-survival and
                 // the Phase 3 outbound connector.
-                Self::persist_paired_peer(&outcome.peer_fingerprint, &outcome.peer_sync_addr);
+                Self::persist_paired_peer(
+                    &outcome.peer_fingerprint,
+                    &outcome.peer_sync_addr,
+                    &outcome.session_key,
+                );
                 Response::ok(
                     req_id,
                     serde_json::json!({
@@ -3206,6 +3266,10 @@ impl IpcServer {
                     // which we treat as a dedup skip.
                     let mut inserted: u32 = 0;
                     let mut skipped: u32 = 0;
+                    // P2P Phase 3: collect successfully-inserted rows so the
+                    // handler can broadcast them to the sync orchestrator (which
+                    // re-keys + pushes them to paired peers).
+                    let mut inserted_clips: Vec<copypaste_core::ClipboardItem> = Vec::new();
                     // Derive the v2 storage key once: imported content is
                     // encrypted exactly as `daemon::encrypt_text_for_storage`
                     // does (v2 key + v4 AAD, stamped key_version = 2), so the
@@ -3244,7 +3308,10 @@ impl IpcServer {
                             {
                                 Ok(v) => v,
                                 Err(e) => {
-                                    return Err::<(u32, u32), anyhow::Error>(anyhow::anyhow!(
+                                    return Err::<
+                                        (u32, u32, Vec<copypaste_core::ClipboardItem>),
+                                        anyhow::Error,
+                                    >(anyhow::anyhow!(
                                         "encrypt imported item failed: {e}"
                                     ));
                                 }
@@ -3265,6 +3332,7 @@ impl IpcServer {
                         match copypaste_core::insert_item_with_fts(&db, &clip, "") {
                             Ok(stored_id) if stored_id == requested_id => {
                                 inserted += 1;
+                                inserted_clips.push(clip);
                             }
                             Ok(_) => {
                                 // Returned id differs => dedup hit (existing
@@ -3272,22 +3340,39 @@ impl IpcServer {
                                 skipped += 1;
                             }
                             Err(e) => {
-                                return Err::<(u32, u32), anyhow::Error>(e.into());
+                                return Err::<
+                                    (u32, u32, Vec<copypaste_core::ClipboardItem>),
+                                    anyhow::Error,
+                                >(e.into());
                             }
                         }
                     }
-                    Ok::<(u32, u32), anyhow::Error>((inserted, skipped))
+                    Ok::<(u32, u32, Vec<copypaste_core::ClipboardItem>), anyhow::Error>((
+                        inserted,
+                        skipped,
+                        inserted_clips,
+                    ))
                 })
                 .await;
 
                 match join {
-                    Ok(Ok((inserted, skipped))) => Response::ok(
-                        req.id,
-                        serde_json::json!({
-                            "inserted": inserted,
-                            "skipped": skipped,
-                        }),
-                    ),
+                    Ok(Ok((inserted, skipped, inserted_clips))) => {
+                        // P2P Phase 3: notify the sync orchestrator of each newly
+                        // imported row so it is re-keyed and pushed to paired
+                        // peers (a closed/absent channel is a no-op — no peers).
+                        if let Some(ref tx) = self.new_item_tx {
+                            for clip in inserted_clips {
+                                let _ = tx.send(clip);
+                            }
+                        }
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({
+                                "inserted": inserted,
+                                "skipped": skipped,
+                            }),
+                        )
+                    }
                     Ok(Err(e)) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,

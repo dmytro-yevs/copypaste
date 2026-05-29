@@ -30,6 +30,21 @@ pub struct PairedDevice {
     /// `peers.json` records that predate this field (they deserialise to `None`).
     #[serde(default)]
     pub address: Option<String>,
+    /// Base64 (standard) of the 32-byte shared content sync key for this peer,
+    /// derived deterministically from the PAKE `SessionKey` at pairing time
+    /// (P2P Phase 3, cross-device readability).
+    ///
+    /// Both sides converge on the same `SessionKey` after a successful PAKE
+    /// handshake, so each derives — and persists — the IDENTICAL key here. The
+    /// sync orchestrator uses it to re-encrypt outgoing item plaintext (so a
+    /// paired peer can decrypt it) and to decrypt incoming items before
+    /// re-encrypting them under this device's own local-storage key.
+    ///
+    /// `#[serde(default)]` keeps backward compatibility with records that
+    /// predate this field. chmod 0600 on the file (see [`save_peers`]) keeps the
+    /// key off world-readable storage; it never leaves this host as plaintext.
+    #[serde(default)]
+    pub sync_key_b64: Option<String>,
 }
 
 /// Load the list of paired devices from `path`.
@@ -80,6 +95,7 @@ mod tests {
             name: name.to_string(),
             added_at: 1_700_000_000,
             address: Some("127.0.0.1:4242".to_string()),
+            sync_key_b64: None,
         }
     }
 

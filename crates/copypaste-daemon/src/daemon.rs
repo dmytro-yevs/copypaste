@@ -282,6 +282,17 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // `self_write_change_count` and wire it into ClipboardMonitor below.
     // When `write_to_pasteboard` runs it stamps the post-write NSPasteboard
     // changeCount into this Arc; the monitor's next `poll()` skips that count.
+    // Broadcast channel: carries newly-inserted clipboard items to any
+    // subscriber (P2P sync, cloud-sync, future extensions). Created BEFORE the
+    // IPC server so the `import` handler can be handed a sender clone (P2P
+    // Phase 3 — imported items are broadcast so they sync like captured ones).
+    //
+    // Capacity 256 (bumped from 64 — audit HIGH #8). The earlier 64-slot
+    // buffer was too small for clipboard bursts (e.g. a rapid `pbcopy` loop
+    // or a P2P peer momentarily backpressured by network jitter): subscribers
+    // would receive `RecvError::Lagged` and silently drop items.
+    let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(256);
+
     #[cfg(unix)]
     let (self_write_change_count_arc, p2p_sync_addr_slot, _ipc_handle) = {
         let mut server = IpcServer::new(
@@ -289,7 +300,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             private_mode.clone(),
             local_key_arc.clone(),
             device_public_key_arc.clone(),
-        );
+        )
+        .with_new_item_tx(new_item_tx.clone());
         if let Some(peers) = p2p_peers.clone() {
             server = server.with_p2p_peers(peers);
         }
@@ -326,18 +338,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         (swcc, sync_addr_slot, handle)
     };
 
-    // Broadcast channel: carries newly-inserted clipboard items to any
-    // subscriber (P2P sync, cloud-sync, future extensions).
-    //
-    // Capacity 256 (bumped from 64 — audit HIGH #8). The earlier 64-slot
-    // buffer was too small for clipboard bursts (e.g. a rapid `pbcopy` loop
-    // or a P2P peer momentarily backpressured by network jitter): subscribers
-    // would receive `RecvError::Lagged` and silently drop items.
-    //
-    // Subscriber loops (p2p::subscriber_loop, cloud orchestrator, sync_orch)
-    // still need to log `Lagged(n)` themselves — owned by the subsystems that
-    // hold the receivers, not this file.
-    let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(256);
+    // Subscriber loops (p2p outbound_loop, cloud orchestrator, sync_orch) log
+    // `Lagged(n)` themselves — owned by the subsystems that hold the receivers.
 
     // Beta W2.2 (arch-1): create sync orchestrator channels up-front so they
     // can be wired into the P2P subsystem below.
@@ -431,6 +433,19 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let sync_rx = new_item_tx.subscribe();
     // D2 (sync_orch): pass a token clone so the orchestrator exits on shutdown.
     let sync_shutdown = shutdown_token.clone();
+    // P2P Phase 3 (cross-device readability): give the orchestrator this
+    // device's local-storage seed and the peers.json path so it can re-key item
+    // payloads through the shared content sync key established at pairing. Only
+    // wired when P2P is enabled — the cloud path uses its own SyncKey scheme.
+    let sync_crypto = if p2p_enabled {
+        let seed: [u8; 32] = **local_key_arc;
+        Some(sync_orch::SyncCrypto::new(
+            seed,
+            crate::ipc::peers_file_path(),
+        ))
+    } else {
+        None
+    };
     let sync_handle = tokio::spawn(async move {
         if let Err(e) = sync_orch::run(
             sync_db,
@@ -438,6 +453,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             sync_incoming_rx,
             sync_outbound_tx,
             sync_device_id,
+            sync_crypto,
             sync_shutdown,
         )
         .await
