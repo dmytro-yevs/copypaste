@@ -372,8 +372,14 @@ impl Drop for CloudHandle {
 ///   Read by `get_sync_status` IPC to surface a timestamp to the UI.
 /// - `local_key` — daemon's local XChaCha20-Poly1305 key, used to decrypt
 ///   locally-stored ciphertext before re-encrypting for the cloud.
+/// - `cloud_signed_in` — shared flag published for the IPC `get_sync_status`
+///   handler. Set `true` once a bearer is successfully resolved and `false` if
+///   bearer resolution fails (BUG 2: the IPC layer previously hardcoded
+///   `signed_in = supabase_configured`, so it kept reporting "signed in" even
+///   after a `CloudError::AuthFailed` aborted cloud sync).
 ///
 /// Returns a [`CloudHandle`] that can be used to stop the tasks.
+#[allow(clippy::too_many_arguments)]
 pub async fn start_cloud(
     config: CloudConfig,
     db: Arc<Mutex<Database>>,
@@ -381,18 +387,32 @@ pub async fn start_cloud(
     sync_key: Arc<Mutex<Option<SyncKey>>>,
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
+    cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
 ) -> anyhow::Result<CloudHandle> {
     // Defence-in-depth: re-validate the URL even though CloudConfig::new should
     // have rejected it already. Cheap, and protects callers that constructed
     // the struct directly (e.g. tests).
     if !is_https_url(&config.supabase_url) {
+        // Not an auth failure per se, but cloud sync is not running, so the UI
+        // must not claim we are signed in.
+        cloud_signed_in.store(false, Ordering::Relaxed);
         return Err(CloudError::InsecureUrl(config.supabase_url.clone()).into());
     }
 
     // Resolve the bearer fail-closed: if email/password is configured and
     // sign-in fails, we abort cloud sync entirely instead of silently using
     // the anon key (which would downgrade scope without operator awareness).
-    let bearer_str = resolve_bearer(&config).await?;
+    // Publish the real auth state either way (BUG 2).
+    let bearer_str = match resolve_bearer(&config).await {
+        Ok(token) => {
+            cloud_signed_in.store(true, Ordering::Relaxed);
+            token
+        }
+        Err(e) => {
+            cloud_signed_in.store(false, Ordering::Relaxed);
+            return Err(e.into());
+        }
+    };
     // Shared, mutable bearer so the 401-refresh path (Wave 2.7 edge #20) can
     // swap in a fresh token without restarting the loops.
     let bearer: Arc<RwLock<String>> = Arc::new(RwLock::new(bearer_str));
@@ -418,6 +438,7 @@ pub async fn start_cloud(
     let push_local_key = local_key.clone();
     let push_db = db.clone();
     let push_last_sync_ms = last_sync_ms.clone();
+    let push_signed_in = cloud_signed_in.clone();
     tokio::spawn(push_loop(
         push_config,
         push_bearer,
@@ -427,6 +448,7 @@ pub async fn start_cloud(
         push_local_key,
         push_db,
         push_last_sync_ms,
+        push_signed_in,
     ));
 
     // Task B: poll Supabase REST for remote items and insert unknown ones locally.
@@ -436,6 +458,7 @@ pub async fn start_cloud(
     let poll_sync_key = sync_key.clone();
     let poll_local_key = local_key.clone();
     let poll_last_sync_ms = last_sync_ms.clone();
+    let poll_signed_in = cloud_signed_in.clone();
     tokio::spawn(realtime_loop(
         poll_config,
         poll_bearer,
@@ -444,6 +467,7 @@ pub async fn start_cloud(
         poll_sync_key,
         poll_local_key,
         poll_last_sync_ms,
+        poll_signed_in,
     ));
 
     tracing::info!("cloud-sync started (url={})", config.supabase_url);
@@ -553,6 +577,7 @@ async fn push_loop(
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     db: Arc<Mutex<Database>>,
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
+    cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
 ) {
     let client = reqwest::Client::new();
     let rest_url = format!("{}/rest/v1/clipboard_items", config.supabase_url);
@@ -700,6 +725,7 @@ async fn push_loop(
                 &bearer,
                 &item,
                 &payload_ct_b64,
+                Some(&cloud_signed_in),
             )
             .await
             {
@@ -813,6 +839,7 @@ async fn push_loop(
                                 &bearer,
                                 &item,
                                 &payload_ct_b64,
+                                Some(&cloud_signed_in),
                             )
                             .await
                             {
@@ -1000,6 +1027,12 @@ fn parse_retry_after_secs(headers: &reqwest::header::HeaderMap) -> Option<Durati
 /// Returns `Ok(())` on 2xx, `Err(msg)` for permanent failures or after the
 /// transient-retry budget is exhausted. Callers (the push loop) then decide
 /// whether to requeue.
+///
+/// `cloud_signed_in` is the shared auth-state flag (BUG 2). When the 401 path
+/// refreshes the bearer, a successful refresh keeps it `true` and a failed
+/// refresh flips it `false`. `None` is accepted for callers/tests that do not
+/// track auth state.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn push_item_with_retries(
     client: &reqwest::Client,
     url: &str,
@@ -1007,7 +1040,12 @@ pub(crate) async fn push_item_with_retries(
     bearer: &Arc<RwLock<String>>,
     item: &ClipboardItem,
     payload_ct_b64: &str,
+    cloud_signed_in: Option<&Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<(), String> {
+    // A throwaway flag for the `None` case so `refresh_bearer` always has a
+    // target to write — its write is then simply ignored by the caller.
+    let scratch_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let signed_in = cloud_signed_in.unwrap_or(&scratch_flag);
     let mut backoff = PUSH_INITIAL_BACKOFF;
     // Hard cap on attempts to avoid hot loops even if every attempt comes back
     // as `Transient(_)`. The loop body sleeps between attempts so the worst-case
@@ -1029,7 +1067,7 @@ pub(crate) async fn push_item_with_retries(
             PushOutcome::Unauthorized if !refreshed_once => {
                 refreshed_once = true;
                 tracing::info!("cloud-sync got 401; refreshing bearer and retrying once");
-                match refresh_bearer(config).await {
+                match refresh_bearer(config, signed_in).await {
                     Ok(new_token) => {
                         *bearer.write().await = new_token;
                     }
@@ -1087,8 +1125,24 @@ pub(crate) async fn push_item_with_retries(
 /// persisted config), or falls back to the anon key. Returning the anon key on
 /// refresh is intentional — it matches the initial `start_cloud` behaviour for
 /// the no-credentials case.
-async fn refresh_bearer(config: &CloudConfig) -> Result<String, String> {
-    resolve_bearer(config).await.map_err(|e| e.to_string())
+///
+/// BUG 2: a refresh that fails to re-authenticate must flip `signed_in` to
+/// `false` so `get_sync_status` stops claiming the daemon is signed in; a
+/// successful refresh flips it back to `true`.
+async fn refresh_bearer(
+    config: &CloudConfig,
+    cloud_signed_in: &Arc<std::sync::atomic::AtomicBool>,
+) -> Result<String, String> {
+    match resolve_bearer(config).await {
+        Ok(token) => {
+            cloud_signed_in.store(true, Ordering::Relaxed);
+            Ok(token)
+        }
+        Err(e) => {
+            cloud_signed_in.store(false, Ordering::Relaxed);
+            Err(e.to_string())
+        }
+    }
 }
 
 // ── Realtime / poll loop ──────────────────────────────────────────────────────
@@ -1105,6 +1159,70 @@ async fn refresh_bearer(config: &CloudConfig) -> Result<String, String> {
 /// If no sync key is set, the poll is skipped with a one-time warning.
 /// If decryption fails (wrong passphrase, tampered blob), the row is skipped
 /// and a `warn!` is emitted — we never crash, never log plaintext.
+/// The settings-table key under which the download high-water-mark (max ingested
+/// `wall_time`, in Unix ms) is persisted so a restart resumes forward pagination
+/// instead of re-downloading the entire cloud history.
+const POLL_WATERMARK_KEY: &str = "cloud_poll_watermark";
+
+/// Base poll query (no lower bound). The `wall_time=gt.<watermark>` filter is
+/// appended by [`build_poll_url`] when a watermark is known.
+const POLL_SELECT_QS: &str = "select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.desc&limit=20";
+
+/// Construct the poll URL for a single tick.
+///
+/// When `watermark > 0`, appends `&wall_time=gt.<watermark>` so PostgREST only
+/// returns rows strictly newer than everything we have already ingested. This is
+/// the BUG 1 fix: without the filter the daemon re-fetched the newest 20 rows on
+/// every tick, never paginated into older history, and dropped any surplus
+/// beyond 20 new items between ticks. The `wall_time=gt.<value>` syntax matches
+/// the Android client (`SupabaseClient.kt`).
+fn build_poll_url(supabase_url: &str, watermark: i64) -> String {
+    if watermark > 0 {
+        format!("{supabase_url}/rest/v1/clipboard_items?{POLL_SELECT_QS}&wall_time=gt.{watermark}")
+    } else {
+        format!("{supabase_url}/rest/v1/clipboard_items?{POLL_SELECT_QS}")
+    }
+}
+
+/// Seed the download watermark on startup from the larger of the persisted
+/// `cloud_poll_watermark` setting and the local `MAX(wall_time)`. Either source
+/// missing/unreadable contributes `0` (download from the beginning). Never
+/// errors — a fresh DB or absent setting simply yields `0`.
+fn load_poll_watermark(db: &Database) -> i64 {
+    let persisted: i64 = db
+        .conn()
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            rusqlite::params![POLL_WATERMARK_KEY],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    let local_max: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COALESCE(MAX(wall_time), 0) FROM clipboard_items",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    persisted.max(local_max)
+}
+
+/// Persist the download watermark into the `settings` table (upsert). Returns the
+/// rusqlite error on failure so the caller can log it; the watermark also lives
+/// in memory, so a persist failure only costs re-pagination after a restart.
+fn save_poll_watermark(db: &Database, watermark: i64) -> rusqlite::Result<()> {
+    db.conn().execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2) \
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![POLL_WATERMARK_KEY, watermark.to_string()],
+    )?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn realtime_loop(
     config: CloudConfig,
     bearer: Arc<RwLock<String>>,
@@ -1113,14 +1231,34 @@ async fn realtime_loop(
     sync_key: Arc<Mutex<Option<SyncKey>>>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
+    cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
 ) {
     let client = reqwest::Client::new();
-    let poll_url = format!(
-        "{}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.desc&limit=20",
-        config.supabase_url
-    );
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
     let mut warned_no_key = false;
+
+    // BUG 1 fix — download high-water-mark.
+    //
+    // The previous poll URL was a fixed `order=wall_time.desc&limit=20` with NO
+    // lower bound, so every tick re-fetched the same newest 20 rows: older
+    // history never downloaded, and if more than 20 items arrived between ticks
+    // the surplus was lost forever. We now track the maximum `wall_time` we have
+    // ingested and append `&wall_time=gt.<watermark>` so polling paginates
+    // forward (the column/filter syntax is the same one the Android client uses
+    // — `wall_time=gt.$sinceWallTime`). The watermark is seeded on startup from
+    // the larger of (a) the persisted `cloud_poll_watermark` setting and (b) the
+    // local `MAX(wall_time)`, and is persisted again after each advance so a
+    // daemon restart does not re-download the entire history.
+    let mut watermark: i64 = {
+        let db_arc = db.clone();
+        tokio::task::spawn_blocking(move || {
+            let db_guard = db_arc.blocking_lock();
+            load_poll_watermark(&db_guard)
+        })
+        .await
+        .unwrap_or(0)
+    };
+    tracing::info!("cloud-sync poll: seeded download watermark wall_time={watermark}");
 
     loop {
         tokio::select! {
@@ -1147,149 +1285,228 @@ async fn realtime_loop(
                     }
                 };
 
-                match fetch_remote_rows_with_refresh(&client, &poll_url, &config, &bearer).await {
-                    Err(e) => tracing::warn!("cloud-sync poll failed: {e}"),
-                    Ok(rows) => {
-                        // Decrypt + re-encrypt + insert in a blocking task so
-                        // the async executor is not blocked by rusqlite IO.
-                        // We snapshot the key bytes (non-secret from the
-                        // perspective of the blocking thread, but never logged).
-                        let db_arc = db.clone();
-                        let local_key_clone = local_key.clone();
-                        let join = tokio::task::spawn_blocking(move || {
-                            // Reconstruct a SyncKey from the snapshot bytes.
-                            // We use a raw array so this is purely stack-local
-                            // and scrubbed when the closure returns.
-                            let mut key_arr = [0u8; 32];
-                            key_arr.copy_from_slice(&key_bytes);
-                            let db_guard = db_arc.blocking_lock();
-                            let mut synced = 0u32;
-                            for row in rows {
-                                let Some(id) = row["id"].as_str() else { continue };
-                                let Some(item_id) = row["item_id"].as_str() else { continue };
-                                // Dedup check before doing expensive decrypt.
-                                match exists_item(&db_guard, id) {
-                                    Ok(true) => continue,
-                                    Err(e) => {
-                                        tracing::warn!("cloud-sync: exists_item error for id={id}: {e}");
-                                        continue;
-                                    }
-                                    Ok(false) => {}
-                                }
-
-                                // Decode payload_ct (base64 → bytes).
-                                let payload_ct_b64 = match row["payload_ct"].as_str() {
-                                    Some(s) => s,
-                                    None => {
-                                        tracing::warn!("cloud-sync: row id={id} missing payload_ct; skipping");
-                                        continue;
-                                    }
-                                };
-                                let blob = match decode_payload_ct(payload_ct_b64) {
-                                    Ok(b) => b,
-                                    Err(e) => {
-                                        tracing::warn!("cloud-sync: payload_ct decode failed for id={id}: {e}; skipping");
-                                        continue;
-                                    }
-                                };
-
-                                // Decrypt with sync key (AAD = item_id + schema v5).
-                                // On failure: skip, warn, NEVER log the blob or key.
-                                //
-                                // We snapshot the sync key bytes before entering
-                                // spawn_blocking (SyncKey is not Send across the
-                                // async boundary). Reconstruct a temporary SyncKey
-                                // via `from_bytes` so the canonical `decrypt_from_cloud`
-                                // code path is used — same AEAD parameters as upload.
-                                let plaintext = {
-                                    let tmp_key = SyncKey::from_bytes(key_arr);
-                                    match decrypt_from_cloud(&tmp_key, item_id, &blob) {
-                                        Ok(p) => p,
-                                        Err(e) => {
-                                            // Never log plaintext or the key.
-                                            tracing::warn!(
-                                                "cloud-sync: decrypt_from_cloud failed for id={id} \
-                                                 (wrong passphrase or tampered blob): {e}; skipping"
-                                            );
-                                            continue;
-                                        }
-                                    }
-                                };
-
-                                // Re-encrypt with local key (v2 HKDF path).
-                                let content_type = row["content_type"]
-                                    .as_str()
-                                    .unwrap_or("text")
-                                    .to_owned();
-                                let lamport_ts = row["lamport_ts"].as_i64().unwrap_or(0);
-                                let wall_time = row["wall_time"].as_i64().unwrap_or(0);
-                                let expires_at = row["expires_at"].as_i64();
-                                let app_bundle_id = row["app_bundle_id"].as_str().map(str::to_owned);
-                                let origin_device_id = row["device_id"]
-                                    .as_str()
-                                    .map(str::to_owned)
-                                    .unwrap_or_default();
-
-                                let local_item = match build_local_item(
-                                    id,
-                                    item_id,
-                                    &content_type,
-                                    &plaintext,
-                                    lamport_ts,
-                                    wall_time,
-                                    expires_at,
-                                    app_bundle_id,
-                                    origin_device_id,
-                                    &local_key_clone,
-                                ) {
-                                    Ok(i) => i,
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            "cloud-sync: local re-encrypt failed for id={id}: {e}; skipping"
-                                        );
-                                        continue;
-                                    }
-                                };
-
-                                match insert_item(&db_guard, &local_item) {
-                                    Ok(()) => {
-                                        synced += 1;
-                                        tracing::info!("cloud-sync: synced remote id={}", local_item.id);
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            "cloud-sync: failed to insert remote id={}: {e}",
-                                            local_item.id
-                                        );
-                                    }
-                                }
-                            }
-                            // Zero the snapshot key bytes before the closure exits.
-                            key_arr.iter_mut().for_each(|b| *b = 0);
-                            synced
-                        });
-                        match join.await {
-                            Ok(synced) => {
-                                if synced > 0 {
-                                    // Record the wall-clock time of the last successful sync.
-                                    let now_ms = std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_millis() as i64;
-                                    last_sync_ms.store(now_ms, Ordering::Relaxed);
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!("cloud-sync: insert worker panicked or was cancelled: {e}");
-                            }
-                        }
-                    }
-                }
+                // One poll round: fetch rows newer than `watermark`, ingest them,
+                // and advance/persist the watermark. Extracted into `poll_once`
+                // so the forward-pagination contract (BUG 1) is unit-testable
+                // without waiting on the 10s interval.
+                watermark = poll_once(
+                    &client,
+                    &config,
+                    &bearer,
+                    &db,
+                    &local_key,
+                    &last_sync_ms,
+                    &cloud_signed_in,
+                    &key_bytes,
+                    watermark,
+                )
+                .await;
             }
             _ = shutdown.notified() => {
                 tracing::info!("cloud-sync realtime_loop: shutdown received");
                 break;
             }
+        }
+    }
+}
+
+/// Execute a single poll round and return the (possibly advanced) watermark.
+///
+/// 1. Build the poll URL with `wall_time=gt.<watermark>` so PostgREST only
+///    returns rows newer than everything ingested so far (BUG 1 forward
+///    pagination — the previous fixed `limit=20` re-fetched the same newest
+///    rows every tick and dropped surplus history).
+/// 2. Decrypt + re-encrypt + insert each unknown row.
+/// 3. Advance the watermark to the highest `wall_time` seen in the batch
+///    (including de-duped / undecryptable rows, so they are never re-requested)
+///    and persist it so a restart resumes forward instead of from the top.
+///
+/// On a fetch error the watermark is returned unchanged so the next tick retries
+/// the same window.
+#[allow(clippy::too_many_arguments)]
+async fn poll_once(
+    client: &reqwest::Client,
+    config: &CloudConfig,
+    bearer: &Arc<RwLock<String>>,
+    db: &Arc<Mutex<Database>>,
+    local_key: &Arc<zeroize::Zeroizing<[u8; 32]>>,
+    last_sync_ms: &Arc<std::sync::atomic::AtomicI64>,
+    cloud_signed_in: &Arc<std::sync::atomic::AtomicBool>,
+    key_bytes: &[u8],
+    watermark: i64,
+) -> i64 {
+    let poll_url = build_poll_url(&config.supabase_url, watermark);
+
+    let rows =
+        match fetch_remote_rows_with_refresh(client, &poll_url, config, bearer, cloud_signed_in)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!("cloud-sync poll failed: {e}");
+                return watermark;
+            }
+        };
+
+    // Decrypt + re-encrypt + insert in a blocking task so the async executor is
+    // not blocked by rusqlite IO. We snapshot the key bytes (non-secret from the
+    // perspective of the blocking thread, but never logged).
+    let db_arc = db.clone();
+    let local_key_clone = local_key.clone();
+    let mut key_arr = [0u8; 32];
+    key_arr.copy_from_slice(key_bytes);
+    let join = tokio::task::spawn_blocking(move || {
+        let db_guard = db_arc.blocking_lock();
+        let mut synced = 0u32;
+        // Highest wall_time observed in this batch — used to advance the download
+        // watermark even for rows that were de-duped or failed to decrypt, so we
+        // never re-request them on the next tick.
+        let mut batch_max_wall: i64 = 0;
+        for row in rows {
+            let Some(id) = row["id"].as_str() else {
+                continue;
+            };
+            let Some(item_id) = row["item_id"].as_str() else {
+                continue;
+            };
+            // Advance the batch watermark for EVERY row we can read a wall_time
+            // from — including ones we skip below (already present, undecryptable)
+            // — so the next poll's `wall_time=gt.<watermark>` does not re-request
+            // them.
+            let row_wall = row["wall_time"].as_i64().unwrap_or(0);
+            if row_wall > batch_max_wall {
+                batch_max_wall = row_wall;
+            }
+            // Dedup check before doing expensive decrypt.
+            match exists_item(&db_guard, id) {
+                Ok(true) => continue,
+                Err(e) => {
+                    tracing::warn!("cloud-sync: exists_item error for id={id}: {e}");
+                    continue;
+                }
+                Ok(false) => {}
+            }
+
+            // Decode payload_ct (base64 → bytes).
+            let payload_ct_b64 = match row["payload_ct"].as_str() {
+                Some(s) => s,
+                None => {
+                    tracing::warn!("cloud-sync: row id={id} missing payload_ct; skipping");
+                    continue;
+                }
+            };
+            let blob = match decode_payload_ct(payload_ct_b64) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!(
+                        "cloud-sync: payload_ct decode failed for id={id}: {e}; skipping"
+                    );
+                    continue;
+                }
+            };
+
+            // Decrypt with sync key (AAD = item_id + schema v5).
+            // On failure: skip, warn, NEVER log the blob or key.
+            //
+            // We snapshot the sync key bytes before entering spawn_blocking
+            // (SyncKey is not Send across the async boundary). Reconstruct a
+            // temporary SyncKey via `from_bytes` so the canonical
+            // `decrypt_from_cloud` code path is used — same AEAD parameters as
+            // upload.
+            let plaintext = {
+                let tmp_key = SyncKey::from_bytes(key_arr);
+                match decrypt_from_cloud(&tmp_key, item_id, &blob) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        // Never log plaintext or the key.
+                        tracing::warn!(
+                            "cloud-sync: decrypt_from_cloud failed for id={id} \
+                             (wrong passphrase or tampered blob): {e}; skipping"
+                        );
+                        continue;
+                    }
+                }
+            };
+
+            // Re-encrypt with local key (v2 HKDF path).
+            let content_type = row["content_type"].as_str().unwrap_or("text").to_owned();
+            let lamport_ts = row["lamport_ts"].as_i64().unwrap_or(0);
+            let wall_time = row_wall;
+            let expires_at = row["expires_at"].as_i64();
+            let app_bundle_id = row["app_bundle_id"].as_str().map(str::to_owned);
+            let origin_device_id = row["device_id"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_default();
+
+            let local_item = match build_local_item(
+                id,
+                item_id,
+                &content_type,
+                &plaintext,
+                lamport_ts,
+                wall_time,
+                expires_at,
+                app_bundle_id,
+                origin_device_id,
+                &local_key_clone,
+            ) {
+                Ok(i) => i,
+                Err(e) => {
+                    tracing::warn!(
+                        "cloud-sync: local re-encrypt failed for id={id}: {e}; skipping"
+                    );
+                    continue;
+                }
+            };
+
+            match insert_item(&db_guard, &local_item) {
+                Ok(()) => {
+                    synced += 1;
+                    tracing::info!("cloud-sync: synced remote id={}", local_item.id);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "cloud-sync: failed to insert remote id={}: {e}",
+                        local_item.id
+                    );
+                }
+            }
+        }
+        // Zero the snapshot key bytes before the closure exits.
+        key_arr.iter_mut().for_each(|b| *b = 0);
+        // Persist the advanced watermark inside the same DB lock so it survives a
+        // restart. Return the value the async loop should use going forward.
+        let new_watermark = if batch_max_wall > watermark {
+            if let Err(e) = save_poll_watermark(&db_guard, batch_max_wall) {
+                tracing::warn!(
+                    "cloud-sync: failed to persist poll watermark {batch_max_wall}: {e}"
+                );
+            }
+            batch_max_wall
+        } else {
+            watermark
+        };
+        (synced, new_watermark)
+    });
+
+    match join.await {
+        Ok((synced, new_watermark)) => {
+            if synced > 0 {
+                // Record the wall-clock time of the last successful sync.
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+                last_sync_ms.store(now_ms, Ordering::Relaxed);
+            }
+            // Advance the in-memory watermark so the next tick's URL filters past
+            // everything we just saw.
+            new_watermark.max(watermark)
+        }
+        Err(e) => {
+            tracing::warn!("cloud-sync: insert worker panicked or was cancelled: {e}");
+            watermark
         }
     }
 }
@@ -1420,6 +1637,7 @@ async fn fetch_remote_rows_with_refresh(
     url: &str,
     config: &CloudConfig,
     bearer: &Arc<RwLock<String>>,
+    cloud_signed_in: &Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut refreshed = false;
     loop {
@@ -1429,7 +1647,7 @@ async fn fetch_remote_rows_with_refresh(
             FetchOutcome::Unauthorized if !refreshed => {
                 refreshed = true;
                 tracing::info!("cloud-sync poll got 401; refreshing bearer and retrying once");
-                match refresh_bearer(config).await {
+                match refresh_bearer(config, cloud_signed_in).await {
                     Ok(new_token) => {
                         *bearer.write().await = new_token;
                     }
@@ -1833,7 +2051,7 @@ mod tests {
         // test runner. 30s is well over the 1+2+4 = 7s worth of backoff.
         let result = tokio::time::timeout(
             Duration::from_secs(30),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA=="),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None),
         )
         .await
         .expect("push pipeline must not hang");
@@ -1883,7 +2101,7 @@ mod tests {
 
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA=="),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None),
         )
         .await
         .expect("must not hang");
@@ -1932,7 +2150,7 @@ mod tests {
         let start = std::time::Instant::now();
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA=="),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None),
         )
         .await
         .expect("must not hang");
@@ -2122,6 +2340,294 @@ mod tests {
         );
         // Front of queue should now be `item-5` (the first 5 were evicted).
         assert_eq!(q.front().expect("non-empty").0.id, "item-5");
+    }
+
+    // ── BUG 1 — download poll watermark (forward pagination) ──────────────────
+
+    #[test]
+    fn build_poll_url_appends_watermark_only_when_positive() {
+        let base = build_poll_url("https://x.test", 0);
+        assert!(
+            base.ends_with("&limit=20"),
+            "no watermark filter when watermark==0: {base}"
+        );
+        assert!(
+            !base.contains("wall_time=gt."),
+            "must NOT add a gt filter at watermark 0: {base}"
+        );
+
+        let bounded = build_poll_url("https://x.test", 1234);
+        assert!(
+            bounded.contains("&wall_time=gt.1234"),
+            "watermark must be appended as wall_time=gt.<T>: {bounded}"
+        );
+    }
+
+    #[test]
+    fn load_poll_watermark_takes_max_of_persisted_and_local() {
+        let db = copypaste_core::Database::open_in_memory().expect("in-mem db");
+        // Fresh DB, no rows, no setting → 0 (download from the beginning).
+        assert_eq!(load_poll_watermark(&db), 0);
+
+        // Persist a watermark and confirm round-trip.
+        save_poll_watermark(&db, 500).expect("persist");
+        assert_eq!(load_poll_watermark(&db), 500);
+
+        // A local row newer than the persisted setting wins the max().
+        let mut local = test_item("local-row");
+        local.wall_time = 900;
+        copypaste_core::insert_item(&db, &local).expect("insert local");
+        assert_eq!(
+            load_poll_watermark(&db),
+            900,
+            "must seed from MAX(local wall_time) when it exceeds the persisted watermark"
+        );
+
+        // A persisted watermark newer than any local row wins instead.
+        save_poll_watermark(&db, 5000).expect("persist higher");
+        assert_eq!(load_poll_watermark(&db), 5000);
+    }
+
+    /// Build a cloud-row JSON object exactly as PostgREST would return it: the
+    /// `payload_ct` is the bytea hex-output form (`\x<hex>`) of the
+    /// `encrypt_for_cloud` blob.
+    fn cloud_row(
+        id: &str,
+        sync_key: &SyncKey,
+        plaintext: &[u8],
+        wall_time: i64,
+    ) -> serde_json::Value {
+        use base64::Engine as _;
+        let item_id = id; // 1:1 for the test
+        let blob = encrypt_for_cloud(sync_key, item_id, plaintext).expect("cloud encrypt");
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
+        let payload_ct = encode_payload_ct_hex(&b64);
+        serde_json::json!({
+            "id": id,
+            "item_id": item_id,
+            "content_type": "text",
+            "payload_ct": payload_ct,
+            "lamport_ts": wall_time,
+            "wall_time": wall_time,
+            "expires_at": serde_json::Value::Null,
+            "app_bundle_id": serde_json::Value::Null,
+            "device_id": "remote-device",
+        })
+    }
+
+    /// **BUG 1** — after ingesting a row with `wall_time=T`, the NEXT poll must
+    /// carry `wall_time=gt.T`, and a row at-or-below the watermark must NOT be
+    /// re-requested or re-inserted.
+    ///
+    /// Round 1: server returns a row at wall_time=2000 with NO `wall_time` filter
+    /// in the request. `poll_once` ingests it and advances the watermark to 2000.
+    /// Round 2: the request MUST include `wall_time=gt.2000`; the server (matched
+    /// only for that filter) returns an empty array. We assert the watermark
+    /// stuck at 2000 and the local DB still holds exactly the one item — proving
+    /// the old row was never re-fetched/re-inserted.
+    #[tokio::test]
+    async fn poll_advances_watermark_and_does_not_refetch_old_rows() {
+        use mockito::Matcher;
+
+        let sync_key = copypaste_core::derive_sync_key("watermark-test-passphrase").unwrap();
+        let plaintext = b"first-remote-item";
+
+        let row1 = cloud_row(
+            "11111111-1111-1111-1111-111111111111",
+            &sync_key,
+            plaintext,
+            2000,
+        );
+
+        // Mocks are matched in REGISTRATION order. Register the SPECIFIC
+        // `wall_time=gt.2000` matcher FIRST so the round-2 request lands there.
+        // Round 1's request (watermark 0 → no gt filter) cannot match it and
+        // falls through to the catch-all `m1`. This also enforces *absence* of
+        // the filter on round 1: if round 1 had erroneously carried
+        // `wall_time=gt.2000`, it would match `m2` and overflow its
+        // `.expect(1)`, failing `m2.assert()`.
+        let m2 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::Regex("wall_time=gt.2000".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("[]")
+            .expect(1)
+            .create();
+
+        // Round 1 catch-all: returns the single row at wall_time=2000.
+        let m1 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&vec![row1]).unwrap())
+            .expect(1)
+            .create();
+
+        let cfg = test_cfg();
+        let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
+        let client = reqwest::Client::new();
+        let db = Arc::new(Mutex::new(
+            copypaste_core::Database::open_in_memory().expect("in-mem db"),
+        ));
+        let local_key = Arc::new(zeroize::Zeroizing::new([7u8; 32]));
+        let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let key_bytes = sync_key.as_bytes().to_vec();
+
+        // Round 1: from watermark 0.
+        let wm1 = poll_once(
+            &client,
+            &cfg,
+            &bearer,
+            &db,
+            &local_key,
+            &last_sync_ms,
+            &signed_in,
+            &key_bytes,
+            0,
+        )
+        .await;
+        assert_eq!(
+            wm1, 2000,
+            "watermark must advance to the ingested row's wall_time"
+        );
+        m1.assert();
+
+        // Exactly one row landed locally.
+        {
+            let g = db.lock().await;
+            let count: i64 = g
+                .conn()
+                .query_row("SELECT COUNT(1) FROM clipboard_items", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 1, "exactly one remote row ingested");
+            // Watermark persisted for restart resilience.
+            assert_eq!(load_poll_watermark(&g), 2000);
+        }
+
+        // Round 2: from watermark 2000 — request carries the gt filter, no rows.
+        let wm2 = poll_once(
+            &client,
+            &cfg,
+            &bearer,
+            &db,
+            &local_key,
+            &last_sync_ms,
+            &signed_in,
+            &key_bytes,
+            wm1,
+        )
+        .await;
+        assert_eq!(
+            wm2, 2000,
+            "empty newer-window leaves the watermark unchanged"
+        );
+        m2.assert();
+
+        // Still exactly one row — the old row was filtered out server-side and
+        // never re-inserted.
+        {
+            let g = db.lock().await;
+            let count: i64 = g
+                .conn()
+                .query_row("SELECT COUNT(1) FROM clipboard_items", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(count, 1, "old row must not be re-fetched or re-inserted");
+        }
+    }
+
+    // ── BUG 2 — real signed_in auth state ─────────────────────────────────────
+
+    /// When bearer resolution fails (email/password set but sign-in errors
+    /// against an unreachable host → `CloudError::AuthFailed`), `start_cloud`
+    /// must set the shared `cloud_signed_in` flag to `false` and return an error
+    /// — so `get_sync_status` reports the real (signed-out) state instead of the
+    /// old hardcoded `signed_in = supabase_configured`.
+    #[tokio::test]
+    async fn start_cloud_auth_failure_sets_signed_in_false() {
+        // Unrouteable host:port so sign-in fails fast and deterministically.
+        let cfg = CloudConfig {
+            supabase_url: "https://127.0.0.1:1".to_owned(),
+            anon_key: "anon-public-key".to_owned(),
+            email: Some("user@example.com".to_owned()),
+            password: Some("wrong".to_owned()),
+        };
+        let db = Arc::new(Mutex::new(
+            copypaste_core::Database::open_in_memory().expect("in-mem db"),
+        ));
+        let (tx, rx) = tokio::sync::broadcast::channel::<ClipboardItem>(8);
+        let sync_key = Arc::new(Mutex::new(None));
+        let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let local_key = Arc::new(zeroize::Zeroizing::new([3u8; 32]));
+        let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+
+        let res = start_cloud(
+            cfg,
+            db,
+            rx,
+            sync_key,
+            last_sync_ms,
+            local_key,
+            signed_in.clone(),
+        )
+        .await;
+
+        assert!(res.is_err(), "auth failure must abort start_cloud");
+        assert!(
+            !signed_in.load(Ordering::Relaxed),
+            "cloud_signed_in must be false after AuthFailed"
+        );
+        drop(tx);
+    }
+
+    /// Symmetric success path: a successful bearer resolution must set
+    /// `cloud_signed_in` to `true`. `start_cloud` rejects the `http://` mockito
+    /// URL at its HTTPS gate, so we drive the same publish path the loops use —
+    /// `refresh_bearer` (which wraps `resolve_bearer`). With no email/password it
+    /// resolves to the anon key (Ok), and must flip the flag to `true`.
+    #[tokio::test]
+    async fn successful_bearer_resolution_sets_signed_in_true() {
+        std::env::remove_var("SUPABASE_EMAIL");
+        std::env::remove_var("SUPABASE_PASSWORD");
+
+        let cfg = CloudConfig {
+            supabase_url: mockito::server_url(),
+            anon_key: "anon-key-for-tests".to_owned(),
+            email: None,
+            password: None,
+        };
+        // Start the flag at false to prove the success path actively sets it true.
+        let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let token = refresh_bearer(&cfg, &signed_in)
+            .await
+            .expect("anon-key bearer resolution must succeed");
+        assert_eq!(token, "anon-key-for-tests");
+        assert!(
+            signed_in.load(Ordering::Relaxed),
+            "cloud_signed_in must be true after a successful bearer resolution"
+        );
+    }
+
+    /// And the inverse on the same publish path: a failed bearer resolution
+    /// (email/password set but the host is unreachable → AuthFailed) must flip a
+    /// previously-true flag back to `false`, modelling a token that stops
+    /// authenticating mid-session (the 401-refresh path).
+    #[tokio::test]
+    async fn failed_bearer_refresh_clears_signed_in() {
+        let cfg = CloudConfig {
+            supabase_url: "https://127.0.0.1:1".to_owned(),
+            anon_key: "anon".to_owned(),
+            email: Some("user@example.com".to_owned()),
+            password: Some("wrong".to_owned()),
+        };
+        let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let res = refresh_bearer(&cfg, &signed_in).await;
+        assert!(res.is_err(), "unreachable sign-in must fail");
+        assert!(
+            !signed_in.load(Ordering::Relaxed),
+            "a failed refresh must clear cloud_signed_in"
+        );
     }
 }
 
@@ -2369,9 +2875,17 @@ mod e2e_live {
         let rest_url = format!("{url}/rest/v1/clipboard_items");
         let cfg = cfg_for(&user, &anon);
         let bearer = Arc::new(RwLock::new(user.bearer.clone()));
-        push_item_with_retries(&client, &rest_url, &cfg, &bearer, &item, &payload_ct_b64)
-            .await
-            .expect("push_item_with_retries must succeed against the live stack");
+        push_item_with_retries(
+            &client,
+            &rest_url,
+            &cfg,
+            &bearer,
+            &item,
+            &payload_ct_b64,
+            None,
+        )
+        .await
+        .expect("push_item_with_retries must succeed against the live stack");
 
         // Assert the row is present in Supabase, scoped to this user by RLS.
         let rows = rest_select_all(&client, &url, &anon, &user.bearer).await;
@@ -2419,6 +2933,7 @@ mod e2e_live {
             &bearer,
             &item,
             &payload_ct_b64,
+            None,
         )
         .await
         .expect("alice push");
@@ -2484,6 +2999,7 @@ mod e2e_live {
             &bearer,
             &item,
             &payload_ct_b64,
+            None,
         )
         .await
         .expect("A push");

@@ -450,6 +450,13 @@ pub struct IpcServer {
     /// `get_sync_status` returns a live value.
     #[cfg(feature = "cloud-sync")]
     pub last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
+    /// Real GoTrue auth state, published by the cloud push/poll loops (BUG 2).
+    /// `true` once `start_cloud` resolves a bearer, `false` on a bearer-resolution
+    /// failure (`CloudError::AuthFailed`) or a failed 401-refresh. Read by
+    /// `get_sync_status` so the UI reflects the actual signed-in state instead of
+    /// the old hardcoded `signed_in = supabase_configured`.
+    #[cfg(feature = "cloud-sync")]
+    pub cloud_signed_in: Arc<AtomicBool>,
     /// Broadcast sender for newly-ingested clipboard items, shared with the
     /// clipboard monitor and the sync orchestrator (P2P Phase 3).
     ///
@@ -487,6 +494,8 @@ impl IpcServer {
             sync_key: Arc::new(Mutex::new(None)),
             #[cfg(feature = "cloud-sync")]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            #[cfg(feature = "cloud-sync")]
+            cloud_signed_in: Arc::new(AtomicBool::new(false)),
             new_item_tx: None,
         }
     }
@@ -577,9 +586,11 @@ impl IpcServer {
         mut self,
         sync_key: Arc<Mutex<Option<SyncKey>>>,
         last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
+        cloud_signed_in: Arc<AtomicBool>,
     ) -> Self {
         self.sync_key = sync_key;
         self.last_sync_ms = last_sync_ms;
+        self.cloud_signed_in = cloud_signed_in;
         self
     }
 
@@ -623,6 +634,8 @@ impl IpcServer {
             sync_key: Arc::new(Mutex::new(None)),
             #[cfg(feature = "cloud-sync")]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            #[cfg(feature = "cloud-sync")]
+            cloud_signed_in: Arc::new(AtomicBool::new(false)),
             new_item_tx: None,
         }
     }
@@ -2007,12 +2020,15 @@ impl IpcServer {
                 let supabase_configured = app_cfg.supabase_url.is_some()
                     && app_cfg.supabase_anon_key.is_some()
                     || std::env::var("SUPABASE_URL").is_ok();
-                // `signed_in` is true when we have a GoTrue session (anon key or
-                // email/password token). For now we report it as true when
-                // supabase is configured and we haven't seen an auth failure
-                // (the push/poll loops log failures but don't surface a flag
-                // here yet — that lives in a future wave).
-                let signed_in = supabase_configured;
+                // BUG 2 fix: report the REAL GoTrue auth state published by the
+                // cloud loops, not the old `signed_in = supabase_configured`
+                // placeholder. The flag is set `true` once `start_cloud` resolves
+                // a bearer and `false` on a bearer-resolution / 401-refresh
+                // failure, so the UI no longer claims "signed in" after a
+                // `CloudError::AuthFailed` aborted cloud sync.
+                let signed_in = self
+                    .cloud_signed_in
+                    .load(std::sync::atomic::Ordering::Relaxed);
                 let raw_ts = self.last_sync_ms.load(std::sync::atomic::Ordering::Relaxed);
                 let last_sync_ms_val: Option<i64> = if raw_ts > 0 { Some(raw_ts) } else { None };
                 // B. Expose the non-secret Supabase URL and email so the UI can
@@ -6037,5 +6053,48 @@ mod tests {
                 "missing audit row for {fp}"
             );
         }
+    }
+
+    /// BUG 2 — `get_sync_status` must report the REAL `signed_in` auth state
+    /// published by the cloud loops via the shared `cloud_signed_in` flag, not
+    /// the old hardcoded `signed_in = supabase_configured`. We build a server,
+    /// wire a shared flag, and assert the IPC response tracks the flag both ways.
+    #[cfg(feature = "cloud-sync")]
+    #[tokio::test]
+    async fn get_sync_status_reports_real_signed_in_flag() {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let private_mode = Arc::new(AtomicBool::new(false));
+        let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
+        let device_pub = Arc::new([0u8; 32]);
+
+        let sync_key = Arc::new(Mutex::new(None));
+        let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let signed_in = Arc::new(AtomicBool::new(false));
+
+        let server = IpcServer::new(db, private_mode, local_key, device_pub).with_cloud_sync_state(
+            sync_key,
+            last_sync_ms,
+            signed_in.clone(),
+        );
+
+        let line = r#"{"id":"1","method":"get_sync_status","params":{}}"#;
+
+        // Flag false (e.g. after CloudError::AuthFailed) → signed_in == false,
+        // even though supabase may be "configured".
+        let resp = server.dispatch(line).await;
+        let data = resp.data.expect("get_sync_status must return data");
+        assert_eq!(
+            data["signed_in"], false,
+            "signed_in must reflect the false auth flag, not supabase_configured: {data}"
+        );
+
+        // Flip the shared flag true (successful bearer resolution) → reflected.
+        signed_in.store(true, Ordering::Relaxed);
+        let resp2 = server.dispatch(line).await;
+        let data2 = resp2.data.expect("get_sync_status must return data");
+        assert_eq!(
+            data2["signed_in"], true,
+            "signed_in must track the real auth flag once set true: {data2}"
+        );
     }
 }
