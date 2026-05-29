@@ -111,6 +111,23 @@ namespace copypaste_android {
   /// Throws `P2pError` on a bad addr_hint or any transport/PAKE failure.
   [Throws=CopypasteError]
   BootstrapResult bootstrap_pair_initiator(string addr_hint, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string pake_password, string sync_addr);
+
+  /// Run ONE P2P clipboard sync session against an already-paired peer.
+  ///
+  /// Connects to `peer_addr` (host:port) over mutual TLS — `peer_fingerprint`
+  /// (hex SHA-256 of the peer's cert, from the bootstrap pairing result) is
+  /// allow-listed so the handshake only completes with that exact peer.
+  /// `session_key` is the 32-byte PAKE session key from
+  /// `bootstrap_pair_initiator`; the shared content key is derived from it
+  /// EXACTLY as the macOS daemon does, so items round-trip as plaintext.
+  /// `cert_der`/`key_der` are this device's mTLS identity (`generate_device_cert`).
+  /// `local_items` are this device's clipboard items (plaintext) to offer.
+  ///
+  /// Returns the sync counts plus every item RECEIVED from the peer, decrypted
+  /// back to plaintext. Throws `P2pError` on a bad address, connect/TLS
+  /// failure, or any sync-protocol error.
+  [Throws=CopypasteError]
+  P2pSyncResult sync_with_peer(string peer_addr, string peer_fingerprint, sequence<u8> session_key, sequence<u8> cert_der, sequence<u8> key_der, sequence<LocalItem> local_items);
 };
 
 [Error]
@@ -175,4 +192,28 @@ dictionary BootstrapResult {
   string peer_fingerprint;
   string peer_sync_addr;
   sequence<u8> session_key;
+};
+
+// A local clipboard item (plaintext) Android offers to a peer during sync.
+// `id` is the stable row id; `item_id` is regenerated internally if empty.
+dictionary LocalItem {
+  string id;
+  i64 wall_time_ms;
+  string content_type;
+  sequence<u8> plaintext;
+};
+
+// An item received from the peer during sync, decrypted back to plaintext.
+dictionary SyncedItem {
+  string id;
+  string content_type;
+  sequence<u8> plaintext;
+  i64 wall_time_ms;
+};
+
+// Result of `sync_with_peer`: one completed sync session's outcome.
+dictionary P2pSyncResult {
+  u64 items_received;
+  u64 items_sent;
+  sequence<SyncedItem> items;
 };

@@ -33,6 +33,9 @@ copypaste-core = { path = "../copypaste-core" }
 # bootstrap PAKE pairing) through UniFFI rather than reimplementing it in
 # Kotlin. See bootstrap_pair_initiator / generate_device_cert below.
 copypaste-p2p = { path = "../copypaste-p2p" }
+# Sync engine + wire protocol: `sync_with_peer` drives the SAME transport-agnostic
+# `SyncEngine::run_session` the desktop sync uses, over the mTLS stream.
+copypaste-sync = { path = "../copypaste-sync" }
 # Long-lived runtime for the (synchronous) FFI wrappers that block on the
 # async bootstrap pairing. Multi-thread RT is required because the loopback
 # bootstrap test (and real pairing) drives concurrent TLS read/write tasks.
