@@ -72,12 +72,17 @@ pub struct PullItem {
     pub wall_time: u64,
 }
 
-/// Query params for GET /devices/:id/items?since=<wall_time>
+/// Query params for GET /devices/:id/items?since=<wall_time>&limit=<n>
 #[derive(Debug, Deserialize)]
 pub struct PullParams {
     /// Return only items with wall_time > since (defaults to 0).
     #[serde(default)]
     pub since: u64,
+    /// Maximum number of items to return in this page (M4). Absent → server
+    /// default (`DEFAULT_PULL_LIMIT`); clamped to `MAX_PULL_LIMIT`. Clients
+    /// paginate by passing the largest returned `wall_time` back as `since`.
+    #[serde(default)]
+    pub limit: Option<usize>,
 }
 
 // ---------------------------------------------------------------------------

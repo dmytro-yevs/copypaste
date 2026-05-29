@@ -96,8 +96,16 @@ pub async fn register(
     // while holding the lock, recover the inner data rather than crashing this
     // request. The data is still consistent because all writes are atomic.
     let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
+    // Scope the per-account device quota (H1) to the registering client IP so
+    // it is a per-source cap, not a global ceiling that would reject the 6th
+    // device across all users. `client_ip` is reused from the rate-limit check.
     let (auth_token, expires_at_unix) = store
-        .register_device(body.device_id.clone(), device_name, body.public_key_b64)
+        .register_device_scoped(
+            client_ip,
+            body.device_id.clone(),
+            device_name,
+            body.public_key_b64,
+        )
         .map_err(|e| e.into_response())?;
 
     // Format expires_at as RFC-3339.
