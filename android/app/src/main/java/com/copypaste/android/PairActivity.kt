@@ -58,6 +58,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uniffi.copypaste_android.ScannedPairing
+import uniffi.copypaste_android.bootstrapPairInitiator
+import uniffi.copypaste_android.syncWithPeer
 
 /** Pairing token lifetime in seconds — mirrors the Rust core's PAKE session TTL. */
 private const val PAIR_TOKEN_TTL_SECONDS = 120
@@ -109,12 +112,17 @@ fun PairScreen(
 ) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
+    val deviceKeyStore = remember { DeviceKeyStore(context) }
+    val repository = remember { ClipboardRepository(context) }
 
     var qr by remember { mutableStateOf<PairingQrResult?>(null) }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var loading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var scannedInfo by remember { mutableStateOf<String?>(null) }
+    var scannedPeer by remember { mutableStateOf<ScannedPairing?>(null) }
+    var syncing by remember { mutableStateOf(false) }
+    var syncResult by remember { mutableStateOf<String?>(null) }
     var remainingSeconds by remember { mutableStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -129,8 +137,10 @@ fun PairScreen(
             ?: return@rememberLauncherForActivityResult // user cancelled
         try {
             val info = parsePairing(contents)
-            // Surface the peer identity. The PAKE handshake itself is driven by
-            // the relay/sync layer using info.pakePassword + info.fingerprint.
+            // Surface the peer identity and retain it so the user can confirm,
+            // then drive the PAKE bootstrap + one sync (initiator side).
+            scannedPeer = info
+            syncResult = null
             scannedInfo = "${info.deviceName.ifBlank { "device" }} (${info.fingerprint})"
         } catch (e: Exception) {
             errorMessage = e.message ?: "Invalid pairing code"
@@ -168,6 +178,61 @@ fun PairScreen(
             launchScanner()
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    // Drive bootstrap PAKE pairing + a single P2P sync against the scanned peer
+    // (Android-as-initiator). Runs entirely off the main thread; result text is
+    // shown on completion. All FFI errors surface as a snackbar (no crash).
+    //
+    // NOTE (L4): the macOS side currently advertises addr_hint as 127.0.0.1:<port>
+    // (loopback only), so a live emulator↔host connection will fail here until
+    // macOS advertises a host-reachable address. That is a separate task.
+    fun runPairAndSync(peer: ScannedPairing) {
+        if (syncing) return
+        scope.launch {
+            syncing = true
+            syncResult = null
+            try {
+                val key = settings.encryptionKey
+                val message = withContext(Dispatchers.IO) {
+                    val cert = deviceKeyStore.getOrCreate()
+                    val bootstrap = bootstrapPairInitiator(
+                        addrHint = peer.addrHint,
+                        certDer = cert.certDer,
+                        keyDer = cert.keyDer,
+                        pakePassword = peer.pakePassword,
+                        syncAddr = "",
+                    )
+                    val localItems = repository.localItemsForSync(key)
+                    val result = syncWithPeer(
+                        peerAddr = bootstrap.peerSyncAddr,
+                        peerFingerprint = bootstrap.peerFingerprint,
+                        sessionKey = bootstrap.sessionKey,
+                        certDer = cert.certDer,
+                        keyDer = cert.keyDer,
+                        localItems = localItems,
+                    )
+                    var stored = 0
+                    for (item in result.items) {
+                        val plaintext = String(
+                            ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
+                            Charsets.UTF_8,
+                        )
+                        if (repository.storeItem(plaintext, key)) stored += 1
+                    }
+                    // Persist the peer for future syncs.
+                    settings.pairedPeerFingerprint = bootstrap.peerFingerprint
+                    settings.pairedPeerSyncAddr = bootstrap.peerSyncAddr
+                    "Paired with ${peer.deviceName.ifBlank { "device" }} — received ${result.itemsReceived} item(s), stored $stored, sent ${result.itemsSent}."
+                }
+                syncResult = message
+                scannedPeer = null
+            } catch (e: Exception) {
+                errorMessage = e.message ?: e.javaClass.simpleName
+            } finally {
+                syncing = false
+            }
         }
     }
 
@@ -319,6 +384,30 @@ fun PairScreen(
                     text = "Scanned: $info",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            scannedPeer?.let { peer ->
+                Button(
+                    enabled = !syncing,
+                    onClick = { runPairAndSync(peer) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(text = if (syncing) "Pairing…" else "Pair & sync")
+                }
+            }
+
+            if (syncing) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            syncResult?.let { msg ->
+                Text(
+                    text = msg,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
 
