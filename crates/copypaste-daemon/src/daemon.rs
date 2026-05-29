@@ -46,7 +46,15 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // here (e.g. user denied a Keychain prompt) must not block the daemon
     // because the entry is still usable, just with the legacy unrestricted
     // ACL.  The next launch retries automatically.
+    //
+    // Only run this when the Keychain backend is actually in use. On ad-hoc /
+    // unsigned installs the key lives in the 0600 file store (see
+    // `keychain::file_store`) and there is no Keychain ACL to rotate — calling
+    // the rotation there would read/delete/recreate a Keychain item and raise
+    // the very login-password prompt this whole change exists to eliminate.
     #[cfg(target_os = "macos")]
+    if crate::keychain::signing::choose_key_backend()
+        == crate::keychain::signing::KeyBackend::Keychain
     {
         match crate::keychain::acl::rotate_acl_to_current_install() {
             Ok(true) => tracing::info!("Keychain ACL rotated to current install"),
@@ -271,8 +279,39 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // writes to `cloud_sync_key`; the cloud push/poll loops read it. The
     // cloud loops write to `cloud_last_sync_ms`; `get_sync_status` reads it.
     #[cfg(feature = "cloud-sync")]
-    let cloud_sync_key: std::sync::Arc<tokio::sync::Mutex<Option<copypaste_core::SyncKey>>> =
-        std::sync::Arc::new(tokio::sync::Mutex::new(None));
+    let cloud_sync_key: std::sync::Arc<tokio::sync::Mutex<Option<copypaste_core::SyncKey>>> = {
+        // Restore a previously-set sync passphrase key on startup so cloud
+        // sync resumes without re-entering the passphrase. On ad-hoc/unsigned
+        // installs the key lives in the non-prompting 0600 file store; we only
+        // read that here (the Keychain path is left untouched to avoid a
+        // prompt on builds that still use it). See `keychain::file_store`.
+        #[cfg(target_os = "macos")]
+        let restored: Option<copypaste_core::SyncKey> = if crate::keychain::keychain_bypassed() {
+            None
+        } else {
+            match crate::keychain::signing::choose_key_backend() {
+                crate::keychain::signing::KeyBackend::File => {
+                    match crate::keychain::file_store::load_cloud_sync_key() {
+                        Ok(Some(bytes)) => Some(copypaste_core::SyncKey::from_bytes(bytes)),
+                        Ok(None) => None,
+                        Err(e) => {
+                            tracing::warn!(error = %e, "could not restore cloud-sync key from file store");
+                            None
+                        }
+                    }
+                }
+                // Keychain path: not auto-restored here (reading would risk a
+                // prompt); the key is re-established via `set_sync_passphrase`.
+                crate::keychain::signing::KeyBackend::Keychain => None,
+            }
+        };
+        #[cfg(not(target_os = "macos"))]
+        let restored: Option<copypaste_core::SyncKey> = None;
+        if restored.is_some() {
+            tracing::info!("restored cloud-sync key from persistent store");
+        }
+        std::sync::Arc::new(tokio::sync::Mutex::new(restored))
+    };
     #[cfg(feature = "cloud-sync")]
     let cloud_last_sync_ms: std::sync::Arc<std::sync::atomic::AtomicI64> =
         std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));

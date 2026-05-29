@@ -9,6 +9,9 @@ use security_framework::passwords::{delete_generic_password, get_generic_passwor
 
 #[cfg(target_os = "macos")]
 pub mod acl;
+pub mod file_store;
+#[cfg(target_os = "macos")]
+pub mod signing;
 
 pub(crate) const SERVICE: &str = "com.copypaste.daemon";
 pub(crate) const ACCOUNT: &str = "device-secret-key";
@@ -97,8 +100,19 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
         return Ok(DeviceKeypair::generate());
     }
 
+    // Backend selection (the real fix for the recurring Keychain prompt):
+    // ad-hoc / unsigned installs CANNOT keep a stable Keychain ACL across
+    // updates — the cdhash-pinned ACL breaks on every rebuild and macOS
+    // prompts for the login password. Those installs use the non-prompting
+    // 0600 file store instead. Only a Developer-ID-signed build (stable Team
+    // Identifier → stable designated requirement) keeps the Keychain.
+    // See `keychain::signing` and `keychain::file_store`.
     #[cfg(target_os = "macos")]
     {
+        match signing::choose_key_backend() {
+            signing::KeyBackend::File => return file_store::load_or_create(),
+            signing::KeyBackend::Keychain => {}
+        }
         match get_generic_password(SERVICE, ACCOUNT) {
             Ok(bytes) => {
                 // Audit MED #4: wrap the keychain-returned Vec in Zeroizing
@@ -180,6 +194,12 @@ pub fn delete_stored() -> Result<(), KeychainError> {
     // benign no-op rather than a Security-framework call that could prompt.
     if keychain_bypassed() {
         return Ok(());
+    }
+    // Mirror the backend selection used by `load_or_create` so a factory
+    // reset removes whichever store actually holds the key on this install.
+    match signing::choose_key_backend() {
+        signing::KeyBackend::File => return file_store::delete_stored(),
+        signing::KeyBackend::Keychain => {}
     }
     delete_generic_password(SERVICE, ACCOUNT).map_err(KeychainError::from)
 }

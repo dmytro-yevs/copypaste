@@ -157,10 +157,48 @@ for sibling in copypaste copypaste-daemon copypaste-relay; do
 done
 echo "==> Post-staging: bundle OK (executable=$DIST_BUNDLE_EXECUTABLE, siblings: cli/daemon/relay)"
 
-# 2) Ad-hoc sign with hardened runtime + entitlements.
-echo "==> Ad-hoc signing $APP_DIR (hardened runtime, entitlements: $ENTITLEMENTS)"
+# 2) Sign with hardened runtime + entitlements.
+#
+# Signing identity: defaults to ad-hoc (`--sign -`). Set MACOS_SIGN_IDENTITY to
+# a Developer ID Application identity (e.g. "Developer ID Application: Name
+# (TEAMID)") to produce a properly-signed, notarisable build. A Developer-ID
+# signature has a STABLE designated requirement (real Team Identifier), so its
+# Keychain ACL survives app updates and the daemon prefers the Keychain key
+# store. The default ad-hoc build instead uses the non-prompting 0600 file key
+# store (see crates/copypaste-daemon/src/keychain/file_store.rs).
+SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:--}"
+
+# Inner Mach-O binaries get an EXPLICIT, STABLE -i identifier each. Without
+# this, ad-hoc signing derives the identifier from the binary name PLUS a hash
+# (e.g. `copypaste-daemon-<hash>`), and that identifier changes on every
+# rebuild. Pinning the identifier stops the identifier from rotating.
+#
+# NOTE: under ad-hoc signing the cdhash STILL changes on every rebuild, so the
+# *designated requirement* (`cdhash H"…"`) — and therefore any cdhash-pinned
+# Keychain ACL — still rotates. The stable identifier alone does NOT stop the
+# recurring Keychain password prompt; the real remedy is the non-prompting
+# file key store referenced above. The stable identifier is kept because it
+# makes the launchd label / item attributes deterministic and is required if a
+# Developer ID identity is later supplied.
+echo "==> Signing inner binaries with stable identifiers (identity: $SIGN_IDENTITY)"
+declare -A INNER_IDS=(
+    [copypaste-daemon]="com.copypaste.daemon"
+    [copypaste]="com.copypaste.cli"
+    [copypaste-relay]="com.copypaste.relay"
+)
+for bin in copypaste-daemon copypaste copypaste-relay; do
+    codesign --force \
+        --sign "$SIGN_IDENTITY" \
+        --identifier "${INNER_IDS[$bin]}" \
+        --options runtime \
+        --timestamp=none \
+        "$APP_DIR/Contents/MacOS/$bin"
+done
+
+# Sign the bundle itself last (--deep re-seals nested code already signed above).
+echo "==> Signing $APP_DIR (hardened runtime, entitlements: $ENTITLEMENTS)"
 codesign --force --deep \
-    --sign - \
+    --sign "$SIGN_IDENTITY" \
     --options runtime \
     --entitlements "$ENTITLEMENTS" \
     --timestamp=none \

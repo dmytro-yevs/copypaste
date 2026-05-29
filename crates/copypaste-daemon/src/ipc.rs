@@ -1955,23 +1955,41 @@ impl IpcServer {
                 // cloud-sync account so they survive a daemon restart.
                 #[cfg(target_os = "macos")]
                 if crate::keychain::keychain_bypassed() {
-                    // Dev/test bypass: do not persist to the Keychain (would
-                    // prompt). The key stays active in-memory for this session.
+                    // Dev/test bypass: do not persist (would prompt / touch
+                    // disk). The key stays active in-memory for this session.
                     tracing::debug!(
-                        "set_sync_passphrase: COPYPASTE_EPHEMERAL_KEY set; skipping keychain persist"
+                        "set_sync_passphrase: COPYPASTE_EPHEMERAL_KEY set; skipping key persist"
                     );
                 } else {
-                    use security_framework::passwords::set_generic_password;
-                    if let Err(e) = set_generic_password(
-                        crate::keychain::SERVICE,
-                        crate::keychain::CLOUD_SYNC_ACCOUNT,
-                        new_key.as_bytes(),
-                    ) {
-                        tracing::warn!(
-                            "set_sync_passphrase: keychain persist failed ({e}); \
-                             key is active in-memory only until daemon restart"
-                        );
-                        // Non-fatal: the key is still active for this session.
+                    // Persist via the SAME backend the device key uses. On
+                    // ad-hoc / unsigned installs that is the non-prompting
+                    // 0600 file store — using the Keychain here would raise
+                    // the login-password prompt that this change eliminates.
+                    // See `keychain::signing` / `keychain::file_store`.
+                    match crate::keychain::signing::choose_key_backend() {
+                        crate::keychain::signing::KeyBackend::File => {
+                            if let Err(e) = crate::keychain::file_store::store_cloud_sync_key(
+                                new_key.as_bytes(),
+                            ) {
+                                tracing::warn!(
+                                    "set_sync_passphrase: file-store persist failed ({e}); \
+                                     key is active in-memory only until daemon restart"
+                                );
+                            }
+                        }
+                        crate::keychain::signing::KeyBackend::Keychain => {
+                            use security_framework::passwords::set_generic_password;
+                            if let Err(e) = set_generic_password(
+                                crate::keychain::SERVICE,
+                                crate::keychain::CLOUD_SYNC_ACCOUNT,
+                                new_key.as_bytes(),
+                            ) {
+                                tracing::warn!(
+                                    "set_sync_passphrase: keychain persist failed ({e}); \
+                                     key is active in-memory only until daemon restart"
+                                );
+                            }
+                        }
                     }
                 }
 
