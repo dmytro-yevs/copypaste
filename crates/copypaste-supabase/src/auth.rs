@@ -13,6 +13,24 @@ use crate::store::{InMemoryStore, SessionStore};
 // How many seconds before expiry we proactively refresh the token.
 const REFRESH_MARGIN_SECS: u64 = 60;
 
+/// Redact an account email for logging. The email is PII and must never appear
+/// verbatim in logs. Keeps the first character of the local part plus the
+/// domain (`alice@example.com` → `a***@example.com`); inputs without a usable
+/// `@` collapse to `<redacted>`.
+fn redact_email(email: &str) -> String {
+    match email.split_once('@') {
+        Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {
+            let first = local.chars().next().unwrap_or('*');
+            if local.chars().count() <= 1 {
+                format!("*@{domain}")
+            } else {
+                format!("{first}***@{domain}")
+            }
+        }
+        _ => "<redacted>".to_string(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // AuthClient
 // ---------------------------------------------------------------------------
@@ -75,14 +93,18 @@ impl AuthClient {
     ///
     /// The session is automatically saved to the configured store.
     pub async fn sign_in(&self, email: &str, password: &str) -> AuthResult<Session> {
-        debug!("signing in as {email}");
+        debug!("signing in as {}", redact_email(email));
         let url = format!("{}/auth/v1/token?grant_type=password", self.base_url);
         let body = PasswordGrantRequest { email, password };
 
         let raw: GoTrueTokenResponse = self.post_json(&url, &body).await?;
         let session = self.build_session(raw);
         self.store.save(&session);
-        info!("signed in as {email} (expires_at={})", session.expires_at);
+        info!(
+            "signed in as {} (expires_at={})",
+            redact_email(email),
+            session.expires_at
+        );
         Ok(session)
     }
 
@@ -283,5 +305,54 @@ impl AuthClient {
             token_type: raw.token_type,
             user: raw.user,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn redact_email_masks_pii() {
+        assert_eq!(redact_email("alice@example.com"), "a***@example.com");
+        assert_eq!(redact_email("a@example.com"), "*@example.com");
+        assert_eq!(redact_email("not-an-email"), "<redacted>");
+        assert_eq!(redact_email("@x.com"), "<redacted>");
+        assert_eq!(redact_email(""), "<redacted>");
+        let r = redact_email("dmitriy.evseev.99@gmail.com");
+        assert!(!r.contains("evseev"), "local part leaked: {r}");
+    }
+
+    #[test]
+    fn session_debug_redacts_tokens() {
+        let s = Session {
+            access_token: "supersecret-access".to_owned(),
+            refresh_token: "supersecret-refresh".to_owned(),
+            expires_in: 3600,
+            expires_at: 9999,
+            token_type: "bearer".to_owned(),
+            user: User {
+                id: "u1".to_owned(),
+                email: Some("a@example.com".to_owned()),
+                role: None,
+                created_at: None,
+                updated_at: None,
+            },
+        };
+        let dbg = format!("{s:?}");
+        assert!(
+            !dbg.contains("supersecret-access"),
+            "access token leaked: {dbg}"
+        );
+        assert!(
+            !dbg.contains("supersecret-refresh"),
+            "refresh token leaked: {dbg}"
+        );
+        assert!(
+            dbg.contains("<redacted>"),
+            "expected redaction marker: {dbg}"
+        );
+        // Non-secret fields are still visible for debugging.
+        assert!(dbg.contains("9999"), "expires_at should be visible: {dbg}");
     }
 }

@@ -238,6 +238,30 @@ fn test_only_allows_local_http(_s: &str) -> bool {
     false
 }
 
+/// Redact an account email for logging / error payloads. The account email is
+/// PII and must never appear verbatim in logs or surfaced errors. We keep just
+/// enough structure to be useful for debugging — the first character of the
+/// local part and the domain — and mask the rest:
+///
+/// - `alice@example.com` → `a***@example.com`
+/// - `a@example.com`     → `*@example.com`
+/// - `not-an-email`      → `<redacted>`
+fn redact_email(email: &str) -> String {
+    match email.split_once('@') {
+        Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {
+            let first = local.chars().next().unwrap_or('*');
+            if local.chars().count() <= 1 {
+                format!("*@{domain}")
+            } else {
+                format!("{first}***@{domain}")
+            }
+        }
+        // No `@` (or empty local/domain): not a recognisable address — never
+        // echo it back, since it may still be sensitive operator input.
+        _ => "<redacted>".to_string(),
+    }
+}
+
 // ── Pre-flight checks ─────────────────────────────────────────────────────────
 
 /// Probe `crate::keychain::load_or_create` with a one-shot retry policy
@@ -433,11 +457,21 @@ pub async fn start_cloud(
         return Err(CloudError::InsecureUrl(config.supabase_url.clone()).into());
     }
 
+    // Shared auth client: holds the GoTrue session (incl. refresh token) in its
+    // in-memory store after sign-in, so the 401-refresh path can use the cheap
+    // refresh-token grant instead of a full password sign-in.
+    let auth_client = Arc::new(AuthClient::new(
+        config.supabase_url.clone(),
+        config.anon_key.clone(),
+    ));
+
     // Resolve the bearer fail-closed: if email/password is configured and
     // sign-in fails, we abort cloud sync entirely instead of silently using
     // the anon key (which would downgrade scope without operator awareness).
-    // Publish the real auth state either way (BUG 2).
-    let bearer_str = match resolve_bearer(&config).await {
+    // Publish the real auth state either way (BUG 2). Use the shared
+    // `auth_client` so the resulting session (incl. refresh token) is reusable
+    // by the 401-refresh path's cheap refresh-token grant.
+    let bearer_str = match resolve_bearer_with_client(&config, &auth_client).await {
         Ok(token) => {
             cloud_signed_in.store(true, Ordering::Relaxed);
             token
@@ -473,6 +507,7 @@ pub async fn start_cloud(
     let push_db = db.clone();
     let push_last_sync_ms = last_sync_ms.clone();
     let push_signed_in = cloud_signed_in.clone();
+    let push_auth = auth_client.clone();
     tokio::spawn(push_loop(
         push_config,
         push_bearer,
@@ -483,6 +518,7 @@ pub async fn start_cloud(
         push_db,
         push_last_sync_ms,
         push_signed_in,
+        push_auth,
     ));
 
     // Task B: poll Supabase REST for remote items and insert unknown ones locally.
@@ -493,6 +529,7 @@ pub async fn start_cloud(
     let poll_local_key = local_key.clone();
     let poll_last_sync_ms = last_sync_ms.clone();
     let poll_signed_in = cloud_signed_in.clone();
+    let poll_auth = auth_client.clone();
     tokio::spawn(realtime_loop(
         poll_config,
         poll_bearer,
@@ -502,6 +539,7 @@ pub async fn start_cloud(
         poll_local_key,
         poll_last_sync_ms,
         poll_signed_in,
+        poll_auth,
     ));
 
     tracing::info!("cloud-sync started (url={})", config.supabase_url);
@@ -512,7 +550,11 @@ pub async fn start_cloud(
 
 // ── Bearer token resolution ───────────────────────────────────────────────────
 
-/// Resolve the bearer token for Supabase REST requests.
+/// Resolve the bearer token for Supabase REST requests, using an explicit
+/// [`AuthClient`] so the caller can reuse the same client (and its session
+/// store) for the refresh-token grant later. On a successful password sign-in
+/// the resulting [`Session`] (incl. refresh token) is saved into `client`'s
+/// store by `AuthClient::sign_in`.
 ///
 /// Credentials are resolved by [`CloudConfig::from_env`] (env vars first, then
 /// the persisted `0600` config written by `copypaste cloud setup`).
@@ -528,18 +570,23 @@ pub async fn start_cloud(
 ///   project's RLS policies grant only the `authenticated` role, so anon-key
 ///   REST requests are rejected. This path exists for explicitly anon-scoped
 ///   deployments; the documented setup always supplies email/password.
-async fn resolve_bearer(config: &CloudConfig) -> Result<String, CloudError> {
+async fn resolve_bearer_with_client(
+    config: &CloudConfig,
+    client: &AuthClient,
+) -> Result<String, CloudError> {
     match (config.email.as_deref(), config.password.as_deref()) {
         (Some(email), Some(password)) => {
-            match sign_in_with_password(config, email, password).await {
-                Ok(token) => {
-                    tracing::info!("cloud-sync: signed in as {email}");
-                    Ok(token)
+            match client.sign_in(email, password).await {
+                Ok(session) => {
+                    tracing::info!("cloud-sync: signed in as {}", redact_email(email));
+                    Ok(session.access_token)
                 }
                 Err(e) => {
                     // Fail-closed: abort cloud sync. Do NOT silently downgrade
                     // to anon scope — that would mask a credential rotation,
                     // server misconfiguration, or active attack from the operator.
+                    // NOTE: `AuthError`'s Display never echoes the submitted
+                    // email/password, so this message carries no PII.
                     tracing::error!(
                         "cloud-sync: email/password sign-in FAILED ({e}); refusing to fall back to anon key"
                     );
@@ -555,18 +602,9 @@ async fn resolve_bearer(config: &CloudConfig) -> Result<String, CloudError> {
 }
 
 /// Sign in via the shared `copypaste-supabase` `AuthClient` and return the
-/// access token.
-///
-/// Beta W2.3 (arch-1): the daemon used to carry its own copy of the GoTrue
-/// `POST /auth/v1/token?grant_type=password` request. That stub has been
-/// replaced by a delegation to `AuthClient::sign_in`, which does the same
-/// thing with one shared error envelope and one shared test suite. We only
-/// need the `access_token` here, so we discard the rest of the `Session` and
-/// let the in-memory session store be GC'd with the client.
-///
-/// The return type stays `anyhow::Result<String>` so callers (`resolve_bearer`,
-/// the W2.7 `refresh_bearer` path) keep their existing error-mapping wiring;
-/// `AuthError`'s `Display` impl is preserved through `anyhow::Error`.
+/// access token. Thin wrapper retained for the test suite and the
+/// no-shared-client call sites; production code in `start_cloud` uses
+/// [`resolve_bearer_with_client`] so the session is reusable for refresh.
 async fn sign_in_with_password(
     config: &CloudConfig,
     email: &str,
@@ -612,6 +650,7 @@ async fn push_loop(
     db: Arc<Mutex<Database>>,
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
+    auth: Arc<AuthClient>,
 ) {
     let client = reqwest::Client::new();
     let rest_url = format!("{}/rest/v1/clipboard_items", config.supabase_url);
@@ -760,6 +799,7 @@ async fn push_loop(
                 &item,
                 &payload_ct_b64,
                 Some(&cloud_signed_in),
+                &auth,
             )
             .await
             {
@@ -874,6 +914,7 @@ async fn push_loop(
                                 &item,
                                 &payload_ct_b64,
                                 Some(&cloud_signed_in),
+                                &auth,
                             )
                             .await
                             {
@@ -1075,6 +1116,7 @@ pub(crate) async fn push_item_with_retries(
     item: &ClipboardItem,
     payload_ct_b64: &str,
     cloud_signed_in: Option<&Arc<std::sync::atomic::AtomicBool>>,
+    auth: &AuthClient,
 ) -> Result<(), String> {
     // A throwaway flag for the `None` case so `refresh_bearer` always has a
     // target to write — its write is then simply ignored by the caller.
@@ -1101,7 +1143,7 @@ pub(crate) async fn push_item_with_retries(
             PushOutcome::Unauthorized if !refreshed_once => {
                 refreshed_once = true;
                 tracing::info!("cloud-sync got 401; refreshing bearer and retrying once");
-                match refresh_bearer(config, signed_in).await {
+                match refresh_bearer(config, signed_in, auth).await {
                     Ok(new_token) => {
                         *bearer.write().await = new_token;
                     }
@@ -1154,20 +1196,51 @@ pub(crate) async fn push_item_with_retries(
     }
 }
 
-/// Refresh the bearer token. Currently calls `resolve_bearer`, which re-runs
-/// the email/password sign-in path when credentials are present (env vars or
-/// persisted config), or falls back to the anon key. Returning the anon key on
-/// refresh is intentional — it matches the initial `start_cloud` behaviour for
-/// the no-credentials case.
+/// Refresh the bearer token.
 ///
-/// BUG 2: a refresh that fails to re-authenticate must flip `signed_in` to
-/// `false` so `get_sync_status` stops claiming the daemon is signed in; a
-/// successful refresh flips it back to `true`.
+/// Prefers the cheap **refresh-token grant**: if `auth` has a stored session
+/// (populated by the initial password sign-in in `start_cloud`), we call
+/// `AuthClient::refresh_session` with its refresh token. This avoids re-sending
+/// the password on every 401 and matches how the access token is meant to be
+/// rotated.
+///
+/// Fallbacks, in order:
+/// 1. Refresh grant succeeds → return the new access token (the new session,
+///    incl. a rotated refresh token, is saved back into `auth`'s store).
+/// 2. Refresh grant fails (no stored session, or the refresh token is
+///    expired/revoked) → fall back to a full password sign-in via
+///    [`resolve_bearer_with_client`], so a long-lived daemon can recover after
+///    the refresh token itself ages out.
+/// 3. No email/password configured → `resolve_bearer_with_client` returns the
+///    anon key, matching the initial `start_cloud` behaviour.
+///
+/// BUG 2: in every path the shared `cloud_signed_in` flag is updated — set
+/// `true` when a fresh token is obtained (refresh grant or password sign-in) and
+/// `false` when the fallback re-auth fails — so `get_sync_status` stops claiming
+/// the daemon is signed in after auth dies.
 async fn refresh_bearer(
     config: &CloudConfig,
     cloud_signed_in: &Arc<std::sync::atomic::AtomicBool>,
+    auth: &AuthClient,
 ) -> Result<String, String> {
-    match resolve_bearer(config).await {
+    if let Some(session) = auth.current_session() {
+        match auth.refresh_session(&session.refresh_token).await {
+            Ok(new_session) => {
+                tracing::info!("cloud-sync: bearer refreshed via refresh-token grant");
+                cloud_signed_in.store(true, Ordering::Relaxed);
+                return Ok(new_session.access_token);
+            }
+            Err(e) => {
+                // Refresh token expired/revoked/etc. — fall through to a full
+                // sign-in. Do not surface the error directly: re-auth may still
+                // succeed. `AuthError`'s Display carries no PII.
+                tracing::warn!(
+                    "cloud-sync: refresh-token grant failed ({e}); falling back to password sign-in"
+                );
+            }
+        }
+    }
+    match resolve_bearer_with_client(config, auth).await {
         Ok(token) => {
             cloud_signed_in.store(true, Ordering::Relaxed);
             Ok(token)
@@ -1266,9 +1339,15 @@ async fn realtime_loop(
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
+    auth: Arc<AuthClient>,
 ) {
     let client = reqwest::Client::new();
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+    // Don't burst: if a poll round runs long (slow network, large batch) and we
+    // miss one or more ticks, skip the backlog and resume on the next aligned
+    // tick instead of firing the missed ticks back-to-back (the default `Burst`
+    // behavior), which would hammer the relay/Supabase right after recovery.
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut warned_no_key = false;
 
     // BUG 1 fix — download high-water-mark.
@@ -1322,7 +1401,10 @@ async fn realtime_loop(
                 // One poll round: fetch rows newer than `watermark`, ingest them,
                 // and advance/persist the watermark. Extracted into `poll_once`
                 // so the forward-pagination contract (BUG 1) is unit-testable
-                // without waiting on the 10s interval.
+                // without waiting on the 10s interval. `poll_once` internally uses
+                // `fetch_remote_rows_with_refresh`, which performs the bl-cloud
+                // refresh-token grant on a 401 (via `auth`) and updates
+                // `cloud_signed_in`.
                 watermark = poll_once(
                     &client,
                     &config,
@@ -1331,6 +1413,7 @@ async fn realtime_loop(
                     &local_key,
                     &last_sync_ms,
                     &cloud_signed_in,
+                    &auth,
                     &key_bytes,
                     watermark,
                 )
@@ -1366,21 +1449,28 @@ async fn poll_once(
     local_key: &Arc<zeroize::Zeroizing<[u8; 32]>>,
     last_sync_ms: &Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: &Arc<std::sync::atomic::AtomicBool>,
+    auth: &AuthClient,
     key_bytes: &[u8],
     watermark: i64,
 ) -> i64 {
     let poll_url = build_poll_url(&config.supabase_url, watermark);
 
-    let rows =
-        match fetch_remote_rows_with_refresh(client, &poll_url, config, bearer, cloud_signed_in)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                tracing::warn!("cloud-sync poll failed: {e}");
-                return watermark;
-            }
-        };
+    let rows = match fetch_remote_rows_with_refresh(
+        client,
+        &poll_url,
+        config,
+        bearer,
+        cloud_signed_in,
+        auth,
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::warn!("cloud-sync poll failed: {e}");
+            return watermark;
+        }
+    };
 
     // Decrypt + re-encrypt + insert in a blocking task so the async executor is
     // not blocked by rusqlite IO. We snapshot the key bytes (non-secret from the
@@ -1672,6 +1762,7 @@ async fn fetch_remote_rows_with_refresh(
     config: &CloudConfig,
     bearer: &Arc<RwLock<String>>,
     cloud_signed_in: &Arc<std::sync::atomic::AtomicBool>,
+    auth: &AuthClient,
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut refreshed = false;
     loop {
@@ -1681,7 +1772,7 @@ async fn fetch_remote_rows_with_refresh(
             FetchOutcome::Unauthorized if !refreshed => {
                 refreshed = true;
                 tracing::info!("cloud-sync poll got 401; refreshing bearer and retrying once");
-                match refresh_bearer(config, cloud_signed_in).await {
+                match refresh_bearer(config, cloud_signed_in, auth).await {
                     Ok(new_token) => {
                         *bearer.write().await = new_token;
                     }
@@ -1818,6 +1909,21 @@ mod tests {
             CloudConfig::new("HTTPS://abc.supabase.co".to_owned(), "anon".to_owned()).is_ok(),
             "uppercase HTTPS scheme should be accepted"
         );
+    }
+
+    #[test]
+    fn redact_email_masks_pii() {
+        assert_eq!(redact_email("alice@example.com"), "a***@example.com");
+        assert_eq!(redact_email("a@example.com"), "*@example.com");
+        // No usable @ → fully redacted, never echoed.
+        assert_eq!(redact_email("not-an-email"), "<redacted>");
+        assert_eq!(redact_email("@example.com"), "<redacted>");
+        assert_eq!(redact_email("user@"), "<redacted>");
+        assert_eq!(redact_email(""), "<redacted>");
+        // The full local part beyond the first char must never survive.
+        let r = redact_email("dmitriy.evseev.99@gmail.com");
+        assert!(!r.contains("evseev"), "local part leaked: {r}");
+        assert_eq!(r, "d***@gmail.com");
     }
 
     #[test]
@@ -2047,6 +2153,14 @@ mod tests {
         }
     }
 
+    /// A fresh, session-less [`AuthClient`] pointed at the mockito server. With
+    /// no stored session, `refresh_bearer` skips the refresh-token grant and
+    /// falls back to `resolve_bearer_with_client` (anon key when no
+    /// email/password is configured) — matching the pre-existing 401 behaviour.
+    fn test_auth(cfg: &CloudConfig) -> AuthClient {
+        AuthClient::new(cfg.supabase_url.clone(), cfg.anon_key.clone())
+    }
+
     /// **Edge #19 — push queued during disconnect must flush on reconnect.**
     ///
     /// We model "disconnect" as a sequence of 503 (transient server error)
@@ -2080,12 +2194,13 @@ mod tests {
         let client = reqwest::Client::new();
         let url = format!("{}/rest/v1/clipboard_items", cfg.supabase_url);
         let item = test_item("queued-during-disconnect");
+        let auth = test_auth(&cfg);
 
         // Wrap in a generous timeout so a hung pipeline cannot deadlock the
         // test runner. 30s is well over the 1+2+4 = 7s worth of backoff.
         let result = tokio::time::timeout(
             Duration::from_secs(30),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None, &auth),
         )
         .await
         .expect("push pipeline must not hang");
@@ -2132,10 +2247,12 @@ mod tests {
         let client = reqwest::Client::new();
         let url = format!("{}/rest/v1/clipboard_items", cfg.supabase_url);
         let item = test_item("token-expiry");
+        // Session-less auth client → refresh_bearer falls back to the anon key.
+        let auth = test_auth(&cfg);
 
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None, &auth),
         )
         .await
         .expect("must not hang");
@@ -2180,11 +2297,12 @@ mod tests {
         let client = reqwest::Client::new();
         let url = format!("{}/rest/v1/clipboard_items", cfg.supabase_url);
         let item = test_item("rate-limited");
+        let auth = test_auth(&cfg);
 
         let start = std::time::Instant::now();
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None, &auth),
         )
         .await
         .expect("must not hang");
@@ -2207,6 +2325,98 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(10),
             "should not have waited the full timeout; elapsed: {elapsed:?}"
+        );
+    }
+
+    /// **Item 1 — a 401 must prefer the cheap refresh-token grant over a full
+    /// password sign-in when a session is already stored.**
+    ///
+    /// We seed an `AuthClient` with a stored session (so it has a refresh
+    /// token), mock the GoTrue `grant_type=refresh_token` endpoint, and ensure
+    /// the password endpoint is NEVER hit. A 401 on the REST push should drive
+    /// `refresh_bearer` → `AuthClient::refresh_session`, swap in the new access
+    /// token, and retry successfully.
+    #[tokio::test]
+    async fn refresh_on_401_uses_refresh_token_grant_not_password() {
+        use copypaste_supabase::{InMemoryStore, Session, SessionStore, User};
+        use std::sync::Arc as StdArc;
+
+        // REST push: first 401, then 201 once the refreshed token is used.
+        let m_401 = mockito::mock("POST", "/rest/v1/clipboard_items")
+            .with_status(401)
+            .with_body(r#"{"message":"JWT expired"}"#)
+            .expect(1)
+            .create();
+        let m_ok = mockito::mock("POST", "/rest/v1/clipboard_items")
+            .with_status(201)
+            .with_body("")
+            .expect(1)
+            .create();
+
+        // GoTrue refresh-token grant succeeds and hands back a fresh session.
+        let m_refresh = mockito::mock("POST", "/auth/v1/token?grant_type=refresh_token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"access_token":"refreshed-access-token","refresh_token":"rotated-refresh-token","expires_in":3600,"token_type":"bearer","user":{"id":"u1","email":"a@example.com"}}"#,
+            )
+            .expect(1)
+            .create();
+
+        // The password grant must NOT be exercised on this path. `expect(0)`
+        // makes `.assert()` fail if it is ever hit.
+        let m_password = mockito::mock("POST", "/auth/v1/token?grant_type=password")
+            .with_status(200)
+            .with_body("{}")
+            .expect(0)
+            .create();
+
+        let cfg = test_cfg();
+
+        // Seed a session-bearing auth client via a pre-populated store.
+        let store = StdArc::new(InMemoryStore::new());
+        store.save(&Session {
+            access_token: "stale-expired-token".to_owned(),
+            refresh_token: "seed-refresh-token".to_owned(),
+            expires_in: 0,
+            expires_at: 0,
+            token_type: "bearer".to_owned(),
+            user: User {
+                id: "u1".to_owned(),
+                email: Some("a@example.com".to_owned()),
+                role: None,
+                created_at: None,
+                updated_at: None,
+            },
+        });
+        let auth = AuthClient::with_store(cfg.supabase_url.clone(), cfg.anon_key.clone(), store);
+
+        let bearer = Arc::new(RwLock::new("stale-expired-token".to_owned()));
+        let client = reqwest::Client::new();
+        let url = format!("{}/rest/v1/clipboard_items", cfg.supabase_url);
+        let item = test_item("refresh-grant");
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None, &auth),
+        )
+        .await
+        .expect("must not hang");
+
+        assert!(
+            result.is_ok(),
+            "401 must be recovered via refresh-token grant; got: {result:?}"
+        );
+        m_401.assert();
+        m_ok.assert();
+        m_refresh.assert();
+        m_password.assert(); // proves the password grant was not used
+
+        // The bearer was rotated to the access token from the refresh grant.
+        assert_eq!(
+            bearer.read().await.clone(),
+            "refreshed-access-token",
+            "401 path must install the refreshed access token"
         );
     }
 
@@ -2506,6 +2716,7 @@ mod tests {
         let local_key = Arc::new(zeroize::Zeroizing::new([7u8; 32]));
         let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
         let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let auth = test_auth(&cfg);
         let key_bytes = sync_key.as_bytes().to_vec();
 
         // Round 1: from watermark 0.
@@ -2517,6 +2728,7 @@ mod tests {
             &local_key,
             &last_sync_ms,
             &signed_in,
+            &auth,
             &key_bytes,
             0,
         )
@@ -2548,6 +2760,7 @@ mod tests {
             &local_key,
             &last_sync_ms,
             &signed_in,
+            &auth,
             &key_bytes,
             wm1,
         )
@@ -2632,8 +2845,11 @@ mod tests {
         };
         // Start the flag at false to prove the success path actively sets it true.
         let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // Session-less auth client → refresh_bearer falls back to anon-key
+        // resolution via resolve_bearer_with_client.
+        let auth = test_auth(&cfg);
 
-        let token = refresh_bearer(&cfg, &signed_in)
+        let token = refresh_bearer(&cfg, &signed_in, &auth)
             .await
             .expect("anon-key bearer resolution must succeed");
         assert_eq!(token, "anon-key-for-tests");
@@ -2656,7 +2872,8 @@ mod tests {
             password: Some("wrong".to_owned()),
         };
         let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        let res = refresh_bearer(&cfg, &signed_in).await;
+        let auth = test_auth(&cfg);
+        let res = refresh_bearer(&cfg, &signed_in, &auth).await;
         assert!(res.is_err(), "unreachable sign-in must fail");
         assert!(
             !signed_in.load(Ordering::Relaxed),
@@ -2809,6 +3026,13 @@ mod e2e_live {
         }
     }
 
+    /// Session-less auth client for the push pipeline. On a 401 against the live
+    /// stack `refresh_bearer` falls back to a full password sign-in (the cfg
+    /// carries the user's email/password), which is the intended recovery path.
+    fn test_auth(cfg: &CloudConfig) -> AuthClient {
+        AuthClient::new(cfg.supabase_url.clone(), cfg.anon_key.clone())
+    }
+
     /// Open a fresh, empty encrypted DB at a unique temp path with a random
     /// ephemeral key — mirrors the daemon's `COPYPASTE_EPHEMERAL_KEY=1` mode.
     fn open_temp_db(tmp: &tempfile::TempDir, name: &str) -> (Database, [u8; 32]) {
@@ -2909,6 +3133,7 @@ mod e2e_live {
         let rest_url = format!("{url}/rest/v1/clipboard_items");
         let cfg = cfg_for(&user, &anon);
         let bearer = Arc::new(RwLock::new(user.bearer.clone()));
+        let auth = test_auth(&cfg);
         push_item_with_retries(
             &client,
             &rest_url,
@@ -2917,6 +3142,7 @@ mod e2e_live {
             &item,
             &payload_ct_b64,
             None,
+            &auth,
         )
         .await
         .expect("push_item_with_retries must succeed against the live stack");
@@ -2960,6 +3186,7 @@ mod e2e_live {
         let payload_ct_b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
         let cfg = cfg_for(&alice, &anon);
         let bearer = Arc::new(RwLock::new(alice.bearer.clone()));
+        let auth = test_auth(&cfg);
         push_item_with_retries(
             &client,
             &format!("{url}/rest/v1/clipboard_items"),
@@ -2968,6 +3195,7 @@ mod e2e_live {
             &item,
             &payload_ct_b64,
             None,
+            &auth,
         )
         .await
         .expect("alice push");
@@ -3026,6 +3254,7 @@ mod e2e_live {
         let payload_ct_b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
         let cfg = cfg_for(&user, &anon);
         let bearer = Arc::new(RwLock::new(user.bearer.clone()));
+        let auth = test_auth(&cfg);
         push_item_with_retries(
             &client,
             &format!("{url}/rest/v1/clipboard_items"),
@@ -3034,6 +3263,7 @@ mod e2e_live {
             &item,
             &payload_ct_b64,
             None,
+            &auth,
         )
         .await
         .expect("A push");
@@ -3446,9 +3676,21 @@ mod bytea_e2e {
 
         let item = make_item(&id, &item_id);
         let rest_url = format!("{url}/rest/v1/clipboard_items");
-        push_item_with_retries(&client, &rest_url, &cfg, &bearer, &item, &payload_ct_b64)
-            .await
-            .expect("push must land in the fake PostgREST");
+        // Session-less auth client: the fake never returns 401, so the refresh
+        // path is not exercised; we just satisfy the merged signature.
+        let auth = AuthClient::new(cfg.supabase_url.clone(), cfg.anon_key.clone());
+        push_item_with_retries(
+            &client,
+            &rest_url,
+            &cfg,
+            &bearer,
+            &item,
+            &payload_ct_b64,
+            None,
+            &auth,
+        )
+        .await
+        .expect("push must land in the fake PostgREST");
 
         // The server stored the DECODED ciphertext bytes (not the ASCII of the
         // hex literal), proving `encode_payload_ct_hex` was interpreted as bytea.
@@ -3602,9 +3844,14 @@ mod bytea_e2e {
         let poll_url = format!(
             "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.desc&limit=20"
         );
-        let rows = fetch_remote_rows_with_refresh(&client, &poll_url, &cfg, &bearer)
-            .await
-            .expect("poll-path fetch must succeed");
+        let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        // Session-less auth client: this fake never returns 401, so the refresh
+        // path is not exercised here; we just need a value for the merged signature.
+        let auth = AuthClient::new(cfg.supabase_url.clone(), cfg.anon_key.clone());
+        let rows =
+            fetch_remote_rows_with_refresh(&client, &poll_url, &cfg, &bearer, &signed_in, &auth)
+                .await
+                .expect("poll-path fetch must succeed");
         let row = rows
             .iter()
             .find(|r| r["id"].as_str() == Some(id.as_str()))

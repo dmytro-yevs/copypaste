@@ -39,16 +39,22 @@ impl InMemoryStore {
 
 impl SessionStore for InMemoryStore {
     fn save(&self, session: &Session) {
-        let mut guard = self.inner.lock().expect("mutex poisoned");
+        // A poisoned lock only means a previous holder panicked; the session
+        // slot itself is a plain `Option` with no broken invariant, so recover
+        // the guard rather than propagating the panic (this is a best-effort
+        // RAM cache — losing it is never worth crashing the daemon).
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         *guard = Some(session.clone());
     }
 
     fn load(&self) -> Option<Session> {
-        self.inner.lock().expect("mutex poisoned").clone()
+        // See `save`: recover from poisoning instead of panicking.
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     fn clear(&self) {
-        let mut guard = self.inner.lock().expect("mutex poisoned");
+        // See `save`: recover from poisoning instead of panicking.
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         *guard = None;
     }
 }

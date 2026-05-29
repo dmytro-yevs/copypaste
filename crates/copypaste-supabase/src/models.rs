@@ -15,7 +15,11 @@ pub struct User {
 }
 
 /// An active auth session holding both tokens.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Debug` is implemented manually to **redact the access and refresh tokens** —
+/// these are bearer secrets and must never reach logs, error payloads, or panic
+/// messages. Derived `Debug` would print them verbatim.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Session {
     pub access_token: String,
     pub refresh_token: String,
@@ -26,6 +30,19 @@ pub struct Session {
     pub expires_at: u64,
     pub token_type: String,
     pub user: User,
+}
+
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("access_token", &"<redacted>")
+            .field("refresh_token", &"<redacted>")
+            .field("expires_in", &self.expires_in)
+            .field("expires_at", &self.expires_at)
+            .field("token_type", &self.token_type)
+            .field("user", &self.user)
+            .finish()
+    }
 }
 
 impl Session {
