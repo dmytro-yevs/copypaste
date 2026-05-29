@@ -28,6 +28,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.IdeBg
+import com.copypaste.android.ui.theme.IdePanel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -134,9 +136,10 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     var selectedTab by rememberSaveable { mutableIntStateOf(NavTab.CLIPS.ordinal) }
 
     Scaffold(
+        containerColor = IdeBg,
         bottomBar = {
             NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
+                containerColor = IdePanel,
             ) {
                 NavTab.entries.forEachIndexed { index, tab ->
                     NavigationBarItem(

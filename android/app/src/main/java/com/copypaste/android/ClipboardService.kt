@@ -199,24 +199,29 @@ class ClipboardService : Service() {
 
         val key = settings.encryptionKey
 
-        // Live UniFFI path: insert directly into the encrypted SQLite DB via
-        // copypaste-core. Empty id from native side also means "skipped as
-        // sensitive". On UnsatisfiedLinkError (no .so) or DB failure, fall
-        // through to the SharedPreferences repository so the app stays usable.
-        var nativeInsertOk = false
+        // Native SQLite insert (sync subsystem only). In the live build this
+        // writes the encrypted row into copypaste-core's DB so the sync engine
+        // can pick it up. The UI does NOT read this DB — it reads the
+        // SharedPreferences repository — so this insert is fire-and-forget and
+        // must NOT gate the repository.storeItem() call below. Treating a
+        // successful native insert as "done" was the bug that made captured
+        // items invisible in shipped APKs (write to SQLite, read from prefs).
         try {
             val nativeId = addClipboardItem(databasePath, key, text)
             if (nativeId.isNotEmpty()) {
-                nativeInsertOk = true
                 Log.d(TAG, "Native insert ok: $nativeId")
             }
         } catch (e: UnsatisfiedLinkError) {
-            Log.d(TAG, "Native addClipboardItem unavailable — falling back to repo")
+            Log.d(TAG, "Native addClipboardItem unavailable (no live .so)")
         } catch (e: CopypasteException) {
-            Log.w(TAG, "Native addClipboardItem failed (${e.message}) — falling back to repo")
+            Log.w(TAG, "Native addClipboardItem failed (${e.message})")
         }
 
-        val stored = if (nativeInsertOk) true else repository.storeItem(text, key)
+        // Always persist to the SharedPreferences repository — this is the
+        // single source the UI reads (ClipboardViewModel → repository.getItems).
+        // The sensitive check above already filtered this content once; the
+        // repository repeats the cheap check defensively but won't double-store.
+        val stored = repository.storeItem(text, key)
         if (stored) {
             Log.d(TAG, "Clipboard item stored successfully")
             // Bump today's counter so the next notification update shows the new
