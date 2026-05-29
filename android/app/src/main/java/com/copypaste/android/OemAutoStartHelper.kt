@@ -7,7 +7,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.util.Log
 
 /**
  * Detects the device manufacturer and deep-links to the OEM-specific autostart
@@ -35,8 +34,6 @@ import android.util.Log
  */
 object OemAutoStartHelper {
 
-    private const val TAG = "OemAutoStartHelper"
-
     /**
      * Returns a human-readable description of what the user should enable on
      * their device, e.g. "Autostart" for Xiaomi, "Protected apps" for Huawei.
@@ -62,75 +59,6 @@ object OemAutoStartHelper {
      * not be resolvable at runtime on this exact device/ROM version).
      */
     fun hasOemScreen(context: Context): Boolean = manufacturer() != Manufacturer.UNKNOWN
-
-    /**
-     * Launch the OEM autostart / protected-apps settings screen.
-     *
-     * Priority order:
-     *  1. OEM-specific component intent (resolvability checked before launch).
-     *  2. System ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS for this package.
-     *  3. ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS (global battery list).
-     *  4. ACTION_APPLICATION_DETAILS_SETTINGS (app details page as last resort).
-     *
-     * @return true if an OEM-specific screen was launched, false if we fell back.
-     */
-    fun launchOemOrFallback(context: Context): Boolean {
-        val candidates = oemIntents(context)
-        for (intent in candidates) {
-            if (isResolvable(context, intent)) {
-                return try {
-                    context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                    Log.i(TAG, "Launched OEM screen: ${intent.component ?: intent.action}")
-                    true
-                } catch (e: Exception) {
-                    Log.w(TAG, "OEM intent launch failed: ${e.message}")
-                    false
-                }
-            }
-        }
-
-        // OEM screen not found — fall back to standard battery opt exemption.
-        Log.d(TAG, "No OEM screen resolvable; falling back to battery settings")
-        return launchBatteryFallback(context)
-    }
-
-    /**
-     * Standard fallback: request battery-optimisation exemption for our package,
-     * then the global battery optimisation settings list, then app details.
-     */
-    fun launchBatteryFallback(context: Context): Boolean {
-        val packageUri = Uri.parse("package:${context.packageName}")
-
-        val batteryExempt = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-            .apply { data = packageUri }
-        if (isResolvable(context, batteryExempt)) {
-            return try {
-                context.startActivity(batteryExempt.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                true
-            } catch (e: Exception) {
-                Log.w(TAG, "Battery exemption intent failed: ${e.message}")
-                false
-            }
-        }
-
-        val batteryList = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-        if (isResolvable(context, batteryList)) {
-            return try {
-                context.startActivity(batteryList.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                true
-            } catch (e: Exception) { false }
-        }
-
-        // Last resort: app details settings
-        return try {
-            context.startActivity(
-                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                    .apply { data = packageUri }
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-            true
-        } catch (e: Exception) { false }
-    }
 
     // ── Private helpers ─────────────────────────────────────────────────────
 
@@ -292,8 +220,36 @@ object OemAutoStartHelper {
         extras.forEach { (k, v) -> putExtra(k, v) }
     }
 
+    /**
+     * Ordered list of candidate OEM autostart/protected-apps intents for this
+     * device's manufacturer, each tagged with [Intent.FLAG_ACTIVITY_NEW_TASK].
+     * The caller should launch the first one that [isResolvable]; if none are,
+     * fall back to the battery-exemption → app-details chain.
+     *
+     * Public so the onboarding flow can route the launch through its
+     * ActivityResult launcher (instead of a bare startActivity) and so it can
+     * apply a single in-flight gate across all permission/settings intents.
+     */
+    fun getOemIntentCandidates(context: Context): List<Intent> =
+        oemIntents(context).map { it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+
+    /**
+     * Ordered battery-exemption fallback chain (battery-opt exemption for this
+     * package → global battery-opt list → app-details settings). Used when no
+     * OEM-specific candidate is resolvable. Each intent carries
+     * [Intent.FLAG_ACTIVITY_NEW_TASK].
+     */
+    fun getBatteryFallbackCandidates(context: Context): List<Intent> {
+        val packageUri = Uri.parse("package:${context.packageName}")
+        return listOf(
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply { data = packageUri },
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply { data = packageUri },
+        ).map { it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+    }
+
     /** Returns true if the intent can be resolved by at least one activity on this device. */
-    private fun isResolvable(context: Context, intent: Intent): Boolean {
+    fun isResolvable(context: Context, intent: Intent): Boolean {
         val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PackageManager.MATCH_DEFAULT_ONLY
         } else {

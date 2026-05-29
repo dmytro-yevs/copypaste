@@ -1,9 +1,9 @@
 package com.copypaste.android
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
@@ -71,16 +71,28 @@ import com.copypaste.android.ui.theme.CopyPasteTheme
  */
 class OnboardingActivity : ComponentActivity() {
 
+    /**
+     * Single "request-in-flight" gate. Android delivers a permission dialog /
+     * Settings screen one at a time; firing several intents back-to-back makes
+     * the system drop all but the first. We therefore allow exactly ONE request
+     * or Settings intent to be in flight at once: taps on other cards are
+     * ignored until the current one returns (its ActivityResult callback clears
+     * the flag), so every permission window can be opened in turn.
+     */
+    private var requestInFlight = false
+
     private val notifLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         Log.d(TAG, "POST_NOTIFICATIONS granted=$granted")
+        requestInFlight = false
         refreshState()
     }
 
     private val settingsLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
+        requestInFlight = false
         refreshState()
     }
 
@@ -113,55 +125,74 @@ class OnboardingActivity : ComponentActivity() {
         refreshState()
     }
 
-    private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    /**
+     * Launch a Settings intent through [settingsLauncher] under the in-flight
+     * gate, walking the supplied fallback [candidates] in order and using the
+     * first that actually launches. If a tap arrives while another request is
+     * pending it is ignored (the gate is held). Returns true if something was
+     * launched; on failure of every candidate the gate is released so the user
+     * can retry.
+     */
+    private fun launchGated(candidates: List<Intent>): Boolean {
+        if (requestInFlight) {
+            Log.d(TAG, "Ignoring tap: a permission/settings request is already in flight")
+            return false
         }
+        if (candidates.isEmpty()) return false
+        requestInFlight = true
+        for (intent in candidates) {
+            try {
+                settingsLauncher.launch(intent)
+                return true
+            } catch (e: ActivityNotFoundException) {
+                Log.w(TAG, "Settings intent not resolvable, trying next: ${e.message}")
+            } catch (e: Exception) {
+                Log.w(TAG, "Settings intent launch failed, trying next: ${e.message}")
+            }
+        }
+        // Nothing launched — release the gate so the user isn't stuck.
+        requestInFlight = false
+        Log.w(TAG, "No settings intent could be launched")
+        return false
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (requestInFlight) {
+            Log.d(TAG, "Ignoring tap: a permission/settings request is already in flight")
+            return
+        }
+        requestInFlight = true
+        notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun openAccessibilitySettings() {
-        settingsLauncher.launch(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        launchGated(
+            listOf(
+                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+        )
     }
 
     private fun requestBatteryOptimizationExemption() {
-        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-            data = Uri.parse("package:$packageName")
-        }
-        try {
-            settingsLauncher.launch(intent)
-        } catch (e: Exception) {
-            // Some OEMs don't support this intent; fall back to battery settings.
-            Log.w(TAG, "ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS not supported: ${e.message}")
-            settingsLauncher.launch(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-        }
+        // Battery-exemption intent first, then the global battery-opt list as
+        // a fallback for OEMs that don't expose the per-package action.
+        launchGated(OemAutoStartHelper.getBatteryFallbackCandidates(this))
     }
 
     /**
-     * Open the OEM-specific autostart / protected-apps settings screen via
-     * [OemAutoStartHelper]. Falls back to battery settings if not available.
-     * The result launcher is used to trigger a refresh after the user returns.
+     * Open the OEM-specific autostart / protected-apps settings screen, routed
+     * through [settingsLauncher] (so the return triggers a refresh) and under
+     * the shared in-flight gate. Tries each resolvable OEM candidate first, then
+     * the battery-exemption → app-details fallback chain. Every launch is
+     * guarded so an unresolvable OEM intent can never crash the app.
      */
     private fun openOemAutoStart() {
-        // We launch through OemAutoStartHelper using startActivity directly from
-        // the Activity so the resultLauncher can detect the return.
-        val launched = try {
-            OemAutoStartHelper.launchOemOrFallback(this)
-        } catch (e: Exception) {
-            Log.w(TAG, "OEM autostart launch failed: ${e.message}")
-            false
-        }
-        if (!launched) {
-            // Ultimate fallback: app info settings page.
-            try {
-                settingsLauncher.launch(
-                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.parse("package:$packageName")
-                    }
-                )
-            } catch (e: Exception) {
-                Log.w(TAG, "App details settings launch failed: ${e.message}")
-            }
-        }
+        val oem = OemAutoStartHelper.getOemIntentCandidates(this)
+            .filter { OemAutoStartHelper.isResolvable(this, it) }
+        val fallback = OemAutoStartHelper.getBatteryFallbackCandidates(this)
+        launchGated(oem + fallback)
     }
 
     companion object {

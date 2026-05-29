@@ -14,6 +14,14 @@
     <!-- Notification permission (runtime, Android 13 / API 33+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Camera: required by the ZXing QR scanner in PairActivity (device pairing).
+         Declared explicitly (not just inherited from the embedded scanner library)
+         and requested at runtime before launching the scanner. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Camera is optional: the app also pairs by displaying a QR, so don't
+         exclude camera-less devices from Play. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <!-- Battery optimization exemption: lets us stay alive for polling.
          Declared here; user is prompted at runtime via ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
