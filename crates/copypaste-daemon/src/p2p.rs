@@ -8,7 +8,9 @@
 //! [`P2pError::NotImplemented`] — the PAKE handshake lands in W2.4.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
@@ -293,6 +295,23 @@ pub async fn start_p2p(
         });
     }
 
+    // ── peer connector loop (Phase 3) ─────────────────────────────────────────
+    // Proactively DIALS paired peers that are not yet connected, so two paired
+    // daemons establish a live mTLS link without waiting for the other side to
+    // dial first. Reads each peer's persisted sync address from peers.json on
+    // every tick (so a freshly-paired peer is picked up with no restart), skips
+    // peers already in `peer_sinks`, never dials its own fingerprint, and
+    // applies per-peer exponential backoff on failure.
+    {
+        let transport = Arc::clone(&transport);
+        let peer_sinks = Arc::clone(&peer_sinks);
+        let incoming_tx = incoming_tx.clone();
+        let own_fp = transport.fingerprint().to_string();
+        tokio::spawn(async move {
+            peer_connector_loop(transport, peer_sinks, incoming_tx, own_fp).await;
+        });
+    }
+
     // ── discovery task ────────────────────────────────────────────────────────
     tokio::spawn(async move {
         match discovery_for_task.start().await {
@@ -403,16 +422,244 @@ async fn accept_loop(
     }
 }
 
-/// Manage one authenticated peer connection.
+/// How often the [`peer_connector_loop`] wakes to check for paired-but-not-
+/// connected peers to dial.
+const CONNECTOR_TICK: Duration = Duration::from_secs(3);
+
+/// Per-peer backoff schedule (seconds) applied after a failed dial. The dialer
+/// advances one step on each consecutive failure and resets to the first step
+/// on success, so a peer that is simply offline is retried with increasing
+/// spacing (5s → 30s → 60s, capped) rather than hammered every tick.
+const CONNECTOR_BACKOFF_STEPS: [u64; 3] = [5, 30, 60];
+
+/// Per-peer dial state tracked by the connector loop across ticks.
+struct PeerDialState {
+    /// Index into [`CONNECTOR_BACKOFF_STEPS`] for the next failure delay.
+    backoff_idx: usize,
+    /// Earliest instant we may dial this peer again. `None` = dial now.
+    next_attempt: Option<Instant>,
+}
+
+/// A dialable paired peer resolved from `peers.json`.
+struct DialablePeer {
+    /// Canonical (colon-free, lowercase) cert fingerprint — the mTLS pin.
+    fingerprint: DeviceFingerprint,
+    /// The peer's sync-listener socket address.
+    addr: SocketAddr,
+}
+
+/// Read `peers.json` and return the paired peers that carry a parseable sync
+/// `address` — the set the connector may dial. Peers with no address (legacy
+/// records, or a peer that never advertised one) are skipped: the connector
+/// has nothing to dial and relies on the peer dialing us instead.
+fn dialable_peers_from_path(path: &std::path::Path) -> Vec<DialablePeer> {
+    let stored = crate::peers::load_peers(path);
+    let mut out = Vec::new();
+    for dev in &stored {
+        if dev.fingerprint.is_empty() {
+            continue;
+        }
+        let Some(addr_str) = dev.address.as_deref() else {
+            continue;
+        };
+        let addr = match addr_str.parse::<SocketAddr>() {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::debug!(addr = %addr_str, error = %e, "skipping peer with unparseable sync address");
+                continue;
+            }
+        };
+        out.push(DialablePeer {
+            fingerprint: crate::ipc::canonical_fingerprint(&dev.fingerprint),
+            addr,
+        });
+    }
+    out
+}
+
+/// Proactively dial paired peers that are not currently connected (Phase 3).
+///
+/// Each tick re-reads `peers.json` (so a peer paired at runtime is picked up
+/// without a restart), then for every paired peer that has a sync address and
+/// is **not** already in `peer_sinks`, dials it with
+/// [`PeerTransport::connect_with_retry`]. On success the per-connection sink is
+/// registered in `peer_sinks` (keyed by fingerprint) and the SAME
+/// [`run_peer_connection`] handler the accept loop uses is spawned, so inbound
+/// items flow to `incoming_tx` and outbound items fan out.
+///
+/// # Avoiding deadlock / thrash
+/// * Locks on `peer_sinks` are held only for the brief insert/contains checks
+///   (never across the `connect_with_retry` await), so the accept loop and the
+///   fanout loop are never blocked by an in-flight dial.
+/// * Already-connected peers are skipped (cheap `contains_key`).
+/// * We never dial our own fingerprint (`own_fp`).
+/// * Per-peer exponential backoff ([`CONNECTOR_BACKOFF_STEPS`]) spaces out
+///   retries to an offline peer instead of dialing every tick.
+///
+/// # Double-connect race (both sides dialing)
+/// `peer_sinks` is keyed by cert fingerprint. If both daemons dial each other
+/// at once, two connections may briefly exist; whichever sink is inserted last
+/// wins the map slot and the superseded connection's per-connection task drops
+/// its (now-unreferenced) sink and exits when the stream closes — no duplicate
+/// fan-out. We additionally re-check `contains_key` immediately before dialing
+/// to skip a peer the accept loop just connected.
+async fn peer_connector_loop(
+    transport: Arc<PeerTransport>,
+    peer_sinks: PeerSinks,
+    incoming_tx: mpsc::Sender<WireItem>,
+    own_fp: DeviceFingerprint,
+) {
+    tracing::debug!(%own_fp, "P2P peer connector loop running");
+    let peers_path = crate::ipc::peers_file_path();
+    let mut dial_state: HashMap<DeviceFingerprint, PeerDialState> = HashMap::new();
+
+    loop {
+        tokio::time::sleep(CONNECTOR_TICK).await;
+
+        let peers = dialable_peers_from_path(&peers_path);
+        // Drop dial-state for peers no longer present (unpaired) so the map
+        // does not grow unbounded across re-pairings.
+        let live: std::collections::HashSet<&str> =
+            peers.iter().map(|p| p.fingerprint.as_str()).collect();
+        dial_state.retain(|fp, _| live.contains(fp.as_str()));
+
+        for peer in peers {
+            // Never dial ourselves (our own record could appear if a future
+            // bug wrote it, or in a single-host test that pairs a daemon's
+            // own fingerprint).
+            if peer.fingerprint == own_fp {
+                continue;
+            }
+
+            // Skip peers we already have a live sink for. Brief lock.
+            {
+                let sinks = peer_sinks.lock().await;
+                if sinks.contains_key(&peer.fingerprint) {
+                    continue;
+                }
+            }
+
+            // Respect per-peer backoff.
+            let now = Instant::now();
+            if let Some(state) = dial_state.get(&peer.fingerprint) {
+                if let Some(next) = state.next_attempt {
+                    if now < next {
+                        continue;
+                    }
+                }
+            }
+
+            tracing::debug!(fingerprint = %peer.fingerprint, addr = %peer.addr, "connector dialing paired peer");
+            match transport
+                .connect_with_retry(peer.addr, &peer.fingerprint)
+                .await
+            {
+                Ok(stream) => {
+                    // Re-check under the lock: the accept loop may have
+                    // registered an inbound connection from this peer while we
+                    // were dialing. If so, drop our outbound duplicate.
+                    let mut sinks = peer_sinks.lock().await;
+                    if sinks.contains_key(&peer.fingerprint) {
+                        tracing::debug!(
+                            fingerprint = %peer.fingerprint,
+                            "connector: peer already connected (accept loop won the race) — dropping outbound duplicate"
+                        );
+                        drop(sinks);
+                        drop(stream);
+                    } else {
+                        let (peer_tx, peer_rx) = mpsc::channel::<WireItem>(64);
+                        let cleanup_tx = peer_tx.clone();
+                        sinks.insert(peer.fingerprint.clone(), peer_tx);
+                        drop(sinks);
+
+                        tracing::info!(fingerprint = %peer.fingerprint, addr = %peer.addr, "connector established outbound mTLS link");
+
+                        let incoming_tx = incoming_tx.clone();
+                        let peer_sinks = Arc::clone(&peer_sinks);
+                        let peer_key = peer.fingerprint.clone();
+                        tokio::spawn(async move {
+                            run_peer_connection_client(stream, peer_rx, incoming_tx).await;
+                            let mut sinks = peer_sinks.lock().await;
+                            if sinks
+                                .get(&peer_key)
+                                .is_some_and(|tx| tx.same_channel(&cleanup_tx))
+                            {
+                                sinks.remove(&peer_key);
+                            }
+                            drop(sinks);
+                            tracing::debug!(fingerprint = %peer_key, "connector outbound connection closed");
+                        });
+                    }
+                    // Success → reset backoff.
+                    dial_state.insert(
+                        peer.fingerprint.clone(),
+                        PeerDialState {
+                            backoff_idx: 0,
+                            next_attempt: None,
+                        },
+                    );
+                }
+                Err(e) => {
+                    let entry =
+                        dial_state
+                            .entry(peer.fingerprint.clone())
+                            .or_insert(PeerDialState {
+                                backoff_idx: 0,
+                                next_attempt: None,
+                            });
+                    let step = CONNECTOR_BACKOFF_STEPS
+                        [entry.backoff_idx.min(CONNECTOR_BACKOFF_STEPS.len() - 1)];
+                    entry.next_attempt = Some(Instant::now() + Duration::from_secs(step));
+                    entry.backoff_idx =
+                        (entry.backoff_idx + 1).min(CONNECTOR_BACKOFF_STEPS.len() - 1);
+                    tracing::debug!(
+                        fingerprint = %peer.fingerprint,
+                        addr = %peer.addr,
+                        backoff_secs = step,
+                        error = %e,
+                        "connector dial failed — backing off"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Manage one authenticated **inbound** (accept-side) peer connection.
+async fn run_peer_connection(
+    framed: copypaste_p2p::transport::PeerStream,
+    peer_rx: mpsc::Receiver<WireItem>,
+    incoming_tx: mpsc::Sender<WireItem>,
+) {
+    run_peer_connection_framed(framed, peer_rx, incoming_tx).await
+}
+
+/// Manage one authenticated **outbound** (connector-side) peer connection.
+///
+/// Identical duplex pump as [`run_peer_connection`] but for the client-side TLS
+/// stream type returned by [`PeerTransport::connect_with_retry`].
+async fn run_peer_connection_client(
+    framed: copypaste_p2p::transport::PeerClientStream,
+    peer_rx: mpsc::Receiver<WireItem>,
+    incoming_tx: mpsc::Sender<WireItem>,
+) {
+    run_peer_connection_framed(framed, peer_rx, incoming_tx).await
+}
+
+/// Duplex pump shared by the accept-side and connector-side connection tasks.
 ///
 /// Reads incoming frames and forwards them to `incoming_tx`; reads from
 /// `peer_rx` and writes outgoing frames to the peer. Both directions run
 /// concurrently via `tokio::select!`; the task exits when either side closes.
-async fn run_peer_connection(
-    mut framed: copypaste_p2p::transport::PeerStream,
+/// Generic over the framed stream so the server-side ([`PeerStream`]) and
+/// client-side ([`PeerClientStream`]) TLS stream types share one implementation.
+async fn run_peer_connection_framed<S>(
+    mut framed: tokio_util::codec::Framed<S, tokio_util::codec::LengthDelimitedCodec>,
     mut peer_rx: mpsc::Receiver<WireItem>,
     incoming_tx: mpsc::Sender<WireItem>,
-) {
+) where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     loop {
         tokio::select! {
             // Inbound: peer sent a frame — deserialise and forward to sync_orch.
@@ -798,6 +1045,38 @@ mod tests {
         );
         // The lean (name-less) record is also honoured, normalised.
         assert!(peers.is_known("bbbb"), "name-less peer also loaded");
+    }
+
+    /// Phase 3: the connector resolves only paired peers that carry a parseable
+    /// sync `address` from `peers.json`; records with no address (or a malformed
+    /// one) are skipped, and the fingerprint is normalised to canonical hex.
+    #[test]
+    fn dialable_peers_resolves_address_records_only() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        let fp_colon = std::iter::repeat_n("ab", 32).collect::<Vec<_>>().join(":");
+        let fp_canonical = crate::ipc::canonical_fingerprint(&fp_colon);
+        let json = format!(
+            r#"[
+                {{"fingerprint":"{fp_colon}","name":"A","added_at":1,"address":"127.0.0.1:4242"}},
+                {{"fingerprint":"cd:cd","added_at":2}},
+                {{"fingerprint":"ef:ef","added_at":3,"address":"not-an-addr"}}
+            ]"#
+        );
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(json.as_bytes()).unwrap();
+        drop(f);
+
+        let dialable = dialable_peers_from_path(&path);
+        assert_eq!(
+            dialable.len(),
+            1,
+            "only the record with a valid address is dialable"
+        );
+        assert_eq!(dialable[0].fingerprint, fp_canonical);
+        assert_eq!(dialable[0].addr, "127.0.0.1:4242".parse().unwrap());
     }
 
     /// A missing `peers.json` loads zero peers and never errors.
