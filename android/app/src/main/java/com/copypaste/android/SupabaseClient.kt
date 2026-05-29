@@ -1,6 +1,5 @@
 package com.copypaste.android
 
-import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,7 +16,9 @@ import java.net.URL
  *
  * Speaks the SAME wire protocol as the macOS daemon's cloud.rs:
  *   - Table   : `clipboard_items` (PostgREST `/rest/v1/clipboard_items`)
- *   - Column  : `payload_ct`  — base64(nonce[24] || XChaCha20-Poly1305 ciphertext)
+ *   - Column  : `payload_ct`  — Postgres `bytea` holding nonce[24] ||
+ *               XChaCha20-Poly1305 ciphertext, sent/received as the hex-input
+ *               literal `\x<hex>` (see [encodePayloadCt]/[decodePayloadCt])
  *   - AAD     : "{item_id}|5"  (CLOUD_AAD_SCHEMA_VERSION = 5)
  *   - Auth    : `apikey` header + `Authorization: Bearer <token>` header
  *
@@ -47,6 +48,62 @@ class SupabaseClient(
 
         /** Connect / read timeout for every HTTP call, ms. */
         private const val TIMEOUT_MS = 15_000
+
+        /** Lowercase hex digits for [encodePayloadCt]. */
+        private val HEX_DIGITS = "0123456789abcdef".toCharArray()
+
+        /**
+         * Encode a raw cloud ciphertext blob (nonce[24] || ciphertext_with_tag)
+         * as a Postgres `bytea` hex-input literal `\x<hex>` (lowercase).
+         *
+         * `payload_ct` is a Postgres `bytea` column. PostgREST stores a string
+         * assigned to it via Postgres' INPUT formats — a bare base64 string is
+         * NOT one of them (it is stored as the literal ASCII bytes of the base64
+         * text), so the daemon could never decode it. The canonical hex input
+         * form `\x<hex>` makes the column hold the true ciphertext bytes and the
+         * read-back round-trips. Mirrors `encode_payload_ct_hex` in cloud.rs.
+         */
+        @JvmStatic
+        fun encodePayloadCt(blob: ByteArray): String {
+            val sb = StringBuilder(2 + blob.size * 2)
+            sb.append("\\x")
+            for (b in blob) {
+                val v = b.toInt() and 0xFF
+                sb.append(HEX_DIGITS[v ushr 4])
+                sb.append(HEX_DIGITS[v and 0x0F])
+            }
+            return sb.toString()
+        }
+
+        /**
+         * Decode a `payload_ct` value as returned by PostgREST into the raw
+         * ciphertext blob. PostgREST renders `bytea` in hex output form
+         * (`\x<hex>`); we also accept a bare base64 string for backward
+         * compatibility with rows written by the pre-fix Android/daemon (where
+         * the base64 text was stored verbatim). Mirrors `decode_payload_ct`.
+         *
+         * @throws IllegalArgumentException on malformed hex or base64.
+         */
+        @JvmStatic
+        fun decodePayloadCt(payloadCt: String): ByteArray {
+            if (payloadCt.startsWith("\\x")) {
+                val hex = payloadCt.substring(2)
+                require(hex.length % 2 == 0) { "odd-length hex in payload_ct" }
+                val out = ByteArray(hex.length / 2)
+                var i = 0
+                while (i < hex.length) {
+                    val hi = Character.digit(hex[i], 16)
+                    val lo = Character.digit(hex[i + 1], 16)
+                    require(hi >= 0 && lo >= 0) { "invalid hex digit in payload_ct" }
+                    out[i / 2] = ((hi shl 4) or lo).toByte()
+                    i += 2
+                }
+                return out
+            }
+            // Back-compat: bare base64 (pre-fix rows). java.util.Base64 is pure
+            // JVM (available in unit tests); the std alphabet matches NO_WRAP.
+            return java.util.Base64.getDecoder().decode(payloadCt)
+        }
     }
 
     // ── Data types ──────────────────────────────────────────────────────────
@@ -59,8 +116,12 @@ class SupabaseClient(
         val id: String,
         val itemId: String,
         val contentType: String,
-        /** Raw base64-encoded cloud blob (nonce[24] || ciphertext_with_tag). */
-        val payloadCtBase64: String,
+        /**
+         * Raw `payload_ct` wire string as returned by PostgREST. For a `bytea`
+         * column this is the hex-output form `\x<hex>`; legacy rows may instead
+         * hold a bare base64 string. Decode via [decodePayloadCt].
+         */
+        val payloadCtWire: String,
         val lamportTs: Long,
         val wallTime: Long,
         val expiresAt: Long?,
@@ -147,13 +208,16 @@ class SupabaseClient(
         try {
             // Encrypt with the cross-device sync key (XChaCha20-Poly1305, AAD = itemId|5).
             val blob = cloud_encrypt(itemId, plaintext, syncKeyBytes)
-            val payloadCtBase64 = Base64.encodeToString(blob, Base64.NO_WRAP)
+            // `payload_ct` is a Postgres `bytea` column — send the hex-input
+            // literal `\x<hex>` (NOT bare base64, which Postgres would store as
+            // the ASCII of the base64 text). Mirrors daemon `encode_payload_ct_hex`.
+            val payloadCtHex = encodePayloadCt(blob)
 
             val body = JSONObject().apply {
                 put("id", id)
                 put("item_id", itemId)
                 put("content_type", contentType)
-                put("payload_ct", payloadCtBase64)
+                put("payload_ct", payloadCtHex)
                 put("lamport_ts", lamportTs)
                 put("wall_time", wallTime)
                 if (expiresAt != null) put("expires_at", expiresAt) else put("expires_at", JSONObject.NULL)
@@ -235,7 +299,7 @@ class SupabaseClient(
                     id = id,
                     itemId = itemId,
                     contentType = obj.optString("content_type", "text"),
-                    payloadCtBase64 = payloadCt,
+                    payloadCtWire = payloadCt,
                     lamportTs = obj.optLong("lamport_ts", 0L),
                     wallTime = obj.optLong("wall_time", 0L),
                     expiresAt = if (obj.isNull("expires_at")) null else obj.optLong("expires_at"),
@@ -260,10 +324,13 @@ class SupabaseClient(
             Log.d(TAG, "decryptRow: skipping non-text row id=${row.id} (${row.contentType})")
             return null
         }
+        // `payload_ct` comes back as a `bytea` hex literal `\x<hex>` (or, for
+        // legacy rows, bare base64). [decodePayloadCt] accepts both, mirroring
+        // the daemon's `decode_payload_ct`.
         val blob = try {
-            Base64.decode(row.payloadCtBase64, Base64.DEFAULT)
+            decodePayloadCt(row.payloadCtWire)
         } catch (e: Exception) {
-            Log.w(TAG, "decryptRow: base64 decode failed for id=${row.id}: ${e.message}")
+            Log.w(TAG, "decryptRow: payload_ct decode failed for id=${row.id}: ${e.message}")
             return null
         }
         val plaintext = try {
