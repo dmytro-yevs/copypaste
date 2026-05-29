@@ -789,11 +789,13 @@ fn setup_macos(app: &tauri::App) {
     use tauri::ActivationPolicy;
     use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
 
-    // Menu-bar app: no Dock icon until a window is shown.
+    // Regular policy so CopyPaste appears in the Cmd+Tab application switcher
+    // (and shows a Dock icon). Accessory hides it from both Cmd+Tab and the Dock;
+    // alt-tab presence on macOS is only available with Regular policy.
     // set_activation_policy on App requires &mut self; use the AppHandle variant (&self) instead.
     let _ = app
         .handle()
-        .set_activation_policy(ActivationPolicy::Accessory);
+        .set_activation_policy(ActivationPolicy::Regular);
     if let Some(win) = app.get_webview_window("main") {
         let _ = apply_vibrancy(
             &win,
