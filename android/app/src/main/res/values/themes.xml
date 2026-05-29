@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <!--
         AppCompat theme retained for the existing AndroidManifest entries that
         reference Theme.MaterialComponents.DayNight.NoActionBar — the Compose
@@ -13,7 +13,15 @@
         <item name="colorPrimary">@color/copypaste_primary</item>
         <item name="colorPrimaryDark">@color/copypaste_primary_dark</item>
         <item name="colorAccent">@color/copypaste_primary</item>
+        <!-- Edge-to-edge: transparent system bars; Compose applies the insets. -->
         <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- The app is permanently dark (Darcula). Status bar sits on a dark
+             background, so use LIGHT icons (windowLightStatusBar = false). -->
+        <item name="android:windowLightStatusBar">false</item>
+        <!-- Render into the display cutout (notch / punch-hole) area on the short
+             edges; combined with the Compose insets below this lets the header use
+             the full width while never drawing *under* the status bar / notch. -->
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
     </style>
 </resources>

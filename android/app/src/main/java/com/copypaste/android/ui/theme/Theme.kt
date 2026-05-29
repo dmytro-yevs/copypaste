@@ -74,9 +74,17 @@ fun CopyPasteTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            // Match status bar to our root background so the UI looks edge-to-edge.
-            window.statusBarColor = IdeBg.toArgb()
-            // Dark status bar = light icons (correct for dark background).
+            // Draw edge-to-edge: let our content extend behind the system bars and
+            // the display cutout. The individual screens apply the corresponding
+            // window insets (status-bar / cutout padding) so the header is never
+            // clipped on notched / punch-hole phones. On API 35 this is enforced
+            // by the platform regardless; we set it explicitly so API 26-34 behave
+            // identically.
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            // Transparent status bar so our dark background shows through the
+            // cutout / status-bar strip.
+            window.statusBarColor = Color.Transparent.toArgb()
+            // Dark background → light status-bar icons.
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
         }
     }

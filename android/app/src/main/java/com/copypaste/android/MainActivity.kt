@@ -7,7 +7,9 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentPaste
@@ -67,6 +69,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Edge-to-edge: the bottom NavigationBar and each tab's TopAppBar apply
+        // their own system-bar insets so nothing is clipped on notched phones.
+        enableEdgeToEdge()
 
         settings = Settings(this)
         repository = ClipboardRepository(this)
@@ -137,6 +142,14 @@ private fun MainShell(viewModel: ClipboardViewModel) {
 
     Scaffold(
         containerColor = IdeBg,
+        // The NavigationBar (bottomBar) consumes the navigation-bar inset itself.
+        // We zero the Scaffold's *content* insets so the TOP (status-bar / cutout)
+        // inset is NOT also added to innerPadding — each embedded screen's own
+        // TopAppBar already applies that top inset, and applying it twice would
+        // push the header down by a doubled status-bar height. Without this the
+        // inner screens would be either double-inset (here) or clipped (if the
+        // TopAppBar inset were removed). See HistoryScreen / PairScreen / etc.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             NavigationBar(
                 containerColor = IdePanel,
