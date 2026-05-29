@@ -272,6 +272,10 @@ export function SettingsView() {
 
   // Data
   const [deleteMsg, setDeleteMsg] = useState<{ text: string; isError: boolean } | null>(null);
+  // Fix #7: inline confirm state replaces window.confirm, which is unreliable /
+  // blocked in the Tauri (WRY) webview and matches the pattern already used in
+  // HistoryView's "Clear all".
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   // Global state
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -462,7 +466,7 @@ export function SettingsView() {
   // -------------------------------------------------------------------------
 
   const handleDeleteAll = useCallback(async () => {
-    if (!window.confirm("Delete all clipboard history? This cannot be undone.")) return;
+    setDeleteConfirm(false);
     try {
       const result = await api.deleteAll();
       setDeleteMsg({
@@ -790,17 +794,37 @@ export function SettingsView() {
                     {deleteMsg.text}
                   </span>
                 )}
-                <button
-                  type="button"
-                  disabled={offline}
-                  onClick={() => void handleDeleteAll()}
-                  className={[
-                    "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
-                    "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-                  ].join(" ")}
-                >
-                  Clear history…
-                </button>
+                {deleteConfirm ? (
+                  <span className="flex items-center gap-1.5 text-[13px]">
+                    <span className="text-ide-dim">Delete all history?</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteAll()}
+                      className="rounded-ide border border-ide-danger/50 bg-ide-elevated px-2.5 py-1 text-[13px] text-ide-danger hover:bg-ide-hover"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirm(false)}
+                      className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[13px] text-ide-dim hover:bg-ide-hover"
+                    >
+                      No
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={offline}
+                    onClick={() => setDeleteConfirm(true)}
+                    className={[
+                      "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
+                      "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
+                    ].join(" ")}
+                  >
+                    Clear history…
+                  </button>
+                )}
               </div>
             </SettingsRow>
           </Panel>

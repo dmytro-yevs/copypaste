@@ -252,8 +252,9 @@ function HistoryRow({ entry, selected, previewLines, previewSize, maskSensitive,
     preview = entry.preview;
   }
 
-  // Fix #6: row height driven by previewSize setting
-  const rowH = isImage ? Math.max(previewSize + 6, 34) : previewSize;
+  // Fix #6: row height driven by previewSize setting (shared with the
+  // virtualizer via rowHeightFor so offsets stay consistent).
+  const rowH = rowHeightFor(entry, previewSize);
 
   return (
     <div
@@ -345,6 +346,132 @@ function ActionBtn({
     >
       {label}
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Row height model (shared by the row and the virtualizer)
+// ---------------------------------------------------------------------------
+
+/**
+ * Compute the row height (px) for an entry, mirroring HistoryRow's own logic.
+ * Image rows are taller; everything else is `previewSize`. Kept in one place so
+ * the virtualizer's offset math stays in sync with what actually renders.
+ */
+function rowHeightFor(entry: HistoryEntry, previewSize: number): number {
+  const isImage =
+    entry.content_type === "image" || entry.content_type.startsWith("image/");
+  return isImage ? Math.max(previewSize + 6, 34) : previewSize;
+}
+
+// ---------------------------------------------------------------------------
+// Virtualized list — windowing for large histories
+//
+// Fix #1: the history view previously rendered every row (up to 200), which
+// scales poorly as the cap grows and wastes DOM nodes / layout work. This
+// renders only the rows intersecting the viewport plus a small overscan buffer.
+// Row heights are known up front (see rowHeightFor), so we build a prefix-sum
+// offset table and binary-search the first visible row — supporting the mixed
+// image/text row heights exactly, not just a single fixed height.
+// ---------------------------------------------------------------------------
+
+const OVERSCAN_PX = 240; // render a buffer above/below the viewport
+
+/**
+ * Build the prefix-sum offset table for a list of rows. `offsets[i]` is the top
+ * edge (px) of row `i`; `offsets[n]` is the total content height. Exported for
+ * unit testing the virtualization math.
+ */
+export function buildOffsets(heights: number[]): number[] {
+  const arr = new Array<number>(heights.length + 1);
+  arr[0] = 0;
+  for (let i = 0; i < heights.length; i++) arr[i + 1] = arr[i] + heights[i];
+  return arr;
+}
+
+/**
+ * Given a prefix-sum offset table, the scroll position, and the viewport
+ * height, return the `[start, end)` index range of rows to render (inclusive of
+ * an overscan buffer). Pure and side-effect free so it can be unit tested
+ * without a DOM. `end` is exclusive.
+ */
+export function computeVisibleWindow(
+  offsets: number[],
+  scrollTop: number,
+  viewportH: number,
+  overscanPx: number = OVERSCAN_PX
+): { start: number; end: number } {
+  const count = offsets.length - 1;
+  if (count <= 0) return { start: 0, end: 0 };
+
+  const top = Math.max(0, scrollTop - overscanPx);
+  const bottom = scrollTop + viewportH + overscanPx;
+
+  // Binary-search the first row whose bottom edge is past `top`.
+  let lo = 0;
+  let hi = count;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (offsets[mid + 1] <= top) lo = mid + 1;
+    else hi = mid;
+  }
+  const start = Math.min(lo, count - 1);
+
+  let end = start;
+  while (end < count && offsets[end] < bottom) end++;
+  return { start, end };
+}
+
+interface VirtualListProps {
+  items: HistoryEntry[];
+  previewSize: number;
+  listRef: React.RefObject<HTMLDivElement | null>;
+  onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
+  renderRow: (entry: HistoryEntry) => React.ReactNode;
+}
+
+function VirtualList({ items, previewSize, listRef, onKeyDown, renderRow }: VirtualListProps) {
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(0);
+
+  // Prefix-sum offsets: offsets[i] is the top of row i; offsets[n] is total height.
+  const offsets = buildOffsets(items.map((it) => rowHeightFor(it, previewSize)));
+  const totalH = offsets[items.length] ?? 0;
+
+  // Measure the viewport height and keep it current on resize.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    setViewportH(el.clientHeight);
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setViewportH(el.clientHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [listRef]);
+
+  const { start, end } = computeVisibleWindow(offsets, scrollTop, viewportH);
+  const visible = items.slice(start, end);
+  const padTop = offsets[start] ?? 0;
+
+  return (
+    <div
+      ref={listRef}
+      role="listbox"
+      aria-label="Clipboard history"
+      tabIndex={0}
+      onKeyDown={onKeyDown}
+      onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
+      className="h-full overflow-y-auto focus:outline-none"
+      style={{ scrollbarWidth: "thin" }}
+    >
+      {/* Spacer establishes the full scroll height; the inner block is offset
+          to where the visible window starts. */}
+      <div style={{ height: totalH, position: "relative" }}>
+        <div style={{ position: "absolute", top: padTop, left: 0, right: 0 }}>
+          {visible.map((entry) => renderRow(entry))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -470,6 +597,26 @@ export function HistoryView() {
   // -------------------------------------------------------------------------
 
   const selectedIdx = filtered.findIndex((it) => it.id === selectedId);
+
+  // Keep the selected row visible. With virtualization an off-screen selected
+  // row isn't in the DOM, so we can't rely on Element.scrollIntoView — instead
+  // we compute its offset from the same height model the virtualizer uses and
+  // scroll the container so the row sits within the viewport.
+  useEffect(() => {
+    if (selectedIdx < 0) return;
+    const el = listRef.current;
+    if (!el) return;
+    let top = 0;
+    for (let i = 0; i < selectedIdx; i++) top += rowHeightFor(filtered[i], previewSize);
+    const rowH = rowHeightFor(filtered[selectedIdx], previewSize);
+    const viewTop = el.scrollTop;
+    const viewBottom = viewTop + el.clientHeight;
+    if (top < viewTop) {
+      el.scrollTop = top;
+    } else if (top + rowH > viewBottom) {
+      el.scrollTop = top + rowH - el.clientHeight;
+    }
+  }, [selectedIdx, filtered, previewSize]);
 
   const handleKeyDown = useCallback(
     async (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -667,16 +814,12 @@ export function HistoryView() {
     );
   } else {
     body = (
-      <div
-        ref={listRef}
-        role="listbox"
-        aria-label="Clipboard history"
-        tabIndex={0}
+      <VirtualList
+        items={filtered}
+        previewSize={previewSize}
+        listRef={listRef}
         onKeyDown={(e) => void handleKeyDown(e)}
-        className="h-full overflow-y-auto focus:outline-none"
-        style={{ scrollbarWidth: "thin" }}
-      >
-        {filtered.map((entry) => (
+        renderRow={(entry) => (
           <HistoryRow
             key={entry.id}
             entry={entry}
@@ -692,8 +835,8 @@ export function HistoryView() {
             onPin={() => void handlePin(entry.id, entry.pinned)}
             onDelete={() => void handleDelete(entry.id)}
           />
-        ))}
-      </div>
+        )}
+      />
     );
   }
 
