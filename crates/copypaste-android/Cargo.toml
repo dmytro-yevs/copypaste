@@ -46,6 +46,13 @@ thiserror = "1"
 # bound into the AEAD AAD before encryption (legacy empty-AAD fallback was
 # removed in 1c55e57).
 uuid = { workspace = true }
+# `sync_with_peer` speaks the daemon's framed P2P wire protocol directly:
+# length-delimited frames each carrying a JSON-serialised `WireItem`. These
+# mirror the exact deps the daemon's `run_peer_connection` uses (p2p.rs).
+futures-util = { workspace = true, features = ["sink"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+bytes = "1"
+serde_json = { workspace = true }
 
 # Android NDK has no system OpenSSL, so sqlcipher's `#include <openssl/crypto.h>`
 # fails at compile time on aarch64-linux-android / x86_64-linux-android. Pull in
@@ -63,5 +70,5 @@ uniffi = { version = "0.27", features = ["build"] }
 # Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+
 tempfile = ">=3.0, <3.14"
 # Cross-language conformance fixture (tests/conformance_vectors.rs): emit golden
-# AEAD vectors as JSON for the Kotlin instrumented test to consume.
-serde_json = { workspace = true }
+# AEAD vectors as JSON for the Kotlin instrumented test to consume. (serde_json
+# is now also a normal dependency — used by `sync_with_peer`'s framed protocol.)

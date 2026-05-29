@@ -446,21 +446,34 @@ fn shared_sync_key_from_session(
     Ok(copypaste_core::SyncKey::from_bytes(content_key))
 }
 
-/// Run ONE clipboard sync session against an already-paired peer over mTLS.
+/// Run ONE clipboard sync exchange against an already-paired peer over mTLS.
 ///
-/// See the UDL docstring for the full contract. The flow mirrors the desktop
-/// daemon's sync path:
+/// **Wire protocol — matches the daemon, NOT `SyncEngine::run_session`.** The
+/// macOS daemon's per-connection pump (`p2p.rs::run_peer_connection_framed`)
+/// does NOT run the HELLO/HAVE/WANT/ITEMS/DONE handshake on a paired link. It
+/// KEEPS the `Framed<_, LengthDelimitedCodec>` and exchanges each item as one
+/// length-delimited frame carrying a JSON-serialised
+/// [`copypaste_sync::protocol::WireItem`]. Right after a connection is
+/// accepted it PUSHES its catch-up history (re-keyed under the shared sync
+/// key) into the peer as these framed `WireItem`s. A previous version of this
+/// FFI peeled the codec and ran `run_session`, so it spoke a different wire
+/// protocol than the daemon and live sync failed with "frame too large".
+///
+/// This function therefore mirrors the daemon's framed pump exactly:
 ///   1. derive the shared content key from `session_key`;
-///   2. wrap each `LocalItem`'s plaintext under that key (`encrypt_for_cloud`),
-///      producing the SAME on-wire form the daemon's `rekey_outbound` emits
-///      (self-framed cloud blob in `content`, `content_nonce = None`);
-///   3. connect to `peer_addr` with `peer_fingerprint` allow-listed, then run
-///      `SyncEngine::run_session` over the raw TLS stream;
-///   4. unwrap each received item with the shared key (`decrypt_from_cloud`)
-///      back to plaintext.
+///   2. connect to `peer_addr` with `peer_fingerprint` allow-listed, KEEPING
+///      the length-delimited framing the transport set up;
+///   3. SEND each text [`LocalItem`], re-keyed under the shared key
+///      (`encrypt_for_cloud`) into the SAME on-wire `WireItem` shape the
+///      daemon's `rekey_outbound` emits (self-framed cloud blob in `content`,
+///      `content_nonce = None`), as one JSON frame each;
+///   4. READ incoming `WireItem` frames (the daemon's catch-up push) until a
+///      short idle timeout elapses with no new frame, an item cap is hit, or
+///      an overall deadline passes, decrypting each with the shared key
+///      (`decrypt_from_cloud`) back to plaintext.
 ///
 /// Errors: [`CopypasteError::P2pError`] for a malformed `peer_addr`, a
-/// connect/TLS failure, or a sync-protocol error; [`CopypasteError::InvalidKeyLength`]
+/// connect/TLS failure, or a framing/transport error; [`CopypasteError::InvalidKeyLength`]
 /// if `session_key` is not 32 bytes.
 pub fn sync_with_peer(
     peer_addr: String,
@@ -471,8 +484,10 @@ pub fn sync_with_peer(
     local_items: Vec<LocalItem>,
 ) -> Result<P2pSyncResult, CopypasteError> {
     panic_boundary::catch_result(|| {
+        use bytes::Bytes;
         use copypaste_p2p::transport::{PairedPeers, PeerTransport};
-        use copypaste_sync::engine::SyncEngine;
+        use copypaste_sync::protocol::WireItem;
+        use futures_util::{SinkExt, StreamExt};
 
         let addr: std::net::SocketAddr =
             peer_addr
@@ -482,52 +497,117 @@ pub fn sync_with_peer(
                 })?;
 
         let shared = shared_sync_key_from_session(&session_key)?;
+        let device_id = uuid::Uuid::new_v4().to_string();
 
-        // Build the local item set in the SAME sync-key-wrapped wire form the
-        // daemon's `rekey_outbound` produces: the cloud blob (self-framed, its
-        // own 24-byte nonce prefix) goes in `content`, and `content_nonce` is
-        // cleared so the peer recognises it as sync-key-wrapped.
-        let mut wrapped: Vec<copypaste_core::ClipboardItem> = Vec::with_capacity(local_items.len());
+        // Build the outbound `WireItem`s in the SAME sync-key-wrapped wire form
+        // the daemon's `rekey_outbound` produces: the cloud blob (self-framed,
+        // its own 24-byte nonce prefix) goes in `content`, and `content_nonce`
+        // is `None` so the peer recognises it as sync-key-wrapped. Only text
+        // items are re-keyed (image chunks use a separate scheme).
+        let mut outbound: Vec<WireItem> = Vec::with_capacity(local_items.len());
         for it in &local_items {
-            // Only text items are re-keyed (image chunks use a separate scheme).
             if it.content_type != "text" {
                 continue;
             }
-            let mut item = copypaste_core::ClipboardItem::new_text(Vec::new(), Vec::new(), 0);
-            if !it.id.is_empty() {
-                item.id = it.id.clone();
-            }
-            item.wall_time = it.wall_time_ms;
-            item.lamport_ts = it.wall_time_ms;
-            let blob = encrypt_for_cloud(&shared, &item.item_id, &it.plaintext)
+            let item_id = uuid::Uuid::new_v4().to_string();
+            let id = if it.id.is_empty() {
+                item_id.clone()
+            } else {
+                it.id.clone()
+            };
+            let blob = encrypt_for_cloud(&shared, &item_id, &it.plaintext)
                 .map_err(|_| CopypasteError::EncryptionFailed)?;
-            item.content = Some(blob);
-            item.content_nonce = None;
-            wrapped.push(item);
+            outbound.push(WireItem {
+                id,
+                item_id,
+                content_type: "text".to_string(),
+                content: Some(blob),
+                // `None` is the daemon's "sync-key-wrapped" unwrap marker.
+                content_nonce: None,
+                blob_ref: None,
+                is_sensitive: false,
+                lamport_ts: it.wall_time_ms,
+                wall_time: it.wall_time_ms,
+                expires_at: None,
+                app_bundle_id: None,
+                origin_device_id: device_id.clone(),
+                // Sync-key-wrapped blobs are version-independent on the wire;
+                // the daemon stamps the same default for re-keyed items.
+                key_version: 2,
+            });
         }
 
-        // Connect over mTLS with the peer fingerprint allow-listed, then run one
-        // session over the RAW TLS stream (`run_session` does its own framing).
-        let device_id = uuid::Uuid::new_v4().to_string();
+        // Connect over mTLS with the peer fingerprint allow-listed. KEEP the
+        // `Framed<_, LengthDelimitedCodec>` the transport set up — the daemon's
+        // `run_peer_connection_framed` exchanges length-delimited JSON
+        // `WireItem` frames over exactly this framing (NOT `run_session`).
         let peers = PairedPeers::new();
         peers.add(peer_fingerprint.clone(), "android-peer");
         let transport = PeerTransport::from_cert(cert_der, key_der, peers);
 
-        let (result, to_upsert) = runtime()
+        // Bounded receive window: the daemon pushes its catch-up history right
+        // after accepting the connection, so frames arrive promptly. We read
+        // until any of: no new frame for `IDLE`, `MAX_ITEMS` received, or the
+        // overall `DEADLINE` elapses — then we stop (the daemon keeps the link
+        // open indefinitely, so we cannot wait for an EOF here).
+        const IDLE: std::time::Duration = std::time::Duration::from_secs(3);
+        const DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
+        const MAX_ITEMS: usize = 10_000;
+
+        let received: Vec<WireItem> = runtime()
             .block_on(async {
-                let framed = transport.connect(addr, &peer_fingerprint).await?;
-                // The sync engine drives its own length-prefixed JSON framing on
-                // a raw byte stream, so peel off the LengthDelimitedCodec.
-                let mut stream = framed.into_inner();
-                let mut engine = SyncEngine::new(device_id.clone());
-                engine
-                    .run_session(&mut stream, &wrapped)
-                    .await
-                    .map_err(|e| {
-                        copypaste_p2p::transport::TransportError::Io(std::io::Error::other(
-                            e.to_string(),
-                        ))
-                    })
+                let mut framed = transport.connect(addr, &peer_fingerprint).await?;
+
+                // Send this device's items first, mirroring the daemon's
+                // outbound write half (`serde_json::to_vec(&WireItem)` → frame).
+                for item in &outbound {
+                    match serde_json::to_vec(item) {
+                        Ok(payload) => framed.send(Bytes::from(payload)).await?,
+                        Err(e) => {
+                            return Err(copypaste_p2p::transport::TransportError::Io(
+                                std::io::Error::other(format!("serialise outbound WireItem: {e}")),
+                            ));
+                        }
+                    }
+                }
+
+                // Read incoming frames within the bounded window.
+                let mut got: Vec<WireItem> = Vec::new();
+                let deadline = tokio::time::Instant::now() + DEADLINE;
+                loop {
+                    if got.len() >= MAX_ITEMS {
+                        break;
+                    }
+                    let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                    if remaining.is_zero() {
+                        break;
+                    }
+                    let idle = IDLE.min(remaining);
+                    match tokio::time::timeout(idle, framed.next()).await {
+                        // A frame arrived: deserialise it as a `WireItem` exactly
+                        // as the daemon's read half does.
+                        Ok(Some(Ok(frame))) => match serde_json::from_slice::<WireItem>(&frame) {
+                            Ok(wire) => got.push(wire),
+                            Err(_e) => {
+                                // A frame we cannot parse is not fatal — skip it
+                                // and keep reading (matches the daemon, which
+                                // logs and continues on a deserialise error).
+                            }
+                        },
+                        // Frame-level read error or clean EOF: stop reading and
+                        // keep what we already collected. The daemon's read half
+                        // (`run_peer_connection_framed`) likewise just drops the
+                        // connection on a frame error / EOF rather than failing
+                        // the exchange — and the peer dropping its end yields a
+                        // non-graceful TLS EOF here, which is expected, not fatal.
+                        Ok(Some(Err(_e))) => break,
+                        Ok(None) => break,
+                        // Idle timeout with no new frame: the catch-up push is
+                        // drained, so the receive window is complete.
+                        Err(_elapsed) => break,
+                    }
+                }
+                Ok(got)
             })
             .map_err(
                 |e: copypaste_p2p::transport::TransportError| CopypasteError::P2pError {
@@ -535,38 +615,32 @@ pub fn sync_with_peer(
                 },
             )?;
 
-        // Unwrap every received item back to plaintext using the shared key.
-        let mut items: Vec<SyncedItem> = Vec::with_capacity(to_upsert.len());
-        for ci in &to_upsert {
-            // A sync-key-wrapped text item carries `content` (the cloud blob) and
-            // no `content_nonce`. Skip anything that doesn't fit that shape.
-            if ci.content_type != "text" {
+        // Unwrap every received item back to plaintext using the shared key. A
+        // sync-key-wrapped text item carries `content` (the cloud blob) and no
+        // `content_nonce`; skip anything that doesn't fit that shape, and skip
+        // (rather than fail) a blob we cannot decrypt.
+        let mut items: Vec<SyncedItem> = Vec::with_capacity(received.len());
+        for wire in &received {
+            if wire.content_type != "text" || wire.content_nonce.is_some() {
                 continue;
             }
-            let Some(blob) = ci.content.as_ref() else {
+            let Some(blob) = wire.content.as_ref() else {
                 continue;
             };
-            if ci.content_nonce.is_some() {
-                continue;
-            }
-            match decrypt_from_cloud(&shared, &ci.item_id, blob) {
+            match decrypt_from_cloud(&shared, &wire.item_id, blob) {
                 Ok(plaintext) => items.push(SyncedItem {
-                    id: ci.id.clone(),
-                    content_type: ci.content_type.clone(),
+                    id: wire.id.clone(),
+                    content_type: wire.content_type.clone(),
                     plaintext,
-                    wall_time_ms: ci.wall_time,
+                    wall_time_ms: wire.wall_time,
                 }),
-                Err(_) => {
-                    // A blob we cannot decrypt under the shared key is not a hard
-                    // failure for the session — skip it but keep the rest.
-                    continue;
-                }
+                Err(_) => continue,
             }
         }
 
         Ok(P2pSyncResult {
-            items_received: result.items_received as u64,
-            items_sent: result.items_sent as u64,
+            items_received: received.len() as u64,
+            items_sent: outbound.len() as u64,
             items,
         })
     })
@@ -1059,19 +1133,26 @@ mod tests {
         );
     }
 
-    /// End-to-end loopback sync: stand up a real mTLS peer endpoint that holds
-    /// ONE known clipboard item (wrapped under the SAME shared content key the
-    /// FFI derives from the session key), then call `sync_with_peer` against it.
+    /// End-to-end loopback sync against a peer that speaks the DAEMON's framed
+    /// wire protocol (NOT `run_session`) — i.e. the real protocol live macOS
+    /// daemons use. The fake peer accepts the mTLS connection, then PUSHES one
+    /// framed JSON `WireItem` (re-keyed under the shared key, `content_nonce =
+    /// None`) exactly like the daemon's sync-on-connect catch-up push. It also
+    /// reads any inbound frame the FFI sends, so this test exercises BOTH
+    /// directions of the framed exchange.
     ///
     /// Proves the full FFI path: derive shared key → mTLS connect (fingerprint
-    /// pinned) → `SyncEngine::run_session` over the raw TLS stream → unwrap the
-    /// received cloud blob back to the ORIGINAL plaintext. Asserts the FFI
-    /// returns that item as correct plaintext and `items_received >= 1`.
+    /// pinned) → keep the `LengthDelimitedCodec` framing → read the peer's
+    /// framed `WireItem` → unwrap the cloud blob back to the ORIGINAL plaintext.
+    /// Asserts the FFI returns that item as correct plaintext and the peer
+    /// received the FFI's one offered item (the Android→macOS send path).
     #[test]
     fn sync_with_peer_receives_item_from_loopback_peer() {
+        use bytes::Bytes;
         use copypaste_p2p::pake::SessionKey;
         use copypaste_p2p::transport::{PairedPeers, PeerTransport};
-        use copypaste_sync::engine::SyncEngine;
+        use copypaste_sync::protocol::WireItem;
+        use futures_util::{SinkExt, StreamExt};
         use std::sync::mpsc;
         use tokio::net::TcpListener;
 
@@ -1090,19 +1171,32 @@ mod tests {
         let peer_fp = peer_cert.fingerprint.clone();
         let init_fp = init_cert.fingerprint.clone();
 
-        // The one known item the peer holds, wrapped under the shared key exactly
-        // as the daemon's `rekey_outbound` does (cloud blob, no item nonce).
+        // The one known item the peer pushes, wrapped under the shared key
+        // exactly as the daemon's `rekey_outbound` does (self-framed cloud blob
+        // in `content`, `content_nonce = None`).
         let known_item_id = uuid::Uuid::new_v4().to_string();
         let known_plaintext = b"hello from the loopback peer".to_vec();
         let known_blob = encrypt_for_cloud(&shared, &known_item_id, &known_plaintext)
             .expect("peer wraps its item under the shared key");
-        let mut peer_item = copypaste_core::ClipboardItem::new_text(Vec::new(), Vec::new(), 5);
-        peer_item.item_id = known_item_id.clone();
-        peer_item.content = Some(known_blob);
-        peer_item.content_nonce = None;
+        let peer_wire = WireItem {
+            id: known_item_id.clone(),
+            item_id: known_item_id.clone(),
+            content_type: "text".to_string(),
+            content: Some(known_blob),
+            content_nonce: None,
+            blob_ref: None,
+            is_sensitive: false,
+            lamport_ts: 5,
+            wall_time: 5,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "loopback-peer".to_string(),
+            key_version: 2,
+        };
 
         // Peer runs on its OWN runtime in a background OS thread so the main test
         // thread is free of an ambient runtime for the synchronous FFI call.
+        // Returns the count of frames it received from the FFI initiator.
         let (port_tx, port_rx) = mpsc::channel::<u16>();
         let peer_cert_der = peer_cert.cert_der.clone();
         let peer_key_der = peer_cert.key_der.clone();
@@ -1122,28 +1216,57 @@ mod tests {
                     .send(listener.local_addr().expect("addr").port())
                     .expect("send port");
 
-                let (_addr, _fp, framed) = transport.accept(&listener).await.expect("accept");
-                let mut stream = framed.into_inner();
-                let mut engine = SyncEngine::new("loopback-peer");
-                let items = [peer_item];
-                engine
-                    .run_session(&mut stream, &items)
+                // Accept and KEEP the length-delimited framing — this is the
+                // daemon's `run_peer_connection` shape, not `run_session`.
+                let (_addr, _fp, mut framed) = transport.accept(&listener).await.expect("accept");
+
+                // PUSH the catch-up item as one framed JSON `WireItem`, exactly
+                // like the daemon does right after a connection is established.
+                let payload = serde_json::to_vec(&peer_wire).expect("serialise peer WireItem");
+                framed
+                    .send(Bytes::from(payload))
                     .await
-                    .expect("peer session")
+                    .expect("peer push frame");
+
+                // Read whatever the FFI sends back (its offered local items),
+                // bounded by a short idle timeout so the peer task terminates.
+                let mut received_from_ffi = 0u64;
+                loop {
+                    match tokio::time::timeout(std::time::Duration::from_secs(2), framed.next())
+                        .await
+                    {
+                        Ok(Some(Ok(frame))) => {
+                            if serde_json::from_slice::<WireItem>(&frame).is_ok() {
+                                received_from_ffi += 1;
+                            }
+                        }
+                        Ok(Some(Err(_))) | Ok(None) | Err(_) => break,
+                    }
+                }
+                received_from_ffi
             })
         });
 
         let port = port_rx.recv().expect("peer port");
         let addr = format!("127.0.0.1:{port}");
 
-        // The FFI under test: connect, sync, unwrap received items to plaintext.
+        // The FFI under test offers ONE local item (exercising the send path)
+        // and must receive the peer's pushed item decrypted to plaintext.
+        let offered_plaintext = b"hello from android initiator".to_vec();
+        let local_items = vec![LocalItem {
+            id: String::new(),
+            wall_time_ms: 7,
+            content_type: "text".to_string(),
+            plaintext: offered_plaintext.clone(),
+        }];
+
         let result = sync_with_peer(
             addr,
             peer_fp,
             session_key.to_vec(),
             init_cert.cert_der.clone(),
             init_cert.key_der.clone(),
-            Vec::new(), // Android offers nothing this round; it only receives.
+            local_items,
         )
         .expect("FFI sync_with_peer must succeed over loopback");
 
@@ -1151,6 +1274,10 @@ mod tests {
             result.items_received >= 1,
             "must receive at least the peer's one item, got {}",
             result.items_received
+        );
+        assert_eq!(
+            result.items_sent, 1,
+            "FFI must report its one offered item as sent"
         );
         let got = result
             .items
@@ -1160,11 +1287,11 @@ mod tests {
         assert_eq!(got.content_type, "text");
         assert_eq!(got.plaintext, known_plaintext);
 
-        // Drain the peer thread so its session result is checked too.
-        let peer_result = peer_thread.join().expect("peer thread join");
+        // The peer must have received the FFI's one offered item (send path).
+        let frames_peer_got = peer_thread.join().expect("peer thread join");
         assert_eq!(
-            peer_result.0.items_sent, 1,
-            "peer must have sent its one item to the FFI initiator"
+            frames_peer_got, 1,
+            "peer must have received the FFI initiator's one offered framed WireItem"
         );
     }
 

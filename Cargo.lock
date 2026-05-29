@@ -801,14 +801,17 @@ dependencies = [
 name = "copypaste-android"
 version = "0.5.0"
 dependencies = [
+ "bytes",
  "copypaste-core",
  "copypaste-p2p",
  "copypaste-sync",
+ "futures-util",
  "rusqlite",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
  "uniffi",
  "uuid",
 ]
