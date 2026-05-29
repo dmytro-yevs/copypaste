@@ -140,7 +140,8 @@ fun HistoryScreen(
         topBar = {
             // ── Compact IDE-style header (44 dp, matches macOS ViewShell h-11) ──
             TopAppBar(
-                // Fix #2: title uses bodyLarge (13 sp medium) not titleLarge (22 sp).
+                // Title uses titleLarge, which the theme overrides to 14 sp to
+                // match the compact IDE bar (default Material titleLarge is 22 sp).
                 title = {
                     Text(
                         text = stringResource(R.string.title_history),

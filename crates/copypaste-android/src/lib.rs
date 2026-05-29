@@ -245,9 +245,9 @@ pub fn close_database(handle: u64) {
 //     text via `copypaste_core::encrypt_item`, build a `ClipboardItem`, and
 //     persist via `copypaste_core::insert_item`. Returns the new row id, or
 //     an empty string if the text was flagged as sensitive.
-//   * Feature OFF (default)            → no DB I/O. Returns a deterministic
-//     stub id so callers can still exercise the binding in CI without bundling
-//     the storage stack.
+//   * Feature OFF (default)            → no DB I/O. Validates the key shape
+//     and returns an empty string so Kotlin callers treat it as "not stored
+//     natively" and fall through to the SharedPreferences repository.
 //
 // `key` must be the 32-byte device key (derived from Android Keystore by the
 // caller; that derivation lives in Kotlin).
