@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use copypaste_ipc::ErrorCode;
 use serde_json::Value;
-use std::io::{BufRead, BufReader, ErrorKind, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -10,6 +10,15 @@ use std::time::Duration;
 /// line. Without this, a daemon that accepts the connection but never replies
 /// (deadlocked DB, stuck `spawn_blocking`) would hang the CLI forever.
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Hard ceiling on a single response line read from the daemon socket.
+///
+/// Mirrors the daemon's own `MAX_REQUEST_BYTES` posture (16 MiB): without a
+/// cap, a buggy or hostile peer on the socket could stream an unbounded line
+/// and force the CLI to grow `resp_line` until it exhausts memory. 16 MiB is
+/// comfortably larger than any legitimate response (the daemon clamps `list`
+/// pages to 1000 rows) while still bounding worst-case allocation.
+const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Minimal wire-level response. Mirrors protocol.rs in the daemon.
 ///
@@ -60,16 +69,27 @@ impl IpcClient {
             .map_err(map_timeout)
             .context("failed to write to daemon socket")?;
 
-        // Read response line
-        let mut reader = BufReader::new(&self.stream);
+        // Read response line, bounded to MAX_RESPONSE_BYTES so a misbehaving
+        // peer can't stream an unbounded line and OOM the CLI. We read at most
+        // MAX_RESPONSE_BYTES + 1 so we can tell a legitimate (capped) line from
+        // one the daemon truncated by hitting the ceiling.
+        let mut reader = BufReader::new((&self.stream).take(MAX_RESPONSE_BYTES + 1));
         let mut resp_line = String::new();
-        reader
+        let n = reader
             .read_line(&mut resp_line)
             .map_err(map_timeout)
             .context("failed to read from daemon socket")?;
 
         if resp_line.is_empty() {
             return Err(anyhow!("daemon closed connection without response"));
+        }
+
+        // If we read past the cap, the line is oversized (or unterminated):
+        // reject rather than parse a truncated, possibly-misleading payload.
+        if n as u64 > MAX_RESPONSE_BYTES {
+            return Err(anyhow!(
+                "daemon response exceeded {MAX_RESPONSE_BYTES} bytes; refusing to parse"
+            ));
         }
 
         // Parse response
@@ -154,6 +174,44 @@ mod tests {
         assert!(resp.ok);
         assert_eq!(resp.id, "1");
         assert!(resp.data.is_some());
+    }
+
+    /// A response line larger than `MAX_RESPONSE_BYTES` must be rejected
+    /// (not parsed, not allowed to grow `resp_line` unbounded). We stream a
+    /// payload past the cap with no trailing newline so `read_line` stops only
+    /// because `.take()` hit the ceiling.
+    #[test]
+    fn call_rejects_oversized_response() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("big.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = String::new();
+                let mut reader = BufReader::new(&stream);
+                reader.read_line(&mut buf).unwrap();
+                // Write more than the cap, with no newline, in chunks so we
+                // don't allocate one giant buffer. Ignore write errors: once
+                // the client bails and drops its end, the pipe breaks.
+                let chunk = vec![b'a'; 64 * 1024];
+                let mut written: u64 = 0;
+                while written <= MAX_RESPONSE_BYTES {
+                    if stream.write_all(&chunk).is_err() {
+                        break;
+                    }
+                    written += chunk.len() as u64;
+                }
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let mut client = IpcClient::connect(&sock).unwrap();
+        let req = serde_json::json!({"id": "1", "method": "list", "params": {}});
+        let err = client.call(&req).unwrap_err();
+        assert!(
+            err.to_string().contains("exceeded"),
+            "expected oversize rejection, got: {err}"
+        );
     }
 
     #[test]

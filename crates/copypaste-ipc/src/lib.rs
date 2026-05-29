@@ -34,7 +34,8 @@ pub use error::ErrorCode;
 pub use request::Request;
 pub use response::{
     Response, ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR, ERR_CODE_INVALID_ARGUMENT,
-    ERR_CODE_IPC_NOT_READY, ERR_CODE_NOT_FOUND, ERR_CODE_NOT_IMPLEMENTED,
+    ERR_CODE_IPC_NOT_READY, ERR_CODE_MIGRATION_IN_PROGRESS, ERR_CODE_NOT_FOUND,
+    ERR_CODE_NOT_IMPLEMENTED,
 };
 
 /// Current IPC protocol version. Bump on breaking wire changes.

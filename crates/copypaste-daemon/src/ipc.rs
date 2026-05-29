@@ -69,6 +69,35 @@ pub struct AppConfig {
     pub supabase_password: Option<String>,
 }
 
+/// Strip account credentials from a serialised [`AppConfig`] before it leaves
+/// the daemon over IPC. Removes `supabase_password` and `supabase_email` and
+/// replaces each with a `*_set` boolean presence flag. The anon/public key is
+/// left intact (it is a publishable key the UI prefills). No-op for non-object
+/// values. See the `get_config` handler for the rationale.
+fn redact_config_secrets(value: &mut serde_json::Value) {
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    let password_set = obj
+        .get("supabase_password")
+        .map(|p| !p.is_null())
+        .unwrap_or(false);
+    let email_set = obj
+        .get("supabase_email")
+        .map(|e| !e.is_null())
+        .unwrap_or(false);
+    obj.remove("supabase_password");
+    obj.remove("supabase_email");
+    obj.insert(
+        "supabase_password_set".into(),
+        serde_json::Value::Bool(password_set),
+    );
+    obj.insert(
+        "supabase_email_set".into(),
+        serde_json::Value::Bool(email_set),
+    );
+}
+
 fn config_path() -> Option<std::path::PathBuf> {
     dirs::config_dir().map(|d| d.join("copypaste").join("config.json"))
 }
@@ -1953,9 +1982,20 @@ impl IpcServer {
                 }
             }
             "get_config" => {
+                // Never ship account credentials over IPC. `get_config` feeds
+                // the UI settings form and the CLI's read-merge-write in
+                // `cloud setup`; neither needs the raw GoTrue password or email
+                // back (the CLI re-supplies both on every `set_config`, the UI
+                // does not surface them at all). `redact_config_secrets`
+                // replaces them with boolean presence flags. The Supabase
+                // anon/public key is, by design, a publishable key and is kept
+                // so the UI can prefill the settings field.
                 let cfg = read_config();
                 match serde_json::to_value(&cfg) {
-                    Ok(v) => Response::ok(req.id, v),
+                    Ok(mut v) => {
+                        redact_config_secrets(&mut v);
+                        Response::ok(req.id, v)
+                    }
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
             }
@@ -4008,6 +4048,54 @@ mod tests {
     use tempfile::tempdir;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
+
+    /// `get_config` must never ship the GoTrue password or email over IPC.
+    /// `redact_config_secrets` strips both and replaces them with `*_set`
+    /// presence flags, while leaving the publishable anon key intact.
+    #[test]
+    fn redact_config_secrets_strips_password_and_email() {
+        let mut v = serde_json::json!({
+            "p2p_enabled": true,
+            "supabase_url": "https://x.supabase.co",
+            "supabase_anon_key": "eyJpublishable",
+            "supabase_email": "user@example.com",
+            "supabase_password": "hunter2",
+        });
+        redact_config_secrets(&mut v);
+        let obj = v.as_object().unwrap();
+        // Secrets are gone from the wire.
+        assert!(!obj.contains_key("supabase_password"));
+        assert!(!obj.contains_key("supabase_email"));
+        // Presence flags reflect that both were set.
+        assert_eq!(obj["supabase_password_set"], serde_json::json!(true));
+        assert_eq!(obj["supabase_email_set"], serde_json::json!(true));
+        // Non-secret fields (incl. the publishable anon key) are untouched.
+        assert_eq!(
+            obj["supabase_anon_key"],
+            serde_json::json!("eyJpublishable")
+        );
+        assert_eq!(
+            obj["supabase_url"],
+            serde_json::json!("https://x.supabase.co")
+        );
+        assert_eq!(obj["p2p_enabled"], serde_json::json!(true));
+    }
+
+    /// When the credentials are absent (null), the presence flags must be
+    /// `false` and no secret key should appear on the wire.
+    #[test]
+    fn redact_config_secrets_reports_unset_when_null() {
+        let mut v = serde_json::json!({
+            "supabase_email": serde_json::Value::Null,
+            "supabase_password": serde_json::Value::Null,
+        });
+        redact_config_secrets(&mut v);
+        let obj = v.as_object().unwrap();
+        assert_eq!(obj["supabase_password_set"], serde_json::json!(false));
+        assert_eq!(obj["supabase_email_set"], serde_json::json!(false));
+        assert!(!obj.contains_key("supabase_password"));
+        assert!(!obj.contains_key("supabase_email"));
+    }
 
     /// RAII guard that snapshots one or more env vars, sets them for the test,
     /// and restores the previous values (or unsets them) on drop — even on

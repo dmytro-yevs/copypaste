@@ -12,10 +12,14 @@ pub fn run(socket_path: &Path) -> Result<()> {
     if let Some(data) = &resp.data {
         let total = data["total_items"].as_i64().unwrap_or(0);
         let sensitive = data["sensitive_items"].as_i64().unwrap_or(0);
-        let version = data["version"].as_str().unwrap_or("?");
-        println!("total:     {total}");
-        println!("sensitive: {sensitive}");
-        println!("version:   {version}");
+        // The daemon's `version` field is the IPC/schema version, NOT a semver
+        // release. Label it as such and surface the CLI's real crate semver
+        // separately so users don't mistake "1" for the app version.
+        let schema_version = data["version"].as_str().unwrap_or("?");
+        println!("total:      {total}");
+        println!("sensitive:  {sensitive}");
+        println!("schema:     {schema_version}");
+        println!("cli version: {}", env!("CARGO_PKG_VERSION"));
     }
     Ok(())
 }
