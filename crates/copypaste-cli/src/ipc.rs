@@ -1,9 +1,15 @@
 use anyhow::{anyhow, Context, Result};
 use copypaste_ipc::ErrorCode;
 use serde_json::Value;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::time::Duration;
+
+/// Max time to wait for the daemon to accept a write or produce a response
+/// line. Without this, a daemon that accepts the connection but never replies
+/// (deadlocked DB, stuck `spawn_blocking`) would hang the CLI forever.
+const IO_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Minimal wire-level response. Mirrors protocol.rs in the daemon.
 ///
@@ -33,6 +39,14 @@ impl IpcClient {
     pub fn connect(socket_path: &Path) -> Result<Self> {
         let stream = UnixStream::connect(socket_path)
             .with_context(|| format!("daemon not running (socket: {})", socket_path.display()))?;
+        // Bound every read/write so a connected-but-unresponsive daemon can't
+        // hang the CLI indefinitely.
+        stream
+            .set_read_timeout(Some(IO_TIMEOUT))
+            .context("failed to set read timeout on daemon socket")?;
+        stream
+            .set_write_timeout(Some(IO_TIMEOUT))
+            .context("failed to set write timeout on daemon socket")?;
         Ok(Self { stream })
     }
 
@@ -43,6 +57,7 @@ impl IpcClient {
         line.push('\n');
         self.stream
             .write_all(line.as_bytes())
+            .map_err(map_timeout)
             .context("failed to write to daemon socket")?;
 
         // Read response line
@@ -50,6 +65,7 @@ impl IpcClient {
         let mut resp_line = String::new();
         reader
             .read_line(&mut resp_line)
+            .map_err(map_timeout)
             .context("failed to read from daemon socket")?;
 
         if resp_line.is_empty() {
@@ -74,6 +90,22 @@ impl IpcClient {
             // keep working unchanged.
             error_code: v["error_code"].as_str().and_then(ErrorCode::parse),
         })
+    }
+}
+
+/// Convert a socket-timeout I/O error into a clear, actionable message.
+///
+/// A read/write timeout surfaces as [`ErrorKind::WouldBlock`] on most Unix
+/// platforms and [`ErrorKind::TimedOut`] on others; both mean the daemon
+/// accepted the connection but did not respond in time. Any other I/O error
+/// is passed through unchanged.
+fn map_timeout(err: std::io::Error) -> std::io::Error {
+    match err.kind() {
+        ErrorKind::WouldBlock | ErrorKind::TimedOut => std::io::Error::new(
+            err.kind(),
+            "daemon not responding (timed out after 5s) — it may be deadlocked; try restarting it",
+        ),
+        _ => err,
     }
 }
 
