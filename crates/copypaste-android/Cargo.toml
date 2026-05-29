@@ -29,6 +29,14 @@ android-uniffi-live = []
 
 [dependencies]
 copypaste-core = { path = "../copypaste-core" }
+# P2P FFI foundation: Android drives the SAME Rust P2P stack (cert gen +
+# bootstrap PAKE pairing) through UniFFI rather than reimplementing it in
+# Kotlin. See bootstrap_pair_initiator / generate_device_cert below.
+copypaste-p2p = { path = "../copypaste-p2p" }
+# Long-lived runtime for the (synchronous) FFI wrappers that block on the
+# async bootstrap pairing. Multi-thread RT is required because the loopback
+# bootstrap test (and real pairing) drives concurrent TLS read/write tasks.
+tokio = { workspace = true }
 uniffi = { version = "0.27", features = ["bindgen", "cli"] }
 thiserror = "1"
 # v0.3: needed by `add_clipboard_item` to pre-generate the item_id that's

@@ -89,6 +89,28 @@ namespace copypaste_android {
 
   [Throws=VersionError]
   void check_compatibility(u32 kotlin_abi_version);
+
+  // ── P2P pairing (drives the existing copypaste-p2p stack) ─────────────────
+  // Android does NOT reimplement P2P — these expose the SAME mTLS cert
+  // generation and bootstrap PAKE pairing the macOS daemon uses, so the
+  // fingerprints Android generates and pins match the desktop side exactly.
+
+  /// Generate a fresh self-signed ECDSA P-256 mTLS cert for this device.
+  /// Returns the cert/key DER, a random device_id (UUID), and the cert
+  /// fingerprint (hex(SHA-256(cert_der))) — the value the peer pins.
+  /// key_der is secret; the caller MUST store it securely and never transmit it.
+  [Throws=CopypasteError]
+  DeviceCert generate_device_cert();
+
+  /// Run the initiator side of bootstrap PAKE pairing against a responder at
+  /// `addr_hint` (host:port). Blocks on the shared tokio runtime. `cert_der`/
+  /// `key_der` are this device's identity from `generate_device_cert`;
+  /// `pake_password` comes from the scanned QR token; `sync_addr` is this
+  /// device's own P2P sync-listener host:port. Returns the peer's pinned
+  /// fingerprint, its sync address, and the 32-byte PAKE session key.
+  /// Throws `P2pError` on a bad addr_hint or any transport/PAKE failure.
+  [Throws=CopypasteError]
+  BootstrapResult bootstrap_pair_initiator(string addr_hint, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string pake_password, string sync_addr);
 };
 
 [Error]
@@ -97,6 +119,10 @@ interface CopypasteError {
   DecryptionFailed(string message);
   DatabaseError(string message);
   InvalidKeyLength();
+  // P2P pairing / transport failure from copypaste_p2p (TransportError): TLS,
+  // socket, framing, or PAKE handshake errors — including a wrong pairing
+  // password or a channel-binding MitM abort — and a malformed addr_hint.
+  P2pError(string message);
   // v0.3 (OI-7): a Rust panic was caught at the FFI boundary by
   // panic_boundary::catch_result. The message carries the panic payload's
   // string form. Kotlin should log + show a generic error to the user
@@ -130,4 +156,23 @@ dictionary ScannedPairing {
   string device_name;
   string addr_hint;
   string pake_password;
+};
+
+// Result of `generate_device_cert`: a fresh self-signed mTLS identity.
+// `fingerprint` = hex(SHA-256(cert_der)) — the value the peer pins.
+// `key_der` is secret; store securely and never transmit.
+dictionary DeviceCert {
+  string device_id;
+  string fingerprint;
+  sequence<u8> cert_der;
+  sequence<u8> key_der;
+};
+
+// Result of `bootstrap_pair_initiator`: the outcome of one PAKE pairing.
+// `peer_fingerprint` is the responder's pinned cert fingerprint; `session_key`
+// is the 32-byte PAKE+channel-bound key both ends derived.
+dictionary BootstrapResult {
+  string peer_fingerprint;
+  string peer_sync_addr;
+  sequence<u8> session_key;
 };

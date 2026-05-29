@@ -28,6 +28,13 @@ pub enum CopypasteError {
     DatabaseError { message: String },
     #[error("Invalid key length: expected 32")]
     InvalidKeyLength,
+    /// P2P pairing / transport failure surfaced from `copypaste_p2p`
+    /// (`TransportError`): TLS, socket, framing, or PAKE handshake errors —
+    /// including a wrong pairing password or a channel-binding MitM abort. Also
+    /// raised for a malformed `addr_hint` that cannot be parsed into a
+    /// `SocketAddr`. The `message` carries the underlying error's display form.
+    #[error("P2P pairing failed: {message}")]
+    P2pError { message: String },
     /// v0.3 (OI-7): a Rust panic was caught at the FFI boundary by
     /// [`panic_boundary::catch_result`]. Carries the panic message so Kotlin
     /// can log/surface it instead of seeing a JVM-killing abort.
@@ -254,6 +261,127 @@ pub fn parse_pairing_qr(payload: String) -> Result<ScannedPairing, CopypasteErro
             device_name: parsed.device_name,
             addr_hint: parsed.addr_hint,
             pake_password,
+        })
+    })
+}
+
+// ---------------------------------------------------------------------------
+// P2P pairing FFI — drive the EXISTING copypaste-p2p stack from Android.
+//
+// Android does NOT reimplement P2P. These wrappers expose the same mTLS cert
+// generation and bootstrap PAKE pairing the macOS daemon uses, so the
+// fingerprints Android generates/pins are bit-for-bit what the desktop side
+// expects. The synchronous UniFFI surface blocks on a long-lived multi-thread
+// tokio runtime (the bootstrap handshake drives concurrent TLS read/write).
+// ---------------------------------------------------------------------------
+
+/// Process-wide tokio runtime backing the blocking P2P FFI wrappers.
+///
+/// A single multi-thread runtime is created lazily on first pairing call and
+/// reused for the life of the process. Multi-thread is required: the bootstrap
+/// handshake interleaves framed TLS reads and writes that would deadlock on a
+/// current-thread runtime under `block_on`.
+static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
+fn runtime() -> &'static tokio::runtime::Runtime {
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build tokio runtime for P2P FFI")
+    })
+}
+
+/// FFI result of [`generate_device_cert`]: a fresh self-signed mTLS identity.
+///
+/// `fingerprint` is `hex(SHA-256(cert_der))` — the SAME value the macOS side
+/// pins. Kotlin must persist `cert_der` + `key_der` securely (key_der is
+/// secret) and advertise `fingerprint` / `device_id` in the pairing QR.
+pub struct DeviceCert {
+    pub device_id: String,
+    pub fingerprint: String,
+    pub cert_der: Vec<u8>,
+    pub key_der: Vec<u8>,
+}
+
+/// FFI result of [`bootstrap_pair_initiator`]: the outcome of one PAKE pairing.
+///
+/// `peer_fingerprint` is the responder's pinned cert fingerprint; `session_key`
+/// is the 32-byte PAKE+channel-bound key both ends derived.
+#[derive(Debug)]
+pub struct BootstrapResult {
+    pub peer_fingerprint: String,
+    pub peer_sync_addr: String,
+    pub session_key: Vec<u8>,
+}
+
+/// Generate a fresh self-signed ECDSA P-256 mTLS certificate for this device,
+/// reusing `copypaste_p2p::SelfSignedCert` (the exact mechanism the daemon and
+/// P2P transport use). A random `device_id` (UUID) is generated and used as the
+/// cert CN; the returned `fingerprint` is `fingerprint_of(cert_der)`.
+///
+/// Errors: [`CopypasteError::P2pError`] if rcgen certificate generation fails.
+pub fn generate_device_cert() -> Result<DeviceCert, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let device_id = uuid::Uuid::new_v4().to_string();
+        let cert = copypaste_p2p::SelfSignedCert::generate(&device_id).map_err(|e| {
+            CopypasteError::P2pError {
+                message: e.to_string(),
+            }
+        })?;
+        let fingerprint = copypaste_p2p::fingerprint_of(&cert.cert_der);
+        Ok(DeviceCert {
+            device_id,
+            fingerprint,
+            cert_der: cert.cert_der,
+            key_der: cert.key_der,
+        })
+    })
+}
+
+/// Run the initiator side of bootstrap PAKE pairing against a responder at
+/// `addr_hint` (a `host:port` string), driving `copypaste_p2p::bootstrap::
+/// run_initiator` on the shared runtime.
+///
+/// `cert_der`/`key_der` are this device's mTLS identity (from
+/// [`generate_device_cert`]). `pake_password` is the PAKE password derived from
+/// the scanned QR token. `sync_addr` is this device's own P2P sync-listener
+/// `host:port`, sent in-band so the peer can persist it.
+///
+/// Errors: [`CopypasteError::P2pError`] for a malformed `addr_hint`, or any
+/// `TransportError` (TLS / socket / framing / PAKE failure, wrong password, or
+/// a channel-binding MitM abort).
+pub fn bootstrap_pair_initiator(
+    addr_hint: String,
+    cert_der: &[u8],
+    key_der: &[u8],
+    pake_password: String,
+    sync_addr: String,
+) -> Result<BootstrapResult, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let addr: std::net::SocketAddr =
+            addr_hint
+                .parse()
+                .map_err(|e: std::net::AddrParseError| CopypasteError::P2pError {
+                    message: format!("invalid addr_hint '{addr_hint}': {e}"),
+                })?;
+
+        let pairing = runtime()
+            .block_on(copypaste_p2p::bootstrap::run_initiator(
+                addr,
+                cert_der.to_vec(),
+                key_der.to_vec(),
+                &pake_password,
+                &sync_addr,
+            ))
+            .map_err(|e| CopypasteError::P2pError {
+                message: e.to_string(),
+            })?;
+
+        Ok(BootstrapResult {
+            peer_fingerprint: pairing.peer_fingerprint,
+            peer_sync_addr: pairing.peer_sync_addr,
+            session_key: pairing.session_key.as_bytes().to_vec(),
         })
     })
 }
@@ -605,6 +733,124 @@ mod tests {
         assert!(
             matches!(result, Err(CopypasteError::InvalidKeyLength)),
             "16-byte key must return InvalidKeyLength"
+        );
+    }
+
+    // ── P2P pairing FFI tests ────────────────────────────────────────────────
+
+    /// `generate_device_cert` returns a non-empty cert/key and a fingerprint
+    /// that matches `fingerprint_of(cert_der)` — i.e. the SAME value the peer
+    /// pins. Two calls produce distinct identities.
+    #[test]
+    fn generate_device_cert_fingerprint_matches() {
+        let c = generate_device_cert().expect("cert gen");
+        assert!(!c.cert_der.is_empty(), "cert DER must not be empty");
+        assert!(!c.key_der.is_empty(), "key DER must not be empty");
+        assert!(!c.device_id.is_empty(), "device_id must not be empty");
+        assert_eq!(
+            c.fingerprint,
+            copypaste_p2p::fingerprint_of(&c.cert_der),
+            "FFI fingerprint must equal fingerprint_of(cert_der)"
+        );
+
+        let c2 = generate_device_cert().expect("cert gen 2");
+        assert_ne!(c.fingerprint, c2.fingerprint, "each cert is unique");
+    }
+
+    /// End-to-end: spin up a real `BootstrapResponder` on a loopback port in a
+    /// background thread (with its own runtime), then call the
+    /// `bootstrap_pair_initiator` FFI wrapper against it. Proves the FFI path
+    /// completes a real PAKE + RFC 5705 channel-binding handshake over TLS:
+    /// it must return the responder's cert fingerprint and a 32-byte session
+    /// key. The responder thread asserts both ends derived the same key.
+    #[test]
+    fn bootstrap_pair_initiator_pairs_over_loopback() {
+        use copypaste_p2p::bootstrap::BootstrapResponder;
+        use std::sync::mpsc;
+
+        let responder_cert = generate_device_cert().expect("responder cert");
+        let initiator_cert = generate_device_cert().expect("initiator cert");
+        let responder_fp = responder_cert.fingerprint.clone();
+        let initiator_fp = initiator_cert.fingerprint.clone();
+
+        let password = "shared-qr-secret-abcdef";
+        let resp_sync_addr = "127.0.0.1:7001";
+        let init_sync_addr = "127.0.0.1:7002";
+
+        // The responder runs on its OWN runtime in a background OS thread so the
+        // main test thread is free of an ambient runtime and can call the
+        // synchronous FFI wrapper (which itself does runtime().block_on(...)).
+        let (port_tx, port_rx) = mpsc::channel::<u16>();
+        let resp_cert_der = responder_cert.cert_der.clone();
+        let resp_key_der = responder_cert.key_der.clone();
+        let pw = password.to_string();
+        let responder_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("responder runtime");
+            rt.block_on(async move {
+                let responder = BootstrapResponder::bind(resp_cert_der, resp_key_der)
+                    .await
+                    .expect("bind responder");
+                let port = responder.local_addr().expect("local addr").port();
+                port_tx.send(port).expect("send port");
+                responder.run(&pw, resp_sync_addr).await
+            })
+        });
+
+        let port = port_rx.recv().expect("responder port");
+        let addr_hint = format!("127.0.0.1:{port}");
+
+        let result = bootstrap_pair_initiator(
+            addr_hint,
+            &initiator_cert.cert_der,
+            &initiator_cert.key_der,
+            password.to_string(),
+            init_sync_addr.to_string(),
+        )
+        .expect("FFI bootstrap pairing must succeed over loopback");
+
+        // The FFI wrapper learned the responder's REAL pinned cert fingerprint.
+        assert_eq!(
+            result.peer_fingerprint, responder_fp,
+            "initiator must pin the responder's cert fingerprint"
+        );
+        assert_eq!(result.peer_sync_addr, resp_sync_addr);
+        assert_eq!(
+            result.session_key.len(),
+            32,
+            "PAKE session key must be 32 bytes"
+        );
+
+        // The responder side must have derived the same key and learned our fp.
+        let resp_pairing = responder_thread
+            .join()
+            .expect("responder thread join")
+            .expect("responder pairing");
+        assert_eq!(resp_pairing.peer_fingerprint, initiator_fp);
+        assert_eq!(
+            resp_pairing.session_key.as_bytes().as_slice(),
+            result.session_key.as_slice(),
+            "both endpoints must derive the same PAKE session key via the FFI path"
+        );
+    }
+
+    /// A malformed `addr_hint` must surface as `P2pError`, not a panic.
+    #[test]
+    fn bootstrap_pair_initiator_rejects_bad_addr() {
+        let cert = generate_device_cert().expect("cert");
+        let err = bootstrap_pair_initiator(
+            "not-an-addr".into(),
+            &cert.cert_der,
+            &cert.key_der,
+            "pw".into(),
+            "127.0.0.1:7000".into(),
+        )
+        .expect_err("malformed addr_hint must error");
+        assert!(
+            matches!(err, CopypasteError::P2pError { .. }),
+            "expected P2pError, got {err:?}"
         );
     }
 
