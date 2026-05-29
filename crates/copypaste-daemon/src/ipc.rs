@@ -3421,150 +3421,161 @@ impl IpcServer {
     ) -> Result<(), PasteboardError> {
         #[cfg(target_os = "macos")]
         {
-            let content = match &item.content {
-                Some(bytes) => bytes.as_slice(),
-                None => return Err(PasteboardError::other("item has no content")),
-            };
+            // Drain the autorelease pool around the entire Cocoa body. Without
+            // this, every paste-back (NSString::from_str, NSData::with_bytes for
+            // multi-MB images, clearContents/setData_forType, and the
+            // changeCount read in `record_self_write`) leaks autoreleased Cocoa
+            // objects on this tokio worker thread — the same leak class fixed in
+            // `clipboard.rs::poll`.
+            objc2::rc::autoreleasepool(|_pool| {
+                let content = match &item.content {
+                    Some(bytes) => bytes.as_slice(),
+                    None => return Err(PasteboardError::other("item has no content")),
+                };
 
-            // DUP-ON-COPY helper: reads and stores the post-write changeCount so
-            // the monitor's next tick can identify and suppress this self-write.
-            // Defined as a closure to avoid repeating the unsafe block.
-            let record_self_write = |self_write_cc: &Arc<std::sync::atomic::AtomicI64>| {
-                use objc2_app_kit::NSPasteboard;
-                let new_count = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
-                self_write_cc.store(new_count, std::sync::atomic::Ordering::Release);
-                tracing::debug!(
-                    change_count = new_count,
-                    "clipboard: recorded self-write changeCount to suppress re-capture"
-                );
-            };
+                // DUP-ON-COPY helper: reads and stores the post-write changeCount so
+                // the monitor's next tick can identify and suppress this self-write.
+                // Defined as a closure to avoid repeating the unsafe block.
+                let record_self_write = |self_write_cc: &Arc<std::sync::atomic::AtomicI64>| {
+                    use objc2_app_kit::NSPasteboard;
+                    let new_count =
+                        unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                    self_write_cc.store(new_count, std::sync::atomic::Ordering::Release);
+                    tracing::debug!(
+                        change_count = new_count,
+                        "clipboard: recorded self-write changeCount to suppress re-capture"
+                    );
+                };
 
-            use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
-            use objc2_foundation::{NSData, NSString};
+                use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+                use objc2_foundation::{NSData, NSString};
 
-            if item.content_type == "text" {
-                // ----- text: decrypt per-item ciphertext, then write -----
-                let nonce_vec = item
-                    .content_nonce
-                    .as_ref()
-                    .ok_or_else(|| PasteboardError::other("text item missing content_nonce"))?;
-                let nonce: &[u8; 24] = nonce_vec.as_slice().try_into().map_err(|_| {
-                    PasteboardError::other(format!(
-                        "text item content_nonce wrong length: expected 24, got {}",
-                        nonce_vec.len()
-                    ))
-                })?;
+                if item.content_type == "text" {
+                    // ----- text: decrypt per-item ciphertext, then write -----
+                    let nonce_vec = item
+                        .content_nonce
+                        .as_ref()
+                        .ok_or_else(|| PasteboardError::other("text item missing content_nonce"))?;
+                    let nonce: &[u8; 24] = nonce_vec.as_slice().try_into().map_err(|_| {
+                        PasteboardError::other(format!(
+                            "text item content_nonce wrong length: expected 24, got {}",
+                            nonce_vec.len()
+                        ))
+                    })?;
 
-                // Dispatch decrypt on the row's key_version so ciphertexts
-                // produced under different HKDF key families are always
-                // decrypted with the matching key and AAD format:
-                //
-                //   key_version = 1 → v1 key (local_enc_key / HKDF-SHA-256),
-                //                     AAD = build_item_aad(item_id, 3)
-                //   key_version = 2 → v2 key (derive_v2 / HKDF-SHA-512),
-                //                     AAD = build_item_aad_v2(item_id, 4, 2)
-                //   other           → UnknownKeyVersion → auth_failed error
-                //
-                // Previously this always used the v1 AAD regardless of
-                // key_version, so any item written with key_version = 2 (the
-                // current default since ITEM_KEY_VERSION_CURRENT = 2) would
-                // fail with "authentication tag mismatch" on paste-back.
-                //
-                // Note: IpcServer only holds one key (local_key = v1 key from
-                // Keychain). key_version = 2 items are derived from the same
-                // seed via derive_v2; we derive it inline here so the server
-                // struct does not need a second Arc field.
-                let v1_key: [u8; 32] = **self.local_key;
-                let v2_key = derive_v2(&v1_key);
-                let plaintext_bytes = decrypt_item_by_version(
-                    item.key_version,
-                    &v1_key,
-                    &v2_key,
-                    &item.item_id,
-                    nonce,
-                    content,
-                )
-                .map_err(|e| match e {
-                    EncryptError::AuthFailed | EncryptError::AadMismatch => {
-                        PasteboardError::decrypt(
-                            "Decryption failed: authentication tag mismatch".to_string(),
-                        )
-                    }
-                    EncryptError::UnknownKeyVersion(_) => PasteboardError::decrypt(
-                        "Item encrypted with a previous key — cannot be recovered. \
+                    // Dispatch decrypt on the row's key_version so ciphertexts
+                    // produced under different HKDF key families are always
+                    // decrypted with the matching key and AAD format:
+                    //
+                    //   key_version = 1 → v1 key (local_enc_key / HKDF-SHA-256),
+                    //                     AAD = build_item_aad(item_id, 3)
+                    //   key_version = 2 → v2 key (derive_v2 / HKDF-SHA-512),
+                    //                     AAD = build_item_aad_v2(item_id, 4, 2)
+                    //   other           → UnknownKeyVersion → auth_failed error
+                    //
+                    // Previously this always used the v1 AAD regardless of
+                    // key_version, so any item written with key_version = 2 (the
+                    // current default since ITEM_KEY_VERSION_CURRENT = 2) would
+                    // fail with "authentication tag mismatch" on paste-back.
+                    //
+                    // Note: IpcServer only holds one key (local_key = v1 key from
+                    // Keychain). key_version = 2 items are derived from the same
+                    // seed via derive_v2; we derive it inline here so the server
+                    // struct does not need a second Arc field.
+                    let v1_key: [u8; 32] = **self.local_key;
+                    let v2_key = derive_v2(&v1_key);
+                    let plaintext_bytes = decrypt_item_by_version(
+                        item.key_version,
+                        &v1_key,
+                        &v2_key,
+                        &item.item_id,
+                        nonce,
+                        content,
+                    )
+                    .map_err(|e| match e {
+                        EncryptError::AuthFailed | EncryptError::AadMismatch => {
+                            PasteboardError::decrypt(
+                                "Decryption failed: authentication tag mismatch".to_string(),
+                            )
+                        }
+                        EncryptError::UnknownKeyVersion(_) => PasteboardError::decrypt(
+                            "Item encrypted with a previous key — cannot be recovered. \
                              Clear history to start fresh."
-                            .to_string(),
-                    ),
-                    other => PasteboardError::decrypt(other.to_string()),
-                })?;
-                let text = std::str::from_utf8(&plaintext_bytes).map_err(|e| {
-                    PasteboardError::decrypt(format!("decrypted content is not UTF-8: {e}"))
-                })?;
-                unsafe {
-                    let pb = NSPasteboard::generalPasteboard();
-                    pb.clearContents();
-                    let ns_str = NSString::from_str(text);
-                    let ok = pb.setString_forType(&ns_str, NSPasteboardTypeString);
-                    if !ok {
-                        return Err(PasteboardError::other(
-                            "NSPasteboard setString:forType: returned false",
-                        ));
+                                .to_string(),
+                        ),
+                        other => PasteboardError::decrypt(other.to_string()),
+                    })?;
+                    let text = std::str::from_utf8(&plaintext_bytes).map_err(|e| {
+                        PasteboardError::decrypt(format!("decrypted content is not UTF-8: {e}"))
+                    })?;
+                    unsafe {
+                        let pb = NSPasteboard::generalPasteboard();
+                        pb.clearContents();
+                        let ns_str = NSString::from_str(text);
+                        let ok = pb.setString_forType(&ns_str, NSPasteboardTypeString);
+                        if !ok {
+                            return Err(PasteboardError::other(
+                                "NSPasteboard setString:forType: returned false",
+                            ));
+                        }
                     }
-                }
-                record_self_write(&self.self_write_change_count);
-                Ok(())
-            } else if item.content_type == "image" {
-                // ----- image: reassemble chunks → decrypt → write as PNG -----
-                // `file_id` is embedded in the JSON metadata stored in
-                // `blob_ref` (see ClipboardItem::new_image in
-                // storage/items.rs).
-                let meta_json = item.blob_ref.as_deref().ok_or_else(|| {
-                    PasteboardError::other("image item missing blob_ref metadata")
-                })?;
-                let file_id = parse_image_file_id(meta_json).map_err(PasteboardError::other)?;
+                    record_self_write(&self.self_write_change_count);
+                    Ok(())
+                } else if item.content_type == "image" {
+                    // ----- image: reassemble chunks → decrypt → write as PNG -----
+                    // `file_id` is embedded in the JSON metadata stored in
+                    // `blob_ref` (see ClipboardItem::new_image in
+                    // storage/items.rs).
+                    let meta_json = item.blob_ref.as_deref().ok_or_else(|| {
+                        PasteboardError::other("image item missing blob_ref metadata")
+                    })?;
+                    let file_id = parse_image_file_id(meta_json).map_err(PasteboardError::other)?;
 
-                let chunks = chunks_from_blob(content).map_err(|e| {
-                    PasteboardError::other(format!("image chunks_from_blob failed: {e}"))
-                })?;
-                let png_bytes = decode_image(&chunks, &self.local_key, &file_id)
-                    .map_err(|e| PasteboardError::decrypt(format!("image decode failed: {e}")))?;
+                    let chunks = chunks_from_blob(content).map_err(|e| {
+                        PasteboardError::other(format!("image chunks_from_blob failed: {e}"))
+                    })?;
+                    let png_bytes =
+                        decode_image(&chunks, &self.local_key, &file_id).map_err(|e| {
+                            PasteboardError::decrypt(format!("image decode failed: {e}"))
+                        })?;
 
-                unsafe {
-                    let pb = NSPasteboard::generalPasteboard();
-                    pb.clearContents();
-                    let type_str = NSString::from_str("public.png");
-                    let data = NSData::with_bytes(&png_bytes);
-                    let ok = pb.setData_forType(Some(&data), &type_str);
-                    if !ok {
-                        return Err(PasteboardError::other(
-                            "NSPasteboard setData:forType: returned false for public.png",
-                        ));
+                    unsafe {
+                        let pb = NSPasteboard::generalPasteboard();
+                        pb.clearContents();
+                        let type_str = NSString::from_str("public.png");
+                        let data = NSData::with_bytes(&png_bytes);
+                        let ok = pb.setData_forType(Some(&data), &type_str);
+                        if !ok {
+                            return Err(PasteboardError::other(
+                                "NSPasteboard setData:forType: returned false for public.png",
+                            ));
+                        }
                     }
-                }
-                record_self_write(&self.self_write_change_count);
-                Ok(())
-            } else {
-                // Unknown content_type — keep a best-effort raw-bytes write,
-                // but map to a real UTI when possible. We do NOT attempt
-                // decryption here because we don't know the shape of the
-                // ciphertext (no nonce / no chunk metadata). Used only by
-                // future content_types added without updating this handler.
-                let uti = map_content_type_to_uti(&item.content_type);
-                unsafe {
-                    let pb = NSPasteboard::generalPasteboard();
-                    pb.clearContents();
-                    let type_str = NSString::from_str(&uti);
-                    let data = NSData::with_bytes(content);
-                    let ok = pb.setData_forType(Some(&data), &type_str);
-                    if !ok {
-                        return Err(PasteboardError::other(format!(
-                            "NSPasteboard setData:forType: returned false for type '{uti}'"
-                        )));
+                    record_self_write(&self.self_write_change_count);
+                    Ok(())
+                } else {
+                    // Unknown content_type — keep a best-effort raw-bytes write,
+                    // but map to a real UTI when possible. We do NOT attempt
+                    // decryption here because we don't know the shape of the
+                    // ciphertext (no nonce / no chunk metadata). Used only by
+                    // future content_types added without updating this handler.
+                    let uti = map_content_type_to_uti(&item.content_type);
+                    unsafe {
+                        let pb = NSPasteboard::generalPasteboard();
+                        pb.clearContents();
+                        let type_str = NSString::from_str(&uti);
+                        let data = NSData::with_bytes(content);
+                        let ok = pb.setData_forType(Some(&data), &type_str);
+                        if !ok {
+                            return Err(PasteboardError::other(format!(
+                                "NSPasteboard setData:forType: returned false for type '{uti}'"
+                            )));
+                        }
                     }
+                    record_self_write(&self.self_write_change_count);
+                    Ok(())
                 }
-                record_self_write(&self.self_write_change_count);
-                Ok(())
-            }
+            })
         }
 
         #[cfg(not(target_os = "macos"))]
