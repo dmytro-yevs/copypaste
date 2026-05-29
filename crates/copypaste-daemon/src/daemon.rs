@@ -296,6 +296,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         if let Some(ref fp) = cert_fingerprint_display {
             server = server.with_cert_fingerprint(fp.clone());
         }
+        // P2P Phase 1: hand the IPC pairing handlers a clone of the SAME mTLS
+        // cert the transport presents, so they can TLS-wrap the unauthenticated
+        // bootstrap pairing channel (responder listener / initiator dial). The
+        // fingerprints peers learn over that channel then match what the pinned
+        // mTLS layer compares.
+        if let Some(ref cert) = p2p_cert {
+            server = server.with_p2p_cert(cert.cert_der.clone(), cert.key_der.clone());
+        }
         #[cfg(feature = "cloud-sync")]
         {
             server =

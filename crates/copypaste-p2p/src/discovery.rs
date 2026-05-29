@@ -219,6 +219,22 @@ impl DiscoveryService {
         lock_safe(&self.known_peers).values().cloned().collect()
     }
 
+    /// Resolve a peer by its advertised `device_id` (the `did` TXT record).
+    ///
+    /// Returns the most-recently-seen [`PeerInfo`] for `device_id`, or `None`
+    /// if no such peer is currently known. Used as the **fallback** discovery
+    /// path during pairing when the QR carries no `addr_hint`: the initiator
+    /// resolves the responder's `host:port` from mDNS instead.
+    ///
+    /// Loopback mDNS is unreliable (see module docs), so `addr_hint` remains the
+    /// primary path and this is best-effort only.
+    pub fn resolve_peer(&self, device_id: &str) -> Option<PeerInfo> {
+        lock_safe(&self.known_peers)
+            .values()
+            .find(|p| p.device_id == device_id)
+            .cloned()
+    }
+
     // ── private helpers ──────────────────────────────────────────────────────
 
     /// Announce own service on the local network.

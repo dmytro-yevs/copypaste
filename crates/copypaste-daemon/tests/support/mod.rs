@@ -56,6 +56,17 @@ impl Daemon {
     /// Panics (failing the test) if the binary cannot be spawned or the socket
     /// does not come up within [`SOCKET_READY_TIMEOUT`].
     pub fn spawn() -> Self {
+        Self::spawn_inner(false)
+    }
+
+    /// Spawn a fresh isolated daemon with the P2P subsystem ENABLED
+    /// (`COPYPASTE_P2P=1`), so the mTLS transport, cert, and the network
+    /// bootstrap pairing channel are live. Used by the network-pairing tests.
+    pub fn spawn_with_p2p() -> Self {
+        Self::spawn_inner(true)
+    }
+
+    fn spawn_inner(p2p: bool) -> Self {
         let tmp_dir = tempfile::tempdir().expect("could not create temp dir for daemon");
         let root = tmp_dir.path();
 
@@ -71,8 +82,8 @@ impl Daemon {
             std::fs::create_dir_all(dir).expect("could not create isolated daemon dir");
         }
 
-        let child = Command::new(daemon_binary())
-            .env("COPYPASTE_SOCKET", &socket_path)
+        let mut cmd = Command::new(daemon_binary());
+        cmd.env("COPYPASTE_SOCKET", &socket_path)
             .env("COPYPASTE_DB", &db_path)
             .env("COPYPASTE_DATA_DIR", &data_dir)
             .env("COPYPASTE_CONFIG_DIR", &config_dir)
@@ -84,13 +95,16 @@ impl Daemon {
             // (ad-hoc-signed dev builds invalidate the Keychain ACL on every
             // rebuild) and the slow one-time ACL-rotation delay on cold start.
             .env("COPYPASTE_EPHEMERAL_KEY", "1")
-            // Step A keeps P2P OFF: do not set COPYPASTE_P2P.
-            .env("RUST_LOG", "error") // keep test output quiet
-            .spawn()
-            .expect(
-                "failed to spawn copypaste-daemon — \
+            .env("RUST_LOG", "error"); // keep test output quiet
+
+        if p2p {
+            cmd.env("COPYPASTE_P2P", "1");
+        }
+
+        let child = cmd.spawn().expect(
+            "failed to spawn copypaste-daemon — \
                  run `cargo build -p copypaste-daemon` first",
-            );
+        );
 
         let daemon = Self {
             child,
