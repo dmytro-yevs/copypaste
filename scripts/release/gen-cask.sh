@@ -94,6 +94,31 @@ else
     echo "    sha256  → ${SHA256}"
 fi
 
+# ── Update Tauri productVersion so Info.plist matches the cask version ──────
+# tauri.conf.json carries a hardcoded "version" field that becomes
+# CFBundleShortVersionString / CFBundleVersion in the .app bundle's Info.plist.
+# Keeping it in sync with the cask version avoids Homebrew --adopt mismatches
+# (Homebrew compares source bundle version to target when adopting an existing
+# app) and makes `sw_vers` / bundle version queries return the correct value.
+
+TAURI_CONF="crates/copypaste-ui/src-tauri/tauri.conf.json"
+if [[ -f "$TAURI_CONF" ]]; then
+    echo "==> Updating $TAURI_CONF version → $VERSION"
+    TMP_TAURI="$(mktemp)"
+    # Replace the top-level "version" field only (not nested version strings).
+    # Use a simple sed that matches the exact JSON key pattern emitted by Tauri.
+    sed 's/"version": "[^"]*"/"version": "'"$VERSION"'"/' "$TAURI_CONF" > "$TMP_TAURI"
+    # Verify the change landed.
+    if grep -qF "\"version\": \"${VERSION}\"" "$TMP_TAURI"; then
+        mv "$TMP_TAURI" "$TAURI_CONF"
+    else
+        echo "WARNING: could not update version in $TAURI_CONF — continuing anyway" >&2
+        rm -f "$TMP_TAURI"
+    fi
+else
+    echo "WARNING: $TAURI_CONF not found — skipping Tauri version bump" >&2
+fi
+
 # ── Apply changes to cask ─────────────────────────────────────────────────────
 
 echo "==> Updating $CASK"
@@ -161,6 +186,8 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
 
     printf '%s\n' "$NEW_CASK_CONTENT" > "$CASK"
     git add "$CASK"
+    # Also stage tauri.conf.json if it was updated.
+    [[ -f "$TAURI_CONF" ]] && git add "$TAURI_CONF" || true
 
     if git diff --cached --quiet; then
         echo "Cask already up to date on main — nothing to push."
@@ -183,6 +210,7 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
         git reset --hard origin/main
         printf '%s\n' "$NEW_CASK_CONTENT" > "$CASK"
         git add "$CASK"
+        [[ -f "$TAURI_CONF" ]] && git add "$TAURI_CONF" || true
         if git diff --cached --quiet; then
             echo "Cask already up to date after re-fetch — nothing to push."
             echo "Done."
@@ -194,6 +222,6 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
 else
     echo
     echo "Done. Review then commit:"
-    echo "  git add $CASK"
+    echo "  git add $CASK ${TAURI_CONF}"
     echo "  git commit -m \"chore(cask): bump to $VERSION\""
 fi

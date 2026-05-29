@@ -21,12 +21,24 @@ cask "copypaste" do
   app "CopyPaste.app"
 
   postflight do
-    # Strip quarantine (ad-hoc signed builds, no Apple Developer ID)
+    # Strip quarantine (ad-hoc signed builds, no Apple Developer ID).
+    # Must run before any attempt to launch the app or its helpers.
     system_command "/usr/bin/xattr",
                    args: ["-cr", "#{appdir}/CopyPaste.app"]
-    # Load launchd plist if it exists
+
+    # Bootstrap the LaunchAgent if the plist already exists (upgrade path).
+    # Use `launchctl bootstrap` (macOS 13+) rather than the removed
+    # `launchctl load -w` to avoid a non-zero exit that would abort the
+    # postflight and cause Homebrew to roll back the installation.
+    # On a fresh install the plist is written by the app on first launch;
+    # no action is needed here.
     plist = Pathname.new("#{Dir.home}/Library/LaunchAgents/com.copypaste.daemon.plist")
-    system_command "/bin/launchctl", args: ["load", "-w", plist.to_s] if plist.exist?
+    if plist.exist?
+      uid = `id -u`.chomp
+      system_command "/bin/launchctl",
+                     args: ["bootstrap", "gui/#{uid}", plist.to_s],
+                     must_succeed: false
+    end
   end
 
   uninstall launchctl: "com.copypaste.daemon"

@@ -62,6 +62,33 @@ if [[ ! -d "$TAURI_APP" ]]; then
     echo "ERROR: $TAURI_APP not found — run 'cd crates/copypaste-ui && pnpm install && pnpm tauri build' first." >&2
     exit 1
 fi
+
+# Verify the Tauri bundle is well-formed: Info.plist must exist and the
+# CFBundleExecutable binary must be present inside the bundle.
+# A missing or misnamed executable is the leading cause of
+# "App source '/Applications/CopyPaste.app' is not there" failures during
+# brew upgrade — Homebrew mounts the DMG, finds the .app, copies it to
+# /Applications, but the OS refuses to open it, postflight fails, Homebrew
+# rolls back, and the purge step can't find the (already-removed) app.
+TAURI_INFO_PLIST="${TAURI_APP}/Contents/Info.plist"
+if [[ ! -f "$TAURI_INFO_PLIST" ]]; then
+    echo "ERROR: $TAURI_INFO_PLIST missing — Tauri bundle is malformed." >&2
+    exit 1
+fi
+# Extract CFBundleExecutable using PlistBuddy (always available on macOS).
+BUNDLE_EXECUTABLE="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$TAURI_INFO_PLIST" 2>/dev/null || true)"
+if [[ -z "$BUNDLE_EXECUTABLE" ]]; then
+    echo "ERROR: CFBundleExecutable not set in $TAURI_INFO_PLIST." >&2
+    exit 1
+fi
+BUNDLE_EXECUTABLE_PATH="${TAURI_APP}/Contents/MacOS/${BUNDLE_EXECUTABLE}"
+if [[ ! -f "$BUNDLE_EXECUTABLE_PATH" ]]; then
+    echo "ERROR: CFBundleExecutable '$BUNDLE_EXECUTABLE' not found at $BUNDLE_EXECUTABLE_PATH." >&2
+    echo "       Tauri bundle is incomplete — re-run 'pnpm tauri build'." >&2
+    exit 1
+fi
+echo "==> Preflight: Tauri bundle OK (CFBundleExecutable=$BUNDLE_EXECUTABLE)"
+
 if [[ ! -f "$BIN_CLI" ]]; then
     echo "ERROR: $BIN_CLI not found — run 'cargo build --release -p copypaste-cli' first." >&2
     exit 1
@@ -112,10 +139,23 @@ else
     exit 1
 fi
 
-if [[ ! -d "$APP_DIR" ]]; then
-    echo "ERROR: expected .app bundle at $APP_DIR (bundle step produced nothing)" >&2
+# Post-staging verification: confirm the assembled bundle is complete before
+# signing. This catches e.g. a Tauri build that produced a bundle with a
+# different CFBundleExecutable name than 'CopyPaste'.
+DIST_INFO_PLIST="${APP_DIR}/Contents/Info.plist"
+DIST_BUNDLE_EXECUTABLE="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$DIST_INFO_PLIST" 2>/dev/null || true)"
+if [[ ! -f "${APP_DIR}/Contents/MacOS/${DIST_BUNDLE_EXECUTABLE}" ]]; then
+    echo "ERROR: CFBundleExecutable '$DIST_BUNDLE_EXECUTABLE' not found in staged bundle $APP_DIR." >&2
     exit 1
 fi
+# Verify the three sibling binaries were injected successfully.
+for sibling in copypaste copypaste-daemon copypaste-relay; do
+    if [[ ! -f "${APP_DIR}/Contents/MacOS/${sibling}" ]]; then
+        echo "ERROR: sibling binary '${sibling}' missing from $APP_DIR/Contents/MacOS/" >&2
+        exit 1
+    fi
+done
+echo "==> Post-staging: bundle OK (executable=$DIST_BUNDLE_EXECUTABLE, siblings: cli/daemon/relay)"
 
 # 2) Ad-hoc sign with hardened runtime + entitlements.
 echo "==> Ad-hoc signing $APP_DIR (hardened runtime, entitlements: $ENTITLEMENTS)"
