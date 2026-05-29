@@ -1,10 +1,13 @@
+# frozen_string_literal: true
+
 cask "copypaste" do
   version "0.5.1"
   sha256 "dcff72705469dcac0a24a5e9512c6e39f0e074af78cae29d85806403b575621e"
 
-  # DMG filename follows the CI pattern: CopyPaste-v<tag>-macos-arm64.dmg
-  # where <tag> already includes the leading 'v', so the prefix becomes 'vv'.
-  url "https://github.com/dmytro-yevs/copypaste/releases/download/v#{version}/CopyPaste-vv#{version}-macos-arm64.dmg",
+  # DMG filename follows the CI pattern: CopyPaste-v<version>-macos-arm64.dmg
+  # where <version> is bare (build-dmg-ci.sh strips any leading 'v'), so the
+  # prefix is a single 'v'.
+  url "https://github.com/dmytro-yevs/copypaste/releases/download/v#{version}/CopyPaste-v#{version}-macos-arm64.dmg",
       verified: "github.com/dmytro-yevs/copypaste/"
   name "CopyPaste"
   desc "Encrypted clipboard manager with end-to-end sync"
@@ -36,8 +39,31 @@ cask "copypaste" do
     if plist.exist?
       uid = `id -u`.chomp
       system_command "/bin/launchctl",
-                     args: ["bootstrap", "gui/#{uid}", plist.to_s],
+                     args:         ["bootstrap", "gui/#{uid}", plist.to_s],
                      must_succeed: false
+    end
+  end
+
+  uninstall_preflight do
+    # Robustness for the "stuck state" left by an earlier broken upgrade.
+    #
+    # During `brew upgrade`/`reinstall`, Homebrew uninstalls the old version
+    # first by MOVING /Applications/CopyPaste.app back to staging
+    # (Cask::Artifact::Moved#move_back). If that target is ABSENT — e.g. a
+    # previous failed upgrade already removed it — move_back raises:
+    #   "It seems the App source '/Applications/CopyPaste.app' is not there."
+    # because a plain upgrade is not run with `force`, and aborts the upgrade.
+    #
+    # uninstall_preflight runs BEFORE the App artifact's uninstall phase
+    # (Homebrew artifact sort order: UninstallPreflightSteps precedes App), so
+    # here we recreate a minimal placeholder bundle when the app is missing.
+    # move_back then finds a target, backs it up, and deletes it without
+    # raising; the new version's `app` stanza installs the real bundle next.
+    app_path = "#{appdir}/CopyPaste.app"
+    unless File.exist?(app_path)
+      # `system_command` is provided by Cask::DSL::Base; bare `opoo`/`ohai`
+      # are NOT available in this eval context, so we stay silent here.
+      system_command "/bin/mkdir", args: ["-p", "#{app_path}/Contents/MacOS"]
     end
   end
 
