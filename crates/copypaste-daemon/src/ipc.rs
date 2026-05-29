@@ -1954,7 +1954,13 @@ impl IpcServer {
                 // Persist the raw key bytes to the macOS Keychain under the
                 // cloud-sync account so they survive a daemon restart.
                 #[cfg(target_os = "macos")]
-                {
+                if crate::keychain::keychain_bypassed() {
+                    // Dev/test bypass: do not persist to the Keychain (would
+                    // prompt). The key stays active in-memory for this session.
+                    tracing::debug!(
+                        "set_sync_passphrase: COPYPASTE_EPHEMERAL_KEY set; skipping keychain persist"
+                    );
+                } else {
                     use security_framework::passwords::set_generic_password;
                     if let Err(e) = set_generic_password(
                         crate::keychain::SERVICE,

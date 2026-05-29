@@ -78,6 +78,9 @@ fn spawn_daemon(socket_path: &Path, db_path: &Path) -> Child {
     Command::new(daemon_binary())
         .env("COPYPASTE_SOCKET", socket_path)
         .env("COPYPASTE_DB", db_path)
+        // Skip the macOS Keychain so this test never raises an interactive
+        // login-keychain password prompt (ad-hoc-signed dev builds otherwise do).
+        .env("COPYPASTE_EPHEMERAL_KEY", "1")
         .env("RUST_LOG", "error") // suppress noisy logs during tests
         .spawn()
         .expect("failed to spawn copypaste-daemon — did you run `cargo build -p copypaste-daemon` first?")

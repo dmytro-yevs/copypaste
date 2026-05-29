@@ -60,6 +60,7 @@ fn cleanup(service: &str, account: &str) {
 
 #[test]
 #[serial]
+#[ignore = "touches real macOS Keychain; run explicitly with `cargo test -- --ignored`"]
 fn store_and_retrieve_db_key_roundtrip() {
     let (service, account) = unique_account("roundtrip");
     // Simulate a 32-byte SQLCipher DB key — same shape as the device secret
@@ -84,6 +85,7 @@ fn store_and_retrieve_db_key_roundtrip() {
 
 #[test]
 #[serial]
+#[ignore = "touches real macOS Keychain; run explicitly with `cargo test -- --ignored`"]
 fn retrieve_missing_key_returns_specific_error() {
     let (service, account) = unique_account("missing");
     // Belt-and-braces: ensure nothing is hanging around from a previous run.
@@ -102,6 +104,7 @@ fn retrieve_missing_key_returns_specific_error() {
 
 #[test]
 #[serial]
+#[ignore = "touches real macOS Keychain; run explicitly with `cargo test -- --ignored`"]
 fn overwrite_existing_key() {
     let (service, account) = unique_account("overwrite");
     let first: [u8; 32] = [0x11; 32];
@@ -127,6 +130,7 @@ fn overwrite_existing_key() {
 
 #[test]
 #[serial]
+#[ignore = "touches real macOS Keychain; run explicitly with `cargo test -- --ignored`"]
 fn delete_key_idempotent() {
     let (service, account) = unique_account("delete-idempotent");
     let value: [u8; 32] = [0xCC; 32];

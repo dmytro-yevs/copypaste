@@ -62,6 +62,7 @@ fn sigkill_recovers_lamport() {
     let mut child = Command::new(&bin)
         .env("COPYPASTE_STATE_DIR", &state)
         .env("COPYPASTE_TEST_MODE", "1")
+        .env("COPYPASTE_EPHEMERAL_KEY", "1") // skip macOS Keychain prompt
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -90,6 +91,7 @@ fn sigkill_recovers_lamport() {
     let mut child2 = Command::new(&bin)
         .env("COPYPASTE_STATE_DIR", &state)
         .env("COPYPASTE_TEST_MODE", "1")
+        .env("COPYPASTE_EPHEMERAL_KEY", "1") // skip macOS Keychain prompt
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

@@ -17,6 +17,20 @@ pub(crate) const ACCOUNT: &str = "device-secret-key";
 /// so they are never confused.
 pub(crate) const CLOUD_SYNC_ACCOUNT: &str = "cloud-sync-key";
 
+/// Dev/test escape hatch: when `COPYPASTE_EPHEMERAL_KEY` is set in the
+/// environment, every keychain entry point in this module short-circuits
+/// BEFORE any Security-framework call so the macOS login-keychain password
+/// prompt is never triggered.
+///
+/// Why centralize here: ad-hoc-signed dev builds change signature on every
+/// rebuild, invalidating the persisted item's ACL and forcing an interactive
+/// keychain prompt. `cargo test --workspace` and `make dev-daemon` set this
+/// env so they run non-interactively. Production (env unset) is unaffected —
+/// every caller falls through to the real Security-framework path unchanged.
+pub(crate) fn keychain_bypassed() -> bool {
+    std::env::var_os("COPYPASTE_EPHEMERAL_KEY").is_some()
+}
+
 /// Compute the canonical device fingerprint from a raw public key.
 ///
 /// Format: first 16 bytes of `SHA-256(public_key)` rendered as
@@ -73,6 +87,16 @@ pub enum KeychainError {
 /// `Synchronizable=false` attributes so the secret never leaves the device
 /// via iCloud Keychain sync — see `migrate_legacy_accessibility_if_needed`.
 pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
+    // Dev/test bypass: return a fresh ephemeral keypair without touching the
+    // Keychain. Must be checked BEFORE any Security-framework call so no
+    // password prompt is ever raised. See `keychain_bypassed`.
+    if keychain_bypassed() {
+        tracing::warn!(
+            "COPYPASTE_EPHEMERAL_KEY set: using ephemeral in-memory device keypair, skipping macOS Keychain"
+        );
+        return Ok(DeviceKeypair::generate());
+    }
+
     #[cfg(target_os = "macos")]
     {
         match get_generic_password(SERVICE, ACCOUNT) {
@@ -152,6 +176,11 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
 /// Delete the stored keypair — used for testing and factory reset.
 #[cfg(target_os = "macos")]
 pub fn delete_stored() -> Result<(), KeychainError> {
+    // Dev/test bypass: there is no persisted entry to delete, so this is a
+    // benign no-op rather than a Security-framework call that could prompt.
+    if keychain_bypassed() {
+        return Ok(());
+    }
     delete_generic_password(SERVICE, ACCOUNT).map_err(KeychainError::from)
 }
 

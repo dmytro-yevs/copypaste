@@ -319,6 +319,12 @@ pub fn store_with_acl(secret: &[u8; 32], paths: &[PathBuf]) -> Result<(), Keycha
 /// designated requirement hash blob (20- or 32-byte digest) — comparing
 /// digests instead of paths is robust to bundle relocation.
 pub fn current_acl_app_digests() -> Result<Vec<Vec<u8>>, KeychainError> {
+    // Dev/test bypass: no persisted entry exists, so report an empty ACL
+    // without touching the Security framework. See `super::keychain_bypassed`.
+    if super::keychain_bypassed() {
+        return Ok(Vec::new());
+    }
+
     use security_framework::passwords::get_generic_password;
 
     // We can only inspect an item that exists.  Trigger the lookup first to
@@ -403,6 +409,13 @@ pub fn current_acl_app_digests() -> Result<Vec<Vec<u8>>, KeychainError> {
 /// Returns `Ok(true)` if a rotation was performed, `Ok(false)` if the ACL
 /// was already correct (or no entry exists yet — first run).
 pub fn rotate_acl_to_current_install() -> Result<bool, KeychainError> {
+    // Dev/test bypass: skip the entire read/delete/recreate dance before any
+    // Security-framework call so daemon startup never raises a keychain
+    // prompt. Report "no rotation performed". See `super::keychain_bypassed`.
+    if super::keychain_bypassed() {
+        return Ok(false);
+    }
+
     use security_framework::passwords::{delete_generic_password, get_generic_password};
 
     let secret_bytes = match get_generic_password(SERVICE, ACCOUNT) {
