@@ -72,7 +72,24 @@ impl AppConfig {
 
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
         let text = toml::to_string_pretty(self)?;
-        std::fs::write(path, text)?;
+
+        // Write to a sibling temp file then atomically rename over the target.
+        // A crash mid-write can therefore only leave the temp file behind; the
+        // previous (valid) config is never truncated. The temp file lives in
+        // the same directory so the rename stays within one filesystem.
+        let dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "config.toml".to_owned());
+        let tmp_path = dir.join(format!(".{file_name}.tmp"));
+
+        std::fs::write(&tmp_path, text.as_bytes())?;
+        // rename is atomic on the same filesystem; on failure clean up the temp.
+        if let Err(e) = std::fs::rename(&tmp_path, path) {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(e.into());
+        }
         Ok(())
     }
 
@@ -109,6 +126,67 @@ mod tests {
         std::fs::write(&path, "poll_interval_ms = 50\nconfig_version = 1\n").unwrap();
         let cfg = AppConfig::load(&path).unwrap();
         assert_eq!(cfg.poll_interval_ms, 100);
+    }
+
+    #[test]
+    fn save_writes_valid_parseable_file_atomically() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = AppConfig::default();
+        cfg.save(&path).unwrap();
+
+        // Final file exists and parses; no temp file is left behind.
+        assert!(path.exists());
+        let reparsed = AppConfig::load(&path).unwrap();
+        assert_eq!(reparsed.history_limit, cfg.history_limit);
+        let tmp = dir.path().join(".config.toml.tmp");
+        assert!(!tmp.exists(), "temp file should be renamed away");
+    }
+
+    #[test]
+    fn save_overwrites_existing_config_in_place() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        let first = AppConfig {
+            history_limit: 111,
+            ..Default::default()
+        };
+        first.save(&path).unwrap();
+        assert_eq!(AppConfig::load(&path).unwrap().history_limit, 111);
+
+        let second = AppConfig {
+            history_limit: 222,
+            ..Default::default()
+        };
+        second.save(&path).unwrap();
+        assert_eq!(AppConfig::load(&path).unwrap().history_limit, 222);
+    }
+
+    #[test]
+    fn failed_save_leaves_prior_config_intact() {
+        // Simulate an interrupted write: point `save` at a path whose parent is
+        // not a directory. The rename (and the temp write) cannot succeed, so
+        // the previously written, valid config must remain untouched.
+        let dir = tempdir().unwrap();
+        let good_path = dir.path().join("config.toml");
+        let original = AppConfig {
+            history_limit: 777,
+            ..Default::default()
+        };
+        original.save(&good_path).unwrap();
+
+        // A path *inside* a regular file — its "parent" is not a directory, so
+        // writing the sibling temp file fails before any rename happens.
+        let bogus_path = good_path.join("nested").join("config.toml");
+        let doomed = AppConfig {
+            history_limit: 999,
+            ..Default::default()
+        };
+        assert!(doomed.save(&bogus_path).is_err());
+
+        // Prior config is byte-for-byte valid and unchanged.
+        assert_eq!(AppConfig::load(&good_path).unwrap().history_limit, 777);
     }
 
     #[test]

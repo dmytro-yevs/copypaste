@@ -68,6 +68,7 @@ fn bench_chunks(c: &mut Criterion) {
                     black_box(&file_id),
                     64 * 1024,
                 )
+                .unwrap()
             })
         });
     }

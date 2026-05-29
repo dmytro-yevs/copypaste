@@ -71,7 +71,7 @@ fn chunked_encryption_large_item_roundtrip() {
     let key = [0x77u8; 32];
     let file_id = [0x11u8; 16];
     let data = vec![0xABu8; 200_000]; // 200 KB
-    let chunks = encrypt_chunks(&data, &key, &file_id, 64 * 1024);
+    let chunks = encrypt_chunks(&data, &key, &file_id, 64 * 1024).unwrap();
     assert!(chunks.len() > 1);
     let decrypted = decrypt_chunks(&chunks, &key, &file_id).unwrap();
     assert_eq!(decrypted, data);

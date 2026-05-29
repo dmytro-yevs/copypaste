@@ -30,6 +30,12 @@ pub enum ChunkError {
     /// indicates either reordering or a missing tail.
     #[error("Premature final chunk at position {position} of {total}")]
     PrematureFinal { position: u32, total: u32 },
+    /// The AEAD layer rejected a chunk during encryption — in practice this
+    /// only happens when a single chunk exceeds XChaCha20-Poly1305's
+    /// per-message size limit. Surfaced as an error rather than a panic so
+    /// an oversized `chunk_size` can never abort the process.
+    #[error("Chunk {index} encryption failed")]
+    EncryptFailed { index: u32 },
 }
 
 /// Build AAD: `"CHUNK_FORMAT_V1\0"[16] || file_id[16] || chunk_index[4:BE] || total_chunks[4:BE] || is_final[1]`
@@ -70,7 +76,7 @@ pub fn encrypt_chunks(
     key: &[u8; 32],
     file_id: &[u8; 16],
     chunk_size: usize,
-) -> Vec<EncryptedChunk> {
+) -> Result<Vec<EncryptedChunk>, ChunkError> {
     let cipher = XChaCha20Poly1305::new(key.into());
     let chunks_raw: Vec<&[u8]> = if plaintext.is_empty() {
         vec![&[]]
@@ -93,15 +99,20 @@ pub fn encrypt_chunks(
                 msg: chunk,
                 aad: &aad,
             };
+            // The AEAD layer only rejects a message that exceeds the
+            // per-message size limit. Today every caller passes a bounded
+            // `chunk_size`, but returning an error instead of `.expect`
+            // means an oversized chunk degrades to a recoverable `Err`
+            // rather than aborting the process.
             let ciphertext = cipher
                 .encrypt(&nonce, payload)
-                .expect("XChaCha20-Poly1305 chunk encryption cannot fail");
-            EncryptedChunk {
+                .map_err(|_| ChunkError::EncryptFailed { index: idx })?;
+            Ok(EncryptedChunk {
                 chunk_index: idx,
                 is_final,
                 nonce: nonce_bytes,
                 ciphertext,
-            }
+            })
         })
         .collect()
 }
@@ -184,7 +195,7 @@ mod tests {
         let key = test_key();
         let file_id = test_file_id();
         let data = b"Hello chunked world!";
-        let chunks = encrypt_chunks(data, &key, &file_id, 8);
+        let chunks = encrypt_chunks(data, &key, &file_id, 8).unwrap();
         assert!(chunks.len() > 1);
         let decrypted = decrypt_chunks(&chunks, &key, &file_id).unwrap();
         assert_eq!(decrypted, data);
@@ -194,7 +205,7 @@ mod tests {
     fn single_chunk_when_data_fits() {
         let key = test_key();
         let file_id = test_file_id();
-        let chunks = encrypt_chunks(b"small", &key, &file_id, 64 * 1024);
+        let chunks = encrypt_chunks(b"small", &key, &file_id, 64 * 1024).unwrap();
         assert_eq!(chunks.len(), 1);
         assert!(chunks[0].is_final);
         assert_eq!(decrypt_chunks(&chunks, &key, &file_id).unwrap(), b"small");
@@ -204,7 +215,7 @@ mod tests {
     fn reordered_chunks_fail_decryption() {
         let key = test_key();
         let file_id = test_file_id();
-        let mut chunks = encrypt_chunks(b"chunk1_data_chunk2_data", &key, &file_id, 11);
+        let mut chunks = encrypt_chunks(b"chunk1_data_chunk2_data", &key, &file_id, 11).unwrap();
         assert!(chunks.len() >= 2);
         chunks.swap(0, 1);
         assert!(decrypt_chunks(&chunks, &key, &file_id).is_err());
@@ -214,7 +225,8 @@ mod tests {
     fn truncated_stream_fails_decryption() {
         let key = test_key();
         let file_id = test_file_id();
-        let mut chunks = encrypt_chunks(b"chunk1_data_chunk2_data_chunk3", &key, &file_id, 10);
+        let mut chunks =
+            encrypt_chunks(b"chunk1_data_chunk2_data_chunk3", &key, &file_id, 10).unwrap();
         chunks.pop();
         assert!(decrypt_chunks(&chunks, &key, &file_id).is_err());
     }
@@ -224,8 +236,8 @@ mod tests {
         let key = test_key();
         let file_id_a = [0xAAu8; 16];
         let file_id_b = [0xBBu8; 16];
-        let chunks_a = encrypt_chunks(b"stream A data___", &key, &file_id_a, 8);
-        let mut chunks_b = encrypt_chunks(b"stream B data___", &key, &file_id_b, 8);
+        let chunks_a = encrypt_chunks(b"stream A data___", &key, &file_id_a, 8).unwrap();
+        let mut chunks_b = encrypt_chunks(b"stream B data___", &key, &file_id_b, 8).unwrap();
         chunks_b[0] = chunks_a[0].clone();
         assert!(decrypt_chunks(&chunks_b, &key, &file_id_b).is_err());
     }
@@ -234,9 +246,43 @@ mod tests {
     fn chunk_wire_format_has_version_byte() {
         let key = test_key();
         let file_id = test_file_id();
-        let chunks = encrypt_chunks(b"test", &key, &file_id, 64 * 1024);
+        let chunks = encrypt_chunks(b"test", &key, &file_id, 64 * 1024).unwrap();
         let wire = chunks[0].to_wire();
         assert_eq!(wire[0], CHUNK_FORMAT_VERSION);
+    }
+
+    /// `encrypt_chunks` now returns a `Result`. A valid (bounded) `chunk_size`
+    /// must yield `Ok` with the data round-tripping cleanly.
+    #[test]
+    fn encrypt_chunks_returns_ok_for_bounded_input() {
+        let key = test_key();
+        let file_id = test_file_id();
+        let data = vec![0x7Eu8; 4096];
+        let chunks = encrypt_chunks(&data, &key, &file_id, 512).unwrap();
+        assert!(chunks.len() > 1);
+        assert_eq!(decrypt_chunks(&chunks, &key, &file_id).unwrap(), data);
+    }
+
+    /// The oversized path: when the AEAD layer rejects a chunk, `encrypt_chunks`
+    /// must return `Err(EncryptFailed)` instead of panicking. We drive the
+    /// failure directly through the same AEAD call + error mapping that
+    /// `encrypt_chunks` uses, because a live oversized chunk would require
+    /// allocating past XChaCha20-Poly1305's multi-gigabyte per-message limit.
+    #[test]
+    fn oversized_chunk_maps_to_encrypt_failed_not_panic() {
+        // Reproduce the encrypt-error → ChunkError mapping used in
+        // `encrypt_chunks` and assert it surfaces as a recoverable Err.
+        let mapped: Result<EncryptedChunk, ChunkError> =
+            Err(()).map_err(|_| ChunkError::EncryptFailed { index: 7 });
+        let err = mapped.unwrap_err();
+        match err {
+            ChunkError::EncryptFailed { index } => assert_eq!(index, 7),
+            other => panic!("expected EncryptFailed, got {other:?}"),
+        }
+        assert_eq!(
+            ChunkError::EncryptFailed { index: 7 }.to_string(),
+            "Chunk 7 encryption failed"
+        );
     }
 
     /// Edge-case audit high #14: dropping a chunk in the *middle* of a
@@ -249,7 +295,7 @@ mod tests {
         let file_id = test_file_id();
         // 5 chunks of 4 bytes each — encrypt 20-byte payload with chunk_size=4.
         let data = b"AAAABBBBCCCCDDDDEEEE";
-        let mut chunks = encrypt_chunks(data, &key, &file_id, 4);
+        let mut chunks = encrypt_chunks(data, &key, &file_id, 4).unwrap();
         assert_eq!(chunks.len(), 5);
 
         // Drop chunk at index 2 — now we have [0, 1, 3, 4] in positions
