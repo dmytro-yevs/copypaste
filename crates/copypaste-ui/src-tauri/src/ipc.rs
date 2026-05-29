@@ -98,3 +98,64 @@ fn do_call(method: &str, params: Value) -> Result<IpcReply, String> {
 pub fn ipc_call(method: String, params: Option<Value>) -> Result<IpcReply, String> {
     call(&method, params.unwrap_or(Value::Null))
 }
+
+/// Result of [`pairing_qr_svg`]: an inline SVG of the pairing QR plus metadata.
+#[derive(serde::Serialize)]
+pub struct PairingQr {
+    /// Inline SVG markup of the QR code (drop straight into an `<img>` via a
+    /// data URI, or `dangerouslySetInnerHTML`).
+    pub svg: String,
+    /// The raw `CPPAIR1.…` payload string (shown as a fallback / copy target).
+    pub payload: String,
+    /// Seconds until the embedded pairing token expires.
+    pub expires_in_secs: u64,
+}
+
+/// Generate a scannable pairing QR for this device.
+///
+/// Asks the daemon (`pair_generate_qr`) for a fresh pairing payload — this
+/// device's fingerprint plus a single-use, short-lived token — and renders it
+/// as an inline SVG QR code other devices scan to pair automatically. The QR is
+/// purely a transport for the existing PAKE pairing material; no new crypto is
+/// introduced (see `copypaste_core::crypto::pairing_qr`).
+#[tauri::command]
+pub fn pairing_qr_svg() -> Result<PairingQr, String> {
+    let reply = call("pair_generate_qr", Value::Null)?;
+    if !reply.ok {
+        return Err(reply
+            .error
+            .unwrap_or_else(|| "pair_generate_qr failed".to_string()));
+    }
+    let data = reply
+        .data
+        .ok_or_else(|| "daemon returned no data for pair_generate_qr".to_string())?;
+    let payload = data["qr"]
+        .as_str()
+        .ok_or_else(|| "daemon response missing 'qr' field".to_string())?
+        .to_string();
+    let expires_in_secs = data["expires_in_secs"].as_u64().unwrap_or(0);
+
+    let svg = render_svg(&payload)?;
+    Ok(PairingQr {
+        svg,
+        payload,
+        expires_in_secs,
+    })
+}
+
+/// Render `payload` as an inline SVG QR code string.
+fn render_svg(payload: &str) -> Result<String, String> {
+    use qrcode::render::svg;
+    use qrcode::{EcLevel, QrCode};
+
+    let code = QrCode::with_error_correction_level(payload, EcLevel::M)
+        .map_err(|e| format!("qr_build_failed:{e}"))?;
+    let svg = code
+        .render::<svg::Color<'_>>()
+        .min_dimensions(220, 220)
+        .quiet_zone(true)
+        .dark_color(svg::Color("#000000"))
+        .light_color(svg::Color("#ffffff"))
+        .build();
+    Ok(svg)
+}

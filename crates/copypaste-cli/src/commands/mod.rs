@@ -9,6 +9,7 @@ pub mod delete;
 pub mod export;
 pub mod import;
 pub mod list;
+pub mod pair_qr;
 pub mod pin;
 pub mod private;
 pub mod search;

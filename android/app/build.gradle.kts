@@ -154,4 +154,9 @@ dependencies {
 
     // WorkManager: Supabase background poll worker
     implementation(libs.work.runtime.ktx)
+
+    // ZXing: QR generation (core) for the pairing display + camera scanning
+    // (android-embedded) so another device's QR can be read to pair.
+    implementation(libs.zxing.core)
+    implementation(libs.zxing.embedded)
 }

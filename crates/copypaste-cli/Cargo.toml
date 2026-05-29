@@ -16,6 +16,8 @@ serde_json.workspace = true
 anyhow.workspace = true
 home.workspace = true
 copypaste-ipc = { path = "../copypaste-ipc" }
+# QR rendering for `copypaste pair-qr` (terminal block art).
+qrcode.workspace = true
 # beta-bonus (vacuum): direct encrypted-DB access for `copypaste vacuum`.
 # We open the SQLCipher file ourselves (daemon must be stopped first), so we
 # need rusqlite and the core Database wrapper. Adds ~1MB to binary but lets

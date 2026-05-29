@@ -89,6 +89,10 @@ anyhow = "1"
 clap = { version = ">=4.0, <4.5.40", features = ["derive"] }
 # Base64 encoding
 base64 = "0.22"
+# QR code generation (pure-Rust). Used by the CLI to render a scannable pairing
+# QR in the terminal. default-features = false drops the optional `image`
+# renderer — we only need the module matrix for unicode block art.
+qrcode = { version = "0.14", default-features = false }
 # HTTP client. Old `<0.12` ceiling dropped now we follow stable. 0.12 pulls
 # rustls 0.23 + rustls-webpki 0.103 (closes RUSTSEC-2026-0098/0099/0104).
 # supabase crate already overrides locally to 0.12; this aligns the workspace.

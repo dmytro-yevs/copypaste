@@ -57,6 +57,29 @@ namespace copypaste_android {
   [Throws=CopypasteError]
   sequence<u8> cloud_decrypt(string item_id, [ByRef] sequence<u8> blob, [ByRef] sequence<u8> sync_key_bytes);
 
+  // ── QR device pairing ─────────────────────────────────────────────────────
+  // The QR code is a transport for the EXISTING PAKE pairing material — it is
+  // NOT a new crypto scheme. The payload carries this device's fingerprint, a
+  // single-use high-entropy token, and metadata. The token, rendered as a
+  // base64url string (`pake_password`), is fed into the existing
+  // password-authenticated pairing flow in place of the manually-typed code.
+  // See crates/copypaste-core/src/crypto/pairing_qr.rs.
+
+  /// Build a QR pairing payload for this device (display side). Generates a
+  /// fresh single-use token internally. Returns the encoded `qr` string to
+  /// render plus the `pake_password` derived from the token — the displaying
+  /// device must use that same password when it answers the scanner's PAKE
+  /// handshake. `addr_hint` may be empty (mDNS-only discovery).
+  [Throws=CopypasteError]
+  PairingQrPayload build_pairing_qr(string fingerprint, string device_id, string device_name, string addr_hint);
+
+  /// Parse a scanned QR payload (scan side). Returns the peer's pairing info,
+  /// including the `pake_password` to feed into the PAKE initiator flow.
+  /// Throws `DecryptionFailed` (reused as a generic parse error) if the payload
+  /// is malformed or uses an unsupported version.
+  [Throws=CopypasteError]
+  ScannedPairing parse_pairing_qr(string payload);
+
   // Version + ABI compatibility check.
   // Kotlin calls these on startup to confirm it is talking to a compatible
   // Rust core. Bump UNIFFI_ABI_VERSION (in src/version.rs) whenever the
@@ -89,4 +112,22 @@ interface VersionError {
 dictionary EncryptedBlob {
   sequence<u8> nonce;
   sequence<u8> ciphertext;
+};
+
+// Result of `build_pairing_qr`: the encoded QR string to display plus the PAKE
+// password derived from the embedded token (the displaying device needs it to
+// answer the scanner's handshake).
+dictionary PairingQrPayload {
+  string qr;
+  string pake_password;
+};
+
+// Result of `parse_pairing_qr`: the peer's pairing material recovered from a
+// scanned QR. `pake_password` is fed into the PAKE initiator flow.
+dictionary ScannedPairing {
+  string fingerprint;
+  string device_id;
+  string device_name;
+  string addr_hint;
+  string pake_password;
 };
