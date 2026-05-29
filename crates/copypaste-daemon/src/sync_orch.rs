@@ -27,8 +27,8 @@ use tracing::{debug, info, warn};
 
 use copypaste_core::{
     build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2, encrypt_for_cloud,
-    encrypt_item_with_aad, insert_item, upsert_fts, ClipboardItem, Database, SyncKey,
-    AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
+    encrypt_item_with_aad, ClipboardItem, Database, MigrationState, SyncKey, AAD_SCHEMA_VERSION_V4,
+    ITEM_KEY_VERSION_CURRENT, NONCE_SIZE,
 };
 use copypaste_sync::{
     merge::{local_to_wire, resolve, wire_to_local, MergeOutcome},
@@ -147,7 +147,17 @@ pub async fn run(
                         // key so a paired peer can decrypt it. Falls back to the
                         // raw at-rest ciphertext when no shared key is available.
                         if let Some(ref crypto) = crypto {
-                            rekey_outbound(crypto, &mut wire);
+                            // sync H2: if a shared key is present but re-keying
+                            // fails, DROP the item — forwarding raw at-rest
+                            // ciphertext would land a permanently-undecryptable
+                            // row on the peer that it counts as synced.
+                            if rekey_outbound(crypto, &mut wire) == RekeyOutcome::Failed {
+                                warn!(
+                                    item_id = %wire.id,
+                                    "sync_orch: dropping local item — re-key failed (would be undecryptable on peer)"
+                                );
+                                continue;
+                            }
                         }
                         debug!(item_id = %wire.id, "sync_orch: forwarding local item to transport");
                         if let Err(e) = outbound_tx.send(wire).await {
@@ -222,34 +232,29 @@ pub async fn merge_incoming_with_crypto(
     }
 
     let db_guard = db.lock().await;
-    // Snapshot local rows once so we can compare every incoming item without
-    // re-querying. History is bounded by the daemon's `history_limit`, so
-    // this is cheap (low thousands of rows in practice).
-    let local: Vec<ClipboardItem> = copypaste_core::get_page(&db_guard, 10_000, 0)
-        .map_err(|e| anyhow::anyhow!("sync_orch: get_page: {e}"))?;
-    let local_by_id: std::collections::HashMap<&str, &ClipboardItem> =
-        local.iter().map(|i| (i.id.as_str(), i)).collect();
 
     let mut upserted = 0usize;
     for wire in items {
-        let exists = local_by_id.contains_key(wire.id.as_str());
-        let take_remote = match local_by_id.get(wire.id.as_str()) {
-            Some(existing) => matches!(resolve(existing, &wire), MergeOutcome::TakeRemote),
+        // M3: look up the specific row by id rather than snapshotting a capped
+        // page. A `get_page(.., 10_000, 0)` snapshot misses rows past row 10k,
+        // so an incoming update for such an item would be treated as new and
+        // then lost on the PK conflict at insert time.
+        let existing = match copypaste_core::get_item_by_id(&db_guard, &wire.id) {
+            Ok(row) => row,
+            Err(e) => {
+                warn!(item_id = %wire.id, "sync_orch: get_item_by_id failed: {e}");
+                continue;
+            }
+        };
+        let exists = existing.is_some();
+        let take_remote = match existing.as_ref() {
+            Some(local) => matches!(resolve(local, &wire), MergeOutcome::TakeRemote),
             None => true,
         };
 
         if !take_remote {
             debug!(item_id = %wire.id, "sync_orch: LWW kept local");
             continue;
-        }
-
-        // `clipboard_items.id` is the PK and `insert_item` uses plain INSERT
-        // (not REPLACE), so existing rows must be deleted first.
-        if exists {
-            if let Err(e) = copypaste_core::delete_item(&db_guard, &wire.id) {
-                warn!(item_id = %wire.id, "sync_orch: delete before reinsert failed: {e}");
-                continue;
-            }
         }
 
         // P2P Phase 3: unwrap the shared-key payload into a row encrypted under
@@ -266,25 +271,95 @@ pub async fn merge_incoming_with_crypto(
             None => (wire_to_local(wire), None),
         };
 
-        match insert_item(&db_guard, &to_insert) {
+        // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
+        // ran `delete_item` then a separate `insert_item`; if the insert failed
+        // the row was lost. We wrap delete + insert + FTS in a single
+        // transaction so a failed insert rolls back the delete and leaves the
+        // old row (and its FTS entry) intact. Mirrors `insert_item_with_fts`'s
+        // `unchecked_transaction` approach (we can't reuse it directly because
+        // it does plain INSERT with dedup-on-conflict rather than replace).
+        let fts_text = fts_plaintext.and_then(|pt| String::from_utf8(pt).ok());
+        match replace_item_atomic(&db_guard, exists, &to_insert, fts_text.as_deref()) {
             Ok(()) => {
                 debug!(item_id = %to_insert.id, "sync_orch: upserted incoming item");
-                // Index the plaintext for text items so search + history preview
-                // work for synced rows (the receiver never saw the plaintext at
-                // capture time, so nothing populated FTS for it yet).
-                if let Some(pt) = fts_plaintext {
-                    if let Ok(s) = String::from_utf8(pt) {
-                        if let Err(e) = upsert_fts(&db_guard, &to_insert.id, &s) {
-                            warn!(item_id = %to_insert.id, "sync_orch: fts upsert failed: {e}");
-                        }
-                    }
-                }
                 upserted += 1;
             }
-            Err(e) => warn!(item_id = %to_insert.id, "sync_orch: insert failed: {e}"),
+            Err(e) => warn!(item_id = %to_insert.id, "sync_orch: atomic replace failed: {e}"),
         }
     }
     Ok(upserted)
+}
+
+/// Atomically replace (or insert) a clipboard row and its FTS index for the
+/// sync merge path (sync M1).
+///
+/// Runs DELETE (when `existed`) + INSERT + FTS rewrite inside one
+/// `unchecked_transaction`, so a failed insert rolls the whole thing back and
+/// the prior row survives intact. Unlike `insert_item` / `insert_item_with_fts`
+/// in core (plain INSERT, dedup-on-conflict), this path is a true replace keyed
+/// on the primary key `id`, which is what LWW `TakeRemote` requires.
+///
+/// `fts_text` is the already-decrypted plaintext to index; `None`/empty skips
+/// FTS (e.g. verbatim or image rows). The stored `key_version` mirrors what the
+/// non-atomic path wrote (`insert_item` stamps the current item key version).
+fn replace_item_atomic(
+    db: &Database,
+    existed: bool,
+    item: &ClipboardItem,
+    fts_text: Option<&str>,
+) -> anyhow::Result<()> {
+    use rusqlite::params;
+
+    // Honour the same write gate the core `insert_item` enforces: while the v4
+    // key-version sweep is running, reject writes so a key_version=2 row can't
+    // corrupt the cursor-based resume.
+    if matches!(db.migration_state()?, MigrationState::InProgress { .. }) {
+        anyhow::bail!("sync_orch: refusing write while v4 migration is in progress");
+    }
+
+    let tx = db.conn().unchecked_transaction()?;
+    if existed {
+        tx.execute(
+            "DELETE FROM clipboard_items WHERE id = ?1",
+            params![item.id],
+        )?;
+    }
+    tx.execute(
+        "INSERT INTO clipboard_items
+         (id, item_id, content_type, content, content_nonce, blob_ref,
+          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+          content_hash, origin_device_id, key_version, pinned)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+        params![
+            item.id,
+            item.item_id,
+            item.content_type,
+            item.content,
+            item.content_nonce,
+            item.blob_ref,
+            item.is_sensitive as i64,
+            item.is_synced as i64,
+            item.lamport_ts,
+            item.wall_time,
+            item.expires_at,
+            item.app_bundle_id,
+            item.content_hash,
+            item.origin_device_id,
+            ITEM_KEY_VERSION_CURRENT,
+            item.pinned as i64,
+        ],
+    )?;
+    if let Some(text) = fts_text {
+        if !text.is_empty() {
+            tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![item.id])?;
+            tx.execute(
+                "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, ?2)",
+                params![item.id, text],
+            )?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 /// Build the set of local items to push to a peer that has just connected
@@ -311,14 +386,33 @@ pub fn catchup_items(db: &Database, device_id: &str, crypto: &SyncCrypto) -> Vec
     let mut out = Vec::with_capacity(local.len());
     for item in &local {
         let mut wire = local_to_wire(item, device_id);
-        rekey_outbound(crypto, &mut wire);
-        // Only forward items we could actually re-key (text under the shared
-        // key); a still-locally-encrypted payload is useless to the peer.
-        if wire.content_nonce.is_none() && wire.content.is_some() {
+        // Only forward items we could actually re-key under the shared key; a
+        // still-locally-encrypted (NotApplicable) or failed payload is useless
+        // — or worse, undecryptable — to the peer (sync H2).
+        if rekey_outbound(crypto, &mut wire) == RekeyOutcome::Rewrapped {
             out.push(wire);
         }
     }
     out
+}
+
+/// Outcome of an attempt to re-key an outgoing item under the shared sync key.
+#[derive(Debug, PartialEq, Eq)]
+enum RekeyOutcome {
+    /// The payload was successfully re-wrapped under the shared sync key — the
+    /// wire item is decryptable by the paired peer and safe to forward.
+    Rewrapped,
+    /// The item is not a re-key candidate (non-text, no content/nonce, or no
+    /// shared key is available). The wire item is left unchanged and follows
+    /// the legacy path — it may carry raw at-rest ciphertext (a no-crypto /
+    /// legacy peer expects that) or be an image chunk handled elsewhere.
+    NotApplicable,
+    /// A shared key WAS available and the item WAS a candidate, but re-keying
+    /// failed (wrong nonce length, local-decrypt, or shared-encrypt error). The
+    /// wire item still carries raw at-rest ciphertext that the peer can never
+    /// decrypt — the caller MUST drop it rather than forward a permanently
+    /// undecryptable row (sync H2).
+    Failed,
 }
 
 /// Re-encrypt an outgoing item's payload under the shared content sync key so a
@@ -331,24 +425,33 @@ pub fn catchup_items(db: &Database, device_id: &str, crypto: &SyncCrypto) -> Vec
 /// is placed in `wire.content` and `wire.content_nonce` is cleared to `None`,
 /// which the receiver uses as the "sync-key-wrapped" marker.
 ///
-/// On any failure (no shared key, no content, non-text item, decrypt failure)
-/// the wire item is left UNCHANGED — it ships its raw at-rest ciphertext, which
-/// a peer cannot decrypt (legacy behaviour). Only text items are re-keyed;
-/// image chunk blobs use a separate per-chunk scheme (deferred).
-fn rekey_outbound(crypto: &SyncCrypto, wire: &mut WireItem) {
+/// Returns [`RekeyOutcome`]:
+/// * [`RekeyOutcome::Rewrapped`] — payload re-wrapped, safe to forward.
+/// * [`RekeyOutcome::NotApplicable`] — non-text, no content/nonce, or no shared
+///   key: the wire item is left UNCHANGED and follows the legacy path.
+/// * [`RekeyOutcome::Failed`] — a shared key was present but the crypto step
+///   failed; the wire still carries raw at-rest ciphertext the peer cannot
+///   decrypt, so the caller must DROP it (sync H2).
+///
+/// Only text items are re-keyed; image chunk blobs use a separate per-chunk
+/// scheme (deferred).
+fn rekey_outbound(crypto: &SyncCrypto, wire: &mut WireItem) -> RekeyOutcome {
     if wire.content_type != "text" {
-        return;
+        return RekeyOutcome::NotApplicable;
     }
     let Some(shared) = crypto.shared_sync_key() else {
-        return;
+        return RekeyOutcome::NotApplicable;
     };
     let (Some(ciphertext), Some(nonce_vec)) = (wire.content.as_ref(), wire.content_nonce.as_ref())
     else {
-        return;
+        return RekeyOutcome::NotApplicable;
     };
+    // From here on a shared key IS present and the item IS a re-key candidate,
+    // so any failure must surface as `Failed` (drop), never silent forward.
     let mut nonce = [0u8; NONCE_SIZE];
     if nonce_vec.len() != NONCE_SIZE {
-        return;
+        warn!(item_id = %wire.item_id, "sync_orch: rekey_outbound wrong nonce length, dropping");
+        return RekeyOutcome::Failed;
     }
     nonce.copy_from_slice(nonce_vec);
 
@@ -363,7 +466,7 @@ fn rekey_outbound(crypto: &SyncCrypto, wire: &mut WireItem) {
         Ok(pt) => pt,
         Err(e) => {
             warn!(item_id = %wire.item_id, "sync_orch: rekey_outbound local-decrypt failed: {e}");
-            return;
+            return RekeyOutcome::Failed;
         }
     };
 
@@ -373,9 +476,11 @@ fn rekey_outbound(crypto: &SyncCrypto, wire: &mut WireItem) {
             // The cloud blob is self-framed (nonce prefix), so there is no
             // separate item-level nonce. `None` is the receiver's unwrap marker.
             wire.content_nonce = None;
+            RekeyOutcome::Rewrapped
         }
         Err(e) => {
             warn!(item_id = %wire.item_id, "sync_orch: rekey_outbound shared-encrypt failed: {e}");
+            RekeyOutcome::Failed
         }
     }
 }
@@ -435,6 +540,7 @@ fn rekey_inbound(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use copypaste_core::insert_item;
 
     fn make_db() -> Arc<Mutex<Database>> {
         Arc::new(Mutex::new(

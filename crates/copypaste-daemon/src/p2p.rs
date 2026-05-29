@@ -850,17 +850,44 @@ async fn push_catchup(catchup: &CatchupProvider, sink: &mpsc::Sender<WireItem>) 
 ///
 /// Peers whose sender has been closed (disconnected) are removed from
 /// `peer_sinks`.
+///
+/// M2: the `peer_sinks` lock is held only long enough to *snapshot* the
+/// senders (each `mpsc::Sender` is cheap to clone) — never across the actual
+/// send. The previous implementation held the lock across `tx.send().await`,
+/// so a single slow/backpressured peer stalled all connection management
+/// (accept/dial loops insert and remove sinks under the same lock). We now use
+/// the non-blocking `try_send` on the dropped-guard snapshot: a `Closed`
+/// channel means the peer is gone (pruned), while a transiently `Full` channel
+/// (bounded at 64) just drops this best-effort fanout item for that peer — the
+/// sync-on-connect catch-up replay reconciles it on the next reconnect, and we
+/// must not evict a live peer merely for being momentarily behind.
 async fn fanout_to_peers(item: &WireItem, peer_sinks: &PeerSinks) {
-    let mut dead_keys: Vec<DeviceFingerprint> = Vec::new();
-    {
+    // Snapshot (key, sender) pairs under the lock, then release it before sending.
+    let snapshot: Vec<(DeviceFingerprint, mpsc::Sender<WireItem>)> = {
         let sinks = peer_sinks.lock().await;
-        for (key, tx) in sinks.iter() {
-            if tx.send(item.clone()).await.is_err() {
+        sinks
+            .iter()
+            .map(|(key, tx)| (key.clone(), tx.clone()))
+            .collect()
+    };
+
+    let mut dead_keys: Vec<DeviceFingerprint> = Vec::new();
+    for (key, tx) in snapshot {
+        match tx.try_send(item.clone()) {
+            Ok(()) => {}
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                tracing::warn!(
+                    peer = %key,
+                    "peer sink full — dropping fanout item (catch-up will reconcile)"
+                );
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => {
                 tracing::debug!(peer = %key, "peer sink closed — will prune");
-                dead_keys.push(key.clone());
+                dead_keys.push(key);
             }
         }
     }
+
     if !dead_keys.is_empty() {
         let mut sinks = peer_sinks.lock().await;
         for key in dead_keys {

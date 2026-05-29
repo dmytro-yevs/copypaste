@@ -47,6 +47,27 @@ pub const MAX_CONNECT_ATTEMPTS: u32 = 4;
 /// (that's the relay client's job, see `copypaste_sync::backoff`).
 pub const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
+/// Maximum size of a single length-delimited data-plane frame (16 MiB).
+///
+/// The data plane carries serialized [`WireItem`]s. The largest payload is an
+/// image item whose ciphertext the relay caps at 10 MiB
+/// (`RELAY_MAX_ITEM_BYTES`); base64/JSON framing of that blob plus item
+/// metadata can roughly inflate it, so we size the ceiling to match
+/// `copypaste_sync::engine`'s `MAX_FRAME_SIZE` (16 MiB) rather than relying on
+/// tokio-util's silent 8 MiB `LengthDelimitedCodec::new()` default, which would
+/// truncate large images and stall the link. A peer that sends a frame above
+/// this ceiling has its connection torn down (DoS guard).
+pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
+/// Build the length-delimited codec used for every data-plane stream, with the
+/// frame ceiling explicitly set to [`MAX_FRAME_BYTES`] (mirrors the bootstrap
+/// handshake's `length_codec()` so both planes share one bound).
+fn length_codec() -> LengthDelimitedCodec {
+    LengthDelimitedCodec::builder()
+        .max_frame_length(MAX_FRAME_BYTES)
+        .new_codec()
+}
+
 use crate::cert::{fingerprint_of, SelfSignedCert};
 use crate::verifier::PeerCertVerifier;
 
@@ -357,7 +378,7 @@ impl PeerTransport {
         }
         tracing::info!(peer_addr = %peer_addr, peer_fingerprint = %peer_fp, "peer authenticated");
 
-        let framed = Framed::new(tls_stream, LengthDelimitedCodec::new());
+        let framed = Framed::new(tls_stream, length_codec());
         Ok((peer_addr, peer_fp, framed))
     }
 
@@ -409,7 +430,7 @@ impl PeerTransport {
         };
         tracing::info!(peer_addr = %addr, expected_fingerprint = %expected_fingerprint, "peer authenticated");
 
-        let framed = Framed::new(tls_stream, LengthDelimitedCodec::new());
+        let framed = Framed::new(tls_stream, length_codec());
         Ok(framed)
     }
 
