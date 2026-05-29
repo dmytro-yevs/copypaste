@@ -5,19 +5,19 @@
     "sync_key_hex": "3335b72a2bcc4adaf3e1ed2d8e1e64a82eb08a05472d5b665be1ddeb640aff5b",
     "vectors": [
       {
-        "blob_hex": "aa32b4699eaaf59c13164d1275685c93ba37bb91b82005b764094dcb02bc371f7e12a30d7e8f498da0ef06901d8e9e2a73bb39bb35b4ed991104119b3531a693965f501fc2b86f94",
+        "blob_hex": "1cadda2378ac3e31d0c8813c5f4c62fc0073961f254e112b115c491031e4824149a16b4fa69e793dffee87636f24bc4b8586fe90ddb3b835afe748255ef12ff35b06c0b16b57b182",
         "item_id": "conformance-cloud-ascii",
         "label": "ascii",
         "plaintext_utf8": "hello cross-language conformance"
       },
       {
-        "blob_hex": "86707d639715f30ebcbc3f0b1219d14216bd739958eea2cc35ea8cebfcfc51cb0570ee609ede86c53db6a17203ed90e56821c18d55db9394d051bdedfa7586c5dacf39c019e750a722c955fa9321e97b755cb0db232d51",
+        "blob_hex": "9c0de51564440172891e9c166dc53b6a9fe985d50e97fb9a08af1d1808507e2abff09a3ffc5c91c4fb21dec75b34f2fe946f6b5055b673ef68cf0bfcc2048c3ed86bda3f16699a9ae7d99e6f710f74d748696fa3f7886c",
         "item_id": "conformance-cloud-unicode",
         "label": "unicode",
         "plaintext_utf8": "café ☕ 日本語 🦀 — mixed BMP + astral"
       },
       {
-        "blob_hex": "f38e22951f5e417162d7974f4f205c7c8cfd55cdfe3ae8f209716440d49b98bfc8c90ce054df28df",
+        "blob_hex": "d8bc808386b97e658d6175121969080b114ee90429943372de0161e811cd869dd93c5382d4f682f5",
         "item_id": "conformance-cloud-empty",
         "label": "empty",
         "plaintext_utf8": ""
@@ -30,27 +30,27 @@
     "note": "encrypt_text/decrypt_text path. key_hex is the raw 32-byte device key.",
     "vectors": [
       {
-        "ciphertext_hex": "fcfefc7a3002f4b4e27a65880bd587dd942d34eecdec4ac209e4cd7f853db1e8fefc82f5d0ac0924529051d2c836e4ac",
+        "ciphertext_hex": "1cec80caaab3c26028bbe08cd0faad64e0dfd3efdab7c7dbe4c1f1aa74c93f1169417101a79f798da7565f235ce56feb",
         "item_id": "conformance-item-ascii",
         "key_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
         "label": "ascii",
-        "nonce_hex": "52b164961a3eef9875c9ca36a976cdb6a823cb924b0d04a8",
+        "nonce_hex": "f27c67a956b0c8626df0c6ea62e58f26189fa34f7e34dfe0",
         "plaintext_utf8": "hello cross-language conformance"
       },
       {
-        "ciphertext_hex": "e194a8bcf5a4a87c071acee51b10bd440a25da7170123f9430735b3226a87e1dc1f8b27d53e8b60b8fa6e95f8a2d2782b77facc131b92b2e6924a2065e652d",
+        "ciphertext_hex": "9662026b10aaa475537be13ca0d7e8f5aa07c81d189f6d6ac0dcab37fc4c8f52dc25c7ff93d85de597d237e93a8ed39756e1614d96150371ac0d157c2f2d3d",
         "item_id": "conformance-item-unicode",
         "key_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
         "label": "unicode",
-        "nonce_hex": "a0a913510f2fe58bb18a583d2915972b75e3c31b4321840b",
+        "nonce_hex": "4848c3e6d545418b81e8273cf0403fc2400f893069fb6872",
         "plaintext_utf8": "café ☕ 日本語 🦀 — mixed BMP + astral"
       },
       {
-        "ciphertext_hex": "0c3a7cec489880194a468a8b7c47bb8d",
+        "ciphertext_hex": "f8c519c8cc49d9365508584fd5a53154",
         "item_id": "conformance-item-empty",
         "key_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
         "label": "empty",
-        "nonce_hex": "c6cc6f70fcd4a3e47576eb91d80436e063458690a54a3918",
+        "nonce_hex": "fa4309822cd219825a8fa781d4ed405d00443b76afdf7e86",
         "plaintext_utf8": ""
       }
     ]
