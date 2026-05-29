@@ -276,6 +276,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     #[cfg(feature = "cloud-sync")]
     let cloud_last_sync_ms: std::sync::Arc<std::sync::atomic::AtomicI64> =
         std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
+    // BUG 2: real GoTrue auth state, published by the cloud loops and read by the
+    // IPC `get_sync_status` handler. Starts `false` — we are not signed in until
+    // `start_cloud` resolves a bearer. Previously `get_sync_status` hardcoded
+    // `signed_in = supabase_configured`, so it reported "signed in" even after a
+    // `CloudError::AuthFailed` aborted cloud sync.
+    #[cfg(feature = "cloud-sync")]
+    let cloud_signed_in: std::sync::Arc<std::sync::atomic::AtomicBool> =
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     // D2 (IPC): pass a token clone so the accept loop exits on shutdown.
     // DUP-ON-COPY fix: build IpcServer before spawning so we can extract
@@ -318,8 +326,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         }
         #[cfg(feature = "cloud-sync")]
         {
-            server =
-                server.with_cloud_sync_state(cloud_sync_key.clone(), cloud_last_sync_ms.clone());
+            server = server.with_cloud_sync_state(
+                cloud_sync_key.clone(),
+                cloud_last_sync_ms.clone(),
+                cloud_signed_in.clone(),
+            );
         }
         let swcc = server.self_write_change_count.clone();
         // P2P Phase 2: grab a handle to the shared slot holding this daemon's
@@ -506,6 +517,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 cloud_sync_key.clone(),
                 cloud_last_sync_ms.clone(),
                 local_key_arc.clone(),
+                cloud_signed_in.clone(),
             )
             .await
             {
