@@ -6,7 +6,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/dmytro-yevs/copypaste/main/scripts/release/install.sh | bash -s -- 0.5.1
 #
 # What it does:
-#   1. Downloads CopyPaste-vv<version>-macos-arm64.dmg from the GitHub release.
+#   1. Downloads CopyPaste-v<version>-macos-arm64.dmg from the GitHub release.
 #   2. Mounts, copies CopyPaste.app to /Applications, drops quarantine attr
 #      (ad-hoc signed builds would otherwise trip Gatekeeper on first launch).
 #   3. Loads ~/Library/LaunchAgents/com.copypaste.daemon.plist if present.
@@ -28,9 +28,9 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
 fi
 
 # Resolve "latest" by querying the GitHub API for the newest release tag, then
-# build the canonical asset URL. The published asset name embeds the version
-# with a double-v prefix: CopyPaste-vv<version>-macos-arm64.dmg (the release
-# tag already carries a leading 'v').
+# build the canonical asset URL. The published asset name embeds the bare
+# version with a single-v prefix: CopyPaste-v<version>-macos-arm64.dmg (the
+# release tag carries a leading 'v'; the asset name does not double it).
 if [[ "$VERSION" == "latest" ]]; then
     TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
         | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
@@ -46,7 +46,7 @@ else
     VER_NO_V="${VERSION#v}"
     DISPLAY_VERSION="v${VER_NO_V}"
 fi
-ASSET_URL="https://github.com/${REPO}/releases/download/v${VER_NO_V}/${APP_NAME}-vv${VER_NO_V}-macos-arm64.dmg"
+ASSET_URL="https://github.com/${REPO}/releases/download/v${VER_NO_V}/${APP_NAME}-v${VER_NO_V}-macos-arm64.dmg"
 
 TMP="$(mktemp -d)"
 DMG="${TMP}/${APP_NAME}.dmg"
