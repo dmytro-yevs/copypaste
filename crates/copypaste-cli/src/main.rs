@@ -147,6 +147,37 @@ enum Commands {
         #[arg(long)]
         reindex_only: bool,
     },
+    /// Configure and diagnose Supabase cloud sync (setup/status/test/setup-sql)
+    Cloud {
+        #[command(subcommand)]
+        action: CloudAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum CloudAction {
+    /// Store the Supabase project URL + anon key + account credentials in the daemon config
+    Setup {
+        /// Supabase project URL (must start with https://)
+        #[arg(long)]
+        url: String,
+        /// Supabase anon/public API key (starts with eyJ…)
+        #[arg(long)]
+        anon_key: String,
+        /// Account email for the authenticated GoTrue sign-in (required by RLS)
+        #[arg(long)]
+        email: String,
+        /// Account password. If omitted, read from the SUPABASE_PASSWORD env var
+        /// or prompted on stdin — never pass it as a flag (shell-history leak).
+        #[arg(long)]
+        password: Option<String>,
+    },
+    /// Show current cloud-sync status (configured / signed in / last sync)
+    Status,
+    /// Validate the configured Supabase connection end-to-end
+    Test,
+    /// Print the idempotent provisioning SQL (schema + RLS) for the Supabase SQL Editor
+    SetupSql,
 }
 
 #[derive(Subcommand)]
@@ -242,6 +273,17 @@ fn main() {
                 reindex_only,
             },
         ),
+        Commands::Cloud { action } => match action {
+            CloudAction::Setup {
+                url,
+                anon_key,
+                email,
+                password,
+            } => commands::cloud::setup(&socket, &url, &anon_key, &email, password),
+            CloudAction::Status => commands::cloud::status(&socket),
+            CloudAction::Test => commands::cloud::test(&socket),
+            CloudAction::SetupSql => commands::cloud::setup_sql(),
+        },
     };
 
     if let Err(e) = result {

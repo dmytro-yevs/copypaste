@@ -55,6 +55,18 @@ pub struct AppConfig {
     pub supabase_url: Option<String>,
     #[serde(default)]
     pub supabase_anon_key: Option<String>,
+    /// GoTrue account email for the `authenticated` scope sign-in. Persisted
+    /// (not env-only) so the documented `copypaste cloud setup` flow yields a
+    /// daemon that authenticates and passes the `authenticated`-only RLS
+    /// policies — anon-key-only requests are rejected by RLS and sync silently
+    /// fails. Stored in the same `0600` `config.json` as `supabase_anon_key`.
+    #[serde(default)]
+    pub supabase_email: Option<String>,
+    /// GoTrue account password. See [`Self::supabase_email`]. Never logged; the
+    /// `Debug` derive is acceptable because the daemon does not debug-print the
+    /// whole config (only individual non-secret fields are surfaced over IPC).
+    #[serde(default)]
+    pub supabase_password: Option<String>,
 }
 
 fn config_path() -> Option<std::path::PathBuf> {
@@ -1525,8 +1537,12 @@ impl IpcServer {
                 let supabase_url_val: Option<String> = std::env::var("SUPABASE_URL")
                     .ok()
                     .or_else(|| app_cfg.supabase_url.clone());
-                // SUPABASE_EMAIL is env-only (never persisted to config file).
-                let email_val: Option<String> = std::env::var("SUPABASE_EMAIL").ok();
+                // Email: env var first, else the persisted config (written by
+                // `copypaste cloud setup`). We surface only the email — never the
+                // password, anon key, or passphrase.
+                let email_val: Option<String> = std::env::var("SUPABASE_EMAIL")
+                    .ok()
+                    .or_else(|| app_cfg.supabase_email.clone());
                 Response::ok(
                     req.id,
                     serde_json::json!({
@@ -1540,10 +1556,22 @@ impl IpcServer {
                 )
             }
 
+            // `cloud_test_connection` validates the configured Supabase
+            // credentials end-to-end so the UI/CLI can give a precise, actionable
+            // diagnostic instead of leaving the user to guess why sync is silent.
+            // It performs a single cheap `GET /rest/v1/clipboard_items?limit=0`
+            // with the anon key (+ optional email/password bearer) and classifies
+            // the outcome (URL reachable? key valid? table present? RLS ok?).
+            #[cfg(feature = "cloud-sync")]
+            "cloud_test_connection" => {
+                let result = test_cloud_connection().await;
+                Response::ok(req.id, result)
+            }
+
             // When cloud-sync is not compiled in, return not_implemented so
             // the UI gets a machine-readable code rather than "method not found".
             #[cfg(not(feature = "cloud-sync"))]
-            "set_sync_passphrase" | "get_sync_status" => {
+            "set_sync_passphrase" | "get_sync_status" | "cloud_test_connection" => {
                 Response::not_implemented(req.id, "cloud-sync")
             }
             "set_private_mode" => {
@@ -2902,6 +2930,191 @@ fn map_content_type_to_uti(content_type: &str) -> String {
         "text" => "public.utf8-plain-text".to_string(),
         _ => "public.data".to_string(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Cloud connection diagnostics
+// ---------------------------------------------------------------------------
+
+/// Probe the configured Supabase project and return a structured diagnostic.
+///
+/// This is what backs the `cloud_test_connection` IPC method (and `copypaste
+/// cloud test`). It performs at most one authenticated round-trip:
+/// `GET /rest/v1/clipboard_items?limit=0` with the anon key in `apikey` and an
+/// `Authorization: Bearer` header (email/password token when configured, anon
+/// key otherwise). The HTTP outcome is mapped to an actionable message so the
+/// user learns *which* step is wrong (credentials missing, URL unreachable,
+/// key invalid, table not provisioned, RLS misconfigured) rather than seeing
+/// silent no-op sync.
+///
+/// The returned JSON shape is stable (consumed by the CLI/UI):
+/// ```json
+/// { "ok": bool, "configured": bool, "stage": "<step>", "message": "<human>" }
+/// ```
+/// `ok` is the single source of truth ("is cloud sync ready?"); `stage` and
+/// `message` are for display. No secrets are ever included in the output.
+#[cfg(feature = "cloud-sync")]
+async fn test_cloud_connection() -> serde_json::Value {
+    use crate::cloud::CloudConfig;
+
+    // Resolve credentials the same way the daemon's cloud orchestrator does
+    // (env vars first, then the persisted AppConfig the UI writes).
+    let cfg = match CloudConfig::from_env() {
+        Some(c) => c,
+        None => {
+            return serde_json::json!({
+                "ok": false,
+                "configured": false,
+                "stage": "config",
+                "message": "Supabase is not configured. Set the project URL and anon key \
+                            (Settings → Sync, or `copypaste cloud setup`).",
+            });
+        }
+    };
+
+    // Mirror the daemon's HTTPS-only gate so the diagnostic matches what
+    // start_cloud would actually accept.
+    if !cfg
+        .supabase_url
+        .to_ascii_lowercase()
+        .starts_with("https://")
+    {
+        return serde_json::json!({
+            "ok": false,
+            "configured": true,
+            "stage": "url",
+            "message": format!(
+                "Supabase URL must use https:// (got {}). Cloud sync refuses plain http.",
+                cfg.supabase_url
+            ),
+        });
+    }
+
+    // Bearer: prefer an email/password GoTrue token (authenticated scope, the
+    // scope RLS expects), falling back to the anon key. Credentials come from
+    // `CloudConfig` (env vars first, then the persisted `0600` config written by
+    // `copypaste cloud setup`) — the same resolution the orchestrator uses. We
+    // do NOT fail the whole probe if sign-in fails — we report it as the failing
+    // stage so the user can fix credentials specifically.
+    let (bearer, signed_in) = match (cfg.email.as_deref(), cfg.password.as_deref()) {
+        (Some(email), Some(password)) if !email.is_empty() && !password.is_empty() => {
+            let auth = copypaste_supabase::auth::AuthClient::new(&cfg.supabase_url, &cfg.anon_key);
+            match auth.sign_in(email, password).await {
+                Ok(session) => (session.access_token, true),
+                Err(e) => {
+                    return serde_json::json!({
+                        "ok": false,
+                        "configured": true,
+                        "stage": "auth",
+                        "message": format!(
+                            "Sign-in failed for {email}: {e}. Re-check the email/password \
+                             (run `copypaste cloud setup` again, or set SUPABASE_EMAIL / \
+                             SUPABASE_PASSWORD), and that the user is confirmed."
+                        ),
+                    });
+                }
+            }
+        }
+        _ => (cfg.anon_key.clone(), false),
+    };
+
+    // One cheap REST round-trip. `limit=0` returns an empty array on success
+    // without transferring any rows, so it is safe even on a large table.
+    let url = format!("{}/rest/v1/clipboard_items?limit=0", cfg.supabase_url);
+    let client = reqwest::Client::new();
+    let resp = match client
+        .get(&url)
+        .header("apikey", &cfg.anon_key)
+        .header("Authorization", format!("Bearer {bearer}"))
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return serde_json::json!({
+                "ok": false,
+                "configured": true,
+                "stage": "network",
+                "message": format!(
+                    "Could not reach {}: {e}. Check the URL and your network/proxy.",
+                    cfg.supabase_url
+                ),
+            });
+        }
+    };
+
+    let status = resp.status();
+    let code = status.as_u16();
+    if status.is_success() {
+        let scope = if signed_in {
+            "signed in (authenticated scope)"
+        } else {
+            "anon key (sign in for full scope)"
+        };
+        return serde_json::json!({
+            "ok": true,
+            "configured": true,
+            "stage": "done",
+            "message": format!("Connected to Supabase — table reachable, {scope}."),
+        });
+    }
+
+    // Classify the common failure HTTP codes into actionable guidance.
+    let body = resp.text().await.unwrap_or_default();
+    let (stage, message) = match code {
+        // 401 has two distinct root causes. When we already hold an
+        // authenticated bearer (`signed_in`), the anon key itself must be
+        // wrong/expired. When the probe used only the anon key (no sign-in),
+        // the project's `authenticated`-only RLS rejects the request and the
+        // fix is to supply email/password, not to re-copy the anon key.
+        401 if signed_in => (
+            "auth",
+            "401 Unauthorized — the anon key is wrong or expired. Re-copy it from \
+             Supabase → Project Settings → API."
+                .to_string(),
+        ),
+        401 => (
+            "auth",
+            "401 Unauthorized — the request used the anon key with no signed-in \
+             session, and the table's RLS grants only the `authenticated` role. \
+             Provide email/password (run `copypaste cloud setup` and supply them, \
+             or set SUPABASE_EMAIL / SUPABASE_PASSWORD) so the daemon authenticates."
+                .to_string(),
+        ),
+        404 => (
+            "schema",
+            "404 Not Found — the clipboard_items table is missing. Run the \
+             provisioning SQL: `copypaste cloud setup-sql` then paste it into the \
+             Supabase SQL Editor."
+                .to_string(),
+        ),
+        // PostgREST returns 400/406 with a 'relation does not exist' hint when
+        // the table is absent under some configs; surface the body for clarity.
+        400 | 406 => (
+            "schema",
+            format!(
+                "{code} from PostgREST — the table may be missing or misconfigured. \
+                 Run `copypaste cloud setup-sql`. Server said: {}",
+                body.trim()
+            ),
+        ),
+        403 => (
+            "rls",
+            "403 Forbidden — row-level security rejected the request. Re-run the RLS \
+             part of `copypaste cloud setup-sql`."
+                .to_string(),
+        ),
+        _ => (
+            "http",
+            format!("Unexpected HTTP {code} from Supabase: {}", body.trim()),
+        ),
+    };
+    serde_json::json!({
+        "ok": false,
+        "configured": true,
+        "stage": stage,
+        "message": message,
+    })
 }
 
 #[cfg(test)]

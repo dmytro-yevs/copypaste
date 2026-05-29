@@ -1,5 +1,6 @@
 pub mod backup;
 pub mod clear;
+pub mod cloud;
 pub mod common;
 pub mod copy;
 pub mod count;

@@ -107,6 +107,12 @@ pub struct CloudConfig {
     pub supabase_url: String,
     /// Supabase anonymous/public API key.
     pub anon_key: String,
+    /// GoTrue account email for the `authenticated`-scope password grant.
+    /// `None` falls back to anon-key-only operation (which the project's
+    /// RLS policies reject — see [`resolve_bearer`]).
+    pub email: Option<String>,
+    /// GoTrue account password. Never logged.
+    pub password: Option<String>,
 }
 
 impl CloudConfig {
@@ -119,14 +125,33 @@ impl CloudConfig {
     /// This lets the UI configure Supabase credentials without requiring the
     /// operator to set environment variables manually.
     ///
-    /// **Note**: `SUPABASE_EMAIL` / `SUPABASE_PASSWORD` for GoTrue sign-in are
-    /// intentionally env-only — they are credentials, not configuration, and
-    /// should not be persisted to disk via the config file.
+    /// **Email/password resolution** (for the `authenticated`-scope GoTrue
+    /// sign-in) mirrors the URL/key resolution: `SUPABASE_EMAIL` /
+    /// `SUPABASE_PASSWORD` env vars take precedence, then the persisted
+    /// `AppConfig` (`supabase_email` / `supabase_password`, written by
+    /// `copypaste cloud setup` into the same `0600` `config.json`). Persisting
+    /// them is required so the documented one-command setup yields a daemon
+    /// that authenticates — anon-key-only requests are rejected by the
+    /// `authenticated`-only RLS policies and sync silently fails otherwise.
     ///
     /// **Scheme validation** happens at `start_cloud` time via
     /// [`CloudError::InsecureUrl`], not here.
     pub fn from_env() -> Option<Self> {
-        // Priority 1: environment variables.
+        let app_cfg = crate::ipc::read_config();
+
+        // Email/password: env var wins, else persisted config. Empty values are
+        // treated as absent so a blank env export doesn't shadow stored creds.
+        let nonempty = |s: String| if s.trim().is_empty() { None } else { Some(s) };
+        let email = std::env::var("SUPABASE_EMAIL")
+            .ok()
+            .and_then(nonempty)
+            .or_else(|| app_cfg.supabase_email.clone().and_then(nonempty));
+        let password = std::env::var("SUPABASE_PASSWORD")
+            .ok()
+            .and_then(nonempty)
+            .or_else(|| app_cfg.supabase_password.clone().and_then(nonempty));
+
+        // Priority 1: environment variables for URL + anon key.
         if let (Ok(url), Ok(key)) = (
             std::env::var("SUPABASE_URL"),
             std::env::var("SUPABASE_ANON_KEY"),
@@ -134,15 +159,18 @@ impl CloudConfig {
             return Some(Self {
                 supabase_url: url.trim_end_matches('/').to_owned(),
                 anon_key: key,
+                email,
+                password,
             });
         }
-        // Priority 2: persisted AppConfig (set via the UI).
-        let app_cfg = crate::ipc::read_config();
+        // Priority 2: persisted AppConfig (set via the UI or `cloud setup`).
         let url = app_cfg.supabase_url?;
         let key = app_cfg.supabase_anon_key?;
         Some(Self {
             supabase_url: url.trim_end_matches('/').to_owned(),
             anon_key: key,
+            email,
+            password,
         })
     }
 
@@ -157,6 +185,8 @@ impl CloudConfig {
         Ok(Self {
             supabase_url: trimmed,
             anon_key,
+            email: None,
+            password: None,
         })
     }
 }
@@ -426,23 +456,24 @@ pub async fn start_cloud(
 
 /// Resolve the bearer token for Supabase REST requests.
 ///
+/// Credentials are resolved by [`CloudConfig::from_env`] (env vars first, then
+/// the persisted `0600` config written by `copypaste cloud setup`).
+///
 /// Behaviour matrix:
-/// - Both `SUPABASE_EMAIL` and `SUPABASE_PASSWORD` set:
+/// - Both email and password present:
 ///   - sign-in succeeds → return the access_token (authenticated scope).
 ///   - sign-in fails    → return [`CloudError::AuthFailed`]. We **do not**
 ///     silently fall back to the anon key. The caller (`start_cloud`) will
 ///     abort cloud sync entirely; the operator must either fix the credentials
 ///     or unset them to fall back to the anon key explicitly.
-/// - Neither (or only one) set → use the anon key as bearer. This is the
-///   public-read/anonymous-write scope the project has been deliberately
-///   configured for, so no error.
+/// - Neither (or only one) set → use the anon key as bearer. NOTE: the
+///   project's RLS policies grant only the `authenticated` role, so anon-key
+///   REST requests are rejected. This path exists for explicitly anon-scoped
+///   deployments; the documented setup always supplies email/password.
 async fn resolve_bearer(config: &CloudConfig) -> Result<String, CloudError> {
-    match (
-        std::env::var("SUPABASE_EMAIL"),
-        std::env::var("SUPABASE_PASSWORD"),
-    ) {
-        (Ok(email), Ok(password)) => {
-            match sign_in_with_password(config, &email, &password).await {
+    match (config.email.as_deref(), config.password.as_deref()) {
+        (Some(email), Some(password)) => {
+            match sign_in_with_password(config, email, password).await {
                 Ok(token) => {
                     tracing::info!("cloud-sync: signed in as {email}");
                     Ok(token)
@@ -1052,9 +1083,10 @@ pub(crate) async fn push_item_with_retries(
 }
 
 /// Refresh the bearer token. Currently calls `resolve_bearer`, which re-runs
-/// the email/password sign-in path if those env vars are set, or falls back to
-/// the anon key. Returning the anon key on refresh is intentional — it matches
-/// the initial `start_cloud` behaviour for the no-credentials case.
+/// the email/password sign-in path when credentials are present (env vars or
+/// persisted config), or falls back to the anon key. Returning the anon key on
+/// refresh is intentional — it matches the initial `start_cloud` behaviour for
+/// the no-credentials case.
 async fn refresh_bearer(config: &CloudConfig) -> Result<String, String> {
     resolve_bearer(config).await.map_err(|e| e.to_string())
 }
@@ -1459,6 +1491,8 @@ mod tests {
         let cfg = CloudConfig {
             supabase_url: "https://127.0.0.1:1".to_owned(),
             anon_key: "anon-public-key".to_owned(),
+            email: None,
+            password: None,
         };
 
         // Simulate the email/password path by directly invoking sign-in.
@@ -1496,6 +1530,8 @@ mod tests {
         let bad_cfg = CloudConfig {
             supabase_url: "http://abc.supabase.co".to_owned(),
             anon_key: "anon".to_owned(),
+            email: None,
+            password: None,
         };
         let (tx, _rx) = tokio::sync::broadcast::channel::<ClipboardItem>(8);
         // We cannot easily build a Database in a unit test (it needs a path),
@@ -1652,6 +1688,8 @@ mod tests {
         CloudConfig {
             supabase_url: mockito::server_url(),
             anon_key: "anon-key-for-tests".to_owned(),
+            email: None,
+            password: None,
         }
     }
 
