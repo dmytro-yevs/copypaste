@@ -50,6 +50,7 @@
 
 pub mod bootstrap;
 pub mod cert;
+pub mod connector;
 pub mod discovery;
 pub mod error;
 pub mod interfaces;

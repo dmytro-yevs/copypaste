@@ -321,20 +321,25 @@ impl SyncEngine {
 
         let mut to_upsert: Vec<ClipboardItem> = Vec::new();
 
-        for wire in received_items {
-            // Advance clock with the item's timestamp.
-            // Saturating cast: negative i64 → 0; otherwise the same value.
-            // observe() itself uses saturating_add internally (edge-cases LOW #34).
-            let observed = if wire.lamport_ts < 0 {
+        for mut wire in received_items {
+            // L1: clamp a negative inbound `lamport_ts` at INGESTION, before it
+            // is used for the clock, the LWW merge, or storage. `lamport_ts` is
+            // i64 on the wire/row but u64 in the clock; a malformed/hostile peer
+            // could send a negative value. Previously only the clock-observe
+            // path clamped it while the original negative value still flowed
+            // into `resolve()` and `wire_to_local()` — so a negative ts was
+            // persisted to the row. Clamping the wire item in place fixes all
+            // three consumers at once and guarantees no negative ts is stored.
+            if wire.lamport_ts < 0 {
                 warn!(
                     "received wire item {} with negative lamport_ts {} — clamping to 0",
                     wire.id, wire.lamport_ts
                 );
-                0u64
-            } else {
-                wire.lamport_ts as u64
-            };
-            self.clock.observe(observed);
+                wire.lamport_ts = 0;
+            }
+            // Advance our clock with the (now non-negative) item timestamp.
+            // observe() uses saturating_add internally (edge-cases LOW #34).
+            self.clock.observe(wire.lamport_ts as u64);
 
             if let Some(existing) = local_by_id.get(wire.id.as_str()) {
                 // Item exists locally — apply LWW merge.
@@ -703,8 +708,18 @@ mod tests {
             engine_b.run_session(&mut sb, &items_b),
         );
         // Must not panic — both sides return Ok.
-        assert!(res_a.is_ok());
+        let (_result_a, upsert_a) = res_a.expect("engine A must succeed");
         assert!(res_b.is_ok());
+
+        // L1: A had no items, so it accepts "neg" from B. The stored item's
+        // lamport_ts MUST be clamped to 0 at ingestion — a negative value must
+        // never be persisted to the row.
+        assert_eq!(upsert_a.len(), 1, "A should accept the new item from B");
+        assert_eq!(upsert_a[0].id, "neg");
+        assert_eq!(
+            upsert_a[0].lamport_ts, 0,
+            "negative inbound lamport_ts must be clamped to 0 before storage (L1)"
+        );
     }
 
     #[tokio::test]
