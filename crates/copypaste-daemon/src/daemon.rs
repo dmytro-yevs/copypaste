@@ -236,6 +236,33 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         None
     };
 
+    // CRITICAL-1: generate the mTLS self-signed cert ONCE, here, before both the
+    // IPC server and `start_p2p`. The IPC pairing handlers advertise this cert's
+    // fingerprint (in colon-hex user-facing form) and `start_p2p` makes the
+    // transport present the SAME cert — so a scanning/pairing peer pins exactly
+    // the value the mTLS verifier compares (`fingerprint_of(cert_der)`), instead
+    // of the device-key fingerprint the allowlist never checks.
+    //
+    // `None` when P2P is disabled: no transport runs, so there is no cert to
+    // advertise; the pairing IPC handlers then return a clear error.
+    let p2p_cert: Option<copypaste_p2p::cert::SelfSignedCert> = if p2p_enabled {
+        match copypaste_p2p::cert::SelfSignedCert::generate(&local_device_id) {
+            Ok(cert) => Some(cert),
+            Err(e) => {
+                tracing::warn!("mTLS cert generation failed ({e}); pairing disabled this session");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    // Colon-hex (user-facing) form of the cert fingerprint for the pairing
+    // surface; `display_fingerprint` round-trips back to `fingerprint_of` via
+    // `canonical_fingerprint` at the mTLS boundary.
+    let cert_fingerprint_display: Option<String> = p2p_cert
+        .as_ref()
+        .map(|c| crate::ipc::display_fingerprint(&c.fingerprint()));
+
     #[cfg(unix)]
     let socket_path = paths::socket_path();
 
@@ -255,16 +282,39 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // `self_write_change_count` and wire it into ClipboardMonitor below.
     // When `write_to_pasteboard` runs it stamps the post-write NSPasteboard
     // changeCount into this Arc; the monitor's next `poll()` skips that count.
+    // Broadcast channel: carries newly-inserted clipboard items to any
+    // subscriber (P2P sync, cloud-sync, future extensions). Created BEFORE the
+    // IPC server so the `import` handler can be handed a sender clone (P2P
+    // Phase 3 — imported items are broadcast so they sync like captured ones).
+    //
+    // Capacity 256 (bumped from 64 — audit HIGH #8). The earlier 64-slot
+    // buffer was too small for clipboard bursts (e.g. a rapid `pbcopy` loop
+    // or a P2P peer momentarily backpressured by network jitter): subscribers
+    // would receive `RecvError::Lagged` and silently drop items.
+    let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(256);
+
     #[cfg(unix)]
-    let (self_write_change_count_arc, _ipc_handle) = {
+    let (self_write_change_count_arc, p2p_sync_addr_slot, _ipc_handle) = {
         let mut server = IpcServer::new(
             db.clone(),
             private_mode.clone(),
             local_key_arc.clone(),
             device_public_key_arc.clone(),
-        );
+        )
+        .with_new_item_tx(new_item_tx.clone());
         if let Some(peers) = p2p_peers.clone() {
             server = server.with_p2p_peers(peers);
+        }
+        if let Some(ref fp) = cert_fingerprint_display {
+            server = server.with_cert_fingerprint(fp.clone());
+        }
+        // P2P Phase 1: hand the IPC pairing handlers a clone of the SAME mTLS
+        // cert the transport presents, so they can TLS-wrap the unauthenticated
+        // bootstrap pairing channel (responder listener / initiator dial). The
+        // fingerprints peers learn over that channel then match what the pinned
+        // mTLS layer compares.
+        if let Some(ref cert) = p2p_cert {
+            server = server.with_p2p_cert(cert.cert_der.clone(), cert.key_der.clone());
         }
         #[cfg(feature = "cloud-sync")]
         {
@@ -272,6 +322,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 server.with_cloud_sync_state(cloud_sync_key.clone(), cloud_last_sync_ms.clone());
         }
         let swcc = server.self_write_change_count.clone();
+        // P2P Phase 2: grab a handle to the shared slot holding this daemon's
+        // own P2P sync-listener address. `start_p2p` (below) binds an
+        // OS-assigned port, so we populate this slot only once that port is
+        // known; the pairing handlers then send it in-band over the bootstrap
+        // channel so the peer can persist it for the Phase 3 connector.
+        let sync_addr_slot = server.p2p_sync_addr_slot();
         let socket_clone = socket_path.clone();
         let ipc_shutdown = shutdown_token.clone();
         let handle = tokio::spawn(async move {
@@ -279,21 +335,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 tracing::error!("IPC server error: {e}");
             }
         });
-        (swcc, handle)
+        (swcc, sync_addr_slot, handle)
     };
 
-    // Broadcast channel: carries newly-inserted clipboard items to any
-    // subscriber (P2P sync, cloud-sync, future extensions).
-    //
-    // Capacity 256 (bumped from 64 — audit HIGH #8). The earlier 64-slot
-    // buffer was too small for clipboard bursts (e.g. a rapid `pbcopy` loop
-    // or a P2P peer momentarily backpressured by network jitter): subscribers
-    // would receive `RecvError::Lagged` and silently drop items.
-    //
-    // Subscriber loops (p2p::subscriber_loop, cloud orchestrator, sync_orch)
-    // still need to log `Lagged(n)` themselves — owned by the subsystems that
-    // hold the receivers, not this file.
-    let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(256);
+    // Subscriber loops (p2p outbound_loop, cloud orchestrator, sync_orch) log
+    // `Lagged(n)` themselves — owned by the subsystems that hold the receivers.
 
     // Beta W2.2 (arch-1): create sync orchestrator channels up-front so they
     // can be wired into the P2P subsystem below.
@@ -306,52 +352,96 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let (sync_incoming_tx, sync_incoming_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
 
     // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
-    let _p2p_handle: Option<p2p::P2pHandle> = if let Some(p2p_peers) = p2p_peers {
-        // Reuse the persistent device_id loaded above (load_or_create_device_id
-        // was called once already; parsing it back to Uuid is cheap).
-        let device_id =
-            uuid::Uuid::parse_str(&local_device_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
-        let device_name = std::env::var("HOSTNAME")
-            .or_else(|_| std::env::var("COMPUTERNAME"))
-            .unwrap_or_else(|_| "CopyPaste".to_string());
+    // Both the live allowlist and the cert must be present: the cert is the
+    // identity the transport presents and that pairing advertises, so without
+    // it there is nothing for peers to pin (CRITICAL-1).
+    let _p2p_handle: Option<p2p::P2pHandle> =
+        if let (Some(p2p_peers), Some(p2p_cert)) = (p2p_peers, p2p_cert) {
+            // Reuse the persistent device_id loaded above (load_or_create_device_id
+            // was called once already; parsing it back to Uuid is cheap).
+            let device_id =
+                uuid::Uuid::parse_str(&local_device_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
+            let device_name = std::env::var("HOSTNAME")
+                .or_else(|_| std::env::var("COMPUTERNAME"))
+                .unwrap_or_else(|_| "CopyPaste".to_string());
 
-        let p2p_config = p2p::P2pConfig {
-            listen_port: 0,
-            device_name,
-            enabled: true,
+            let p2p_config = p2p::P2pConfig {
+                listen_port: 0,
+                device_name,
+                enabled: true,
+            };
+
+            // P2P Phase 3 (sync-on-connect catch-up): build a provider that
+            // replays the current local history — already re-keyed under the
+            // shared sync key, exactly like normal outbound — into each peer the
+            // instant a link is established. Without this, an item produced
+            // before the link came up is never delivered (fanout is
+            // fire-and-forget to currently-connected sinks). Uses the same
+            // `SyncCrypto` construction as the orchestrator below.
+            let catchup: p2p::CatchupProvider = {
+                let catchup_db = db.clone();
+                let catchup_device_id = local_device_id.clone();
+                let catchup_seed: [u8; 32] = **local_key_arc;
+                Arc::new(move || {
+                    let crypto =
+                        sync_orch::SyncCrypto::new(catchup_seed, crate::ipc::peers_file_path());
+                    // The closure is `Fn` (sync) but the DB sits behind a tokio
+                    // Mutex; `block_in_place` + `blocking_lock` safely acquires
+                    // it on the multi-thread runtime without blocking the worker.
+                    tokio::task::block_in_place(|| {
+                        let db = catchup_db.blocking_lock();
+                        sync_orch::catchup_items(&db, &catchup_device_id, &crypto)
+                    })
+                })
+            };
+
+            // Hand the SAME live allowlist already shared with the IPC server
+            // (fix/p2p-c-review #2) and the SAME cert whose fingerprint the IPC
+            // pairing handlers advertise (CRITICAL-1). `start_p2p` seeds the
+            // allowlist from peers.json.
+            match p2p::start_p2p(
+                p2p_config,
+                db.clone(),
+                device_id,
+                (*local_key_arc).clone(),
+                p2p_cert,
+                p2p_peers,
+                new_item_tx.subscribe(),
+                sync_incoming_tx.clone(),
+                sync_outbound_rx,
+                catchup,
+            )
+            .await
+            {
+                Ok(handle) => {
+                    tracing::info!(port = handle.actual_port, "P2P subsystem running");
+                    // P2P Phase 2: publish this daemon's now-bound sync-listener
+                    // address into the shared slot the IPC pairing handlers read.
+                    // 127.0.0.1 is fine for the single-host / loopback case; a
+                    // real LAN address is a later refinement (see Phase 2 design).
+                    #[cfg(unix)]
+                    {
+                        let addr = format!("127.0.0.1:{}", handle.actual_port);
+                        let mut slot = p2p_sync_addr_slot
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        *slot = Some(addr);
+                    }
+                    Some(handle)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to start P2P subsystem: {e}");
+                    None
+                }
+            }
+        } else {
+            tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
+            // Drop sync_outbound_rx — no consumer. sync_orch will log debug
+            // on each outbound send (harmless: closed receiver just means no
+            // peers are connected).
+            drop(sync_outbound_rx);
+            None
         };
-
-        // Hand the SAME live allowlist already shared with the IPC server
-        // (fix/p2p-c-review #2). `start_p2p` seeds it from peers.json.
-        match p2p::start_p2p(
-            p2p_config,
-            db.clone(),
-            device_id,
-            (*local_key_arc).clone(),
-            p2p_peers,
-            new_item_tx.subscribe(),
-            sync_incoming_tx.clone(),
-            sync_outbound_rx,
-        )
-        .await
-        {
-            Ok(handle) => {
-                tracing::info!(port = handle.actual_port, "P2P subsystem running");
-                Some(handle)
-            }
-            Err(e) => {
-                tracing::warn!("Failed to start P2P subsystem: {e}");
-                None
-            }
-        }
-    } else {
-        tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
-        // Drop sync_outbound_rx — no consumer. sync_orch will log debug
-        // on each outbound send (harmless: closed receiver just means no
-        // peers are connected).
-        drop(sync_outbound_rx);
-        None
-    };
 
     // Beta W2.2 (arch-1): start the sync orchestrator.
     //
@@ -368,6 +458,19 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let sync_rx = new_item_tx.subscribe();
     // D2 (sync_orch): pass a token clone so the orchestrator exits on shutdown.
     let sync_shutdown = shutdown_token.clone();
+    // P2P Phase 3 (cross-device readability): give the orchestrator this
+    // device's local-storage seed and the peers.json path so it can re-key item
+    // payloads through the shared content sync key established at pairing. Only
+    // wired when P2P is enabled — the cloud path uses its own SyncKey scheme.
+    let sync_crypto = if p2p_enabled {
+        let seed: [u8; 32] = **local_key_arc;
+        Some(sync_orch::SyncCrypto::new(
+            seed,
+            crate::ipc::peers_file_path(),
+        ))
+    } else {
+        None
+    };
     let sync_handle = tokio::spawn(async move {
         if let Err(e) = sync_orch::run(
             sync_db,
@@ -375,6 +478,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             sync_incoming_rx,
             sync_outbound_tx,
             sync_device_id,
+            sync_crypto,
             sync_shutdown,
         )
         .await

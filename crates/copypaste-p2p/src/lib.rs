@@ -48,6 +48,7 @@
 //! # }
 //! ```
 
+pub mod bootstrap;
 pub mod cert;
 pub mod discovery;
 pub mod error;
@@ -70,6 +71,11 @@ pub use error::DiscoveryError;
 
 // Convenient top-level re-exports — PAKE pairing (ADR-008).
 pub use pake::{PakeError, PakeInitiator, PakeResponder, PasswordFile, SessionKey};
+
+// Convenient top-level re-exports — unauthenticated bootstrap channel (P2P Phase 1).
+pub use bootstrap::{
+    run_initiator, BootstrapPairing, BootstrapResponder, BOOTSTRAP_ACCEPT_TIMEOUT,
+};
 
 /// Default TCP port for P2P direct connections.
 pub const DEFAULT_P2P_PORT: u16 = 51515;

@@ -138,17 +138,27 @@ fn format_fingerprint(bytes: &[u8]) -> String {
 }
 
 /// Path to peers.json in the app config directory.
+///
+/// Honours the `COPYPASTE_CONFIG_DIR` override (used by the isolated integration
+/// harness, and any deployment that relocates config) before falling back to the
+/// platform `dirs::config_dir()`. In all cases the file lives under a
+/// `copypaste/` subdirectory so the path is stable across the override and the
+/// default.
 pub(crate) fn peers_file_path() -> PathBuf {
     static FALLBACK_WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    let base = dirs::config_dir().unwrap_or_else(|| {
-        FALLBACK_WARNED.get_or_init(|| {
-            tracing::warn!(
-                "dirs::config_dir() unavailable — falling back to CWD for peers.json. \
-                 Set $XDG_CONFIG_HOME or $HOME to silence this warning."
-            );
+    let base = std::env::var_os("COPYPASTE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(dirs::config_dir)
+        .unwrap_or_else(|| {
+            FALLBACK_WARNED.get_or_init(|| {
+                tracing::warn!(
+                    "neither COPYPASTE_CONFIG_DIR nor dirs::config_dir() available — \
+                     falling back to CWD for peers.json. Set $XDG_CONFIG_HOME or $HOME \
+                     to silence this warning."
+                );
+            });
+            PathBuf::from(".")
         });
-        PathBuf::from(".")
-    });
     base.join("copypaste").join("peers.json")
 }
 
@@ -250,6 +260,28 @@ pub(crate) fn canonical_fingerprint(fp: &str) -> String {
     fp.replace(':', "").to_ascii_lowercase()
 }
 
+/// Render a colon-free hex fingerprint (the mTLS layer's canonical form,
+/// `hex(SHA-256(cert_der))`) into the user-facing `XX:XX:...` colon-grouped
+/// form the pairing surface expects.
+///
+/// This is the inverse of [`canonical_fingerprint`] for the grouping: it pairs
+/// the hex digits and joins them with `:` so the value passes
+/// [`is_valid_fingerprint`] and round-trips back to the same canonical bytes
+/// the verifier ([`copypaste_p2p::cert::fingerprint_of`]) compares against.
+/// Input is lowercased; any `:` already present is stripped first so the
+/// function is idempotent. An odd-length input (never produced by
+/// `fingerprint_of`) keeps its trailing nibble in the final group rather than
+/// panicking.
+pub(crate) fn display_fingerprint(fp: &str) -> String {
+    let canonical = canonical_fingerprint(fp);
+    let bytes = canonical.as_bytes();
+    bytes
+        .chunks(2)
+        .map(|pair| std::str::from_utf8(pair).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join(":")
+}
+
 /// Maximum lifetime of an in-progress PAKE session before it is evicted as
 /// stale (fix/p2p-c-review #1 — DoS). The full 3-message handshake is two
 /// user-driven IPC round-trips; 120 s is generous for a human typing a
@@ -319,10 +351,17 @@ pub struct IpcServer {
     /// ciphertext bytes back, so paste produced "content is not valid
     /// UTF-8" for text and garbage for images.
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
-    /// Device public-key bytes — used by `get_own_fingerprint` to derive
-    /// the canonical user-visible fingerprint (`keychain::own_fingerprint`).
-    /// Audit HIGH #6: previously the handler used DefaultHasher(hostname,
-    /// pid), which changed every restart and was not collision-resistant.
+    /// Device public-key bytes (X25519). Historically `get_own_fingerprint`
+    /// derived its value from this via `keychain::own_fingerprint` (audit HIGH
+    /// #6, superseding an unstable DefaultHasher scheme). CRITICAL-1: pairing
+    /// now advertises the mTLS **cert** fingerprint (`cert_fingerprint`)
+    /// instead, since the device-key fingerprint is never what the mTLS layer
+    /// pins. The bytes are retained here — they remain part of the
+    /// `IpcServer::new` contract and the device identity is still useful for
+    /// future non-pairing surfaces.
+    // Retained for API stability / future use; no current read path. The cert
+    // fingerprint, not this device-key fingerprint, is what pairing advertises.
+    #[allow(dead_code)]
     device_public_key: Arc<[u8; 32]>,
     /// Readiness gate. While `false`, all data-touching methods return
     /// `IPC_NOT_READY` instead of dispatching. Default `true` for production
@@ -361,6 +400,44 @@ pub struct IpcServer {
     /// (the S10 grace path is exercised). `None` when P2P is disabled — the
     /// PAKE handlers then only persist to `peers.json` (loaded on next start).
     p2p_peers: Option<copypaste_p2p::transport::PairedPeers>,
+    /// Our live mTLS **certificate** fingerprint in user-facing colon-hex form,
+    /// i.e. `display_fingerprint(hex(SHA-256(cert_der)))` for the exact same
+    /// cert the running `PeerTransport` presents and that peers pin
+    /// ([`copypaste_p2p::transport::PeerTransport::fingerprint`] /
+    /// [`copypaste_p2p::cert::fingerprint_of`]).
+    ///
+    /// CRITICAL-1 fix: pairing (`pair_generate_qr`, `get_own_fingerprint`)
+    /// MUST advertise this value — NOT the device-key fingerprint
+    /// (`keychain::own_fingerprint`, SHA-256 of the X25519 public key), which
+    /// the mTLS allowlist never compares against, so cert-pinning could never
+    /// match and pairing could never authenticate.
+    ///
+    /// `None` when P2P is disabled (`COPYPASTE_P2P` unset): no transport runs,
+    /// so there is no cert to advertise and the pairing handlers return a clear
+    /// error rather than a fingerprint that cannot authenticate any channel.
+    cert_fingerprint: Option<String>,
+    /// Our self-signed mTLS certificate DER + key, used to TLS-wrap the
+    /// unauthenticated bootstrap pairing channel (P2P Phase 1). This is a clone
+    /// of the SAME cert `start_p2p`'s transport presents and whose fingerprint
+    /// `cert_fingerprint` advertises, so the fingerprints a pairing peer learns
+    /// over the bootstrap channel match the ones the pinned mTLS layer compares.
+    ///
+    /// `None` when P2P is disabled — the QR pairing handlers then fall back to
+    /// the legacy IPC-relayed PAKE path (no network bootstrap channel).
+    p2p_cert: Option<Arc<(Vec<u8>, Vec<u8>)>>,
+    /// Optional mDNS discovery handle used by the initiator's QR-accept path to
+    /// resolve the responder's `host:port` when the QR carries no `addr_hint`
+    /// (best-effort fallback — loopback mDNS is unreliable, so `addr_hint` is
+    /// the primary path). `None` when P2P discovery is not wired in.
+    discovery: Option<Arc<copypaste_p2p::discovery::DiscoveryService>>,
+    /// This daemon's own P2P sync-listener address (`host:port`), filled once
+    /// `start_p2p` has bound its accept loop (the port is OS-assigned, so it is
+    /// not known when `IpcServer` is constructed). The pairing handlers send
+    /// this value in-band over the bootstrap channel so the peer can persist it
+    /// for the Phase 3 outbound connector. A `std::sync::Mutex` (not tokio's) is
+    /// used because the critical section is a trivial clone with no `.await`.
+    /// Holds `None` until populated, or when P2P is disabled.
+    p2p_sync_addr: Arc<std::sync::Mutex<Option<String>>>,
     /// Shared passphrase-derived cloud sync key (Argon2id, 32 bytes).
     ///
     /// `None` means the user has not yet configured a sync passphrase, so
@@ -373,6 +450,16 @@ pub struct IpcServer {
     /// `get_sync_status` returns a live value.
     #[cfg(feature = "cloud-sync")]
     pub last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
+    /// Broadcast sender for newly-ingested clipboard items, shared with the
+    /// clipboard monitor and the sync orchestrator (P2P Phase 3).
+    ///
+    /// Captured-by-polling items already flow through this channel from the
+    /// monitor. The `import` IPC method historically inserted straight into the
+    /// DB without notifying anyone, so imported items never reached the sync
+    /// orchestrator and could not be pushed to a paired peer. Wiring the sender
+    /// here lets `import` broadcast each inserted row so it syncs like a captured
+    /// one. `None` when the daemon did not provide a sender (e.g. unit tests).
+    new_item_tx: Option<tokio::sync::broadcast::Sender<copypaste_core::ClipboardItem>>,
 }
 
 impl IpcServer {
@@ -391,12 +478,29 @@ impl IpcServer {
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
             pending_qr_token: Arc::new(Mutex::new(None)),
             p2p_peers: None,
+            cert_fingerprint: None,
+            p2p_cert: None,
+            discovery: None,
+            p2p_sync_addr: Arc::new(std::sync::Mutex::new(None)),
             self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
             #[cfg(feature = "cloud-sync")]
             sync_key: Arc::new(Mutex::new(None)),
             #[cfg(feature = "cloud-sync")]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            new_item_tx: None,
         }
+    }
+
+    /// Attach the live mTLS certificate fingerprint that pairing advertises.
+    ///
+    /// CRITICAL-1: this MUST be the fingerprint of the same cert the running
+    /// `PeerTransport` presents (`display_fingerprint(transport.fingerprint())`)
+    /// so a scanning/pairing peer pins a value the mTLS layer actually compares
+    /// against. The daemon generates the cert once and hands the same cert to
+    /// `start_p2p` and the colon-hex fingerprint here, guaranteeing they agree.
+    pub fn with_cert_fingerprint(mut self, fingerprint: impl Into<String>) -> Self {
+        self.cert_fingerprint = Some(fingerprint.into());
+        self
     }
 
     /// Attach the live P2P paired-peer allowlist (fix/p2p-c-review #2).
@@ -408,6 +512,56 @@ impl IpcServer {
     pub fn with_p2p_peers(mut self, peers: copypaste_p2p::transport::PairedPeers) -> Self {
         self.p2p_peers = Some(peers);
         self
+    }
+
+    /// Attach the self-signed mTLS cert (DER) + key used to TLS-wrap the
+    /// unauthenticated bootstrap pairing channel (P2P Phase 1).
+    ///
+    /// MUST be a clone of the exact cert `start_p2p`'s transport presents (and
+    /// whose fingerprint `with_cert_fingerprint` advertises) so the fingerprints
+    /// a peer learns over the bootstrap channel match what the pinned mTLS layer
+    /// later compares.
+    pub fn with_p2p_cert(mut self, cert_der: Vec<u8>, key_der: Vec<u8>) -> Self {
+        self.p2p_cert = Some(Arc::new((cert_der, key_der)));
+        self
+    }
+
+    /// Attach the mDNS discovery handle used as the QR-accept fallback when the
+    /// QR carries no `addr_hint`.
+    pub fn with_discovery(
+        mut self,
+        discovery: Arc<copypaste_p2p::discovery::DiscoveryService>,
+    ) -> Self {
+        self.discovery = Some(discovery);
+        self
+    }
+
+    /// Return a handle to the shared slot holding this daemon's own P2P
+    /// sync-listener address (`host:port`).
+    ///
+    /// The IPC server is constructed before `start_p2p` binds its accept loop,
+    /// so the OS-assigned port is not known yet. The daemon calls
+    /// [`set_p2p_sync_addr`](Self::set_p2p_sync_addr) (via this same Arc) once
+    /// `start_p2p` returns the bound port; the pairing handlers then read it and
+    /// send it in-band over the bootstrap channel. Returning the Arc lets the
+    /// daemon populate the slot after the server has been moved into its task.
+    pub fn p2p_sync_addr_slot(&self) -> Arc<std::sync::Mutex<Option<String>>> {
+        Arc::clone(&self.p2p_sync_addr)
+    }
+
+    /// Populate the shared slot with this daemon's bound P2P sync-listener
+    /// address. Convenience wrapper over [`p2p_sync_addr_slot`](Self::p2p_sync_addr_slot)
+    /// for callers that still hold the server (e.g. tests).
+    ///
+    /// A poisoned mutex (a prior panic while holding the lock) is recovered
+    /// rather than propagated — the slot holds only a non-secret address string,
+    /// so reusing it after a panic is safe and keeps pairing functional.
+    pub fn set_p2p_sync_addr(&self, addr: impl Into<String>) {
+        let mut slot = self
+            .p2p_sync_addr
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *slot = Some(addr.into());
     }
 
     /// Wire up shared cloud-sync state created by the daemon before spawning
@@ -426,6 +580,16 @@ impl IpcServer {
     ) -> Self {
         self.sync_key = sync_key;
         self.last_sync_ms = last_sync_ms;
+        self
+    }
+
+    /// Attach the broadcast sender for newly-ingested clipboard items so the
+    /// `import` IPC method can notify the sync orchestrator (P2P Phase 3).
+    pub fn with_new_item_tx(
+        mut self,
+        tx: tokio::sync::broadcast::Sender<copypaste_core::ClipboardItem>,
+    ) -> Self {
+        self.new_item_tx = Some(tx);
         self
     }
 
@@ -450,11 +614,16 @@ impl IpcServer {
             pake_sessions: Arc::new(Mutex::new(HashMap::new())),
             pending_qr_token: Arc::new(Mutex::new(None)),
             p2p_peers: None,
+            cert_fingerprint: None,
+            p2p_cert: None,
+            discovery: None,
+            p2p_sync_addr: Arc::new(std::sync::Mutex::new(None)),
             self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
             #[cfg(feature = "cloud-sync")]
             sync_key: Arc::new(Mutex::new(None)),
             #[cfg(feature = "cloud-sync")]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            new_item_tx: None,
         }
     }
 
@@ -522,6 +691,285 @@ impl IpcServer {
                 "registered paired peer in live P2P allowlist"
             );
         }
+    }
+
+    /// This daemon's own P2P sync-listener address (`host:port`), if `start_p2p`
+    /// has bound it. Sent in-band over the bootstrap channel so the peer can
+    /// persist it for the Phase 3 connector. Returns an empty string when the
+    /// port is not yet known (P2P disabled or not yet bound) — the bootstrap
+    /// wire tolerates an empty address frame.
+    fn own_sync_addr(&self) -> String {
+        self.p2p_sync_addr
+            .lock()
+            .map(|slot| slot.clone().unwrap_or_default())
+            .unwrap_or_else(|poisoned| poisoned.into_inner().clone().unwrap_or_default())
+    }
+
+    /// Derive the base64-encoded shared content sync key for a peer from the
+    /// PAKE [`SessionKey`](copypaste_p2p::pake::SessionKey).
+    ///
+    /// Uses `SessionKey::derive_xchacha_key` with a fixed domain-separation
+    /// salt so the derivation is (a) deterministic — both paired devices hold
+    /// the same `SessionKey` and therefore derive the IDENTICAL content key —
+    /// and (b) domain-separated from any other use of the same session key
+    /// (e.g. TLS channel binding). The resulting 32-byte key is the
+    /// XChaCha20-Poly1305 key the sync orchestrator feeds to
+    /// `encrypt_for_cloud` / `decrypt_from_cloud` for cross-device item payloads.
+    fn derive_peer_sync_key_b64(session_key: &copypaste_p2p::pake::SessionKey) -> String {
+        use base64::Engine as _;
+        // Fixed, non-secret domain-separation salt for the P2P content sync key.
+        const P2P_SYNC_KEY_SALT: &[u8] = b"copypaste/p2p/content-sync-key/v1";
+        let key = session_key.derive_xchacha_key(P2P_SYNC_KEY_SALT);
+        base64::engine::general_purpose::STANDARD.encode(key)
+    }
+
+    /// Durably persist a freshly-paired peer to `peers.json` (P2P Phase 2), in
+    /// addition to the in-memory allowlist registration.
+    ///
+    /// `peer_fp_canonical` is the canonical (colon-free, lowercase) cert
+    /// fingerprint the bootstrap channel reports; it is stored in the
+    /// user-facing colon-hex form so the rest of the IPC peers surface
+    /// (`list_peers`, revoke, etc.) and `load_persisted_peers_into` round-trip
+    /// it consistently. `peer_sync_addr` is the peer's P2P sync-listener address
+    /// learned in-band, stored so the Phase 3 connector can dial it directly
+    /// (loopback mDNS filters 127.0.0.1 and is unreliable).
+    ///
+    /// Idempotent: if a record with the same fingerprint already exists it is
+    /// replaced (address/name refreshed) rather than duplicated. Failures are
+    /// logged and swallowed — pairing already succeeded in memory, and a persist
+    /// failure must not turn a successful pair into an IPC error.
+    ///
+    /// A free function (not a `&self` method) so the detached bootstrap-responder
+    /// task can call it after `self` has been moved/borrowed away.
+    fn persist_paired_peer(
+        peer_fp_canonical: &str,
+        peer_sync_addr: &str,
+        session_key: &copypaste_p2p::pake::SessionKey,
+    ) {
+        let display = display_fingerprint(peer_fp_canonical);
+        let added_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let address = if peer_sync_addr.is_empty() {
+            None
+        } else {
+            Some(peer_sync_addr.to_string())
+        };
+
+        // P2P Phase 3 (cross-device readability): derive the shared content sync
+        // key from the PAKE session key. Both sides hold the SAME session key
+        // after a successful handshake, so each persists the IDENTICAL bytes —
+        // that is what lets a peer decrypt items this device sends (and vice
+        // versa). The derived key is base64-encoded into peers.json (chmod 0600).
+        let sync_key_b64 = Some(Self::derive_peer_sync_key_b64(session_key));
+
+        let path = peers_file_path();
+        let mut peers = crate::peers::load_peers(&path);
+        // Drop any prior record for the same peer (canonical compare) so a
+        // re-pair refreshes the address/name instead of duplicating the entry.
+        peers.retain(|p| canonical_fingerprint(&p.fingerprint) != peer_fp_canonical);
+        peers.push(crate::peers::PairedDevice {
+            fingerprint: display,
+            name: String::new(),
+            added_at,
+            address,
+            sync_key_b64,
+        });
+
+        match crate::peers::save_peers(&path, &peers) {
+            Ok(()) => tracing::info!(
+                fingerprint = %peer_fp_canonical,
+                addr = %peer_sync_addr,
+                "persisted paired peer to peers.json"
+            ),
+            Err(e) => tracing::warn!(
+                fingerprint = %peer_fp_canonical,
+                "failed to persist paired peer to peers.json: {e}"
+            ),
+        }
+    }
+
+    /// Spawn the responder side of the P2P Phase 1 bootstrap PAKE handshake.
+    ///
+    /// The `responder` already owns the bound, TLS-wrapped ephemeral listener
+    /// whose address was advertised in the QR's `addr_hint`. This accepts ONE
+    /// inbound connection within the pairing window and runs the PAKE responder
+    /// over the TLS stream. On success the peer's cert fingerprint (learned over
+    /// the same channel) is registered in the live mTLS allowlist so subsequent
+    /// pinned mTLS sessions are accepted without a daemon restart.
+    ///
+    /// Runs detached: pairing is driven by the scanning device dialling in, so
+    /// there is nothing for the IPC caller to await here. PAKE failure (wrong
+    /// token, MitM, timeout) only logs — no peer is registered.
+    fn spawn_bootstrap_responder(
+        &self,
+        responder: copypaste_p2p::bootstrap::BootstrapResponder,
+        password: String,
+    ) {
+        let peers = self.p2p_peers.clone();
+        // Our own P2P sync-listener address, sent in-band so the initiator can
+        // persist it; and used by nothing else here. Captured before the move.
+        let own_sync_addr = self.own_sync_addr();
+        tokio::spawn(async move {
+            match responder.run(&password, &own_sync_addr).await {
+                Ok(outcome) => {
+                    tracing::info!(
+                        peer_fingerprint = %outcome.peer_fingerprint,
+                        peer_sync_addr = %outcome.peer_sync_addr,
+                        "bootstrap PAKE responder completed over network channel"
+                    );
+                    // Register the freshly-paired peer in the live allowlist.
+                    // The bootstrap channel reports the canonical (colon-free)
+                    // hex fingerprint; `rotate_peer` upserts it as active.
+                    if let Some(peers) = peers {
+                        peers.rotate_peer(
+                            &outcome.peer_fingerprint,
+                            outcome.peer_fingerprint.clone(),
+                            String::new(),
+                        );
+                    }
+                    // P2P Phase 2: durably persist the peer (fingerprint +
+                    // sync-listener address) so it survives a restart and the
+                    // Phase 3 connector can dial it directly.
+                    Self::persist_paired_peer(
+                        &outcome.peer_fingerprint,
+                        &outcome.peer_sync_addr,
+                        &outcome.session_key,
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("bootstrap PAKE responder failed: {e}");
+                }
+            }
+        });
+    }
+
+    /// Initiator side of the P2P Phase 1 network pairing flow.
+    ///
+    /// Decodes the scanned `qr`, derives the PAKE password from its token,
+    /// resolves the responder's `host:port` (QR `addr_hint` primary; mDNS
+    /// `resolve_peer` fallback), dials the unauthenticated bootstrap TLS channel,
+    /// and runs the PAKE initiator over it. On success the responder's cert
+    /// fingerprint is registered in the live mTLS allowlist.
+    ///
+    /// Returns the IPC `Response` directly (this is the whole handler for the
+    /// network branch of `pair_accept_qr`).
+    async fn pair_accept_qr_network(&self, req_id: String, qr: &str) -> Response {
+        // We must have our own cert to present on the bootstrap channel so the
+        // responder learns the fingerprint it will later pin.
+        let cert = match self.p2p_cert.as_ref() {
+            Some(c) => Arc::clone(c),
+            None => {
+                return Response::err_with_code(
+                    req_id,
+                    ERR_CODE_INVALID_ARGUMENT,
+                    "P2P is disabled (set COPYPASTE_P2P=1): cannot accept a pairing QR \
+                     over the network without an mTLS certificate",
+                )
+            }
+        };
+
+        let payload = match copypaste_core::PairingPayload::decode(qr) {
+            Ok(p) => p,
+            Err(e) => {
+                return Response::err_with_code(
+                    req_id,
+                    ERR_CODE_INVALID_ARGUMENT,
+                    format!("failed to decode pairing QR: {e}"),
+                )
+            }
+        };
+
+        let password = payload.token.to_pake_password();
+
+        // Resolve the responder's address: addr_hint is primary; fall back to
+        // mDNS resolution by device_id when it is empty (best-effort — loopback
+        // mDNS is unreliable, see discovery::resolve_peer).
+        let addr = match self.resolve_pairing_addr(&payload) {
+            Ok(addr) => addr,
+            Err(msg) => return Response::err_with_code(req_id, ERR_CODE_INVALID_ARGUMENT, msg),
+        };
+
+        let (cert_der, key_der) = (cert.0.clone(), cert.1.clone());
+        // Our own P2P sync-listener address, sent in-band so the responder can
+        // persist it for its Phase 3 connector.
+        let own_sync_addr = self.own_sync_addr();
+        match copypaste_p2p::bootstrap::run_initiator(
+            addr,
+            cert_der,
+            key_der,
+            &password,
+            &own_sync_addr,
+        )
+        .await
+        {
+            Ok(outcome) => {
+                tracing::info!(
+                    peer_fingerprint = %outcome.peer_fingerprint,
+                    peer_sync_addr = %outcome.peer_sync_addr,
+                    "bootstrap PAKE initiator completed over network channel"
+                );
+                if let Some(ref peers) = self.p2p_peers {
+                    peers.rotate_peer(
+                        &outcome.peer_fingerprint,
+                        outcome.peer_fingerprint.clone(),
+                        String::new(),
+                    );
+                }
+                // P2P Phase 2: durably persist the peer (fingerprint + the
+                // sync-listener address it advertised) for restart-survival and
+                // the Phase 3 outbound connector.
+                Self::persist_paired_peer(
+                    &outcome.peer_fingerprint,
+                    &outcome.peer_sync_addr,
+                    &outcome.session_key,
+                );
+                Response::ok(
+                    req_id,
+                    serde_json::json!({
+                        "ok": true,
+                        "peer_fingerprint": outcome.peer_fingerprint,
+                    }),
+                )
+            }
+            Err(e) => Response::err_with_code(
+                req_id,
+                ERR_CODE_AUTH_FAILED,
+                format!("network PAKE pairing failed: {e}"),
+            ),
+        }
+    }
+
+    /// Resolve the responder's socket address for the initiator bootstrap dial.
+    ///
+    /// Uses the QR `addr_hint` when present; otherwise falls back to mDNS
+    /// `resolve_peer` keyed by the QR's `device_id`. Returns a human-readable
+    /// error string when neither yields a usable address.
+    fn resolve_pairing_addr(
+        &self,
+        payload: &copypaste_core::PairingPayload,
+    ) -> Result<std::net::SocketAddr, String> {
+        if !payload.addr_hint.is_empty() {
+            return payload
+                .addr_hint
+                .parse::<std::net::SocketAddr>()
+                .map_err(|e| format!("invalid addr_hint '{}': {e}", payload.addr_hint));
+        }
+
+        // mDNS fallback (best-effort).
+        let discovery = self
+            .discovery
+            .as_ref()
+            .ok_or_else(|| "QR has no addr_hint and mDNS discovery is unavailable".to_string())?;
+        let peer = discovery
+            .resolve_peer(&payload.device_id)
+            .ok_or_else(|| "QR has no addr_hint and the peer was not found via mDNS".to_string())?;
+        let ip = peer
+            .ip_addrs
+            .first()
+            .ok_or_else(|| "mDNS-resolved peer has no IP address".to_string())?;
+        Ok(std::net::SocketAddr::new(*ip, peer.port))
     }
 
     /// Returns true if a request to `method` requires the backing database.
@@ -1612,19 +2060,27 @@ impl IpcServer {
             // P2P IPC methods
             // ------------------------------------------------------------------
             "get_own_fingerprint" => {
-                // Audit HIGH #6 fix: use the canonical SHA-256-of-public-key
-                // fingerprint derived from the device's persistent keypair
-                // (loaded by the daemon at startup via
-                // `keychain::load_or_create` and passed into `IpcServer::new`).
+                // CRITICAL-1 fix: advertise the live mTLS **certificate**
+                // fingerprint — the value peers pin and the mTLS verifier
+                // compares (`PeerTransport::fingerprint` / `fingerprint_of`) —
+                // NOT the device-key fingerprint
+                // (`keychain::own_fingerprint`, SHA-256 of the X25519 public
+                // key). The latter is never compared by the mTLS allowlist, so
+                // pinning it could never authenticate a channel.
                 //
-                // The previous DefaultHasher(hostname, pid) scheme:
-                //   * changed on every restart (pid varies),
-                //   * was not collision-resistant across hosts that share a
-                //     hostname (common in containers / dev VMs),
-                //   * could not be reconciled with the canonical fingerprint
-                //     the UI / pair_peer paths already used.
-                let fingerprint = crate::keychain::own_fingerprint(self.device_public_key.as_ref());
-                Response::ok(req.id, serde_json::json!({ "fingerprint": fingerprint }))
+                // When P2P is disabled there is no running transport and thus
+                // no cert to advertise; return a clear error rather than a
+                // fingerprint that cannot authenticate anything.
+                match self.cert_fingerprint.as_ref() {
+                    Some(fingerprint) => {
+                        Response::ok(req.id, serde_json::json!({ "fingerprint": fingerprint }))
+                    }
+                    None => Response::err(
+                        req.id,
+                        "P2P is disabled (set COPYPASTE_P2P=1): no mTLS certificate \
+                         to advertise for pairing",
+                    ),
+                }
             }
 
             "list_peers" => match load_peers() {
@@ -2401,7 +2857,27 @@ impl IpcServer {
             // Response data: { "qr": "CPPAIR1...", "expires_in_secs": <u64> }
             // ----------------------------------------------------------------
             "pair_generate_qr" => {
-                let fingerprint = crate::keychain::own_fingerprint(self.device_public_key.as_ref());
+                // CRITICAL-1 fix: the QR must carry the live mTLS **certificate**
+                // fingerprint (the value the scanner pins and the mTLS verifier
+                // compares — `PeerTransport::fingerprint` / `fingerprint_of`),
+                // NOT the device-key fingerprint (`keychain::own_fingerprint`).
+                // The QR payload already documents this field as the cert
+                // fingerprint (see `copypaste_core::crypto::pairing_qr`), so the
+                // payload format/version is unchanged — only the value sourced
+                // here was wrong, making cert-pinning unable to ever match.
+                //
+                // No cert exists when P2P is disabled; refuse rather than
+                // advertise a fingerprint that cannot authenticate the channel.
+                let fingerprint = match self.cert_fingerprint.as_ref() {
+                    Some(fp) => fp.clone(),
+                    None => {
+                        return Response::err(
+                            req.id,
+                            "P2P is disabled (set COPYPASTE_P2P=1): cannot generate a \
+                             pairing QR without an mTLS certificate to advertise",
+                        )
+                    }
+                };
 
                 // Device name mirrors the P2P subsystem's source (HOSTNAME /
                 // COMPUTERNAME, falling back to "CopyPaste") so the scanning
@@ -2416,27 +2892,71 @@ impl IpcServer {
                 // pinning uses the fingerprint.
                 let device_id = fingerprint.clone();
 
-                let payload = match copypaste_core::PairingPayload::new(
+                // Generate the single-use pairing token up front so the same
+                // value feeds (a) the QR the scanner reads, (b) the legacy IPC
+                // PAKE path's stored token, and (c) the bootstrap responder's
+                // PAKE password — all derived from one token.
+                let token = copypaste_core::PairingToken::generate();
+                let password = token.to_pake_password();
+
+                // P2P Phase 1: spawn an ephemeral, *unauthenticated* bootstrap
+                // TLS listener and advertise its `host:port` in the QR's
+                // `addr_hint`. The initiator dials it and the responder side of
+                // the PAKE handshake runs over that TLS stream (PAKE provides
+                // the mutual auth from the shared QR secret; the channel is
+                // unpinned because neither side knows the other's cert yet).
+                //
+                // When P2P is disabled / the cert is absent we leave `addr_hint`
+                // empty and fall back to the legacy IPC-relayed PAKE path.
+                let addr_hint = if let Some(cert) = self.p2p_cert.clone() {
+                    let (cert_der, key_der) = (cert.0.clone(), cert.1.clone());
+                    match copypaste_p2p::bootstrap::BootstrapResponder::bind(cert_der, key_der)
+                        .await
+                    {
+                        Ok(responder) => match responder.local_addr() {
+                            Ok(local) => {
+                                // The listener binds 0.0.0.0 but the QR must
+                                // carry a concrete host. 127.0.0.1 covers the
+                                // single-host (and loopback-test) case; mDNS is
+                                // the cross-host fallback when addr_hint is empty.
+                                let hint = format!("127.0.0.1:{}", local.port());
+                                self.spawn_bootstrap_responder(responder, password.clone());
+                                hint
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "bootstrap listener local_addr failed ({e}); \
+                                     falling back to mDNS-only addr_hint"
+                                );
+                                String::new()
+                            }
+                        },
+                        Err(e) => {
+                            tracing::warn!(
+                                "bootstrap listener bind failed ({e}); \
+                                 falling back to mDNS-only addr_hint"
+                            );
+                            String::new()
+                        }
+                    }
+                } else {
+                    String::new()
+                };
+
+                // Build the payload directly from the pre-generated token so the
+                // QR, the stored token, and the bootstrap password all agree.
+                let payload = copypaste_core::PairingPayload {
                     fingerprint,
+                    token,
                     device_id,
                     device_name,
-                    String::new(), // addr_hint: discovery is mDNS-only for now.
-                ) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("failed to build pairing payload: {e}"),
-                        )
-                    }
+                    addr_hint,
                 };
 
                 let qr = payload.encode();
 
-                // Store the token (replacing any prior active QR) so
-                // `pair_accept_qr` can re-derive the same PAKE password. The
-                // token is moved out of the payload to avoid a second copy.
+                // Store the token (replacing any prior active QR) so the legacy
+                // IPC `pair_accept_qr` path can re-derive the same PAKE password.
                 {
                     let mut slot = self.pending_qr_token.lock().await;
                     *slot = Some((payload.token, std::time::Instant::now()));
@@ -2466,6 +2986,20 @@ impl IpcServer {
             "pair_accept_qr" => {
                 use base64::Engine as _;
                 let b64 = base64::engine::general_purpose::STANDARD;
+
+                // ── P2P Phase 1: network bootstrap path ─────────────────────
+                // When the caller supplies the scanned `qr` string (rather than
+                // a relayed `message1_b64`), this daemon is the *initiator*: it
+                // decodes the QR, dials the responder's `addr_hint` over the
+                // unauthenticated bootstrap TLS channel, and runs the full PAKE
+                // initiator handshake over the network. PAKE provides mutual auth
+                // from the shared QR secret; the channel is unpinned. On success
+                // the responder's cert fingerprint (learned over the channel) is
+                // registered in the live mTLS allowlist.
+                if let Some(qr) = req.params.get("qr").and_then(|v| v.as_str()) {
+                    let qr = qr.to_string();
+                    return self.pair_accept_qr_network(req.id.clone(), &qr).await;
+                }
 
                 let message1_b64 = match req.params.get("message1_b64").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
@@ -2732,6 +3266,10 @@ impl IpcServer {
                     // which we treat as a dedup skip.
                     let mut inserted: u32 = 0;
                     let mut skipped: u32 = 0;
+                    // P2P Phase 3: collect successfully-inserted rows so the
+                    // handler can broadcast them to the sync orchestrator (which
+                    // re-keys + pushes them to paired peers).
+                    let mut inserted_clips: Vec<copypaste_core::ClipboardItem> = Vec::new();
                     // Derive the v2 storage key once: imported content is
                     // encrypted exactly as `daemon::encrypt_text_for_storage`
                     // does (v2 key + v4 AAD, stamped key_version = 2), so the
@@ -2770,7 +3308,10 @@ impl IpcServer {
                             {
                                 Ok(v) => v,
                                 Err(e) => {
-                                    return Err::<(u32, u32), anyhow::Error>(anyhow::anyhow!(
+                                    return Err::<
+                                        (u32, u32, Vec<copypaste_core::ClipboardItem>),
+                                        anyhow::Error,
+                                    >(anyhow::anyhow!(
                                         "encrypt imported item failed: {e}"
                                     ));
                                 }
@@ -2791,6 +3332,7 @@ impl IpcServer {
                         match copypaste_core::insert_item_with_fts(&db, &clip, "") {
                             Ok(stored_id) if stored_id == requested_id => {
                                 inserted += 1;
+                                inserted_clips.push(clip);
                             }
                             Ok(_) => {
                                 // Returned id differs => dedup hit (existing
@@ -2798,22 +3340,39 @@ impl IpcServer {
                                 skipped += 1;
                             }
                             Err(e) => {
-                                return Err::<(u32, u32), anyhow::Error>(e.into());
+                                return Err::<
+                                    (u32, u32, Vec<copypaste_core::ClipboardItem>),
+                                    anyhow::Error,
+                                >(e.into());
                             }
                         }
                     }
-                    Ok::<(u32, u32), anyhow::Error>((inserted, skipped))
+                    Ok::<(u32, u32, Vec<copypaste_core::ClipboardItem>), anyhow::Error>((
+                        inserted,
+                        skipped,
+                        inserted_clips,
+                    ))
                 })
                 .await;
 
                 match join {
-                    Ok(Ok((inserted, skipped))) => Response::ok(
-                        req.id,
-                        serde_json::json!({
-                            "inserted": inserted,
-                            "skipped": skipped,
-                        }),
-                    ),
+                    Ok(Ok((inserted, skipped, inserted_clips))) => {
+                        // P2P Phase 3: notify the sync orchestrator of each newly
+                        // imported row so it is re-keyed and pushed to paired
+                        // peers (a closed/absent channel is a no-op — no peers).
+                        if let Some(ref tx) = self.new_item_tx {
+                            for clip in inserted_clips {
+                                let _ = tx.send(clip);
+                            }
+                        }
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({
+                                "inserted": inserted,
+                                "skipped": skipped,
+                            }),
+                        )
+                    }
                     Ok(Err(e)) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -3405,7 +3964,14 @@ mod tests {
         // surfaces — they only validate dispatch / state-machine behaviour.
         let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
         let device_pub = Arc::new([0u8; 32]);
-        let server = IpcServer::new(db.clone(), private_mode.clone(), local_key, device_pub);
+        // Give the test server a realistic mTLS cert fingerprint (colon-hex of a
+        // 32-byte SHA-256) so the pairing handlers (`pair_generate_qr`,
+        // `get_own_fingerprint`) behave as they do with P2P enabled. Generating a
+        // real cert keeps this honest: the advertised value is exactly what the
+        // transport would pin.
+        let cert = copypaste_p2p::cert::SelfSignedCert::generate("test-device").unwrap();
+        let server = IpcServer::new(db.clone(), private_mode.clone(), local_key, device_pub)
+            .with_cert_fingerprint(display_fingerprint(&cert.fingerprint()));
         let path = socket_path.to_path_buf();
         tokio::spawn(async move {
             if let Err(e) = server.serve(&path, CancellationToken::new()).await {
@@ -4958,6 +5524,85 @@ mod tests {
             Arc::new(zeroize::Zeroizing::new([0u8; 32])),
             Arc::new([0u8; 32]),
         )
+    }
+
+    /// CRITICAL-1: `display_fingerprint` renders the mTLS canonical fingerprint
+    /// (colon-free 64-hex from `fingerprint_of`) into the user-facing colon-hex
+    /// form, and `canonical_fingerprint` round-trips it back to the exact value
+    /// the mTLS verifier compares — so a pinned QR fingerprint authenticates.
+    #[test]
+    fn display_fingerprint_round_trips_cert_fingerprint() {
+        let cert = copypaste_p2p::cert::SelfSignedCert::generate("rt-device").unwrap();
+        let canonical = cert.fingerprint(); // hex(SHA-256(cert_der)), 64 hex chars, no colons
+        assert_eq!(canonical.len(), 64, "cert fingerprint must be 64 hex chars");
+
+        let display = display_fingerprint(&canonical);
+        // 32 colon-separated 2-hex groups.
+        assert_eq!(
+            display.split(':').count(),
+            32,
+            "must be 32 colon groups: {display}"
+        );
+        assert!(
+            is_valid_fingerprint(&display),
+            "display form must validate: {display}"
+        );
+
+        // The mTLS boundary strips colons; it MUST equal the original canonical
+        // value the verifier (`fingerprint_of`) produces.
+        assert_eq!(
+            canonical_fingerprint(&display),
+            canonical,
+            "round-trip must recover the exact canonical fingerprint the verifier pins"
+        );
+    }
+
+    /// CRITICAL-1: with no cert fingerprint set (P2P disabled), the pairing
+    /// handlers must refuse rather than advertise the device-key fingerprint the
+    /// mTLS layer never pins.
+    #[tokio::test]
+    async fn pairing_handlers_error_when_p2p_disabled() {
+        let server = bare_server(); // no .with_cert_fingerprint → cert_fingerprint == None
+
+        let resp = server
+            .dispatch(r#"{"id":"f1","method":"get_own_fingerprint","params":{}}"#)
+            .await;
+        assert!(!resp.ok, "get_own_fingerprint must error without a cert");
+        assert!(
+            resp.error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("P2P is disabled"),
+            "must be the disabled-P2P error, not a parse error: {resp:?}"
+        );
+
+        let resp = server
+            .dispatch(r#"{"id":"q1","method":"pair_generate_qr","params":{}}"#)
+            .await;
+        assert!(!resp.ok, "pair_generate_qr must error without a cert");
+        assert!(
+            resp.error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("P2P is disabled"),
+            "must be the disabled-P2P error, not a parse error: {resp:?}"
+        );
+    }
+
+    /// CRITICAL-1: when a cert fingerprint IS configured, `get_own_fingerprint`
+    /// returns exactly that colon-hex cert fingerprint (not the device key).
+    #[tokio::test]
+    async fn get_own_fingerprint_returns_cert_fingerprint() {
+        let cert = copypaste_p2p::cert::SelfSignedCert::generate("own-fp-device").unwrap();
+        let expected = display_fingerprint(&cert.fingerprint());
+        let server = bare_server().with_cert_fingerprint(expected.clone());
+
+        let resp = server
+            .dispatch(r#"{"id":"f2","method":"get_own_fingerprint","params":{}}"#)
+            .await;
+        assert!(resp.ok, "must succeed with a cert: {resp:?}");
+        let data = resp.data.expect("data present");
+        assert_eq!(data["fingerprint"], serde_json::Value::String(expected));
     }
 
     /// fix/p2p-c-review #1 — a session older than `PAKE_SESSION_TTL` is evicted

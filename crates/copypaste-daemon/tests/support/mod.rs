@@ -45,6 +45,9 @@ const IPC_READ_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct Daemon {
     child: Child,
     socket_path: PathBuf,
+    /// The daemon's `COPYPASTE_CONFIG_DIR`; `peers.json` lives directly under it
+    /// (see `peers_file_path()` in the daemon, which honours this env override).
+    config_dir: PathBuf,
     // Kept alive for the lifetime of the daemon; removed on drop.
     _tmp_dir: tempfile::TempDir,
 }
@@ -56,6 +59,17 @@ impl Daemon {
     /// Panics (failing the test) if the binary cannot be spawned or the socket
     /// does not come up within [`SOCKET_READY_TIMEOUT`].
     pub fn spawn() -> Self {
+        Self::spawn_inner(false)
+    }
+
+    /// Spawn a fresh isolated daemon with the P2P subsystem ENABLED
+    /// (`COPYPASTE_P2P=1`), so the mTLS transport, cert, and the network
+    /// bootstrap pairing channel are live. Used by the network-pairing tests.
+    pub fn spawn_with_p2p() -> Self {
+        Self::spawn_inner(true)
+    }
+
+    fn spawn_inner(p2p: bool) -> Self {
         let tmp_dir = tempfile::tempdir().expect("could not create temp dir for daemon");
         let root = tmp_dir.path();
 
@@ -71,8 +85,8 @@ impl Daemon {
             std::fs::create_dir_all(dir).expect("could not create isolated daemon dir");
         }
 
-        let child = Command::new(daemon_binary())
-            .env("COPYPASTE_SOCKET", &socket_path)
+        let mut cmd = Command::new(daemon_binary());
+        cmd.env("COPYPASTE_SOCKET", &socket_path)
             .env("COPYPASTE_DB", &db_path)
             .env("COPYPASTE_DATA_DIR", &data_dir)
             .env("COPYPASTE_CONFIG_DIR", &config_dir)
@@ -84,17 +98,21 @@ impl Daemon {
             // (ad-hoc-signed dev builds invalidate the Keychain ACL on every
             // rebuild) and the slow one-time ACL-rotation delay on cold start.
             .env("COPYPASTE_EPHEMERAL_KEY", "1")
-            // Step A keeps P2P OFF: do not set COPYPASTE_P2P.
-            .env("RUST_LOG", "error") // keep test output quiet
-            .spawn()
-            .expect(
-                "failed to spawn copypaste-daemon — \
+            .env("RUST_LOG", "error"); // keep test output quiet
+
+        if p2p {
+            cmd.env("COPYPASTE_P2P", "1");
+        }
+
+        let child = cmd.spawn().expect(
+            "failed to spawn copypaste-daemon — \
                  run `cargo build -p copypaste-daemon` first",
-            );
+        );
 
         let daemon = Self {
             child,
             socket_path,
+            config_dir,
             _tmp_dir: tmp_dir,
         };
 
@@ -111,6 +129,22 @@ impl Daemon {
     /// Path to this daemon's IPC Unix socket.
     pub fn socket_path(&self) -> &Path {
         &self.socket_path
+    }
+
+    /// Path to this daemon's `peers.json`. The daemon honours
+    /// `COPYPASTE_CONFIG_DIR` for the peers file, writing it directly under that
+    /// dir, so the test reads it from the same isolated location.
+    pub fn peers_json_path(&self) -> PathBuf {
+        self.config_dir.join("copypaste").join("peers.json")
+    }
+
+    /// Read and parse this daemon's `peers.json`, returning an empty array if it
+    /// does not exist yet.
+    pub fn read_peers_json(&self) -> serde_json::Value {
+        match std::fs::read_to_string(self.peers_json_path()) {
+            Ok(s) => serde_json::from_str(&s).expect("peers.json must be valid JSON"),
+            Err(_) => serde_json::json!([]),
+        }
     }
 
     /// Send one newline-delimited JSON-RPC request and return the parsed
