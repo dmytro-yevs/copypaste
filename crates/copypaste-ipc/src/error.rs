@@ -55,6 +55,10 @@ pub enum ErrorCode {
     RateLimited,
     /// Daemon socket is missing / refused connection (UI/CLI client view).
     DaemonOffline,
+    /// The v4 key-rotation sweep is still in progress; ingest paths reject new
+    /// writes until it completes. Clients should back off and retry shortly
+    /// rather than treat this as a hard failure.
+    MigrationInProgress,
 }
 
 impl ErrorCode {
@@ -73,6 +77,7 @@ impl ErrorCode {
             Self::VersionMismatch => "version_mismatch",
             Self::RateLimited => "rate_limited",
             Self::DaemonOffline => "daemon_offline",
+            Self::MigrationInProgress => "migration_in_progress",
         }
     }
 
@@ -95,6 +100,7 @@ impl ErrorCode {
             "version_mismatch" => Some(Self::VersionMismatch),
             "rate_limited" => Some(Self::RateLimited),
             "daemon_offline" => Some(Self::DaemonOffline),
+            "migration_in_progress" => Some(Self::MigrationInProgress),
             _ => None,
         }
     }
@@ -125,6 +131,7 @@ mod tests {
             ErrorCode::VersionMismatch,
             ErrorCode::RateLimited,
             ErrorCode::DaemonOffline,
+            ErrorCode::MigrationInProgress,
         ];
         for code in all {
             let s = code.as_str();
@@ -173,7 +180,8 @@ mod tests {
         // this test catches the drift.
         use crate::response::{
             ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR, ERR_CODE_INVALID_ARGUMENT,
-            ERR_CODE_IPC_NOT_READY, ERR_CODE_NOT_FOUND, ERR_CODE_NOT_IMPLEMENTED,
+            ERR_CODE_IPC_NOT_READY, ERR_CODE_MIGRATION_IN_PROGRESS, ERR_CODE_NOT_FOUND,
+            ERR_CODE_NOT_IMPLEMENTED,
         };
         assert_eq!(ErrorCode::NotFound.as_str(), ERR_CODE_NOT_FOUND);
         assert_eq!(ErrorCode::AuthFailed.as_str(), ERR_CODE_AUTH_FAILED);
@@ -184,6 +192,25 @@ mod tests {
         assert_eq!(ErrorCode::NotImplemented.as_str(), ERR_CODE_NOT_IMPLEMENTED);
         assert_eq!(ErrorCode::IpcNotReady.as_str(), ERR_CODE_IPC_NOT_READY);
         assert_eq!(ErrorCode::InternalError.as_str(), ERR_CODE_INTERNAL_ERROR);
+        assert_eq!(
+            ErrorCode::MigrationInProgress.as_str(),
+            ERR_CODE_MIGRATION_IN_PROGRESS
+        );
+    }
+
+    /// The `migration_in_progress` wire code (emitted by the daemon's v4
+    /// key-rotation sweep gate) must parse into the typed variant so the CLI
+    /// can branch on it instead of matching English error text.
+    #[test]
+    fn migration_in_progress_parses_and_displays() {
+        assert_eq!(
+            ErrorCode::parse("migration_in_progress"),
+            Some(ErrorCode::MigrationInProgress)
+        );
+        assert_eq!(
+            format!("{}", ErrorCode::MigrationInProgress),
+            "migration_in_progress"
+        );
     }
 
     #[test]

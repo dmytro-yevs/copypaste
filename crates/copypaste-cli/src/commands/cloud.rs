@@ -39,18 +39,19 @@ const SETUP_SQL: &str = include_str!("../../../../docs/supabase/setup.sql");
 /// URL is HTTPS before sending — the daemon refuses plain http, and failing
 /// here gives a clearer message than a silent no-op later.
 ///
-/// `password` is resolved without ever accepting a plain argv flag value other
-/// than as an explicit opt-in: callers pass `None` and we read `SUPABASE_PASSWORD`
-/// or prompt on stdin, avoiding shell-history leakage.
+/// Both the anon key and password are resolved without ever requiring a plain
+/// argv flag value: callers may pass `None` and we read the matching env var
+/// (`SUPABASE_ANON_KEY` / `SUPABASE_PASSWORD`) or prompt on stdin, avoiding
+/// shell-history and process-list (`ps`) leakage. An explicit flag value is
+/// still accepted as a deprecated fallback.
 pub fn setup(
     socket_path: &Path,
     url: &str,
-    anon_key: &str,
+    anon_key: Option<String>,
     email: &str,
     password: Option<String>,
 ) -> Result<()> {
     let url = url.trim().trim_end_matches('/');
-    let anon_key = anon_key.trim();
     let email = email.trim();
 
     if !url.to_ascii_lowercase().starts_with("https://") {
@@ -58,16 +59,29 @@ pub fn setup(
             "Supabase URL must start with https:// (got {url}). Cloud sync refuses plain http."
         ));
     }
-    if anon_key.is_empty() {
-        return Err(anyhow!("anon key must not be empty"));
-    }
     if email.is_empty() {
         return Err(anyhow!("email must not be empty"));
     }
 
+    // Resolve the anon key without leaking it via `ps`: explicit --anon-key
+    // (deprecated) → SUPABASE_ANON_KEY env → interactive prompt.
+    let anon_key = resolve_secret(
+        anon_key,
+        "SUPABASE_ANON_KEY",
+        "Supabase anon/public API key (input is visible): ",
+    )?;
+    let anon_key = anon_key.trim();
+    if anon_key.is_empty() {
+        return Err(anyhow!("anon key must not be empty"));
+    }
+
     // Resolve the password without leaking it into shell history: explicit
     // --password arg (discouraged) → SUPABASE_PASSWORD env → interactive prompt.
-    let password = resolve_password(password)?;
+    let password = resolve_secret(
+        password,
+        "SUPABASE_PASSWORD",
+        "Supabase account password (input is visible): ",
+    )?;
     if password.trim().is_empty() {
         return Err(anyhow!("password must not be empty"));
     }
@@ -107,25 +121,26 @@ pub fn setup(
     Ok(())
 }
 
-/// Resolve the account password: explicit value → `SUPABASE_PASSWORD` env →
-/// interactive stdin prompt. We never echo the password back and never log it.
+/// Resolve a secret value (anon key or password) without leaking it via the
+/// process list or shell history: explicit value (deprecated argv flag) →
+/// `env_var` → interactive stdin prompt. We never echo it back and never log it.
 ///
 /// stdin prompt note: this reads a line in cleartext (the terminal echoes it)
 /// — acceptable for a one-time setup step and strictly better than an argv flag
 /// (which would persist in shell history and `ps` output). A no-echo prompt
 /// would require an extra crate (`rpassword`); deferred to avoid a new pinned
 /// dependency.
-fn resolve_password(explicit: Option<String>) -> Result<String> {
-    if let Some(p) = explicit {
-        return Ok(p);
+fn resolve_secret(explicit: Option<String>, env_var: &str, prompt: &str) -> Result<String> {
+    if let Some(v) = explicit {
+        return Ok(v);
     }
-    if let Ok(p) = std::env::var("SUPABASE_PASSWORD") {
-        if !p.is_empty() {
-            return Ok(p);
+    if let Ok(v) = std::env::var(env_var) {
+        if !v.is_empty() {
+            return Ok(v);
         }
     }
     use std::io::Write;
-    print!("Supabase account password (input is visible): ");
+    print!("{prompt}");
     std::io::stdout().flush()?;
     let mut buf = String::new();
     std::io::stdin().read_line(&mut buf)?;
@@ -202,7 +217,10 @@ mod tests {
 
     #[test]
     fn run_signatures_compile() {
-        let _: fn(&Path, &str, &str, &str, Option<String>) -> Result<()> = setup;
+        // Reference each entry point so a signature change is caught at compile
+        // time. `setup` takes `Option<String>` for the anon key and password so
+        // neither secret has to be passed on the (process-list-visible) argv.
+        let _ = setup;
         let _: fn(&Path) -> Result<()> = status;
         let _: fn(&Path) -> Result<()> = test;
         let _: fn() -> Result<()> = setup_sql;

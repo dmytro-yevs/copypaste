@@ -171,9 +171,11 @@ enum CloudAction {
         /// Supabase project URL (must start with https://)
         #[arg(long)]
         url: String,
-        /// Supabase anon/public API key (starts with eyJ…)
+        /// Supabase anon/public API key (starts with eyJ…). If omitted, read
+        /// from the SUPABASE_ANON_KEY env var or prompted on stdin — passing it
+        /// as a flag leaks it into shell history and the process list.
         #[arg(long)]
-        anon_key: String,
+        anon_key: Option<String>,
         /// Account email for the authenticated GoTrue sign-in (required by RLS)
         #[arg(long)]
         email: String,
@@ -290,7 +292,7 @@ fn main() {
                 anon_key,
                 email,
                 password,
-            } => commands::cloud::setup(&socket, &url, &anon_key, &email, password),
+            } => commands::cloud::setup(&socket, &url, anon_key, &email, password),
             CloudAction::Status => commands::cloud::status(&socket),
             CloudAction::Test => commands::cloud::test(&socket),
             CloudAction::SetupSql => commands::cloud::setup_sql(),

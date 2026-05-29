@@ -24,6 +24,10 @@ pub const ERR_CODE_NOT_IMPLEMENTED: &str = "not_implemented";
 pub const ERR_CODE_IPC_NOT_READY: &str = "ipc_not_ready";
 /// Catch-all for unexpected daemon-side failures (I/O, panics, db errors).
 pub const ERR_CODE_INTERNAL_ERROR: &str = "internal_error";
+/// The v4 key-rotation sweep is still in progress. Ingest paths return this
+/// rather than writing new items to avoid mixing key versions during the
+/// sweep. Clients should back off and retry after a short delay.
+pub const ERR_CODE_MIGRATION_IN_PROGRESS: &str = "migration_in_progress";
 
 /// A single JSON-RPC-style response emitted by the daemon for a matching
 /// [`crate::Request`].
