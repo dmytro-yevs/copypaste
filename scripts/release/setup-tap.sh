@@ -284,7 +284,7 @@ jobs:
           VERSION: \${{ steps.ver.outputs.version }}
         run: |
           set -euo pipefail
-          URL=\"https://github.com/$GITHUB_USER/CopyPaste/releases/download/v\${VERSION}/CopyPaste.dmg\"
+          URL=\"https://github.com/$GITHUB_USER/CopyPaste/releases/download/v\${VERSION}/CopyPaste-vv\${VERSION}-macos-arm64.dmg\"
           curl -fsSL -o /tmp/CopyPaste.dmg \"\$URL\"
           SHA=\$(sha256sum /tmp/CopyPaste.dmg | awk '{print \$1}')
           echo \"sha256=\$SHA\" >> \"\$GITHUB_OUTPUT\"
