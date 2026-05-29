@@ -2,21 +2,20 @@
 # install.sh — curl-piped end-user installer for CopyPaste on macOS.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/USER/CopyPaste/main/scripts/release/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/USER/CopyPaste/main/scripts/release/install.sh | bash -s -- 0.2.0-beta.1
+#   curl -fsSL https://raw.githubusercontent.com/dmytro-yevs/copypaste/main/scripts/release/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/dmytro-yevs/copypaste/main/scripts/release/install.sh | bash -s -- 0.5.1
 #
 # What it does:
-#   1. Downloads CopyPaste-<version>.dmg from the GitHub release.
+#   1. Downloads CopyPaste-vv<version>-macos-arm64.dmg from the GitHub release.
 #   2. Mounts, copies CopyPaste.app to /Applications, drops quarantine attr
 #      (ad-hoc signed builds would otherwise trip Gatekeeper on first launch).
 #   3. Loads ~/Library/LaunchAgents/com.copypaste.daemon.plist if present.
 #
-# Replace USER/CopyPaste below with the actual GitHub <owner>/<repo> once the
-# repo lives at its final URL. Tracked as a TODO until W1.5 lands the cask.
+# Override the repo via COPYPASTE_REPO env for forks.
 set -euo pipefail
 
 # ---- config ----------------------------------------------------------------
-REPO="${COPYPASTE_REPO:-USER/CopyPaste}"   # override via env for forks
+REPO="${COPYPASTE_REPO:-dmytro-yevs/copypaste}"   # override via env for forks
 VERSION="${1:-latest}"
 APP_NAME="CopyPaste"
 APP_BUNDLE="${APP_NAME}.app"
@@ -28,16 +27,26 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
     exit 1
 fi
 
-# Resolve "latest" via GitHub API redirect; otherwise build the asset URL directly.
+# Resolve "latest" by querying the GitHub API for the newest release tag, then
+# build the canonical asset URL. The published asset name embeds the version
+# with a double-v prefix: CopyPaste-vv<version>-macos-arm64.dmg (the release
+# tag already carries a leading 'v').
 if [[ "$VERSION" == "latest" ]]; then
-    ASSET_URL="https://github.com/${REPO}/releases/latest/download/${APP_NAME}.dmg"
-    DISPLAY_VERSION="latest"
+    TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+        | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+    if [[ -z "$TAG" ]]; then
+        echo "ERROR: could not resolve latest release tag from GitHub API." >&2
+        echo "       Pass an explicit version, e.g. bash -s -- 0.5.1" >&2
+        exit 1
+    fi
+    VER_NO_V="${TAG#v}"
+    DISPLAY_VERSION="v${VER_NO_V} (latest)"
 else
     # Accept both "0.2.0-beta.1" and "v0.2.0-beta.1"
     VER_NO_V="${VERSION#v}"
-    ASSET_URL="https://github.com/${REPO}/releases/download/v${VER_NO_V}/${APP_NAME}-${VER_NO_V}.dmg"
     DISPLAY_VERSION="v${VER_NO_V}"
 fi
+ASSET_URL="https://github.com/${REPO}/releases/download/v${VER_NO_V}/${APP_NAME}-vv${VER_NO_V}-macos-arm64.dmg"
 
 TMP="$(mktemp -d)"
 DMG="${TMP}/${APP_NAME}.dmg"
