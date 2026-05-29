@@ -162,6 +162,42 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
+     * Decrypt all locally stored items into [uniffi.copypaste_android.LocalItem]
+     * values for a P2P sync push. Each stored blob is decrypted with [key] using
+     * the item's id as AEAD AAD (the same id used at encrypt time).
+     *
+     * Items that fail to decrypt (e.g. produced by the local AES-GCM fallback
+     * when the .so was absent, which UniFFI cannot read back) are skipped rather
+     * than aborting the whole sync. Returns most-recent-first, capped at [limit].
+     */
+    suspend fun localItemsForSync(
+        key: ByteArray,
+        limit: Int = 200,
+    ): List<uniffi.copypaste_android.LocalItem> = withContext(Dispatchers.IO) {
+        val ids = storedIds().takeLast(limit)
+        ids.mapNotNull { id ->
+            val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
+            try {
+                val parts = raw.split("|")
+                val wallTimeMs = parts[0].toLong()
+                val contentType = parts[1]
+                val nonce = Base64.decode(parts[3], Base64.NO_WRAP)
+                val ciphertext = Base64.decode(parts[4], Base64.NO_WRAP)
+                val plain = decryptText(id, ciphertext, nonce, key)
+                uniffi.copypaste_android.LocalItem(
+                    id = id,
+                    wallTimeMs = wallTimeMs,
+                    contentType = contentType,
+                    plaintext = plain.map { it.toUByte() },
+                )
+            } catch (e: Exception) {
+                Log.d(TAG, "Skipping item $id for sync (decrypt/parse failed): ${e.message}")
+                null
+            }
+        }.reversed()
+    }
+
+    /**
      * Pull incoming relay items, decrypt each via UniFFI decryptText, and store
      * non-sensitive plaintext locally. Returns the list of decrypted strings that
      * were successfully received (storing may still be a no-op until the .so lands).

@@ -802,10 +802,13 @@ name = "copypaste-android"
 version = "0.5.0"
 dependencies = [
  "copypaste-core",
+ "copypaste-p2p",
+ "copypaste-sync",
  "rusqlite",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
  "uniffi",
  "uuid",
 ]

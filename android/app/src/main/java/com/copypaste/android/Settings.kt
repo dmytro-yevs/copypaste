@@ -240,6 +240,25 @@ class Settings(context: Context) {
             return key
         }
 
+    /**
+     * Pinned fingerprint of the most recently paired P2P peer, or empty when no
+     * device has been paired. Stored after a successful [PairActivity] sync so a
+     * future sync can target the same peer without re-scanning a QR.
+     */
+    var pairedPeerFingerprint: String
+        get() = prefs.getString("paired_peer_fingerprint", "") ?: ""
+        set(v) = prefs.edit().putString("paired_peer_fingerprint", v).apply()
+
+    /**
+     * Sync-listener address (host:port) reported by the most recently paired
+     * peer during bootstrap. See the L4 milestone note: the macOS side currently
+     * advertises a loopback hint, so this is not yet host-reachable from an
+     * emulator.
+     */
+    var pairedPeerSyncAddr: String
+        get() = prefs.getString("paired_peer_sync_addr", "") ?: ""
+        set(v) = prefs.edit().putString("paired_peer_sync_addr", v).apply()
+
     fun clear() = prefs.edit().clear().apply()
 
     // ── AndroidKeyStore KEK helpers ─────────────────────────────────────────
