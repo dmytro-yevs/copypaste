@@ -192,8 +192,9 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.zxing.embedded)
 
-    // JVM unit tests (src/test) — pure logic, no Android/FFI deps. Runs via
-    // `./gradlew testDebugUnitTest` without an emulator.
+    // JVM unit tests (src/test) — pure-Kotlin logic with no Android/FFI deps
+    // (e.g. content-type normalization at the P2P sync boundary). Runs on the
+    // host JVM via `./gradlew test` / `testDebugUnitTest`, no emulator needed.
     testImplementation("junit:junit:4.13.2")
 
     // Instrumented tests (androidTest) — cross-language crypto conformance.

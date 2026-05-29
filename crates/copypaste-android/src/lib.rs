@@ -514,7 +514,11 @@ pub fn sync_with_peer(
         // items are re-keyed (image chunks use a separate scheme).
         let mut outbound: Vec<WireItem> = Vec::with_capacity(local_items.len());
         for it in &local_items {
-            if it.content_type != "text" {
+            // Defense-in-depth: callers (the Android Kotlin layer) normalize to
+            // the canonical "text" token, but tolerate MIME-style "text/plain"
+            // and any "text/*" here so a stored content type never silently
+            // drops an item from the send path. Canonical "text" stays primary.
+            if !(it.content_type == "text" || it.content_type.starts_with("text/")) {
                 continue;
             }
             let item_id = uuid::Uuid::new_v4().to_string();
@@ -1275,6 +1279,27 @@ mod tests {
     /// received the FFI's one offered item (the Android→macOS send path).
     #[test]
     fn sync_with_peer_receives_item_from_loopback_peer() {
+        loopback_sync_roundtrip("text");
+    }
+
+    /// Regression for the Android→peer "ZERO items sent" bug: the Kotlin layer
+    /// stores `content_type = "text/plain"` and historically passed that raw
+    /// into `LocalItem`, but the send path only re-keyed items whose content
+    /// type was exactly "text" — so every Android item was silently dropped
+    /// (items_sent = 0). This drives the same loopback exchange with a
+    /// `"text/plain"` offered item and asserts it IS sent and received by the
+    /// peer. The earlier loopback test used "text", masking the real value.
+    #[test]
+    fn sync_with_peer_sends_text_plain_item_to_loopback_peer() {
+        loopback_sync_roundtrip("text/plain");
+    }
+
+    /// Shared body for the loopback send/receive tests, parameterized by the
+    /// content type the FFI offers, so we can prove both the canonical "text"
+    /// token and the MIME-style "text/plain" value are accepted by the send
+    /// path. `offered_content_type` is the value placed on the outbound
+    /// `LocalItem.content_type`.
+    fn loopback_sync_roundtrip(offered_content_type: &str) {
         use bytes::Bytes;
         use copypaste_p2p::pake::SessionKey;
         use copypaste_p2p::transport::{PairedPeers, PeerTransport};
@@ -1378,7 +1403,7 @@ mod tests {
         let local_items = vec![LocalItem {
             id: String::new(),
             wall_time_ms: 7,
-            content_type: "text".to_string(),
+            content_type: offered_content_type.to_string(),
             plaintext: offered_plaintext.clone(),
         }];
 
