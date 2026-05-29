@@ -13,6 +13,15 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   COVERAGE_AUTO_INSTALL: "1"
+  # The coverage job instruments and runs the FULL daemon test suite via
+  # `cargo llvm-cov --workspace`. Some daemon tests spin up the real daemon
+  # startup path, which reaches the macOS Keychain. On the headless CI runner
+  # the Keychain is locked/unavailable and those tests panic (e.g.
+  # `ipc::tests::revoke_peer_validates_and_records_audit_row`). The regular
+  # `cargo test --workspace` runs that pass do so because this bypass is set;
+  # mirror it here so coverage matches CI behaviour. See keychain::mod.rs
+  # (`keychain_bypassed`) for the centralized escape hatch.
+  COPYPASTE_EPHEMERAL_KEY: "1"
 
 jobs:
   coverage:
