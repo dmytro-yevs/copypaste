@@ -188,8 +188,18 @@ pub fn chunks_from_blob(blob: &[u8]) -> Result<Vec<EncryptedChunk>, ImageError> 
         return Err(ImageError::Decode("blob too short".into()));
     }
     let count = u32::from_be_bytes([blob[0], blob[1], blob[2], blob[3]]) as usize;
+
+    // Smallest possible per-chunk footprint in the blob: a 4-byte wire-length
+    // prefix plus the minimum wire header [version:1][index:4][is_final:1]
+    // [nonce:24][ct_len:4] = 34 bytes, i.e. 38 bytes total. A declared `count`
+    // can therefore never exceed `(blob.len() - 4) / 38`. We clamp the reserve
+    // against this ceiling so a corrupt/malicious blob with a huge count field
+    // cannot trigger a multi-GB `Vec::with_capacity` allocation (OOM). The
+    // per-chunk `pos` bounds checks below remain authoritative for correctness.
+    const MIN_WIRE_CHUNK_LEN: usize = 4 + (1 + 4 + 1 + 24 + 4);
+    let capacity_ceiling = (blob.len() - 4) / MIN_WIRE_CHUNK_LEN;
     let mut pos = 4usize;
-    let mut chunks = Vec::with_capacity(count);
+    let mut chunks = Vec::with_capacity(count.min(capacity_ceiling));
 
     for _ in 0..count {
         if pos + 4 > blob.len() {
@@ -387,6 +397,36 @@ mod tests {
         // Truncate to just the count field
         let truncated = &blob[..4];
         let err = chunks_from_blob(truncated).unwrap_err();
+        assert!(matches!(err, ImageError::Decode(_)));
+    }
+
+    #[test]
+    fn absurd_count_does_not_over_allocate() {
+        // A corrupt/malicious blob declaring a u32::MAX chunk count but carrying
+        // almost no actual data must NOT attempt a multi-GB pre-allocation.
+        // It must fail with a bounded Decode error instead (the per-chunk bounds
+        // checks reject the first chunk because there is no wire-length prefix).
+        let mut blob = u32::MAX.to_be_bytes().to_vec(); // count = 4_294_967_295
+        blob.extend_from_slice(&[0x00, 0x01]); // 2 trailing bytes, not even a full wire_len
+        let err = chunks_from_blob(&blob).unwrap_err();
+        assert!(matches!(err, ImageError::Decode(_)));
+    }
+
+    #[test]
+    fn large_count_with_one_real_chunk_reads_safely() {
+        // Build a valid single-chunk blob, then overwrite the count field with a
+        // huge value. Deserialisation must still bound its allocation to the real
+        // blob length and fail cleanly when it runs past the available bytes,
+        // rather than reserving capacity for the bogus count.
+        let key = test_key();
+        let file_id = test_file_id();
+        let chunks = encrypt_chunks(b"hi", &key, &file_id, 64 * 1024);
+        assert_eq!(chunks.len(), 1);
+        let mut blob = chunks_to_blob(&chunks);
+        blob[0..4].copy_from_slice(&u32::MAX.to_be_bytes());
+        // Reading the (single) real chunk succeeds, then the second iteration
+        // hits the wire-length bounds check and errors — no huge allocation.
+        let err = chunks_from_blob(&blob).unwrap_err();
         assert!(matches!(err, ImageError::Decode(_)));
     }
 
