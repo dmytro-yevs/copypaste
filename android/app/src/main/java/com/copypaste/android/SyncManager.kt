@@ -33,6 +33,38 @@ class SyncManager(
 ) {
     companion object {
         private const val TAG = "SyncManager"
+
+        /**
+         * M8: process-wide cache of the Argon2id-derived 32-byte sync key,
+         * keyed by the passphrase that produced it. derive_cloud_sync_key runs
+         * Argon2id (~50 ms on device); without this cache every push and every
+         * poll re-derived it. Cleared automatically when the passphrase changes
+         * (different key in the map). RAM-only; never persisted.
+         */
+        @Volatile
+        private var cachedSyncKey: Pair<String, ByteArray>? = null
+
+        private val syncKeyLock = Any()
+
+        /**
+         * Return the derived sync key for [passphrase], deriving (and caching)
+         * on a miss. Returns null if derivation throws. Hands back a defensive
+         * copy so callers cannot mutate the cached key.
+         */
+        private fun derivedSyncKey(passphrase: String): ByteArray? {
+            cachedSyncKey?.let { (pw, key) -> if (pw == passphrase) return key.copyOf() }
+            return synchronized(syncKeyLock) {
+                cachedSyncKey?.let { (pw, key) -> if (pw == passphrase) return@synchronized key.copyOf() }
+                val derived = try {
+                    derive_cloud_sync_key(passphrase)
+                } catch (e: Exception) {
+                    Log.w(TAG, "sync key derivation failed: ${e.message}")
+                    return@synchronized null
+                }
+                cachedSyncKey = passphrase to derived
+                derived.copyOf()
+            }
+        }
     }
 
     private var lastLamportTs: Long = 0
@@ -115,19 +147,21 @@ class SyncManager(
 
         val client = SupabaseClient(s.supabaseUrl, s.supabaseAnonKey)
 
-        // Derive sync key from passphrase (Argon2id — expensive, ~50ms on device).
-        val syncKeyBytes = try {
-            derive_cloud_sync_key(s.cloudSyncPassphrase)
-        } catch (e: Exception) {
-            Log.w(TAG, "pushToSupabase: key derivation failed: ${e.message}")
+        // M8: cached Argon2id-derived sync key (re-derived only on passphrase change).
+        val syncKeyBytes = derivedSyncKey(s.cloudSyncPassphrase) ?: run {
+            Log.w(TAG, "pushToSupabase: key derivation failed")
             return@withContext null
         }
 
-        // Resolve bearer: try email/password sign-in if configured, else fall back to anon key.
+        // M8: resolve the bearer token. When email/password credentials are
+        // configured, a sign-in failure is FATAL — we must NOT silently fall
+        // back to the anon key, which would write rows under the anon role and
+        // bypass Row Level Security (the removed insecure fallback). Only when
+        // no credentials are configured do we use the anon key as the bearer.
         val bearer = if (s.hasSupabaseCredentials) {
             client.signIn(s.supabaseEmail, s.supabasePassword) ?: run {
-                Log.w(TAG, "pushToSupabase: sign-in failed, falling back to anon key")
-                s.supabaseAnonKey
+                Log.w(TAG, "pushToSupabase: sign-in failed — aborting (no anon-key RLS bypass)")
+                return@withContext null
             }
         } else {
             s.supabaseAnonKey
@@ -177,18 +211,18 @@ class SyncManager(
 
         val client = SupabaseClient(s.supabaseUrl, s.supabaseAnonKey)
 
-        val syncKeyBytes = try {
-            derive_cloud_sync_key(s.cloudSyncPassphrase)
-        } catch (e: Exception) {
-            Log.w(TAG, "pollFromSupabase: key derivation failed: ${e.message}")
+        // M8: cached Argon2id-derived sync key (re-derived only on passphrase change).
+        val syncKeyBytes = derivedSyncKey(s.cloudSyncPassphrase) ?: run {
+            Log.w(TAG, "pollFromSupabase: key derivation failed")
             return@withContext emptyList()
         }
 
-        // Resolve bearer: sign in with email/password if configured.
+        // M8: see pushToSupabase — a sign-in failure must NOT fall back to the
+        // anon key (RLS bypass). Abort the poll instead.
         val bearer = if (s.hasSupabaseCredentials) {
             client.signIn(s.supabaseEmail, s.supabasePassword) ?: run {
-                Log.w(TAG, "pollFromSupabase: sign-in failed, falling back to anon key")
-                s.supabaseAnonKey
+                Log.w(TAG, "pollFromSupabase: sign-in failed — aborting (no anon-key RLS bypass)")
+                return@withContext emptyList()
             }
         } else {
             s.supabaseAnonKey

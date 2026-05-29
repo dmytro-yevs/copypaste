@@ -29,10 +29,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdePanel
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -59,12 +59,23 @@ class MainActivity : ComponentActivity() {
     private lateinit var clipboardManager: ClipboardManager
     private lateinit var repository: ClipboardRepository
     private lateinit var settings: Settings
-    private val scope = CoroutineScope(Dispatchers.Main)
+
+    /**
+     * L10: whether the onboarding screen has already been forwarded to during
+     * this Activity's lifetime. Instance-scoped (was a process-static `var`,
+     * which suppressed onboarding forever after the first launch even across
+     * fresh Activity instances). Persisted into savedInstanceState so a config
+     * change / process-death restore does not re-trigger onboarding mid-task.
+     */
+    private var onboardingShownThisSession = false
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         val clip = clipboardManager.primaryClip ?: return@OnPrimaryClipChangedListener
         val text = clip.getItemAt(0)?.text?.toString() ?: return@OnPrimaryClipChangedListener
-        scope.launch(Dispatchers.IO) { handleClipboardChange(text) }
+        // M7: use the Activity's lifecycleScope so the coroutine is cancelled
+        // automatically in onDestroy — the old hand-rolled CoroutineScope was
+        // never cancelled, leaking the Activity/ViewModel via the captured `this`.
+        lifecycleScope.launch(Dispatchers.IO) { handleClipboardChange(text) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,6 +83,9 @@ class MainActivity : ComponentActivity() {
         // Edge-to-edge: the bottom NavigationBar and each tab's TopAppBar apply
         // their own system-bar insets so nothing is clipped on notched phones.
         enableEdgeToEdge()
+
+        onboardingShownThisSession =
+            savedInstanceState?.getBoolean(KEY_ONBOARDING_SHOWN, false) ?: false
 
         settings = Settings(this)
         repository = ClipboardRepository(this)
@@ -94,6 +108,11 @@ class MainActivity : ComponentActivity() {
             onboardingShownThisSession = true
             startActivity(Intent(this, OnboardingActivity::class.java))
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(KEY_ONBOARDING_SHOWN, onboardingShownThisSession)
     }
 
     override fun onDestroy() {
@@ -123,8 +142,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
-        // Suppress repeat onboarding launches within the same Activity instance.
-        private var onboardingShownThisSession = false
+        private const val KEY_ONBOARDING_SHOWN = "onboarding_shown_this_session"
     }
 }
 

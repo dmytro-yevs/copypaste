@@ -159,6 +159,8 @@ dependencies {
     implementation(libs.material)
     implementation(libs.kotlinx.coroutines.android)
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0")
+    // M7: Activity.lifecycleScope for auto-cancelled clipboard coroutines.
+    implementation(libs.lifecycle.runtime.ktx)
     implementation("androidx.recyclerview:recyclerview:1.3.2")
 
     // Compose BOM — manages versions of all compose libs.
@@ -195,8 +197,8 @@ dependencies {
     // JVM unit tests (src/test) — pure-Kotlin logic with no Android/FFI deps
     // (e.g. content-type normalization at the P2P sync boundary,
     // SupabaseClient.encodePayloadCt/decodePayloadCt bytea hex,
-    // PairUtilsTest.formatScannedInfo, and
-    // OemAutoStartHelper.detectManufacturer mapping). Runs on the host JVM via
+    // PairUtilsTest.formatScannedInfo, OemAutoStartHelper.detectManufacturer
+    // mapping, and FgsSyncLoop backoff/interval math). Runs on the host JVM via
     // `./gradlew test` / `testDebugUnitTest`, no emulator needed.
     testImplementation("junit:junit:4.13.2")
 

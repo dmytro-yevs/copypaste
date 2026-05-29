@@ -194,6 +194,29 @@ class Settings(context: Context) {
      */
     val encryptionKey: ByteArray
         get() {
+            // H4: the unwrapped key is cached in RAM after the first AndroidKeyStore
+            // GCM unwrap. Without this cache, every call (each clipboard store, each
+            // sync poll, each FGS tick) performed a fresh AES-GCM keystore unwrap —
+            // a hardware/software keystore round-trip that is needlessly expensive
+            // on a hot path. The cache is process-local, never persisted, and dies
+            // with the process. We hand out a defensive copy so a caller mutating
+            // the returned array cannot corrupt the cached master key.
+            cachedKey?.let { return it.copyOf() }
+            synchronized(keyCacheLock) {
+                cachedKey?.let { return it.copyOf() }
+                val key = loadOrCreateKey()
+                cachedKey = key
+                return key.copyOf()
+            }
+        }
+
+    /**
+     * Unwrap (or migrate/generate) the 32-byte encryption key. Callers go through
+     * the cached [encryptionKey] accessor; this does the actual keystore work and
+     * is invoked at most once per process under [keyCacheLock].
+     */
+    private fun loadOrCreateKey(): ByteArray {
+        run {
             // Already migrated → unwrap and return.
             val wrappedB64 = prefs.getString(KEY_WRAPPED_KEY_B64, null)
             val ivB64 = prefs.getString(KEY_WRAPPED_KEY_IV_B64, null)
@@ -239,6 +262,7 @@ class Settings(context: Context) {
             editor.apply()
             return key
         }
+    }
 
     /**
      * Pinned fingerprint of the most recently paired P2P peer, or empty when no
@@ -301,7 +325,12 @@ class Settings(context: Context) {
                 .apply()
         }
 
-    fun clear() = prefs.edit().clear().apply()
+    fun clear() {
+        // H4: drop the cached master key so a re-created key after clear() is
+        // not shadowed by a stale RAM copy.
+        synchronized(keyCacheLock) { cachedKey = null }
+        prefs.edit().clear().apply()
+    }
 
     // ── AndroidKeyStore KEK helpers ─────────────────────────────────────────
 
@@ -346,6 +375,20 @@ class Settings(context: Context) {
 
     companion object {
         private const val TAG = "Settings"
+
+        /**
+         * H4: process-wide cache of the unwrapped 32-byte encryption key.
+         *
+         * Lives in the companion (not a [Settings] instance field) because the
+         * app constructs many short-lived [Settings] objects — caching per
+         * instance would still re-unwrap on each new object. The cache is
+         * RAM-only (never written to prefs/disk) and dies with the process.
+         */
+        @Volatile
+        private var cachedKey: ByteArray? = null
+
+        private val keyCacheLock = Any()
+
         private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
         private const val KEK_ALIAS = "copypaste_master_kek_v1"
         private const val KEK_TRANSFORMATION = "AES/GCM/NoPadding"

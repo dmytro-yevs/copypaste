@@ -1,5 +1,6 @@
 package com.copypaste.android
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -43,7 +44,11 @@ class RelayClient(private val baseUrl: String) {
                         token = json.getString("token")
                     )
                 } else null
-            } catch (e: Exception) { null }
+            } catch (e: Exception) {
+                // L11: log relay errors so outages are diagnosable (was a silent swallow).
+                Log.w(TAG, "registerDevice failed: ${e.javaClass.simpleName}: ${e.message}", e)
+                null
+            }
         }
 
     suspend fun uploadItem(deviceId: String, token: String, item: RelayItem): Boolean =
@@ -60,7 +65,10 @@ class RelayClient(private val baseUrl: String) {
 
                 val resp = post("/devices/$deviceId/items", body, token)
                 resp.code in 200..201
-            } catch (e: Exception) { false }
+            } catch (e: Exception) {
+                Log.w(TAG, "uploadItem failed: ${e.javaClass.simpleName}: ${e.message}", e)
+                false
+            }
         }
 
     suspend fun pollItems(deviceId: String, token: String, sinceLamport: Long = 0): List<RelayItem> =
@@ -82,11 +90,19 @@ class RelayClient(private val baseUrl: String) {
                         lamportTs = item.getLong("lamport_ts")
                     )
                 }
-            } catch (e: Exception) { emptyList() }
+            } catch (e: Exception) {
+                Log.w(TAG, "pollItems failed: ${e.javaClass.simpleName}: ${e.message}", e)
+                emptyList()
+            }
         }
 
     suspend fun health(): Boolean = withContext(Dispatchers.IO) {
-        try { get("/health", null).code == 200 } catch (e: Exception) { false }
+        try {
+            get("/health", null).code == 200
+        } catch (e: Exception) {
+            Log.w(TAG, "health check failed: ${e.javaClass.simpleName}: ${e.message}", e)
+            false
+        }
     }
 
     // --- HTTP helpers ---
@@ -124,6 +140,8 @@ class RelayClient(private val baseUrl: String) {
     }
 
     companion object {
+        private const val TAG = "RelayClient"
+
         /** Derive bearer token from public key bytes (first 32 hex chars of SHA-256) */
         fun tokenFromPublicKey(publicKeyBytes: ByteArray): String {
             val digest = MessageDigest.getInstance("SHA-256").digest(publicKeyBytes)
