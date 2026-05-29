@@ -47,6 +47,15 @@ fn history_cap_for_limit(tier_limit: Option<usize>) -> usize {
 #[allow(dead_code)]
 pub const MAX_FREE_DEVICES: usize = 5;
 
+/// Default page size for `GET /devices/:id/items` when the caller does not
+/// supply `limit`, and the absolute upper bound a single pull may return (M4).
+/// Bounds the work done (clone + serialize) under the global store mutex on a
+/// single request so one pull cannot amplify lock-hold time across a full
+/// `MAX_PUSH_ITEMS_PER_DEVICE` inbox.
+pub const DEFAULT_PULL_LIMIT: usize = 200;
+/// Hard ceiling on a caller-supplied `limit`; larger values are clamped down.
+pub const MAX_PULL_LIMIT: usize = 500;
+
 /// Per-device registration-rate-limit window (security MEDIUM #13).
 pub const REG_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 /// Maximum registration attempts allowed per device_id within `REG_LIMIT_WINDOW`.
@@ -79,6 +88,11 @@ pub struct DeviceRecord {
     // dead. Kept for the forthcoming tier-wiring.
     #[allow(dead_code)]
     pub tier: Tier,
+    /// Source IP the device registered from, used as the *scope* for the
+    /// per-scope device-count quota (H1). `None` when the relay is exercised
+    /// without a real transport (unit/integration tests); all such devices
+    /// share the single `None` scope, matching pre-IP behaviour.
+    pub registered_from_ip: Option<IpAddr>,
 }
 
 /// A single encrypted item in the wall-clock push/pull sync protocol.
@@ -234,14 +248,44 @@ impl RelayStore {
     // Registration
     // -----------------------------------------------------------------------
 
-    /// Register a new device with an explicit tier.
+    /// Register a new device with an explicit tier (no source IP — the device
+    /// is placed in the shared `None` scope). Convenience wrapper over
+    /// [`Self::register_device_with_tier_scoped`].
     ///
     /// Returns `(bearer_token, expires_at_unix)` on success.
     /// Returns `RelayError::DeviceConflict` if the device_id is already registered.
     /// Returns `RelayError::DeviceQuotaExceeded` if the device count limit for
-    /// `tier` has been reached.
+    /// `tier` has been reached *within the device's scope*.
+    // Production registration goes through `register_device_scoped` (which
+    // supplies the client IP); this unscoped wrapper is retained for the tier
+    // unit/integration tests that exercise the quota without a transport.
+    #[allow(dead_code)]
     pub fn register_device_with_tier(
         &mut self,
+        device_id: String,
+        device_name: String,
+        public_key_b64: String,
+        tier: Tier,
+    ) -> Result<(String, i64), RelayError> {
+        self.register_device_with_tier_scoped(None, device_id, device_name, public_key_b64, tier)
+    }
+
+    /// Register a new device with an explicit tier, scoped to `client_ip`.
+    ///
+    /// The device-count quota (H1) is enforced **per scope** — counting only
+    /// devices that registered from the same `client_ip` — rather than as a
+    /// single global cap across the whole relay. A global cap would reject the
+    /// 6th device across *all* users, breaking normal multi-user operation; a
+    /// per-scope cap bounds one source's footprint while letting independent
+    /// clients each register their own device set.
+    ///
+    /// Returns `(bearer_token, expires_at_unix)` on success.
+    /// Returns `RelayError::DeviceConflict` if the device_id is already registered.
+    /// Returns `RelayError::DeviceQuotaExceeded` if the device-count limit for
+    /// `tier` has been reached within `client_ip`'s scope.
+    pub fn register_device_with_tier_scoped(
+        &mut self,
+        client_ip: Option<IpAddr>,
         device_id: String,
         device_name: String,
         public_key_b64: String,
@@ -251,8 +295,15 @@ impl RelayStore {
             return Err(RelayError::DeviceConflict);
         }
 
-        // Enforce device-count quota before inserting.
-        quota::check_device_quota(tier, self.devices.len()).map_err(|v| match v {
+        // Enforce device-count quota *within this scope* before inserting.
+        // Count only devices that registered from the same client IP so the
+        // cap is per-scope, not a global ceiling (H1).
+        let scope_count = self
+            .devices
+            .values()
+            .filter(|r| r.registered_from_ip == client_ip)
+            .count();
+        quota::check_device_quota(tier, scope_count).map_err(|v| match v {
             QuotaViolation::MaxDevicesExceeded { limit } => {
                 RelayError::DeviceQuotaExceeded { limit }
             }
@@ -303,6 +354,7 @@ impl RelayStore {
                 registered_at: Instant::now(),
                 expires_at_unix,
                 tier,
+                registered_from_ip: client_ip,
             },
         );
         // Pre-create an empty inbox so pull can work without a separate device-check.
@@ -311,10 +363,13 @@ impl RelayStore {
         Ok((bearer_token, expires_at_unix))
     }
 
-    /// Register a new device using the default tier (`Tier::Free`).
+    /// Register a new device using the default tier (`Tier::Free`), unscoped
+    /// (shared `None` scope). Convenience wrapper used by tests.
     ///
     /// Returns `(bearer_token, expires_at_unix)` on success.
-    /// Convenience wrapper over [`Self::register_device_with_tier`].
+    // Production uses `register_device_scoped`; this unscoped form is used by
+    // the test suites that don't drive a real transport.
+    #[allow(dead_code)]
     pub fn register_device(
         &mut self,
         device_id: String,
@@ -322,6 +377,27 @@ impl RelayStore {
         public_key_b64: String,
     ) -> Result<(String, i64), RelayError> {
         self.register_device_with_tier(device_id, device_name, public_key_b64, Tier::Free)
+    }
+
+    /// Register a new device using the default tier (`Tier::Free`), scoped to
+    /// `client_ip` for the per-scope device quota (H1). Used by the HTTP
+    /// registration handler, which supplies the connecting client's IP.
+    ///
+    /// Returns `(bearer_token, expires_at_unix)` on success.
+    pub fn register_device_scoped(
+        &mut self,
+        client_ip: Option<IpAddr>,
+        device_id: String,
+        device_name: String,
+        public_key_b64: String,
+    ) -> Result<(String, i64), RelayError> {
+        self.register_device_with_tier_scoped(
+            client_ip,
+            device_id,
+            device_name,
+            public_key_b64,
+            Tier::Free,
+        )
     }
 
     /// Return public info about a registered device. Bearer tokens are never included.
@@ -428,13 +504,22 @@ impl RelayStore {
             .as_secs();
 
         let inbox = self.sync_items.entry(device_id.to_string()).or_default();
-        inbox.push(SyncItem {
+        let item = SyncItem {
             id,
             content_type,
             content_b64,
             wall_time,
             inserted_at_unix,
-        });
+        };
+        // Keep the inbox sorted ascending by `wall_time` *on insert* (M4) so
+        // `pull_items` can binary-search + slice instead of cloning and sorting
+        // the whole inbox under the global mutex on every pull. The common case
+        // is a monotonically increasing `wall_time`, which appends at the end
+        // (O(1) amortised); out-of-order pushes use a binary-search insert.
+        // Ties keep insertion order via `partition_point` (insert after equal
+        // `wall_time`), preserving the prior stable-sort behaviour.
+        let pos = inbox.partition_point(|existing| existing.wall_time <= wall_time);
+        inbox.insert(pos, item);
 
         // History quota: cap the inbox at the tier-aware effective limit
         // (the tighter of the absolute hard cap and the tier's
@@ -457,16 +542,33 @@ impl RelayStore {
         Ok(id)
     }
 
-    /// Return items in `device_id`'s sync inbox with `wall_time > since`, sorted ascending.
-    pub fn pull_items(&self, device_id: &str, since: u64) -> Result<Vec<PullItem>, RelayError> {
+    /// Return up to `limit` items in `device_id`'s sync inbox with
+    /// `wall_time > since`, ordered ascending by `wall_time`.
+    ///
+    /// The inbox is kept sorted by `wall_time` on insert (see [`Self::push_item`]),
+    /// so this binary-searches for the first item past `since` and clones only
+    /// the (at most `limit`) items it returns — it no longer clones+sorts the
+    /// entire inbox under the global mutex (M4). A `limit` of `0` is treated as
+    /// "no items" rather than "unbounded"; callers wanting the whole window pass
+    /// a large explicit cap.
+    pub fn pull_items(
+        &self,
+        device_id: &str,
+        since: u64,
+        limit: usize,
+    ) -> Result<Vec<PullItem>, RelayError> {
         let inbox = self
             .sync_items
             .get(device_id)
             .ok_or(RelayError::DeviceNotFound)?;
 
-        let mut result: Vec<PullItem> = inbox
+        // First index whose `wall_time > since`. The inbox is sorted ascending,
+        // so everything from `start` onward qualifies (no full scan/sort).
+        let start = inbox.partition_point(|item| item.wall_time <= since);
+
+        let result: Vec<PullItem> = inbox[start..]
             .iter()
-            .filter(|item| item.wall_time > since)
+            .take(limit)
             .map(|item| PullItem {
                 id: item.id,
                 content_type: item.content_type.clone(),
@@ -475,7 +577,6 @@ impl RelayStore {
             })
             .collect();
 
-        result.sort_by_key(|r| r.wall_time);
         Ok(result)
     }
 
@@ -506,7 +607,13 @@ impl RelayStore {
     // Cleanup
     // -----------------------------------------------------------------------
 
-    #[allow(dead_code)]
+    /// Remove device records (and their inbox + id-counter map entries) for
+    /// devices that registered at least `inactive_threshold_secs` ago AND have
+    /// an empty inbox. Wired into the background evictor (see `store.rs`) so the
+    /// `devices` map and the per-device counter map are actually reclaimed
+    /// (H1) — previously this was never called, so both grew without bound.
+    ///
+    /// Returns the number of device records removed.
     pub fn cleanup_inactive_devices(&mut self, inactive_threshold_secs: u64) -> usize {
         let inactive_ids: Vec<String> = self
             .devices
@@ -559,11 +666,31 @@ impl RelayStore {
     /// system clock.
     ///
     /// Returns the number of items evicted (across all device inboxes).
-    /// Empty inboxes are NOT removed — devices keep their registration
-    /// regardless of inbox activity (see [`Self::cleanup_inactive_devices`] for
-    /// device-record pruning).
+    ///
+    /// Inboxes belonging to a still-registered device are kept even when they
+    /// drain to empty (the device keeps its registration). However, *orphaned*
+    /// map entries — a `sync_items` inbox or a `next_sync_id_per_device`
+    /// counter whose `device_id` is no longer in `devices` — are reclaimed
+    /// here regardless of contents (H2): once the device record is gone the
+    /// inbox is unreachable (reads require a live `verify_token`), so retaining
+    /// it would just leak dead data. Without this, any inbox/counter that
+    /// outlives its device would grow unboundedly; pruning keeps both maps
+    /// bounded by the live device set.
     #[allow(dead_code)]
     pub fn prune_expired(&mut self, now_unix: u64, ttl_secs: u64) -> usize {
+        // Reclaim orphaned map entries regardless of TTL — these are pure
+        // memory leaks unrelated to item age (H2). Bind `devices` to a local
+        // shared borrow so the `retain` closures don't conflict with the
+        // mutable borrow of the map being retained.
+        // An inbox / counter whose device record is gone is unreachable (every
+        // read path requires a live `verify_token`), so reclaim it regardless
+        // of whether it still holds items — keeping it would leak dead data.
+        let devices = &self.devices;
+        self.sync_items
+            .retain(|device_id, _| devices.contains_key(device_id));
+        self.next_sync_id_per_device
+            .retain(|device_id, _| devices.contains_key(device_id));
+
         if ttl_secs == 0 {
             return 0;
         }
@@ -745,7 +872,7 @@ mod tests {
         push_text(&mut store, &device_a_id(), 1000);
         push_text(&mut store, &device_a_id(), 2000);
         push_text(&mut store, &device_a_id(), 3000);
-        let items = store.pull_items(&device_a_id(), 1000).unwrap();
+        let items = store.pull_items(&device_a_id(), 1000, usize::MAX).unwrap();
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].wall_time, 2000);
         assert_eq!(items[1].wall_time, 3000);
@@ -759,7 +886,7 @@ mod tests {
             .unwrap();
         push_text(&mut store, &device_a_id(), 100);
         push_text(&mut store, &device_a_id(), 200);
-        let items = store.pull_items(&device_a_id(), 0).unwrap();
+        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
         assert_eq!(items.len(), 2);
     }
 
@@ -772,7 +899,7 @@ mod tests {
         push_text(&mut store, &device_a_id(), 3000);
         push_text(&mut store, &device_a_id(), 1000);
         push_text(&mut store, &device_a_id(), 2000);
-        let items = store.pull_items(&device_a_id(), 0).unwrap();
+        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
         let times: Vec<u64> = items.iter().map(|i| i.wall_time).collect();
         assert_eq!(times, vec![1000, 2000, 3000]);
     }
@@ -835,7 +962,7 @@ mod tests {
         for t in 1u64..=(MAX_PUSH_ITEMS_PER_DEVICE as u64 + 1) {
             push_text(&mut store, &device_a_id(), t);
         }
-        let items = store.pull_items(&device_a_id(), 0).unwrap();
+        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
         assert_eq!(items.len(), MAX_PUSH_ITEMS_PER_DEVICE);
         let min_wt = items.iter().map(|i| i.wall_time).min().unwrap();
         assert_eq!(min_wt, 2, "oldest item must be evicted");
@@ -844,7 +971,9 @@ mod tests {
     #[test]
     fn pull_returns_device_not_found_for_unknown_device() {
         let store = make_store();
-        let err = store.pull_items("unknown-device", 0).unwrap_err();
+        let err = store
+            .pull_items("unknown-device", 0, usize::MAX)
+            .unwrap_err();
         assert!(matches!(err, RelayError::DeviceNotFound));
     }
 
@@ -1028,7 +1157,7 @@ mod tests {
             push_text(&mut store, &device_a_id(), t);
         }
 
-        let items = store.pull_items(&device_a_id(), 0).unwrap();
+        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
         assert!(
             items.len() <= effective_cap,
             "inbox must never exceed the effective history cap ({effective_cap}), got {}",
@@ -1050,7 +1179,7 @@ mod tests {
             push_text(&mut store, &device_a_id(), t);
         }
 
-        let items = store.pull_items(&device_a_id(), 0).unwrap();
+        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
         // Pro tier has no history limit, so only the absolute hard cap applies.
         assert_eq!(items.len(), MAX_PUSH_ITEMS_PER_DEVICE);
     }
@@ -1075,5 +1204,168 @@ mod tests {
         assert_eq!(history_cap_for_limit(Some(tight_tier_limit)), 10);
         // Unlimited tier history (`None`) clamps to the hard cap.
         assert_eq!(history_cap_for_limit(None), MAX_PUSH_ITEMS_PER_DEVICE);
+    }
+
+    // ---- H1: per-scope device quota ----------------------------------------
+
+    use std::net::{IpAddr, Ipv4Addr};
+
+    fn ip(n: u8) -> Option<IpAddr> {
+        Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, n)))
+    }
+
+    /// The device-count quota must be *per scope* (per registering IP), not a
+    /// global ceiling: distinct IPs each get their own full free-tier budget,
+    /// so a global "5 devices total" cap can no longer reject legitimate users.
+    #[test]
+    fn device_quota_is_per_scope_not_global() {
+        let mut store = make_store();
+        // Scope A fills its 5-device free budget.
+        for i in 0u8..5 {
+            store
+                .register_device_with_tier_scoped(
+                    ip(1),
+                    unique_device_id(i),
+                    format!("A{i}"),
+                    unique_key(i),
+                    Tier::Free,
+                )
+                .expect("scope A device must be accepted");
+        }
+        // A 6th device from scope A is rejected (its own scope is full)...
+        let err = store
+            .register_device_with_tier_scoped(
+                ip(1),
+                unique_device_id(5),
+                "A5".into(),
+                unique_key(5),
+                Tier::Free,
+            )
+            .unwrap_err();
+        assert!(matches!(err, RelayError::DeviceQuotaExceeded { limit: 5 }));
+
+        // ...but a device from a *different* IP (scope B) still registers fine,
+        // even though the relay already holds 5 devices globally. A global cap
+        // would have rejected this; a per-scope cap accepts it.
+        store
+            .register_device_with_tier_scoped(
+                ip(2),
+                unique_device_id(6),
+                "B0".into(),
+                unique_key(6),
+                Tier::Free,
+            )
+            .expect("a different scope must get its own device budget");
+        assert_eq!(store.stats().0, 6, "relay holds 6 devices across 2 scopes");
+    }
+
+    // ---- H2: orphan-map reclamation ----------------------------------------
+
+    /// `prune_expired` must reclaim `next_sync_id_per_device` counters and empty
+    /// `sync_items` inboxes whose device record no longer exists, so those maps
+    /// stay bounded by the live device set instead of leaking forever.
+    #[test]
+    fn prune_expired_reclaims_orphaned_maps() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64())
+            .unwrap();
+        push_text(&mut store, &device_a_id(), 1000);
+        // Counter + inbox now exist for device A.
+        assert!(store.next_sync_id_per_device.contains_key(&device_a_id()));
+        assert!(store.sync_items.contains_key(&device_a_id()));
+
+        // Forcibly drop *only* the device record, simulating a record removed
+        // by some path that left the side maps behind.
+        store.devices.remove(&device_a_id());
+
+        let now = 1_000_000u64;
+        store.prune_expired(now, 60);
+
+        assert!(
+            !store.next_sync_id_per_device.contains_key(&device_a_id()),
+            "orphaned id-counter entry must be reclaimed"
+        );
+        assert!(
+            !store.sync_items.contains_key(&device_a_id()),
+            "orphaned inbox must be reclaimed"
+        );
+    }
+
+    /// Empty inboxes belonging to a *still-registered* device must be kept (the
+    /// device retains its registration regardless of inbox activity).
+    #[test]
+    fn prune_expired_keeps_empty_inbox_of_registered_device() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64())
+            .unwrap();
+        // Empty inbox, device still registered.
+        store.prune_expired(u64::MAX, 1);
+        assert!(store.sync_items.contains_key(&device_a_id()));
+    }
+
+    // ---- M4: paginated pull -------------------------------------------------
+
+    /// `pull_items` must honor `limit`, returning at most `limit` items from the
+    /// `since` window in ascending `wall_time` order.
+    #[test]
+    fn pull_items_respects_limit() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64())
+            .unwrap();
+        for t in 1u64..=10 {
+            push_text(&mut store, &device_a_id(), t);
+        }
+        let page = store.pull_items(&device_a_id(), 0, 3).unwrap();
+        assert_eq!(page.len(), 3, "limit must cap the page size");
+        assert_eq!(
+            page.iter().map(|i| i.wall_time).collect::<Vec<_>>(),
+            vec![1, 2, 3],
+            "page must be the earliest items in the since-window, ascending"
+        );
+    }
+
+    /// Pagination via `since` + `limit` must walk the whole window without gaps
+    /// or duplicates when the client feeds the last `wall_time` back as `since`.
+    #[test]
+    fn pull_items_pagination_walks_window() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64())
+            .unwrap();
+        for t in 1u64..=5 {
+            push_text(&mut store, &device_a_id(), t);
+        }
+        let mut seen = Vec::new();
+        let mut since = 0u64;
+        loop {
+            let page = store.pull_items(&device_a_id(), since, 2).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            since = page.last().unwrap().wall_time;
+            seen.extend(page.iter().map(|i| i.wall_time));
+        }
+        assert_eq!(seen, vec![1, 2, 3, 4, 5]);
+    }
+
+    /// Out-of-order pushes must still be returned ascending by `wall_time`,
+    /// proving the on-insert sort (M4) keeps the inbox ordered.
+    #[test]
+    fn pull_items_ordered_after_out_of_order_push() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64())
+            .unwrap();
+        for t in [50u64, 10, 30, 20, 40] {
+            push_text(&mut store, &device_a_id(), t);
+        }
+        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
+        assert_eq!(
+            items.iter().map(|i| i.wall_time).collect::<Vec<_>>(),
+            vec![10, 20, 30, 40, 50]
+        );
     }
 }

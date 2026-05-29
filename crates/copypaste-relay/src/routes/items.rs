@@ -9,7 +9,7 @@ use crate::config::RelayConfig;
 use crate::error::RelayError;
 use crate::models::{PullItem, PullParams, PushRequest, PushResponse};
 use crate::quota::{self, QuotaViolation, Tier};
-use crate::state::AppState;
+use crate::state::{AppState, DEFAULT_PULL_LIMIT, MAX_PULL_LIMIT};
 
 /// DELETE /devices/:device_id/items/:item_id
 ///
@@ -105,12 +105,20 @@ pub async fn pull(
     BearerToken(token): BearerToken,
     Query(params): Query<PullParams>,
 ) -> Result<Json<Vec<PullItem>>, RelayError> {
+    // Resolve the page size before taking the lock: default when absent,
+    // clamped to the hard ceiling so a caller-supplied `limit` cannot force an
+    // oversized clone under the global mutex (M4).
+    let limit = params
+        .limit
+        .unwrap_or(DEFAULT_PULL_LIMIT)
+        .min(MAX_PULL_LIMIT);
+
     // Survive mutex poisoning (security HIGH #1).
     let store = state.lock().unwrap_or_else(|e| e.into_inner());
 
     // Auth: verify token belongs to this device.
     store.verify_token(&device_id, &token)?;
 
-    let items = store.pull_items(&device_id, params.since)?;
+    let items = store.pull_items(&device_id, params.since, limit)?;
     Ok(Json(items))
 }
