@@ -93,6 +93,30 @@ jobs:
             -p copypaste-daemon --features copypaste-daemon/cloud-sync \
             -p copypaste-relay
 
+      - name: Sync tauri.conf.json version to release version
+        # Must run BEFORE `pnpm tauri build` — Tauri reads tauri.conf.json's
+        # top-level "version" into the .app Info.plist (CFBundleShortVersionString /
+        # CFBundleVersion). Bumping it after the build (e.g. in gen-cask.sh, which
+        # runs post-publish) would leave the SHIPPED DMG carrying a stale version
+        # and break Homebrew `--adopt` version comparison. Strip a leading 'v' from
+        # the tag so the plist version is bare (e.g. v0.5.0 → 0.5.0).
+        run: |
+          RAW_VERSION="${INPUT_VERSION:-$TAG_NAME}"
+          BARE_VERSION="${RAW_VERSION#v}"
+          TAURI_CONF="crates/copypaste-ui/src-tauri/tauri.conf.json"
+          echo "==> Setting $TAURI_CONF version → $BARE_VERSION"
+          TMP="$(mktemp)"
+          # Exactly one top-level "version" key in this file; replace it in place.
+          sed 's/"version": "[^"]*"/"version": "'"$BARE_VERSION"'"/' "$TAURI_CONF" > "$TMP"
+          if grep -qF "\"version\": \"${BARE_VERSION}\"" "$TMP"; then
+            mv "$TMP" "$TAURI_CONF"
+          else
+            echo "::error::failed to set version in $TAURI_CONF"
+            rm -f "$TMP"
+            exit 1
+          fi
+          grep '"version"' "$TAURI_CONF"
+
       - name: Build Tauri app (pnpm install + pnpm tauri build)
         working-directory: crates/copypaste-ui
         run: |

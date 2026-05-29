@@ -69,5 +69,8 @@ cask "copypaste" do
     To start it again (or recover from a previously disabled state):
       launchctl enable gui/$(id -u)/com.copypaste.daemon
       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.copypaste.daemon.plist
+
+    If a previous upgrade failed and left CopyPaste in a stuck state, recover with:
+      brew reinstall --cask --force copypaste
   EOS
 end
