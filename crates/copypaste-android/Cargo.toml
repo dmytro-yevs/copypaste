@@ -7,7 +7,12 @@ license.workspace = true
 description = "Android JNI/UniFFI bindings for CopyPaste core"
 
 [lib]
-crate-type = ["cdylib"]
+# `cdylib` is the Android .so artifact; `lib` (rlib) is added so the
+# cross-language conformance generator (tests/conformance_vectors.rs) — and any
+# future host-side integration test — can `use copypaste_android::…` to call the
+# exact FFI functions the Kotlin bindings invoke. The rlib does not affect the
+# Android cdylib build (cargo-ndk still emits libcopypaste_android.so).
+crate-type = ["cdylib", "lib"]
 name = "copypaste_android"
 
 [[bin]]
@@ -46,3 +51,6 @@ uniffi = { version = "0.27", features = ["build"] }
 [dev-dependencies]
 # Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+
 tempfile = ">=3.0, <3.14"
+# Cross-language conformance fixture (tests/conformance_vectors.rs): emit golden
+# AEAD vectors as JSON for the Kotlin instrumented test to consume.
+serde_json = { workspace = true }

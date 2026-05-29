@@ -45,20 +45,30 @@ val buildCargoNdk by tasks.registering(Exec::class) {
     }
 
     workingDir(workspaceRoot)
-    // Beta W2.6: target arm64-v8a (modern devices) and armeabi-v7a (legacy 32-bit),
-    // plus x86_64 for emulator use. Build with the `android-uniffi-live` cargo
-    // feature so addClipboardItem/getHistoryCount perform real DB I/O.
-    commandLine(
-        "cargo", "ndk",
-        "-t", "arm64-v8a",
-        "-t", "armeabi-v7a",
-        "-t", "x86_64",
+    // Beta W2.6: by default target arm64-v8a (modern devices) and armeabi-v7a
+    // (legacy 32-bit), plus x86_64 for emulator use, with the `android-uniffi-live`
+    // cargo feature so addClipboardItem/getHistoryCount do real DB I/O.
+    //
+    // The cross-language crypto conformance test only needs the pure
+    // encrypt/decrypt FFI (no DB), and the CI/dev box may have only the
+    // arm64-v8a Rust target installed. Two gradle properties keep that path lean:
+    //   -PcargoNdkTargets=arm64-v8a   (comma-separated ABIs to build)
+    //   -PcargoNdkLive=false          (drop the android-uniffi-live feature)
+    // Example (matches the emulator AVD `copypaste_test`, ABI arm64-v8a):
+    //   ./gradlew connectedDebugAndroidTest -PcargoNdkTargets=arm64-v8a -PcargoNdkLive=false
+    val targets = (project.findProperty("cargoNdkTargets") as String?)
+        ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
+        ?: listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+    val live = (project.findProperty("cargoNdkLive") as String?) != "false"
+
+    val args = mutableListOf("cargo", "ndk")
+    targets.forEach { args += listOf("-t", it) }
+    args += listOf(
         "-o", "android/app/src/main/jniLibs",
-        "build",
-        "--release",
-        "-p", "copypaste-android",
-        "--features", "android-uniffi-live"
+        "build", "--release", "-p", "copypaste-android",
     )
+    if (live) args += listOf("--features", "android-uniffi-live")
+    commandLine(args)
 }
 
 // Wire cargo-ndk before every assembleDebug/assembleRelease
@@ -78,6 +88,10 @@ android {
         targetSdk = 35
         versionCode = 5
         versionName = "0.3.2"
+        // Instrumented (androidTest) runner for the cross-language crypto
+        // conformance test (CryptoConformanceTest.kt). Runs on the emulator via
+        // `./gradlew connectedDebugAndroidTest`.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
@@ -159,4 +173,18 @@ dependencies {
     // (android-embedded) so another device's QR can be read to pair.
     implementation(libs.zxing.core)
     implementation(libs.zxing.embedded)
+
+    // Instrumented tests (androidTest) — cross-language crypto conformance.
+    // AndroidX Test runner + ext-junit drive CryptoConformanceTest on a device
+    // or emulator. JNA is already an `implementation` dep (loaded into the app
+    // process), so the UniFFI bindings resolve the native lib at test time.
+    androidTestImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.5.2")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    // JNA's *own* native dispatch lib (libjnidispatch.so) ships only in the
+    // @aar variant. The main app pulls the plain JAR (kotlinc classpath), so the
+    // androidTest APK has no libjnidispatch.so and UniFFI's Native.load aborts
+    // with UnsatisfiedLinkError. Adding the AAR here packages the per-ABI
+    // libjnidispatch.so into the test build. pickFirsts (above) dedupes it.
+    androidTestImplementation("net.java.dev.jna:jna:5.14.0@aar")
 }
