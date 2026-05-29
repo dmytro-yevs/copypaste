@@ -15,12 +15,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -42,6 +38,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.IdeBg
+import com.copypaste.android.ui.theme.IdeBorder
+import com.copypaste.android.ui.theme.SectionLabel
 
 /**
  * Settings screen — toggles and Supabase config fields.
@@ -106,21 +106,13 @@ fun SettingsScreen(
 
     Scaffold(
         modifier = modifier,
+        containerColor = IdeBg,
         topBar = {
-            androidx.compose.material3.TopAppBar(
-                title = { Text(stringResource(R.string.title_settings)) },
-                navigationIcon = {
-                    if (showBackButton) {
-                        IconButton(onClick = onBack) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
-                        }
-                    }
-                },
-                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
-                )
+            CopyPasteTopBar(
+                title = stringResource(R.string.title_settings),
+                showBackButton = showBackButton,
+                onBack = onBack,
+                backContentDescription = stringResource(R.string.cd_back),
             )
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
@@ -144,7 +136,7 @@ fun SettingsScreen(
                     }
                 }
             )
-            HorizontalDivider()
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
             SettingsRow(
                 title = stringResource(R.string.setting_sensitive_warnings_title),
                 subtitle = stringResource(R.string.setting_sensitive_warnings_subtitle),
@@ -156,7 +148,7 @@ fun SettingsScreen(
                     }
                 }
             )
-            HorizontalDivider()
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
             SettingsRow(
                 title = stringResource(R.string.setting_mask_sensitive_title),
                 subtitle = stringResource(R.string.setting_mask_sensitive_subtitle),
@@ -168,7 +160,7 @@ fun SettingsScreen(
                     }
                 }
             )
-            HorizontalDivider()
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
             // ── Permissions review ─────────────────────────────────────────────
             SettingsNavRow(
@@ -178,10 +170,10 @@ fun SettingsScreen(
                     ctx.startActivity(Intent(ctx, PermissionsSettingsActivity::class.java))
                 }
             )
-            HorizontalDivider()
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
             // ── Sync backend selector ──────────────────────────────────────────
-            SectionHeader("Sync Backend")
+            SectionLabel("Sync Backend")
             SettingsRow(
                 title = "Use Supabase Cloud Sync",
                 subtitle = "Cross-device sync via Supabase (end-to-end encrypted). Off = relay mode.",
@@ -199,11 +191,11 @@ fun SettingsScreen(
                     }
                 }
             )
-            HorizontalDivider()
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
             // ── Supabase config (visible only when SUPABASE selected) ──────────
             if (syncBackend == SyncBackend.SUPABASE) {
-                SectionHeader("Supabase Configuration")
+                SectionLabel("Supabase Configuration")
 
                 SettingsTextField(
                     label = "Supabase URL",
@@ -240,7 +232,7 @@ fun SettingsScreen(
                     password = true,
                 )
 
-                SectionHeader("Supabase Account (optional)")
+                SectionLabel("Supabase Account (optional)")
                 Text(
                     text = "If left blank, the anon key is used as bearer. " +
                             "Sign-in enables Row Level Security policies.",
@@ -272,12 +264,12 @@ fun SettingsScreen(
                     password = true,
                 )
 
-                HorizontalDivider()
+                HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
             }
 
             // ── Relay config (visible only when RELAY selected) ────────────────
             if (syncBackend == SyncBackend.RELAY) {
-                SectionHeader("Relay Configuration")
+                SectionLabel("Relay Configuration")
                 SettingsTextField(
                     label = stringResource(R.string.setting_relay_url_label),
                     hint = "http://localhost:8080",
@@ -288,7 +280,7 @@ fun SettingsScreen(
                         catch (e: Exception) { settingsError = e.message }
                     },
                 )
-                HorizontalDivider()
+                HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
             }
 
             // ── Device ID (read-only) ──────────────────────────────────────────
@@ -306,16 +298,6 @@ fun SettingsScreen(
             }
         }
     }
-}
-
-@Composable
-private fun SectionHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
-    )
 }
 
 @Composable

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Clipboard history row for the (View-based) ClipboardHistoryAdapter. Styled to
+    match the Compose HistoryRow: dark surface, 13sp primary preview, 11sp faint
+    metadata, compact padding. NOTE: the live history UI is the Compose
+    HistoryScreen; this adapter is currently not wired into any screen, but the
+    layout is kept consistent so it matches if revived.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/bg_row_ripple"
+    android:paddingHorizontal="@dimen/space_md"
+    android:paddingVertical="@dimen/space_sm">
+
+    <TextView
+        android:id="@android:id/text1"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:textColor="@color/ide_text"
+        android:textSize="13sp" />
+
+    <TextView
+        android:id="@android:id/text2"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:textColor="#6F737A"
+        android:textSize="11sp" />
+</LinearLayout>

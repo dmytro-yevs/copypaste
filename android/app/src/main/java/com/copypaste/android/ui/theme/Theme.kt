@@ -40,6 +40,14 @@ private val DarculaColorScheme = darkColorScheme(
     surfaceVariant       = IdeElevated, // #313438 — cards, chips
     onSurfaceVariant     = IdeDim,      // #9da0a8
 
+    // Tonal surface containers — keep every elevation tier inside the Darcula
+    // grey ramp instead of Material3's default purple-tinted auto-elevation.
+    surfaceContainerLowest  = IdeBg,       // #1e1f22
+    surfaceContainerLow     = IdePanel,    // #2b2d30
+    surfaceContainer        = IdePanel,    // #2b2d30 — bottom nav / app bar
+    surfaceContainerHigh    = IdeElevated, // #313438 — cards
+    surfaceContainerHighest = IdeHover,    // #34373b — pressed / raised
+
     // ── Outline / dividers ────────────────────────────────────────────────
     outline              = IdeBorder,   // #393b40
     outlineVariant       = IdeDivider,  // #43454a
@@ -92,6 +100,7 @@ fun CopyPasteTheme(
     MaterialTheme(
         colorScheme = DarculaColorScheme,
         typography   = CopyPasteTypography,
+        shapes       = CopyPasteShapes,
         content      = content,
     )
 }

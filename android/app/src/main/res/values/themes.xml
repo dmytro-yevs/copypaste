@@ -1,18 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!--
-        AppCompat theme retained for the existing AndroidManifest entries that
-        reference Theme.MaterialComponents.DayNight.NoActionBar — the Compose
-        screens override their own surface colors via CopyPasteTheme.
-        We override the application theme here so Compose Activities
-        (ComponentActivity, not AppCompatActivity) still get a no-action-bar
-        base parent compatible with edge-to-edge layouts.
+        AppCompat base theme for the AndroidManifest entries. The Compose screens
+        draw their own Darcula surfaces via CopyPasteTheme; this theme only governs
+        the window background BEFORE Compose composes (the launch/splash frame) and
+        the system-bar attributes. We point everything at the dark Darcula tokens
+        so launching the app no longer flashes a white (or indigo) frame.
+
+        INSET OWNERSHIP: status-bar / display-cutout WindowInsets handling is owned
+        by a separate change. Do NOT add fitsSystemWindows / cutout attributes here
+        — keep this purely color + accent so it merges cleanly. Hook left below.
     -->
     <style name="Theme.CopyPaste" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Brand accent — indigo #5A59E6 -->
-        <item name="colorPrimary">@color/copypaste_primary</item>
-        <item name="colorPrimaryDark">@color/copypaste_primary_dark</item>
-        <item name="colorAccent">@color/copypaste_primary</item>
+        <!-- Accent — Darcula action blue #3574F0 (matches macOS + Compose theme) -->
+        <item name="colorPrimary">@color/ide_accent</item>
+        <item name="colorPrimaryDark">@color/ide_accent_dark</item>
+        <item name="colorAccent">@color/ide_accent</item>
+
+        <!-- Dark window/launch background so there's no white flash before Compose -->
+        <item name="android:windowBackground">@color/ide_bg</item>
+        <item name="android:colorBackground">@color/ide_bg</item>
+
         <!-- Edge-to-edge: transparent system bars; Compose applies the insets. -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
@@ -20,7 +28,7 @@
              background, so use LIGHT icons (windowLightStatusBar = false). -->
         <item name="android:windowLightStatusBar">false</item>
         <!-- Render into the display cutout (notch / punch-hole) area on the short
-             edges; combined with the Compose insets below this lets the header use
+             edges; combined with the Compose insets this lets the header use
              the full width while never drawing *under* the status bar / notch. -->
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="o_mr1">shortEdges</item>
     </style>

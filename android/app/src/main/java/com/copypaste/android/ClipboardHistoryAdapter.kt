@@ -21,8 +21,12 @@ class ClipboardHistoryAdapter(
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        // Uses the styled R.layout.item_clipboard (Darcula dark row) instead of
+        // the default android.R.layout.simple_list_item_2 so the row matches the
+        // Compose HistoryScreen. The two TextViews keep the android.R.id.text1 /
+        // text2 ids the ViewHolder binds against.
         val view = LayoutInflater.from(parent.context)
-            .inflate(android.R.layout.simple_list_item_2, parent, false)
+            .inflate(R.layout.item_clipboard, parent, false)
         return ViewHolder(view)
     }
 

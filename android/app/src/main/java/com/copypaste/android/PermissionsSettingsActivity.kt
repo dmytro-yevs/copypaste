@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Battery5Bar
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -33,16 +32,11 @@ import androidx.compose.material.icons.filled.PhonelinkSetup
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,7 +47,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.IdeBg
+import com.copypaste.android.ui.theme.IdeBorder
+import com.copypaste.android.ui.theme.IdeDanger
+import com.copypaste.android.ui.theme.IdeDim
+import com.copypaste.android.ui.theme.IdeSuccess
+import com.copypaste.android.ui.theme.IdeText
 
 /**
  * Standalone "Permissions" screen reachable from Settings.
@@ -236,22 +238,13 @@ fun PermissionsScreen(
     val oemLabel = OemAutoStartHelper.oemSettingsLabel(ctx)
 
     Scaffold(
+        containerColor = IdeBg,
         topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.title_permissions)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.cd_back),
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary,
-                )
+            CopyPasteTopBar(
+                title = stringResource(R.string.title_permissions),
+                showBackButton = true,
+                onBack = onBack,
+                backContentDescription = stringResource(R.string.cd_back),
             )
         }
     ) { innerPadding ->
@@ -369,16 +362,15 @@ private fun PermissionStatusCard(
     required: Boolean,
     infoOnly: Boolean = false,
 ) {
-    val containerColor = when {
-        granted == true -> MaterialTheme.colorScheme.secondaryContainer
-        granted == false && required -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
-        else -> MaterialTheme.colorScheme.surfaceVariant
+    // Status-colored hairline border: green = granted, red = missing+required,
+    // neutral grey = unknown / optional. Matches the restrained macOS look.
+    val borderColor = when {
+        granted == true              -> IdeSuccess
+        granted == false && required -> IdeDanger
+        else                         -> IdeBorder
     }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = containerColor)
-    ) {
+    CopyPasteCard(accent = borderColor) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -387,20 +379,19 @@ private fun PermissionStatusCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (granted == true) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (granted == true) IdeSuccess else IdeDim
                 )
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = IdeText,
                     modifier = Modifier.weight(1f),
                 )
                 if (required) {
                     Text(
                         text = "required",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error
+                        color = IdeDanger
                     )
                 }
             }
@@ -416,14 +407,12 @@ private fun PermissionStatusCard(
                         imageVector = if (granted) Icons.Filled.CheckCircle
                                       else Icons.Filled.ErrorOutline,
                         contentDescription = null,
-                        tint = if (granted) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.error,
+                        tint = if (granted) IdeSuccess else IdeDanger,
                     )
                     Text(
                         text = if (granted) "Granted" else "Not granted",
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (granted) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.error,
+                        color = if (granted) IdeSuccess else IdeDanger,
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -431,8 +420,8 @@ private fun PermissionStatusCard(
 
             Text(
                 text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = MaterialTheme.typography.bodyMedium,
+                color = IdeDim
             )
 
             if (!infoOnly) {
