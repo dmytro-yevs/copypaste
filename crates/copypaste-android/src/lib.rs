@@ -1332,16 +1332,11 @@ mod tests {
                 // Read whatever the FFI sends back (its offered local items),
                 // bounded by a short idle timeout so the peer task terminates.
                 let mut received_from_ffi = 0u64;
-                loop {
-                    match tokio::time::timeout(std::time::Duration::from_secs(2), framed.next())
-                        .await
-                    {
-                        Ok(Some(Ok(frame))) => {
-                            if serde_json::from_slice::<WireItem>(&frame).is_ok() {
-                                received_from_ffi += 1;
-                            }
-                        }
-                        Ok(Some(Err(_))) | Ok(None) | Err(_) => break,
+                while let Ok(Some(Ok(frame))) =
+                    tokio::time::timeout(std::time::Duration::from_secs(2), framed.next()).await
+                {
+                    if serde_json::from_slice::<WireItem>(&frame).is_ok() {
+                        received_from_ffi += 1;
                     }
                 }
                 received_from_ffi
