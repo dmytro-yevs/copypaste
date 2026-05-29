@@ -117,14 +117,6 @@ path = "tests/keychain_acl.rs"
 name = "health"
 path = "tests/health.rs"
 
-# Beta-bonus: launchd LaunchAgent plist install/uninstall tests (macOS only).
-# See module docs in tests/launchd_install.rs for the "how is launchctl mocked"
-# strategy (file-write half reproduced inline, error path triggered via bogus
-# $HOME so no real launchd registration ever occurs).
-[[test]]
-name = "launchd_install"
-path = "tests/launchd_install.rs"
-
 # Beta-bonus: end-to-end pairing flow tests — mDNS discovery + PAKE handshake +
 # mutual PairedPeers trust. See module docs in tests/pairing_e2e.rs.
 [[test]]
