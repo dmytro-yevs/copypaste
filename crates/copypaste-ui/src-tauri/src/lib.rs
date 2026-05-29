@@ -339,16 +339,31 @@ fn paste_to_frontmost(handle: tauri::AppHandle) -> Result<(), String> {
             thread::sleep(Duration::from_millis(80));
 
             // Synthesise Cmd+V (key down + key up).
+            //
+            // CGEvent::new_keyboard_event returns Err only in pathological cases
+            // (e.g. event source exhaustion). This runs on a detached background
+            // thread, so a panic here would abort the process silently from the
+            // user's point of view — handle the error and log instead.
             if let Ok(source) = CGEventSource::new(CGEventSourceStateID::CombinedSessionState) {
                 let v_kc = KeyCode::ANSI_V;
-                let kd = CGEvent::new_keyboard_event(source.clone(), v_kc, true)
-                    .expect("CGEvent keydown");
-                kd.set_flags(CGEventFlags::CGEventFlagCommand);
-                kd.post(core_graphics::event::CGEventTapLocation::Session);
-
-                let ku = CGEvent::new_keyboard_event(source, v_kc, false).expect("CGEvent keyup");
-                ku.set_flags(CGEventFlags::CGEventFlagCommand);
-                ku.post(core_graphics::event::CGEventTapLocation::Session);
+                match (
+                    CGEvent::new_keyboard_event(source.clone(), v_kc, true),
+                    CGEvent::new_keyboard_event(source, v_kc, false),
+                ) {
+                    (Ok(kd), Ok(ku)) => {
+                        kd.set_flags(CGEventFlags::CGEventFlagCommand);
+                        kd.post(core_graphics::event::CGEventTapLocation::Session);
+                        ku.set_flags(CGEventFlags::CGEventFlagCommand);
+                        ku.post(core_graphics::event::CGEventTapLocation::Session);
+                    }
+                    _ => {
+                        tracing::warn!(
+                            "paste_to_frontmost: failed to synthesise Cmd+V keyboard event"
+                        );
+                    }
+                }
+            } else {
+                tracing::warn!("paste_to_frontmost: failed to create CGEventSource");
             }
         });
         Ok(())

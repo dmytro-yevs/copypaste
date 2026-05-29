@@ -82,30 +82,51 @@ export function Popup() {
     }
   }, [selectedIdx]);
 
-  const hide = useCallback(() => {
-    win.hide();
+  // Fix #3: hide is async (win.hide() returns a promise). Await it so the
+  // window is actually hidden before we restore focus to the prior app and
+  // synthesise the paste — otherwise our popup can still be frontmost when the
+  // Cmd+V fires (blur race), pasting into the popup instead of the target app.
+  const hide = useCallback(async () => {
+    try {
+      await win.hide();
+    } catch (e) {
+      // Hiding can fail if the window was already destroyed; log, don't crash.
+      console.error("popup hide failed", e);
+    }
   }, [win]);
+
+  // Fix #2/#3: hide popup first (awaited), then copy + paste. Errors here used
+  // to be silently swallowed (`catch {}`), masking real failures (daemon
+  // offline, missing Accessibility permission). Surface them to the console and
+  // the error strip so the failure isn't invisible.
+  const copyAndPaste = useCallback(
+    async (id: string) => {
+      await hide();
+      try {
+        await api.copyItem(id);
+        // Synthesise Cmd+V into the previously-focused app.
+        await invoke("paste_to_frontmost");
+      } catch (e) {
+        const msg = e instanceof IpcError ? e.message : String(e);
+        console.error("popup copy/paste failed", e);
+        setError(`Paste failed: ${msg}`);
+      }
+    },
+    [hide]
+  );
 
   const confirmSelection = useCallback(async () => {
     const item = filtered[selectedIdx];
     if (!item) return;
-    // Fix #3: hide popup first, then copy + paste — never touch the main window
-    hide();
-    try {
-      await api.copyItem(item.id);
-      // Synthesise Cmd+V into the previously-focused app.
-      await invoke("paste_to_frontmost");
-    } catch {
-      // Ignore errors on paste — the item might have been deleted.
-    }
-  }, [filtered, selectedIdx, hide]);
+    await copyAndPaste(item.id);
+  }, [filtered, selectedIdx, copyAndPaste]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       switch (e.key) {
         case "Escape":
           e.preventDefault();
-          hide();
+          void hide();
           break;
         case "ArrowDown":
           e.preventDefault();
@@ -137,7 +158,7 @@ export function Popup() {
       // but this catches clicks within the webview that land on the overlay).
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-          hide();
+          void hide();
         }
       }}
     >
@@ -194,16 +215,7 @@ export function Popup() {
               itemHeight={previewSize}
               maskSensitive={maskSensitive}
               onMouseEnter={() => setSelectedIdx(idx)}
-              onClick={async () => {
-                // Fix #3: hide first, copy, then paste — don't activate main window
-                hide();
-                try {
-                  await api.copyItem(item.id);
-                  await invoke("paste_to_frontmost");
-                } catch {
-                  // Ignore errors on paste.
-                }
-              }}
+              onClick={() => void copyAndPaste(item.id)}
             />
           ))}
         </ul>

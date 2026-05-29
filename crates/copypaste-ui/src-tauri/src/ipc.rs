@@ -17,7 +17,14 @@ fn socket_path() -> PathBuf {
     if let Ok(p) = std::env::var("COPYPASTE_SOCKET") {
         return PathBuf::from(p);
     }
-    let home = home::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+    // If the home directory cannot be resolved we have no way to locate the
+    // daemon socket. Fall back to a path that is guaranteed not to exist (and is
+    // not a real system directory) so `UnixStream::connect` fails with NotFound
+    // and the frontend surfaces a clean `daemon_offline` rather than silently
+    // probing `/Library/...` or `/.local/...`.
+    let Some(home) = home::home_dir() else {
+        return PathBuf::from("/nonexistent/copypaste/daemon.sock");
+    };
     #[cfg(target_os = "macos")]
     {
         home.join("Library/Application Support/CopyPaste/daemon.sock")
@@ -94,9 +101,18 @@ fn do_call(method: &str, params: Value) -> Result<IpcReply, String> {
 }
 
 /// Send one JSON-RPC request to the daemon and return the parsed reply.
+///
+/// The underlying socket IO is blocking, so we offload it to a blocking thread
+/// pool via `spawn_blocking` rather than running it inline. An `async` Tauri
+/// command is driven on the async runtime; doing blocking `UnixStream` reads
+/// directly there would stall the executor (and, with the default scheduler,
+/// every other in-flight command) until the daemon replies or the 10s read
+/// timeout elapses. Offloading keeps the UI responsive.
 #[tauri::command]
-pub fn ipc_call(method: String, params: Option<Value>) -> Result<IpcReply, String> {
-    call(&method, params.unwrap_or(Value::Null))
+pub async fn ipc_call(method: String, params: Option<Value>) -> Result<IpcReply, String> {
+    tauri::async_runtime::spawn_blocking(move || call(&method, params.unwrap_or(Value::Null)))
+        .await
+        .map_err(|e| format!("ipc_call task join error: {e}"))?
 }
 
 /// Result of [`pairing_qr_svg`]: an inline SVG of the pairing QR plus metadata.
@@ -119,8 +135,12 @@ pub struct PairingQr {
 /// purely a transport for the existing PAKE pairing material; no new crypto is
 /// introduced (see `copypaste_core::crypto::pairing_qr`).
 #[tauri::command]
-pub fn pairing_qr_svg() -> Result<PairingQr, String> {
-    let reply = call("pair_generate_qr", Value::Null)?;
+pub async fn pairing_qr_svg() -> Result<PairingQr, String> {
+    // Same rationale as `ipc_call`: the daemon round-trip is blocking IO, so run
+    // it off the async runtime to avoid stalling the executor.
+    let reply = tauri::async_runtime::spawn_blocking(|| call("pair_generate_qr", Value::Null))
+        .await
+        .map_err(|e| format!("pairing_qr_svg task join error: {e}"))??;
     if !reply.ok {
         return Err(reply
             .error
