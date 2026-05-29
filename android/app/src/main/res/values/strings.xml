@@ -63,6 +63,8 @@
     <!-- OEM autostart onboarding -->
     <string name="onboarding_oem_title">OEM Autostart / Protected Apps</string>
     <string name="onboarding_oem_button">Open OEM Settings</string>
+    <string name="oem_autostart_toast_labeled">Find CopyPaste and enable: %1$s</string>
+    <string name="oem_autostart_toast_generic">Find CopyPaste and allow autostart / background activity, then return here.</string>
 
     <!-- Content descriptions -->
     <string name="cd_back">Back</string>

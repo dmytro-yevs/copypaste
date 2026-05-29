@@ -55,6 +55,31 @@ class ClipboardRepository(context: Context) {
 
     private val dedupLock = Any()
 
+    /**
+     * Subscribe to changes in the backing item store. Any write from the
+     * foreground service, the accessibility service, or another in-process
+     * writer mutates the shared "copypaste_items" prefs and fires [listener].
+     *
+     * This is the glue that lets the UI ViewModel re-load the history the moment
+     * a clip is captured in the BACKGROUND (the primary capture path on Android
+     * 10+ via [ClipboardAccessibilityService]) — previously the list only
+     * refreshed on first composition or a manual Refresh tap, so background
+     * captures were stored but never appeared until the user forced a reload.
+     *
+     * The caller MUST retain the listener (SharedPreferences holds only a weak
+     * reference) and unsubscribe via [stopObserving].
+     */
+    fun observe(
+        listener: SharedPreferences.OnSharedPreferenceChangeListener
+    ): SharedPreferences.OnSharedPreferenceChangeListener {
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        return listener
+    }
+
+    fun stopObserving(listener: SharedPreferences.OnSharedPreferenceChangeListener) {
+        prefs.unregisterOnSharedPreferenceChangeListener(listener)
+    }
+
     suspend fun getItems(limit: Int = 50): List<ClipboardItem> = withContext(Dispatchers.IO) {
         val ids = storedIds().takeLast(limit)
         ids.mapNotNull { id ->
@@ -69,7 +94,7 @@ class ClipboardRepository(context: Context) {
             if (!ids.remove(id)) return@synchronized false
             prefs.edit()
                 .remove("item_$id")
-                .putString("item_ids", ids.joinToString(","))
+                .putString(KEY_ITEM_IDS, ids.joinToString(","))
                 .apply()
             true
         }
@@ -143,7 +168,7 @@ class ClipboardRepository(context: Context) {
             }
             editor
                 .putString("item_$id", encoded)
-                .putString("item_ids", ids.joinToString(","))
+                .putString(KEY_ITEM_IDS, ids.joinToString(","))
                 .apply()
         }
 
@@ -154,7 +179,7 @@ class ClipboardRepository(context: Context) {
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     private fun storedIds(): List<String> =
-        prefs.getString("item_ids", "")
+        prefs.getString(KEY_ITEM_IDS, "")
             ?.split(",")
             ?.filter { it.isNotBlank() }
             ?: emptyList()
@@ -188,6 +213,14 @@ class ClipboardRepository(context: Context) {
 
     companion object {
         private const val TAG = "ClipboardRepository"
+
+        /**
+         * SharedPreferences key holding the comma-joined ordered index of item
+         * ids. Public so observers (e.g. [ClipboardViewModel]) can filter the
+         * OnSharedPreferenceChangeListener callback to just the index mutations
+         * that signal an add/delete — every store/delete rewrites this key.
+         */
+        const val KEY_ITEM_IDS = "item_ids"
 
         /** Window in which an identical-content store is treated as a duplicate. */
         private const val DEDUP_WINDOW_MS = 2_000L

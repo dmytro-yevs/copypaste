@@ -179,10 +179,24 @@ class PermissionsSettingsActivity : ComponentActivity() {
     }
 
     private fun openOemAutoStart() {
-        val oem = OemAutoStartHelper.getOemIntentCandidates(this)
+        // See OnboardingActivity.openOemAutoStart for the rationale: try
+        // resolvable OEM candidates, then all OEM candidates, then the generic
+        // battery → app-details → settings fallback chain, all guarded so a
+        // missing OEM component can never crash or silently no-op.
+        val resolvable = OemAutoStartHelper.getOemIntentCandidates(this)
             .filter { OemAutoStartHelper.isResolvable(this, it) }
+        val allOem = OemAutoStartHelper.getOemIntentCandidates(this)
         val fallback = OemAutoStartHelper.getBatteryFallbackCandidates(this)
-        launchGated(oem + fallback)
+        val launched = launchGated(resolvable + allOem + fallback)
+        if (launched) {
+            val label = OemAutoStartHelper.oemSettingsLabel(this)
+            val hint = if (label != null) {
+                getString(R.string.oem_autostart_toast_labeled, label)
+            } else {
+                getString(R.string.oem_autostart_toast_generic)
+            }
+            android.widget.Toast.makeText(this, hint, android.widget.Toast.LENGTH_LONG).show()
+        }
     }
 
     companion object {

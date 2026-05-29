@@ -1,6 +1,7 @@
 package com.copypaste.android
 
 import android.app.Application
+import android.content.SharedPreferences
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
@@ -31,6 +32,27 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     private val _errors = MutableLiveData<String?>(null)
     val errors: LiveData<String?> = _errors
 
+    /**
+     * Auto-refresh the history whenever the backing store changes. This is the
+     * fix for "captured clips don't appear": the foreground service and the
+     * accessibility service write to the same SharedPreferences store the UI
+     * reads, but nothing told the UI to re-load after a BACKGROUND capture, so
+     * the list only updated on a manual Refresh. We watch the item-index key
+     * ([ClipboardRepository.KEY_ITEM_IDS], rewritten on every add/delete) and
+     * reload when it mutates. Retained as a field — SharedPreferences holds a
+     * weak reference to the listener.
+     */
+    private val storeListener =
+        SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == ClipboardRepository.KEY_ITEM_IDS) {
+                loadItems()
+            }
+        }
+
+    init {
+        repository.observe(storeListener)
+    }
+
     fun loadItems() {
         viewModelScope.launch {
             _loading.value = true
@@ -60,6 +82,11 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     /** Call from UI after the current error has been displayed to the user. */
     fun clearError() {
         _errors.value = null
+    }
+
+    override fun onCleared() {
+        repository.stopObserving(storeListener)
+        super.onCleared()
     }
 
     companion object {
