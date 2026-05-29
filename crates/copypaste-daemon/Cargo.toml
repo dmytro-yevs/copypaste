@@ -137,6 +137,12 @@ path = "tests/pairing_e2e.rs"
 name = "import_handler"
 path = "tests/import_handler.rs"
 
+# E2E harness Step A: single-daemon spawn helper + readiness test.
+# The reusable helper lives in tests/support/mod.rs (included via `#[path]`).
+[[test]]
+name = "harness_single_daemon"
+path = "tests/harness_single_daemon.rs"
+
 [dev-dependencies]
 tempfile = "3"
 serde_json = "1"
