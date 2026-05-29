@@ -97,7 +97,25 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            // R8 keep-rules are REQUIRED here: the UniFFI bindings + JNA bind to
+            // libcopypaste_android.so via runtime reflection (class/method names
+            // and @Structure.FieldOrder field names). Without proguard-rules.pro,
+            // R8 renames/strips them -> UnsatisfiedLinkError -> the app silently
+            // falls back to the crypto STUB instead of real XChaCha20-Poly1305.
+            // See android/app/proguard-rules.pro for the rules + rationale.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            // NOTE: a release APK is not actually shippable yet — no `signingConfig`
+            // is configured (the project has no release keystore/secrets). CI builds
+            // the DEBUG variant. These keep-rules exist so that IF/when a signed
+            // release variant is built, the native crypto path survives minification.
+            //
+            // For LOCAL release testing WITHOUT secrets you can debug-sign the
+            // release variant by adding (do NOT commit a real keystore):
+            //   signingConfig = signingConfigs.getByName("debug")
+            // then `./gradlew assembleRelease` and verify isNativeLibraryLoaded.
         }
     }
     compileOptions {
