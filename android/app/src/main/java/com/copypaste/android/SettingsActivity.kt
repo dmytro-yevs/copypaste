@@ -1,8 +1,10 @@
 package com.copypaste.android
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -162,6 +164,16 @@ fun SettingsScreen(
                     try { settings.maskSensitiveContent = it } catch (e: Exception) {
                         maskSensitive = prev; settingsError = e.message ?: e.javaClass.simpleName
                     }
+                }
+            )
+            HorizontalDivider()
+
+            // ── Permissions review ─────────────────────────────────────────────
+            SettingsNavRow(
+                title = stringResource(R.string.setting_permissions_title),
+                subtitle = stringResource(R.string.setting_permissions_subtitle),
+                onClick = {
+                    ctx.startActivity(Intent(ctx, PermissionsSettingsActivity::class.java))
                 }
             )
             HorizontalDivider()
@@ -330,6 +342,37 @@ private fun SettingsTextField(
         keyboardOptions = if (password) KeyboardOptions(keyboardType = KeyboardType.Password)
             else KeyboardOptions.Default,
     )
+}
+
+@Composable
+private fun SettingsNavRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier
+            .weight(1f)
+            .padding(end = 12.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 @Composable

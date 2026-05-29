@@ -1,11 +1,15 @@
 package com.copypaste.android
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -130,6 +134,40 @@ fun PairScreen(
             scannedInfo = "${info.deviceName.ifBlank { "device" }} (${info.fingerprint})"
         } catch (e: Exception) {
             errorMessage = e.message ?: "Invalid pairing code"
+        }
+    }
+
+    fun launchScanner() {
+        val options = ScanOptions()
+            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt("Scan the pairing QR on the other device")
+            .setBeepEnabled(false)
+            .setOrientationLocked(false)
+        scanLauncher.launch(options)
+    }
+
+    // Runtime CAMERA permission. ZXing's embedded scanner needs the camera; we
+    // request it explicitly so a denial gives a clear message instead of the
+    // scanner silently aborting (which the ScanContract reports as "cancelled").
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            launchScanner()
+        } else {
+            errorMessage = "Camera permission is required to scan a pairing QR code. " +
+                "Grant it in Settings, or use the QR display flow on this device instead."
+        }
+    }
+
+    fun startScanFlow() {
+        val hasCamera = ContextCompat.checkSelfPermission(
+            context, Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasCamera) {
+            launchScanner()
+        } else {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
     }
 
@@ -270,14 +308,7 @@ fun PairScreen(
             }
 
             OutlinedButton(
-                onClick = {
-                    val options = ScanOptions()
-                        .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                        .setPrompt("Scan the pairing QR on the other device")
-                        .setBeepEnabled(false)
-                        .setOrientationLocked(false)
-                    scanLauncher.launch(options)
-                },
+                onClick = { startScanFlow() },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(text = "Scan a device's QR")
