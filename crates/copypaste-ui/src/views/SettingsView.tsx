@@ -238,8 +238,14 @@ function ShortcutCapture({
 type LoadState = "loading" | "ready" | "offline";
 
 export function SettingsView() {
-  // Display prefs (localStorage-persisted, no daemon needed)
-  const { prefs, setPrefs } = useUI((s) => ({ prefs: s.prefs, setPrefs: s.setPrefs }));
+  // Display prefs (localStorage-persisted, no daemon needed).
+  // Select each field with its own selector returning a STABLE reference.
+  // Returning a fresh object literal `(s) => ({ prefs, setPrefs })` from a
+  // single selector makes the store snapshot unstable on every render, which
+  // under Zustand v5 + React's useSyncExternalStore throws/loops — that throw,
+  // with no error boundary, was blanking the whole window when opening Settings.
+  const prefs = useUI((s) => s.prefs);
+  const setPrefs = useUI((s) => s.setPrefs);
 
   // General
   const [privateMode, setPrivateMode] = useState(false);
@@ -275,6 +281,8 @@ export function SettingsView() {
 
   // Global state
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  // Bumped by the Retry button to re-run the load effect.
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Save-config error (separate from the success "Saved")
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -310,29 +318,44 @@ export function SettingsView() {
         });
 
       try {
+        // Each call is individually fault-tolerant: a single rejecting method
+        // must not blank the screen. The outer try/catch is a backstop only.
         const [pmResult, cfg, status] = await Promise.all([
-          api.getPrivateMode(),
-          api.getConfig(),
+          api.getPrivateMode().catch(() => null),
+          api.getConfig().catch(() => null),
           api.getSyncStatus().catch(() => null),
         ]);
         if (cancelled) return;
-        setPrivateMode(pmResult.private_mode);
-        setConfig(cfg);
+
+        // If the daemon is unreachable for the core calls, show the offline
+        // state. (get_sync_status is optional and may be absent on older builds.)
+        if (pmResult === null && cfg === null) {
+          setLoadState("offline");
+          setSyncStatus(status);
+          return;
+        }
+
+        // Guard every field with a safe default — never assume the daemon
+        // returned a well-formed, fully-populated object.
+        setPrivateMode(pmResult?.private_mode ?? false);
+        setConfig({
+          p2p_enabled: cfg?.p2p_enabled ?? false,
+          supabase_url: cfg?.supabase_url ?? null,
+          supabase_anon_key: cfg?.supabase_anon_key ?? null,
+        });
         // Prefill Supabase URL: prefer the stored config value, but fall back to
         // the value reported by get_sync_status (may be set via env variable).
         const urlFromStatus = status?.supabase_url ?? null;
-        setSupabaseUrl(cfg.supabase_url ?? urlFromStatus ?? "");
-        setSupabaseKey(cfg.supabase_anon_key ?? "");
+        setSupabaseUrl(cfg?.supabase_url ?? urlFromStatus ?? "");
+        setSupabaseKey(cfg?.supabase_anon_key ?? "");
         setSyncStatus(status);
         setLoadState("ready");
       } catch (err) {
         if (cancelled) return;
-        if (err instanceof IpcError && err.code === "daemon_offline") {
-          setLoadState("offline");
-        } else {
-          // Non-offline error: still show controls but set offline to block edits
-          setLoadState("offline");
-        }
+        // Any unexpected error (including a non-IpcError throw): degrade to the
+        // offline state rather than letting it propagate and blank the window.
+        void err;
+        setLoadState("offline");
       }
     }
 
@@ -340,9 +363,13 @@ export function SettingsView() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   const offline = loadState !== "ready";
+  // Optional, best-effort degraded state (daemon up but crypto/storage blocked).
+  const degraded =
+    syncStatus !== null &&
+    (syncStatus.keychain_locked === true || syncStatus.db_unavailable === true);
 
   // -------------------------------------------------------------------------
   // General — Private mode
@@ -493,8 +520,29 @@ export function SettingsView() {
     <ViewShell title="Settings">
       {/* Offline banner */}
       {loadState === "offline" && (
-        <div className="mb-4 rounded-ide border border-ide-border bg-ide-elevated px-3 py-2 text-[13px] text-ide-dim">
-          Daemon not running — settings unavailable.
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-ide border border-ide-border bg-ide-elevated px-3 py-2 text-[13px] text-ide-dim">
+          <span>Daemon not running — clipboard sync paused.</span>
+          <button
+            type="button"
+            onClick={() => setReloadKey((k) => k + 1)}
+            className={[
+              "shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text",
+              "hover:bg-ide-hover",
+            ].join(" ")}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* Degraded banner — daemon is up but crypto/storage is blocked. Optional,
+          best-effort: only shown if the daemon reports these flags. */}
+      {degraded && (
+        <div className="mb-4 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
+          {syncStatus?.keychain_locked
+            ? "Keychain locked — unlock your login keychain so CopyPaste can access its encryption key."
+            : "Storage unavailable — the encrypted database could not be opened."}
+          {syncStatus?.degraded_reason ? ` (${syncStatus.degraded_reason})` : ""}
         </div>
       )}
 
