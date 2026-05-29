@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repository = ClipboardRepository(app)
+    private val settings = Settings(app)
 
     private val _items = MutableLiveData<List<ClipboardItem>>(emptyList())
     val items: LiveData<List<ClipboardItem>> = _items
@@ -57,7 +58,7 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _loading.value = true
             try {
-                _items.value = repository.getItems()
+                _items.value = repository.getItems(settings.encryptionKey)
             } catch (e: Exception) {
                 Log.w(TAG, "loadItems failed", e)
                 _errors.value = e.message ?: e.javaClass.simpleName

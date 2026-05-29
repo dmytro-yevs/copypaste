@@ -80,13 +80,28 @@ class ClipboardRepository(context: Context) {
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
     }
 
-    suspend fun getItems(limit: Int = 50): List<ClipboardItem> = withContext(Dispatchers.IO) {
-        val ids = storedIds().takeLast(limit)
-        ids.mapNotNull { id ->
-            val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
-            parseItem(id, raw)
-        }.reversed()
-    }
+    /**
+     * Load history items for display, most-recent-first.
+     *
+     * Each stored blob is DECRYPTED with [key] (same key used at store time) so
+     * the row shows a real, truncated single-line preview of the clip — not the
+     * old "(N chars)" placeholder (bug Ac). The decryption happens here on
+     * [Dispatchers.IO]; sensitivity is re-evaluated against the decrypted text so
+     * the UI can mask correctly.
+     *
+     * If a blob cannot be decrypted (e.g. it was written by the local AES-GCM
+     * fallback while the .so was absent and we cannot read it back, or the key
+     * rotated) the row falls back to a neutral "(unable to preview)" label — we
+     * never surface ciphertext and never crash.
+     */
+    suspend fun getItems(key: ByteArray, limit: Int = 50): List<ClipboardItem> =
+        withContext(Dispatchers.IO) {
+            val ids = storedIds().takeLast(limit)
+            ids.mapNotNull { id ->
+                val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
+                parseItem(id, raw, key)
+            }.reversed()
+        }
 
     suspend fun deleteItem(id: String): Boolean = withContext(Dispatchers.IO) {
         synchronized(idsWriteLock) {
@@ -195,20 +210,79 @@ class ClipboardRepository(context: Context) {
         return "$ts|text/plain|$plaintextLen|$nonce64|$ct64"
     }
 
-    private fun parseItem(id: String, raw: String): ClipboardItem? {
-        return try {
-            val parts = raw.split("|")
-            ClipboardItem(
-                id = id,
-                contentType = parts[1],
-                isSensitive = false,
-                wallTimeMs = parts[0].toLong(),
-                snippet = "(${parts[2]} chars)"
-            )
+    private fun parseItem(id: String, raw: String, key: ByteArray): ClipboardItem? {
+        val parts = try {
+            raw.split("|")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse item $id: ${e.message}")
+            return null
+        }
+        // Required structural fields. A malformed row (missing pieces) is dropped
+        // rather than rendered, so the index never shows a half-decoded entry.
+        val wallTimeMs = parts.getOrNull(0)?.toLongOrNull() ?: return null
+        val contentType = parts.getOrNull(1) ?: return null
+        val nonceB64 = parts.getOrNull(3)
+        val ctB64 = parts.getOrNull(4)
+
+        // Decrypt for a real preview. Try UniFFI first (the normal store path),
+        // then the local AES-GCM fallback (used when the .so was absent at store
+        // time). Either failure yields a neutral, non-crashing label.
+        val plaintext: String? = if (nonceB64 != null && ctB64 != null) {
+            try {
+                val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
+                val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
+                decryptForPreview(id, ciphertext, nonce, key)
+            } catch (e: Exception) {
+                Log.d(TAG, "Preview decrypt failed for $id: ${e.message}")
+                null
+            }
+        } else {
             null
         }
+
+        val sensitive = plaintext != null && try {
+            isSensitive(plaintext)
+        } catch (_: UnsatisfiedLinkError) {
+            false
+        }
+
+        val snippet = if (plaintext == null) {
+            UNABLE_TO_PREVIEW
+        } else {
+            previewFromPlaintext(plaintext)
+        }
+
+        return ClipboardItem(
+            id = id,
+            contentType = contentType,
+            isSensitive = sensitive,
+            wallTimeMs = wallTimeMs,
+            snippet = snippet,
+        )
+    }
+
+    /**
+     * Decrypt a stored blob into UTF-8 plaintext for preview rendering.
+     *
+     * The blob may have been produced by either the UniFFI XChaCha20 path
+     * ([encryptText]) or the Kotlin AES-256-GCM fallback ([localAesEncrypt]).
+     * The two are not interchangeable, so try UniFFI first and on any failure
+     * fall back to local AES-GCM. Throws if neither can read the blob.
+     */
+    private fun decryptForPreview(
+        id: String,
+        ciphertext: ByteArray,
+        nonce: ByteArray,
+        key: ByteArray,
+    ): String {
+        val bytes = try {
+            decryptText(id, ciphertext, nonce, key)
+        } catch (_: Exception) {
+            // Native unavailable or wrong AEAD scheme for this blob — the item
+            // may have been stored via the local AES-GCM fallback.
+            localAesDecrypt(ciphertext, nonce, key)
+        }
+        return String(bytes, Charsets.UTF_8)
     }
 
     companion object {
@@ -236,9 +310,50 @@ class ClipboardRepository(context: Context) {
         /** Window in which an identical-content store is treated as a duplicate. */
         private const val DEDUP_WINDOW_MS = 2_000L
 
+        /** Max characters shown in a history-row preview before ellipsizing. */
+        const val PREVIEW_MAX_CHARS = 140
+
+        /** Neutral label shown when a stored blob cannot be decrypted. */
+        const val UNABLE_TO_PREVIEW = "(unable to preview)"
+
         private const val AES_TRANSFORMATION = "AES/GCM/NoPadding"
         private const val GCM_TAG_BITS = 128
         private const val GCM_NONCE_BYTES = 12
+
+        /**
+         * Build a safe, human-readable history preview from decrypted [text].
+         *
+         * Pure (no Android / native deps) so it is unit-testable on the host JVM.
+         * Collapses all runs of whitespace (incl. newlines/tabs) to single spaces,
+         * trims, and caps the result at [PREVIEW_MAX_CHARS], appending an ellipsis
+         * when truncated. Blank/whitespace-only input yields an empty string, which
+         * the UI renders as its "empty" placeholder.
+         */
+        fun previewFromPlaintext(text: String): String {
+            val collapsed = text.replace(Regex("\\s+"), " ").trim()
+            if (collapsed.isEmpty()) return ""
+            return if (collapsed.length > PREVIEW_MAX_CHARS) {
+                collapsed.take(PREVIEW_MAX_CHARS).trimEnd() + "…"
+            } else {
+                collapsed
+            }
+        }
+
+        /**
+         * Counterpart to [localAesEncrypt]: AES-256-GCM decryption using only
+         * javax.crypto. Reads back blobs produced by the local fallback when the
+         * UniFFI .so was unavailable at store time. Throws on auth-tag mismatch
+         * (wrong key) — the caller treats that as "unable to preview".
+         */
+        fun localAesDecrypt(ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray {
+            val cipher = Cipher.getInstance(AES_TRANSFORMATION)
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                SecretKeySpec(key.copyOf(32), "AES"),
+                GCMParameterSpec(GCM_TAG_BITS, nonce)
+            )
+            return cipher.doFinal(ciphertext)
+        }
 
         /**
          * AES-256-GCM encryption using only javax.crypto — no native dep.
