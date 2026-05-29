@@ -1264,33 +1264,33 @@ sealed class CopypasteException: Exception() {
     }
     
     class DecryptionFailed(
-        
-        val `message`: kotlin.String
+
+        val `messageText`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "message=${ `messageText` }"
     }
-    
+
     class DatabaseException(
-        
-        val `message`: kotlin.String
+
+        val `messageText`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "message=${ `messageText` }"
     }
-    
+
     class InvalidKeyLength(
         ) : CopypasteException() {
         override val message
             get() = ""
     }
-    
+
     class Panicked(
-        
-        val `message`: kotlin.String
+
+        val `messageText`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "message=${ `messageText` }"
     }
     
 

@@ -98,7 +98,11 @@ private fun encodeQrBitmap(text: String, sizePx: Int): Bitmap {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PairScreen(onBack: () -> Unit = {}) {
+fun PairScreen(
+    modifier: Modifier = Modifier,
+    showBackButton: Boolean = true,
+    onBack: () -> Unit = {},
+) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
 
@@ -149,12 +153,15 @@ fun PairScreen(onBack: () -> Unit = {}) {
     }
 
     Scaffold(
+        modifier = modifier,
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.title_pair)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
+                    if (showBackButton) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
