@@ -98,7 +98,7 @@ class ClipboardService : Service() {
 
         val relayClient = RelayClient(settings.relayUrl)
         syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
-        fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager)
+        fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager, DeviceKeyStore(this))
 
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         ensureChannel(this)

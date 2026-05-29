@@ -251,13 +251,55 @@ class Settings(context: Context) {
 
     /**
      * Sync-listener address (host:port) reported by the most recently paired
-     * peer during bootstrap. See the L4 milestone note: the macOS side currently
-     * advertises a loopback hint, so this is not yet host-reachable from an
-     * emulator.
+     * peer during bootstrap. The macOS daemon now advertises a real LAN-routable
+     * host:port (not loopback), so this is dialable from a real phone on the same
+     * Wi-Fi by [FgsSyncLoop]'s background dialer. It may still be loopback when
+     * the Mac has no LAN interface at all (e.g. emulator-only setups).
      */
     var pairedPeerSyncAddr: String
         get() = prefs.getString("paired_peer_sync_addr", "") ?: ""
         set(v) = prefs.edit().putString("paired_peer_sync_addr", v).apply()
+
+    /**
+     * 32-byte PAKE session key derived during the last successful [PairActivity]
+     * bootstrap. Required (alongside [pairedPeerFingerprint] and
+     * [pairedPeerSyncAddr]) for the background P2P dialer to re-establish a sync
+     * session with the paired peer without re-scanning a QR.
+     *
+     * Storage mirrors [encryptionKey]: the raw bytes are wrapped with the
+     * AndroidKeyStore-resident KEK so the secret never sits in SharedPreferences
+     * in cleartext. Reading returns an empty array when unset or unwrappable.
+     *
+     * DO NOT log or include in crash reports.
+     */
+    var pairedPeerSessionKey: ByteArray
+        get() {
+            val wrappedB64 = prefs.getString(KEY_SESSION_WRAPPED_B64, null) ?: return ByteArray(0)
+            val ivB64 = prefs.getString(KEY_SESSION_IV_B64, null) ?: return ByteArray(0)
+            return runCatching {
+                unwrapKey(
+                    wrapped = Base64.decode(wrappedB64, Base64.DEFAULT),
+                    iv = Base64.decode(ivB64, Base64.DEFAULT),
+                )
+            }.getOrElse { e ->
+                Log.w(TAG, "Failed to unwrap paired-peer session key (${e.javaClass.simpleName})", e)
+                ByteArray(0)
+            }
+        }
+        set(v) {
+            if (v.isEmpty()) {
+                prefs.edit()
+                    .remove(KEY_SESSION_WRAPPED_B64)
+                    .remove(KEY_SESSION_IV_B64)
+                    .apply()
+                return
+            }
+            val (wrapped, iv) = wrapKey(v)
+            prefs.edit()
+                .putString(KEY_SESSION_WRAPPED_B64, Base64.encodeToString(wrapped, Base64.DEFAULT))
+                .putString(KEY_SESSION_IV_B64, Base64.encodeToString(iv, Base64.DEFAULT))
+                .apply()
+        }
 
     fun clear() = prefs.edit().clear().apply()
 
@@ -311,5 +353,7 @@ class Settings(context: Context) {
         private const val KEY_WRAPPED_KEY_B64 = "encryption_key_wrapped_b64"
         private const val KEY_WRAPPED_KEY_IV_B64 = "encryption_key_iv_b64"
         private const val KEY_LEGACY_PLAIN_KEY_B64 = "encryption_key_b64"
+        private const val KEY_SESSION_WRAPPED_B64 = "paired_peer_session_key_wrapped_b64"
+        private const val KEY_SESSION_IV_B64 = "paired_peer_session_key_iv_b64"
     }
 }
