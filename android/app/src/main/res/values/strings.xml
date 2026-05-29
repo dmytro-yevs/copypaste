@@ -34,6 +34,12 @@
     <string name="setting_mask_sensitive_subtitle">Hide preview text for items flagged as sensitive. Tap an item to reveal for 5 seconds.</string>
     <string name="setting_relay_url_label">Relay URL</string>
     <string name="setting_device_id_label">Device ID</string>
+    <string name="setting_permissions_title">Permissions</string>
+    <string name="setting_permissions_subtitle">Review and re-request permissions</string>
+
+    <!-- Permissions screen -->
+    <string name="title_permissions">Permissions</string>
+    <string name="permissions_intro">Review the status of each permission CopyPaste uses. Tap a button to re-open its request or settings screen at any time.</string>
 
     <!-- History — sensitive marker -->
     <string name="sensitive_preview_mask">••••••</string>

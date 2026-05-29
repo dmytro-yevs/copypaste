@@ -73,6 +73,12 @@
             android:exported="false"
             android:theme="@style/Theme.CopyPaste" />
 
+        <!-- In-app Permissions review screen, launched from Settings -->
+        <activity
+            android:name=".PermissionsSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.CopyPaste" />
+
         <!--
             Foreground clipboard-monitoring service.
 
