@@ -22,8 +22,14 @@
 //! mTLS sessions will use — letting each side learn the cert fingerprint it
 //! must pin later.
 //!
-//! Channel binding (mixing the TLS exporter into the PAKE key) is intentionally
-//! **not** done here — it is a later phase. See `SessionKey::bind_to_tls_channel`.
+//! Channel binding (S3): after PAKE completes, each side mixes the RFC 5705 TLS
+//! exporter for *this* TLS session into the PAKE key
+//! ([`SessionKey::bind_to_tls_channel`]) and the two ends exchange
+//! role-separated confirmation tags ([`crate::pake::channel_confirmation_tag`]),
+//! compared in constant time. This binds pairing authenticity to the specific
+//! bootstrap TLS session: a relay/MitM that bridges PAKE over two separate TLS
+//! connections derives a different binder per leg, so the tags never match and
+//! pairing is aborted.
 //!
 //! # Wire protocol (over the framed TLS stream)
 //!
@@ -39,6 +45,9 @@
 //!   | <-- 6. own P2P sync addr         --- |
 //!   | --- 7. PAKE message3            -->  |
 //!   | == both sides hold the same SessionKey == |
+//!   | <-- 8. responder confirm tag     --- |
+//!   | --- 9. initiator confirm tag    -->  |
+//!   | == both confirm tags verified (constant-time) == |
 //! ```
 //!
 //! On success each side returns the *peer's* cert fingerprint, the peer's P2P
@@ -68,13 +77,20 @@ use rustls::{
     ClientConfig, DigitallySignedStruct, DistinguishedName, Error as TlsError, ServerConfig,
     SignatureScheme,
 };
+use subtle::ConstantTimeEq;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use crate::cert::fingerprint_of;
-use crate::pake::{PakeInitiator, PakeResponder, PasswordFile, SessionKey};
-use crate::transport::{DeviceFingerprint, TransportError, TLS_HANDSHAKE_TIMEOUT};
+use crate::pake::{
+    channel_confirmation_tag, ConfirmRole, PakeInitiator, PakeResponder, PasswordFile, SessionKey,
+    CONFIRM_TAG_LEN,
+};
+use crate::transport::{
+    tls_channel_binder_client, tls_channel_binder_server, DeviceFingerprint, TransportError,
+    TLS_HANDSHAKE_TIMEOUT,
+};
 
 /// Maximum time the responder bootstrap listener waits for the single inbound
 /// pairing connection before giving up. Kept generous: the pairing window is
@@ -323,6 +339,11 @@ impl BootstrapResponder {
             fingerprint_of(first.as_ref())
         };
 
+        // RFC 5705 channel binder for THIS TLS session (extracted before the
+        // stream is moved into `Framed`). Mixed into the PAKE key below so the
+        // pairing is bound to this exact TLS channel.
+        let tls_binder = tls_channel_binder_server(&tls_stream)?;
+
         let mut framed = Framed::new(tls_stream, length_codec());
 
         // PasswordFile for this single handshake, derived from the QR password.
@@ -360,6 +381,25 @@ impl BootstrapResponder {
         let session_key = responder
             .finish(&msg3)
             .map_err(|e| io_other(format!("PAKE finish: {e}")))?;
+
+        // Channel-binding confirmation (S3). Bind the PAKE key to this TLS
+        // session, then exchange role-separated confirmation tags. A match in
+        // constant time proves the peer shares the same PAKE key AND the same
+        // TLS channel — a relay bridging two TLS sessions would derive a
+        // different binder per leg, so its tags would never match.
+        let bound_key = session_key.bind_to_tls_channel(&tls_binder);
+        let own_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Responder);
+        let expected_peer_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
+
+        // Frame 8 → our confirmation tag.
+        send_frame(&mut framed, &own_tag).await?;
+        // Frame 9 ← initiator's confirmation tag.
+        let peer_tag = recv_confirmation_tag(&mut framed).await?;
+        if peer_tag.ct_eq(&expected_peer_tag).unwrap_u8() != 1 {
+            return Err(io_other(
+                "bootstrap: channel-binding confirmation mismatch — possible relay MitM, pairing aborted".into(),
+            ));
+        }
 
         // Touch own_cert_der so the field is not flagged unused; the bytes are
         // already consumed via the TLS config but the DER is kept for any future
@@ -441,6 +481,10 @@ pub async fn run_initiator(
         fingerprint_of(first.as_ref())
     };
 
+    // RFC 5705 channel binder for THIS TLS session (extracted before the stream
+    // is moved into `Framed`). Mixed into the PAKE key below.
+    let tls_binder = tls_channel_binder_client(&tls_stream)?;
+
     let mut framed = Framed::new(tls_stream, length_codec());
 
     let (client, msg1) =
@@ -472,6 +516,23 @@ pub async fn run_initiator(
 
     // Frame 7 → our PAKE finalisation.
     send_frame(&mut framed, &msg3).await?;
+
+    // Channel-binding confirmation (S3). See `BootstrapResponder::run` for the
+    // rationale — bind to this TLS session and exchange role-separated tags,
+    // aborting on any mismatch (relay MitM defence).
+    let bound_key = session_key.bind_to_tls_channel(&tls_binder);
+    let own_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
+    let expected_peer_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Responder);
+
+    // Frame 8 ← responder's confirmation tag.
+    let peer_tag = recv_confirmation_tag(&mut framed).await?;
+    // Frame 9 → our confirmation tag.
+    send_frame(&mut framed, &own_tag).await?;
+    if peer_tag.ct_eq(&expected_peer_tag).unwrap_u8() != 1 {
+        return Err(io_other(
+            "bootstrap: channel-binding confirmation mismatch — possible relay MitM, pairing aborted".into(),
+        ));
+    }
 
     Ok(BootstrapPairing {
         peer_fingerprint: tls_peer_fp,
@@ -518,6 +579,26 @@ where
             "bootstrap: peer closed before sending frame".into(),
         )),
     }
+}
+
+/// Receive a peer's channel-binding confirmation tag frame (S3).
+///
+/// Enforces the exact [`CONFIRM_TAG_LEN`] so a desynced or malicious peer
+/// cannot smuggle a short/long frame into the constant-time compare slot.
+async fn recv_confirmation_tag<S>(
+    framed: &mut Framed<S, LengthDelimitedCodec>,
+) -> Result<[u8; CONFIRM_TAG_LEN], TransportError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let bytes = recv_frame(framed).await?;
+    let tag: [u8; CONFIRM_TAG_LEN] = bytes.as_slice().try_into().map_err(|_| {
+        io_other(format!(
+            "bootstrap: confirmation tag wrong length ({} bytes)",
+            bytes.len()
+        ))
+    })?;
+    Ok(tag)
 }
 
 async fn recv_fingerprint<S>(
@@ -573,8 +654,10 @@ mod tests {
     use super::*;
     use crate::cert::SelfSignedCert;
 
-    /// Two endpoints over a real loopback TCP/TLS socket complete PAKE and
-    /// converge on the same session key, learning each other's fingerprints.
+    /// Two endpoints over a real loopback TCP/TLS socket complete PAKE, the S3
+    /// channel-binding confirmation exchange, and converge on the same session
+    /// key, learning each other's fingerprints. Both `run`/`run_initiator`
+    /// returning `Ok` proves the confirmation tags matched.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn bootstrap_pake_over_tls_loopback_succeeds() {
         let responder_cert = SelfSignedCert::generate("responder-device").unwrap();
@@ -673,6 +756,125 @@ mod tests {
         assert!(
             resp.is_err(),
             "responder must not derive a key on wrong password"
+        );
+    }
+
+    /// Relay MitM: an attacker who knows the correct PAKE password but cannot
+    /// keep a single TLS channel end-to-end. The relay terminates TLS toward the
+    /// initiator and opens a *separate* TLS session to the real responder, then
+    /// blindly pumps the opaque PAKE/confirmation frames between the two legs.
+    ///
+    /// PAKE itself still completes (the bytes are forwarded verbatim), but the
+    /// RFC 5705 channel binder differs on each TLS leg, so the channel-bound
+    /// confirmation tags do not match and BOTH endpoints must reject pairing.
+    /// This is the exact attack S3 channel binding defends against.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn bootstrap_relay_mitm_is_rejected_by_channel_binding() {
+        use tokio::io::{copy, AsyncWriteExt};
+
+        let responder_cert = SelfSignedCert::generate("responder-device").unwrap();
+        let initiator_cert = SelfSignedCert::generate("initiator-device").unwrap();
+        let relay_cert = SelfSignedCert::generate("relay-mitm-device").unwrap();
+
+        let password = "shared-qr-secret-relay";
+
+        // Real responder.
+        let responder = BootstrapResponder::bind(
+            responder_cert.cert_der.clone(),
+            responder_cert.key_der.clone(),
+        )
+        .await
+        .expect("bind responder");
+        let responder_port = responder.local_addr().expect("local addr").port();
+        let pw = password.to_string();
+        let responder_task =
+            tokio::spawn(async move { responder.run(&pw, "127.0.0.1:7005").await });
+
+        // Relay listener: TLS server toward the initiator (accept any client cert).
+        let relay_listener = TcpListener::bind("127.0.0.1:0").await.expect("relay bind");
+        let relay_port = relay_listener.local_addr().unwrap().port();
+
+        let relay_server_cfg = ServerConfig::builder()
+            .with_client_cert_verifier(Arc::new(AcceptAnyCert))
+            .with_single_cert(
+                vec![CertificateDer::from(relay_cert.cert_der.clone())],
+                PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(
+                    relay_cert.key_der.clone(),
+                )),
+            )
+            .expect("relay server cfg");
+        let relay_acceptor = TlsAcceptor::from(Arc::new(relay_server_cfg));
+
+        // Relay client config toward the real responder (accept any server cert,
+        // present the relay's own cert).
+        let relay_client_cfg = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
+            .with_client_auth_cert(
+                vec![CertificateDer::from(relay_cert.cert_der.clone())],
+                PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(
+                    relay_cert.key_der.clone(),
+                )),
+            )
+            .expect("relay client cfg");
+        let relay_connector = TlsConnector::from(Arc::new(relay_client_cfg));
+
+        let relay_task = tokio::spawn(async move {
+            let (inbound, _) = relay_listener.accept().await.expect("relay accept");
+            let init_tls = relay_acceptor
+                .accept(inbound)
+                .await
+                .expect("relay tls accept");
+
+            let upstream = TcpStream::connect(("127.0.0.1", responder_port))
+                .await
+                .expect("relay->responder connect");
+            let server_name = ServerName::try_from("copypaste.peer").unwrap();
+            let resp_tls = relay_connector
+                .connect(server_name, upstream)
+                .await
+                .expect("relay->responder tls");
+
+            // Blindly pump bytes both directions between the two TLS legs.
+            let (mut ir, mut iw) = tokio::io::split(init_tls);
+            let (mut rr, mut rw) = tokio::io::split(resp_tls);
+            let a = tokio::spawn(async move {
+                let _ = copy(&mut ir, &mut rw).await;
+                let _ = rw.shutdown().await;
+            });
+            let b = tokio::spawn(async move {
+                let _ = copy(&mut rr, &mut iw).await;
+                let _ = iw.shutdown().await;
+            });
+            let _ = tokio::join!(a, b);
+        });
+
+        // Initiator dials the RELAY (thinking it is the responder).
+        let relay_addr: SocketAddr = ([127, 0, 0, 1], relay_port).into();
+        let init_pw = password.to_string();
+        let initiator_task = tokio::spawn(async move {
+            run_initiator(
+                relay_addr,
+                initiator_cert.cert_der,
+                initiator_cert.key_der,
+                &init_pw,
+                "127.0.0.1:7006",
+            )
+            .await
+        });
+
+        let (resp_res, init_res, _relay_res) =
+            tokio::join!(responder_task, initiator_task, relay_task);
+
+        let init = init_res.expect("initiator join");
+        assert!(
+            init.is_err(),
+            "initiator must reject pairing — channel binding confirmation mismatch under relay MitM"
+        );
+        let resp = resp_res.expect("responder join");
+        assert!(
+            resp.is_err(),
+            "responder must reject pairing — channel binding confirmation mismatch under relay MitM"
         );
     }
 }

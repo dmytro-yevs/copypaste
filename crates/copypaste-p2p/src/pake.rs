@@ -170,6 +170,50 @@ impl SessionKey {
     }
 }
 
+/// Which endpoint a [`channel_confirmation_tag`] belongs to.
+///
+/// The two roles derive *different* tags from the same channel-bound key so a
+/// relay cannot simply reflect one side's tag back to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfirmRole {
+    /// The PAKE initiator (bootstrap TLS client).
+    Initiator,
+    /// The PAKE responder (bootstrap TLS server).
+    Responder,
+}
+
+/// Length of a channel-binding confirmation tag, in bytes.
+pub const CONFIRM_TAG_LEN: usize = 32;
+
+/// Derive a 32-byte confirmation tag from a TLS-channel-bound session key.
+///
+/// # Protocol (S3 — bootstrap pairing confirmation)
+///
+/// After both sides bind the PAKE `SessionKey` to their TLS channel (via
+/// [`SessionKey::bind_to_tls_channel`]) they exchange these tags as the final
+/// step of bootstrap pairing. Each side sends its own-role tag and verifies the
+/// peer's opposite-role tag with a **constant-time** compare. A match proves the
+/// peer holds *both* the same PAKE key *and* the same TLS channel binder.
+///
+/// A relay MitM that bridges PAKE over two distinct TLS sessions ends up with a
+/// different channel binder on each leg, so the bound key (and therefore every
+/// derived tag) differs on the two legs and the compare fails — aborting pairing.
+///
+/// The tag is derived by HKDF-SHA256 over the channel-bound key with a
+/// role-separated info string, so the initiator's and responder's tags differ
+/// and cannot be reflected.
+pub fn channel_confirmation_tag(bound_key: &[u8; 32], role: ConfirmRole) -> [u8; CONFIRM_TAG_LEN] {
+    let info: &[u8] = match role {
+        ConfirmRole::Initiator => b"copypaste/p2p/channel-confirm/v1/initiator",
+        ConfirmRole::Responder => b"copypaste/p2p/channel-confirm/v1/responder",
+    };
+    let hk = Hkdf::<Sha256>::new(None, bound_key);
+    let mut tag = [0u8; CONFIRM_TAG_LEN];
+    hk.expand(info, &mut tag)
+        .expect("32 bytes is well within HKDF-SHA256 output limit");
+    tag
+}
+
 /// Server-side password material derived during initial registration.
 ///
 /// Persisted in SQLCipher (`paired_peers.pake_password_file BLOB`). First

@@ -70,7 +70,10 @@ pub use discovery::{DiscoveryService, PeerInfo, SERVICE_TYPE};
 pub use error::DiscoveryError;
 
 // Convenient top-level re-exports — PAKE pairing (ADR-008).
-pub use pake::{PakeError, PakeInitiator, PakeResponder, PasswordFile, SessionKey};
+pub use pake::{
+    channel_confirmation_tag, ConfirmRole, PakeError, PakeInitiator, PakeResponder, PasswordFile,
+    SessionKey, CONFIRM_TAG_LEN,
+};
 
 // Convenient top-level re-exports — unauthenticated bootstrap channel (P2P Phase 1).
 pub use bootstrap::{
