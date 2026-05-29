@@ -285,10 +285,11 @@ private fun HistoryRow(
     maskSensitive: Boolean,
     onDelete: (String) -> Unit,
 ) {
-    val detectedSensitive = remember(item.id, item.snippet) {
-        if (item.isSensitive) true
-        else try { isSensitive(item.snippet) } catch (_: UnsatisfiedLinkError) { false }
-    }
+    // Sensitivity is computed in the repository against the FULL decrypted
+    // plaintext (see ClipboardRepository.parseItem). The snippet here is a
+    // truncated/sanitized preview, so re-running detection on it would be both
+    // redundant and lossy — trust the flag set at load time.
+    val detectedSensitive = item.isSensitive
 
     var expanded by remember(item.id) { mutableStateOf(false) }
     // Auto-collapse after 4 seconds of inactivity.
