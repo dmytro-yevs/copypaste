@@ -92,21 +92,29 @@ The daemon authenticates via email/password (GoTrue password grant).
 ```sh
 copypaste cloud setup \
   --url "https://YOUR-PROJECT.supabase.co" \
-  --anon-key "eyJhbGciOi..."
-copypaste cloud test     # verifies URL + key + table + RLS, prints what's wrong
+  --anon-key "eyJhbGciOi..." \
+  --email "you@example.com"
+# You'll be prompted for the account password (or set SUPABASE_PASSWORD first).
+copypaste cloud test     # verifies URL + key + sign-in + table + RLS, prints what's wrong
 ```
 
-`cloud setup` writes the URL and anon key into the daemon config
-(`config.json`, same file the desktop UI's Settings → Sync writes) with
-`0600` perms. The running daemon picks them up — no env vars or restart
-needed for the credentials. The desktop UI offers the same form plus a
-**Test connection** button.
+`cloud setup` writes the URL, anon key, **and your account email/password**
+into the daemon config (`config.json`, same file the desktop UI's
+Settings → Sync writes) with `0600` perms. The running daemon picks them up
+— no env vars or restart needed.
 
-> Email/password sign-in (`SUPABASE_EMAIL` / `SUPABASE_PASSWORD`) is still
-> env-only — those are user credentials, not configuration, and are
-> deliberately never persisted to disk. Without them the daemon uses the
-> anon key (which RLS treats as the `anon` role); set them to get the
-> `authenticated` scope your RLS policies require.
+The email/password are **required**, not optional: the provisioning SQL
+grants table access only to the `authenticated` role (`using (user_id =
+auth.uid())`), so the daemon must sign in via the GoTrue password grant to
+pass RLS. With only the anon key the daemon authenticates as the public
+`anon` role, every REST insert/select is rejected by RLS, and sync silently
+fails. The desktop UI offers the same form plus a **Test connection**
+button.
+
+> The password is never accepted as a plain `--password` flag in the happy
+> path (that would persist in shell history and `ps` output). It is read
+> from an interactive prompt or the `SUPABASE_PASSWORD` env var, stored only
+> in the `0600` config file alongside the anon key, and never logged.
 
 ### Alternative: export env vars before starting the daemon
 
@@ -217,8 +225,10 @@ Then in the Supabase dashboard:
 ### How do I rotate the password?
 
 1. Supabase dashboard → **Authentication → Users → ⋯ → Send password reset**.
-2. Update `SUPABASE_PASSWORD` in the launchd plist.
-3. Restart the daemon (step 8).
+2. Re-run `copypaste cloud setup --url … --anon-key … --email …` (you'll be
+   prompted for the new password) — no restart needed. *Or*, if you use the
+   env-var path, update `SUPABASE_PASSWORD` in the launchd plist and restart
+   the daemon (step 8).
 
 ### Free-tier limits
 

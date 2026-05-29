@@ -23,15 +23,35 @@ use std::path::Path;
 /// exactly the file shipped in the repo. Kept in sync via `include_str!`.
 const SETUP_SQL: &str = include_str!("../../../../docs/supabase/setup.sql");
 
-/// Store the Supabase project URL and anon key in the daemon config.
+/// Store the Supabase project URL, anon key, and account credentials in the
+/// daemon config.
+///
+/// The email/password are required because the provisioning SQL grants table
+/// access only to the `authenticated` role (RLS `using (user_id = auth.uid())`).
+/// Without them the daemon would authenticate as the public `anon` role and
+/// every REST insert/select would be rejected by RLS — sync would silently
+/// fail. They are persisted into the same `0600` `config.json` as the anon key
+/// so the documented one-command flow yields working authenticated sync with
+/// no env vars or daemon restart.
 ///
 /// Reads the existing config first and merges, so unrelated settings
 /// (e.g. `p2p_enabled`) are preserved rather than clobbered. Validates that the
 /// URL is HTTPS before sending — the daemon refuses plain http, and failing
 /// here gives a clearer message than a silent no-op later.
-pub fn setup(socket_path: &Path, url: &str, anon_key: &str) -> Result<()> {
+///
+/// `password` is resolved without ever accepting a plain argv flag value other
+/// than as an explicit opt-in: callers pass `None` and we read `SUPABASE_PASSWORD`
+/// or prompt on stdin, avoiding shell-history leakage.
+pub fn setup(
+    socket_path: &Path,
+    url: &str,
+    anon_key: &str,
+    email: &str,
+    password: Option<String>,
+) -> Result<()> {
     let url = url.trim().trim_end_matches('/');
     let anon_key = anon_key.trim();
+    let email = email.trim();
 
     if !url.to_ascii_lowercase().starts_with("https://") {
         return Err(anyhow!(
@@ -40,6 +60,16 @@ pub fn setup(socket_path: &Path, url: &str, anon_key: &str) -> Result<()> {
     }
     if anon_key.is_empty() {
         return Err(anyhow!("anon key must not be empty"));
+    }
+    if email.is_empty() {
+        return Err(anyhow!("email must not be empty"));
+    }
+
+    // Resolve the password without leaking it into shell history: explicit
+    // --password arg (discouraged) → SUPABASE_PASSWORD env → interactive prompt.
+    let password = resolve_password(password)?;
+    if password.trim().is_empty() {
+        return Err(anyhow!("password must not be empty"));
     }
 
     // Read-merge-write: fetch current config so we don't drop other fields.
@@ -54,10 +84,14 @@ pub fn setup(socket_path: &Path, url: &str, anon_key: &str) -> Result<()> {
     if let Some(obj) = cfg.as_object_mut() {
         obj.insert("supabase_url".into(), serde_json::json!(url));
         obj.insert("supabase_anon_key".into(), serde_json::json!(anon_key));
+        obj.insert("supabase_email".into(), serde_json::json!(email));
+        obj.insert("supabase_password".into(), serde_json::json!(password));
     } else {
         cfg = serde_json::json!({
             "supabase_url": url,
             "supabase_anon_key": anon_key,
+            "supabase_email": email,
+            "supabase_password": password,
         });
     }
 
@@ -66,11 +100,38 @@ pub fn setup(socket_path: &Path, url: &str, anon_key: &str) -> Result<()> {
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
-    println!("Supabase credentials saved.");
+    println!("Supabase credentials saved (URL, anon key, email/password).");
     println!("Next:");
     println!("  1. copypaste cloud setup-sql | pbcopy   # provision schema + RLS in Supabase");
     println!("  2. copypaste cloud test                 # verify the connection");
     Ok(())
+}
+
+/// Resolve the account password: explicit value → `SUPABASE_PASSWORD` env →
+/// interactive stdin prompt. We never echo the password back and never log it.
+///
+/// stdin prompt note: this reads a line in cleartext (the terminal echoes it)
+/// — acceptable for a one-time setup step and strictly better than an argv flag
+/// (which would persist in shell history and `ps` output). A no-echo prompt
+/// would require an extra crate (`rpassword`); deferred to avoid a new pinned
+/// dependency.
+fn resolve_password(explicit: Option<String>) -> Result<String> {
+    if let Some(p) = explicit {
+        return Ok(p);
+    }
+    if let Ok(p) = std::env::var("SUPABASE_PASSWORD") {
+        if !p.is_empty() {
+            return Ok(p);
+        }
+    }
+    use std::io::Write;
+    print!("Supabase account password (input is visible): ");
+    std::io::stdout().flush()?;
+    let mut buf = String::new();
+    std::io::stdin().read_line(&mut buf)?;
+    // Strip the trailing newline only; preserve any intentional internal chars.
+    let trimmed = buf.trim_end_matches(['\n', '\r']).to_owned();
+    Ok(trimmed)
 }
 
 /// Print the current cloud-sync status reported by the daemon.
@@ -141,7 +202,7 @@ mod tests {
 
     #[test]
     fn run_signatures_compile() {
-        let _: fn(&Path, &str, &str) -> Result<()> = setup;
+        let _: fn(&Path, &str, &str, &str, Option<String>) -> Result<()> = setup;
         let _: fn(&Path) -> Result<()> = status;
         let _: fn(&Path) -> Result<()> = test;
         let _: fn() -> Result<()> = setup_sql;

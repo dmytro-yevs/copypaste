@@ -55,6 +55,18 @@ pub struct AppConfig {
     pub supabase_url: Option<String>,
     #[serde(default)]
     pub supabase_anon_key: Option<String>,
+    /// GoTrue account email for the `authenticated` scope sign-in. Persisted
+    /// (not env-only) so the documented `copypaste cloud setup` flow yields a
+    /// daemon that authenticates and passes the `authenticated`-only RLS
+    /// policies — anon-key-only requests are rejected by RLS and sync silently
+    /// fails. Stored in the same `0600` `config.json` as `supabase_anon_key`.
+    #[serde(default)]
+    pub supabase_email: Option<String>,
+    /// GoTrue account password. See [`Self::supabase_email`]. Never logged; the
+    /// `Debug` derive is acceptable because the daemon does not debug-print the
+    /// whole config (only individual non-secret fields are surfaced over IPC).
+    #[serde(default)]
+    pub supabase_password: Option<String>,
 }
 
 fn config_path() -> Option<std::path::PathBuf> {
@@ -1525,8 +1537,12 @@ impl IpcServer {
                 let supabase_url_val: Option<String> = std::env::var("SUPABASE_URL")
                     .ok()
                     .or_else(|| app_cfg.supabase_url.clone());
-                // SUPABASE_EMAIL is env-only (never persisted to config file).
-                let email_val: Option<String> = std::env::var("SUPABASE_EMAIL").ok();
+                // Email: env var first, else the persisted config (written by
+                // `copypaste cloud setup`). We surface only the email — never the
+                // password, anon key, or passphrase.
+                let email_val: Option<String> = std::env::var("SUPABASE_EMAIL")
+                    .ok()
+                    .or_else(|| app_cfg.supabase_email.clone());
                 Response::ok(
                     req.id,
                     serde_json::json!({
@@ -2975,16 +2991,15 @@ async fn test_cloud_connection() -> serde_json::Value {
     }
 
     // Bearer: prefer an email/password GoTrue token (authenticated scope, the
-    // scope RLS expects), falling back to the anon key. We do NOT fail the
-    // whole probe if sign-in fails — we report it as the failing stage so the
-    // user can fix credentials specifically.
-    let (bearer, signed_in) = match (
-        std::env::var("SUPABASE_EMAIL"),
-        std::env::var("SUPABASE_PASSWORD"),
-    ) {
-        (Ok(email), Ok(password)) if !email.is_empty() && !password.is_empty() => {
+    // scope RLS expects), falling back to the anon key. Credentials come from
+    // `CloudConfig` (env vars first, then the persisted `0600` config written by
+    // `copypaste cloud setup`) — the same resolution the orchestrator uses. We
+    // do NOT fail the whole probe if sign-in fails — we report it as the failing
+    // stage so the user can fix credentials specifically.
+    let (bearer, signed_in) = match (cfg.email.as_deref(), cfg.password.as_deref()) {
+        (Some(email), Some(password)) if !email.is_empty() && !password.is_empty() => {
             let auth = copypaste_supabase::auth::AuthClient::new(&cfg.supabase_url, &cfg.anon_key);
-            match auth.sign_in(&email, &password).await {
+            match auth.sign_in(email, password).await {
                 Ok(session) => (session.access_token, true),
                 Err(e) => {
                     return serde_json::json!({
@@ -2992,8 +3007,9 @@ async fn test_cloud_connection() -> serde_json::Value {
                         "configured": true,
                         "stage": "auth",
                         "message": format!(
-                            "Sign-in failed for {email}: {e}. Check SUPABASE_EMAIL / \
-                             SUPABASE_PASSWORD, or that the user is confirmed."
+                            "Sign-in failed for {email}: {e}. Re-check the email/password \
+                             (run `copypaste cloud setup` again, or set SUPABASE_EMAIL / \
+                             SUPABASE_PASSWORD), and that the user is confirmed."
                         ),
                     });
                 }
@@ -3046,10 +3062,23 @@ async fn test_cloud_connection() -> serde_json::Value {
     // Classify the common failure HTTP codes into actionable guidance.
     let body = resp.text().await.unwrap_or_default();
     let (stage, message) = match code {
-        401 => (
+        // 401 has two distinct root causes. When we already hold an
+        // authenticated bearer (`signed_in`), the anon key itself must be
+        // wrong/expired. When the probe used only the anon key (no sign-in),
+        // the project's `authenticated`-only RLS rejects the request and the
+        // fix is to supply email/password, not to re-copy the anon key.
+        401 if signed_in => (
             "auth",
             "401 Unauthorized — the anon key is wrong or expired. Re-copy it from \
              Supabase → Project Settings → API."
+                .to_string(),
+        ),
+        401 => (
+            "auth",
+            "401 Unauthorized — the request used the anon key with no signed-in \
+             session, and the table's RLS grants only the `authenticated` role. \
+             Provide email/password (run `copypaste cloud setup` and supply them, \
+             or set SUPABASE_EMAIL / SUPABASE_PASSWORD) so the daemon authenticates."
                 .to_string(),
         ),
         404 => (
