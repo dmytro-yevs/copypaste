@@ -8,4 +8,16 @@
 
     <!-- Adaptive launcher icon background (white, icon motif carries the brand color) -->
     <color name="ic_launcher_background">#FFFFFF</color>
+
+    <!--
+        JetBrains "New UI" / Darcula tokens — mirror crates/copypaste-ui
+        tailwind.config.js and android ui/theme/Color.kt. Used by the AppCompat
+        base theme so the pre-Compose window (splash / launch background) and the
+        system bars match the dark Compose UI instead of flashing white/indigo.
+    -->
+    <color name="ide_bg">#1E1F22</color>
+    <color name="ide_panel">#2B2D30</color>
+    <color name="ide_text">#DFE1E5</color>
+    <color name="ide_accent">#3574F0</color>
+    <color name="ide_accent_dark">#2C63D6</color>
 </resources>

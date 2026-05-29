@@ -29,16 +29,12 @@ import androidx.compose.material.icons.filled.PhonelinkSetup
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,7 +46,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.IdeBg
+import com.copypaste.android.ui.theme.IdeBorder
+import com.copypaste.android.ui.theme.IdeDanger
+import com.copypaste.android.ui.theme.IdeDim
+import com.copypaste.android.ui.theme.IdeSuccess
+import com.copypaste.android.ui.theme.IdeText
 
 /**
  * First-run permission onboarding screen.
@@ -246,14 +250,9 @@ fun OnboardingScreen(
     val allDone = notifGranted && a11yEnabled
 
     Scaffold(
+        containerColor = IdeBg,
         topBar = {
-            TopAppBar(
-                title = { Text("Set up CopyPaste") },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                )
-            )
+            CopyPasteTopBar(title = "Set up CopyPaste")
         }
     ) { innerPadding ->
         Column(
@@ -380,18 +379,15 @@ private fun PermissionCard(
     required: Boolean,
     alwaysShowButton: Boolean = false,
 ) {
-    val containerColor = if (granted) {
-        MaterialTheme.colorScheme.secondaryContainer
-    } else if (required) {
-        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
+    // Status-colored hairline border instead of a flooded card background:
+    //   granted  → green   missing+required → red   otherwise → neutral grey.
+    val borderColor = when {
+        granted              -> IdeSuccess
+        required             -> IdeDanger
+        else                 -> IdeBorder
     }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = containerColor)
-    ) {
+    CopyPasteCard(accent = borderColor) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -400,27 +396,27 @@ private fun PermissionCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (granted) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (granted) IdeSuccess else IdeDim
                 )
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface
+                    style = MaterialTheme.typography.titleMedium,
+                    color = IdeText,
+                    modifier = Modifier.weight(1f),
                 )
                 if (required) {
                     Text(
                         text = "required",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error
+                        color = IdeDanger
                     )
                 }
             }
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                style = MaterialTheme.typography.bodyMedium,
+                color = IdeDim
             )
             Spacer(modifier = Modifier.height(8.dp))
             Button(

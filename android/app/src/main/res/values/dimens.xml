@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        Spacing & radius scale — the single source of truth for View-based
+        (XML) layouts, mirroring the Compose design system in ui/theme. Compose
+        screens hard-code these same numbers via dp literals; keep both in sync.
+
+        Spacing grid: 4 / 8 / 12 / 16 / 24 dp.
+    -->
+    <dimen name="space_xs">4dp</dimen>
+    <dimen name="space_sm">8dp</dimen>
+    <dimen name="space_md">12dp</dimen>
+    <dimen name="space_lg">16dp</dimen>
+    <dimen name="space_xl">24dp</dimen>
+
+    <!-- Corner radii: chips 4dp, controls 6dp, cards 12dp, hero 16dp. -->
+    <dimen name="radius_chip">4dp</dimen>
+    <dimen name="radius_control">6dp</dimen>
+    <dimen name="radius_card">12dp</dimen>
+    <dimen name="radius_hero">16dp</dimen>
+
+    <!-- Chrome -->
+    <dimen name="appbar_height">44dp</dimen>
+    <dimen name="list_row_min_height">36dp</dimen>
+    <dimen name="icon_sm">14dp</dimen>
+    <dimen name="icon_md">18dp</dimen>
+    <dimen name="divider_thickness">0.5dp</dimen>
+</resources>

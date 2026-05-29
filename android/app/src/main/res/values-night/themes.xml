@@ -1,11 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+        Night variant — identical to the base theme. The CopyPaste UI is always
+        dark (Darcula) regardless of the system day/night setting, so both files
+        carry the same dark window background, accent and light system-bar icons.
+        INSET OWNERSHIP: see values/themes.xml — do not add cutout/inset flags.
+    -->
     <style name="Theme.CopyPaste" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Brand accent — indigo #5A59E6 (same in dark mode; luminance contrast is sufficient) -->
-        <item name="colorPrimary">@color/copypaste_primary</item>
-        <item name="colorPrimaryDark">@color/copypaste_primary_dark</item>
-        <item name="colorAccent">@color/copypaste_primary</item>
+        <!-- Accent — Darcula action blue #3574F0 (matches macOS + Compose theme) -->
+        <item name="colorPrimary">@color/ide_accent</item>
+        <item name="colorPrimaryDark">@color/ide_accent_dark</item>
+        <item name="colorAccent">@color/ide_accent</item>
+
+        <!-- Dark window/launch background so there's no white flash before Compose -->
+        <item name="android:windowBackground">@color/ide_bg</item>
+        <item name="android:colorBackground">@color/ide_bg</item>
+
+        <!-- System bars: transparent, light icons (correct over the dark UI). -->
         <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
+        <!-- INSET HOOK: window-inset / cutout flags are set elsewhere. -->
     </style>
 </resources>
