@@ -12,7 +12,7 @@
 //! [`is_advertisable_interface`] (pure functions over already-enumerated data)
 //! so it can be unit-tested without depending on the host's live NIC state.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use if_addrs::{get_if_addrs, IfOperStatus, Interface};
 use tracing::{debug, warn};
@@ -154,6 +154,44 @@ pub fn usable_advertise_addrs() -> Vec<IpAddr> {
             Vec::new()
         }
     }
+}
+
+/// Pick the single LAN-routable host address to advertise to a peer, from an
+/// already-enumerated list of usable addresses.
+///
+/// IPv4 is preferred over IPv6 because it is the cleanest cross-device /
+/// emulator case (link-local/zone-id handling for IPv6 is fragile across the
+/// pairing and dial paths). When `usable` is empty (no real LAN interface —
+/// e.g. an offline machine, a CI sandbox, or a single-host loopback test) the
+/// caller's loopback fallback is returned so same-host pairing still works.
+///
+/// Split out as a pure function over an explicit address list so the selection
+/// policy can be unit-tested without a live NIC.
+pub fn pick_advertise_host(usable: &[IpAddr], fallback: IpAddr) -> IpAddr {
+    usable
+        .iter()
+        .find(|ip| ip.is_ipv4())
+        .or_else(|| usable.first())
+        .copied()
+        .unwrap_or(fallback)
+}
+
+/// Build the `host:port` sync-listener address to advertise to a peer, choosing
+/// a real LAN-routable host address from [`usable_advertise_addrs`].
+///
+/// This is the single source of truth used by BOTH the pairing QR `addr_hint`
+/// and the in-band P2P sync-listener address persisted to `peers.json`: a peer
+/// (a real phone on the same Wi-Fi, not just an emulator on loopback) must
+/// receive a host-reachable address it can dial, never `127.0.0.1`.
+///
+/// Falls back to `127.0.0.1:<port>` ONLY when the host exposes no usable LAN
+/// interface, so single-host / loopback-test pairing still functions. The
+/// listener itself binds `0.0.0.0`, so it is reachable on every interface —
+/// this only decides which concrete host the advertisement carries.
+pub fn advertise_sync_addr(port: u16) -> SocketAddr {
+    let usable = usable_advertise_addrs();
+    let host = pick_advertise_host(&usable, IpAddr::V4(Ipv4Addr::LOCALHOST));
+    SocketAddr::new(host, port)
 }
 
 #[cfg(test)]
@@ -334,5 +372,60 @@ mod tests {
             ],
             "only the real, up, non-virtual LAN addresses should survive"
         );
+    }
+
+    // ── pick_advertise_host / advertise_sync_addr (LAN sync-addr policy) ─────
+
+    /// IPv4 is preferred even when an IPv6 address comes first in the list.
+    #[test]
+    fn pick_advertise_host_prefers_ipv4() {
+        let usable = [
+            IpAddr::V6("2001:db8::5".parse().unwrap()),
+            IpAddr::V4(Ipv4Addr::new(192, 168, 1, 42)),
+        ];
+        let host = pick_advertise_host(&usable, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(host, IpAddr::V4(Ipv4Addr::new(192, 168, 1, 42)));
+    }
+
+    /// With only an IPv6 LAN address available, that address is used (not the
+    /// loopback fallback).
+    #[test]
+    fn pick_advertise_host_uses_ipv6_when_no_ipv4() {
+        let g: Ipv6Addr = "2001:db8::9".parse().unwrap();
+        let usable = [IpAddr::V6(g)];
+        let host = pick_advertise_host(&usable, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(host, IpAddr::V6(g));
+    }
+
+    /// Empty usable list → caller's loopback fallback (single-host / loopback
+    /// test still works). This is the ONLY path that yields loopback.
+    #[test]
+    fn pick_advertise_host_falls_back_to_loopback_when_empty() {
+        let host = pick_advertise_host(&[], IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(host, IpAddr::V4(Ipv4Addr::LOCALHOST));
+    }
+
+    /// The advertised sync address must NEVER be loopback when a real LAN
+    /// interface exists — this is the exact regression behind the
+    /// emulator-only / loopback-only Android sync bug.
+    #[test]
+    fn advertised_host_is_lan_not_loopback_when_lan_present() {
+        let usable = [IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5))];
+        let host = pick_advertise_host(&usable, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert!(!host.is_loopback(), "must advertise a routable LAN host");
+        assert_eq!(host, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 5)));
+    }
+
+    /// `advertise_sync_addr` carries the requested port through unchanged and
+    /// always yields a parseable `host:port` (host depends on the live NIC
+    /// state, so we only assert the port and parseability here).
+    #[test]
+    fn advertise_sync_addr_carries_port() {
+        let addr = advertise_sync_addr(54321);
+        assert_eq!(addr.port(), 54321);
+        // Round-trips through its string form (what gets written to peers.json
+        // / the QR addr_hint and re-parsed by the connector).
+        let reparsed: SocketAddr = addr.to_string().parse().unwrap();
+        assert_eq!(reparsed, addr);
     }
 }
