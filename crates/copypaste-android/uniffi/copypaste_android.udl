@@ -216,4 +216,8 @@ dictionary P2pSyncResult {
   u64 items_received;
   u64 items_sent;
   sequence<SyncedItem> items;
+  // Count of inbound text frames skipped because they carried a content_nonce
+  // (legacy / non-rekeyed peer). Dropped (undecryptable with the shared sync
+  // key) but logged + counted so build-skew is observable rather than silent.
+  u32 items_skipped_legacy;
 };

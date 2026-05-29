@@ -430,6 +430,14 @@ pub struct P2pSyncResult {
     pub items_received: u64,
     pub items_sent: u64,
     pub items: Vec<SyncedItem>,
+    /// Count of inbound text frames skipped because they carried a
+    /// `content_nonce` (i.e. a legacy / non-rekeyed peer that hasn't migrated
+    /// to the sync-key-wrapped cloud-blob shape). Such frames cannot be
+    /// decrypted with the shared sync key, so they are dropped — but, unlike
+    /// before, the drop is now both logged and counted here so a build-skew
+    /// peer no longer makes items vanish silently. See the
+    /// "decrypt 7/7 build-skew" investigation.
+    pub items_skipped_legacy: u32,
 }
 
 /// Derive the shared content [`SyncKey`](copypaste_core::SyncKey) from a 32-byte
@@ -620,8 +628,25 @@ pub fn sync_with_peer(
         // `content_nonce`; skip anything that doesn't fit that shape, and skip
         // (rather than fail) a blob we cannot decrypt.
         let mut items: Vec<SyncedItem> = Vec::with_capacity(received.len());
+        let mut items_skipped_legacy: u32 = 0;
         for wire in &received {
-            if wire.content_type != "text" || wire.content_nonce.is_some() {
+            // A text frame that still carries a `content_nonce` is a legacy /
+            // non-rekeyed frame (e.g. a stale daemon that predates the sync-key
+            // re-keying). We cannot decrypt it with the shared sync key, so we
+            // still skip it — but do NOT do so silently: warn and count it so a
+            // build-skew peer is observable instead of making items vanish (this
+            // silent `continue` is what hid the "decrypt 7/7" failure).
+            if wire.content_type == "text" && wire.content_nonce.is_some() {
+                items_skipped_legacy = items_skipped_legacy.saturating_add(1);
+                eprintln!(
+                    "copypaste-android: WARN skipping legacy/non-rekeyed P2P text frame \
+                     (item_id={}, origin={}): content_nonce is set, peer has not migrated \
+                     to sync-key-wrapped cloud blobs; cannot decrypt with shared key",
+                    wire.item_id, wire.origin_device_id
+                );
+                continue;
+            }
+            if wire.content_type != "text" {
                 continue;
             }
             let Some(blob) = wire.content.as_ref() else {
@@ -642,6 +667,7 @@ pub fn sync_with_peer(
             items_received: received.len() as u64,
             items_sent: outbound.len() as u64,
             items,
+            items_skipped_legacy,
         })
     })
 }
@@ -1389,6 +1415,119 @@ mod tests {
             frames_peer_got, 1,
             "peer must have received the FFI initiator's one offered framed WireItem"
         );
+    }
+
+    /// Defense-in-depth observability: a peer that pushes a text `WireItem`
+    /// still carrying a `content_nonce` (a legacy / non-rekeyed frame, the exact
+    /// build-skew shape that hid the "decrypt 7/7" failure) must NOT vanish
+    /// silently. The FFI must skip it (it's undecryptable with the shared sync
+    /// key) but COUNT it in `items_skipped_legacy` and exercise the warn path.
+    /// Mirrors `sync_with_peer_receives_item_from_loopback_peer`.
+    #[test]
+    fn sync_with_peer_counts_skipped_legacy_frame() {
+        use bytes::Bytes;
+        use copypaste_p2p::transport::{PairedPeers, PeerTransport};
+        use copypaste_sync::protocol::WireItem;
+        use futures_util::{SinkExt, StreamExt};
+        use std::sync::mpsc;
+        use tokio::net::TcpListener;
+
+        let session_key = [0x5Au8; 32];
+
+        let peer_cert = generate_device_cert().expect("peer cert");
+        let init_cert = generate_device_cert().expect("initiator cert");
+        let peer_fp = peer_cert.fingerprint.clone();
+        let init_fp = init_cert.fingerprint.clone();
+
+        // A LEGACY text frame: `content_nonce = Some(...)`. This is the
+        // non-rekeyed shape the FFI cannot decrypt and previously dropped with a
+        // silent `continue`.
+        let legacy_item_id = uuid::Uuid::new_v4().to_string();
+        let legacy_wire = WireItem {
+            id: legacy_item_id.clone(),
+            item_id: legacy_item_id.clone(),
+            content_type: "text".to_string(),
+            content: Some(vec![1, 2, 3, 4]),
+            content_nonce: Some(vec![9u8; 24]),
+            blob_ref: None,
+            is_sensitive: false,
+            lamport_ts: 3,
+            wall_time: 3,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "legacy-peer".to_string(),
+            key_version: 1,
+        };
+
+        let (port_tx, port_rx) = mpsc::channel::<u16>();
+        let peer_cert_der = peer_cert.cert_der.clone();
+        let peer_key_der = peer_cert.key_der.clone();
+        let init_fp_for_peer = init_fp.clone();
+        let peer_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("peer runtime");
+            rt.block_on(async move {
+                let peers = PairedPeers::new();
+                peers.add(init_fp_for_peer, "android-initiator");
+                let transport = PeerTransport::from_cert(peer_cert_der, peer_key_der, peers);
+
+                let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+                port_tx
+                    .send(listener.local_addr().expect("addr").port())
+                    .expect("send port");
+
+                let (_addr, _fp, mut framed) = transport.accept(&listener).await.expect("accept");
+
+                // PUSH the legacy frame, exactly as a stale daemon's catch-up
+                // push would.
+                let payload = serde_json::to_vec(&legacy_wire).expect("serialise legacy WireItem");
+                framed
+                    .send(Bytes::from(payload))
+                    .await
+                    .expect("peer push legacy frame");
+
+                // Drain anything the FFI offers so the peer task terminates.
+                while let Ok(Some(Ok(_frame))) =
+                    tokio::time::timeout(std::time::Duration::from_secs(2), framed.next()).await
+                {
+                }
+            })
+        });
+
+        let port = port_rx.recv().expect("peer port");
+        let addr = format!("127.0.0.1:{port}");
+
+        let result = sync_with_peer(
+            addr,
+            peer_fp,
+            session_key.to_vec(),
+            init_cert.cert_der.clone(),
+            init_cert.key_der.clone(),
+            Vec::new(),
+        )
+        .expect("FFI sync_with_peer must succeed over loopback");
+
+        // The legacy frame was received on the wire ...
+        assert!(
+            result.items_received >= 1,
+            "must have received the legacy frame, got {}",
+            result.items_received
+        );
+        // ... skipped (undecryptable) so it yields NO plaintext item ...
+        assert!(
+            result.items.is_empty(),
+            "legacy non-rekeyed frame must not surface as a decrypted item"
+        );
+        // ... but is now COUNTED instead of vanishing silently.
+        assert_eq!(
+            result.items_skipped_legacy, 1,
+            "the skipped legacy/non-rekeyed frame must be counted, got {}",
+            result.items_skipped_legacy
+        );
+
+        peer_thread.join().expect("peer thread join");
     }
 
     /// Blob format: nonce[24] prepended, total length = 24 + plaintext + 16 (AEAD tag).
