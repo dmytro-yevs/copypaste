@@ -183,5 +183,27 @@
             android:exported="false"
             tools:node="remove"
             xmlns:tools="http://schemas.android.com/tools" />
+
+        <!--
+            FileProvider for log export (LogExportHelper).
+
+            Shares log files from getExternalFilesDir(null)/logs/ via a
+            content:// URI so Share intents work safely with third-party apps.
+
+            The same directory is directly adb-pullable without root:
+              adb pull /sdcard/Android/data/com.copypaste.android/files/logs/
+
+            Authority must match LogExportHelper.AUTHORITY =
+              "com.copypaste.android.fileprovider"
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>
