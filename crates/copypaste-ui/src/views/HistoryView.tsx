@@ -520,49 +520,43 @@ export function HistoryView() {
           sigRef.current = newSig;
           setItems(incoming);
         }
+        setDegraded(false);
+        setErrorDetail(null);
         setLoadState("ready");
       } catch (err) {
         if (err instanceof IpcError && err.code === "daemon_offline") {
           setLoadState("offline");
-        } else {
-          setLoadState("error");
+          return;
         }
-      }
-      setDegraded(false);
-      setErrorDetail(null);
-      setLoadState("ready");
-    } catch (err) {
-      if (err instanceof IpcError && err.code === "daemon_offline") {
-        setLoadState("offline");
-        return;
-      }
-      // The daemon is reachable but history failed. Surface the real error and,
-      // when the daemon reports a degraded/not-ready DB, offer the reset escape
-      // hatch instead of a dead-end "Failed to load history" screen.
-      setErrorDetail(err instanceof IpcError ? err.message : String(err));
-      const notReady =
-        err instanceof IpcError &&
-        (err.code === "ipc_not_ready" || err.code === "IPC_NOT_READY");
-      let isDegraded = notReady;
-      // Confirm via status: the daemon explicitly reports `degraded`.
-      try {
-        const status = (await api.status()) as {
-          degraded?: boolean;
-          degraded_reason?: string | null;
-        };
-        if (status && status.degraded) {
-          isDegraded = true;
-          if (status.degraded_reason) {
-            setErrorDetail(`Database unavailable (${status.degraded_reason}).`);
+        // The daemon is reachable but history failed. Surface the real error and,
+        // when the daemon reports a degraded/not-ready DB, offer the reset escape
+        // hatch instead of a dead-end "Failed to load history" screen.
+        setErrorDetail(err instanceof IpcError ? err.message : String(err));
+        const notReady =
+          err instanceof IpcError &&
+          (err.code === "ipc_not_ready" || err.code === "IPC_NOT_READY");
+        let isDegraded = notReady;
+        // Confirm via status: the daemon explicitly reports `degraded`.
+        try {
+          const status = (await api.status()) as {
+            degraded?: boolean;
+            degraded_reason?: string | null;
+          };
+          if (status && status.degraded) {
+            isDegraded = true;
+            if (status.degraded_reason) {
+              setErrorDetail(`Database unavailable (${status.degraded_reason}).`);
+            }
           }
+        } catch {
+          // Status probe failed too; fall back to the not-ready signal above.
         }
-      } catch {
-        // Status probe failed too; fall back to the not-ready signal above.
+        setDegraded(isDegraded);
+        setLoadState("error");
       }
-      setDegraded(isDegraded);
-      setLoadState("error");
-    }
-  }, [historySize]);
+    },
+    [historySize]
+  );
 
   // Initial load
   useEffect(() => {
@@ -779,7 +773,7 @@ export function HistoryView() {
       setErrorDetail(null);
       setSelectedId(null);
       setItems([]);
-      imageCache.clear();
+      clearImageCache(); // the items are gone; drop their cached thumbnails too
       sigRef.current = "";
       showToast("Database reset — local history erased", "success");
       await load(false);
