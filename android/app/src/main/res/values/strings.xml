@@ -80,6 +80,8 @@
     <string name="cd_copy">Copy</string>
     <string name="cd_delete">Delete item</string>
     <string name="cd_sensitive_icon">Sensitive content marker</string>
+    <string name="cd_image_item">Image clipboard item</string>
+    <string name="cd_image_thumbnail">Image thumbnail</string>
 
     <!-- Error / status -->
     <string name="error_generic">Failed: %1$s</string>

@@ -5,5 +5,23 @@ data class ClipboardItem(
     val contentType: String,
     val isSensitive: Boolean,
     val wallTimeMs: Long,
-    val snippet: String = ""
-)
+    val snippet: String = "",
+    /**
+     * Raw PNG bytes of the image thumbnail, non-null only when [contentType]
+     * is an image MIME type (e.g. "image/png", "image/jpeg").
+     *
+     * Populated by [ClipboardRepository.getItems] when image data is stored
+     * under the separate "item_img_<id>" SharedPreferences key. Images are kept
+     * out of the main pipe-delimited item blob to avoid ballooning the index
+     * string. When null the row shows a generic image-type icon instead.
+     *
+     * NOTE: [data class] equality/hashCode operate on ByteArray by reference for
+     * arrays, which is intentional here — the image bytes are large and reference
+     * identity is sufficient for DiffUtil's [areContentsTheSame] check (a re-load
+     * yields a new ByteArray instance, which signals the row needs rebinding).
+     */
+    val imagePng: ByteArray? = null,
+) {
+    /** True when this item carries an image payload that can be rendered as a thumbnail. */
+    val isImage: Boolean get() = contentType.startsWith("image/") || contentType == "image"
+}

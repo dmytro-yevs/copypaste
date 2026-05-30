@@ -58,7 +58,11 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _loading.value = true
             try {
-                _items.value = repository.getItems(settings.encryptionKey)
+                // Use historySize (Maccy-parity display cap) as the fetch limit so
+                // the list respects the user's configured max without requiring a
+                // separate trim pass. The on-disk retention cap (maxHistoryItems) is
+                // enforced at write time by the capture pipeline.
+                _items.value = repository.getItems(settings.encryptionKey, settings.historySize)
             } catch (e: Exception) {
                 Log.w(TAG, "loadItems failed", e)
                 _errors.value = e.message ?: e.javaClass.simpleName
