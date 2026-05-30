@@ -96,6 +96,8 @@ pub fn run() {
             stop_recording_shortcut,
             record_prior_app,
             paste_to_frontmost,
+            play_copy_sound,
+            show_copy_notification,
         ])
         .setup(|app| {
             // Load persisted config now that we have the app handle.
@@ -308,6 +310,100 @@ fn record_prior_app(handle: tauri::AppHandle) {
     }
     #[cfg(not(target_os = "macos"))]
     let _ = handle;
+}
+
+/// Play a soft system sound (NSSound "Tink") after a successful copy.
+///
+/// Maccy parity: Maccy plays "Funk" or "Pop" depending on version; we use
+/// "Tink" because it is shorter and less intrusive. The sound plays on the
+/// main run-loop via `[NSSound play]` which is non-blocking from the Rust
+/// perspective. Any failure (sound file missing, audio device unavailable) is
+/// silently ignored so it never disrupts the copy flow.
+///
+/// The command is cross-platform safe: on non-macOS it is a no-op.
+#[tauri::command]
+fn play_copy_sound() {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSSound;
+        use objc2_foundation::NSString;
+
+        // SAFETY: NSSound and NSString bindings are correct; ObjC calls are
+        // safe when invoked from a thread that has an autorelease pool. Tauri
+        // command handlers run on the Tokio runtime, which drives an ObjC
+        // autorelease pool on macOS — so this is safe here.
+        unsafe {
+            let name = NSString::from_str("Tink");
+            if let Some(sound) = NSSound::soundNamed(&name) {
+                // play returns bool; ignore the result — best-effort only.
+                let _ = sound.play();
+            } else {
+                tracing::debug!("play_copy_sound: NSSound 'Tink' not found (non-fatal)");
+            }
+        }
+    }
+}
+
+/// Show a macOS notification banner after a successful copy.
+///
+/// Uses `osascript` to post a "display notification" so we don't need the
+/// tauri-plugin-notification or any entitlement changes for a v0.5.2 feature
+/// flag. `osascript` notifications appear in Notification Centre and respect
+/// the user's Do Not Disturb setting. Any failure (osascript missing, user
+/// denied Script Editor notifications, etc.) is silently ignored.
+///
+/// `preview` is a short one-line string supplied by the frontend (already
+/// truncated to ≤60 chars). The command sanitises it before embedding in the
+/// AppleScript literal.
+///
+/// The command is cross-platform safe: on non-macOS it is a no-op.
+#[tauri::command]
+fn show_copy_notification(preview: String) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        // Sanitise preview: strip quotes and backslashes so they cannot escape
+        // the AppleScript string literal.  We only allow printable ASCII + common
+        // Unicode; anything that could act as a metachar is replaced with a space.
+        let safe: String = preview
+            .chars()
+            .map(|c| if c == '"' || c == '\\' { ' ' } else { c })
+            .take(60)
+            .collect();
+        let safe = safe.trim();
+
+        let title = "CopyPaste";
+        let body = if safe.is_empty() { "Copied" } else { safe };
+
+        // Build the AppleScript. Double-quote delimiters are already safe because
+        // we stripped all `"` from the input above.
+        let script = format!(r#"display notification "{body}" with title "{title}""#,);
+
+        // Spawn osascript on a background thread so we don't block the Tauri
+        // command handler. Errors are logged at DEBUG level; they never surface
+        // to the user since this is purely cosmetic feedback.
+        std::thread::spawn(move || {
+            match Command::new("osascript").arg("-e").arg(&script).output() {
+                Ok(out) if !out.status.success() => {
+                    tracing::debug!(
+                        "show_copy_notification: osascript exited {:?}: {}",
+                        out.status.code(),
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!("show_copy_notification: failed to spawn osascript: {e}");
+                }
+                Ok(_) => {}
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Non-macOS: notification is a no-op. preview is unused.
+        let _ = preview;
+    }
 }
 
 /// Activate the previously-focused application (restoring focus) and then

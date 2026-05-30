@@ -173,6 +173,36 @@ export function formatWallTime(ms: number): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Play a soft system sound on copy — Maccy-style feedback.
+ * Calls the `play_copy_sound` Tauri command which plays NSSound "Tink" on
+ * macOS. Non-blocking and failure-safe: any error is swallowed by the Rust
+ * side; this wrapper also ignores errors so a missing sound never disrupts the
+ * copy flow.
+ */
+export async function playCopySound(): Promise<void> {
+  try {
+    await invoke<void>("play_copy_sound");
+  } catch {
+    // Sound is best-effort; never block the copy flow on a sound failure.
+  }
+}
+
+/**
+ * Show a macOS notification banner on copy — Maccy-style feedback.
+ * Calls the `show_copy_notification` Tauri command which posts a
+ * user-notification via osascript. Non-blocking and failure-safe: any error
+ * (missing entitlement, user denied notifications, etc.) is swallowed.
+ * @param preview A short one-line preview of the copied item (may be empty).
+ */
+export async function showCopyNotification(preview: string): Promise<void> {
+  try {
+    await invoke<void>("show_copy_notification", { preview });
+  } catch {
+    // Notification is best-effort; never block the copy flow on a notify failure.
+  }
+}
+
+/**
  * Get the currently configured popup shortcut accelerator string
  * (e.g. "CmdOrCtrl+Shift+V").
  * This calls the Tauri command directly, NOT the daemon IPC socket.

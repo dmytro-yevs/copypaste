@@ -15,12 +15,24 @@ export interface UIPrefs {
   previewSize: number;
   /** When true, redact sensitive_spans ranges in clip previews. */
   maskSensitive: boolean;
+  /**
+   * Play a soft system sound (Tink) when an item is copied — Maccy parity.
+   * Default false (Maccy default is off).
+   */
+  playSoundOnCopy: boolean;
+  /**
+   * Show a macOS notification banner when an item is copied — Maccy parity.
+   * Default false (Maccy default is off).
+   */
+  notifyOnCopy: boolean;
 }
 
 const DEFAULT_PREFS: UIPrefs = {
   previewLines: 1,
   previewSize: 28,
   maskSensitive: true,
+  playSoundOnCopy: false,
+  notifyOnCopy: false,
 };
 
 function loadPrefs(): UIPrefs {
