@@ -128,7 +128,9 @@ pub fn decrypt_chunks(
     let cipher = XChaCha20Poly1305::new(key.into());
     let total = chunks.len() as u32;
 
-    let last = chunks.last().unwrap();
+    // SAFETY: guarded by the `chunks.is_empty()` early-return above; `last()`
+    // cannot return `None` when `chunks` is non-empty.
+    let last = chunks.last().expect("non-empty by is_empty guard above");
     if !last.is_final {
         return Err(ChunkError::TruncatedStream {
             expected: total + 1,

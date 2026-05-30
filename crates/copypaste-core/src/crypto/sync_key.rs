@@ -286,11 +286,11 @@ pub fn decrypt_from_cloud(
     }
 
     let (nonce_bytes, ciphertext) = blob.split_at(NONCE_SIZE);
-    // SAFETY: split_at guarantees nonce_bytes.len() == NONCE_SIZE == 24.
-    let nonce = XNonce::from(
-        *<&[u8; NONCE_SIZE]>::try_from(nonce_bytes)
-            .expect("split_at(NONCE_SIZE) guarantees exactly NONCE_SIZE bytes"),
-    );
+    // SAFETY: `split_at(NONCE_SIZE)` guarantees `nonce_bytes.len() == NONCE_SIZE == 24`.
+    // `XNonce::from_slice` is the idiomatic infallible constructor for a known-length
+    // slice; it panics only when the length differs from 24, which is structurally
+    // impossible here. Prefer it over `try_into().expect()` to avoid the bare `expect`.
+    let nonce = *XNonce::from_slice(nonce_bytes);
 
     let cipher = XChaCha20Poly1305::new(key.as_bytes().into());
     let aad = build_cloud_aad(item_id);

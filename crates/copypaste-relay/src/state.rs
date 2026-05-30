@@ -78,6 +78,11 @@ pub struct DeviceRecord {
     /// from the public key (which would make it a deterministic oracle).
     pub bearer_token: String,
     pub registered_at: Instant,
+    /// Last time this device was seen making an authenticated request (push or
+    /// pull). Updated by `update_last_seen`. Used by `cleanup_inactive_devices`
+    /// instead of `registered_at` so that an active device that has drained its
+    /// inbox is not evicted simply because it registered long ago.
+    pub last_seen: Instant,
     /// Unix timestamp (seconds since epoch) when the token expires (1 year).
     pub expires_at_unix: i64,
     /// Subscription tier — determines device count and history quotas.
@@ -361,6 +366,7 @@ impl RelayStore {
         OsRng.fill_bytes(&mut token_bytes);
         let bearer_token = hex_encode(&token_bytes);
 
+        let now = Instant::now();
         self.devices.insert(
             device_id.clone(),
             DeviceRecord {
@@ -368,7 +374,8 @@ impl RelayStore {
                 device_name,
                 public_key_b64,
                 bearer_token: bearer_token.clone(),
-                registered_at: Instant::now(),
+                registered_at: now,
+                last_seen: now,
                 expires_at_unix,
                 tier,
                 registered_from_ip: client_ip,
@@ -425,6 +432,26 @@ impl RelayStore {
     }
 
     // -----------------------------------------------------------------------
+    // Activity tracking
+    // -----------------------------------------------------------------------
+
+    /// Stamp `last_seen` to `Instant::now()` for `device_id`.
+    ///
+    /// Call this after every successful `verify_token` so that `cleanup_inactive_devices`
+    /// evicts on actual inactivity, not on registration age. A device that registers,
+    /// drains its inbox, and then stays idle for the threshold will be evicted — but
+    /// one that continues to pull (even an empty inbox) will not.
+    // Route handlers (push/pull/delete) should call this after a successful
+    // `verify_token` to keep `last_seen` current. Wired here; the handler
+    // call sites are in `copypaste-daemon` (out of scope for this crate).
+    #[allow(dead_code)]
+    pub fn update_last_seen(&mut self, device_id: &str) {
+        if let Some(record) = self.devices.get_mut(device_id) {
+            record.last_seen = Instant::now();
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Auth
     // -----------------------------------------------------------------------
 
@@ -437,10 +464,16 @@ impl RelayStore {
     /// check still runs before the expiry branch so the constant-time
     /// comparison path is unconditional.
     pub fn verify_token(&self, device_id: &str, token: &str) -> Result<(), RelayError> {
+        // Collapse missing-device to `Unauthorized` (not `DeviceNotFound`) on
+        // token-guarded routes: returning a distinct 404 would let an attacker
+        // enumerate which device IDs are registered by probing push/pull/delete
+        // with a garbage token. `Unauthorized` is indistinguishable from a wrong
+        // token, closing that oracle while preserving GET /devices/:id 404 for the
+        // unauthenticated device-info endpoint.
         let record = self
             .devices
             .get(device_id)
-            .ok_or(RelayError::DeviceNotFound)?;
+            .ok_or(RelayError::Unauthorized)?;
         let token_ok: bool = record
             .bearer_token
             .as_bytes()
@@ -699,8 +732,11 @@ impl RelayStore {
             .devices
             .iter()
             .filter(|(id, record)| {
-                let old_enough =
-                    record.registered_at.elapsed().as_secs() >= inactive_threshold_secs;
+                // Evict on `last_seen`, not `registered_at`. A device that was
+                // registered long ago but has actively pulled recently should NOT be
+                // evicted — `registered_at` never advances after creation, so using it
+                // would lock out any active receiver whose inbox happens to be empty.
+                let old_enough = record.last_seen.elapsed().as_secs() >= inactive_threshold_secs;
                 if !old_enough {
                     return false;
                 }
