@@ -52,24 +52,23 @@ pub struct ImageMeta {
 
 /// Build `image::Limits` from a decoded-bytes budget (MB).
 ///
-/// `max_alloc` is set to `max_decoded_mb * 1024 * 1024` bytes.
-/// Width/height caps are derived conservatively: at 4 bytes/pixel (RGBA8),
-/// the worst case for a square image is `sqrt(budget_bytes / 4)` pixels per
-/// side.  We use that ceiling so the dimension limit is always consistent
-/// with the allocation budget and an attacker cannot craft a narrow-but-very-
-/// tall image that passes the per-axis check but exceeds the alloc budget
-/// before `total_bytes()` is called.
+/// `max_alloc` is set to `max_decoded_mb * 1024 * 1024` bytes.  That single
+/// cap is sufficient to prevent decode-bomb OOM: the `image` crate enforces
+/// `max_alloc` before the pixel buffer is allocated regardless of image
+/// dimensions.
+///
+/// Per-axis `max_image_width` / `max_image_height` are intentionally *not*
+/// set here.  Deriving them from a square-image assumption (√(budget/4))
+/// incorrectly rejects valid wide/tall images (e.g. 4096×32) whose total
+/// pixel count is far below the memory budget.  The allocation cap is the
+/// authoritative guard; the per-axis fields are redundant and harmful.
 fn make_limits(max_decoded_mb: u32) -> Limits {
     // Saturating arithmetic: an absurdly large config value should just give a
     // very generous limit rather than wrap or panic.
     let max_bytes = (max_decoded_mb as u64).saturating_mul(1024 * 1024);
-    // bytes / 4 bpp → max pixels; integer sqrt → max side length.
-    let max_side = ((max_bytes / 4) as f64).sqrt() as u32;
     // Limits is #[non_exhaustive] so we cannot use a struct literal — start
-    // from the default and overwrite the three fields we care about.
+    // from the default and overwrite only the allocation cap.
     let mut limits = Limits::default();
-    limits.max_image_width = Some(max_side.max(1));
-    limits.max_image_height = Some(max_side.max(1));
     limits.max_alloc = Some(max_bytes);
     limits
 }
@@ -184,12 +183,47 @@ pub fn encode_as_png(img: &DynamicImage) -> Result<Vec<u8>, ImageError> {
 /// [`crate::config::MAX_DECODED_IMAGE_MB`]) to prevent decode-bomb OOM before
 /// the pixel buffer is allocated.
 ///
+/// Also checks the re-encoded PNG size against `max_bytes` to prevent
+/// amplification: a highly-compressed input can pass the raw-byte gate,
+/// decode successfully (bounded by `image::Limits`), and then re-encode to a
+/// lossless PNG that is 3–4× larger than the original compressed bytes.
+/// Without this second gate the oversized PNG blob flows to
+/// `encrypt_chunks`/SQLite unchecked.
+///
 /// Returns `(ImageMeta, Vec<EncryptedChunk>)`.
+///
+/// For a version that also accepts a custom decoded-bytes budget (MB) see
+/// [`encode_image_with_limit`].
 pub fn encode_image(
     raw: &[u8],
     key: &[u8; 32],
     file_id: &[u8; 16],
     max_bytes: usize,
+) -> Result<(ImageMeta, Vec<EncryptedChunk>), ImageError> {
+    // FIXWAVE: daemon handle_image should pass config.max_decoded_image_mb
+    // instead of relying on the compile-time default baked into this wrapper.
+    encode_image_with_limit(
+        raw,
+        key,
+        file_id,
+        max_bytes,
+        crate::config::MAX_DECODED_IMAGE_MB,
+    )
+}
+
+/// Like [`encode_image`] but accepts an explicit `max_decoded_mb` allocation
+/// cap for the decode step, allowing the daemon (or tests) to thread the
+/// user-configured `AppConfig::max_decoded_image_mb` value all the way
+/// through to `decode_clipboard_image_limited`.
+///
+/// `max_bytes` gates both the raw-input size and the re-encoded PNG size (to
+/// prevent decode-amplification; see [`encode_image`] doc).
+pub fn encode_image_with_limit(
+    raw: &[u8],
+    key: &[u8; 32],
+    file_id: &[u8; 16],
+    max_bytes: usize,
+    max_decoded_mb: u32,
 ) -> Result<(ImageMeta, Vec<EncryptedChunk>), ImageError> {
     let max = if max_bytes == 0 {
         MAX_IMAGE_BYTES
@@ -203,14 +237,32 @@ pub fn encode_image(
         });
     }
 
-    let img = decode_clipboard_image(raw)?;
+    // Use the caller-supplied decoded-bytes budget so AppConfig::max_decoded_image_mb
+    // is honoured rather than the hardcoded compile-time constant.
+    let img = decode_clipboard_image_limited(raw, max_decoded_mb)?;
     let (width, height) = (img.width(), img.height());
     let original_size = raw.len() as u64;
 
     let png_bytes = encode_as_png(&img)?;
 
+    // [HIGH] Guard against decode-amplification: a highly-compressed input
+    // passes the raw-byte gate above, decodes within the Limits budget, and
+    // then re-encodes to a lossless PNG that may be 3–4× larger. Without this
+    // second check the oversized PNG blob would flow to encrypt_chunks/SQLite.
+    if png_bytes.len() > max {
+        return Err(ImageError::TooLarge {
+            actual: png_bytes.len(),
+            max,
+        });
+    }
+
     let chunks = encrypt_chunks(&png_bytes, key, file_id, IMAGE_CHUNK_SIZE)?;
-    let chunk_count = chunks.len() as u32;
+    // [LOW] chunks.len() is provably ≤ ceil(max / IMAGE_CHUNK_SIZE) ≤
+    // ceil(MAX_IMAGE_BYTES / 512 KiB) = 20, so it always fits in a u32.
+    // Use try_from + expect to make the invariant explicit and catch any
+    // future refactor that widens the gate.
+    let chunk_count = u32::try_from(chunks.len())
+        .expect("chunk count must fit in u32: provably bounded by upstream raw-byte gate");
 
     let meta = ImageMeta {
         width,
@@ -241,7 +293,10 @@ pub fn decode_image(
 /// Format: `[chunk_count: u32 BE] [chunk_0_wire] [chunk_1_wire] ...`
 pub fn chunks_to_blob(chunks: &[EncryptedChunk]) -> Vec<u8> {
     let mut out = Vec::new();
-    let count = chunks.len() as u32;
+    // [LOW] chunks.len() is provably ≤ ceil(MAX_IMAGE_BYTES / IMAGE_CHUNK_SIZE) ≤ 20,
+    // so it always fits in u32. Use try_from+expect to make the invariant explicit.
+    let count = u32::try_from(chunks.len())
+        .expect("chunk count must fit in u32: provably bounded by upstream raw-byte gate");
     out.extend_from_slice(&count.to_be_bytes());
     for chunk in chunks {
         let wire = chunk.to_wire();
