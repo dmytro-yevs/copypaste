@@ -84,6 +84,13 @@ struct TapActive(Mutex<bool>);
 /// here is cheap.  The `Option` is `None` until `setup_tray` runs.
 struct PrivateModeMenuItem(Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>);
 
+/// Handle to the "Recent" tray Submenu so the background poller can
+/// rebuild it once the daemon is ready and periodically thereafter.
+///
+/// `Submenu<Wry>` is internally `Arc`-backed; cloning is cheap.
+/// The `Option` is `None` until `setup_tray` runs.
+struct RecentSubmenu(Mutex<Option<tauri::menu::Submenu<tauri::Wry>>>);
+
 // ---------------------------------------------------------------------------
 // Tauri entry point
 // ---------------------------------------------------------------------------
@@ -99,6 +106,9 @@ pub fn run() {
         // V-21-A: placeholder populated by setup_tray; background poller uses
         // it to re-sync the checkmark after the daemon socket becomes ready.
         .manage(PrivateModeMenuItem(Mutex::new(None)))
+        // Recent-resync: placeholder populated by setup_tray; background poller
+        // rebuilds the submenu once the daemon responds and then periodically.
+        .manage(RecentSubmenu(Mutex::new(None)))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             ipc::ipc_call,
@@ -153,6 +163,12 @@ pub fn run() {
             // background thread that polls until the daemon responds, then
             // re-syncs the CheckMenuItem to the daemon's true value.
             spawn_tray_private_mode_resync(app.handle().clone());
+
+            // Recent-resync: the tray Recent submenu was built at startup before
+            // the daemon was ready, so it likely shows a placeholder.  Spawn a
+            // background poller that rebuilds it once the daemon responds and
+            // then refreshes it periodically so the items stay current.
+            spawn_tray_recent_resync(app.handle().clone());
 
             #[cfg(target_os = "macos")]
             {
@@ -910,6 +926,8 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     // --- "Recent" submenu ---
     // Fetch up to 10 recent items from the daemon. If the daemon is offline or
     // returns an empty list we show a single disabled placeholder entry.
+    // The submenu handle is stored in RecentSubmenu managed state so the
+    // background poller can rebuild it once the daemon is ready.
     let recent_submenu = {
         let mut builder = SubmenuBuilder::new(app, "Recent");
 
@@ -955,6 +973,14 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
         builder.build()?
     };
+
+    // Store a clone of the submenu handle in managed state so the background
+    // poller can rebuild it without re-entering setup_tray.
+    {
+        let state: tauri::State<RecentSubmenu> = app.state();
+        let mut guard = state.0.lock().expect("mutex poisoned");
+        *guard = Some(recent_submenu.clone());
+    }
 
     // --- "Private Mode" check item ---
     // Query the daemon for the current state; fall back to false on any error.
@@ -1149,6 +1175,138 @@ fn spawn_tray_private_mode_resync(handle: tauri::AppHandle) {
                     thread::sleep(POLL_INTERVAL);
                 }
             }
+        }
+    });
+}
+
+/// Rebuild the Recent tray submenu from a fresh history_page call.
+///
+/// Clears all existing items in the submenu and repopulates with up to 10
+/// items from the daemon. Falls back to the "No recent items" placeholder if
+/// the daemon is offline or returns an empty list. The submenu handle is
+/// shared via `RecentSubmenu` managed state; no re-registration of the tray
+/// menu is needed because `Submenu<Wry>` is Arc-backed and mutations are
+/// reflected live in the displayed menu.
+///
+/// The existing `on_menu_event` handler dispatches on `other.starts_with("recent:")`
+/// so it automatically handles any item ID written here — no re-registration needed.
+fn rebuild_recent_submenu(
+    handle: &tauri::AppHandle,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use tauri::menu::MenuItemBuilder;
+
+    let state = handle
+        .try_state::<RecentSubmenu>()
+        .ok_or("RecentSubmenu state not registered")?;
+    let guard = state.0.lock().map_err(|e| format!("mutex poisoned: {e}"))?;
+    let submenu = guard
+        .as_ref()
+        .ok_or("RecentSubmenu not yet populated by setup_tray")?;
+
+    // Fetch up to 10 items. On any error, fall back to a placeholder.
+    let items_opt: Option<Vec<(String, String)>> = ipc::call(
+        "history_page",
+        serde_json::json!({ "limit": 10, "offset": 0 }),
+    )
+    .ok()
+    .and_then(|reply| {
+        if !reply.ok {
+            return None;
+        }
+        reply
+            .data
+            .as_ref()
+            .and_then(|d| d["items"].as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        let id = item["id"].as_str()?.to_owned();
+                        let preview = item["preview"].as_str().unwrap_or("").to_owned();
+                        Some((id, preview))
+                    })
+                    .collect::<Vec<_>>()
+            })
+    });
+
+    // Remove all existing items (iterate in reverse so indices stay valid).
+    let existing = submenu.items()?;
+    for i in (0..existing.len()).rev() {
+        let _ = submenu.remove_at(i);
+    }
+
+    // Append fresh items.
+    match items_opt {
+        Some(items) if !items.is_empty() => {
+            for (id, preview) in &items {
+                let label = truncate_preview(preview, 40);
+                let menu_id = format!("recent:{id}");
+                let item = MenuItemBuilder::with_id(menu_id, label).build(handle)?;
+                submenu.append(&item)?;
+            }
+        }
+        _ => {
+            let placeholder = MenuItemBuilder::with_id("recent:none", "No recent items")
+                .enabled(false)
+                .build(handle)?;
+            submenu.append(&placeholder)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Startup-race + periodic Recent submenu resync.
+///
+/// `setup_tray` runs at startup before the daemon socket is necessarily bound,
+/// so the Recent submenu often shows a placeholder. This function spawns a
+/// background thread that:
+///
+/// 1. Polls until the daemon responds, then does an initial rebuild.
+/// 2. Continues polling every `REFRESH_INTERVAL` so the tray stays current as
+///    the user copies things.
+///
+/// The refresh is intentionally cheap: 10-item `history_page` call, only runs
+/// while the app is alive, stops after `GIVE_UP_AFTER` of daemon silence.
+fn spawn_tray_recent_resync(handle: tauri::AppHandle) {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    thread::spawn(move || {
+        /// How long to wait between refreshes once the daemon is up.
+        const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+        /// Poll interval while waiting for the daemon to come up initially.
+        const POLL_INTERVAL: Duration = Duration::from_millis(250);
+        /// Give up entirely if the daemon never responds within this window.
+        const GIVE_UP_AFTER: Duration = Duration::from_secs(30);
+
+        // Phase 1: wait for the daemon to become ready.
+        let deadline = Instant::now() + GIVE_UP_AFTER;
+        loop {
+            if Instant::now() >= deadline {
+                tracing::warn!("tray Recent re-sync: daemon not ready after 30 s — giving up");
+                return;
+            }
+
+            // A successful, ok=true history_page reply is the readiness signal.
+            let ready = ipc::call(
+                "history_page",
+                serde_json::json!({ "limit": 1, "offset": 0 }),
+            )
+            .map(|r| r.ok)
+            .unwrap_or(false);
+
+            if ready {
+                break;
+            }
+            thread::sleep(POLL_INTERVAL);
+        }
+
+        // Phase 2: rebuild now and then periodically.
+        loop {
+            if let Err(e) = rebuild_recent_submenu(&handle) {
+                tracing::warn!("tray Recent re-sync: rebuild failed: {e}");
+            }
+            thread::sleep(REFRESH_INTERVAL);
         }
     });
 }

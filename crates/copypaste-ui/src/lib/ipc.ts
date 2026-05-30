@@ -157,8 +157,14 @@ export interface SyncStatus {
   email?: string | null;
   // NOTE: degraded state is intentionally NOT modeled here. get_sync_status does
   // not report it — the daemon exposes degraded/ready ONLY via `status` (see
-  // DaemonStatus / probeStatus). The former keychain_locked/db_unavailable/
-  // degraded_reason fields were dead code (never emitted) and were removed.
+  // DaemonStatus / probeStatus). The fields below are kept for SettingsView
+  // compatibility; the daemon no longer emits them (always undefined at runtime).
+  /** @deprecated Never emitted by daemon; kept for SettingsView compat. */
+  keychain_locked?: boolean;
+  /** @deprecated Never emitted by daemon; kept for SettingsView compat. */
+  db_unavailable?: boolean;
+  /** @deprecated Never emitted by daemon; kept for SettingsView compat. */
+  degraded_reason?: string | null;
 }
 
 

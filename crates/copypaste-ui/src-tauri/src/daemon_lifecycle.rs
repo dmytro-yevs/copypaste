@@ -348,7 +348,12 @@ pub fn ensure_daemon_running(app: &tauri::AppHandle) -> Result<bool, String> {
 
     // 4. Spawn the fresh bundled daemon.
     let bin = bundled_daemon_path().ok_or_else(|| {
-        "could not locate bundled copypaste-daemon next to the app executable".to_string()
+        // Actionable message: this happens when the user dragged a new .app over a
+        // running instance, leaving the bundle incomplete.
+        "Installation incomplete — the background service is missing. \
+         Quit CopyPaste fully (tray → Quit), delete /Applications/CopyPaste.app, \
+         then reinstall from the DMG (don't drag while it's running)."
+            .to_string()
     })?;
 
     let child = std::process::Command::new(&bin)

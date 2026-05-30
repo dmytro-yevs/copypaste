@@ -3,7 +3,8 @@ import { useUI, type ViewId } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RestartDaemonButton } from "./components/RestartDaemonButton";
-import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission } from "./lib/ipc";
+import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission, getDaemonError } from "./lib/ipc";
+import { listen } from "@tauri-apps/api/event";
 import { HistoryView } from "./views/HistoryView";
 import { DevicesView } from "./views/DevicesView";
 import { SettingsView } from "./views/SettingsView";
@@ -20,6 +21,51 @@ export default function App() {
   const view = useUI((s) => s.view);
   const { Component: View, label } = VIEWS[view];
 
+  // ---------------------------------------------------------------------------
+  // Daemon spawn error banner (non-dismissible, installation-incomplete)
+  // ---------------------------------------------------------------------------
+  // On mount: call getDaemonError() for the case where the app launched,
+  // tried to start the daemon, failed, and we loaded after the event fired.
+  // Also listen for the real-time "daemon-spawn-result" event for the case
+  // where the app is still starting when this component mounts.
+  const [daemonError, setDaemonError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // Fallback: read whatever error was stored by ensure_daemon_running_async.
+    void getDaemonError().then((err) => {
+      if (!cancelled && err) setDaemonError(err);
+    }).catch(() => {
+      // Best-effort — never block on this.
+    });
+
+    // Real-time: listen for the daemon-spawn-result Tauri event so we show
+    // the banner immediately if the daemon fails while the UI is already open.
+    let unlisten: (() => void) | null = null;
+    void listen<{ ok: boolean; error?: string }>("daemon-spawn-result", (event) => {
+      if (cancelled) return;
+      if (!event.payload.ok && event.payload.error) {
+        setDaemonError(event.payload.error);
+      } else if (event.payload.ok) {
+        // Daemon started successfully — clear any stale error.
+        setDaemonError(null);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    }).catch(() => {
+      // Best-effort.
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Stale-daemon banner (dismissible)
+  // ---------------------------------------------------------------------------
   // App-launch stale check: if an OLD daemon survived an upgrade and is still
   // serving old code, show a single dismissible banner offering a restart.
   // Uses detectStaleDaemonFromStatus (strictly OLDER semver only) so a newer
@@ -50,7 +96,9 @@ export default function App() {
   }, []);
   const showStaleBanner = staleDaemon !== null && !dismissed;
 
-  // Accessibility permission banner (macOS only).
+  // ---------------------------------------------------------------------------
+  // Accessibility permission banner (macOS only)
+  // ---------------------------------------------------------------------------
   // We check once on mount; the Tauri command always returns `true` on
   // non-macOS so the banner never appears there.  After the user opens
   // System Settings and grants the permission we re-check every 3 s until
@@ -100,6 +148,15 @@ export default function App() {
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col bg-ide-bg/35">
           <div data-tauri-drag-region className="h-9 shrink-0" />
+
+          {/* Daemon spawn error — non-dismissible, installation-incomplete */}
+          {daemonError !== null && (
+            <div className="mx-3 mb-2 flex items-start gap-3 rounded-ide border border-red-500/40 bg-red-500/5 px-3 py-2 text-[13px] text-red-400">
+              <span className="shrink-0 font-semibold">Background service error:</span>
+              <span>{daemonError}</span>
+            </div>
+          )}
+
           {showStaleBanner && (
             <div className="mx-3 mb-2 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
               <span>
