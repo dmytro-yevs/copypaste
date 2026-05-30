@@ -254,6 +254,21 @@ impl PairedPeers {
         state.inner.len()
     }
 
+    /// Immediately remove a peer from the live allowlist (both active and
+    /// superseded slots), effective for all future handshakes on this handle.
+    ///
+    /// Used by the revoke handlers so a revoked peer's mTLS session is no longer
+    /// accepted on the next handshake — without waiting for a daemon restart.
+    /// The `fingerprint` is normalised to lowercase before compare so callers
+    /// may pass either the user-facing colon-hex form (after stripping colons) or
+    /// the canonical lowercase hex the verifier uses.
+    pub fn remove(&self, fingerprint: &str) {
+        let canonical = fingerprint.to_ascii_lowercase();
+        let mut state = self.state.write().unwrap_or_else(|e| e.into_inner());
+        state.inner.remove(&canonical);
+        state.superseded.remove(&canonical);
+    }
+
     /// Display name associated with a fingerprint, whether it is an active or a
     /// still-graced superseded fingerprint. Returns `None` for unknown/expired
     /// fingerprints. Used by diagnostics/UI that surface in-flight rotations.
@@ -462,6 +477,13 @@ impl PeerTransport {
         addr: SocketAddr,
         expected_fingerprint: &str,
     ) -> Result<PeerClientStream, TransportError> {
+        // Guard: a zero MAX_CONNECT_ATTEMPTS would leave last_err = None and
+        // the final .expect() below would panic. Return a clear error instead.
+        if MAX_CONNECT_ATTEMPTS == 0 {
+            return Err(TransportError::Io(std::io::Error::other(
+                "MAX_CONNECT_ATTEMPTS is 0; no connection attempt made",
+            )));
+        }
         let mut last_err: Option<TransportError> = None;
         for attempt in 1..=MAX_CONNECT_ATTEMPTS {
             match self.connect(addr, expected_fingerprint).await {
