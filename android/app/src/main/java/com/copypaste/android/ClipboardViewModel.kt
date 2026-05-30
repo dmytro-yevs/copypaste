@@ -84,6 +84,54 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun deleteItems(ids: List<String>) {
+        viewModelScope.launch {
+            try {
+                repository.deleteItems(ids)
+                loadItems()
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteItems(${ids.size}) failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            }
+        }
+    }
+
+    fun setPinned(id: String, pinned: Boolean) {
+        viewModelScope.launch {
+            try {
+                repository.setPinned(id, pinned)
+                loadItems()
+            } catch (e: Exception) {
+                Log.w(TAG, "setPinned($id, $pinned) failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            }
+        }
+    }
+
+    fun clearAll() {
+        viewModelScope.launch {
+            try {
+                repository.clearAll()
+                loadItems()
+            } catch (e: Exception) {
+                Log.w(TAG, "clearAll failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            }
+        }
+    }
+
+    fun clearUnpinned() {
+        viewModelScope.launch {
+            try {
+                repository.clearUnpinned()
+                loadItems()
+            } catch (e: Exception) {
+                Log.w(TAG, "clearUnpinned failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            }
+        }
+    }
+
     /** Call from UI after the current error has been displayed to the user. */
     fun clearError() {
         _errors.value = null
