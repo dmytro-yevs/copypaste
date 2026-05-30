@@ -3,6 +3,7 @@ import {
   api,
   IpcError,
   formatWallTime,
+  formatEpochSecs,
   pairingQrSvg,
   probeStatus,
   type PairedDevice,
@@ -14,7 +15,7 @@ import { RestartDaemonButton } from "../components/RestartDaemonButton";
 type QrState =
   | { status: "idle" }
   | { status: "loading" }
-  | { status: "ready"; qr: PairingQr }
+  | { status: "ready"; qr: PairingQr; generatedAt: number }
   | { status: "error"; message: string };
 
 // Devices load outcomes. `degraded` (daemon up, DB unavailable) and `error`
@@ -33,6 +34,11 @@ type FingerprintState =
   | { status: "ready"; fingerprint: string }
   | { status: "degraded"; reason: string | null }
   | { status: "offline" };
+
+// Pairing token TTL from the daemon (PAKE_SESSION_TTL = 120 s).
+// We refresh 15 s before expiry to ensure a valid code is always on-screen.
+const QR_TTL_SECS = 120;
+const QR_REFRESH_MARGIN_SECS = 15;
 
 export function DevicesView() {
   // --- Devices state ---
@@ -53,18 +59,57 @@ export function DevicesView() {
   // Incrementing this triggers a fingerprint re-fetch (e.g. after restart).
   const [fpReloadKey, setFpReloadKey] = useState(0);
 
-  // --- QR pairing (this device displays a code; other devices scan it) ---
+  // --- QR pairing ---
   const [qrState, setQrState] = useState<QrState>({ status: "idle" });
+  // Countdown seconds remaining until the current QR expires (display only).
+  const [qrSecsLeft, setQrSecsLeft] = useState<number | null>(null);
+  // Ref so the auto-refresh timer can read the latest qrState without a
+  // stale-closure problem — we write it in parallel with the React state.
+  const qrStateRef = useRef<QrState>({ status: "idle" });
 
-  const handleShowQr = useCallback(async () => {
+  const generateQr = useCallback(async () => {
     setQrState({ status: "loading" });
+    qrStateRef.current = { status: "loading" };
+    setQrSecsLeft(null);
     try {
       const qr = await pairingQrSvg();
-      setQrState({ status: "ready", qr });
+      const next: QrState = { status: "ready", qr, generatedAt: Date.now() };
+      setQrState(next);
+      qrStateRef.current = next;
+      setQrSecsLeft(qr.expires_in_secs > 0 ? qr.expires_in_secs : QR_TTL_SECS);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to generate pairing code";
-      setQrState({ status: "error", message });
+      const next: QrState = { status: "error", message };
+      setQrState(next);
+      qrStateRef.current = next;
     }
+  }, []);
+
+  // Auto-generate on mount, auto-refresh before expiry.
+  useEffect(() => {
+    void generateQr();
+
+    // Tick every second: update the countdown and trigger a refresh
+    // QR_REFRESH_MARGIN_SECS before the token expires.
+    const interval = setInterval(() => {
+      const current = qrStateRef.current;
+      if (current.status !== "ready") return;
+
+      const elapsedSecs = (Date.now() - current.generatedAt) / 1000;
+      const ttl = current.qr.expires_in_secs > 0 ? current.qr.expires_in_secs : QR_TTL_SECS;
+      const remaining = Math.max(0, Math.round(ttl - elapsedSecs));
+      setQrSecsLeft(remaining);
+
+      // Refresh QR_REFRESH_MARGIN_SECS before expiry so the user always has
+      // a scannable code — single-use tokens expire after QR_TTL_SECS.
+      if (remaining <= QR_REFRESH_MARGIN_SECS) {
+        void generateQr();
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  // generateQr is stable (useCallback with no deps), so this only runs once.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // --- Load peers ---
@@ -338,10 +383,15 @@ export function DevicesView() {
           const isThisDevice =
             ownFingerprint !== null && peer.fingerprint === ownFingerprint;
 
+          // Extract host from "host:port" address if present.
+          const peerHost = peer.address
+            ? peer.address.replace(/:\d+$/, "")
+            : null;
+
           return (
             <div
               key={peer.fingerprint}
-              className="flex items-center justify-between gap-4 px-3 py-2 hover:bg-ide-hover"
+              className="flex items-start justify-between gap-4 px-3 py-2.5 hover:bg-ide-hover"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
@@ -355,6 +405,7 @@ export function DevicesView() {
                     </span>
                   )}
                 </div>
+
                 {/* Fix #8: truncated fingerprint so the row stays compact */}
                 <p
                   className="font-mono text-[11px] text-ide-dim"
@@ -364,6 +415,23 @@ export function DevicesView() {
                     ? `${peer.fingerprint.slice(0, 16)}…${peer.fingerprint.slice(-8)}`
                     : peer.fingerprint}
                 </p>
+
+                {/* Rich device metadata — only shown when data is available */}
+                <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                  {peerHost && (
+                    <span className="text-[11px] text-ide-faint">
+                      <span className="text-ide-dim">IP</span>{" "}
+                      <span className="font-mono">{peerHost}</span>
+                    </span>
+                  )}
+                  {peer.added_at != null && peer.added_at > 0 && (
+                    <span className="text-[11px] text-ide-faint">
+                      <span className="text-ide-dim">Paired</span>{" "}
+                      {formatEpochSecs(peer.added_at)}
+                    </span>
+                  )}
+                </div>
+
                 {revokedAt !== null && (
                   <p className="text-[11px] text-ide-accent">
                     Revoked · {formatWallTime(revokedAt)}
@@ -463,16 +531,13 @@ export function DevicesView() {
             Pair via QR
           </p>
 
-          {qrState.status === "idle" && (
-            <p className="text-[12px] text-ide-dim">
-              Generate a single-use code, then scan it from the CopyPaste app on
-              another device to pair automatically — no typing a password.
-            </p>
+          {qrState.status === "loading" && (
+            <p className="text-[12px] text-ide-dim animate-pulse">Generating…</p>
           )}
 
           {qrState.status === "ready" && (
             <div className="flex flex-col items-center gap-3">
-              {/* Fix #10: dangerouslySetInnerHTML is acceptable here. The SVG is
+              {/* dangerouslySetInnerHTML is acceptable here. The SVG is
                   produced entirely by our own Tauri backend (ipc.rs::render_svg
                   via the `qrcode` crate) from a pairing payload — it never
                   contains remote, daemon-supplied, or user-entered markup, so
@@ -486,9 +551,16 @@ export function DevicesView() {
               <p className="select-all break-all text-center font-mono text-[10px] text-ide-faint">
                 {qrState.qr.payload}
               </p>
-              {qrState.qr.expires_in_secs > 0 && (
+              {qrSecsLeft !== null && qrSecsLeft > 0 && (
                 <p className="text-[11px] text-ide-dim">
-                  Expires in {qrState.qr.expires_in_secs} seconds.
+                  Expires in{" "}
+                  <span
+                    // Highlight countdown in warning colour when under 20 s.
+                    className={qrSecsLeft <= 20 ? "text-ide-warning font-medium" : ""}
+                  >
+                    {qrSecsLeft}s
+                  </span>
+                  {" "}· auto-refreshes before expiry
                 </p>
               )}
             </div>
@@ -500,7 +572,7 @@ export function DevicesView() {
 
           <button
             type="button"
-            onClick={() => void handleShowQr()}
+            onClick={() => void generateQr()}
             disabled={qrState.status === "loading"}
             className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -508,7 +580,7 @@ export function DevicesView() {
               ? "Generating…"
               : qrState.status === "ready"
                 ? "Regenerate code"
-                : "Show pairing code"}
+                : "Generate code"}
           </button>
         </section>
       </div>

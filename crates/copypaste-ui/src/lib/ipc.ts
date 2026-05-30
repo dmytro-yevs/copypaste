@@ -154,6 +154,10 @@ export interface SyncStatus {
 export interface PairedDevice {
   fingerprint: string;
   name: string;
+  /** Unix timestamp (seconds) when this device was first paired. */
+  added_at?: number | null;
+  /** Peer's P2P sync-listener address (`host:port`), if known. */
+  address?: string | null;
 }
 
 /** Result of `cloud_test_connection` — an end-to-end Supabase probe. */
@@ -420,4 +424,36 @@ export async function detectStaleDaemon(): Promise<string | null> {
     return null;
   }
   return detectStaleDaemonFromStatus(status, appVer);
+}
+
+// ---------------------------------------------------------------------------
+// Accessibility permission (macOS only — always true on other platforms)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether the macOS Accessibility permission is granted for this app.
+ * Returns `true` on non-macOS platforms (no permission needed there).
+ * This calls the Tauri command directly, NOT the daemon IPC socket.
+ */
+export async function checkAccessibilityPermission(): Promise<boolean> {
+  return invoke<boolean>("check_accessibility_permission");
+}
+
+/**
+ * Open System Settings → Privacy & Security → Accessibility and attempt to
+ * (re-)install the CGEventTap if permission was just granted.
+ * No-op on non-macOS platforms.
+ * This calls the Tauri command directly, NOT the daemon IPC socket.
+ */
+export async function requestAccessibilityPermission(): Promise<void> {
+  await invoke<void>("request_accessibility_permission");
+}
+
+/**
+ * Format a Unix timestamp in seconds (as stored in `PairedDevice.added_at`)
+ * for human-readable display. Returns "—" for falsy/zero values.
+ */
+export function formatEpochSecs(secs: number | null | undefined): string {
+  if (!secs) return "—";
+  return new Date(secs * 1000).toLocaleString();
 }

@@ -3,7 +3,7 @@ import { useUI, type ViewId } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RestartDaemonButton } from "./components/RestartDaemonButton";
-import { appVersion, detectStaleDaemonFromStatus, api } from "./lib/ipc";
+import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission } from "./lib/ipc";
 import { HistoryView } from "./views/HistoryView";
 import { DevicesView } from "./views/DevicesView";
 import { SettingsView } from "./views/SettingsView";
@@ -50,6 +50,48 @@ export default function App() {
   }, []);
   const showStaleBanner = staleDaemon !== null && !dismissed;
 
+  // Accessibility permission banner (macOS only).
+  // We check once on mount; the Tauri command always returns `true` on
+  // non-macOS so the banner never appears there.  After the user opens
+  // System Settings and grants the permission we re-check every 3 s until
+  // it's granted (or they dismiss the banner).
+  const [axGranted, setAxGranted] = useState<boolean>(true); // assume OK until checked
+  const [axDismissed, setAxDismissed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const granted = await checkAccessibilityPermission();
+        if (!cancelled) setAxGranted(granted);
+      } catch {
+        // Best-effort — never block startup on this check.
+      }
+    };
+
+    void check();
+
+    // Poll every 3 s so the banner disappears automatically once the user
+    // grants the permission in System Settings (without needing an app restart).
+    const interval = setInterval(() => { void check(); }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const showAxBanner = !axGranted && !axDismissed;
+
+  const handleOpenAxSettings = async () => {
+    try {
+      await requestAccessibilityPermission();
+    } catch {
+      // Fire-and-forget — opening System Settings can't really fail in a
+      // meaningful way; if it does, the user can navigate there manually.
+    }
+  };
+
   return (
     // Outer boundary is the last line of defence: even if the chrome (Sidebar)
     // itself throws, the window shows a fallback instead of going blank.
@@ -83,6 +125,34 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* Accessibility permission banner — macOS only, dismissed once granted */}
+          {showAxBanner && (
+            <div className="mx-3 mb-2 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
+              <span>
+                Accessibility permission is required for the global paste shortcut
+                and hotkey capture. Grant it in System Settings to enable these
+                features.
+              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { void handleOpenAxSettings(); }}
+                  className="rounded-ide border border-ide-warning/50 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-warning hover:bg-ide-hover"
+                >
+                  Open Settings
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAxDismissed(true)}
+                  className="rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
           <main className="min-h-0 flex-1 overflow-hidden">
             {/* Per-view boundary keyed on the view id: a crash in one screen
                 stays contained, and navigating away then back (new key)
