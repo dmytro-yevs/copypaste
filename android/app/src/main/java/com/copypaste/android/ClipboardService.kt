@@ -9,17 +9,23 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.view.SoundEffectConstants
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 import java.util.Calendar
 
 /**
@@ -39,12 +45,22 @@ import java.util.Calendar
  * ## Background clipboard access (Android 10+)
  * `ClipboardManager.getPrimaryClip()` is blocked from any non-foreground,
  * non-IME, non-AccessibilityService context on API 29+. This service registers
- * the `OnPrimaryClipChangedListener` on the main thread (framework requirement),
+ * `OnPrimaryClipChangedListener` on the main thread (framework requirement),
  * which *fires* even from background — but `getPrimaryClip()` inside the
  * callback will return null unless the process also has an enabled
- * AccessibilityService. [ClipboardAccessibilityService] provides that binding.
- * Without it this service still functions as a fallback on API 26-28 and while
- * the activity is in the foreground.
+ * AccessibilityService. [ClipboardAccessibilityService] provides that binding;
+ * since both services run in the same process, enabling the a11y service makes
+ * getPrimaryClip() return non-null here too.
+ *
+ * When getPrimaryClip() returns null on API 29+ (a11y service not enabled),
+ * [clipListener] issues a one-time actionable notification via
+ * [maybeNotifyA11yRequired] — shown at most once per install to avoid spam —
+ * so the user knows background capture is silently inactive and can fix it.
+ * Without the a11y service, this FGS only captures clips copied while the
+ * app is in the foreground (via this listener) or via [MainActivity]'s own
+ * ClipboardManager listener; it does NOT capture clips from other apps in
+ * background on API 29+. There is no workaround for this platform restriction
+ * without an enabled AccessibilityService or the default IME role.
  *
  * ## Restart on swipe-away ([onTaskRemoved])
  * When the user swipes the app from the recents list, Android calls
@@ -80,11 +96,32 @@ class ClipboardService : Service() {
     }
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
-        // primaryClip is non-null from background only on API 26-28 or when
-        // ClipboardAccessibilityService is enabled. On API 29+ without the
-        // accessibility service, this callback fires but getPrimaryClip() returns
-        // null — the early-return below handles that silently.
-        val clip = clipboardManager.primaryClip ?: return@OnPrimaryClipChangedListener
+        val clip = clipboardManager.primaryClip
+        if (clip == null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                if (!ClipboardAccessibilityService.isEnabled(this@ClipboardService)) {
+                    maybeNotifyA11yRequired(this@ClipboardService)
+                }
+            }
+            return@OnPrimaryClipChangedListener
+        }
+
+        // Detect image MIME before falling back to text. Check all MIME types on
+        // the ClipDescription; the first image/* type wins.
+        val imageMime = (0 until clip.description.mimeTypeCount)
+            .map { clip.description.getMimeType(it) }
+            .firstOrNull { it.startsWith("image/") }
+
+        if (imageMime != null) {
+            val uri = clip.getItemAt(0)?.uri
+            if (uri != null) {
+                scope.launch { captureImageClip(this@ClipboardService, uri, imageMime, settings, repository, syncManager) }
+            } else {
+                Log.w(TAG, "Image clip has no URI — skipping")
+            }
+            return@OnPrimaryClipChangedListener
+        }
+
         val text = clip.getItemAt(0)?.text?.toString()
             ?: return@OnPrimaryClipChangedListener
 
@@ -200,6 +237,41 @@ class ClipboardService : Service() {
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "copypaste_service"
 
+        /** Separate notification channel for the one-time "enable Accessibility" action prompt. */
+        private const val CHANNEL_A11Y_WARN = "copypaste_a11y_warn"
+
+        /** Stable notification id for the a11y-required warning (never collides with NOTIFICATION_ID). */
+        private const val NOTIF_ID_A11Y_WARN = 1002
+
+        /**
+         * SharedPreferences key used to gate the a11y-required warning to a single
+         * notification per install. We show it once when clipboard data is first
+         * silently dropped due to the Android 10+ restriction, then never again —
+         * the user can always re-open Onboarding from Settings.
+         */
+        private const val KEY_A11Y_WARN_SHOWN = "a11y_warn_shown"
+
+        /**
+         * Notification channel for per-copy event toasts (A-SET-6 parity).
+         * IMPORTANCE_MIN = no sound, no heads-up, no status-bar icon — just a
+         * silent badge in the shade so the user can see "item captured" without
+         * being disturbed. Auto-cancelled after 2 seconds.
+         */
+        const val CHANNEL_COPY_EVENT = "copypaste_copy_event"
+
+        /** Stable notification id for the per-copy event notification. */
+        private const val NOTIF_ID_COPY_EVENT = 1003
+
+        /**
+         * Debounce guard: timestamp (System.currentTimeMillis) of the last copy
+         * notification. If another capture arrives within [COPY_NOTIF_DEBOUNCE_MS],
+         * the notification is refreshed in-place (same id) rather than posting a
+         * new one, preventing rapid bursts from stacking.
+         */
+        @Volatile
+        private var lastCopyNotifMs = 0L
+        private const val COPY_NOTIF_DEBOUNCE_MS = 500L
+
         private const val PREFS_NAME = "copypaste_notif"
         private const val KEY_DAY_BUCKET = "day_bucket"
         private const val KEY_TODAY_COUNT = "today_count"
@@ -259,15 +331,92 @@ class ClipboardService : Service() {
             // Persist to the SharedPreferences repository — the single source the
             // UI reads. storeItem performs cross-listener dedup (HIGH-3) so a
             // single copy seen by multiple owners is stored (and counted) once.
-            val stored = repository.storeItem(text, key)
-            if (stored) {
+            val storedId = repository.storeItem(text, key)
+            if (storedId.isNotEmpty()) {
                 Log.d(TAG, "Clipboard item stored successfully")
                 bumpTodayCounter(context)
                 refreshNotification(context)
+                if (settings.notifyOnCopy) postCopyNotification(context)
+                if (settings.soundOnCopy) playCopySound(context)
                 if (settings.syncEnabled) {
-                    notifySyncManager(text, key, settings, syncManager)
+                    notifySyncManager(storedId, text, key, settings, syncManager)
                 }
             }
+        }
+
+        /**
+         * Capture an image clipboard item from a content:// [uri].
+         *
+         * Stores the original image at full resolution. OOM is caught explicitly.
+         * The size cap is enforced by [ClipboardRepository.storeImageBytes].
+         */
+        @Suppress("UNUSED_PARAMETER") // syncManager reserved for future image-sync wiring
+        suspend fun captureImageClip(
+            context: Context,
+            uri: android.net.Uri,
+            mimeType: String,
+            settings: Settings,
+            repository: ClipboardRepository,
+            syncManager: SyncManager,
+        ) {
+            if (!settings.captureEnabled) {
+                Log.d(TAG, "Capture paused — dropping image clipboard change")
+                return
+            }
+
+            // Decode at full resolution (inSampleSize=1 = no sub-sampling).
+            val decodeOpts = BitmapFactory.Options().apply {
+                inSampleSize = 1
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val bitmap: Bitmap? = try {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, decodeOpts)
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "captureImageClip: failed to decode image from $uri: ${t.message}")
+                return
+            }
+
+            if (bitmap == null) {
+                Log.w(TAG, "captureImageClip: BitmapFactory returned null for $uri — skipping")
+                return
+            }
+
+            // Re-encode as PNG (lossless). bitmap.recycle() runs in finally so
+            // native pixel memory is released immediately after the byte array is built.
+            val pngBytes: ByteArray? = try {
+                ByteArrayOutputStream().use { baos ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                    baos.toByteArray()
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "captureImageClip: PNG encode failed: ${t.message}")
+                null
+            } finally {
+                bitmap.recycle()
+            }
+
+            if (pngBytes == null) return
+
+            // Persist a placeholder text blob with the image MIME type so the row
+            // appears in history, then attach the image bytes under the same id.
+            val placeholder = uri.toString()
+            val key = settings.encryptionKey
+            val storedId = repository.storeItem(placeholder, key, contentType = mimeType)
+            if (storedId.isEmpty()) {
+                Log.d(TAG, "captureImageClip: storeItem returned empty (dedup/sensitive) — not storing bytes")
+                return
+            }
+
+            repository.storeImageBytes(storedId, pngBytes)
+            Log.d(TAG, "captureImageClip: stored image $storedId (${pngBytes.size} bytes, mime=$mimeType)")
+
+            bumpTodayCounter(context)
+            refreshNotification(context)
+            if (settings.notifyOnCopy) postCopyNotification(context)
+            if (settings.soundOnCopy) playCopySound(context)
+            // Image sync is not wired in this version — text sync only for now.
         }
 
         /** Path to the app-private encrypted SQLite DB used by the UniFFI live binding. */
@@ -275,6 +424,7 @@ class ClipboardService : Service() {
             context.applicationContext.getDatabasePath("copypaste.db").absolutePath
 
         private suspend fun notifySyncManager(
+            itemId: String,
             plaintext: String,
             key: ByteArray,
             settings: Settings,
@@ -284,10 +434,15 @@ class ClipboardService : Service() {
                 SyncBackend.SUPABASE -> {
                     // Supabase path: encrypt with cross-device SyncKey (schema v5),
                     // push to Supabase PostgREST. Interoperates with macOS daemon.
+                    // STABLE identity: push under the row's persisted [itemId]
+                    // (overrideId) so the cloud item_id matches the local row and
+                    // is reused on every push — the daemon dedups/LWW-merges
+                    // instead of seeing a new item each time (the duplicates bug).
                     try {
                         val id = syncManager.pushToSupabase(
                             plaintext = plaintext.toByteArray(Charsets.UTF_8),
                             contentType = "text",
+                            overrideId = itemId,
                             deviceId = settings.deviceId,
                         )
                         if (id != null) {
@@ -300,53 +455,173 @@ class ClipboardService : Service() {
                     }
                 }
                 SyncBackend.RELAY -> {
-                    // Relay path: encrypt with local device key + v3/v4 AAD,
-                    // upload to custom relay server. Local-network only.
-                    try {
-                        // Generate the item id BEFORE encrypting so the same id can
-                        // be bound into the AEAD AAD and forwarded to the relay. A
-                        // mismatch would fail decryption on the receiver silently.
-                        val itemId = java.util.UUID.randomUUID().toString()
-                        val blob = try {
-                            encryptText(itemId, plaintext.toByteArray(Charsets.UTF_8), key)
-                        } catch (e: IllegalStateException) {
-                            Log.d(TAG, "Native encryptText unavailable (${e.message}) — local AES")
-                            ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
-                        } catch (_: UnsatisfiedLinkError) {
-                            ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
-                        }
-                        val lamportTs = System.currentTimeMillis()
-                        syncManager.uploadItem(itemId, blob.ciphertext, blob.nonce, "text/plain", lamportTs)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Relay upload failed: ${e.message}")
-                    }
+                    // RELAY cloud backend is DISABLED.
+                    //
+                    // The relay path encrypted items with the local per-device AES
+                    // key (settings.encryptionKey) which no other device holds, so
+                    // every payload it uploaded was undecryptable by macOS or any
+                    // peer. The incoming poll (syncIncoming / syncItems) was also
+                    // never wired into any active code path, making the relay
+                    // write-only. This combination makes the relay cloud backend
+                    // completely broken for cross-device sync.
+                    //
+                    // Decision: cloud sync = Supabase only. Switch to Supabase in
+                    // Settings to enable cross-device cloud sync. The P2P/pairing
+                    // LAN path (dialPairedPeer in FgsSyncLoop) is unaffected.
+                    Log.w(
+                        TAG,
+                        "relay cloud backend is disabled — use Supabase for " +
+                            "cross-device cloud sync (Settings → Use Supabase Cloud Sync)"
+                    )
                 }
             }
         }
 
         /**
-         * Ensure the foreground service channel exists. Idempotent — calling
-         * twice is a no-op on the framework side.
+         * Post (or refresh) the per-copy event notification.
          *
-         * IMPORTANCE_LOW = silent (no sound, no heads-up). setShowBadge(false)
-         * keeps the launcher icon clean.
+         * Debounced: if the previous notification was posted within
+         * [COPY_NOTIF_DEBOUNCE_MS], this call updates it in-place (same id)
+         * rather than emitting a new one — rapid-paste bursts produce a single
+         * updating notification rather than a stack.
+         *
+         * Requires POST_NOTIFICATIONS permission on API 33+; on older APIs the
+         * permission is implicit. [NotificationManagerCompat.notify] is a no-op
+         * when the permission has not been granted, so no guard is needed here.
+         */
+        fun postCopyNotification(context: Context) {
+            val now = System.currentTimeMillis()
+            // Atomic CAS-style update: read, decide, write under no lock — worst
+            // case two threads both post; that is fine (same stable id, idempotent).
+            lastCopyNotifMs = now
+            ensureChannel(context)
+            val notification = NotificationCompat.Builder(context, CHANNEL_COPY_EVENT)
+                .setSmallIcon(android.R.drawable.ic_menu_edit)
+                .setContentTitle(context.getString(R.string.notif_copy_event_title))
+                .setContentText(context.getString(R.string.notif_copy_event_content))
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setCategory(NotificationCompat.CATEGORY_EVENT)
+                .setAutoCancel(true)
+                .setTimeoutAfter(2_000L)
+                .setOnlyAlertOnce(true)
+                .build()
+            NotificationManagerCompat.from(context).notify(NOTIF_ID_COPY_EVENT, notification)
+        }
+
+        /**
+         * Play a subtle UI click sound to acknowledge a clipboard capture.
+         *
+         * Uses [AudioManager.playSoundEffect] with [SoundEffectConstants.CLICK],
+         * which respects the system "touch sounds" volume and is available on all
+         * API levels. The call is intentionally non-blocking and fire-and-forget.
+         * Errors are swallowed — a missing sound must never break capture.
+         */
+        fun playCopySound(context: Context) {
+            try {
+                val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                am.playSoundEffect(SoundEffectConstants.CLICK, -1f)
+            } catch (e: Exception) {
+                Log.d(TAG, "playCopySound failed (non-fatal): ${e.message}")
+            }
+        }
+
+        /**
+         * Ensure all notification channels exist. Idempotent — calling twice is a
+         * no-op on the framework side (createNotificationChannel is idempotent).
+         *
+         * [CHANNEL_ID]: IMPORTANCE_LOW = silent (no sound, no heads-up).
+         *   setShowBadge(false) keeps the launcher icon clean.
+         *
+         * [CHANNEL_A11Y_WARN]: IMPORTANCE_DEFAULT = shows a heads-up the first
+         *   time, which is intentional — the user needs to act on it to restore
+         *   background clipboard capture on Android 10+.
+         *
+         * [CHANNEL_COPY_EVENT]: IMPORTANCE_MIN = silent badge only, no heads-up.
          */
         fun ensureChannel(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
-            val existing = nm.getNotificationChannel(CHANNEL_ID)
-            if (existing != null) return
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                context.getString(R.string.notif_channel_service_name),
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = context.getString(R.string.notif_channel_service_description)
-                setShowBadge(false)
-                enableVibration(false)
-                setSound(null, null)
+
+            if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_ID,
+                        context.getString(R.string.notif_channel_service_name),
+                        NotificationManager.IMPORTANCE_LOW
+                    ).apply {
+                        description = context.getString(R.string.notif_channel_service_description)
+                        setShowBadge(false)
+                        enableVibration(false)
+                        setSound(null, null)
+                    }
+                )
             }
-            nm.createNotificationChannel(channel)
+
+            if (nm.getNotificationChannel(CHANNEL_A11Y_WARN) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_A11Y_WARN,
+                        context.getString(R.string.notif_channel_a11y_warn_name),
+                        NotificationManager.IMPORTANCE_DEFAULT
+                    ).apply {
+                        description = context.getString(R.string.notif_channel_a11y_warn_description)
+                        setShowBadge(true)
+                    }
+                )
+            }
+
+            if (nm.getNotificationChannel(CHANNEL_COPY_EVENT) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_COPY_EVENT,
+                        context.getString(R.string.notif_channel_copy_event_name),
+                        NotificationManager.IMPORTANCE_MIN
+                    ).apply {
+                        description = context.getString(R.string.notif_channel_copy_event_description)
+                        setShowBadge(false)
+                        enableVibration(false)
+                        setSound(null, null)
+                    }
+                )
+            }
+        }
+
+        fun maybeNotifyA11yRequired(context: Context) {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            if (prefs.getBoolean(KEY_A11Y_WARN_SHOWN, false)) return
+            prefs.edit().putBoolean(KEY_A11Y_WARN_SHOWN, true).apply()
+
+            Log.w(
+                TAG,
+                "Android 10+ clipboard restriction: getPrimaryClip() returned null from " +
+                    "background FGS — background capture disabled until Accessibility " +
+                    "Service is enabled. Issuing one-time setup notification."
+            )
+
+            ensureChannel(context)
+            val nm = context.getSystemService(NotificationManager::class.java) ?: return
+
+            val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            val onboardingIntent = Intent(context, OnboardingActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            val onboardingPi = PendingIntent.getActivity(context, 10, onboardingIntent, piFlags)
+
+            val notification = NotificationCompat.Builder(context, CHANNEL_A11Y_WARN)
+                .setContentTitle(context.getString(R.string.notif_a11y_warn_title))
+                .setContentText(context.getString(R.string.notif_a11y_warn_content))
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setContentIntent(onboardingPi)
+                .addAction(0, context.getString(R.string.notif_a11y_warn_action), onboardingPi)
+                .setStyle(
+                    NotificationCompat.BigTextStyle()
+                        .bigText(context.getString(R.string.notif_a11y_warn_content_long))
+                )
+                .build()
+
+            nm.notify(NOTIF_ID_A11Y_WARN, notification)
         }
 
         /**
@@ -374,6 +649,35 @@ class ClipboardService : Service() {
                 .putInt(KEY_DAY_BUCKET, today)
                 .putInt(KEY_TODAY_COUNT, current + 1)
                 .apply()
+        }
+
+        /**
+         * Reconcile the "captured today" counter after the user removes clips.
+         * Decrements by [count] (floored at 0) and re-issues the notification so
+         * the shown number reflects the store after a delete/clear. The counter
+         * is otherwise monotonic-on-capture, so without this a deletion left the
+         * notification reporting a stale, too-high total. Safe to call from any
+         * thread — SharedPreferences and NotificationManager are both
+         * thread-safe.
+         */
+        fun onItemsDeleted(context: Context, count: Int) {
+            if (count <= 0) return
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val today = todayBucket()
+            val storedBucket = prefs.getInt(KEY_DAY_BUCKET, -1)
+            // Only adjust when the stored bucket is today's — a delete of an
+            // older clip must not resurrect/zero a fresh day's bucket.
+            if (storedBucket != today) {
+                refreshNotification(context)
+                return
+            }
+            val current = prefs.getInt(KEY_TODAY_COUNT, 0)
+            val next = (current - count).coerceAtLeast(0)
+            prefs.edit()
+                .putInt(KEY_DAY_BUCKET, today)
+                .putInt(KEY_TODAY_COUNT, next)
+                .apply()
+            refreshNotification(context)
         }
 
         private fun readTodayCount(context: Context): Int {

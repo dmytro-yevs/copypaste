@@ -51,12 +51,44 @@ class Settings(context: Context) {
     }
 
     var relayUrl: String
-        get() = prefs.getString("relay_url", "http://localhost:8080") ?: "http://localhost:8080"
+        get() = prefs.getString("relay_url", "") ?: ""
         set(v) = prefs.edit().putString("relay_url", v).apply()
 
+    /**
+     * True when the relay URL is non-blank AND not the loopback placeholder.
+     * Connecting to 127.0.0.1 from a real device always produces ECONNREFUSED
+     * (os error 111). The old default was "http://localhost:8080" which is
+     * unreachable on device; callers should gate relay I/O on this flag.
+     */
+    val isRelayConfigured: Boolean
+        get() = relayUrl.isNotBlank() &&
+                !relayUrl.contains("localhost") &&
+                !relayUrl.contains("127.0.0.1")
+
     var syncEnabled: Boolean
-        get() = prefs.getBoolean("sync_enabled", false)
+        get() = prefs.getBoolean("sync_enabled", true)
         set(v) = prefs.edit().putBoolean("sync_enabled", v).apply()
+
+    /**
+     * When true (default), post a brief [ClipboardService.CHANNEL_COPY_EVENT]
+     * notification each time a new clipboard item is captured. One per capture,
+     * debounced against rapid consecutive copies by a 500 ms guard in
+     * [ClipboardService.postCopyNotification]. Mirrors macOS Maccy-style
+     * "copy notification" parity goal (A-SET-6).
+     */
+    var notifyOnCopy: Boolean
+        get() = prefs.getBoolean("notify_on_copy", true)
+        set(v) = prefs.edit().putBoolean("notify_on_copy", v).apply()
+
+    /**
+     * When true (default), play a subtle click sound each time a new clipboard
+     * item is captured. Uses [android.media.AudioManager.playSoundEffect] with
+     * [android.view.SoundEffectConstants.CLICK] (available all API levels).
+     * Mirrors macOS Maccy-style copy sound parity (A-SET-6).
+     */
+    var soundOnCopy: Boolean
+        get() = prefs.getBoolean("sound_on_copy", true)
+        set(v) = prefs.edit().putBoolean("sound_on_copy", v).apply()
 
     // ── Supabase cloud sync ─────────────────────────────────────────────────
 
@@ -101,8 +133,19 @@ class Settings(context: Context) {
      * - [SyncBackend.RELAY]    — custom relay server (original, local-network-friendly)
      * - [SyncBackend.SUPABASE] — Supabase PostgREST (cross-device, cloud-based)
      */
+    /**
+     * Which sync backend to use when [syncEnabled] is true.
+     *
+     * DEFAULT is [SyncBackend.SUPABASE] — the only backend that interoperates
+     * with the macOS daemon via a shared cross-device sync key.
+     *
+     * [SyncBackend.RELAY] is kept for persisted-settings compatibility and
+     * P2P/pairing references but the RELAY *cloud* push path is a disabled
+     * no-op (see [ClipboardService.notifySyncManager]). New installs always
+     * start on Supabase.
+     */
     var syncBackend: SyncBackend
-        get() = when (prefs.getString("sync_backend", SyncBackend.RELAY.name)) {
+        get() = when (prefs.getString("sync_backend", SyncBackend.SUPABASE.name)) {
             SyncBackend.SUPABASE.name -> SyncBackend.SUPABASE
             else -> SyncBackend.RELAY
         }
@@ -136,12 +179,31 @@ class Settings(context: Context) {
         get() = supabaseEmail.isNotBlank() && supabasePassword.isNotBlank()
 
     /**
-     * Wall-time (Unix ms) of the most recently processed Supabase poll item.
-     * [SupabasePollWorker] reads this to avoid re-processing already-seen rows.
+     * Compound keyset cursor for the Supabase ascending poll.
+     *
+     * Both fields are advanced together for EVERY row in a batch (including
+     * self-echo and blank rows) BEFORE any `continue`, so a batch that
+     * contains only own-device rows still advances the cursor and does not
+     * re-fetch the same window on the next poll.
+     *
+     * Mirror of the `(last_wall_time, last_id)` cursor in the macOS daemon's
+     * cloud.rs `build_poll_url`. PostgREST keyset filter:
+     *   or=(wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))
+     * with order=wall_time.asc,id.asc.
      */
     var lastSupabasePollWallTime: Long
         get() = prefs.getLong("supabase_last_poll_wall_time", 0L)
         set(v) = prefs.edit().putLong("supabase_last_poll_wall_time", v).apply()
+
+    /**
+     * Row `id` (UUID string) of the last processed Supabase poll row.
+     * Combined with [lastSupabasePollWallTime] to form the compound keyset
+     * cursor — prevents burst-loss when >20 rows share the same wall_time.
+     * Empty string means "no rows seen yet" (initial state).
+     */
+    var lastSupabasePollId: String
+        get() = prefs.getString("supabase_last_poll_id", "") ?: ""
+        set(v) = prefs.edit().putString("supabase_last_poll_id", v).apply()
 
     val deviceId: String
         get() {
@@ -177,6 +239,87 @@ class Settings(context: Context) {
     var maxHistoryItems: Int
         get() = prefs.getInt("max_history_items", 1000)
         set(v) = prefs.edit().putInt("max_history_items", v).apply()
+
+    // ── Display settings (Maccy-parity) ────────────────────────────────────────
+
+    /**
+     * Maximum height (in dp) for image thumbnails in the history list.
+     *
+     * Matches Maccy's `imageMaxHeight` preference. The thumbnail is scaled into
+     * a bounding box of width ≈ 340 dp × height [imageMaxHeight] dp using
+     * [androidx.compose.ui.layout.ContentScale.Fit] (uniform, never upscales).
+     *
+     * Default 40 dp (compact list rows). Range 1–200.
+     */
+    var imageMaxHeight: Int
+        get() = prefs.getInt("image_max_height", 40).coerceIn(1, 200)
+        set(v) = prefs.edit().putInt("image_max_height", v.coerceIn(1, 200)).apply()
+
+    /**
+     * Maximum number of history items to display and retain on-device.
+     *
+     * Mirrors Maccy's `historySize` preference. The list scrolls vertically
+     * without a row-count cap. Range 1–999.
+     *
+     * Note: [maxHistoryItems] (above) controls the on-disk retention cap used
+     * by the capture pipeline. [historySize] is the display cap consumed by the
+     * history list to limit how many items are fetched for rendering. Both
+     * default to sensible values independently so upgrading users are unaffected.
+     */
+    var historySize: Int
+        get() = prefs.getInt("history_size", 200).coerceIn(1, 999)
+        set(v) = prefs.edit().putInt("history_size", v.coerceIn(1, 999)).apply()
+
+    /**
+     * Delay in milliseconds before auto-collapsing an expanded action row.
+     *
+     * Mirrors Maccy's `previewDelay` preference. Range 200–100 000 ms. Default 1500 ms.
+     */
+    var previewDelay: Long
+        get() = prefs.getLong("preview_delay_ms", 1500L).coerceIn(200L, 100_000L)
+        set(v) = prefs.edit().putLong("preview_delay_ms", v.coerceIn(200L, 100_000L)).apply()
+
+    // ── Sync Wi-Fi preference ───────────────────────────────────────────────
+
+    /**
+     * When true, sync operations (both Supabase poll and relay fan-out) should
+     * be restricted to Wi-Fi connections. Defaults to false (sync on any network).
+     */
+    var syncOnWifiOnly: Boolean
+        get() = prefs.getBoolean("sync_on_wifi_only", false)
+        set(v) = prefs.edit().putBoolean("sync_on_wifi_only", v).apply()
+
+    // ── Storage / size limits ───────────────────────────────────────────────
+    // Defaults match crates/copypaste-core/src/config/defaults.rs.
+
+    /**
+     * Maximum size in bytes for a text clipboard item. Items larger than this
+     * are silently dropped at capture time.
+     * Default: 15 MiB (15 728 640 B) — matches MAX_TEXT_SIZE_BYTES in defaults.rs.
+     */
+    var maxTextSizeBytes: Long
+        get() = prefs.getLong("max_text_size_bytes", 15L * 1024 * 1024)
+        set(v) = prefs.edit().putLong("max_text_size_bytes", v).apply()
+
+    /**
+     * Maximum size in bytes for an image clipboard item. Images larger than this
+     * are silently dropped at capture time.
+     * Default: 64 MiB (67 108 864 B) — matches MAX_IMAGE_SIZE_BYTES in defaults.rs.
+     */
+    var maxImageSizeBytes: Long
+        get() = prefs.getLong("max_image_size_bytes", 64L * 1024 * 1024)
+        set(v) = prefs.edit().putLong("max_image_size_bytes", v).apply()
+
+    /**
+     * Total local storage quota for the clipboard database, in bytes.
+     * When the database approaches this limit, the oldest non-sensitive items
+     * should be pruned by the repository.
+     * Default: 10 GiB (10 737 418 240 B) — matches STORAGE_QUOTA_BYTES in defaults.rs.
+     * NOTE: 10 GiB exceeds Int range — the literal and pref MUST be Long.
+     */
+    var storageQuotaBytes: Long
+        get() = prefs.getLong("storage_quota_bytes", 10L * 1024 * 1024 * 1024)
+        set(v) = prefs.edit().putLong("storage_quota_bytes", v).apply()
 
     /**
      * 256-bit AES key used for local clipboard encryption.
@@ -324,6 +467,36 @@ class Settings(context: Context) {
                 .putString(KEY_SESSION_IV_B64, Base64.encodeToString(iv, Base64.DEFAULT))
                 .apply()
         }
+
+    // ── Logcat capture (adb READ_LOGS fallback) ────────────────────────────
+
+    /**
+     * Whether the optional adb READ_LOGS logcat capture path is enabled.
+     *
+     * This setting only takes effect if `android.permission.READ_LOGS` has been
+     * granted via adb (`adb shell pm grant com.copypaste.android android.permission.READ_LOGS`).
+     * Without that grant the service refuses to start regardless of this flag.
+     *
+     * Default: false (opt-in power-user feature).
+     */
+    var logcatCaptureEnabled: Boolean
+        get() = prefs.getBoolean("logcat_capture_enabled", false)
+        set(v) = prefs.edit().putBoolean("logcat_capture_enabled", v).apply()
+
+    /**
+     * Runtime flag set by [LogcatCaptureService] to track whether it has
+     * successfully read at least one clipboard item via logcat.
+     *
+     * false → either not yet tried, or Android 11+ scoped-logcat is blocking
+     *          system-process log lines, or API 29+ clipboard background
+     *          restriction is still preventing getPrimaryClip from returning a value.
+     * true  → at least one text clip was captured and routed through the pipeline.
+     *
+     * Reset to false when the service is stopped.
+     */
+    var logcatCaptureWorking: Boolean
+        get() = prefs.getBoolean("logcat_capture_working", false)
+        set(v) = prefs.edit().putBoolean("logcat_capture_working", v).apply()
 
     fun clear() {
         // H4: drop the cached master key so a re-created key after clear() is
