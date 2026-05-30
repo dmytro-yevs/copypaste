@@ -1,0 +1,6 @@
+[bindings.kotlin]
+# The Rust crate lib.name is "copypaste_android", which produces
+# libcopypaste_android.so via cargo-ndk. Without this override the
+# uniffi-generated findLibraryName() defaults to "uniffi_copypaste_android"
+# and Native.load fails with UnsatisfiedLinkError at runtime.
+cdylib_name = "copypaste_android"

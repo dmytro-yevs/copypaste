@@ -179,27 +179,30 @@ class SupabaseClient(
     // ── Poll ─────────────────────────────────────────────────────────────────
 
     /**
-     * Poll for recent rows from other devices and decrypt them.
+     * Poll for rows since the compound keyset cursor ([sinceWallTime], [sinceId])
+     * and decrypt them.
      *
-     * Fetches up to [POLL_LIMIT] rows ordered by `wall_time DESC` where
-     * `wall_time > sinceWallTime`, then decrypts each `payload_ct` blob using
-     * [syncKeyBytes]. Rows that fail to decrypt (wrong key, tampered blob) are
-     * skipped with a warning — we never crash or surface partial plaintext.
+     * Uses an ascending compound keyset cursor (order=wall_time.asc,id.asc) that
+     * mirrors the macOS daemon's `build_poll_url`. The PostgREST filter is:
+     *   or=(wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))
+     * This correctly handles >POLL_LIMIT rows sharing the same wall_time — no rows
+     * are skipped between polls regardless of burst size.
      *
-     * This mirrors the `realtime_loop` in the macOS daemon's cloud.rs, using
-     * the identical decrypt path: base64-decode → `cloud_decrypt(syncKeyBytes,
-     * itemId, blob)` → plaintext.
+     * Returns all raw rows (including own-device rows and blank rows) so the
+     * caller can advance the cursor for every row before applying filters.
+     * Rows that fail to decrypt are returned as `null` plaintext (caller skips).
      *
-     * Returns the list of successfully decrypted items. The caller is
-     * responsible for deduplication (check against locally-stored item ids).
+     * Callers MUST advance [sinceWallTime]/[sinceId] for EVERY row in the
+     * result — including self-echo and blank rows — before applying `continue`.
      */
     suspend fun poll(
         bearerToken: String,
         syncKeyBytes: ByteArray,
         sinceWallTime: Long = 0L,
+        sinceId: String = "",
     ): List<DecryptedItem> = withContext(Dispatchers.IO) {
         try {
-            val rows = fetchRows(bearerToken, sinceWallTime)
+            val rows = fetchRows(bearerToken, sinceWallTime, sinceId)
             rows.mapNotNull { row -> decryptRow(row, syncKeyBytes) }
         } catch (e: Exception) {
             Log.w(TAG, "poll exception: ${e.message}")
@@ -208,16 +211,34 @@ class SupabaseClient(
     }
 
     /**
-     * Fetch raw rows from PostgREST. Returns empty list on any error.
-     * Identical query to the daemon's poll_url (select, order, limit).
+     * Fetch raw rows from PostgREST using the ascending compound keyset cursor.
+     *
+     * Query mirrors `build_poll_url` in the macOS daemon's cloud.rs:
+     *   order=wall_time.asc,id.asc
+     *   or=(wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))   ← when cursor is set
+     *   limit=POLL_LIMIT
+     *
+     * Returns rows in ascending wall_time order so the caller can advance the
+     * cursor by iterating front-to-back. Returns empty list on any error.
      */
-    private fun fetchRows(bearerToken: String, sinceWallTime: Long): List<CloudRow> {
+    private fun fetchRows(
+        bearerToken: String,
+        sinceWallTime: Long,
+        sinceId: String,
+    ): List<CloudRow> {
         val path = buildString {
             append("/rest/v1/clipboard_items")
             append("?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id")
-            append("&order=wall_time.desc")
+            // Ascending compound keyset: same order as daemon's build_poll_url.
+            append("&order=wall_time.asc,id.asc")
             append("&limit=$POLL_LIMIT")
-            if (sinceWallTime > 0) append("&wall_time=gt.$sinceWallTime")
+            // Keyset filter — skip when cursor is at the initial position (0/"").
+            // PostgREST `or` syntax: (wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))
+            if (sinceWallTime > 0 || sinceId.isNotBlank()) {
+                val w = sinceWallTime
+                val id = sinceId.ifBlank { "00000000-0000-0000-0000-000000000000" }
+                append("&or=(wall_time.gt.$w,and(wall_time.eq.$w,id.gt.$id))")
+            }
         }
         val resp = get(path, bearerToken)
         if (resp.code !in 200..299) {
@@ -250,11 +271,32 @@ class SupabaseClient(
     }
 
     /**
+     * Fetch ALL raw rows for the cursor batch (including self-echo rows) so the
+     * caller can advance the cursor for every row. Returns the full [CloudRow]
+     * list; callers filter out own-device rows after advancing the cursor.
+     *
+     * Decrypts each row; returns `null` plaintext (and logs WARN) when
+     * decryption fails — never surfaces partial plaintext or throws to caller.
+     */
+    suspend fun pollRaw(
+        bearerToken: String,
+        sinceWallTime: Long = 0L,
+        sinceId: String = "",
+    ): List<CloudRow> = withContext(Dispatchers.IO) {
+        try {
+            fetchRows(bearerToken, sinceWallTime, sinceId)
+        } catch (e: Exception) {
+            Log.w(TAG, "pollRaw exception: ${e.message}")
+            emptyList()
+        }
+    }
+
+    /**
      * Decrypt a single [CloudRow] using [syncKeyBytes].
      * Returns `null` (and logs a warning) if the blob is malformed or decryption
      * fails — never surfaces partial plaintext or throws to the caller.
      */
-    private fun decryptRow(row: CloudRow, syncKeyBytes: ByteArray): DecryptedItem? {
+    fun decryptRow(row: CloudRow, syncKeyBytes: ByteArray): DecryptedItem? {
         // Only text items are supported today (mirrors macOS daemon behaviour).
         if (row.contentType != "text") {
             Log.d(TAG, "decryptRow: skipping non-text row id=${row.id} (${row.contentType})")

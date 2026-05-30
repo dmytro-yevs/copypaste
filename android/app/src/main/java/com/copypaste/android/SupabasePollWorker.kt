@@ -20,14 +20,18 @@ import java.util.concurrent.TimeUnit
  *
  * Poll interval: 15 minutes (minimum WorkManager allows for periodic work).
  * Constraints: requires network; does NOT require charging or Wi-Fi-only so the
- * user gets timely updates on mobile data too. Add a Wi-Fi constraint here if
- * battery life becomes a concern.
+ * user gets timely updates on mobile data too.
  *
- * Deduplication: each incoming [SupabaseClient.DecryptedItem] is only stored if
- * its [SupabaseClient.DecryptedItem.id] is not already present locally.
- * [ClipboardRepository.storeItem] idempotently writes by UUID key so duplicate
- * calls are safe but result in extra rows — the [sinceWallTime] cursor in
- * [SyncManager.pollFromSupabase] prevents the majority of duplicates.
+ * ## Cursor strategy (Tasks 4/5/6)
+ * Uses an ascending compound keyset cursor (wall_time, id) that mirrors the
+ * macOS daemon's `build_poll_url`. For every row in the batch — including
+ * self-echo (own deviceId) rows and blank rows — the cursor is advanced BEFORE
+ * any `continue`. This prevents stalling on a batch of own-device rows.
+ *
+ * ## LWW replace (Task 5)
+ * When an incoming row's item_id already exists locally, the incoming
+ * lamport_ts is compared to the stored row's. If strictly newer, the local
+ * row is replaced (last-writer-wins), mirroring the daemon's cloud.rs LWW.
  */
 class SupabasePollWorker(
     appContext: Context,
@@ -53,25 +57,53 @@ class SupabasePollWorker(
         val syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
 
         return try {
-            val sinceWallTime = settings.lastSupabasePollWallTime
-            val items = syncManager.pollFromSupabase(sinceWallTime = sinceWallTime)
+            val batch = syncManager.pollFromSupabase(
+                sinceWallTime = settings.lastSupabasePollWallTime,
+                sinceId = settings.lastSupabasePollId,
+            ) ?: return Result.success()
 
             var newCount = 0
-            var latestWallTime = sinceWallTime
+            var cursorWallTime = settings.lastSupabasePollWallTime
+            var cursorId = settings.lastSupabasePollId
 
-            for (item in items) {
+            for (row in batch.rows) {
+                // Task 6: advance cursor for EVERY row (including self-echo and blank)
+                // BEFORE any continue so a batch of own-device rows still advances.
+                if (row.wallTime > cursorWallTime ||
+                    (row.wallTime == cursorWallTime && row.id > cursorId)) {
+                    cursorWallTime = row.wallTime
+                    cursorId = row.id
+                }
+
+                // Skip own-device rows (self-echo from our push).
+                if (row.deviceId == settings.deviceId) continue
+
+                // Decrypt the row; skip if decryption fails (wrong key / tampered).
+                val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
+
                 val text = item.plaintext.toString(Charsets.UTF_8)
                 if (text.isBlank()) continue
-                val stored = repository.storeItem(text, settings.encryptionKey)
+
+                // Task 5: LWW replace — if item_id already exists locally, replace
+                // only when the incoming lamport_ts is strictly newer.
+                val stored = repository.storeItemWithLww(
+                    plaintext = text,
+                    key = settings.encryptionKey,
+                    itemId = item.itemId,
+                    incomingLamportTs = item.lamportTs,
+                )
                 if (stored) newCount++
-                if (item.wallTime > latestWallTime) latestWallTime = item.wallTime
             }
 
-            if (latestWallTime > sinceWallTime) {
-                settings.lastSupabasePollWallTime = latestWallTime
+            // Persist the advanced cursor after processing the full batch.
+            if (cursorWallTime > settings.lastSupabasePollWallTime ||
+                (cursorWallTime == settings.lastSupabasePollWallTime &&
+                        cursorId > settings.lastSupabasePollId)) {
+                settings.lastSupabasePollWallTime = cursorWallTime
+                settings.lastSupabasePollId = cursorId
             }
 
-            Log.i(TAG, "Poll complete: ${items.size} fetched, $newCount stored")
+            Log.i(TAG, "Poll complete: ${batch.rows.size} fetched, $newCount stored")
             Result.success()
         } catch (e: Exception) {
             Log.w(TAG, "Poll failed: ${e.message}")
