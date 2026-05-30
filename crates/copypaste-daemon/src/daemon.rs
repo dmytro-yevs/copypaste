@@ -26,6 +26,7 @@ use std::time::Duration;
 /// abandoned thread may stay parked on the OS prompt; that is acceptable — it
 /// holds only a clone of nothing and is reaped when the process exits.
 const KEYCHAIN_READ_TIMEOUT: Duration = Duration::from_secs(8);
+use std::sync::RwLock;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::time::interval;
 // D1: CancellationToken for coordinated graceful shutdown across all tasks.
@@ -50,10 +51,13 @@ pub async fn run() -> anyhow::Result<()> {
 pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()> {
     let config = load_config();
     tracing::info!(
-        "poll_interval={}ms history_limit={}",
+        "poll_interval={}ms storage_quota_bytes={}",
         config.poll_interval_ms,
-        config.history_limit
+        config.storage_quota_bytes
     );
+    // Shared live core config — written by `set_config` IPC handler so limit
+    // changes hot-reload into the tick loop without a daemon restart.
+    let core_config_arc: Arc<RwLock<AppConfig>> = Arc::new(RwLock::new(config.clone()));
 
     // v0.3 (THREAT-MODEL OI-4): upgrade the Keychain entry's ACL on first
     // launch after install/upgrade.  Idempotent + best-effort — a failure
@@ -312,7 +316,17 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // Create it here (before both the IPC task and `start_p2p`) and hand each a
     // clone; `PairedPeers` is interior-mutable, so clones observe one another.
     // `None` when P2P is disabled — IPC pairing then only persists to peers.json.
-    let p2p_enabled = std::env::var("COPYPASTE_P2P").as_deref() == Ok("1");
+    //
+    // A-SET-4: env var is the override (the app always spawns with COPYPASTE_P2P=1
+    // when it wants P2P enabled); when env var is absent, fall back to the
+    // persisted IPC config's p2p_enabled so the user's UI toggle takes effect.
+    // The IPC AppConfig (config.json) owns p2p_enabled; the core AppConfig
+    // (config.toml) owns limits. Read the IPC config here just for this field.
+    let p2p_enabled = match std::env::var("COPYPASTE_P2P").as_deref() {
+        Ok("1") => true,
+        Ok("0") => false,
+        _ => crate::ipc::read_config().p2p_enabled,
+    };
     let p2p_peers: Option<copypaste_p2p::transport::PairedPeers> = if p2p_enabled {
         Some(copypaste_p2p::transport::PairedPeers::new())
     } else {
@@ -423,7 +437,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             local_key_arc.clone(),
             device_public_key_arc.clone(),
         )
-        .with_new_item_tx(new_item_tx.clone());
+        .with_new_item_tx(new_item_tx.clone())
+        .with_core_config(core_config_arc.clone());
         if let Some(peers) = p2p_peers.clone() {
             server = server.with_p2p_peers(peers);
         }
@@ -648,6 +663,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 local_key_arc.clone(),
                 cloud_signed_in.clone(),
                 config.clone(),
+                config.sync_on_wifi_only,
             )
             .await
             {
@@ -684,13 +700,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let mut cleanup_ticks: u64 = 0;
     // Sensitive TTL cleanup runs every 5 seconds; track elapsed ticks separately.
     let mut sensitive_cleanup_ticks: u64 = 0;
-    let sensitive_ttl_ms = config.sensitive_ttl_secs as i64 * 1000;
 
     tracing::info!("clipboard monitor started");
     tracing::info!(
-        "sensitive auto-wipe TTL: {}s ({}ms), checked every 5s",
+        "sensitive auto-wipe TTL: {}s, checked every 5s",
         config.sensitive_ttl_secs,
-        sensitive_ttl_ms,
     );
 
     #[cfg(target_os = "macos")]
@@ -708,7 +722,15 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx, &local_device_id).await;
+                    // Hot-reload: snapshot the current live config on every
+                    // tick so limit changes from set_config take effect
+                    // without a restart.
+                    let live_config = core_config_arc
+                        .read()
+                        .map(|g| g.clone())
+                        .unwrap_or_else(|_| config.clone());
+                    let sensitive_ttl_ms = live_config.sensitive_ttl_secs as i64 * 1000;
+                    handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -764,7 +786,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx, &local_device_id).await;
+                    let live_config = core_config_arc
+                        .read()
+                        .map(|g| g.clone())
+                        .unwrap_or_else(|_| config.clone());
+                    let sensitive_ttl_ms = live_config.sensitive_ttl_secs as i64 * 1000;
+                    handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -1355,48 +1382,14 @@ async fn handle_image(
     }
 }
 
-/// Enforce the count cap (`history_limit`) after each local insert.
+/// Enforce the size-only cap after each local insert.
 ///
-/// Uses a direct bulk DELETE ordered by `wall_time ASC` — no per-row loop.
-/// PINNED items (`pinned = 1`) are never evicted.
+/// The count cap (`history_limit`) has been removed: the local DB is bounded
+/// exclusively by `storage_quota_bytes`. Pinned items are never evicted.
+///
+/// `storage_quota_bytes` is u64 in AppConfig; saturating cast to i64 is safe
+/// because values above i64::MAX (>9 EB) are unreachable in practice.
 fn prune_history(db: &Database, config: &AppConfig) {
-    let total = copypaste_core::count_items(db).unwrap_or(0) as usize;
-    if total > config.history_limit {
-        let excess = total - config.history_limit;
-        // Direct SQL DELETE ordered by `wall_time ASC` — bulk-removes the
-        // oldest rows in a single statement (audit HIGH #4). The previous
-        // implementation went through `get_page` + per-row `delete_item`,
-        // which was both N+1 and risked pruning the wrong page if the
-        // pagination math drifted.
-        //
-        // `pinned = 0` excludes explicitly pinned items so they are never
-        // deleted by the history-limit prune (schema v7, see `pin_item`).
-        let res = db.conn().execute(
-            "DELETE FROM clipboard_items WHERE id IN (
-                SELECT id FROM clipboard_items
-                WHERE pinned = 0
-                ORDER BY wall_time ASC
-                LIMIT ?1
-            )",
-            rusqlite::params![excess as i64],
-        );
-        match res {
-            Ok(n) => tracing::debug!(
-                "pruned {} of {} requested items over history_limit={}",
-                n,
-                excess,
-                config.history_limit
-            ),
-            Err(e) => tracing::warn!("prune_history failed: {e}"),
-        }
-    }
-    // M1 FIX: enforce the byte quota after the count-cap prune so a local
-    // capture burst (many small items) cannot exhaust disk even when item
-    // count stays under `history_limit`.  The cloud path already calls
-    // `prune_to_cap` inside `poll_once`; this call mirrors it for the local
-    // clipboard-capture path so both paths converge to the same cap.
-    // `storage_quota_bytes` is u64 in AppConfig; saturating cast to i64 is
-    // safe — values above i64::MAX (>9 EB) are unreachable in practice.
     match prune_to_cap(db, config.storage_quota_bytes as i64) {
         Ok(0) => {}
         Ok(n) => tracing::debug!("prune_history: byte-cap pruned {n} rows"),
