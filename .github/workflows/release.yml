@@ -250,20 +250,20 @@ jobs:
         run: |
           # cloud-sync excluded from release build — requires Supabase credentials not present in CI
           cargo ndk -t arm64-v8a \
-            build -p copypaste-android --release \
+            build -p copypaste-android --profile release-size \
             --features copypaste-android/android-uniffi-live
 
       - name: Collect .so artifact
         run: |
           mkdir -p dist-android
-          find target/aarch64-linux-android/release -maxdepth 1 -name "*.so" \
+          find target/aarch64-linux-android/release-size -maxdepth 1 -name "*.so" \
             -exec cp {} dist-android/ \;
           ls -lh dist-android/
 
       - name: Copy .so into jniLibs
         run: |
           mkdir -p android/app/src/main/jniLibs/arm64-v8a
-          cp target/aarch64-linux-android/release/libcopypaste_android.so \
+          cp target/aarch64-linux-android/release-size/libcopypaste_android.so \
              android/app/src/main/jniLibs/arm64-v8a/
 
       - name: Set up JDK 17
