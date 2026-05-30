@@ -98,8 +98,12 @@ pub fn store_cloud_sync_key(secret: &[u8; 32]) -> Result<(), KeychainError> {
 }
 
 /// Load the persisted cloud-sync key, or `None` if no passphrase was ever set.
+///
+/// Returns the raw array (copied out of the internal `Zeroizing` wrapper) so
+/// callers that require `[u8; 32]` by value work without change. The `Zeroizing`
+/// wrapper is dropped here, wiping the intermediate copy from the stack.
 pub fn load_cloud_sync_key() -> Result<Option<[u8; 32]>, KeychainError> {
-    read_secret(&cloud_sync_file_path()?)
+    Ok(read_secret(&cloud_sync_file_path()?)?.map(|z| *z))
 }
 
 /// Load the device keypair from the `0600` key file, creating + persisting a
@@ -222,7 +226,10 @@ pub fn delete_stored() -> Result<(), KeychainError> {
 /// the file does not exist (first run). A wrong-length file is a hard error so
 /// a corrupt/truncated key is never silently treated as "absent" (which would
 /// generate a fresh key and orphan the existing encrypted DB).
-fn read_secret(path: &Path) -> Result<Option<[u8; 32]>, KeychainError> {
+///
+/// The returned array is wrapped in [`zeroize::Zeroizing`] so the secret bytes
+/// are wiped from the stack when the caller drops the value (security MED #6).
+fn read_secret(path: &Path) -> Result<Option<zeroize::Zeroizing<[u8; 32]>>, KeychainError> {
     let bytes = match std::fs::read(path) {
         Ok(b) => zeroize::Zeroizing::new(b),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -231,7 +238,7 @@ fn read_secret(path: &Path) -> Result<Option<[u8; 32]>, KeychainError> {
     if bytes.len() != 32 {
         return Err(KeychainError::InvalidLength(bytes.len()));
     }
-    let mut arr = [0u8; 32];
+    let mut arr = zeroize::Zeroizing::new([0u8; 32]);
     arr.copy_from_slice(&bytes);
     Ok(Some(arr))
 }

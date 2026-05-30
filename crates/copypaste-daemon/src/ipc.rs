@@ -211,6 +211,21 @@ fn legacy_config_path() -> Option<std::path::PathBuf> {
     dirs::config_dir().map(|base| base.join("copypaste").join("config.json"))
 }
 
+/// Public accessor for `p2p_enabled` so daemon.rs (and other callers that
+/// cannot import `AppConfig` directly) can honour the persisted flag without
+/// re-reading the full config.
+///
+/// # FIXWAVE: daemon.rs must call `ipc::read_config().p2p_enabled` (or this
+/// accessor) when deciding whether to start the P2P subsystem. Currently
+/// `daemon.rs` reads the env-var `COPYPASTE_P2P` only and never consults the
+/// persisted `AppConfig::p2p_enabled` value written by `set_config`, so toggling
+/// P2P from the settings UI has no effect until the env-var is set. Wiring
+/// requires editing `daemon.rs` (out of scope for this agent) — the call site
+/// is the block immediately before `start_p2p` in `daemon::run`.
+pub fn p2p_enabled_from_config() -> bool {
+    read_config().p2p_enabled
+}
+
 /// Load the IPC `AppConfig` (config.json) and overlay the limit fields from the
 /// core `AppConfig` (config.toml) so `get_config` returns a merged view.
 ///
@@ -1808,9 +1823,16 @@ impl IpcServer {
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     let total = copypaste_core::count_items(&db).unwrap_or(0);
-                    // Count sensitive items via get_page scan (limited to first 1000)
-                    let sample = copypaste_core::get_page(&db, 1000, 0).unwrap_or_default();
-                    let sensitive_count = sample.iter().filter(|i| i.is_sensitive).count() as i64;
+                    // Fix HIGH #5: accurate sensitive count via a dedicated
+                    // COUNT query instead of scanning the first 1000 rows.
+                    let sensitive_count: i64 = db
+                        .conn()
+                        .query_row(
+                            "SELECT COUNT(*) FROM clipboard_items WHERE is_sensitive = 1",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(0);
                     (total, sensitive_count)
                 })
                 .await;
@@ -2294,13 +2316,24 @@ impl IpcServer {
                 // replaces them with boolean presence flags. The Supabase
                 // anon/public key is, by design, a publishable key and is kept
                 // so the UI can prefill the settings field.
-                let cfg = read_config();
-                match serde_json::to_value(&cfg) {
-                    Ok(mut v) => {
-                        redact_config_secrets(&mut v);
-                        Response::ok(req.id, v)
-                    }
-                    Err(e) => Response::err(req.id, e.to_string()),
+                //
+                // Fix HIGH #3: read_config() does blocking fs I/O (reads
+                // config.json + config.toml); run it on the blocking thread
+                // pool so the async worker is never stalled by disk I/O.
+                let join = tokio::task::spawn_blocking(read_config).await;
+                match join {
+                    Ok(cfg) => match serde_json::to_value(&cfg) {
+                        Ok(mut v) => {
+                            redact_config_secrets(&mut v);
+                            Response::ok(req.id, v)
+                        }
+                        Err(e) => Response::err(req.id, e.to_string()),
+                    },
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("get_config blocking task failed: {e}"),
+                    ),
                 }
             }
             "set_config" => {
@@ -2316,23 +2349,35 @@ impl IpcServer {
                 // the stored Supabase credentials, breaking cloud sync. Merge
                 // the incoming config onto the persisted one, preserving any
                 // secret the caller did not supply.
-                let merged = merge_config(read_config(), incoming);
-                // Persist IPC fields (Supabase creds, p2p_enabled) to config.json.
-                if let Err(e) = write_config(&merged) {
-                    return Response::err(req.id, e.to_string());
-                }
-                // Persist limit fields to config.toml AND hot-reload the live
-                // core config so the monitor/prune picks them up on the next tick.
-                match update_core_config(&merged) {
-                    Ok(new_core) => {
-                        if let Some(ref arc) = self.core_config {
+                //
+                // Fix HIGH #3: read_config()/write_config()/update_core_config()
+                // all do blocking fs I/O; run them on the blocking thread pool.
+                let core_config_arc = self.core_config.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let merged = merge_config(read_config(), incoming);
+                    // Persist IPC fields (Supabase creds, p2p_enabled) to config.json.
+                    write_config(&merged)?;
+                    // Persist limit fields to config.toml AND return the new
+                    // core config for hot-reload in the caller.
+                    let new_core = update_core_config(&merged)?;
+                    Ok::<_, anyhow::Error>((merged, new_core))
+                })
+                .await;
+                match join {
+                    Ok(Ok((_merged, new_core))) => {
+                        if let Some(ref arc) = core_config_arc {
                             if let Ok(mut guard) = arc.write() {
                                 *guard = new_core;
                             }
                         }
                         Response::ok(req.id, serde_json::json!({"saved": true}))
                     }
-                    Err(e) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("set_config blocking task failed: {e}"),
+                    ),
                 }
             }
             // Cloud auth — stubs until Supabase integration lands.
@@ -2428,7 +2473,18 @@ impl IpcServer {
             #[cfg(feature = "cloud-sync")]
             "get_sync_status" => {
                 let passphrase_set = self.sync_key.lock().await.is_some();
-                let app_cfg = read_config();
+                // Fix HIGH #3: read_config() does blocking fs I/O; move it to
+                // the blocking thread pool so the async worker is not stalled.
+                let app_cfg = match tokio::task::spawn_blocking(read_config).await {
+                    Ok(cfg) => cfg,
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("get_sync_status blocking task failed: {e}"),
+                        )
+                    }
+                };
                 let supabase_configured = app_cfg.supabase_url.is_some()
                     && app_cfg.supabase_anon_key.is_some()
                     || std::env::var("SUPABASE_URL").is_ok();
@@ -2845,7 +2901,15 @@ impl IpcServer {
                         }));
 
                         match save_peers(&peers) {
-                            Ok(_) => Response::ok(req.id, serde_json::json!({ "ok": true })),
+                            Ok(_) => {
+                                // Fix HIGH #4: manual pair_peer didn't register
+                                // the peer in the live mTLS allowlist, so the
+                                // accepted connection required a daemon restart.
+                                // Mirror what pair_peer_with_password "finish"
+                                // does: register into the live allowlist now.
+                                self.register_live_peer(&fingerprint);
+                                Response::ok(req.id, serde_json::json!({ "ok": true }))
+                            }
                             Err(e) => Response::err(req.id, format!("failed to save peers: {e}")),
                         }
                     }
@@ -2959,15 +3023,25 @@ impl IpcServer {
                 .await;
 
                 match join {
-                    Ok(Ok(revoked_at)) => Response::ok(
-                        req.id,
-                        serde_json::json!({
-                            "ok": true,
-                            "removed": removed,
-                            "revoked_at": revoked_at,
-                            "fingerprint": fingerprint,
-                        }),
-                    ),
+                    Ok(Ok(revoked_at)) => {
+                        // Fix CRITICAL #1: remove the peer from the live in-memory
+                        // mTLS allowlist so the revoked peer's existing (or new)
+                        // mTLS session is rejected immediately — without waiting
+                        // for a daemon restart. Normalise to canonical lowercase
+                        // hex (strip colons) to match PairedPeers' key format.
+                        if let Some(ref peers) = self.p2p_peers {
+                            peers.remove(&canonical_fingerprint(&fingerprint));
+                        }
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({
+                                "ok": true,
+                                "removed": removed,
+                                "revoked_at": revoked_at,
+                                "fingerprint": fingerprint,
+                            }),
+                        )
+                    }
                     Ok(Err(e)) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -3049,6 +3123,16 @@ impl IpcServer {
                         ERR_CODE_INTERNAL_ERROR,
                         format!("revocations recorded but failed to clear peers: {e}"),
                     );
+                }
+
+                // Fix CRITICAL #1: evict every revoked peer from the live mTLS
+                // allowlist so their sessions are rejected immediately without
+                // a daemon restart. Normalise each fingerprint to canonical
+                // lowercase hex (strip colons) to match PairedPeers' key format.
+                if let Some(ref peers) = self.p2p_peers {
+                    for (fp, _) in &captured {
+                        peers.remove(&canonical_fingerprint(fp));
+                    }
                 }
 
                 Response::ok(
