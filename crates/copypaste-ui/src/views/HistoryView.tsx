@@ -954,23 +954,28 @@ export function HistoryView() {
     setBulkBusy(true);
     const ids = Array.from(multiSelectedIds);
     let failed = 0;
-    for (const id of ids) {
-      try {
-        await api.deleteItem(id);
-      } catch {
-        failed++;
+    try {
+      for (const id of ids) {
+        try {
+          await api.deleteItem(id);
+        } catch {
+          failed++;
+        }
       }
-    }
-    // Clear selection and refresh regardless of partial failures.
-    clearSelection();
-    if (selectedId !== null && multiSelectedIds.has(selectedId)) setSelectedId(null);
-    sigRef.current = ""; // force re-render
-    void load(true);
-    setBulkBusy(false);
-    if (failed > 0) {
-      showToast(`Deleted ${ids.length - failed}/${ids.length} (${failed} failed)`, "error");
-    } else {
-      showToast(`Deleted ${ids.length} item${ids.length === 1 ? "" : "s"}`, "success");
+      // Clear selection and refresh regardless of partial failures.
+      clearSelection();
+      if (selectedId !== null && multiSelectedIds.has(selectedId)) setSelectedId(null);
+      sigRef.current = ""; // force re-render
+      void load(true);
+      if (failed > 0) {
+        showToast(`Deleted ${ids.length - failed}/${ids.length} (${failed} failed)`, "error");
+      } else {
+        showToast(`Deleted ${ids.length} item${ids.length === 1 ? "" : "s"}`, "success");
+      }
+    } finally {
+      // Always release the busy flag — even if clearSelection/load throws,
+      // so the bulk action bar is never permanently disabled (V-13).
+      setBulkBusy(false);
     }
   }, [bulkBusy, multiSelectedIds, clearSelection, selectedId, load, showToast]);
 
@@ -980,22 +985,27 @@ export function HistoryView() {
       setBulkBusy(true);
       const ids = Array.from(multiSelectedIds);
       let failed = 0;
-      for (const id of ids) {
-        try {
-          await api.pinItem(id, targetPinned);
-        } catch {
-          failed++;
+      try {
+        for (const id of ids) {
+          try {
+            await api.pinItem(id, targetPinned);
+          } catch {
+            failed++;
+          }
         }
-      }
-      clearSelection();
-      sigRef.current = "";
-      void load(true);
-      setBulkBusy(false);
-      const verb = targetPinned ? "Pinned" : "Unpinned";
-      if (failed > 0) {
-        showToast(`${verb} ${ids.length - failed}/${ids.length} (${failed} failed)`, "error");
-      } else {
-        showToast(`${verb} ${ids.length} item${ids.length === 1 ? "" : "s"}`, "success");
+        clearSelection();
+        sigRef.current = "";
+        void load(true);
+        const verb = targetPinned ? "Pinned" : "Unpinned";
+        if (failed > 0) {
+          showToast(`${verb} ${ids.length - failed}/${ids.length} (${failed} failed)`, "error");
+        } else {
+          showToast(`${verb} ${ids.length} item${ids.length === 1 ? "" : "s"}`, "success");
+        }
+      } finally {
+        // Always release the busy flag — even if clearSelection/load throws,
+        // so the bulk action bar is never permanently disabled (V-13).
+        setBulkBusy(false);
       }
     },
     [bulkBusy, multiSelectedIds, clearSelection, load, showToast]
@@ -1015,41 +1025,46 @@ export function HistoryView() {
     // the same order they see on screen.
     const selectedItems = filtered.filter((it) => multiSelectedIds.has(it.id));
 
-    // Step 1: copy the first selected item via daemon (puts it on pasteboard).
-    const firstId = selectedItems[0]?.id;
-    if (firstId !== undefined) {
-      try {
-        await api.copyItem(firstId);
-      } catch (err) {
-        const msg = err instanceof IpcError ? err.message : "Copy failed";
-        showToast(msg, "error");
-        setBulkBusy(false);
-        return;
+    try {
+      // Step 1: copy the first selected item via daemon (puts it on pasteboard).
+      const firstId = selectedItems[0]?.id;
+      if (firstId !== undefined) {
+        try {
+          await api.copyItem(firstId);
+        } catch (err) {
+          const msg = err instanceof IpcError ? err.message : "Copy failed";
+          showToast(msg, "error");
+          // Return inside try so finally still runs and releases the busy flag (V-13).
+          return;
+        }
       }
-    }
 
-    // Step 2: if the browser clipboard API is available, write the concatenated
-    // preview text of all selected non-sensitive, non-image items. This is
-    // best-effort — we don't surface an error if the API is unavailable.
-    const textItems = selectedItems.filter(
-      (it) =>
-        !it.is_sensitive &&
-        it.content_type !== "image" &&
-        !it.content_type.startsWith("image/")
-    );
-    if (textItems.length > 1 && typeof navigator?.clipboard?.writeText === "function") {
-      const concatenated = textItems.map((it) => it.preview).join("\n");
-      try {
-        await navigator.clipboard.writeText(concatenated);
-      } catch {
-        // Clipboard API unavailable or permission denied — daemon copy above already succeeded.
+      // Step 2: if the browser clipboard API is available, write the concatenated
+      // preview text of all selected non-sensitive, non-image items. This is
+      // best-effort — we don't surface an error if the API is unavailable.
+      const textItems = selectedItems.filter(
+        (it) =>
+          !it.is_sensitive &&
+          it.content_type !== "image" &&
+          !it.content_type.startsWith("image/")
+      );
+      if (textItems.length > 1 && typeof navigator?.clipboard?.writeText === "function") {
+        const concatenated = textItems.map((it) => it.preview).join("\n");
+        try {
+          await navigator.clipboard.writeText(concatenated);
+        } catch {
+          // Clipboard API unavailable or permission denied — daemon copy above already succeeded.
+        }
       }
-    }
 
-    clearSelection();
-    void load(true);
-    setBulkBusy(false);
-    showToast(`Copied ${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`, "success");
+      clearSelection();
+      void load(true);
+      showToast(`Copied ${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`, "success");
+    } finally {
+      // Always release the busy flag — even if clearSelection/load throws,
+      // so the bulk action bar is never permanently disabled (V-13).
+      setBulkBusy(false);
+    }
   }, [bulkBusy, multiSelectedIds, filtered, clearSelection, load, showToast]);
 
   // Inline confirm state — replaces window.confirm (blocked in Tauri webviews).

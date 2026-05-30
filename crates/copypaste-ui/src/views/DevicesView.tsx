@@ -495,6 +495,39 @@ export function DevicesView() {
     );
   }
 
+  // --- Degraded state (daemon up, DB unavailable) ---
+  // Previously fell through silently; now surfaces a message and restart
+  // button so the user can recover without knowing the internals (V-14).
+  if (loadState === "degraded") {
+    return (
+      <ViewShell title="Devices" actions={actions}>
+        <div className="flex items-center gap-3">
+          <p className="text-[13px] text-ide-warning">
+            Database degraded — device list unavailable. Reset the database in
+            History to recover.
+          </p>
+          <RestartDaemonButton onRestarted={() => void loadPeers()} />
+        </div>
+      </ViewShell>
+    );
+  }
+
+  // --- Generic error state ---
+  // Previously had no early-return branch; render an explicit message and
+  // restart button so the user is never left staring at a blank view (V-14).
+  if (loadState === "error") {
+    return (
+      <ViewShell title="Devices" actions={actions}>
+        <div className="flex items-center gap-3">
+          <p className="text-[13px] text-ide-danger">
+            Failed to load devices. Try restarting the daemon.
+          </p>
+          <RestartDaemonButton onRestarted={() => void loadPeers()} />
+        </div>
+      </ViewShell>
+    );
+  }
+
   // --- Already-paired indicator for QR panel ---
   // If the user shows a QR code but they already have paired devices, surface a
   // note. The daemon will reject a duplicate-fingerprint scan with an error, but
@@ -519,6 +552,15 @@ export function DevicesView() {
         {fpState.status === "offline" && (
           <div className="px-3 py-2.5">
             <p className="text-[13px] text-ide-danger">Daemon not running.</p>
+          </div>
+        )}
+        {/* degraded: daemon is up but DB is unavailable — fingerprint cannot be
+            read. Show a placeholder so the row is never silently empty (V-14). */}
+        {fpState.status === "degraded" && (
+          <div className="px-3 py-2.5">
+            <p className="text-[13px] text-ide-warning">
+              This device — Unavailable (database degraded)
+            </p>
           </div>
         )}
         {thisDevicePeer !== null && (
