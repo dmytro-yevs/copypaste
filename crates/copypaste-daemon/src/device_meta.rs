@@ -304,15 +304,16 @@ mod tests {
         // app_version is always present.
         assert_eq!(meta.app_version, "0.5.2");
         // All optional fields must be either None or a non-empty Some.
-        for field in [
+        for v in [
             &meta.device_name,
             &meta.device_model,
             &meta.os_version,
             &meta.local_ip,
-        ] {
-            if let Some(v) = field {
-                assert!(!v.is_empty(), "optional field must not be Some(\"\")");
-            }
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(!v.is_empty(), "optional field must not be Some(\"\")");
         }
     }
 }

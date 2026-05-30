@@ -307,6 +307,13 @@ pub(crate) fn update_core_config(
     if let Some(v) = incoming.sync_on_wifi_only {
         core.sync_on_wifi_only = v;
     }
+    // core.save() writes via a sibling temp file + atomic rename and does NOT
+    // create the parent dir; ensure it exists (mirrors write_config for the
+    // sibling config.json) so first-run / test config dirs don't ENOENT.
+    if let Some(parent) = toml_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| anyhow::anyhow!("failed to create config dir: {e}"))?;
+    }
     core.save(&toml_path)
         .map_err(|e| anyhow::anyhow!("failed to save config.toml: {e}"))?;
     Ok(core)
@@ -7447,6 +7454,7 @@ mod tests {
             supabase_anon_key: Some("anon-123".into()),
             supabase_email: Some("user@example.com".into()),
             supabase_password: Some("super-secret".into()),
+            ..Default::default()
         };
         // Incoming mirrors what the UI sends back after `get_config` redaction:
         // secrets absent (None), only the toggle + publishable fields present.
@@ -7456,6 +7464,7 @@ mod tests {
             supabase_anon_key: Some("anon-123".into()),
             supabase_email: None,
             supabase_password: None,
+            ..Default::default()
         };
         let merged = merge_config(existing, incoming);
         assert_eq!(
@@ -7482,6 +7491,7 @@ mod tests {
             supabase_anon_key: None,
             supabase_email: Some("old@example.com".into()),
             supabase_password: Some("old-pw".into()),
+            ..Default::default()
         };
         let incoming = AppConfig {
             p2p_enabled: false,
@@ -7489,6 +7499,7 @@ mod tests {
             supabase_anon_key: None,
             supabase_email: Some("new@example.com".into()),
             supabase_password: Some("new-pw".into()),
+            ..Default::default()
         };
         let merged = merge_config(existing, incoming);
         assert_eq!(merged.supabase_password.as_deref(), Some("new-pw"));
@@ -7515,6 +7526,7 @@ mod tests {
             supabase_anon_key: Some("anon-xyz".into()),
             supabase_email: Some("seed@example.com".into()),
             supabase_password: Some("do-not-wipe-me".into()),
+            ..Default::default()
         };
         write_config(&seeded).expect("seed write_config");
 
