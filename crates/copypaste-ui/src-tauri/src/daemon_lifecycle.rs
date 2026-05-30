@@ -316,22 +316,35 @@ fn evict_stray_daemon() {
 /// if it changed, our child was superseded and the daemon is healthy under new
 /// ownership — we return `Ok(true)` instead of a false error.
 pub fn ensure_daemon_running(app: &tauri::AppHandle) -> Result<bool, String> {
-    // 1. Reconcile the LaunchAgent first: boot out any leftover instance so it
+    // 1. Snapshot the lifecycle generation at function entry — BEFORE any
+    //    blocking work — so that a restart_daemon which completes entirely
+    //    (bump gen → kill old → spawn new-and-reachable) during bootout or
+    //    eviction is captured here.  If we took the snapshot AFTER the up-to-3s
+    //    blocking evict we would see the POST-restart gen, mistake the spurious
+    //    3rd daemon we're about to spawn as the "first", time out, compare
+    //    gen_after==gen_before, and write a FALSE "daemon failed" error.
+    //    Reusing the same Arc for both the before/after reads also eliminates
+    //    the silent footgun of try_state returning None if the state is not yet
+    //    registered (the debug_assert below catches that in debug builds).
+    let gen_arc = app.try_state::<DaemonLifecycleGen>();
+    debug_assert!(
+        gen_arc.is_some(),
+        "DaemonLifecycleGen must be registered in Tauri managed state before \
+         ensure_daemon_running is called"
+    );
+    let gen_before = gen_arc
+        .as_ref()
+        .map(|s| s.0.load(Ordering::SeqCst))
+        .unwrap_or(0);
+
+    // 2. Reconcile the LaunchAgent first: boot out any leftover instance so it
     //    cannot fight the app-owned lifecycle.
     bootout_launchagent();
 
-    // 2. Always attempt eviction (fixes wedged/stale daemon after upgrade).
+    // 3. Always attempt eviction (fixes wedged/stale daemon after upgrade).
     //    Unlike the old code that skipped eviction when daemon_reachable()=false,
     //    we handle all three cases: reachable, socket-exists-but-silent, no socket.
     evict_stray_daemon();
-
-    // 3. Snapshot the lifecycle generation BEFORE storing the child so that a
-    //    concurrent restart_daemon (which bumps the generation then takes+kills
-    //    the child) is detectable in step 5 below.
-    let gen_before = app
-        .try_state::<DaemonLifecycleGen>()
-        .map(|s| s.0.load(Ordering::SeqCst))
-        .unwrap_or(0);
 
     // 4. Spawn the fresh bundled daemon.
     let bin = bundled_daemon_path().ok_or_else(|| {
@@ -367,8 +380,11 @@ pub fn ensure_daemon_running(app: &tauri::AppHandle) -> Result<bool, String> {
     // 6. Timed out. Check whether restart_daemon superseded us while we polled.
     //    If the generation advanced, our child was killed and replaced — the
     //    daemon is healthy under new ownership, so this is NOT an error.
-    let gen_after = app
-        .try_state::<DaemonLifecycleGen>()
+    //    Reuse gen_arc captured at function entry so both reads hit the same
+    //    Arc and there is no window where try_state could return None on one
+    //    read but Some on the other.
+    let gen_after = gen_arc
+        .as_ref()
         .map(|s| s.0.load(Ordering::SeqCst))
         .unwrap_or(0);
     if gen_after != gen_before {
@@ -512,7 +528,15 @@ pub fn restart_daemon(app: tauri::AppHandle) -> Result<(), String> {
     stop_tracked_child(&app);
 
     // Step 3: spawn a fresh one and wait for it to become reachable.
-    ensure_daemon_running(&app).map(|_| ())
+    let result = ensure_daemon_running(&app);
+    // Mirror what ensure_daemon_running_async does: write the outcome into
+    // DaemonSpawnError so get_daemon_error reflects the restart result and a
+    // stale startup error does not linger after a successful restart.
+    if let Some(state) = app.try_state::<DaemonSpawnError>() {
+        let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+        *guard = result.as_ref().err().cloned();
+    }
+    result.map(|_| ())
 }
 
 /// Stop the child we're tracking (used by restart_daemon before respawn).
