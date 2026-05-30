@@ -226,7 +226,7 @@ impl DeviceKeypair {
         peer_public_bytes: &[u8; 32],
         sender_id: &str,
         recipient_id: &str,
-    ) -> [u8; 32] {
+    ) -> zeroize::Zeroizing<[u8; 32]> {
         // Audit MED #3: use the zeroizing ECDH accessor so the raw
         // shared secret is scrubbed when this function returns. The
         // derived enc key is what callers receive; the ikm itself never
@@ -237,7 +237,7 @@ impl DeviceKeypair {
         let mut enc_key = [0u8; 32];
         hk.expand(info.as_bytes(), &mut enc_key)
             .expect("HKDF expand 32 bytes always succeeds");
-        enc_key
+        zeroize::Zeroizing::new(enc_key)
     }
 
     pub fn fingerprint(&self) -> String {
@@ -349,7 +349,7 @@ mod tests {
         let alice = DeviceKeypair::generate();
         let bob = DeviceKeypair::generate();
         let net_key = alice.derive_enc_key(&bob.public_key_bytes(), "a", "b");
-        assert_ne!(*alice.local_enc_key(), net_key);
+        assert_ne!(*alice.local_enc_key(), *net_key);
     }
 
     /// Snapshot test: HKDF is keyed with the versioned salt `HKDF_SALT_V1`.
@@ -387,7 +387,7 @@ mod tests {
             .expand(b"copypaste-v1|alice|bob", &mut alt_key)
             .unwrap();
         assert_ne!(
-            k1, alt_key,
+            *k1, alt_key,
             "changing the HKDF salt MUST change the derived key"
         );
 

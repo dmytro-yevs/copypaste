@@ -159,15 +159,19 @@ pub struct Database {
 
 /// Format a 32-byte key as the hex string SQLCipher expects:
 ///   PRAGMA key = "x'<64 hex chars>'"
-fn key_pragma(key: &[u8; 32]) -> String {
+///
+/// Returns a `Zeroizing<String>` so the key hex is scrubbed from the heap
+/// as soon as the returned value is dropped, limiting the window during
+/// which plaintext key material appears in a heap dump.
+fn key_pragma(key: &[u8; 32]) -> zeroize::Zeroizing<String> {
     use std::fmt::Write;
-    let mut hex = String::with_capacity(64);
+    let mut hex = zeroize::Zeroizing::new(String::with_capacity(64));
     for b in key {
         // Infallible: `fmt::Write for String` only grows a heap buffer and
         // never returns Err, so this formatted write cannot fail.
-        write!(hex, "{:02x}", b).unwrap();
+        write!(*hex, "{:02x}", b).unwrap();
     }
-    format!("PRAGMA key = \"x'{}'\"", hex)
+    zeroize::Zeroizing::new(format!("PRAGMA key = \"x'{}'\"", *hex))
 }
 
 /// Per-connection PRAGMAs that must follow `PRAGMA key`. These are NOT
@@ -349,24 +353,27 @@ impl Database {
         let _ = std::fs::remove_file(&tmp_path);
 
         // Build the hex key for the ATTACH statement.
-        let mut hex = String::with_capacity(64);
+        // Wrapped in Zeroizing so the hex string is scrubbed from the heap
+        // when `key_hex` goes out of scope (heap-dump leak fix).
+        let mut raw_hex = zeroize::Zeroizing::new(String::with_capacity(64));
         for b in key {
             // Infallible: `fmt::Write for String` only grows a heap buffer and
             // never returns Err, so this formatted write cannot fail.
-            write!(hex, "{:02x}", b).unwrap();
+            write!(*raw_hex, "{:02x}", b).unwrap();
         }
-        let key_hex = hex;
+        // The ATTACH SQL also contains the key hex; wrap it in Zeroizing too.
+        let attach_sql = zeroize::Zeroizing::new(format!(
+            "ATTACH DATABASE '{}' AS encrypted KEY \"x'{}'\"",
+            tmp_path.display(),
+            *raw_hex
+        ));
 
         // Open the plaintext source (no key pragma needed).
         let plaintext_conn = Connection::open(path)
             .map_err(|e| DbError::Migration(format!("open plaintext: {e}")))?;
 
         // ATTACH a new encrypted DB as 'encrypted'.
-        let attach_sql = format!(
-            "ATTACH DATABASE '{}' AS encrypted KEY \"x'{}'\"",
-            tmp_path.display(),
-            key_hex
-        );
+
         plaintext_conn
             .execute_batch(&attach_sql)
             .map_err(|e| DbError::Migration(format!("ATTACH encrypted: {e}")))?;
@@ -460,13 +467,14 @@ impl Database {
             Some(p) => p,
             None => {
                 checkpoint_with_retry(&self.conn)?;
-                let mut hex = String::with_capacity(64);
+                // Wrap hex in Zeroizing so key material is scrubbed on drop.
+                let mut hex = zeroize::Zeroizing::new(String::with_capacity(64));
                 for b in new_key {
                     // Infallible: `fmt::Write for String` only grows a heap
                     // buffer and never returns Err, so this write cannot fail.
-                    write!(hex, "{:02x}", b).unwrap();
+                    write!(*hex, "{:02x}", b).unwrap();
                 }
-                let sql = format!("PRAGMA rekey = \"x'{}'\"", hex);
+                let sql = zeroize::Zeroizing::new(format!("PRAGMA rekey = \"x'{}'\"", *hex));
                 self.conn.execute_batch(&sql)?;
                 return Ok(Self {
                     conn: self.conn,
@@ -484,17 +492,18 @@ impl Database {
         let tmp_path = path.with_extension("db.rekey-tmp");
         let _ = std::fs::remove_file(&tmp_path);
 
-        let mut new_hex = String::with_capacity(64);
+        // Wrap hex in Zeroizing so key material is scrubbed from the heap on drop.
+        let mut new_hex = zeroize::Zeroizing::new(String::with_capacity(64));
         for b in new_key {
             // Infallible: `fmt::Write for String` only grows a heap buffer and
             // never returns Err, so this formatted write cannot fail.
-            write!(new_hex, "{:02x}", b).unwrap();
+            write!(*new_hex, "{:02x}", b).unwrap();
         }
-        let attach_sql = format!(
+        let attach_sql = zeroize::Zeroizing::new(format!(
             "ATTACH DATABASE '{}' AS rekeyed KEY \"x'{}'\"",
             tmp_path.display(),
-            new_hex
-        );
+            *new_hex
+        ));
         self.conn
             .execute_batch(&attach_sql)
             .map_err(|e| DbError::Migration(format!("ATTACH rekeyed: {e}")))?;
