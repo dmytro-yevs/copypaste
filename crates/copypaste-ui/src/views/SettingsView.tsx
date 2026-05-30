@@ -210,6 +210,29 @@ function mbToBytes(mb: number): number {
 }
 
 // ---------------------------------------------------------------------------
+// Storage / Limits defaults — MUST mirror copypaste-core
+// (crates/copypaste-core/src/config/defaults.rs). The UI previously hardcoded
+// tiny fallbacks (text 1 MB, image 25 MB, ...) which made Settings show wrong
+// values whenever the daemon was momentarily unavailable. These now fall back
+// to the real generous core defaults instead. Defined as named consts so the
+// useState seed and the load-time `??` fallback can never drift apart.
+//
+// Core uses binary (MiB/GiB) units. The MB display consts are derived from the
+// byte consts via bytesToMb so the displayed seed equals the fallback display.
+const DEFAULT_MAX_TEXT_BYTES = 15 * 1024 * 1024; // 15 MiB
+const DEFAULT_MAX_IMAGE_BYTES = 64 * 1024 * 1024; // 64 MiB
+const DEFAULT_MAX_FILE_BYTES = 1024 * 1024 * 1024; // 1 GiB
+const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024; // 10 GiB
+const DEFAULT_IMAGE_QUALITY = 100;
+const DEFAULT_HISTORY_LIMIT = 1000;
+const DEFAULT_SENSITIVE_TTL_SECS = 30;
+
+const DEFAULT_MAX_TEXT_MB = bytesToMb(DEFAULT_MAX_TEXT_BYTES);
+const DEFAULT_MAX_IMAGE_MB = bytesToMb(DEFAULT_MAX_IMAGE_BYTES);
+const DEFAULT_MAX_FILE_MB = bytesToMb(DEFAULT_MAX_FILE_BYTES);
+const DEFAULT_STORAGE_QUOTA_MB = bytesToMb(DEFAULT_STORAGE_QUOTA_BYTES);
+
+// ---------------------------------------------------------------------------
 // ShortcutCapture — focus to record a new key combo
 // ---------------------------------------------------------------------------
 
@@ -374,13 +397,13 @@ export function SettingsView() {
 
   // Storage / Limits — fields from AppConfig surfaced via get_config / set_config.
   // MB representations; converted to/from raw bytes before IPC.
-  const [maxTextMb, setMaxTextMb] = useState(1);
-  const [maxImageMb, setMaxImageMb] = useState(25);
-  const [maxFileMb, setMaxFileMb] = useState(100);
-  const [quotaMb, setQuotaMb] = useState(500);
-  const [historyLimit, setHistoryLimit] = useState(1000);
-  const [sensitiveTtlSecs, setSensitiveTtlSecs] = useState(30);
-  const [imageQuality, setImageQuality] = useState(80);
+  const [maxTextMb, setMaxTextMb] = useState(DEFAULT_MAX_TEXT_MB);
+  const [maxImageMb, setMaxImageMb] = useState(DEFAULT_MAX_IMAGE_MB);
+  const [maxFileMb, setMaxFileMb] = useState(DEFAULT_MAX_FILE_MB);
+  const [quotaMb, setQuotaMb] = useState(DEFAULT_STORAGE_QUOTA_MB);
+  const [historyLimit, setHistoryLimit] = useState(DEFAULT_HISTORY_LIMIT);
+  const [sensitiveTtlSecs, setSensitiveTtlSecs] = useState(DEFAULT_SENSITIVE_TTL_SECS);
+  const [imageQuality, setImageQuality] = useState(DEFAULT_IMAGE_QUALITY);
   // Per-field save feedback: key = field name, value = error or "Saved" / null.
   const [limitsMsg, setLimitsMsg] = useState<Record<string, string | null>>({});
   const limitsMsgTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -477,13 +500,13 @@ export function SettingsView() {
         setSyncStatus(syncSt);
 
         // Storage / Limits — convert raw bytes to MB for display.
-        setMaxTextMb(bytesToMb(rawCfg.max_text_size_bytes ?? 1_000_000));
-        setMaxImageMb(bytesToMb(rawCfg.max_image_size_bytes ?? 25_000_000));
-        setMaxFileMb(bytesToMb(rawCfg.max_file_size_bytes ?? 100_000_000));
-        setQuotaMb(bytesToMb(rawCfg.storage_quota_bytes ?? 500_000_000));
-        setHistoryLimit(rawCfg.history_limit ?? 1000);
-        setSensitiveTtlSecs(rawCfg.sensitive_ttl_secs ?? 30);
-        setImageQuality(rawCfg.image_quality ?? 80);
+        setMaxTextMb(bytesToMb(rawCfg.max_text_size_bytes ?? DEFAULT_MAX_TEXT_BYTES));
+        setMaxImageMb(bytesToMb(rawCfg.max_image_size_bytes ?? DEFAULT_MAX_IMAGE_BYTES));
+        setMaxFileMb(bytesToMb(rawCfg.max_file_size_bytes ?? DEFAULT_MAX_FILE_BYTES));
+        setQuotaMb(bytesToMb(rawCfg.storage_quota_bytes ?? DEFAULT_STORAGE_QUOTA_BYTES));
+        setHistoryLimit(rawCfg.history_limit ?? DEFAULT_HISTORY_LIMIT);
+        setSensitiveTtlSecs(rawCfg.sensitive_ttl_secs ?? DEFAULT_SENSITIVE_TTL_SECS);
+        setImageQuality(rawCfg.image_quality ?? DEFAULT_IMAGE_QUALITY);
 
         // Sync parity
         setSyncOnWifiOnly(rawCfg.sync_on_wifi_only ?? false);
