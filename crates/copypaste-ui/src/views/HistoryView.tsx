@@ -226,19 +226,68 @@ function ImageThumbnail({ id }: { id: string }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Icon-only action button SVGs (inline, no external icon library needed)
+// ---------------------------------------------------------------------------
+
+/** Pin icon (filled thumbtack) */
+function IconPin({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true" className={className}>
+      <path d="M9.828 1.172a1.2 1.2 0 0 0-1.697 0L6.424 2.879 5.13 1.586a1 1 0 1 0-1.414 1.414L4.97 4.243 2.757 6.457A1 1 0 0 0 3.464 8H7v3.586l-.293.293a1 1 0 1 0 1.414 1.414l.293-.293.293.293a1 1 0 1 0 1.414-1.414L10 11.586V8h3.536a1 1 0 0 0 .707-1.707L12.03 4.07 13.172 2.93a1.2 1.2 0 0 0 0-1.697l-.344-.344a1.2 1.2 0 0 0-1.697 0L9.828 2.192z" />
+    </svg>
+  );
+}
+
+/** Unpin icon (outline thumbtack with slash) */
+function IconPinOff({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+      <line x1="2" y1="2" x2="14" y2="14" />
+      <path d="M9 3.5 12.5 7M7 5l-.3.3A1 1 0 0 0 7.7 7H10v4l-1 1-1-1V7" />
+      <path d="M6.5 7H3.7a1 1 0 0 1-.7-1.7L5.5 2.8" />
+    </svg>
+  );
+}
+
+/** Trash / delete icon */
+function IconTrash({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+      <path d="M2.5 4.5h11M6 4.5V3h4v1.5M4 4.5l.75 8.5h6.5L12 4.5" />
+      <line x1="6.5" y1="7" x2="6.5" y2="11" />
+      <line x1="9.5" y1="7" x2="9.5" y2="11" />
+    </svg>
+  );
+}
+
 interface RowProps {
   entry: HistoryEntry;
   selected: boolean;
+  multiSelected: boolean;
+  selectionMode: boolean;
   previewLines: number;
-  previewSize: number;
   maskSensitive: boolean;
   onSelect: () => void;
   onCopy: () => void;
   onPin: () => void;
   onDelete: () => void;
+  onCheckboxClick: () => void;
 }
 
-function HistoryRow({ entry, selected, previewLines, previewSize, maskSensitive, onSelect, onCopy, onPin, onDelete }: RowProps) {
+function HistoryRow({
+  entry,
+  selected,
+  multiSelected,
+  selectionMode,
+  previewLines,
+  maskSensitive,
+  onSelect,
+  onCopy,
+  onPin,
+  onDelete,
+  onCheckboxClick,
+}: RowProps) {
   // Fix #1: bare "image" content_type stored by daemon
   const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
 
@@ -252,27 +301,57 @@ function HistoryRow({ entry, selected, previewLines, previewSize, maskSensitive,
     preview = entry.preview;
   }
 
-  // Fix #6: row height driven by previewSize setting (shared with the
-  // virtualizer via rowHeightFor so offsets stay consistent).
-  const rowH = rowHeightFor(entry, previewSize);
+  // Row height is intentionally NOT driven by rowHeightFor — natural content
+  // height + py-1.5 padding avoids the hover layout-jump. rowHeightFor is only
+  // used by VirtualList for its offset math, not for DOM styling.
+
+  const handleRowClick = () => {
+    if (selectionMode) {
+      onCheckboxClick();
+    } else {
+      onSelect();
+      onCopy();
+    }
+  };
 
   return (
     <div
       role="option"
-      aria-selected={selected}
+      aria-selected={selected || multiSelected}
       className={[
-        "group relative flex cursor-pointer select-none items-center gap-2 px-3",
+        "group relative flex cursor-pointer select-none items-center gap-2 px-3 py-1.5",
         "border-b text-[13px]",
         entry.pinned ? "border-ide-warning/20 bg-ide-warning/5" : "border-ide-divider/40",
-        selected
+        multiSelected
+          ? "bg-ide-selection text-ide-text"
+          : selected
           ? "bg-ide-selection text-ide-text"
           : entry.pinned
           ? "text-ide-text hover:bg-ide-warning/10"
           : "text-ide-text hover:bg-ide-hover",
       ].join(" ")}
-      style={{ minHeight: rowH }}
-      onClick={() => { onSelect(); onCopy(); }}
+      onClick={handleRowClick}
     >
+      {/* Checkbox — always in flow (reserves 20px). Invisible at rest, fades in
+          on hover or when selection mode is active. Clicking it enters/toggles
+          multi-selection without propagating to the row-click copy handler. */}
+      <span
+        className="flex w-4 shrink-0 items-center justify-center"
+        onClick={(e) => { e.stopPropagation(); onCheckboxClick(); }}
+      >
+        <input
+          type="checkbox"
+          aria-label="Select item"
+          checked={multiSelected}
+          onChange={onCheckboxClick}
+          onClick={(e) => e.stopPropagation()}
+          className={[
+            "h-3.5 w-3.5 rounded accent-ide-accent cursor-pointer",
+            selectionMode ? "opacity-80" : "opacity-0 group-hover:opacity-60",
+          ].join(" ")}
+        />
+      </span>
+
       {/* Pin indicator (only on pinned rows) */}
       {entry.pinned && (
         <span className="flex w-3 shrink-0 items-center justify-center">
@@ -305,46 +384,68 @@ function HistoryRow({ entry, selected, previewLines, previewSize, maskSensitive,
         {isImage && !entry.is_sensitive ? `[Image] ${entry.preview}`.trim() : preview}
       </span>
 
-      {/* Time — hidden while action buttons are visible */}
-      <span className="shrink-0 text-[11px] text-ide-faint group-hover:hidden">
-        {relativeTime(entry.wall_time)}
-      </span>
-
-      {/* Action buttons — appear on hover or selection */}
+      {/* Right-side slot: timestamp (always visible) + action buttons (on hover).
+          Both live in the same fixed-width flex container so showing/hiding the
+          buttons never shifts the layout — the slot width is constant. */}
       <div
-        className={[
-          "absolute right-2 flex items-center gap-1",
-          selected ? "flex" : "hidden group-hover:flex",
-        ].join(" ")}
+        className="flex shrink-0 items-center justify-end gap-1"
+        style={{ minWidth: "4.5rem" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <ActionBtn label="Copy" onClick={onCopy} />
-        <ActionBtn label={entry.pinned ? "Unpin" : "Pin"} onClick={onPin} />
-        <ActionBtn label="Delete" danger onClick={onDelete} />
+        {/* Timestamp — always shown; sits before the buttons */}
+        <span className="text-[11px] text-ide-faint">
+          {relativeTime(entry.wall_time)}
+        </span>
+
+        {/* Icon action buttons — invisible at rest, visible on hover.
+            They DO NOT shift the row because the slot width is reserved. */}
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <IconActionBtn
+            aria-label={entry.pinned ? "Unpin" : "Pin"}
+            title={entry.pinned ? "Unpin" : "Pin"}
+            onClick={onPin}
+          >
+            {entry.pinned ? <IconPinOff /> : <IconPin />}
+          </IconActionBtn>
+          <IconActionBtn
+            aria-label="Delete"
+            title="Delete"
+            danger
+            onClick={onDelete}
+          >
+            <IconTrash />
+          </IconActionBtn>
+        </div>
       </div>
     </div>
   );
 }
 
-function ActionBtn({
-  label,
+function IconActionBtn({
+  "aria-label": ariaLabel,
+  title,
   danger,
   onClick,
+  children,
 }: {
-  label: string;
+  "aria-label": string;
+  title: string;
   danger?: boolean;
   onClick: () => void;
+  children: React.ReactNode;
 }) {
   return (
     <button
+      aria-label={ariaLabel}
+      title={title}
       className={[
-        "rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-0.5 text-[11px]",
-        "hover:bg-ide-hover",
-        danger ? "text-ide-danger" : "text-ide-text",
+        "flex h-5 w-5 items-center justify-center rounded",
+        "border border-transparent hover:border-ide-border hover:bg-ide-elevated",
+        danger ? "text-ide-danger" : "text-ide-dim hover:text-ide-text",
       ].join(" ")}
-      onClick={onClick}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
     >
-      {label}
+      {children}
     </button>
   );
 }
@@ -496,6 +597,11 @@ export function HistoryView() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+
+  // Multi-selection state: selectionMode = bulk-select UI visible;
+  // selectedIds = set of item ids currently checked.
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -702,6 +808,7 @@ export function HistoryView() {
       try {
         await api.deleteItem(id);
         if (selectedId === id) setSelectedId(null);
+        setSelectedIds((prev) => { const s = new Set(prev); s.delete(id); return s; });
         void load(true);
       } catch (err) {
         const msg = err instanceof IpcError ? err.message : "Delete failed";
@@ -710,6 +817,46 @@ export function HistoryView() {
     },
     [selectedId, load, showToast]
   );
+
+  // -------------------------------------------------------------------------
+  // Multi-selection handlers
+  // -------------------------------------------------------------------------
+
+  // Toggle a single item in/out of the multi-selection set.
+  // First checkbox click also enters selection mode.
+  const handleCheckboxClick = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+    setSelectionMode(true);
+  }, []);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedIds(new Set());
+  }, []);
+
+  // Bulk delete all checked items.
+  const handleBulkDelete = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    try {
+      await Promise.all(ids.map((id) => api.deleteItem(id)));
+      if (selectedId !== null && selectedIds.has(selectedId)) setSelectedId(null);
+      exitSelectionMode();
+      sigRef.current = "";
+      void load(true);
+    } catch (err) {
+      const msg = err instanceof IpcError ? err.message : "Delete failed";
+      showToast(msg, "error");
+    }
+  }, [selectedIds, selectedId, exitSelectionMode, load, showToast]);
 
   // Inline confirm state — replaces window.confirm (which is blocked in Tauri webviews).
   const [confirmPending, setConfirmPending] = useState(false);
@@ -824,8 +971,9 @@ export function HistoryView() {
             key={entry.id}
             entry={entry}
             selected={entry.id === selectedId}
+            multiSelected={selectedIds.has(entry.id)}
+            selectionMode={selectionMode}
             previewLines={previewLines}
-            previewSize={previewSize}
             maskSensitive={maskSensitive}
             onSelect={() => {
               setSelectedId(entry.id);
@@ -834,6 +982,7 @@ export function HistoryView() {
             onCopy={() => void handleCopy(entry.id)}
             onPin={() => void handlePin(entry.id, entry.pinned)}
             onDelete={() => void handleDelete(entry.id)}
+            onCheckboxClick={() => handleCheckboxClick(entry.id)}
           />
         )}
       />
@@ -842,6 +991,30 @@ export function HistoryView() {
 
   return (
     <ViewShell title="History" actions={actions}>
+      {/* Bulk action bar — shown only while selection mode is active */}
+      {selectionMode && (
+        <div className="flex shrink-0 items-center justify-between border-b border-ide-divider/40 bg-ide-panel px-3 py-1.5 text-[12px]">
+          <span className="text-ide-dim">
+            {selectedIds.size} selected
+          </span>
+          <span className="flex items-center gap-1.5">
+            {selectedIds.size > 0 && (
+              <button
+                onClick={() => void handleBulkDelete()}
+                className="rounded-ide border border-ide-danger/50 bg-ide-elevated px-2.5 py-0.5 text-ide-danger hover:bg-ide-hover"
+              >
+                Delete
+              </button>
+            )}
+            <button
+              onClick={exitSelectionMode}
+              className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-0.5 text-ide-dim hover:bg-ide-hover"
+            >
+              Done
+            </button>
+          </span>
+        </div>
+      )}
       {body}
       {toast !== null && <Toast key={toast.id} message={toast.message} kind={toast.kind} />}
     </ViewShell>
