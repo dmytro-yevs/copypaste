@@ -98,6 +98,9 @@ export interface DaemonStatus {
   build_version?: string | null;
   /** Daemon OS process id, if reported. */
   pid?: number | null;
+  // TODO(task-7): expose supabase_account_id from daemon status so the UI can
+  // surface a cross-device account mismatch in SettingsView's cloud section.
+  // Add `supabase_account_id?: string | null` here once the daemon emits it.
 }
 
 /**
@@ -304,8 +307,8 @@ export async function resetDatabase(): Promise<ResetDatabaseResult> {
 }
 
 // ---------------------------------------------------------------------------
-// Daemon UPGRADE/RESTART lifecycle (Tauri-direct — talk to launchctl, NOT the
-// daemon IPC, so they work even when the daemon is wedged/unresponsive).
+// Daemon UPGRADE/RESTART lifecycle (Tauri-direct — bypass daemon IPC so these
+// work even when the daemon is wedged/unresponsive).
 // ---------------------------------------------------------------------------
 
 /** The app's own build version (crate version, e.g. "0.5.2"). */
@@ -314,9 +317,23 @@ export async function appVersion(): Promise<string> {
 }
 
 /**
- * Restart the daemon so the freshly-installed binary takes over
- * (`launchctl kickstart -k`, with a bootout+bootstrap fallback). Throws a
- * plain `Error` with the launchctl failure message on failure.
+ * Return the last daemon spawn error from the app-owned lifecycle, if any.
+ *
+ * Returns `null` when the daemon started successfully (or hasn't been
+ * attempted yet). Listen for the `"daemon-spawn-result"` Tauri event for
+ * real-time feedback; this command is the fallback for views that load after
+ * the event fires.
+ */
+export async function getDaemonError(): Promise<string | null> {
+  return invoke<string | null>("get_daemon_error");
+}
+
+/**
+ * Restart the daemon so the freshly-installed binary takes over.
+ *
+ * In app-owned mode this stops the tracked child process (SIGTERM + reap) and
+ * respawns the bundled binary — no launchctl involved. Throws a plain `Error`
+ * with the failure message on error.
  */
 export async function restartDaemon(): Promise<void> {
   try {
@@ -327,14 +344,72 @@ export async function restartDaemon(): Promise<void> {
 }
 
 /**
- * Compare the running daemon's build to the app's own. Returns the daemon's
- * version when it is STALE (survived an upgrade), else `null`.
+ * Parse a semver string into [major, minor, patch] numbers.
+ * Returns null if the string cannot be parsed as semver.
+ */
+function parseSemver(ver: string): [number, number, number] | null {
+  const parts = ver.split(".");
+  if (parts.length < 3) return null;
+  const nums = parts.slice(0, 3).map(Number);
+  if (nums.some(isNaN)) return null;
+  return nums as [number, number, number];
+}
+
+/**
+ * Return -1 if a < b, 0 if equal, 1 if a > b (semver comparison).
+ */
+function compareSemver(
+  a: [number, number, number],
+  b: [number, number, number]
+): -1 | 0 | 1 {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] < b[i]) return -1;
+    if (a[i] > b[i]) return 1;
+  }
+  return 0;
+}
+
+/**
+ * Inspect a pre-fetched {@link DaemonStatus} and app version string to decide
+ * if the daemon is stale (running an OLDER build than the app). Returns the
+ * daemon's reported version string when stale, `"unknown"` when it predates
+ * the `build_version` field, or `null` when not stale (same version, daemon
+ * is NEWER, or comparison isn't possible).
  *
- * A daemon is considered stale when its `build_version` semver prefix (the part
- * before any `+git-sha`) differs from the app's version, OR when it reports no
- * `build_version` at all (a build predating this field — itself a stale signal
- * once this app ships). Best-effort: any error (e.g. daemon offline) yields
- * `null` so callers never block startup on this check.
+ * Only flags as stale when the daemon is strictly OLDER — a daemon that is
+ * NEWER than the app (e.g. the user rolled back) is not flagged so the banner
+ * doesn't appear in that direction.
+ */
+export function detectStaleDaemonFromStatus(
+  status: Partial<DaemonStatus> | null,
+  appVer: string
+): string | null {
+  if (!status) return null;
+  const reported = status.build_version ?? null;
+  // No version field => daemon predates this build => stale by definition.
+  if (reported === null || reported === "") return "unknown";
+  const reportedPrefix = reported.split("+")[0];
+  if (reportedPrefix === appVer) return null;
+  // Parse both as semver to determine direction.
+  const daemonParsed = parseSemver(reportedPrefix);
+  const appParsed = parseSemver(appVer);
+  if (!daemonParsed || !appParsed) {
+    // Cannot parse — fall back to string inequality: flag as stale when different.
+    return reportedPrefix !== appVer ? reported : null;
+  }
+  const cmp = compareSemver(daemonParsed, appParsed);
+  // Only stale when daemon is strictly OLDER (cmp === -1).
+  return cmp === -1 ? reported : null;
+}
+
+/**
+ * Compare the running daemon's build to the app's own. Returns the daemon's
+ * version when it is STALE (survived an upgrade — strictly OLDER semver),
+ * else `null`.
+ *
+ * Only flags as stale when the daemon is strictly OLDER than the app. A daemon
+ * that is NEWER (e.g. after a rollback) is NOT flagged. Best-effort: any error
+ * (e.g. daemon offline) yields `null` so callers never block startup on this check.
  */
 export async function detectStaleDaemon(): Promise<string | null> {
   let appVer: string;
@@ -344,9 +419,5 @@ export async function detectStaleDaemon(): Promise<string | null> {
   } catch {
     return null;
   }
-  const reported = status.build_version ?? null;
-  // No version field => daemon predates this build => stale by definition.
-  if (reported === null || reported === "") return "unknown";
-  const reportedPrefix = reported.split("+", 1)[0];
-  return reportedPrefix === appVer ? null : reported;
+  return detectStaleDaemonFromStatus(status, appVer);
 }

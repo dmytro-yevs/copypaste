@@ -32,7 +32,7 @@
 use std::path::PathBuf;
 use std::process::Child;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tauri::Manager;
 
@@ -40,11 +40,23 @@ use tauri::Manager;
 /// leftover instance from a prior install — we no longer install it ourselves).
 const LAUNCHD_LABEL: &str = "com.copypaste.daemon";
 
+/// How long to poll for socket release after sending SIGTERM, before giving up.
+const SOCKET_RELEASE_TIMEOUT: Duration = Duration::from_secs(3);
+/// Polling interval while waiting for socket release.
+const SOCKET_POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// Maximum wait for the daemon socket to become reachable after spawn.
+const SOCKET_READY_TIMEOUT: Duration = Duration::from_millis(2000);
+
 /// Managed state holding the handle to the daemon child process the app
 /// spawned (if any). `None` means the app has not (yet) started a daemon, or
 /// spawning failed — in which case the degraded UI surfaces it.
 #[derive(Default)]
 pub struct DaemonChild(pub Mutex<Option<Child>>);
+
+/// Last spawn error, surfaced to the frontend via [`get_daemon_error`].
+/// `None` means no error (or daemon started successfully).
+#[derive(Default)]
+pub struct DaemonSpawnError(pub Mutex<Option<String>>);
 
 /// Resolve the daemon socket path. Mirrors
 /// `copypaste-daemon::paths::socket_path` and `ipc::socket_path` so the probe
@@ -87,6 +99,56 @@ fn daemon_reachable() -> bool {
     true
 }
 
+/// Return `true` if the socket *file* exists (regardless of whether it answers).
+fn socket_file_exists() -> bool {
+    socket_path().exists()
+}
+
+/// Minimal `status` reply we care about for eviction decisions.
+/// We use a raw JSON probe to avoid pulling in daemon types here.
+struct StatusReply {
+    pid: Option<u32>,
+    build_version: Option<String>,
+    degraded: bool,
+}
+
+/// Probe the daemon's `status` IPC method synchronously over the Unix socket.
+/// Returns `None` if the socket is unreachable or the reply cannot be parsed.
+#[cfg(unix)]
+fn probe_status() -> Option<StatusReply> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+
+    let mut stream = UnixStream::connect(socket_path()).ok()?;
+    stream
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .ok()?;
+    // Newline-delimited JSON-RPC used by copypaste-daemon.
+    let req = r#"{"jsonrpc":"2.0","id":1,"method":"status","params":null}"#;
+    writeln!(stream, "{req}").ok()?;
+    let mut reader = BufReader::new(stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).ok()?;
+    let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    let result = v.get("result")?;
+    Some(StatusReply {
+        pid: result.get("pid").and_then(|p| p.as_u64()).map(|p| p as u32),
+        build_version: result
+            .get("build_version")
+            .and_then(|bv| bv.as_str())
+            .map(|s| s.to_string()),
+        degraded: result
+            .get("degraded")
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false),
+    })
+}
+
+#[cfg(not(unix))]
+fn probe_status() -> Option<StatusReply> {
+    None
+}
+
 /// Resolve the bundled daemon binary path: a sibling of the currently-running
 /// UI executable (`…/Contents/MacOS/copypaste-daemon`).
 fn bundled_daemon_path() -> Option<PathBuf> {
@@ -100,11 +162,14 @@ fn bundled_daemon_path() -> Option<PathBuf> {
     candidate.exists().then_some(candidate)
 }
 
-// Minimal `getuid` shim so we don't pull in the `libc` crate for one call.
+// SAFETY: getuid() is an async-signal-safe, always-succeeding POSIX function
+// with no side effects. Calling it via FFI is safe.
 #[cfg(target_os = "macos")]
-extern "C" {
-    #[link_name = "getuid"]
-    fn libc_getuid() -> u32;
+fn current_uid_libc() -> u32 {
+    extern "C" {
+        fn getuid() -> u32;
+    }
+    unsafe { getuid() }
 }
 
 /// Best-effort boot-out of any leftover LaunchAgent so launchd cannot revive
@@ -113,8 +178,7 @@ extern "C" {
 fn bootout_launchagent() {
     #[cfg(target_os = "macos")]
     {
-        // SAFETY: getuid is always safe and never fails.
-        let uid = unsafe { libc_getuid() };
+        let uid = current_uid_libc();
         let target = format!("gui/{uid}/{LAUNCHD_LABEL}");
         let _ = std::process::Command::new("launchctl")
             .args(["bootout", &target])
@@ -122,21 +186,105 @@ fn bootout_launchagent() {
     }
 }
 
-/// Best-effort `SIGTERM` to any *other* `copypaste-daemon` process (an old one
-/// left over after an upgrade or started by a legacy agent). Uses `pkill` so we
-/// don't need a PID file. Runs only on unix.
-fn terminate_stray_daemons() {
-    #[cfg(unix)]
-    {
-        // -TERM: graceful; the daemon flushes on SIGTERM. Match the binary name
-        // so we don't hit unrelated processes.
-        let _ = std::process::Command::new("pkill")
-            .args(["-TERM", "-f", "copypaste-daemon"])
-            .output();
+/// Send SIGTERM to a specific PID. Refuses to signal pid 0 or 1 (safety guard).
+#[cfg(unix)]
+fn sigterm_pid(pid: u32) {
+    // Never signal init (1) or the broadcast pid (0).
+    if pid <= 1 {
+        tracing::warn!("sigterm_pid: refusing to signal pid {pid}");
+        return;
     }
+    // Also refuse to signal our own process.
+    if pid == std::process::id() {
+        tracing::warn!("sigterm_pid: refusing to signal self");
+        return;
+    }
+    let _ = std::process::Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .output();
+}
+
+/// Terminate any stale daemon using the exact binary name (not substring match).
+/// Falls back to `pkill -x` (exact name) only when we do not have a live PID.
+#[cfg(unix)]
+fn terminate_stray_by_name() {
+    // -x: exact name match — never a substring match like -f.
+    let _ = std::process::Command::new("pkill")
+        .args(["-TERM", "-x", "copypaste-daemon"])
+        .output();
+}
+
+/// Wait (up to `timeout`) for the socket to be gone (released by dying process).
+/// Polls every `SOCKET_POLL_INTERVAL`. Returns when the socket is gone or on timeout.
+fn wait_for_socket_released(timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if !socket_file_exists() && !daemon_reachable() {
+            return;
+        }
+        std::thread::sleep(SOCKET_POLL_INTERVAL);
+    }
+    tracing::warn!(
+        "wait_for_socket_released: timed out after {}ms; socket may still be held",
+        timeout.as_millis()
+    );
+}
+
+/// Evict any pre-existing daemon so the freshly-installed binary always wins.
+///
+/// Strategy:
+/// 1. If the socket answers `status`, use the reported PID for targeted SIGTERM
+///    and also inspect version/degraded for logging.
+/// 2. If the socket *file* exists but doesn't answer, treat as stale: remove
+///    the file and fall back to `pkill -x` by name.
+/// 3. Either way, poll until the socket is gone before returning so the new
+///    daemon won't see a live socket when it tries to bind.
+#[cfg(unix)]
+fn evict_stray_daemon() {
+    if let Some(status) = probe_status() {
+        // Socket answered — targeted SIGTERM by PID.
+        if let Some(pid) = status.pid {
+            tracing::info!(
+                "evict_stray_daemon: sending SIGTERM to daemon pid={pid} \
+                 build={:?} degraded={}",
+                status.build_version,
+                status.degraded
+            );
+            sigterm_pid(pid);
+        } else {
+            // Status answered but no pid field — fall back to name match.
+            tracing::info!("evict_stray_daemon: no pid in status reply; using pkill -x");
+            terminate_stray_by_name();
+        }
+    } else if socket_file_exists() {
+        // Socket file exists but didn't answer — stale. Clean it up and kill by name.
+        tracing::info!(
+            "evict_stray_daemon: socket exists but is unresponsive — \
+             removing stale socket file and sending pkill -x"
+        );
+        let sock = socket_path();
+        let _ = std::fs::remove_file(&sock);
+        terminate_stray_by_name();
+    } else {
+        // No socket at all — nothing to evict.
+        return;
+    }
+
+    // Poll until the socket is confirmed gone before the caller spawns.
+    wait_for_socket_released(SOCKET_RELEASE_TIMEOUT);
+}
+
+#[cfg(not(unix))]
+fn evict_stray_daemon() {
+    // No-op on non-unix.
 }
 
 /// Ensure the daemon is running, starting the bundled one if needed.
+///
+/// Always attempts eviction: if the socket answers, we read its pid/version to
+/// decide; if the socket file exists but is silent, we treat it as stale.
+/// After eviction, we poll until the socket is gone, THEN spawn — eliminating
+/// the fixed-sleep race where a still-live socket causes the new daemon to bail.
 ///
 /// Returns `Ok(true)` if the app started a daemon (handle stored in managed
 /// state) and it became reachable, or an `Err` describing why the app could
@@ -147,14 +295,10 @@ pub fn ensure_daemon_running(app: &tauri::AppHandle) -> Result<bool, String> {
     //    cannot fight the app-owned lifecycle.
     bootout_launchagent();
 
-    // 2. Stop any pre-existing daemon so the freshly-installed binary always
-    //    wins (fixes stale-daemon-after-upgrade). We do this even if the socket
-    //    currently answers — the answering process may be the OLD binary.
-    if daemon_reachable() {
-        terminate_stray_daemons();
-        // Give the old daemon a beat to release the socket before we rebind.
-        std::thread::sleep(Duration::from_millis(250));
-    }
+    // 2. Always attempt eviction (fixes wedged/stale daemon after upgrade).
+    //    Unlike the old code that skipped eviction when daemon_reachable()=false,
+    //    we handle all three cases: reachable, socket-exists-but-silent, no socket.
+    evict_stray_daemon();
 
     // 3. Spawn the fresh bundled daemon.
     let bin = bundled_daemon_path().ok_or_else(|| {
@@ -168,24 +312,54 @@ pub fn ensure_daemon_running(app: &tauri::AppHandle) -> Result<bool, String> {
     if let Some(state) = app.try_state::<DaemonChild>() {
         // Replace any previously-tracked child (shouldn't exist at startup, but
         // be defensive). Dropping the old handle does not kill it.
-        let mut guard = state.0.lock().expect("DaemonChild mutex poisoned");
+        // Use unwrap_or_else on poisoned mutex so a panic in a prior thread
+        // never blocks app exit or a successful subsequent call.
+        let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
         *guard = Some(child);
     }
 
-    // 4. Wait briefly for the socket to come up so the first UI queries
-    //    succeed. If it never comes up, surface a LOUD error.
-    for _ in 0..40 {
+    // 4. Wait for the socket to come up. Poll up to SOCKET_READY_TIMEOUT.
+    let deadline = Instant::now() + SOCKET_READY_TIMEOUT;
+    while Instant::now() < deadline {
         if daemon_reachable() {
             tracing::info!("app-owned daemon is up (binary: {})", bin.display());
             return Ok(true);
         }
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(SOCKET_POLL_INTERVAL);
     }
     Err(format!(
-        "started daemon at {} but it did not become reachable on {}",
+        "started daemon at {} but it did not become reachable on {} within {}ms",
         bin.display(),
-        socket_path().display()
+        socket_path().display(),
+        SOCKET_READY_TIMEOUT.as_millis()
     ))
+}
+
+/// Ensure the daemon is running on a background thread. The result is stored
+/// in [`DaemonSpawnError`] managed state and optionally emitted as a Tauri
+/// event `"daemon-spawn-result"` so the UI can surface failures without
+/// blocking the main thread (tray + window render immediately).
+pub fn ensure_daemon_running_async(app: tauri::AppHandle) {
+    let app_clone = app.clone();
+    std::thread::spawn(move || {
+        let result = ensure_daemon_running(&app_clone);
+        // Store the error (or clear it on success) so `get_daemon_error` can read it.
+        if let Some(state) = app_clone.try_state::<DaemonSpawnError>() {
+            let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = result.as_ref().err().cloned();
+        }
+        // Emit an event so the UI knows the daemon is (or isn't) ready.
+        let payload = match &result {
+            Ok(_) => serde_json::json!({ "ok": true }),
+            Err(e) => serde_json::json!({ "ok": false, "error": e }),
+        };
+        if let Err(e) = tauri::Emitter::emit(&app_clone, "daemon-spawn-result", payload) {
+            tracing::warn!("failed to emit daemon-spawn-result event: {e}");
+        }
+        if let Err(e) = result {
+            tracing::error!("failed to start app-owned daemon: {e}");
+        }
+    });
 }
 
 /// Stop the daemon the app started (called on full app exit).
@@ -201,7 +375,9 @@ pub fn stop_daemon(app: &tauri::AppHandle) {
     let Some(state) = app.try_state::<DaemonChild>() else {
         return;
     };
-    let mut guard = state.0.lock().expect("DaemonChild mutex poisoned");
+    // Use unwrap_or_else so a poisoned mutex (from a panicked thread) never
+    // blocks app exit — we take the inner value and proceed.
+    let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
     let Some(mut child) = guard.take() else {
         // We never started a daemon — nothing of ours to reap.
         return;
@@ -210,11 +386,9 @@ pub fn stop_daemon(app: &tauri::AppHandle) {
     let pid = child.id();
     #[cfg(unix)]
     {
-        // Graceful SIGTERM via `kill` so the daemon flushes WAL / Keychain
+        // Graceful SIGTERM via targeted kill so the daemon flushes WAL / Keychain
         // state before exiting (`Child::kill` would send SIGKILL).
-        let _ = std::process::Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .output();
+        sigterm_pid(pid);
         // Reap so we don't leave a zombie; give it a moment, then force-kill.
         for _ in 0..40 {
             match child.try_wait() {
@@ -238,12 +412,7 @@ pub fn stop_daemon(app: &tauri::AppHandle) {
 }
 
 // ---------------------------------------------------------------------------
-// Daemon UPGRADE / RESTART commands exposed to the frontend (from the stale-
-// daemon-eviction work). These talk to `launchctl` (not the daemon IPC) so
-// they work even when the daemon is wedged. They complement the app-owned
-// lifecycle above: `restart_daemon` is the user-facing recovery button, and
-// `app_version` lets the UI detect a stale daemon that survived an upgrade.
-// (`LAUNCHD_LABEL` is shared with the app-owned helpers above — defined once.)
+// Tauri commands
 // ---------------------------------------------------------------------------
 
 /// The app's own build version (the crate version, e.g. `"0.5.2"`).
@@ -256,134 +425,69 @@ pub fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Return the last spawn error from [`ensure_daemon_running_async`], if any.
+///
+/// Returns `null` when the daemon started successfully (or hasn't been
+/// attempted yet). The UI should listen for the `"daemon-spawn-result"` event
+/// for real-time feedback; this command is the fallback for views that load
+/// after the event fires.
+#[tauri::command]
+pub fn get_daemon_error(app: tauri::AppHandle) -> Option<String> {
+    app.try_state::<DaemonSpawnError>()
+        .and_then(|state| state.0.lock().unwrap_or_else(|e| e.into_inner()).clone())
+}
+
 /// Restart the daemon so the freshly-installed binary takes over.
 ///
-/// On macOS this uses `launchctl kickstart -k gui/<uid>/<label>`, which
-/// terminates the current job instance and starts a new one from the plist's
-/// `ProgramArguments` (the on-disk binary). When the job is not currently
-/// bootstrapped (e.g. a prior `bootout`), `kickstart` fails; we then fall back
-/// to `bootout` (best-effort) + `bootstrap` of the user's installed plist.
+/// In app-owned mode the LaunchAgent is not used, so this stops the tracked
+/// child (SIGTERM + reap) then calls `ensure_daemon_running` to respawn the
+/// bundled binary. This works even when the daemon is degraded or unresponsive
+/// because it talks to the child handle directly, not via IPC.
 ///
-/// Because everything goes through `launchctl`, this works even when the daemon
-/// is degraded or unresponsive on the IPC socket.
-///
-/// Returns `Ok(())` on success or a human-readable error string the UI surfaces
-/// loudly.
+/// Returns `Ok(())` on success or a human-readable error string the UI
+/// surfaces loudly.
 #[tauri::command]
-pub fn restart_daemon() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+pub fn restart_daemon(app: tauri::AppHandle) -> Result<(), String> {
+    // Step 1: stop the currently tracked child gracefully.
+    stop_tracked_child(&app);
+
+    // Step 2: spawn a fresh one and wait for it to become reachable.
+    ensure_daemon_running(&app).map(|_| ())
+}
+
+/// Stop the child we're tracking (used by restart_daemon before respawn).
+/// Mirrors stop_daemon but does NOT bootout the LaunchAgent — we are about to
+/// respawn, not quit the app.
+fn stop_tracked_child(app: &tauri::AppHandle) {
+    let Some(state) = app.try_state::<DaemonChild>() else {
+        return;
+    };
+    let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut child) = guard.take() else {
+        return;
+    };
+    let pid = child.id();
+    #[cfg(unix)]
     {
-        restart_daemon_macos()
+        sigterm_pid(pid);
+        for _ in 0..40 {
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    tracing::info!("restart_daemon: stopped tracked child (pid {pid})");
+                    return;
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+                Err(_) => break,
+            }
+        }
+        // Force-kill if it didn't exit gracefully.
+        let _ = child.kill();
+        let _ = child.wait();
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(unix))]
     {
-        Err("Restarting the daemon from the app is only supported on macOS.".to_string())
+        let _ = child.kill();
+        let _ = child.wait();
     }
-}
-
-#[cfg(target_os = "macos")]
-fn restart_daemon_macos() -> Result<(), String> {
-    use std::process::Command;
-
-    let uid = current_uid()?;
-    let service_target = format!("gui/{uid}/{LAUNCHD_LABEL}");
-
-    // Primary path: kickstart -k kills the running instance and relaunches it
-    // from the plist's ProgramArguments (the on-disk binary).
-    let kick = Command::new("/bin/launchctl")
-        .args(["kickstart", "-k", &service_target])
-        .output();
-
-    match kick {
-        Ok(out) if out.status.success() => {
-            tracing::info!("restart_daemon: kickstarted {service_target}");
-            return Ok(());
-        }
-        Ok(out) => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            tracing::warn!(
-                "restart_daemon: kickstart {service_target} failed ({}): {} — \
-                 falling back to bootout+bootstrap",
-                out.status,
-                stderr.trim()
-            );
-        }
-        Err(e) => {
-            return Err(format!("failed to invoke launchctl kickstart: {e}"));
-        }
-    }
-
-    // Fallback: the job may not be bootstrapped (e.g. after a prior bootout, or
-    // a fresh install where the plist exists but was never loaded). Bootout
-    // best-effort (ignore failure — it just means it wasn't loaded), then
-    // bootstrap the installed plist.
-    let domain = format!("gui/{uid}");
-    let _ = Command::new("/bin/launchctl")
-        .args(["bootout", &service_target])
-        .output();
-
-    let plist = installed_plist_path()
-        .ok_or_else(|| "cannot resolve LaunchAgents plist path (HOME unset?)".to_string())?;
-    if !plist.exists() {
-        return Err(format!(
-            "daemon LaunchAgent plist not found at {} — reinstall CopyPaste to restore it",
-            plist.display()
-        ));
-    }
-
-    // Clearing any stale `disabled` override before bootstrap mirrors the
-    // installer (`scripts/launchd/install-agent.sh`): a prior disable would
-    // make bootstrap fail with "Input/output error".
-    let _ = Command::new("/bin/launchctl")
-        .args(["enable", &service_target])
-        .output();
-
-    let boot = Command::new("/bin/launchctl")
-        .args(["bootstrap", &domain, &plist.to_string_lossy()])
-        .output()
-        .map_err(|e| format!("failed to invoke launchctl bootstrap: {e}"))?;
-
-    if boot.status.success() {
-        tracing::info!(
-            "restart_daemon: bootstrapped {service_target} from {}",
-            plist.display()
-        );
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&boot.stderr);
-        Err(format!(
-            "launchctl bootstrap failed ({}): {}",
-            boot.status,
-            stderr.trim()
-        ))
-    }
-}
-
-/// Resolve the current numeric UID via `id -u` (no extra crate dependency —
-/// the restart path already shells out to `launchctl`). Matches how the
-/// LaunchAgent installer and the Cask postflight derive the GUI domain.
-#[cfg(target_os = "macos")]
-fn current_uid() -> Result<u32, String> {
-    let out = std::process::Command::new("/usr/bin/id")
-        .arg("-u")
-        .output()
-        .map_err(|e| format!("failed to run `id -u`: {e}"))?;
-    if !out.status.success() {
-        return Err(format!("`id -u` exited with {}", out.status));
-    }
-    String::from_utf8_lossy(&out.stdout)
-        .trim()
-        .parse::<u32>()
-        .map_err(|e| format!("could not parse uid from `id -u`: {e}"))
-}
-
-/// Path to the user's installed LaunchAgent plist
-/// (`~/Library/LaunchAgents/com.copypaste.daemon.plist`).
-#[cfg(target_os = "macos")]
-fn installed_plist_path() -> Option<std::path::PathBuf> {
-    let home = home::home_dir()?;
-    Some(
-        home.join("Library/LaunchAgents")
-            .join(format!("{LAUNCHD_LABEL}.plist")),
-    )
+    tracing::info!("restart_daemon: stopped tracked child (pid {pid})");
 }

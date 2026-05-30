@@ -86,6 +86,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(CurrentShortcut(Mutex::new(cfg.popup_shortcut)))
         .manage(daemon_lifecycle::DaemonChild::default())
+        .manage(daemon_lifecycle::DaemonSpawnError::default())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             ipc::ipc_call,
@@ -93,6 +94,7 @@ pub fn run() {
             ipc::reset_database,
             daemon_lifecycle::app_version,
             daemon_lifecycle::restart_daemon,
+            daemon_lifecycle::get_daemon_error,
             get_popup_shortcut,
             set_popup_shortcut,
             check_accessibility_permission,
@@ -111,12 +113,12 @@ pub fn run() {
                 *guard = persisted.popup_shortcut.clone();
             }
 
-            // App-owned daemon lifecycle: ensure the daemon is running BEFORE
-            // the tray (which queries it) is built. Failures are surfaced loudly
-            // via the log and the daemon-offline UI — never swallowed.
-            if let Err(e) = daemon_lifecycle::ensure_daemon_running(app.handle()) {
-                tracing::error!("failed to start app-owned daemon: {e}");
-            }
+            // App-owned daemon lifecycle: start the daemon on a background
+            // thread so the tray and window render immediately (MED-b fix).
+            // The result is stored in DaemonSpawnError state and emitted as
+            // the "daemon-spawn-result" event; the UI reads it via
+            // get_daemon_error or the event listener.
+            daemon_lifecycle::ensure_daemon_running_async(app.handle().clone());
 
             // Register macOS-only managed state.
             #[cfg(target_os = "macos")]
