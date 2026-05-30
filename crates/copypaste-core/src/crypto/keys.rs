@@ -112,12 +112,16 @@ pub(crate) const HKDF_SALT_V2: &[u8; 32] = &[
 ///
 /// This is the single-device equivalent of [`derive_storage_key_v2`]: it does
 /// NOT take a `pair_id` because local-storage encryption has no peer concept.
-pub fn derive_v2(seed: &[u8; 32]) -> [u8; 32] {
+/// Item 5: return type changed from `[u8; 32]` to `Zeroizing<[u8; 32]>` so
+/// the derived key material is scrubbed from the heap when the caller drops
+/// it. Call sites that need a `&[u8; 32]` borrow use `&*key` or benefit from
+/// deref-coercion in function-call position.
+pub fn derive_v2(seed: &[u8; 32]) -> zeroize::Zeroizing<[u8; 32]> {
     let hk = Hkdf::<Sha512>::new(Some(HKDF_SALT_V2), seed);
     let mut key = [0u8; 32];
     hk.expand(b"copypaste-local-storage-v2", &mut key)
         .expect("HKDF-SHA512 expand 32 bytes always succeeds");
-    key
+    zeroize::Zeroizing::new(key)
 }
 
 /// v1 local-storage-key derivation, exposed as a free function so the
@@ -501,8 +505,9 @@ mod tests {
         let seed = [0xB2u8; 32];
         let v1 = derive_storage_key_v1(&seed);
         let v2 = derive_v2(&seed);
+        // Deref Zeroizing to [u8;32] for comparison with the v1 plain array.
         assert_ne!(
-            v1, v2,
+            v1, *v2,
             "derive_v2 must not collide with derive_storage_key_v1"
         );
     }
@@ -514,8 +519,9 @@ mod tests {
         let seed = [0xC3u8; 32];
         let local_v2 = derive_v2(&seed);
         let pair_v2 = derive_storage_key_v2(&seed, "some-pair-id");
+        // Deref Zeroizing to [u8;32] for comparison with the plain array.
         assert_ne!(
-            local_v2, pair_v2,
+            *local_v2, pair_v2,
             "local derive_v2 must not collide with per-pair derive_storage_key_v2"
         );
     }

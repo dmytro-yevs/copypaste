@@ -61,7 +61,8 @@ pub struct SyncCrypto {
     /// This device's v1 local-storage key (the raw seed from `load_local_key`).
     v1_key: [u8; 32],
     /// This device's v2 local-storage key (`derive_v2(seed)`).
-    v2_key: [u8; 32],
+    /// Item 5: wrapped in `Zeroizing` so the key bytes are scrubbed on drop.
+    v2_key: zeroize::Zeroizing<[u8; 32]>,
     /// Path to `peers.json`, re-read on each crypto operation so a peer paired
     /// at runtime contributes its shared sync key without a restart.
     peers_path: PathBuf,

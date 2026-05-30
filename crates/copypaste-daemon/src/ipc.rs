@@ -2354,7 +2354,35 @@ impl IpcServer {
                 // all do blocking fs I/O; run them on the blocking thread pool.
                 let core_config_arc = self.core_config.clone();
                 let join = tokio::task::spawn_blocking(move || {
-                    let merged = merge_config(read_config(), incoming);
+                    let mut merged = merge_config(read_config(), incoming);
+                    // Item 1 (keychain supabase_password): if the caller supplied a
+                    // new password, migrate it to the macOS Keychain and remove it
+                    // from the config struct so it is NOT written to config.json in
+                    // plain text. On failure (non-macOS, unsigned build without
+                    // Keychain access) we keep the existing config.json behaviour as
+                    // a fallback — the password stays in merged and is written to
+                    // the 0600 config.json, same as before the fix.
+                    if let Some(ref pw) = merged.supabase_password.clone() {
+                        match crate::keychain::store_supabase_password_to_keychain(pw) {
+                            Ok(()) => {
+                                tracing::info!(
+                                    "supabase_password migrated to Keychain; \
+                                     removing from config.json"
+                                );
+                                merged.supabase_password = None;
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    "supabase_password Keychain store failed; \
+                                     falling back to config.json persistence"
+                                );
+                                // Leave merged.supabase_password as-is so
+                                // write_config below persists it to the 0600
+                                // config.json (existing behaviour pre-fix).
+                            }
+                        }
+                    }
                     // Persist IPC fields (Supabase creds, p2p_enabled) to config.json.
                     write_config(&merged)?;
                     // Persist limit fields to config.toml AND return the new

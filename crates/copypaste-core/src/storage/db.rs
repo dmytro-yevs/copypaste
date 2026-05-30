@@ -185,11 +185,19 @@ fn key_pragma(key: &[u8; 32]) -> zeroize::Zeroizing<String> {
 /// — every code path that opens a SQLCipher connection must apply the same
 /// set so behaviour is uniform across UI reader, daemon writer, and the
 /// migration pass.
+///
+/// Item 4: `cache_size = -8192` sets an 8 MB page cache per connection
+/// (negative value = KiB units; 8192 KiB = 8 MB = `SQLITE_CACHE_MB` default).
+/// Previously absent, so SQLite fell back to its own tiny default (≈2 MB).
+/// If a future change threads `AppConfig::sqlite_cache_mb` through `open()`,
+/// replace the literal with `-N*1024` computed at runtime and remove this pragma
+/// from the static constant.
 pub(crate) const CONNECTION_PRAGMAS: &str = "\
 PRAGMA busy_timeout = 5000;\n\
 PRAGMA synchronous = NORMAL;\n\
 PRAGMA foreign_keys = ON;\n\
-PRAGMA temp_store = MEMORY;\n";
+PRAGMA temp_store = MEMORY;\n\
+PRAGMA cache_size = -8192;\n";
 
 impl Database {
     /// Open (or create) an encrypted database at `path`.
