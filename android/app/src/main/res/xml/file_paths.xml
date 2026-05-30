@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    FileProvider paths for LogExportHelper.
+
+    external-files-path maps to Context.getExternalFilesDir(null) —
+    app-scoped external storage, no permission needed on API 29+.
+
+    The "logs" subdirectory is also directly adb-pullable without root:
+      adb pull /sdcard/Android/data/com.copypaste.android/files/logs/
+-->
+<paths>
+    <external-files-path
+        name="log_files"
+        path="logs/" />
+    <!-- Also expose the cache dir so LogExportHelper can share the zip
+         assembled in cacheDir/log_export/copypaste_logs.zip -->
+    <cache-path
+        name="log_export_cache"
+        path="log_export/" />
+</paths>

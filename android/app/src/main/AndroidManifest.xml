@@ -32,6 +32,17 @@
     <!-- WorkManager expedited jobs on Android 12+ require FOREGROUND_SERVICE.
          Already declared above. No additional permission needed for expedited jobs. -->
 
+    <!--
+        READ_LOGS: signature-level permission used by LogcatCaptureService.
+        Cannot be granted by the user via a dialog — must be granted via adb:
+          adb shell pm grant com.copypaste.android android.permission.READ_LOGS
+        Declaring it here allows checkSelfPermission to return GRANTED after the
+        adb grant. Without the declaration the grant command is rejected.
+        This permission is NOT requested at runtime and is NOT required for any
+        core functionality — it is an opt-in power-user fallback only.
+    -->
+    <uses-permission android:name="android.permission.READ_LOGS" />
+
     <application
         android:name=".CopyPasteApp"
         android:label="@string/app_name"
@@ -175,6 +186,18 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            LogcatCaptureService: optional power-user background capture path.
+            Reads clipboard-change events from the system logcat stream when
+            android.permission.READ_LOGS has been granted via adb. This is a
+            best-effort fallback — the primary background capture mechanism is
+            ClipboardAccessibilityService. See LogcatCaptureService.kt for
+            full documentation of capabilities and limitations per Android version.
+        -->
+        <service
+            android:name=".LogcatCaptureService"
+            android:exported="false" />
+
         <!-- WorkManager: Supabase poll worker registered at runtime when backend = SUPABASE.
              ServiceRestartWorker is also registered at runtime by WorkManager. -->
         <provider
@@ -183,5 +206,27 @@
             android:exported="false"
             tools:node="remove"
             xmlns:tools="http://schemas.android.com/tools" />
+
+        <!--
+            FileProvider for log export (LogExportHelper).
+
+            Shares log files from getExternalFilesDir(null)/logs/ via a
+            content:// URI so Share intents work safely with third-party apps.
+
+            The same directory is directly adb-pullable without root:
+              adb pull /sdcard/Android/data/com.copypaste.android/files/logs/
+
+            Authority must match LogExportHelper.AUTHORITY =
+              "com.copypaste.android.fileprovider"
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>
