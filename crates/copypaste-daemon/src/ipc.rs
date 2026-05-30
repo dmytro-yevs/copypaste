@@ -2365,11 +2365,28 @@ impl IpcServer {
                     if let Some(ref pw) = merged.supabase_password.clone() {
                         match crate::keychain::store_supabase_password_to_keychain(pw) {
                             Ok(()) => {
-                                tracing::info!(
-                                    "supabase_password migrated to Keychain; \
-                                     removing from config.json"
-                                );
-                                merged.supabase_password = None;
+                                // Only drop the plaintext from config.json once the
+                                // Keychain ACTUALLY returns it. Under the ephemeral-key
+                                // bypass (CI / unsigned dev builds) `store_*` is a no-op
+                                // that still returns Ok(()); a blind strip would then
+                                // silently lose the secret from both stores. The
+                                // read-back confirms real persistence before we delete
+                                // the on-disk copy.
+                                if crate::keychain::read_supabase_password_from_keychain()
+                                    .as_deref()
+                                    == Some(pw.as_str())
+                                {
+                                    tracing::info!(
+                                        "supabase_password migrated to Keychain; \
+                                         removing from config.json"
+                                    );
+                                    merged.supabase_password = None;
+                                } else {
+                                    tracing::debug!(
+                                        "supabase_password Keychain store is a no-op \
+                                         (ephemeral/bypass mode); keeping it in config.json"
+                                    );
+                                }
                             }
                             Err(e) => {
                                 tracing::warn!(
@@ -7726,10 +7743,18 @@ mod tests {
             "set_config must succeed: {set_resp:?}"
         );
 
-        // The persisted password must be intact.
+        // The persisted password must be intact. The daemon stores it in the
+        // Keychain first (stripping it from config.json) and only falls back to
+        // config.json when the Keychain is unavailable — exactly how the cloud
+        // path retrieves it (cloud.rs: keychain-first, config fallback). Assert
+        // that *effective* value so the test is robust whether or not the real
+        // Keychain is reachable (CI runs with COPYPASTE_EPHEMERAL_KEY, so the
+        // password stays in config.json; a signed build stores it in Keychain).
         let persisted = read_config();
+        let effective_pw = crate::keychain::read_supabase_password_from_keychain()
+            .or_else(|| persisted.supabase_password.clone());
         assert_eq!(
-            persisted.supabase_password.as_deref(),
+            effective_pw.as_deref(),
             Some("do-not-wipe-me"),
             "set_config with the redacted shape must NOT wipe the stored password"
         );

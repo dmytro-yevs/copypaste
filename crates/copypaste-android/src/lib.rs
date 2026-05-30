@@ -1146,8 +1146,10 @@ mod tests {
     /// Wrong passphrase must cause DecryptionFailed.
     #[test]
     fn cloud_decrypt_wrong_passphrase_fails() {
-        let enc_key = derive_cloud_sync_key("correct".into()).expect("derive enc");
-        let dec_key = derive_cloud_sync_key("wrong".into()).expect("derive dec");
+        // Passphrases must be >= MIN_PASSPHRASE_LEN (8); derive_sync_key rejects
+        // shorter ones with PassphraseTooShort (surfaced here as EncryptionFailed).
+        let enc_key = derive_cloud_sync_key("correct-passphrase".into()).expect("derive enc");
+        let dec_key = derive_cloud_sync_key("wrong-passphrase".into()).expect("derive dec");
         let blob = cloud_encrypt("item-x".into(), b"data", &enc_key).expect("encrypt");
         let result = cloud_decrypt("item-x".into(), &blob, &dec_key);
         assert!(
