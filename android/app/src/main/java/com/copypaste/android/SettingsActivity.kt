@@ -76,6 +76,8 @@ fun SettingsScreen(
     var syncEnabled by remember { mutableStateOf(settings.syncEnabled) }
     var showWarnings by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
+    var notifyOnCopy by remember { mutableStateOf(settings.notifyOnCopy) }
+    var soundOnCopy by remember { mutableStateOf(settings.soundOnCopy) }
 
     // ── Sync backend ──
     var syncBackend by remember { mutableStateOf(settings.syncBackend) }
@@ -282,6 +284,33 @@ fun SettingsScreen(
                 )
                 HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
             }
+
+            // ── Notifications (copy event parity with macOS) ───────────────────
+            SectionLabel(stringResource(R.string.section_notifications))
+            SettingsRow(
+                title = stringResource(R.string.setting_notify_on_copy_title),
+                subtitle = stringResource(R.string.setting_notify_on_copy_subtitle),
+                checked = notifyOnCopy,
+                onCheckedChange = {
+                    val prev = notifyOnCopy; notifyOnCopy = it
+                    try { settings.notifyOnCopy = it } catch (e: Exception) {
+                        notifyOnCopy = prev; settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                }
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+            SettingsRow(
+                title = stringResource(R.string.setting_sound_on_copy_title),
+                subtitle = stringResource(R.string.setting_sound_on_copy_subtitle),
+                checked = soundOnCopy,
+                onCheckedChange = {
+                    val prev = soundOnCopy; soundOnCopy = it
+                    try { settings.soundOnCopy = it } catch (e: Exception) {
+                        soundOnCopy = prev; settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                }
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
             // ── Device ID (read-only) ──────────────────────────────────────────
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {

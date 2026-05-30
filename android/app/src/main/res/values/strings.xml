@@ -25,6 +25,9 @@
     <string name="pair_token_expired">Token expired — request a new one.</string>
     <string name="pair_request_new_token">Request new token</string>
 
+    <!-- Settings — section headers -->
+    <string name="section_notifications">Notifications</string>
+
     <!-- Settings -->
     <string name="setting_sync_enabled_title">Enable Clipboard Sync</string>
     <string name="setting_sync_enabled_subtitle">Sync clipboard items with paired devices via the relay.</string>
@@ -37,6 +40,12 @@
     <string name="setting_permissions_title">Permissions</string>
     <string name="setting_permissions_subtitle">Review and re-request permissions</string>
 
+    <!-- Settings — Notifications (copy event parity with macOS Maccy sound/notify) -->
+    <string name="setting_notify_on_copy_title">Notify on copy</string>
+    <string name="setting_notify_on_copy_subtitle">Show a brief notification each time a clipboard item is captured.</string>
+    <string name="setting_sound_on_copy_title">Sound on copy</string>
+    <string name="setting_sound_on_copy_subtitle">Play a subtle click sound each time a clipboard item is captured.</string>
+
     <!-- Permissions screen -->
     <string name="title_permissions">Permissions</string>
     <string name="permissions_intro">Review the status of each permission CopyPaste uses. Tap a button to re-open its request or settings screen at any time.</string>
@@ -45,6 +54,12 @@
     <string name="sensitive_preview_mask">••••••</string>
     <string name="sensitive_badge_label">Sensitive</string>
     <string name="cd_sensitive_item">Sensitive content — preview hidden</string>
+
+    <!-- Per-copy event notification channel -->
+    <string name="notif_channel_copy_event_name">Copy Events</string>
+    <string name="notif_channel_copy_event_description">Silent badge notification each time a clipboard item is captured.</string>
+    <string name="notif_copy_event_title">Item copied</string>
+    <string name="notif_copy_event_content">Clipboard item saved to history.</string>
 
     <!-- Foreground service notification -->
     <string name="notif_channel_service_name">Clipboard Monitoring</string>
