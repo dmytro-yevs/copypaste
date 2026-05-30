@@ -163,6 +163,8 @@ fn key_pragma(key: &[u8; 32]) -> String {
     use std::fmt::Write;
     let mut hex = String::with_capacity(64);
     for b in key {
+        // Infallible: `fmt::Write for String` only grows a heap buffer and
+        // never returns Err, so this formatted write cannot fail.
         write!(hex, "{:02x}", b).unwrap();
     }
     format!("PRAGMA key = \"x'{}'\"", hex)
@@ -349,6 +351,8 @@ impl Database {
         // Build the hex key for the ATTACH statement.
         let mut hex = String::with_capacity(64);
         for b in key {
+            // Infallible: `fmt::Write for String` only grows a heap buffer and
+            // never returns Err, so this formatted write cannot fail.
             write!(hex, "{:02x}", b).unwrap();
         }
         let key_hex = hex;
@@ -458,6 +462,8 @@ impl Database {
                 checkpoint_with_retry(&self.conn)?;
                 let mut hex = String::with_capacity(64);
                 for b in new_key {
+                    // Infallible: `fmt::Write for String` only grows a heap
+                    // buffer and never returns Err, so this write cannot fail.
                     write!(hex, "{:02x}", b).unwrap();
                 }
                 let sql = format!("PRAGMA rekey = \"x'{}'\"", hex);
@@ -480,6 +486,8 @@ impl Database {
 
         let mut new_hex = String::with_capacity(64);
         for b in new_key {
+            // Infallible: `fmt::Write for String` only grows a heap buffer and
+            // never returns Err, so this formatted write cannot fail.
             write!(new_hex, "{:02x}", b).unwrap();
         }
         let attach_sql = format!(

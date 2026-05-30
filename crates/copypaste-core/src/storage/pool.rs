@@ -30,6 +30,8 @@ pub enum PoolError {
 fn key_hex(key: &[u8; 32]) -> String {
     let mut hex = String::with_capacity(64);
     for b in key {
+        // Infallible: `fmt::Write for String` never returns Err (it only grows
+        // the heap buffer), so writing a formatted byte cannot fail here.
         write!(hex, "{:02x}", b).unwrap();
     }
     hex

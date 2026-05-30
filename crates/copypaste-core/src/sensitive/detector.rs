@@ -17,11 +17,14 @@ pub fn nfkc_normalize(text: &str) -> String {
 /// credential, suppressing benign prose like `password: foo` or `// api_key=demo`.
 ///
 /// Strong = any one of:
-///   - value length ≥ 10
+///   - value length ≥ 10 characters (Unicode scalar values, not bytes)
 ///   - contains a special char `[!@#$%^&*+/=]`
 ///   - mix of letter AND digit
 fn is_credential_value_strong(value: &str) -> bool {
-    if value.len() >= 10 {
+    // Count chars, not bytes: a multibyte secret (e.g. CJK/accented) must be
+    // gated on its character length, otherwise a short multibyte value would
+    // be over-counted by `.len()` (byte length) and mis-classified as strong.
+    if value.chars().count() >= 10 {
         return true;
     }
     let mut has_letter = false;
@@ -110,11 +113,19 @@ impl SensitiveDetector {
     /// over the *normalised* string.
     pub fn detect(&self, text: &str) -> Vec<PatternMatch> {
         let normalised = nfkc_normalize(text);
+        self.detect_normalised(&normalised)
+    }
+
+    /// Detect over an *already* NFKC-normalised string. Internal hot-path entry
+    /// that skips re-normalisation; callers (`detect`, `is_sensitive`) must pass
+    /// a string already run through [`nfkc_normalize`]. Returned byte ranges are
+    /// over `normalised`.
+    fn detect_normalised(&self, normalised: &str) -> Vec<PatternMatch> {
         let mut results: Vec<PatternMatch> = Vec::new();
         for (i, re) in patterns().iter().enumerate() {
-            for m in re.find_iter(&normalised) {
+            for m in re.find_iter(normalised) {
                 let range = m.range();
-                if match_is_false_positive(i, m.as_str(), &normalised, &range) {
+                if match_is_false_positive(i, m.as_str(), normalised, &range) {
                     continue;
                 }
                 results.push(PatternMatch {
@@ -145,8 +156,10 @@ impl SensitiveDetector {
         {
             return true;
         }
-        // Only generic_password_kv candidates remain — validate at least one is strong.
-        !self.detect(&normalised).is_empty()
+        // Only generic_password_kv candidates remain — validate at least one is
+        // strong. `normalised` is already NFKC-normalised, so use the inner
+        // entry to avoid a redundant second normalisation pass on the hot path.
+        !self.detect_normalised(&normalised).is_empty()
     }
 
     /// Returns true if any pattern exceeds the confidence threshold.
@@ -642,5 +655,25 @@ mod tests {
     #[test]
     fn long_password_value_detected() {
         assert!(detect("password: abcdefghij").is_some()); // 10 chars
+    }
+
+    #[test]
+    fn multibyte_value_gated_on_chars_not_bytes() {
+        // 9 CJK characters = 27 UTF-8 bytes. The byte-length gate (`>= 10`)
+        // would mis-classify this short value as "strong" purely because of
+        // its byte width; the char-count gate (`chars().count() >= 10`)
+        // correctly treats 9 letters with no digit/special as weak.
+        let nine_cjk = "私的秘密言葉確認鍵"; // 9 chars, 27 bytes
+        assert_eq!(nine_cjk.chars().count(), 9);
+        assert!(nine_cjk.len() >= 10, "precondition: byte length exceeds 10");
+        assert!(
+            !is_credential_value_strong(nine_cjk),
+            "a 9-char multibyte letters-only value must be weak (char gate, not byte gate)"
+        );
+
+        // 10 multibyte chars clears the char-count gate → strong.
+        let ten_cjk = "私的秘密言葉確認鍵値"; // 10 chars
+        assert_eq!(ten_cjk.chars().count(), 10);
+        assert!(is_credential_value_strong(ten_cjk));
     }
 }
