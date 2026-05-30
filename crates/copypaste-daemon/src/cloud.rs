@@ -1998,23 +1998,84 @@ async fn ws_ingest_loop(
                                             count_items(&db_guard).unwrap_or(0) as usize;
                                         if total > history_limit {
                                             let excess = total - history_limit;
-                                            match db_guard.conn().execute(
-                                                "DELETE FROM clipboard_items \
-                                                 WHERE id IN ( \
-                                                     SELECT id FROM clipboard_items \
-                                                     WHERE pinned = 0 \
-                                                     ORDER BY wall_time ASC \
-                                                     LIMIT ?1 \
-                                                 )",
-                                                rusqlite::params![excess as i64],
-                                            ) {
-                                                Ok(n) => tracing::debug!(
-                                                    "ws_ingest_loop: count-pruned {n} rows \
-                                                     (history_limit={history_limit})"
-                                                ),
+                                            // Fix (re-audit): collect ids first, then
+                                            // delete clipboard_items + clipboard_fts in
+                                            // one transaction to avoid orphan FTS rows.
+                                            let conn = db_guard.conn();
+                                            match conn.unchecked_transaction() {
                                                 Err(e) => tracing::warn!(
-                                                    "ws_ingest_loop: count-prune failed: {e}"
+                                                    "ws_ingest_loop: count-prune tx failed: {e}"
                                                 ),
+                                                Ok(tx) => {
+                                                    let ids_res: Result<Vec<String>, _> = tx
+                                                        .prepare(
+                                                            "SELECT id FROM clipboard_items \
+                                                             WHERE pinned = 0 \
+                                                             ORDER BY wall_time ASC \
+                                                             LIMIT ?1",
+                                                        )
+                                                        .and_then(|mut s| {
+                                                            s.query_map(
+                                                                rusqlite::params![excess as i64],
+                                                                |r| r.get(0),
+                                                            )
+                                                            .and_then(|rows| {
+                                                                rows.collect::<Result<Vec<_>, _>>()
+                                                            })
+                                                        });
+                                                    match ids_res {
+                                                        Err(e) => tracing::warn!(
+                                                            "ws_ingest_loop: count-prune \
+                                                             id-collect failed: {e}"
+                                                        ),
+                                                        Ok(ids) => {
+                                                            let del_res = tx.execute(
+                                                                "DELETE FROM clipboard_items \
+                                                                 WHERE id IN ( \
+                                                                     SELECT id \
+                                                                     FROM clipboard_items \
+                                                                     WHERE pinned = 0 \
+                                                                     ORDER BY wall_time ASC \
+                                                                     LIMIT ?1 \
+                                                                 )",
+                                                                rusqlite::params![excess as i64],
+                                                            );
+                                                            let fts_ok =
+                                                                del_res.is_ok() && ids.iter().all(
+                                                                    |id| {
+                                                                        tx.execute(
+                                                                            "DELETE FROM \
+                                                                             clipboard_fts \
+                                                                             WHERE id = ?1",
+                                                                            rusqlite::params![id],
+                                                                        )
+                                                                        .is_ok()
+                                                                    },
+                                                                );
+                                                            if fts_ok {
+                                                                match tx.commit() {
+                                                                    Ok(()) => tracing::debug!(
+                                                                        "ws_ingest_loop: \
+                                                                         count-pruned {} rows \
+                                                                         (history_limit=\
+                                                                         {history_limit})",
+                                                                        ids.len()
+                                                                    ),
+                                                                    Err(e) => tracing::warn!(
+                                                                        "ws_ingest_loop: \
+                                                                         count-prune commit \
+                                                                         failed: {e}"
+                                                                    ),
+                                                                }
+                                                            } else if let Err(e) = del_res {
+                                                                tracing::warn!(
+                                                                    "ws_ingest_loop: \
+                                                                     count-prune failed: {e}"
+                                                                );
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                         let max_bytes =
@@ -2328,24 +2389,68 @@ async fn poll_once(
         if synced > 0 {
             // Count cap: mirrors daemon.rs `prune_history` — bulk DELETE oldest
             // unpinned rows when the total exceeds `history_limit`.
+            // Fix (re-audit): collect ids first, then delete clipboard_items +
+            // clipboard_fts in one transaction to avoid orphan FTS rows.
             let total = count_items(&db_guard).unwrap_or(0) as usize;
             if total > history_limit {
                 let excess = total - history_limit;
-                let res = db_guard.conn().execute(
-                    "DELETE FROM clipboard_items WHERE id IN (
-                        SELECT id FROM clipboard_items
-                        WHERE pinned = 0
-                        ORDER BY wall_time ASC
-                        LIMIT ?1
-                    )",
-                    rusqlite::params![excess as i64],
-                );
-                match res {
-                    Ok(n) => tracing::debug!(
-                        "cloud-sync poll_once: count-pruned {n} rows \
-                         (history_limit={history_limit})"
-                    ),
-                    Err(e) => tracing::warn!("cloud-sync poll_once: count-prune failed: {e}"),
+                let conn = db_guard.conn();
+                match conn.unchecked_transaction() {
+                    Err(e) => {
+                        tracing::warn!("cloud-sync poll_once: count-prune tx failed: {e}")
+                    }
+                    Ok(tx) => {
+                        let ids_res: Result<Vec<String>, _> = tx
+                            .prepare(
+                                "SELECT id FROM clipboard_items
+                                 WHERE pinned = 0
+                                 ORDER BY wall_time ASC
+                                 LIMIT ?1",
+                            )
+                            .and_then(|mut s| {
+                                s.query_map(rusqlite::params![excess as i64], |r| r.get(0))
+                                    .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
+                            });
+                        match ids_res {
+                            Err(e) => tracing::warn!(
+                                "cloud-sync poll_once: count-prune id-collect failed: {e}"
+                            ),
+                            Ok(ids) => {
+                                let del_res = tx.execute(
+                                    "DELETE FROM clipboard_items WHERE id IN (
+                                         SELECT id FROM clipboard_items
+                                         WHERE pinned = 0
+                                         ORDER BY wall_time ASC
+                                         LIMIT ?1
+                                     )",
+                                    rusqlite::params![excess as i64],
+                                );
+                                let fts_ok = del_res.is_ok()
+                                    && ids.iter().all(|id| {
+                                        tx.execute(
+                                            "DELETE FROM clipboard_fts WHERE id = ?1",
+                                            rusqlite::params![id],
+                                        )
+                                        .is_ok()
+                                    });
+                                if fts_ok {
+                                    match tx.commit() {
+                                        Ok(()) => tracing::debug!(
+                                            "cloud-sync poll_once: count-pruned {} rows \
+                                             (history_limit={history_limit})",
+                                            ids.len()
+                                        ),
+                                        Err(e) => tracing::warn!(
+                                            "cloud-sync poll_once: count-prune commit \
+                                             failed: {e}"
+                                        ),
+                                    }
+                                } else if let Err(e) = del_res {
+                                    tracing::warn!("cloud-sync poll_once: count-prune failed: {e}");
+                                }
+                            }
+                        }
+                    }
                 }
             }
             // Byte cap: window-function prune via core API (takes i64 max_bytes).

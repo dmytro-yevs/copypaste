@@ -704,16 +704,44 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
     // Cast is safe: total_unpinned > max_bytes >= 0, so excess > 0 and fits in i64.
     let excess = total_unpinned - max_bytes;
 
-    // Single-pass window-function DELETE.
-    //
-    // The CTE `ranked` assigns each unpinned row a running cumulative byte
-    // total ordered oldest-first.  A row belongs to the eviction prefix when
-    // `cum_bytes - row_bytes < excess`: that is, even without this row's bytes
-    // the running total has not yet covered the excess, so this row (and every
-    // row before it) must be removed.  The tipping row—the first one that brings
-    // the running total to or past `excess`—satisfies the predicate too
-    // (cum_bytes[tipping-1] < excess by definition), so it is included.
-    let deleted = db.conn().execute(
+    // Fix (re-audit): collect the ids to evict first, then delete clipboard_items
+    // AND clipboard_fts in a single transaction — mirrors the pattern used in
+    // `delete_expired` / `delete_sensitive_expired`. Without the FTS sweep every
+    // size-cap eviction leaves orphan FTS rows, causing unbounded FTS growth and
+    // ghost search results.
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+
+    // Single-pass window function: select the ids in the eviction prefix.
+    // A row belongs to the prefix when cum_bytes - row_bytes < excess (i.e. the
+    // running total before this row has not yet covered the excess).  The
+    // "tipping" row (first one that brings the total to or past excess) is
+    // included because cum_bytes[tipping-1] < excess by definition.
+    let mut stmt = tx.prepare(
+        "WITH ranked AS (
+             SELECT
+                 id,
+                 LENGTH(COALESCE(content, '')) AS row_bytes,
+                 SUM(LENGTH(COALESCE(content, ''))) OVER (
+                     ORDER BY wall_time ASC, id ASC
+                     ROWS UNBOUNDED PRECEDING
+                 ) AS cum_bytes
+             FROM clipboard_items
+             WHERE pinned = 0
+         )
+         SELECT id FROM ranked
+         WHERE cum_bytes - row_bytes < ?1",
+    )?;
+    let ids: Vec<String> = stmt
+        .query_map(params![excess], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    drop(stmt);
+
+    if ids.is_empty() {
+        return Ok(0);
+    }
+
+    let deleted = tx.execute(
         "WITH ranked AS (
              SELECT
                  id,
@@ -732,6 +760,10 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
          )",
         params![excess],
     )?;
+    for id in &ids {
+        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    }
+    tx.commit()?;
     Ok(deleted)
 }
 
@@ -1968,6 +2000,63 @@ mod tests {
         assert!(exists(&id1), "pinned oldest must not be evicted");
         assert!(!exists(&id2), "oldest unpinned evicted");
         assert!(exists(&id3), "newest unpinned kept");
+    }
+
+    /// After `prune_to_cap` evicts rows, no orphan FTS rows must remain and
+    /// a full-text search for a pruned term must return nothing.
+    #[test]
+    fn prune_to_cap_no_fts_orphans_after_eviction() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Insert 3 items with FTS entries (oldest → newest, 20 bytes each).
+        // Total = 60 bytes. Quota = 20 → excess = 40 → oldest 2 evicted.
+        let mut ids = Vec::new();
+        let terms = ["alpha unique term", "beta unique term", "gamma unique term"];
+        for (i, term) in terms.iter().enumerate() {
+            let item = make_sized_item(i as i64, (i as i64 + 1) * 1_000, 20);
+            ids.push(item.id.clone());
+            insert_item(&db, &item).unwrap();
+            upsert_fts(&db, &item.id, term).unwrap();
+        }
+
+        let deleted = prune_to_cap(&db, 20).unwrap();
+        assert_eq!(deleted, 2, "2 oldest items evicted");
+
+        // No orphan FTS rows: count(fts) must equal count(items).
+        let item_count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
+            .unwrap();
+        let fts_count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_fts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            fts_count, item_count,
+            "clipboard_fts count ({fts_count}) must equal clipboard_items count \
+             ({item_count}) — no orphan FTS rows after size-cap eviction"
+        );
+
+        // Ghost-search check: pruned terms must not appear in search results.
+        let r_alpha = search_items(&db, "alpha", 10).unwrap();
+        assert!(
+            r_alpha.is_empty(),
+            "pruned term 'alpha' must not appear in search results"
+        );
+        let r_beta = search_items(&db, "beta", 10).unwrap();
+        assert!(
+            r_beta.is_empty(),
+            "pruned term 'beta' must not appear in search results"
+        );
+
+        // The surviving item must still be searchable.
+        let r_gamma = search_items(&db, "gamma", 10).unwrap();
+        assert_eq!(
+            r_gamma.len(),
+            1,
+            "surviving item with term 'gamma' must still be found"
+        );
+        assert_eq!(r_gamma[0].id, ids[2]);
     }
 
     /// Empty database: prune is a no-op.
