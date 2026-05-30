@@ -814,6 +814,7 @@ dependencies = [
  "tokio-util",
  "uniffi",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

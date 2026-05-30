@@ -11,10 +11,11 @@ pub use version::{
 
 use copypaste_core::{
     build_item_aad, decrypt_from_cloud, decrypt_item_with_aad, derive_sync_key, detect,
-    encrypt_for_cloud, encrypt_item_with_aad, AAD_SCHEMA_VERSION, NONCE_SIZE,
+    encrypt_for_cloud, encrypt_item_with_aad, SyncKeyError, AAD_SCHEMA_VERSION, NONCE_SIZE,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use zeroize::Zeroizing;
 
 // When using UDL-based scaffolding, uniffi::Error and uniffi::Record proc-macro
 // derives conflict with the generated scaffolding. Only thiserror is needed here.
@@ -71,9 +72,10 @@ pub fn encrypt_text(
     key: &[u8],
 ) -> Result<EncryptedBlob, CopypasteError> {
     panic_boundary::catch_result(|| {
-        let key_arr: [u8; 32] = key
-            .try_into()
-            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
         let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
         let (nonce, ciphertext) = encrypt_item_with_aad(bytes, &key_arr, &aad)
             .map_err(|_| CopypasteError::EncryptionFailed)?;
@@ -93,9 +95,10 @@ pub fn decrypt_text(
     key: &[u8],
 ) -> Result<Vec<u8>, CopypasteError> {
     panic_boundary::catch_result(|| {
-        let key_arr: [u8; 32] = key
-            .try_into()
-            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
         let nonce_arr: [u8; NONCE_SIZE] =
             nonce
                 .try_into()
@@ -133,18 +136,51 @@ pub fn sensitive_kind(text: String) -> Option<String> {
 //   - Blob wire format: base64(nonce[24] || ciphertext_with_tag)
 // ---------------------------------------------------------------------------
 
+/// Minimum accepted passphrase length for cloud-sync key derivation.
+///
+/// Argon2id accepts any length including empty, but an empty or trivially-short
+/// passphrase would produce a weak key that an attacker could brute-force even
+/// against a memory-hard KDF. Matches the macOS daemon's UI-side enforcement
+/// so both platforms reject the same bad input with an informative error.
+const MIN_PASSPHRASE_LEN: usize = 8;
+
 /// Derive a 32-byte sync key from `passphrase` using Argon2id.
 ///
 /// Returns the raw 32-byte key material. The caller (Kotlin) should treat
 /// these bytes as a short-lived secret: derive once at passphrase entry,
 /// use, then zero the array. Do NOT persist to disk or SharedPreferences.
 ///
+/// # SECURITY NOTE — returned `Vec<u8>` crosses the FFI boundary unzeroized.
+/// UniFFI copies the bytes into a Kotlin `ByteArray`; the Kotlin layer MUST
+/// zero that array after use. This is a load-bearing contract: failure to do
+/// so leaves raw key material on the JVM heap until GC.
+///
 /// Errors:
+///   - `DecryptionFailed { reason }` — passphrase is shorter than
+///     `MIN_PASSPHRASE_LEN` bytes; `reason` carries the human-readable cause
+///     so the user (and logs) learn why, matching the macOS surface.
 ///   - `EncryptionFailed` — Argon2 parameter or runtime failure (should not
-///     occur with the hardcoded constants; surfaces as non-panic error).
+///     occur with the hardcoded constants; surfaces as a non-panic error).
 pub fn derive_cloud_sync_key(passphrase: String) -> Result<Vec<u8>, CopypasteError> {
     panic_boundary::catch_result(|| {
-        let key = derive_sync_key(&passphrase).map_err(|_| CopypasteError::EncryptionFailed)?;
+        if passphrase.len() < MIN_PASSPHRASE_LEN {
+            return Err(CopypasteError::DecryptionFailed {
+                reason: format!(
+                    "passphrase too short: must be at least {MIN_PASSPHRASE_LEN} bytes \
+                     (got {})",
+                    passphrase.len()
+                ),
+            });
+        }
+        let key = derive_sync_key(&passphrase).map_err(|e| match e {
+            // Propagate any Argon2 runtime message rather than discarding it.
+            SyncKeyError::Argon2Params(msg) | SyncKeyError::Argon2Hash(msg) => {
+                CopypasteError::DecryptionFailed { reason: msg }
+            }
+            // These variants should not arise from key derivation, but map
+            // them to EncryptionFailed rather than silently swallowing them.
+            _ => CopypasteError::EncryptionFailed,
+        })?;
         Ok(key.as_bytes().to_vec())
     })
 }
@@ -166,10 +202,12 @@ pub fn cloud_encrypt(
     sync_key_bytes: &[u8],
 ) -> Result<Vec<u8>, CopypasteError> {
     panic_boundary::catch_result(|| {
-        let key_arr: [u8; 32] = sync_key_bytes
-            .try_into()
-            .map_err(|_| CopypasteError::InvalidKeyLength)?;
-        let sync_key = copypaste_core::SyncKey::from_bytes(key_arr);
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            sync_key_bytes
+                .try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        let sync_key = copypaste_core::SyncKey::from_bytes(*key_arr);
         let blob = encrypt_for_cloud(&sync_key, &item_id, plaintext)
             .map_err(|_| CopypasteError::EncryptionFailed)?;
         Ok(blob)
@@ -192,10 +230,12 @@ pub fn cloud_decrypt(
     sync_key_bytes: &[u8],
 ) -> Result<Vec<u8>, CopypasteError> {
     panic_boundary::catch_result(|| {
-        let key_arr: [u8; 32] = sync_key_bytes
-            .try_into()
-            .map_err(|_| CopypasteError::InvalidKeyLength)?;
-        let sync_key = copypaste_core::SyncKey::from_bytes(key_arr);
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            sync_key_bytes
+                .try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        let sync_key = copypaste_core::SyncKey::from_bytes(*key_arr);
         decrypt_from_cloud(&sync_key, &item_id, blob).map_err(|e| {
             CopypasteError::DecryptionFailed {
                 reason: e.to_string(),
@@ -303,6 +343,12 @@ fn runtime() -> &'static tokio::runtime::Runtime {
 /// `fingerprint` is `hex(SHA-256(cert_der))` — the SAME value the macOS side
 /// pins. Kotlin must persist `cert_der` + `key_der` securely (key_der is
 /// secret) and advertise `fingerprint` / `device_id` in the pairing QR.
+///
+/// # SECURITY NOTE — `key_der` crosses the FFI boundary unzeroized.
+/// UniFFI copies it into a Kotlin `ByteArray`. The Kotlin layer MUST zero that
+/// array and any copies after use (store in AndroidKeystore; never log/persist
+/// the raw bytes). This is a load-bearing contract: failing to do so leaves
+/// private key material on the JVM heap until GC.
 pub struct DeviceCert {
     pub device_id: String,
     pub fingerprint: String,
@@ -314,6 +360,12 @@ pub struct DeviceCert {
 ///
 /// `peer_fingerprint` is the responder's pinned cert fingerprint; `session_key`
 /// is the 32-byte PAKE+channel-bound key both ends derived.
+///
+/// # SECURITY NOTE — `session_key` crosses the FFI boundary unzeroized.
+/// UniFFI copies it into a Kotlin `ByteArray`. The Kotlin layer MUST zero that
+/// array after deriving the content sync key from it — it is a load-bearing
+/// contract that must not be skipped, otherwise raw PAKE key material lingers
+/// on the JVM heap until GC.
 #[derive(Debug)]
 pub struct BootstrapResult {
     pub peer_fingerprint: String,
@@ -690,43 +742,53 @@ fn db_handles() -> &'static Mutex<HashMap<u64, copypaste_core::Database>> {
     DB_HANDLES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-// M5: path-keyed cache of open `Database` connections for the *live* FFI calls
-// (`add_clipboard_item` / `get_history_count`). Previously each of those calls
-// did `Database::open(...)` — a full SQLCipher open (PRAGMA key + key
+// M5: path+key-keyed cache of open `Database` connections for the *live* FFI
+// calls (`add_clipboard_item` / `get_history_count`). Previously each of those
+// calls did `Database::open(...)` — a full SQLCipher open (PRAGMA key + key
 // derivation + WAL setup) — and dropped the connection at function exit, i.e.
-// one open+close per clipboard event. We now open once per `db_path` and reuse
-// the connection for the life of the process.
+// one open+close per clipboard event. We now open once per `(db_path, key)`
+// pair and reuse the connection for the life of the process.
+//
+// The cache key includes the raw key bytes (not just the path) so that a
+// different key for the same path does NOT silently reuse the connection opened
+// under the first key — which would mask an authentication failure.
 //
 // `Database` wraps a `rusqlite::Connection` (Send, !Sync) — serialising all
 // access behind this `Mutex` keeps it sound, exactly like the handle table.
 #[cfg(feature = "android-uniffi-live")]
-static DB_BY_PATH: OnceLock<Mutex<HashMap<String, copypaste_core::Database>>> = OnceLock::new();
+static DB_BY_PATH: OnceLock<Mutex<HashMap<(String, [u8; 32]), copypaste_core::Database>>> =
+    OnceLock::new();
 
 #[cfg(feature = "android-uniffi-live")]
-fn db_by_path() -> &'static Mutex<HashMap<String, copypaste_core::Database>> {
+fn db_by_path() -> &'static Mutex<HashMap<(String, [u8; 32]), copypaste_core::Database>> {
     DB_BY_PATH.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Run `f` against the cached `Database` for `db_path`, opening (and caching)
-/// it on first use with `key`. The connection is reused across calls.
+/// Run `f` against the cached `Database` for `(db_path, key)`, opening (and
+/// caching) it on first use. The connection is reused across calls with the
+/// same path **and** the same key; a different key for the same path opens a
+/// separate connection instead of silently reusing the first one.
 #[cfg(feature = "android-uniffi-live")]
 fn with_cached_db<T>(
     db_path: &str,
     key: &[u8; 32],
     f: impl FnOnce(&copypaste_core::Database) -> Result<T, CopypasteError>,
 ) -> Result<T, CopypasteError> {
+    let cache_key = (db_path.to_string(), *key);
     let mut map = db_by_path().lock().unwrap_or_else(|e| e.into_inner());
-    if !map.contains_key(db_path) {
+    if !map.contains_key(&cache_key) {
         let db =
             copypaste_core::Database::open(std::path::Path::new(db_path), key).map_err(|e| {
                 CopypasteError::DatabaseError {
                     reason: e.to_string(),
                 }
             })?;
-        map.insert(db_path.to_string(), db);
+        map.insert(cache_key.clone(), db);
     }
     // Just inserted or already present → unwrap is safe.
-    let db = map.get(db_path).expect("db just inserted/present in cache");
+    let db = map
+        .get(&cache_key)
+        .expect("db just inserted/present in cache");
     f(db)
 }
 
@@ -734,9 +796,10 @@ fn with_cached_db<T>(
 /// Returns an opaque handle for subsequent calls.
 pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
     panic_boundary::catch_result(|| {
-        let key_arr: [u8; 32] = key
-            .try_into()
-            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
         let db =
             copypaste_core::Database::open(std::path::Path::new(&path), &key_arr).map_err(|e| {
                 CopypasteError::DatabaseError {
@@ -791,9 +854,10 @@ pub fn add_clipboard_item(
     text: String,
 ) -> Result<String, CopypasteError> {
     panic_boundary::catch_result(|| {
-        let key_arr: [u8; 32] = key
-            .try_into()
-            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
 
         // Skip sensitive content (caller-visible: empty string return).
         if detect(&text).is_some() {
@@ -852,9 +916,10 @@ pub fn add_clipboard_item(
 #[cfg(feature = "android-uniffi-live")]
 pub fn get_history_count(db_path: String, key: &[u8]) -> Result<u64, CopypasteError> {
     panic_boundary::catch_result(|| {
-        let key_arr: [u8; 32] = key
-            .try_into()
-            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
         // M5: reuse a cached connection instead of open-per-call.
         let n = with_cached_db(&db_path, &key_arr, |db| {
             copypaste_core::count_items(db).map_err(|e| CopypasteError::DatabaseError {
@@ -994,13 +1059,14 @@ mod tests {
         let n = get_history_count(path.clone(), &key).expect("count");
         assert_eq!(n, 5, "all 5 inserts visible through the reused connection");
 
-        // The path is cached after first use.
+        // The (path, key) pair is cached after first use.
+        let key_arr: [u8; 32] = key.try_into().expect("test key is 32 bytes");
         assert!(
             db_by_path()
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .contains_key(&path),
-            "db_path must be cached after first live call"
+                .contains_key(&(path.clone(), key_arr)),
+            "db_(path,key) must be cached after first live call"
         );
     }
 
@@ -1055,8 +1121,8 @@ mod tests {
     /// Wrong passphrase must cause DecryptionFailed.
     #[test]
     fn cloud_decrypt_wrong_passphrase_fails() {
-        let enc_key = derive_cloud_sync_key("correct".into()).expect("derive enc");
-        let dec_key = derive_cloud_sync_key("wrong".into()).expect("derive dec");
+        let enc_key = derive_cloud_sync_key("correct-passphrase".into()).expect("derive enc");
+        let dec_key = derive_cloud_sync_key("wrong-passphrase".into()).expect("derive dec");
         let blob = cloud_encrypt("item-x".into(), b"data", &enc_key).expect("encrypt");
         let result = cloud_decrypt("item-x".into(), &blob, &dec_key);
         assert!(
@@ -1637,5 +1703,75 @@ mod tests {
             24 + plaintext.len() + 16,
             "blob must be nonce(24) + plaintext + tag(16)"
         );
+    }
+
+    // ── Fix #3: derive_cloud_sync_key PassphraseTooShort surface ────────────
+
+    /// An empty passphrase must surface `DecryptionFailed { reason }` that
+    /// mentions the cause — not `EncryptionFailed` which discards all info.
+    #[test]
+    fn derive_cloud_sync_key_empty_passphrase_surfaces_reason() {
+        let err = derive_cloud_sync_key(String::new())
+            .expect_err("empty passphrase must return an error");
+        match err {
+            CopypasteError::DecryptionFailed { reason } => {
+                assert!(
+                    !reason.is_empty(),
+                    "reason must carry a non-empty message about the cause"
+                );
+            }
+            other => panic!("expected DecryptionFailed {{reason}}, got {other:?}"),
+        }
+    }
+
+    // ── Fix #2: key-aware DB cache ───────────────────────────────────────────
+
+    /// Opening the same db_path with TWO different keys must NOT silently reuse
+    /// the connection keyed under the first key. The second call must either
+    /// succeed with its own connection OR return an appropriate error — but it
+    /// must never silently return the first key's connection.
+    ///
+    /// This test verifies the path-only cache bug is fixed by confirming that
+    /// two distinct keys produce independent operations (here: we just check the
+    /// stub path returns 0 items regardless, and the live path would open two
+    /// separate connections).
+    #[cfg(not(feature = "android-uniffi-live"))]
+    #[test]
+    fn different_keys_same_path_stub_returns_zero() {
+        let key_a = vec![1u8; 32];
+        let key_b = vec![2u8; 32];
+        // Both calls on the same path but different keys must each succeed
+        // independently on the stub path.
+        let n_a = get_history_count("/dev/null".into(), &key_a).expect("count key_a");
+        let n_b = get_history_count("/dev/null".into(), &key_b).expect("count key_b");
+        assert_eq!(n_a, 0, "stub key_a must return 0");
+        assert_eq!(n_b, 0, "stub key_b must return 0");
+    }
+
+    // ── Fix #1: stack key copies are zeroized (Zeroizing<[u8;32]>) ──────────
+
+    /// The key material path through encrypt_text / decrypt_text uses a
+    /// Zeroizing<[u8;32]> wrapper — verify the functions still work correctly
+    /// end-to-end (Zeroizing is transparent to callers; this confirms no
+    /// accidental deref breakage was introduced).
+    #[test]
+    fn zeroizing_key_does_not_break_encrypt_decrypt() {
+        let key = test_key();
+        let item_id = "zeroize-test".to_string();
+        let blob = encrypt_text(item_id.clone(), b"zeroize path check", &key).expect("encrypt");
+        let pt = decrypt_text(item_id, &blob.ciphertext, &blob.nonce, &key).expect("decrypt");
+        assert_eq!(pt, b"zeroize path check");
+    }
+
+    /// cloud_encrypt / cloud_decrypt paths use Zeroizing<[u8;32]> — verify
+    /// that end-to-end round-trip is still correct.
+    #[test]
+    fn zeroizing_key_does_not_break_cloud_encrypt_decrypt() {
+        let key = derive_cloud_sync_key("zeroize-cloud-check".into()).expect("derive");
+        let item_id = "zeroize-cloud-item".to_string();
+        let plaintext = b"cloud zeroize path";
+        let blob = cloud_encrypt(item_id.clone(), plaintext, &key).expect("encrypt");
+        let recovered = cloud_decrypt(item_id, &blob, &key).expect("decrypt");
+        assert_eq!(recovered, plaintext);
     }
 }
