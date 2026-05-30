@@ -25,17 +25,62 @@
     <string name="pair_token_expired">Token expired — request a new one.</string>
     <string name="pair_request_new_token">Request new token</string>
 
-    <!-- Settings -->
+    <!-- Settings — section headers -->
+    <string name="section_general">General</string>
+    <string name="section_display">Display</string>
+    <string name="section_storage_limits">Storage / Limits</string>
+    <string name="section_sync">Sync</string>
+    <string name="section_supabase_config">Supabase Configuration</string>
+    <string name="section_supabase_account">Supabase Account (optional)</string>
+    <string name="section_relay_config">Relay Configuration</string>
+    <string name="section_notifications">Notifications</string>
+
+    <!-- Settings — General -->
+    <string name="setting_capture_enabled_title">Pause capture / Private mode</string>
+    <string name="setting_capture_enabled_subtitle">When off, the clipboard monitor stops recording new items. Also togglable from the notification.</string>
     <string name="setting_sync_enabled_title">Enable Clipboard Sync</string>
     <string name="setting_sync_enabled_subtitle">Sync clipboard items with paired devices via the relay.</string>
+
+    <!-- Settings — Display -->
     <string name="setting_sensitive_warnings_title">Warn on Sensitive Data</string>
     <string name="setting_sensitive_warnings_subtitle">Show a toast when card numbers or tokens are skipped.</string>
     <string name="setting_mask_sensitive_title">Mask Sensitive Content</string>
     <string name="setting_mask_sensitive_subtitle">Hide preview text for items flagged as sensitive. Tap an item to reveal for 5 seconds.</string>
+    <string name="setting_image_max_height_label">Image max height (dp)</string>
+    <string name="setting_image_max_height_hint">1–200 dp (default 40)</string>
+    <string name="setting_preview_delay_label">Action-row auto-close delay (ms)</string>
+    <string name="setting_preview_delay_hint">200–100000 ms (default 1500)</string>
+
+    <!-- Settings — Storage / Limits (no item-count cap — size only) -->
+    <string name="setting_max_text_size_label">Max text item size (MB)</string>
+    <string name="setting_max_text_size_hint">1–50 MB (default 1)</string>
+    <string name="setting_max_image_size_label">Max image item size (MB)</string>
+    <string name="setting_max_image_size_hint">1–200 MB (default 25)</string>
+    <string name="setting_storage_quota_label">Local storage limit (MB)</string>
+    <string name="setting_storage_quota_hint">50–10000 MB (default 500)</string>
+
+    <!-- Settings — Sync -->
+    <string name="setting_sync_wifi_only_title">Sync on Wi-Fi only</string>
+    <string name="setting_sync_wifi_only_subtitle">Restrict sync uploads and downloads to Wi-Fi connections.</string>
+    <string name="setting_use_supabase_title">Use Supabase Cloud Sync</string>
+    <string name="setting_use_supabase_subtitle">Cross-device sync via Supabase (end-to-end encrypted). Off = relay mode.</string>
+    <string name="setting_supabase_url_label">Supabase URL</string>
+    <string name="setting_supabase_anon_key_label">Anon Key</string>
+    <string name="setting_sync_passphrase_label">Sync Passphrase</string>
+    <string name="setting_sync_passphrase_hint">Shared passphrase (same on all devices)</string>
+    <string name="setting_supabase_email_label">Email</string>
+    <string name="setting_supabase_password_label">Password</string>
+    <string name="setting_supabase_account_note">If left blank, the anon key is used as bearer. Sign-in enables Row Level Security policies.</string>
     <string name="setting_relay_url_label">Relay URL</string>
     <string name="setting_device_id_label">Device ID</string>
     <string name="setting_permissions_title">Permissions</string>
     <string name="setting_permissions_subtitle">Review and re-request permissions</string>
+
+    <!-- Settings — Notifications -->
+    <string name="setting_notify_on_copy_title">Notify on copy</string>
+    <string name="setting_notify_on_copy_subtitle">Show a brief notification each time a clipboard item is captured.</string>
+    <string name="setting_sound_on_copy_title">Sound on copy</string>
+    <string name="setting_sound_on_copy_subtitle">Play a subtle click sound each time a clipboard item is captured.</string>
 
     <!-- Permissions screen -->
     <string name="title_permissions">Permissions</string>
@@ -45,6 +90,13 @@
     <string name="sensitive_preview_mask">••••••</string>
     <string name="sensitive_badge_label">Sensitive</string>
     <string name="cd_sensitive_item">Sensitive content — preview hidden</string>
+    <string name="sensitive_tap_hint">Sensitive — long-press to copy</string>
+
+    <!-- Per-copy event notification channel -->
+    <string name="notif_channel_copy_event_name">Copy Events</string>
+    <string name="notif_channel_copy_event_description">Silent badge notification each time a clipboard item is captured.</string>
+    <string name="notif_copy_event_title">Item copied</string>
+    <string name="notif_copy_event_content">Clipboard item saved to history.</string>
 
     <!-- Foreground service notification -->
     <string name="notif_channel_service_name">Clipboard Monitoring</string>
@@ -69,8 +121,35 @@
     <!-- Content descriptions -->
     <string name="cd_back">Back</string>
     <string name="cd_refresh">Refresh</string>
+    <string name="cd_copy">Copy</string>
     <string name="cd_delete">Delete item</string>
     <string name="cd_sensitive_icon">Sensitive content marker</string>
+    <string name="cd_image_item">Image clipboard item</string>
+    <string name="cd_image_thumbnail">Image thumbnail</string>
+    <string name="cd_pin_item">Pin item</string>
+    <string name="cd_unpin_item">Unpin item</string>
+    <string name="cd_select_all">Select all</string>
+    <string name="cd_close_selection">Close selection mode</string>
+
+    <!-- History — bulk / pin actions -->
+    <string name="action_pin">Pin</string>
+    <string name="action_unpin">Unpin</string>
+    <string name="action_clear_all">Clear All</string>
+    <string name="action_clear_unpinned">Clear Unpinned</string>
+    <string name="action_delete_selected">Delete selected</string>
+    <string name="action_pin_selected">Pin selected</string>
+    <string name="action_unpin_selected">Unpin selected</string>
+    <string name="selection_count">%1$d selected</string>
+
+    <!-- Confirmation dialogs -->
+    <string name="dialog_clear_all_title">Clear All History</string>
+    <string name="dialog_clear_all_message">This will permanently delete all %1$d clipboard items. This cannot be undone.</string>
+    <string name="dialog_clear_unpinned_title">Clear Unpinned Items</string>
+    <string name="dialog_clear_unpinned_message">This will permanently delete all unpinned clipboard items. Pinned items will be kept.</string>
+    <string name="dialog_delete_selected_title">Delete Selected</string>
+    <string name="dialog_delete_selected_message">This will permanently delete %1$d selected items. This cannot be undone.</string>
+    <string name="dialog_confirm">Delete</string>
+    <string name="dialog_cancel">Cancel</string>
 
     <!-- Error / status -->
     <string name="error_generic">Failed: %1$s</string>
@@ -78,6 +157,9 @@
     <string name="error_delete_item">Failed to delete item: %1$s</string>
     <string name="error_pairing">Pairing failed: %1$s</string>
     <string name="error_settings_save">Could not save setting: %1$s</string>
+    <string name="error_clear_all">Failed to clear history: %1$s</string>
+    <string name="error_set_pinned">Failed to update pin: %1$s</string>
+    <string name="error_delete_items">Failed to delete items: %1$s</string>
     <string name="status_pairing">Generating pairing token…</string>
     <string name="snackbar_dismiss">Dismiss</string>
 </resources>

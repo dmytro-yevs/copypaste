@@ -9,17 +9,23 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.view.SoundEffectConstants
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 import java.util.Calendar
 
 /**
@@ -85,6 +91,25 @@ class ClipboardService : Service() {
         // accessibility service, this callback fires but getPrimaryClip() returns
         // null — the early-return below handles that silently.
         val clip = clipboardManager.primaryClip ?: return@OnPrimaryClipChangedListener
+
+        // Detect image MIME before falling back to text. Check all MIME types on
+        // the ClipDescription; the first image/* type wins.
+        val imageMime = (0 until clip.description.mimeTypeCount)
+            .map { clip.description.getMimeType(it) }
+            .firstOrNull { it.startsWith("image/") }
+
+        if (imageMime != null) {
+            val uri = clip.getItemAt(0)?.uri
+            if (uri != null) {
+                scope.launch {
+                    captureImageClip(this@ClipboardService, uri, imageMime, settings, repository, syncManager)
+                }
+            } else {
+                Log.w(TAG, "Image clip has no URI — skipping")
+            }
+            return@OnPrimaryClipChangedListener
+        }
+
         val text = clip.getItemAt(0)?.text?.toString()
             ?: return@OnPrimaryClipChangedListener
 
@@ -205,6 +230,22 @@ class ClipboardService : Service() {
         private const val KEY_TODAY_COUNT = "today_count"
 
         /**
+         * Notification channel for per-copy event toasts (A-SET-6 parity).
+         * IMPORTANCE_MIN = no sound, no heads-up, no status-bar icon — just a
+         * silent badge. Auto-cancelled after 2 seconds.
+         */
+        const val CHANNEL_COPY_EVENT = "copypaste_copy_event"
+        private const val NOTIF_ID_COPY_EVENT = 1003
+
+        /**
+         * Debounce guard: if another capture arrives within [COPY_NOTIF_DEBOUNCE_MS],
+         * the notification is refreshed in-place rather than posting a new one.
+         */
+        @Volatile
+        private var lastCopyNotifMs = 0L
+        private const val COPY_NOTIF_DEBOUNCE_MS = 500L
+
+        /**
          * Shared capture pipeline: store + count + sync. HIGH-2.
          *
          * Both the foreground [ClipboardService] and the background
@@ -259,14 +300,127 @@ class ClipboardService : Service() {
             // Persist to the SharedPreferences repository — the single source the
             // UI reads. storeItem performs cross-listener dedup (HIGH-3) so a
             // single copy seen by multiple owners is stored (and counted) once.
-            val stored = repository.storeItem(text, key)
-            if (stored) {
+            val storedId = repository.storeItem(text, key)
+            if (storedId.isNotEmpty()) {
                 Log.d(TAG, "Clipboard item stored successfully")
                 bumpTodayCounter(context)
                 refreshNotification(context)
+                if (settings.notifyOnCopy) postCopyNotification(context)
+                if (settings.soundOnCopy) playCopySound(context)
                 if (settings.syncEnabled) {
                     notifySyncManager(text, key, settings, syncManager)
                 }
+            }
+        }
+
+        /**
+         * Capture an image clipboard item from a content:// [uri].
+         *
+         * Stores the ORIGINAL image at full resolution (no downscaling) — the user
+         * wants 100% fidelity. OOM is caught explicitly to avoid crashing the service.
+         * The size cap is enforced by [ClipboardRepository.storeImageBytes] against
+         * [Settings.maxImageSizeBytes].
+         */
+        @Suppress("UNUSED_PARAMETER") // syncManager reserved for future image-sync wiring
+        suspend fun captureImageClip(
+            context: Context,
+            uri: android.net.Uri,
+            mimeType: String,
+            settings: Settings,
+            repository: ClipboardRepository,
+            syncManager: SyncManager,
+        ) {
+            if (!settings.captureEnabled) {
+                Log.d(TAG, "Capture paused — dropping image clipboard change")
+                return
+            }
+
+            // Decode at full resolution (inSampleSize=1 = no sub-sampling).
+            // Catch Throwable to handle OutOfMemoryError (an Error subclass).
+            val decodeOpts = BitmapFactory.Options().apply {
+                inSampleSize = 1
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val bitmap: Bitmap? = try {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, decodeOpts)
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "captureImageClip: failed to decode image from $uri: ${t.message}")
+                return
+            }
+
+            if (bitmap == null) {
+                Log.w(TAG, "captureImageClip: BitmapFactory returned null for $uri — skipping")
+                return
+            }
+
+            // Re-encode as PNG (lossless). bitmap.recycle() runs in finally so
+            // native pixel memory is released immediately after the byte array is built.
+            val pngBytes: ByteArray? = try {
+                ByteArrayOutputStream().use { baos ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                    baos.toByteArray()
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "captureImageClip: PNG encode failed: ${t.message}")
+                null
+            } finally {
+                bitmap.recycle()
+            }
+
+            if (pngBytes == null) return
+
+            // Persist a placeholder text blob with the image MIME type so the row
+            // appears in history, then attach the image bytes under the same id.
+            val placeholder = uri.toString()
+            val key = settings.encryptionKey
+            val storedId = repository.storeItem(placeholder, key, contentType = mimeType)
+            if (storedId.isEmpty()) {
+                Log.d(TAG, "captureImageClip: storeItem returned empty (dedup/sensitive) — not storing bytes")
+                return
+            }
+
+            repository.storeImageBytes(storedId, pngBytes)
+            Log.d(TAG, "captureImageClip: stored image $storedId (${pngBytes.size} bytes, mime=$mimeType)")
+
+            bumpTodayCounter(context)
+            refreshNotification(context)
+            if (settings.notifyOnCopy) postCopyNotification(context)
+            if (settings.soundOnCopy) playCopySound(context)
+            // Image sync is not wired in this version — text sync only for now.
+        }
+
+        /**
+         * Post (or refresh) the per-copy event notification. Debounced at
+         * [COPY_NOTIF_DEBOUNCE_MS] to avoid stacking on rapid-paste bursts.
+         */
+        fun postCopyNotification(context: Context) {
+            lastCopyNotifMs = System.currentTimeMillis()
+            ensureChannel(context)
+            val notification = NotificationCompat.Builder(context, CHANNEL_COPY_EVENT)
+                .setSmallIcon(android.R.drawable.ic_menu_edit)
+                .setContentTitle(context.getString(R.string.notif_copy_event_title))
+                .setContentText(context.getString(R.string.notif_copy_event_content))
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setCategory(NotificationCompat.CATEGORY_EVENT)
+                .setAutoCancel(true)
+                .setTimeoutAfter(2_000L)
+                .setOnlyAlertOnce(true)
+                .build()
+            NotificationManagerCompat.from(context).notify(NOTIF_ID_COPY_EVENT, notification)
+        }
+
+        /**
+         * Play a subtle UI click sound to acknowledge a clipboard capture.
+         * Uses [AudioManager.playSoundEffect] — respects system "touch sounds" volume.
+         */
+        fun playCopySound(context: Context) {
+            try {
+                val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                am.playSoundEffect(SoundEffectConstants.CLICK, -1f)
+            } catch (e: Exception) {
+                Log.d(TAG, "playCopySound failed (non-fatal): ${e.message}")
             }
         }
 
@@ -334,19 +488,36 @@ class ClipboardService : Service() {
         fun ensureChannel(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
-            val existing = nm.getNotificationChannel(CHANNEL_ID)
-            if (existing != null) return
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                context.getString(R.string.notif_channel_service_name),
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = context.getString(R.string.notif_channel_service_description)
-                setShowBadge(false)
-                enableVibration(false)
-                setSound(null, null)
+
+            if (nm.getNotificationChannel(CHANNEL_ID) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_ID,
+                        context.getString(R.string.notif_channel_service_name),
+                        NotificationManager.IMPORTANCE_LOW
+                    ).apply {
+                        description = context.getString(R.string.notif_channel_service_description)
+                        setShowBadge(false)
+                        enableVibration(false)
+                        setSound(null, null)
+                    }
+                )
             }
-            nm.createNotificationChannel(channel)
+
+            if (nm.getNotificationChannel(CHANNEL_COPY_EVENT) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_COPY_EVENT,
+                        context.getString(R.string.notif_channel_copy_event_name),
+                        NotificationManager.IMPORTANCE_MIN
+                    ).apply {
+                        description = context.getString(R.string.notif_channel_copy_event_description)
+                        setShowBadge(false)
+                        enableVibration(false)
+                        setSound(null, null)
+                    }
+                )
+            }
         }
 
         /**

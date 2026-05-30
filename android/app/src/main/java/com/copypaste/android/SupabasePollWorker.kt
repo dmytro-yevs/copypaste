@@ -66,8 +66,8 @@ class SupabasePollWorker(
                 if (text.isBlank()) continue
                 // LOW-2: pass the stable Supabase source id so a row also fetched
                 // by the FGS loop (shared wall-time cursor) is not duplicated.
-                val stored = repository.storeItem(text, settings.encryptionKey, sourceId = item.itemId)
-                if (stored) newCount++
+                val storedId = repository.storeItem(text, settings.encryptionKey, sourceId = item.itemId)
+                if (storedId.isNotEmpty()) newCount++
                 if (item.wallTime > latestWallTime) latestWallTime = item.wallTime
             }
 

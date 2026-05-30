@@ -202,8 +202,8 @@ class FgsSyncLoop(
             if (text.isBlank()) continue
             // LOW-2: pass the stable Supabase source id so a row re-fetched by
             // the WorkManager worker (shared wall-time cursor) is not duplicated.
-            val stored = repository.storeItem(text, settings.encryptionKey, sourceId = item.itemId)
-            if (stored) newCount++
+            val storedId = repository.storeItem(text, settings.encryptionKey, sourceId = item.itemId)
+            if (storedId.isNotEmpty()) newCount++
             if (item.wallTime > latestWallTime) latestWallTime = item.wallTime
         }
 
@@ -263,7 +263,7 @@ class FgsSyncLoop(
                 )
                 // LOW-2: the P2P SyncedItem.id is the peer's stable row id;
                 // dedup against it so a re-dial does not re-insert the same row.
-                if (repository.storeItem(plaintext, key, sourceId = item.id)) stored += 1
+                if (repository.storeItem(plaintext, key, sourceId = item.id).isNotEmpty()) stored += 1
             }
             if (result.itemsReceived > 0uL || result.itemsSent > 0uL) {
                 Log.i(

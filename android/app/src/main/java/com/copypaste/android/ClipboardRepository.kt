@@ -14,13 +14,28 @@ import javax.crypto.spec.SecretKeySpec
 /**
  * Persists clipboard items to SharedPreferences.
  *
- * Each item is stored as a JSON-like string under key "item_<uuid>" so it
+ * Each item is stored as a pipe-delimited blob under key "item_<uuid>" so it
  * survives process death without requiring Room or a .so binary.
  * An ordered index of ids is kept under "item_ids" (comma-separated).
  *
  * Encryption is attempted via UniFFI [encryptText]; on [UnsatisfiedLinkError]
  * (e.g. during unit tests or before .so is built) it falls back to
  * [localAesEncrypt] which uses AES-256-GCM via the Android KeyStore provider.
+ *
+ * ## Retention & quota enforcement
+ *
+ * After every insert the prune pass ([pruneToLimits]) evicts the oldest UNPINNED
+ * items until the total stored payload bytes are within [Settings.storageQuotaBytes].
+ * There is NO count cap — only a size/byte cap (mirrors the macOS desktop policy).
+ *
+ * PINNED items (tracked in [KEY_PINNED_IDS]) are never evicted by the prune pass
+ * and have no TTL. They survive until the user explicitly clears them via
+ * [clearAll] or [deleteItem] / [deleteItems].
+ *
+ * ## Sensitive items
+ *
+ * Sensitive items are DROPPED at capture time in [storeItem] — Android never
+ * persists them.
  */
 class ClipboardRepository(context: Context) {
 
@@ -67,15 +82,6 @@ class ClipboardRepository(context: Context) {
      * Subscribe to changes in the backing item store. Any write from the
      * foreground service, the accessibility service, or another in-process
      * writer mutates the shared "copypaste_items" prefs and fires [listener].
-     *
-     * This is the glue that lets the UI ViewModel re-load the history the moment
-     * a clip is captured in the BACKGROUND (the primary capture path on Android
-     * 10+ via [ClipboardAccessibilityService]) — previously the list only
-     * refreshed on first composition or a manual Refresh tap, so background
-     * captures were stored but never appeared until the user forced a reload.
-     *
-     * The caller MUST retain the listener (SharedPreferences holds only a weak
-     * reference) and unsubscribe via [stopObserving].
      */
     fun observe(
         listener: SharedPreferences.OnSharedPreferenceChangeListener
@@ -91,92 +97,202 @@ class ClipboardRepository(context: Context) {
     /**
      * Load history items for display, most-recent-first.
      *
-     * Each stored blob is DECRYPTED with [key] (same key used at store time) so
-     * the row shows a real, truncated single-line preview of the clip — not the
-     * old "(N chars)" placeholder (bug Ac). The decryption happens here on
-     * [Dispatchers.IO]; sensitivity is re-evaluated against the decrypted text so
-     * the UI can mask correctly.
-     *
-     * If a blob cannot be decrypted (e.g. it was written by the local AES-GCM
-     * fallback while the .so was absent and we cannot read it back, or the key
-     * rotated) the row falls back to a neutral "(unable to preview)" label — we
-     * never surface ciphertext and never crash.
+     * Each stored blob is DECRYPTED with [key] so the row shows a real preview.
+     * The [ClipboardItem.pinned] field is populated from the persisted [KEY_PINNED_IDS] set.
+     * Image bytes are attached when available (stored separately under "item_img_<id>").
      */
-    suspend fun getItems(key: ByteArray, limit: Int = 50): List<ClipboardItem> =
+    suspend fun getItems(key: ByteArray, limit: Int = 200): List<ClipboardItem> =
         withContext(Dispatchers.IO) {
+            val pinnedSet = storedPinnedIds()
             val ids = storedIds().takeLast(limit)
             ids.mapNotNull { id ->
                 val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
-                parseItem(id, raw, key)
+                val item = parseItem(id, raw, key) ?: return@mapNotNull null
+                // Attach image bytes when available — non-null only for image/* content types.
+                val withImage = if (item.isImage) item.copy(imagePng = getImageBytes(id)) else item
+                withImage.copy(pinned = id in pinnedSet)
             }.reversed()
         }
+
+    /**
+     * Return the raw PNG/JPEG bytes stored for image item [id], or null.
+     * Image bytes are persisted under the key "item_img_<id>" as Base64 NO_WRAP.
+     */
+    fun getImageBytes(id: String): ByteArray? {
+        val b64 = prefs.getString("item_img_$id", null) ?: return null
+        return try {
+            Base64.decode(b64, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            Log.w(TAG, "getImageBytes: failed to decode image for $id: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Persist raw image bytes for item [id].
+     * Rejects images larger than [Settings.maxImageSizeBytes].
+     */
+    fun storeImageBytes(id: String, bytes: ByteArray) {
+        val maxBytes = settings.maxImageSizeBytes
+        if (bytes.size.toLong() > maxBytes) {
+            Log.w(TAG, "storeImageBytes: image ${bytes.size} B exceeds maxImageSizeBytes $maxBytes — dropping")
+            return
+        }
+        val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        prefs.edit().putString("item_img_$id", b64).apply()
+        Log.d(TAG, "storeImageBytes: stored ${bytes.size} bytes for $id")
+    }
 
     suspend fun deleteItem(id: String): Boolean = withContext(Dispatchers.IO) {
         synchronized(idsWriteLock) {
             val ids = storedIds().toMutableList()
             if (!ids.remove(id)) return@synchronized false
-            prefs.edit()
+            val pinnedSet = storedPinnedIds().toMutableSet()
+            val wasPinned = pinnedSet.remove(id)
+            val editor = prefs.edit()
                 .remove("item_$id")
+                .remove("item_img_$id")
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
-                .apply()
+            if (wasPinned) {
+                editor.putString(KEY_PINNED_IDS, pinnedSet.joinToString(","))
+            }
+            editor.apply()
             true
         }
     }
 
     /**
-     * Encrypt [plaintext] with [key] and persist. Returns false when the text
-     * is sensitive (checked via UniFFI or skipped when unavailable), already a
-     * recent local duplicate, or — for synced items — already stored under the
-     * same [sourceId].
+     * Bulk-delete items by [ids]. Items not present in the index are silently
+     * skipped. Pinned state is cleaned up for any deleted ids.
+     */
+    fun deleteItems(ids: List<String>) {
+        if (ids.isEmpty()) return
+        val toDelete = ids.toSet()
+        synchronized(idsWriteLock) {
+            val storedList = storedIds().toMutableList()
+            storedList.removeAll(toDelete)
+            val pinnedSet = storedPinnedIds().toMutableSet()
+            val pinnedChanged = pinnedSet.removeAll(toDelete)
+            val editor = prefs.edit()
+                .putString(KEY_ITEM_IDS, storedList.joinToString(","))
+            for (id in toDelete) {
+                editor.remove("item_$id")
+                editor.remove("item_img_$id")
+            }
+            if (pinnedChanged) {
+                editor.putString(KEY_PINNED_IDS, pinnedSet.joinToString(","))
+            }
+            editor.apply()
+        }
+        Log.d(TAG, "deleteItems: removed ${toDelete.size} items")
+    }
+
+    /**
+     * Delete ALL items (text + image blobs + synced-source-id set + pinned set).
+     * Called from "Clear All" action.
+     */
+    fun clearAll() {
+        synchronized(idsWriteLock) {
+            val ids = storedIds()
+            val editor = prefs.edit()
+            for (id in ids) {
+                editor.remove("item_$id")
+                editor.remove("item_img_$id")
+            }
+            editor
+                .remove(KEY_ITEM_IDS)
+                .remove(KEY_SYNCED_SOURCE_IDS)
+                .remove(KEY_PINNED_IDS)
+                .apply()
+        }
+        Log.d(TAG, "clearAll: all items deleted")
+    }
+
+    /**
+     * Delete all UNPINNED items (text + image blobs). Pinned items remain.
+     * Called from "Clear Unpinned" action.
+     */
+    fun clearUnpinned() {
+        synchronized(idsWriteLock) {
+            val pinnedSet = storedPinnedIds()
+            val ids = storedIds()
+            val editor = prefs.edit()
+            for (id in ids) {
+                if (id !in pinnedSet) {
+                    editor.remove("item_$id")
+                    editor.remove("item_img_$id")
+                }
+            }
+            val remaining = ids.filter { it in pinnedSet }
+            editor
+                .putString(KEY_ITEM_IDS, remaining.joinToString(","))
+                .remove(KEY_SYNCED_SOURCE_IDS)
+                .apply()
+        }
+        Log.d(TAG, "clearUnpinned: all unpinned items deleted")
+    }
+
+    /**
+     * Pin or unpin item [id].
+     * Pinned items survive the retention prune pass.
+     */
+    fun setPinned(id: String, pinned: Boolean) {
+        synchronized(idsWriteLock) {
+            val pinnedSet = storedPinnedIds().toMutableSet()
+            val changed = if (pinned) pinnedSet.add(id) else pinnedSet.remove(id)
+            if (changed) {
+                prefs.edit().putString(KEY_PINNED_IDS, pinnedSet.joinToString(",")).apply()
+            }
+        }
+        Log.d(TAG, "setPinned: item $id pinned=$pinned")
+    }
+
+    /**
+     * Encrypt [plaintext] with [key] and persist, returning the STABLE row id of
+     * the stored item — or an empty string when nothing was stored (blank text,
+     * oversized text, sensitive content, or a recent local duplicate).
      *
-     * The new UUID is generated BEFORE encryption so it can be bound into the
-     * AEAD AAD on the v0.3 schema (see [encryptText]). The same id is also
-     * used as the SharedPreferences storage key.
+     * [contentType] defaults to "text/plain". Pass the actual MIME type for image
+     * items (e.g. "image/png") so history can distinguish and attach image bytes.
      *
-     * [sourceId] is the STABLE remote identifier of an incoming synced item —
-     * the Supabase `item_id` (the per-clip UUID bound into the cloud AEAD AAD)
-     * or the P2P [uniffi.copypaste_android.SyncedItem.id]. For locally captured
-     * clips it is null. See LOW-2: [FgsSyncLoop.poll] and
-     * [SupabasePollWorker.doWork] share the `lastSupabasePollWallTime` cursor,
-     * so the same remote row can be fetched by both within the same wall-time
-     * bucket. The 2 s content [DEDUP_WINDOW_MS] only catches near-simultaneous
-     * stores; rows fetched > 2 s apart slipped through and produced a duplicate
-     * history row under a fresh UUID. Recording the source id closes that gap
-     * regardless of timing.
+     * After inserting, calls [pruneToLimits] to enforce the storage-quota cap
+     * (SIZE only — no count cap).
      */
     suspend fun storeItem(
         plaintext: String,
         key: ByteArray,
         sourceId: String? = null,
-    ): Boolean = withContext(Dispatchers.IO) {
-        if (plaintext.isBlank()) return@withContext false
+        contentType: String = "text/plain",
+    ): String = withContext(Dispatchers.IO) {
+        if (plaintext.isBlank()) return@withContext ""
 
-        // ── LOW-2: source-id dedup for incoming synced items. Both poll callers
-        // can fetch the same remote row (shared wall-time cursor), and each call
-        // mints a FRESH local UUID, so content/time dedup alone misses copies
-        // fetched > DEDUP_WINDOW_MS apart. Skip when this remote source id was
-        // already stored; record it atomically otherwise.
+        // ── Size enforcement: reject oversized text before any crypto work.
+        val textBytes = plaintext.toByteArray(Charsets.UTF_8)
+        val maxTextBytes = settings.maxTextSizeBytes
+        if (textBytes.size.toLong() > maxTextBytes) {
+            Log.w(TAG, "storeItem: text ${textBytes.size} B exceeds maxTextSizeBytes $maxTextBytes — dropping")
+            return@withContext ""
+        }
+
+        // ── LOW-2: source-id dedup for incoming synced items.
         if (sourceId != null) {
             synchronized(seenSourceIdsLock) {
                 val seen = storedSourceIds()
                 if (!isNewSourceId(sourceId, seen)) {
                     Log.d(TAG, "Synced item $sourceId already stored — skipping")
-                    return@withContext false
+                    return@withContext ""
                 }
                 recordSourceId(sourceId, seen)
             }
         }
 
-        // ── HIGH-3: cross-listener dedup. The same physical copy fires the
-        // clip-changed listener in every owner (FGS, a11y service, activity).
-        // Skip if identical content was stored within the recent window so a
-        // single copy yields a single row, while a later re-copy still stores.
+        // ── HIGH-3: cross-listener dedup (identical content within DEDUP_WINDOW_MS).
         val hash = plaintext.hashCode()
         synchronized(dedupLock) {
             val now = System.currentTimeMillis()
             if (hash == lastStoredHash && now - lastStoredAtMs < DEDUP_WINDOW_MS) {
                 Log.d(TAG, "Duplicate clip within ${DEDUP_WINDOW_MS}ms — skipping")
-                return@withContext false
+                return@withContext ""
             }
             lastStoredHash = hash
             lastStoredAtMs = now
@@ -187,52 +303,84 @@ class ClipboardRepository(context: Context) {
         } catch (_: UnsatisfiedLinkError) {
             false
         }
-        if (sensitive) return@withContext false
+        if (sensitive) return@withContext ""
 
         val id = UUID.randomUUID().toString()
         val blob = try {
-            encryptText(id, plaintext.toByteArray(Charsets.UTF_8), key)
+            encryptText(id, textBytes, key)
         } catch (e: IllegalStateException) {
             Log.d(TAG, "UniFFI unavailable (${e.message}) — using local AES-GCM fallback")
-            localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+            localAesEncrypt(textBytes, key)
         } catch (_: UnsatisfiedLinkError) {
-            // Defensive — the bindings throw IllegalStateException, but a
-            // future change could surface UnsatisfiedLinkError directly.
             Log.d(TAG, "UniFFI unavailable (UnsatisfiedLinkError) — using local AES-GCM fallback")
-            localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+            localAesEncrypt(textBytes, key)
         }
 
-        val encoded = encodeItem(blob, plaintext.length)
-        // ── HIGH-8: synchronize the read-modify-write so concurrent writers
-        // cannot clobber each other's entries in the comma-joined index.
+        val encoded = encodeItem(blob, textBytes.size, contentType = contentType)
         synchronized(idsWriteLock) {
             val ids = storedIds().toMutableList().also { it.add(id) }
-
-            // ── CRITICAL-1: enforce Settings.maxHistoryItems. Without this the
-            // ids index and the per-item "item_<id>" prefs entries grew forever
-            // (getItems only ever read the last 50, so the overflow was invisible
-            // yet kept bloating the prefs file). Drop the oldest ids past the cap
-            // and remove their backing entries in the same edit.
-            val editor = prefs.edit()
-            val maxItems = settings.maxHistoryItems.coerceAtLeast(1)
-            if (ids.size > maxItems) {
-                val dropCount = ids.size - maxItems
-                repeat(dropCount) {
-                    val droppedId = ids.removeAt(0)
-                    editor.remove("item_$droppedId")
-                }
-            }
-            editor
+            prefs.edit()
                 .putString("item_$id", encoded)
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
                 .apply()
         }
 
-        Log.d(TAG, "Stored item $id (${plaintext.length} chars)")
-        true
+        Log.d(TAG, "Stored item $id (${textBytes.size} bytes, contentType=$contentType)")
+
+        // Prune to size-only quota after insert (count cap REMOVED — macOS parity).
+        pruneToLimits()
+        id
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
+
+    /**
+     * Enforce the storage-quota cap by evicting the oldest UNPINNED items.
+     *
+     * Only the byte quota is enforced — there is no count cap (mirrors desktop policy).
+     * "Stored payload bytes" approximates the UTF-8 byte length of each blob string
+     * (text) plus the stored Base64 length for image bytes.
+     *
+     * PINNED items are counted in total bytes but never evicted.
+     */
+    private fun pruneToLimits() {
+        val quotaBytes = settings.storageQuotaBytes.coerceAtLeast(0L)
+
+        synchronized(idsWriteLock) {
+            val pinnedSet = storedPinnedIds()
+            val ids = storedIds().toMutableList()
+
+            val blobSizes: Map<String, Int> = ids.associate { id ->
+                val textBytes = prefs.getString("item_$id", null)?.toByteArray(Charsets.UTF_8)?.size ?: 0
+                val imgBytes = prefs.getString("item_img_$id", null)?.length ?: 0
+                id to (textBytes + imgBytes)
+            }
+
+            var totalBytes = blobSizes.values.sumOf { it.toLong() }
+            val unpinned = ids.filter { it !in pinnedSet }.toMutableList()
+
+            val editor = prefs.edit()
+            var didEvict = false
+
+            while (unpinned.isNotEmpty()) {
+                val quotaExceeded = quotaBytes > 0 && totalBytes > quotaBytes
+                if (!quotaExceeded) break
+
+                val evictId = unpinned.removeAt(0)
+                ids.remove(evictId)
+                val sz = blobSizes[evictId] ?: 0
+                totalBytes -= sz
+                editor.remove("item_$evictId")
+                editor.remove("item_img_$evictId")
+                didEvict = true
+                Log.d(TAG, "pruneToLimits: evicted $evictId (blob ${sz}B, totalNow=${totalBytes}B)")
+            }
+
+            if (didEvict) {
+                editor.putString(KEY_ITEM_IDS, ids.joinToString(",")).apply()
+            }
+        }
+    }
 
     private fun storedIds(): List<String> =
         prefs.getString(KEY_ITEM_IDS, "")
@@ -240,12 +388,13 @@ class ClipboardRepository(context: Context) {
             ?.filter { it.isNotBlank() }
             ?: emptyList()
 
-    /**
-     * The set of remote source ids already stored locally (LOW-2). Persisted as
-     * a comma-joined string under [KEY_SYNCED_SOURCE_IDS] so dedup survives
-     * process death — the WorkManager worker runs in a fresh process and must
-     * still see ids stored by an earlier FGS-loop poll.
-     */
+    private fun storedPinnedIds(): Set<String> =
+        prefs.getString(KEY_PINNED_IDS, "")
+            ?.split(",")
+            ?.filter { it.isNotBlank() }
+            ?.toHashSet()
+            ?: emptySet()
+
     private fun storedSourceIds(): LinkedHashSet<String> =
         LinkedHashSet(
             prefs.getString(KEY_SYNCED_SOURCE_IDS, "")
@@ -254,11 +403,6 @@ class ClipboardRepository(context: Context) {
                 ?: emptyList()
         )
 
-    /**
-     * Append [sourceId] to the persisted seen-set [seen] (already known to lack
-     * it), trimming oldest-first to [MAX_SEEN_SOURCE_IDS] so the prefs string
-     * cannot grow unbounded. Insertion order is preserved by [LinkedHashSet].
-     */
     private fun recordSourceId(sourceId: String, seen: LinkedHashSet<String>) {
         seen.add(sourceId)
         while (seen.size > MAX_SEEN_SOURCE_IDS) {
@@ -270,13 +414,17 @@ class ClipboardRepository(context: Context) {
 
     /**
      * Encode a stored item as a pipe-delimited string:
-     * <wallTimeMs>|<contentType>|<snippetLen>|<nonceB64>|<ciphertextB64>
+     * <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>
      */
-    private fun encodeItem(blob: EncryptedBlob, plaintextLen: Int): String {
+    private fun encodeItem(
+        blob: EncryptedBlob,
+        plaintextLen: Int,
+        contentType: String = "text/plain",
+    ): String {
         val nonce64 = Base64.encodeToString(blob.nonce, Base64.NO_WRAP)
         val ct64 = Base64.encodeToString(blob.ciphertext, Base64.NO_WRAP)
         val ts = System.currentTimeMillis()
-        return "$ts|text/plain|$plaintextLen|$nonce64|$ct64"
+        return "$ts|$contentType|$plaintextLen|$nonce64|$ct64"
     }
 
     private fun parseItem(id: String, raw: String, key: ByteArray): ClipboardItem? {
@@ -286,16 +434,11 @@ class ClipboardRepository(context: Context) {
             Log.w(TAG, "Failed to parse item $id: ${e.message}")
             return null
         }
-        // Required structural fields. A malformed row (missing pieces) is dropped
-        // rather than rendered, so the index never shows a half-decoded entry.
         val wallTimeMs = parts.getOrNull(0)?.toLongOrNull() ?: return null
         val contentType = parts.getOrNull(1) ?: return null
         val nonceB64 = parts.getOrNull(3)
         val ctB64 = parts.getOrNull(4)
 
-        // Decrypt for a real preview. Try UniFFI first (the normal store path),
-        // then the local AES-GCM fallback (used when the .so was absent at store
-        // time). Either failure yields a neutral, non-crashing label.
         val plaintext: String? = if (nonceB64 != null && ctB64 != null) {
             try {
                 val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
@@ -315,12 +458,9 @@ class ClipboardRepository(context: Context) {
             false
         }
 
-        val snippet = if (plaintext == null) {
-            UNABLE_TO_PREVIEW
-        } else {
-            previewFromPlaintext(plaintext)
-        }
+        val snippet = if (plaintext == null) UNABLE_TO_PREVIEW else previewFromPlaintext(plaintext)
 
+        // pinned and imagePng are populated by getItems() after parseItem returns.
         return ClipboardItem(
             id = id,
             contentType = contentType,
@@ -330,14 +470,6 @@ class ClipboardRepository(context: Context) {
         )
     }
 
-    /**
-     * Decrypt a stored blob into UTF-8 plaintext for preview rendering.
-     *
-     * The blob may have been produced by either the UniFFI XChaCha20 path
-     * ([encryptText]) or the Kotlin AES-256-GCM fallback ([localAesEncrypt]).
-     * The two are not interchangeable, so try UniFFI first and on any failure
-     * fall back to local AES-GCM. Throws if neither can read the blob.
-     */
     private fun decryptForPreview(
         id: String,
         ciphertext: ByteArray,
@@ -347,8 +479,6 @@ class ClipboardRepository(context: Context) {
         val bytes = try {
             decryptText(id, ciphertext, nonce, key)
         } catch (_: Exception) {
-            // Native unavailable or wrong AEAD scheme for this blob — the item
-            // may have been stored via the local AES-GCM fallback.
             localAesDecrypt(ciphertext, nonce, key)
         }
         return String(bytes, Charsets.UTF_8)
@@ -357,70 +487,27 @@ class ClipboardRepository(context: Context) {
     companion object {
         private const val TAG = "ClipboardRepository"
 
-        /**
-         * Map a stored MIME-style content type to the canonical token the Rust
-         * FFI send path (`sync_with_peer`) accepts when re-keying items for
-         * peers. Stored text items use "text/plain"; the FFI only re-keys items
-         * whose content type is exactly "text", so any "text/<any>" value must be
-         * collapsed to "text" at the sync boundary or the item is silently
-         * dropped (items_sent = 0). Non-text types pass through unchanged.
-         */
         fun normalizeContentTypeForSync(stored: String): String =
             if (stored == "text" || stored.startsWith("text/")) "text" else stored
 
-        /**
-         * SharedPreferences key holding the comma-joined ordered index of item
-         * ids. Public so observers (e.g. [ClipboardViewModel]) can filter the
-         * OnSharedPreferenceChangeListener callback to just the index mutations
-         * that signal an add/delete — every store/delete rewrites this key.
-         */
         const val KEY_ITEM_IDS = "item_ids"
-
-        /**
-         * SharedPreferences key holding the comma-joined set of remote source
-         * ids (Supabase `item_id` / P2P `SyncedItem.id`) already stored locally,
-         * used for LOW-2 cross-poll dedup of incoming synced items.
-         */
         const val KEY_SYNCED_SOURCE_IDS = "synced_source_ids"
+        const val KEY_PINNED_IDS = "pinned_ids"
 
-        /**
-         * Upper bound on the persisted source-id seen-set. Oldest ids are
-         * dropped first once exceeded. Comfortably larger than any realistic
-         * sync backlog, so a re-fetched row is still recognised, while the prefs
-         * string stays bounded.
-         */
         const val MAX_SEEN_SOURCE_IDS = 1_000
 
-        /** Window in which an identical-content store is treated as a duplicate. */
         private const val DEDUP_WINDOW_MS = 2_000L
 
-        /**
-         * Pure LOW-2 dedup predicate: an incoming synced item is new (should be
-         * stored) iff its remote [sourceId] is not already in [seen]. Extracted
-         * with no Android deps so it is unit-testable on the host JVM.
-         */
         fun isNewSourceId(sourceId: String, seen: Set<String>): Boolean =
             sourceId !in seen
 
-        /** Max characters shown in a history-row preview before ellipsizing. */
         const val PREVIEW_MAX_CHARS = 140
-
-        /** Neutral label shown when a stored blob cannot be decrypted. */
         const val UNABLE_TO_PREVIEW = "(unable to preview)"
 
         private const val AES_TRANSFORMATION = "AES/GCM/NoPadding"
         private const val GCM_TAG_BITS = 128
         private const val GCM_NONCE_BYTES = 12
 
-        /**
-         * Build a safe, human-readable history preview from decrypted [text].
-         *
-         * Pure (no Android / native deps) so it is unit-testable on the host JVM.
-         * Collapses all runs of whitespace (incl. newlines/tabs) to single spaces,
-         * trims, and caps the result at [PREVIEW_MAX_CHARS], appending an ellipsis
-         * when truncated. Blank/whitespace-only input yields an empty string, which
-         * the UI renders as its "empty" placeholder.
-         */
         fun previewFromPlaintext(text: String): String {
             val collapsed = text.replace(Regex("\\s+"), " ").trim()
             if (collapsed.isEmpty()) return ""
@@ -431,12 +518,6 @@ class ClipboardRepository(context: Context) {
             }
         }
 
-        /**
-         * Counterpart to [localAesEncrypt]: AES-256-GCM decryption using only
-         * javax.crypto. Reads back blobs produced by the local fallback when the
-         * UniFFI .so was unavailable at store time. Throws on auth-tag mismatch
-         * (wrong key) — the caller treats that as "unable to preview".
-         */
         fun localAesDecrypt(ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray {
             val cipher = Cipher.getInstance(AES_TRANSFORMATION)
             cipher.init(
@@ -447,10 +528,6 @@ class ClipboardRepository(context: Context) {
             return cipher.doFinal(ciphertext)
         }
 
-        /**
-         * AES-256-GCM encryption using only javax.crypto — no native dep.
-         * Used as fallback when UniFFI .so is not yet loaded.
-         */
         fun localAesEncrypt(plaintext: ByteArray, key: ByteArray): EncryptedBlob {
             val nonce = ByteArray(GCM_NONCE_BYTES).also {
                 java.security.SecureRandom().nextBytes(it)
@@ -468,12 +545,7 @@ class ClipboardRepository(context: Context) {
 
     /**
      * Decrypt all locally stored items into [uniffi.copypaste_android.LocalItem]
-     * values for a P2P sync push. Each stored blob is decrypted with [key] using
-     * the item's id as AEAD AAD (the same id used at encrypt time).
-     *
-     * Items that fail to decrypt (e.g. produced by the local AES-GCM fallback
-     * when the .so was absent, which UniFFI cannot read back) are skipped rather
-     * than aborting the whole sync. Returns most-recent-first, capped at [limit].
+     * values for a P2P sync push.
      */
     suspend fun localItemsForSync(
         key: ByteArray,
@@ -485,12 +557,6 @@ class ClipboardRepository(context: Context) {
             try {
                 val parts = raw.split("|")
                 val wallTimeMs = parts[0].toLong()
-                // Normalize the stored MIME-style content type ("text/plain",
-                // "text/<any>") to the canonical "text" token the FFI send path
-                // (`sync_with_peer`) re-keys and offers to peers. Without this
-                // mapping every Android item is filtered out and ZERO items are
-                // sent. We only normalize at the sync boundary; the on-disk
-                // value is left untouched.
                 val contentType = normalizeContentTypeForSync(parts[1])
                 val nonce = Base64.decode(parts[3], Base64.NO_WRAP)
                 val ciphertext = Base64.decode(parts[4], Base64.NO_WRAP)
@@ -509,9 +575,7 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Pull incoming relay items, decrypt each via UniFFI decryptText, and store
-     * non-sensitive plaintext locally. Returns the list of decrypted strings that
-     * were successfully received (storing may still be a no-op until the .so lands).
+     * Pull incoming relay items and store locally.
      */
     suspend fun syncItems(syncManager: SyncManager, encryptionKey: ByteArray): List<String> =
         withContext(Dispatchers.IO) {

@@ -178,6 +178,83 @@ class Settings(context: Context) {
         get() = prefs.getInt("max_history_items", 1000)
         set(v) = prefs.edit().putInt("max_history_items", v).apply()
 
+    // ── Display settings (Maccy-parity) ────────────────────────────────────────
+
+    /**
+     * Maximum height (in dp) for image thumbnails in the history list.
+     * Default 40 dp (compact list rows). Range 1–200.
+     */
+    var imageMaxHeight: Int
+        get() = prefs.getInt("image_max_height", 40).coerceIn(1, 200)
+        set(v) = prefs.edit().putInt("image_max_height", v.coerceIn(1, 200)).apply()
+
+    /**
+     * Maximum number of history items to display.
+     * Mirrors Maccy's `historySize` preference. Range 1–999. Default 200.
+     */
+    var historySize: Int
+        get() = prefs.getInt("history_size", 200).coerceIn(1, 999)
+        set(v) = prefs.edit().putInt("history_size", v.coerceIn(1, 999)).apply()
+
+    /**
+     * Delay in ms before auto-collapsing an expanded action row. Default 1500 ms.
+     * Mirrors Maccy's `previewDelay`. Range 200–100 000 ms.
+     */
+    var previewDelay: Long
+        get() = prefs.getLong("preview_delay_ms", 1500L).coerceIn(200L, 100_000L)
+        set(v) = prefs.edit().putLong("preview_delay_ms", v.coerceIn(200L, 100_000L)).apply()
+
+    // ── Storage / size limits (mirrors defaults.rs) ─────────────────────────────
+
+    /**
+     * Maximum size in bytes for a text clipboard item. Default: 1 MB.
+     */
+    var maxTextSizeBytes: Long
+        get() = prefs.getLong("max_text_size_bytes", 1_000_000L)
+        set(v) = prefs.edit().putLong("max_text_size_bytes", v).apply()
+
+    /**
+     * Maximum size in bytes for a stored image item. Default: 25 MB.
+     */
+    var maxImageSizeBytes: Long
+        get() = prefs.getLong("max_image_size_bytes", 25_000_000L)
+        set(v) = prefs.edit().putLong("max_image_size_bytes", v).apply()
+
+    /**
+     * Total local storage quota for the clipboard database, in bytes.
+     * Default: 500 MB.
+     */
+    var storageQuotaBytes: Long
+        get() = prefs.getLong("storage_quota_bytes", 500_000_000L)
+        set(v) = prefs.edit().putLong("storage_quota_bytes", v).apply()
+
+    // ── Sync Wi-Fi preference ───────────────────────────────────────────────────
+
+    /**
+     * When true, restrict sync to Wi-Fi only. Defaults to false.
+     */
+    var syncOnWifiOnly: Boolean
+        get() = prefs.getBoolean("sync_on_wifi_only", false)
+        set(v) = prefs.edit().putBoolean("sync_on_wifi_only", v).apply()
+
+    // ── Notification / sound on copy ───────────────────────────────────────────
+
+    /**
+     * When true (default), post a brief notification each time a clipboard item
+     * is captured. Mirrors macOS Maccy-style copy notification parity.
+     */
+    var notifyOnCopy: Boolean
+        get() = prefs.getBoolean("notify_on_copy", true)
+        set(v) = prefs.edit().putBoolean("notify_on_copy", v).apply()
+
+    /**
+     * When true (default), play a subtle click sound each time a clipboard item
+     * is captured. Mirrors macOS Maccy-style copy sound parity.
+     */
+    var soundOnCopy: Boolean
+        get() = prefs.getBoolean("sound_on_copy", true)
+        set(v) = prefs.edit().putBoolean("sound_on_copy", v).apply()
+
     /**
      * 256-bit AES key used for local clipboard encryption.
      *

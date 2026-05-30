@@ -44,11 +44,11 @@ import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.SectionLabel
 
 /**
- * Settings screen — toggles and Supabase config fields.
+ * Settings screen — grouped into clear sections mirroring the macOS settings layout:
+ *   General / Display / Storage / Sync / Notifications
  *
- * Embedded in the bottom-nav shell via [showBackButton]=false. Also usable
- * as a standalone activity (launched from a deep-link or legacy nav) with
- * [showBackButton]=true.
+ * There is NO "max items count" control — only size/byte-based storage limits
+ * (mirrors desktop: bound local DB by SIZE only, pinned excluded).
  */
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,13 +72,30 @@ fun SettingsScreen(
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
 
-    // ── Toggle states ──
+    // ── General ──
+    var captureEnabled by remember { mutableStateOf(settings.captureEnabled) }
     var syncEnabled by remember { mutableStateOf(settings.syncEnabled) }
+
+    // ── Display ──
     var showWarnings by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
+    var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.toString()) }
+    var previewDelay by remember { mutableStateOf(settings.previewDelay.toString()) }
 
-    // ── Sync backend ──
+    // ── Storage ──
+    var maxTextSizeMb by remember {
+        mutableStateOf((settings.maxTextSizeBytes / 1_000_000L).toString())
+    }
+    var maxImageSizeMb by remember {
+        mutableStateOf((settings.maxImageSizeBytes / 1_000_000L).toString())
+    }
+    var storageQuotaMb by remember {
+        mutableStateOf((settings.storageQuotaBytes / 1_000_000L).toString())
+    }
+
+    // ── Sync ──
     var syncBackend by remember { mutableStateOf(settings.syncBackend) }
+    var syncOnWifiOnly by remember { mutableStateOf(settings.syncOnWifiOnly) }
 
     // ── Supabase fields ──
     var supabaseUrl by remember { mutableStateOf(settings.supabaseUrl) }
@@ -87,8 +104,12 @@ fun SettingsScreen(
     var supabaseEmail by remember { mutableStateOf(settings.supabaseEmail) }
     var supabasePassword by remember { mutableStateOf(settings.supabasePassword) }
 
-    // ── Relay field ──
+    // ── Relay ──
     var relayUrl by remember { mutableStateOf(settings.relayUrl) }
+
+    // ── Notifications ──
+    var notifyOnCopy by remember { mutableStateOf(settings.notifyOnCopy) }
+    var soundOnCopy by remember { mutableStateOf(settings.soundOnCopy) }
 
     var settingsError by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -124,7 +145,22 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.Top
         ) {
-            // ── General toggles ────────────────────────────────────────────────
+
+            // ── GENERAL ──────────────────────────────────────────────────────
+            SectionLabel(stringResource(R.string.section_general))
+            SettingsRow(
+                title = stringResource(R.string.setting_capture_enabled_title),
+                subtitle = stringResource(R.string.setting_capture_enabled_subtitle),
+                checked = captureEnabled,
+                onCheckedChange = {
+                    val prev = captureEnabled; captureEnabled = it
+                    try { settings.captureEnabled = it } catch (e: Exception) {
+                        captureEnabled = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                }
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
             SettingsRow(
                 title = stringResource(R.string.setting_sync_enabled_title),
                 subtitle = stringResource(R.string.setting_sync_enabled_subtitle),
@@ -132,11 +168,23 @@ fun SettingsScreen(
                 onCheckedChange = {
                     val prev = syncEnabled; syncEnabled = it
                     try { settings.syncEnabled = it } catch (e: Exception) {
-                        syncEnabled = prev; settingsError = e.message ?: e.javaClass.simpleName
+                        syncEnabled = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+            SettingsNavRow(
+                title = stringResource(R.string.setting_permissions_title),
+                subtitle = stringResource(R.string.setting_permissions_subtitle),
+                onClick = {
+                    ctx.startActivity(Intent(ctx, PermissionsSettingsActivity::class.java))
+                }
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+            // ── DISPLAY ──────────────────────────────────────────────────────
+            SectionLabel(stringResource(R.string.section_display))
             SettingsRow(
                 title = stringResource(R.string.setting_sensitive_warnings_title),
                 subtitle = stringResource(R.string.setting_sensitive_warnings_subtitle),
@@ -144,7 +192,8 @@ fun SettingsScreen(
                 onCheckedChange = {
                     val prev = showWarnings; showWarnings = it
                     try { settings.showSensitiveWarnings = it } catch (e: Exception) {
-                        showWarnings = prev; settingsError = e.message ?: e.javaClass.simpleName
+                        showWarnings = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
@@ -156,34 +205,98 @@ fun SettingsScreen(
                 onCheckedChange = {
                     val prev = maskSensitive; maskSensitive = it
                     try { settings.maskSensitiveContent = it } catch (e: Exception) {
-                        maskSensitive = prev; settingsError = e.message ?: e.javaClass.simpleName
+                        maskSensitive = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-
-            // ── Permissions review ─────────────────────────────────────────────
-            SettingsNavRow(
-                title = stringResource(R.string.setting_permissions_title),
-                subtitle = stringResource(R.string.setting_permissions_subtitle),
-                onClick = {
-                    ctx.startActivity(Intent(ctx, PermissionsSettingsActivity::class.java))
-                }
+            SettingsNumberField(
+                label = stringResource(R.string.setting_image_max_height_label),
+                hint = stringResource(R.string.setting_image_max_height_hint),
+                value = imageMaxHeight,
+                onValueChange = { imageMaxHeight = it },
+                onCommit = {
+                    val v = imageMaxHeight.toIntOrNull()?.coerceIn(1, 200) ?: return@SettingsNumberField
+                    try { settings.imageMaxHeight = v; imageMaxHeight = v.toString() }
+                    catch (e: Exception) { settingsError = e.message }
+                },
+            )
+            SettingsNumberField(
+                label = stringResource(R.string.setting_preview_delay_label),
+                hint = stringResource(R.string.setting_preview_delay_hint),
+                value = previewDelay,
+                onValueChange = { previewDelay = it },
+                onCommit = {
+                    val v = previewDelay.toLongOrNull()?.coerceIn(200L, 100_000L) ?: return@SettingsNumberField
+                    try { settings.previewDelay = v; previewDelay = v.toString() }
+                    catch (e: Exception) { settingsError = e.message }
+                },
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
-            // ── Sync backend selector ──────────────────────────────────────────
-            SectionLabel("Sync Backend")
+            // ── STORAGE ──────────────────────────────────────────────────────
+            // NOTE: There is no item-count cap — size-only limits mirror the desktop.
+            SectionLabel(stringResource(R.string.section_storage_limits))
+            SettingsNumberField(
+                label = stringResource(R.string.setting_max_text_size_label),
+                hint = stringResource(R.string.setting_max_text_size_hint),
+                value = maxTextSizeMb,
+                onValueChange = { maxTextSizeMb = it },
+                onCommit = {
+                    val mb = maxTextSizeMb.toLongOrNull()?.coerceIn(1L, 50L) ?: return@SettingsNumberField
+                    try { settings.maxTextSizeBytes = mb * 1_000_000L; maxTextSizeMb = mb.toString() }
+                    catch (e: Exception) { settingsError = e.message }
+                },
+            )
+            SettingsNumberField(
+                label = stringResource(R.string.setting_max_image_size_label),
+                hint = stringResource(R.string.setting_max_image_size_hint),
+                value = maxImageSizeMb,
+                onValueChange = { maxImageSizeMb = it },
+                onCommit = {
+                    val mb = maxImageSizeMb.toLongOrNull()?.coerceIn(1L, 200L) ?: return@SettingsNumberField
+                    try { settings.maxImageSizeBytes = mb * 1_000_000L; maxImageSizeMb = mb.toString() }
+                    catch (e: Exception) { settingsError = e.message }
+                },
+            )
+            SettingsNumberField(
+                label = stringResource(R.string.setting_storage_quota_label),
+                hint = stringResource(R.string.setting_storage_quota_hint),
+                value = storageQuotaMb,
+                onValueChange = { storageQuotaMb = it },
+                onCommit = {
+                    val mb = storageQuotaMb.toLongOrNull()?.coerceIn(50L, 10_000L) ?: return@SettingsNumberField
+                    try { settings.storageQuotaBytes = mb * 1_000_000L; storageQuotaMb = mb.toString() }
+                    catch (e: Exception) { settingsError = e.message }
+                },
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+            // ── SYNC ─────────────────────────────────────────────────────────
+            SectionLabel(stringResource(R.string.section_sync))
             SettingsRow(
-                title = "Use Supabase Cloud Sync",
-                subtitle = "Cross-device sync via Supabase (end-to-end encrypted). Off = relay mode.",
+                title = stringResource(R.string.setting_sync_wifi_only_title),
+                subtitle = stringResource(R.string.setting_sync_wifi_only_subtitle),
+                checked = syncOnWifiOnly,
+                onCheckedChange = {
+                    val prev = syncOnWifiOnly; syncOnWifiOnly = it
+                    try { settings.syncOnWifiOnly = it } catch (e: Exception) {
+                        syncOnWifiOnly = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                }
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+            SettingsRow(
+                title = stringResource(R.string.setting_use_supabase_title),
+                subtitle = stringResource(R.string.setting_use_supabase_subtitle),
                 checked = syncBackend == SyncBackend.SUPABASE,
                 onCheckedChange = { useSupabase ->
                     val newBackend = if (useSupabase) SyncBackend.SUPABASE else SyncBackend.RELAY
                     syncBackend = newBackend
                     try {
                         settings.syncBackend = newBackend
-                        // Register or cancel the background poll worker
                         SupabasePollWorker.schedule(ctx, enabled = useSupabase)
                     } catch (e: Exception) {
                         syncBackend = if (useSupabase) SyncBackend.RELAY else SyncBackend.SUPABASE
@@ -193,12 +306,12 @@ fun SettingsScreen(
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
-            // ── Supabase config (visible only when SUPABASE selected) ──────────
+            // ── SUPABASE CONFIG ───────────────────────────────────────────────
             if (syncBackend == SyncBackend.SUPABASE) {
-                SectionLabel("Supabase Configuration")
+                SectionLabel(stringResource(R.string.section_supabase_config))
 
                 SettingsTextField(
-                    label = "Supabase URL",
+                    label = stringResource(R.string.setting_supabase_url_label),
                     hint = "https://your-project.supabase.co",
                     value = supabaseUrl,
                     onValueChange = { supabaseUrl = it },
@@ -207,9 +320,8 @@ fun SettingsScreen(
                         catch (e: Exception) { settingsError = e.message }
                     },
                 )
-
                 SettingsTextField(
-                    label = "Anon Key",
+                    label = stringResource(R.string.setting_supabase_anon_key_label),
                     hint = "eyJhbGci…",
                     value = supabaseAnonKey,
                     onValueChange = { supabaseAnonKey = it },
@@ -219,10 +331,9 @@ fun SettingsScreen(
                     },
                     password = true,
                 )
-
                 SettingsTextField(
-                    label = "Sync Passphrase",
-                    hint = "Shared passphrase (same on all devices)",
+                    label = stringResource(R.string.setting_sync_passphrase_label),
+                    hint = stringResource(R.string.setting_sync_passphrase_hint),
                     value = cloudPassphrase,
                     onValueChange = { cloudPassphrase = it },
                     onCommit = {
@@ -232,17 +343,37 @@ fun SettingsScreen(
                     password = true,
                 )
 
-                SectionLabel("Supabase Account (optional)")
+                SectionLabel(stringResource(R.string.section_supabase_account))
                 Text(
-                    text = "If left blank, the anon key is used as bearer. " +
-                            "Sign-in enables Row Level Security policies.",
+                    text = stringResource(R.string.setting_supabase_account_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
 
+                // Show signed-in account + same-account sync warning
+                val accountDisplay = supabaseEmail.ifBlank { "(anon key — no sign-in)" }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "Signed-in account: $accountDisplay",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "All your devices must use THIS SAME Supabase account to sync — " +
+                            "different accounts can't see each other's clips.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+
                 SettingsTextField(
-                    label = "Email",
+                    label = stringResource(R.string.setting_supabase_email_label),
                     hint = "user@example.com",
                     value = supabaseEmail,
                     onValueChange = { supabaseEmail = it },
@@ -251,9 +382,8 @@ fun SettingsScreen(
                         catch (e: Exception) { settingsError = e.message }
                     },
                 )
-
                 SettingsTextField(
-                    label = "Password",
+                    label = stringResource(R.string.setting_supabase_password_label),
                     hint = "",
                     value = supabasePassword,
                     onValueChange = { supabasePassword = it },
@@ -263,13 +393,12 @@ fun SettingsScreen(
                     },
                     password = true,
                 )
-
                 HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
             }
 
-            // ── Relay config (visible only when RELAY selected) ────────────────
+            // ── RELAY CONFIG ──────────────────────────────────────────────────
             if (syncBackend == SyncBackend.RELAY) {
-                SectionLabel("Relay Configuration")
+                SectionLabel(stringResource(R.string.section_relay_config))
                 SettingsTextField(
                     label = stringResource(R.string.setting_relay_url_label),
                     hint = "http://localhost:8080",
@@ -282,6 +411,35 @@ fun SettingsScreen(
                 )
                 HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
             }
+
+            // ── NOTIFICATIONS ─────────────────────────────────────────────────
+            SectionLabel(stringResource(R.string.section_notifications))
+            SettingsRow(
+                title = stringResource(R.string.setting_notify_on_copy_title),
+                subtitle = stringResource(R.string.setting_notify_on_copy_subtitle),
+                checked = notifyOnCopy,
+                onCheckedChange = {
+                    val prev = notifyOnCopy; notifyOnCopy = it
+                    try { settings.notifyOnCopy = it } catch (e: Exception) {
+                        notifyOnCopy = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                }
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+            SettingsRow(
+                title = stringResource(R.string.setting_sound_on_copy_title),
+                subtitle = stringResource(R.string.setting_sound_on_copy_subtitle),
+                checked = soundOnCopy,
+                onCheckedChange = {
+                    val prev = soundOnCopy; soundOnCopy = it
+                    try { settings.soundOnCopy = it } catch (e: Exception) {
+                        soundOnCopy = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                }
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
             // ── Device ID (read-only) ──────────────────────────────────────────
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -298,6 +456,32 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun SettingsNumberField(
+    label: String,
+    hint: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onCommit: () -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { raw ->
+            if (raw.all { it.isDigit() }) {
+                onValueChange(raw)
+                if (raw.isNotEmpty()) onCommit()
+            }
+        },
+        label = { Text(label) },
+        placeholder = { Text(hint, style = MaterialTheme.typography.bodySmall) },
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+    )
 }
 
 @Composable
@@ -321,8 +505,8 @@ private fun SettingsTextField(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp),
-        visualTransformation = if (password) PasswordVisualTransformation() else
-            androidx.compose.ui.text.input.VisualTransformation.None,
+        visualTransformation = if (password) PasswordVisualTransformation()
+            else androidx.compose.ui.text.input.VisualTransformation.None,
         keyboardOptions = if (password) KeyboardOptions(keyboardType = KeyboardType.Password)
             else KeyboardOptions.Default,
     )

@@ -267,7 +267,7 @@ fun PairScreen(
                             ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
                             Charsets.UTF_8,
                         )
-                        if (repository.storeItem(plaintext, key)) stored += 1
+                        if (repository.storeItem(plaintext, key).isNotEmpty()) stored += 1
                     }
                     // Persist the peer for future syncs. The session key is
                     // stored securely (KEK-wrapped) so the background dialer in
