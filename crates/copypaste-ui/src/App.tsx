@@ -1,7 +1,10 @@
-import type { ComponentType } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { useUI, type ViewId } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { RestartDaemonButton } from "./components/RestartDaemonButton";
+import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission, getDaemonError } from "./lib/ipc";
+import { listen } from "@tauri-apps/api/event";
 import { HistoryView } from "./views/HistoryView";
 import { DevicesView } from "./views/DevicesView";
 import { SettingsView } from "./views/SettingsView";
@@ -17,6 +20,126 @@ const VIEWS: Record<ViewId, { Component: ComponentType; label: string }> = {
 export default function App() {
   const view = useUI((s) => s.view);
   const { Component: View, label } = VIEWS[view];
+
+  // ---------------------------------------------------------------------------
+  // Daemon spawn error banner (non-dismissible, installation-incomplete)
+  // ---------------------------------------------------------------------------
+  // On mount: call getDaemonError() for the case where the app launched,
+  // tried to start the daemon, failed, and we loaded after the event fired.
+  // Also listen for the real-time "daemon-spawn-result" event for the case
+  // where the app is still starting when this component mounts.
+  const [daemonError, setDaemonError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    // Fallback: read whatever error was stored by ensure_daemon_running_async.
+    void getDaemonError().then((err) => {
+      if (!cancelled && err) setDaemonError(err);
+    }).catch(() => {
+      // Best-effort — never block on this.
+    });
+
+    // Real-time: listen for the daemon-spawn-result Tauri event so we show
+    // the banner immediately if the daemon fails while the UI is already open.
+    let unlisten: (() => void) | null = null;
+    void listen<{ ok: boolean; error?: string }>("daemon-spawn-result", (event) => {
+      if (cancelled) return;
+      if (!event.payload.ok && event.payload.error) {
+        setDaemonError(event.payload.error);
+      } else if (event.payload.ok) {
+        // Daemon started successfully — clear any stale error.
+        setDaemonError(null);
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    }).catch(() => {
+      // Best-effort.
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Stale-daemon banner (dismissible)
+  // ---------------------------------------------------------------------------
+  // App-launch stale check: if an OLD daemon survived an upgrade and is still
+  // serving old code, show a single dismissible banner offering a restart.
+  // Uses detectStaleDaemonFromStatus (strictly OLDER semver only) so a newer
+  // daemon after a rollback does not trigger the "restart" banner.
+  // Minimal + non-annoying: we never auto-kill the daemon, and the banner is
+  // dismissible. Best-effort — any error yields no banner.
+  const [staleDaemon, setStaleDaemon] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [myVer, status] = await Promise.all([
+          appVersion().catch(() => null),
+          api.status().catch(() => null),
+        ]);
+        if (cancelled) return;
+        if (myVer !== null) {
+          setStaleDaemon(detectStaleDaemonFromStatus(status, myVer));
+        }
+      } catch {
+        // Best-effort — never show a banner on error.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const showStaleBanner = staleDaemon !== null && !dismissed;
+
+  // ---------------------------------------------------------------------------
+  // Accessibility permission banner (macOS only)
+  // ---------------------------------------------------------------------------
+  // We check once on mount; the Tauri command always returns `true` on
+  // non-macOS so the banner never appears there.  After the user opens
+  // System Settings and grants the permission we re-check every 3 s until
+  // it's granted (or they dismiss the banner).
+  const [axGranted, setAxGranted] = useState<boolean>(true); // assume OK until checked
+  const [axDismissed, setAxDismissed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const check = async () => {
+      try {
+        const granted = await checkAccessibilityPermission();
+        if (!cancelled) setAxGranted(granted);
+      } catch {
+        // Best-effort — never block startup on this check.
+      }
+    };
+
+    void check();
+
+    // Poll every 3 s so the banner disappears automatically once the user
+    // grants the permission in System Settings (without needing an app restart).
+    const interval = setInterval(() => { void check(); }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const showAxBanner = !axGranted && !axDismissed;
+
+  const handleOpenAxSettings = async () => {
+    try {
+      await requestAccessibilityPermission();
+    } catch {
+      // Fire-and-forget — opening System Settings can't really fail in a
+      // meaningful way; if it does, the user can navigate there manually.
+    }
+  };
+
   return (
     // Outer boundary is the last line of defence: even if the chrome (Sidebar)
     // itself throws, the window shows a fallback instead of going blank.
@@ -25,6 +148,68 @@ export default function App() {
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col bg-ide-bg/35">
           <div data-tauri-drag-region className="h-9 shrink-0" />
+
+          {/* Daemon spawn error — non-dismissible, installation-incomplete */}
+          {daemonError !== null && (
+            <div className="mx-3 mb-2 flex items-start gap-3 rounded-ide border border-red-500/40 bg-red-500/5 px-3 py-2 text-[13px] text-red-400">
+              <span className="shrink-0 font-semibold">Background service error:</span>
+              <span>{daemonError}</span>
+            </div>
+          )}
+
+          {showStaleBanner && (
+            <div className="mx-3 mb-2 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
+              <span>
+                CopyPaste was updated but an older background daemon is still
+                running
+                {staleDaemon !== "unknown" ? ` (build ${staleDaemon})` : ""}.
+                Restart it to use the new version.
+              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <RestartDaemonButton
+                  onRestarted={() => {
+                    setStaleDaemon(null);
+                    setDismissed(true);
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setDismissed(true)}
+                  className="rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Accessibility permission banner — macOS only, dismissed once granted */}
+          {showAxBanner && (
+            <div className="mx-3 mb-2 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
+              <span>
+                Accessibility permission is required for the global paste shortcut
+                and hotkey capture. Grant it in System Settings to enable these
+                features.
+              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => { void handleOpenAxSettings(); }}
+                  className="rounded-ide border border-ide-warning/50 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-warning hover:bg-ide-hover"
+                >
+                  Open Settings
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAxDismissed(true)}
+                  className="rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
           <main className="min-h-0 flex-1 overflow-hidden">
             {/* Per-view boundary keyed on the view id: a crash in one screen
                 stays contained, and navigating away then back (new key)

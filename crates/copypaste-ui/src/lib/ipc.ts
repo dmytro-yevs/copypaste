@@ -71,6 +71,78 @@ export interface AppSettings {
   p2p_enabled: boolean;
   supabase_url: string | null;
   supabase_anon_key: string | null;
+  // Storage / Limits — all map 1-to-1 to AppConfig fields in copypaste-core.
+  // Byte fields are stored as raw bytes (u64) and converted to MB in the UI.
+  max_text_size_bytes?: number | null;
+  max_image_size_bytes?: number | null;
+  max_file_size_bytes?: number | null;
+  storage_quota_bytes?: number | null;
+  history_limit?: number | null;
+  sensitive_ttl_secs?: number | null;
+  image_quality?: number | null;
+  // Sync parity
+  sync_on_wifi_only?: boolean | null;
+}
+
+/**
+ * Reply from the daemon's `status` method. This is the ONLY IPC method that
+ * reports degraded state: when the daemon is up but its backing database is
+ * unavailable (e.g. the SQLCipher key no longer matches after a reinstall) it
+ * returns `ok:true` with `degraded:true` / `ready:false` plus a machine-readable
+ * `degraded_reason`. A healthy daemon returns `degraded:false` / `ready:true`.
+ * A reachable socket alone does NOT mean the daemon is fully functional — views
+ * must inspect these fields.
+ */
+export interface DaemonStatus {
+  /** "running" when healthy, "degraded" when the DB is unavailable. */
+  status: string;
+  private_mode: boolean;
+  /** True only when the backing DB is open and usable. */
+  ready: boolean;
+  /** True when the daemon is up but its database cannot be opened/decrypted. */
+  degraded: boolean;
+  /** Human-readable reason for the degraded state, when present. */
+  degraded_reason?: string | null;
+  /** `<crate-version>+<git-sha>` (or just `<crate-version>`). Added for
+   *  stale-daemon detection after an upgrade; absent on a daemon predating this
+   *  field — itself a strong signal it is stale. */
+  build_version?: string | null;
+  /** Daemon OS process id, if reported. */
+  pid?: number | null;
+  // TODO(task-7): expose supabase_account_id from daemon status so the UI can
+  // surface a cross-device account mismatch in SettingsView's cloud section.
+  // Add `supabase_account_id?: string | null` here once the daemon emits it.
+}
+
+/**
+ * Normalized result of probing {@link api.status}. `kind` collapses the three
+ * meaningful daemon conditions into a single discriminant so views can branch
+ * without each re-implementing degraded/offline detection:
+ *  - "ok": daemon up and its DB is usable.
+ *  - "degraded": daemon up but DB unavailable (carries `reason`).
+ *  - "offline": daemon unreachable (transport failure / `daemon_offline`).
+ */
+export type StatusProbe =
+  | { kind: "ok" }
+  | { kind: "degraded"; reason: string | null }
+  | { kind: "offline" };
+
+/**
+ * Probe the daemon's status and collapse it to a {@link StatusProbe}. Never
+ * throws — a transport failure resolves to `{ kind: "offline" }` so every caller
+ * has a defined, non-blank failure path.
+ */
+export async function probeStatus(): Promise<StatusProbe> {
+  try {
+    const s = (await api.status()) as Partial<DaemonStatus>;
+    if (s && (s.degraded === true || s.ready === false)) {
+      return { kind: "degraded", reason: s.degraded_reason ?? null };
+    }
+    return { kind: "ok" };
+  } catch {
+    // Transport-level failure (daemon offline) — IpcError or otherwise.
+    return { kind: "offline" };
+  }
 }
 
 export interface SyncStatus {
@@ -83,21 +155,28 @@ export interface SyncStatus {
   supabase_url?: string | null;
   /** Signed-in account email, if available. */
   email?: string | null;
-  /**
-   * Optional, best-effort degraded-state flags the daemon MAY report when it is
-   * up but cannot do crypto/storage (e.g. the macOS Keychain is locked or the
-   * SQLCipher DB could not be opened). Treated as optional: the UI surfaces a
-   * banner when present but never depends on them.
-   */
+  // NOTE: degraded state is intentionally NOT modeled here. get_sync_status does
+  // not report it — the daemon exposes degraded/ready ONLY via `status` (see
+  // DaemonStatus / probeStatus). The fields below are kept for SettingsView
+  // compatibility; the daemon no longer emits them (always undefined at runtime).
+  /** @deprecated Never emitted by daemon; kept for SettingsView compat. */
   keychain_locked?: boolean;
+  /** @deprecated Never emitted by daemon; kept for SettingsView compat. */
   db_unavailable?: boolean;
-  /** Optional human-readable degraded-state reason, if the daemon supplies one. */
+  /** @deprecated Never emitted by daemon; kept for SettingsView compat. */
   degraded_reason?: string | null;
 }
+
 
 export interface PairedDevice {
   fingerprint: string;
   name: string;
+  /** Unix epoch seconds when this device was paired (0 if unknown). */
+  added_at: number;
+  /** Peer's P2P sync-listener address as "host:port", or null if not yet learned. */
+  address: string | null;
+  /** Base64 shared content-sync key (not displayed; serde default = null). */
+  sync_key_b64: string | null;
 }
 
 /** Result of `cloud_test_connection` — an end-to-end Supabase probe. */
@@ -120,7 +199,7 @@ export const MAX_PAGE = 1000;
 // ---------------------------------------------------------------------------
 
 export const api = {
-  status: () => ipcCall("status"),
+  status: () => ipcCall<DaemonStatus>("status"),
 
   historyPage: (limit: number, offset: number) =>
     ipcCall<HistoryPage>("history_page", { limit: Math.min(limit, MAX_PAGE), offset }),
@@ -173,6 +252,36 @@ export function formatWallTime(ms: number): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Play a soft system sound on copy — Maccy-style feedback.
+ * Calls the `play_copy_sound` Tauri command which plays NSSound "Tink" on
+ * macOS. Non-blocking and failure-safe: any error is swallowed by the Rust
+ * side; this wrapper also ignores errors so a missing sound never disrupts the
+ * copy flow.
+ */
+export async function playCopySound(): Promise<void> {
+  try {
+    await invoke<void>("play_copy_sound");
+  } catch {
+    // Sound is best-effort; never block the copy flow on a sound failure.
+  }
+}
+
+/**
+ * Show a macOS notification banner on copy — Maccy-style feedback.
+ * Calls the `show_copy_notification` Tauri command which posts a
+ * user-notification via osascript. Non-blocking and failure-safe: any error
+ * (missing entitlement, user denied notifications, etc.) is swallowed.
+ * @param preview A short one-line preview of the copied item (may be empty).
+ */
+export async function showCopyNotification(preview: string): Promise<void> {
+  try {
+    await invoke<void>("show_copy_notification", { preview });
+  } catch {
+    // Notification is best-effort; never block the copy flow on a notify failure.
+  }
+}
+
+/**
  * Get the currently configured popup shortcut accelerator string
  * (e.g. "CmdOrCtrl+Shift+V").
  * This calls the Tauri command directly, NOT the daemon IPC socket.
@@ -217,4 +326,183 @@ export async function pairingQrSvg(): Promise<PairingQr> {
   } catch (e) {
     throw new Error(String(e));
   }
+}
+
+/** Reply from the daemon's `reset_database` recovery method. */
+export interface ResetDatabaseResult {
+  /** Always true on success. */
+  reset: boolean;
+  /** True when the daemon recovered in-place (no restart needed). */
+  ready: boolean;
+}
+
+/**
+ * Wipe and recreate the daemon's clipboard database (DESTRUCTIVE recovery).
+ *
+ * This is the escape hatch for a daemon stuck in degraded mode because its
+ * database cannot be decrypted. It erases all local clipboard history and
+ * creates a fresh empty database; the daemon recovers in-place. The Tauri
+ * backend always sends `confirm = true`. Throws a plain `Error` on failure
+ * (daemon offline, reset failed) so the caller can surface the real error.
+ */
+export async function resetDatabase(): Promise<ResetDatabaseResult> {
+  let reply: IpcReply;
+  try {
+    reply = await invoke<IpcReply>("reset_database");
+  } catch (e) {
+    throw new Error(String(e));
+  }
+  if (!reply.ok) {
+    throw new IpcError(reply.error ?? "reset_database failed", reply.error_code);
+  }
+  const data = (reply.data ?? {}) as Partial<ResetDatabaseResult>;
+  return { reset: data.reset ?? true, ready: data.ready ?? true };
+}
+
+// ---------------------------------------------------------------------------
+// Daemon UPGRADE/RESTART lifecycle (Tauri-direct — bypass daemon IPC so these
+// work even when the daemon is wedged/unresponsive).
+// ---------------------------------------------------------------------------
+
+/** The app's own build version (crate version, e.g. "0.5.2"). */
+export async function appVersion(): Promise<string> {
+  return invoke<string>("app_version");
+}
+
+/**
+ * Return the last daemon spawn error from the app-owned lifecycle, if any.
+ *
+ * Returns `null` when the daemon started successfully (or hasn't been
+ * attempted yet). Listen for the `"daemon-spawn-result"` Tauri event for
+ * real-time feedback; this command is the fallback for views that load after
+ * the event fires.
+ */
+export async function getDaemonError(): Promise<string | null> {
+  return invoke<string | null>("get_daemon_error");
+}
+
+/**
+ * Restart the daemon so the freshly-installed binary takes over.
+ *
+ * In app-owned mode this stops the tracked child process (SIGTERM + reap) and
+ * respawns the bundled binary — no launchctl involved. Throws a plain `Error`
+ * with the failure message on error.
+ */
+export async function restartDaemon(): Promise<void> {
+  try {
+    await invoke<void>("restart_daemon");
+  } catch (e) {
+    throw new Error(String(e));
+  }
+}
+
+/**
+ * Parse a semver string into [major, minor, patch] numbers.
+ * Returns null if the string cannot be parsed as semver.
+ */
+function parseSemver(ver: string): [number, number, number] | null {
+  const parts = ver.split(".");
+  if (parts.length < 3) return null;
+  const nums = parts.slice(0, 3).map(Number);
+  if (nums.some(isNaN)) return null;
+  return nums as [number, number, number];
+}
+
+/**
+ * Return -1 if a < b, 0 if equal, 1 if a > b (semver comparison).
+ */
+function compareSemver(
+  a: [number, number, number],
+  b: [number, number, number]
+): -1 | 0 | 1 {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] < b[i]) return -1;
+    if (a[i] > b[i]) return 1;
+  }
+  return 0;
+}
+
+/**
+ * Inspect a pre-fetched {@link DaemonStatus} and app version string to decide
+ * if the daemon is stale (running an OLDER build than the app). Returns the
+ * daemon's reported version string when stale, `"unknown"` when it predates
+ * the `build_version` field, or `null` when not stale (same version, daemon
+ * is NEWER, or comparison isn't possible).
+ *
+ * Only flags as stale when the daemon is strictly OLDER — a daemon that is
+ * NEWER than the app (e.g. the user rolled back) is not flagged so the banner
+ * doesn't appear in that direction.
+ */
+export function detectStaleDaemonFromStatus(
+  status: Partial<DaemonStatus> | null,
+  appVer: string
+): string | null {
+  if (!status) return null;
+  const reported = status.build_version ?? null;
+  // No version field => daemon predates this build => stale by definition.
+  if (reported === null || reported === "") return "unknown";
+  const reportedPrefix = reported.split("+")[0];
+  if (reportedPrefix === appVer) return null;
+  // Parse both as semver to determine direction.
+  const daemonParsed = parseSemver(reportedPrefix);
+  const appParsed = parseSemver(appVer);
+  if (!daemonParsed || !appParsed) {
+    // Cannot parse — fall back to string inequality: flag as stale when different.
+    return reportedPrefix !== appVer ? reported : null;
+  }
+  const cmp = compareSemver(daemonParsed, appParsed);
+  // Only stale when daemon is strictly OLDER (cmp === -1).
+  return cmp === -1 ? reported : null;
+}
+
+/**
+ * Compare the running daemon's build to the app's own. Returns the daemon's
+ * version when it is STALE (survived an upgrade — strictly OLDER semver),
+ * else `null`.
+ *
+ * Only flags as stale when the daemon is strictly OLDER than the app. A daemon
+ * that is NEWER (e.g. after a rollback) is NOT flagged. Best-effort: any error
+ * (e.g. daemon offline) yields `null` so callers never block startup on this check.
+ */
+export async function detectStaleDaemon(): Promise<string | null> {
+  let appVer: string;
+  let status: DaemonStatus;
+  try {
+    [appVer, status] = await Promise.all([appVersion(), api.status()]);
+  } catch {
+    return null;
+  }
+  return detectStaleDaemonFromStatus(status, appVer);
+}
+
+// ---------------------------------------------------------------------------
+// Accessibility permission (macOS only — always true on other platforms)
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether the macOS Accessibility permission is granted for this app.
+ * Returns `true` on non-macOS platforms (no permission needed there).
+ * This calls the Tauri command directly, NOT the daemon IPC socket.
+ */
+export async function checkAccessibilityPermission(): Promise<boolean> {
+  return invoke<boolean>("check_accessibility_permission");
+}
+
+/**
+ * Open System Settings → Privacy & Security → Accessibility and attempt to
+ * (re-)install the CGEventTap if permission was just granted.
+ * No-op on non-macOS platforms.
+ * This calls the Tauri command directly, NOT the daemon IPC socket.
+ */
+export async function requestAccessibilityPermission(): Promise<void> {
+  await invoke<void>("request_accessibility_permission");
+}
+
+/**
+ * Format a Unix timestamp in seconds (as stored in `PairedDevice.added_at`)
+ * for human-readable display. Returns "—" for falsy/zero values.
+ */
+export function formatEpochSecs(secs: number | null | undefined): string {
+  if (!secs) return "—";
+  return new Date(secs * 1000).toLocaleString();
 }

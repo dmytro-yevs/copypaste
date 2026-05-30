@@ -2,6 +2,7 @@
 //! the daemon over the Unix-socket IPC via the `ipc_call` command (`ipc.rs`).
 //! This crate never links `copypaste-core`; all data access is IPC-only.
 
+mod daemon_lifecycle;
 mod ipc;
 
 #[cfg(target_os = "macos")]
@@ -75,6 +76,21 @@ struct PriorApp(Mutex<Option<String>>);
 #[cfg(target_os = "macos")]
 struct TapActive(Mutex<bool>);
 
+/// Handle to the "Private Mode" tray CheckMenuItem so the startup-race
+/// re-sync handler (V-21-A) can update the checkmark after the daemon is
+/// confirmed ready — without re-entering `setup_tray`.
+///
+/// `CheckMenuItem<Wry>` is internally `Arc`-backed, so cloning and storing
+/// here is cheap.  The `Option` is `None` until `setup_tray` runs.
+struct PrivateModeMenuItem(Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>);
+
+/// Handle to the "Recent" tray Submenu so the background poller can
+/// rebuild it once the daemon is ready and periodically thereafter.
+///
+/// `Submenu<Wry>` is internally `Arc`-backed; cloning is cheap.
+/// The `Option` is `None` until `setup_tray` runs.
+struct RecentSubmenu(Mutex<Option<tauri::menu::Submenu<tauri::Wry>>>);
+
 // ---------------------------------------------------------------------------
 // Tauri entry point
 // ---------------------------------------------------------------------------
@@ -84,10 +100,23 @@ pub fn run() {
     let cfg = UiConfig::default(); // will be overwritten in setup after handle is available
     tauri::Builder::default()
         .manage(CurrentShortcut(Mutex::new(cfg.popup_shortcut)))
+        .manage(daemon_lifecycle::DaemonChild::default())
+        .manage(daemon_lifecycle::DaemonSpawnError::default())
+        .manage(daemon_lifecycle::DaemonLifecycleGen::default())
+        // V-21-A: placeholder populated by setup_tray; background poller uses
+        // it to re-sync the checkmark after the daemon socket becomes ready.
+        .manage(PrivateModeMenuItem(Mutex::new(None)))
+        // Recent-resync: placeholder populated by setup_tray; background poller
+        // rebuilds the submenu once the daemon responds and then periodically.
+        .manage(RecentSubmenu(Mutex::new(None)))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             ipc::ipc_call,
             ipc::pairing_qr_svg,
+            ipc::reset_database,
+            daemon_lifecycle::app_version,
+            daemon_lifecycle::restart_daemon,
+            daemon_lifecycle::get_daemon_error,
             get_popup_shortcut,
             set_popup_shortcut,
             check_accessibility_permission,
@@ -96,6 +125,9 @@ pub fn run() {
             stop_recording_shortcut,
             record_prior_app,
             paste_to_frontmost,
+            hide_popup,
+            play_copy_sound,
+            show_copy_notification,
         ])
         .setup(|app| {
             // Load persisted config now that we have the app handle.
@@ -105,6 +137,13 @@ pub fn run() {
                 let mut guard = state.0.lock().expect("mutex poisoned");
                 *guard = persisted.popup_shortcut.clone();
             }
+
+            // App-owned daemon lifecycle: start the daemon on a background
+            // thread so the tray and window render immediately (MED-b fix).
+            // The result is stored in DaemonSpawnError state and emitted as
+            // the "daemon-spawn-result" event; the UI reads it via
+            // get_daemon_error or the event listener.
+            daemon_lifecycle::ensure_daemon_running_async(app.handle().clone());
 
             // Register macOS-only managed state.
             #[cfg(target_os = "macos")]
@@ -116,6 +155,20 @@ pub fn run() {
             setup_tray(app)?;
             register_popup_shortcut(app.handle(), &persisted.popup_shortcut)?;
             setup_popup_window(app)?;
+            setup_main_window(app);
+
+            // V-21-A: Startup race — the tray was built before the daemon socket
+            // was necessarily ready, so `get_private_mode` may have defaulted to
+            // false even though the daemon persisted private_mode=true.  Spawn a
+            // background thread that polls until the daemon responds, then
+            // re-syncs the CheckMenuItem to the daemon's true value.
+            spawn_tray_private_mode_resync(app.handle().clone());
+
+            // Recent-resync: the tray Recent submenu was built at startup before
+            // the daemon was ready, so it likely shows a placeholder.  Spawn a
+            // background poller that rebuilds it once the daemon responds and
+            // then refreshes it periodically so the items stay current.
+            spawn_tray_recent_resync(app.handle().clone());
 
             #[cfg(target_os = "macos")]
             {
@@ -125,8 +178,19 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running CopyPaste UI");
+        .build(tauri::generate_context!())
+        .expect("error while building CopyPaste UI")
+        .run(|handle, event| {
+            // App-owned daemon lifecycle: when the WHOLE app exits, stop the
+            // daemon we started. `RunEvent::Exit` fires only on a real quit
+            // (tray "Quit" → `app.exit(0)`, or process termination). Closing
+            // just the main WINDOW hides it to the tray (see
+            // `setup_main_window`) and never reaches Exit, so the daemon
+            // correctly survives a window close (standard macOS pattern).
+            if let tauri::RunEvent::Exit = event {
+                daemon_lifecycle::stop_daemon(handle);
+            }
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +439,38 @@ fn paste_to_frontmost(handle: tauri::AppHandle) -> Result<(), String> {
     }
 }
 
+/// Play a soft system sound (NSSound "Tink") after a successful copy.
+///
+/// Maccy parity: Maccy plays "Funk" or "Pop" depending on version; we use
+/// "Tink" because it is shorter and less intrusive. The sound plays on the
+/// main run-loop via `[NSSound play]` which is non-blocking from the Rust
+/// perspective. Any failure (sound file missing, audio device unavailable) is
+/// silently ignored so it never disrupts the copy flow.
+///
+/// The command is cross-platform safe: on non-macOS it is a no-op.
+#[tauri::command]
+fn play_copy_sound() {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSSound;
+        use objc2_foundation::NSString;
+
+        // SAFETY: NSSound and NSString bindings are correct; ObjC calls are
+        // safe when invoked from a thread that has an autorelease pool. Tauri
+        // command handlers run on the Tokio runtime, which drives an ObjC
+        // autorelease pool on macOS — so this is safe here.
+        unsafe {
+            let name = NSString::from_str("Tink");
+            if let Some(sound) = NSSound::soundNamed(&name) {
+                // play returns bool; ignore the result — best-effort only.
+                let _ = sound.play();
+            } else {
+                tracing::debug!("play_copy_sound: NSSound 'Tink' not found (non-fatal)");
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // macOS helpers
 // ---------------------------------------------------------------------------
@@ -475,6 +571,133 @@ fn register_popup_shortcut(
     Ok(())
 }
 
+/// Shared internal implementation for hiding the popup without surfacing the
+/// main window.  Both the `hide_popup` Tauri command and the `toggle_popup`
+/// close-branch call this so the macOS prior-app activation logic is never
+/// duplicated or skipped (V-10 fix: toggle_popup was calling `popup.hide()`
+/// directly, bypassing this path).
+///
+/// V-11 fix: when no prior app is recorded (e.g. first-ever popup open before
+/// the user has switched away to any external app), temporarily switch to the
+/// Accessory activation policy before hiding so macOS does not promote the
+/// main window.  The policy is restored to Regular immediately after — the
+/// switch is invisible to the user because the popup is still visible during
+/// the policy change.
+fn hide_popup_internal(handle: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        let bundle_id: Option<String> = handle
+            .try_state::<PriorApp>()
+            .and_then(|s| s.0.lock().ok().map(|g| g.clone()))
+            .flatten();
+
+        if let Some(ref bid) = bundle_id {
+            // Activate the prior external app so macOS hands focus there
+            // instead of to our main window (D7 fix).
+            activate_app_by_bundle_id(bid);
+        } else {
+            // V-11: No prior app recorded (first launch before any external
+            // app has been focused, or Esc pressed immediately).  Temporarily
+            // set Accessory policy so the OS does not auto-promote the main
+            // window when the popup disappears, then restore Regular so the
+            // Dock icon and Cmd+Tab entry remain visible.
+            use tauri::ActivationPolicy;
+            let _ = handle.set_activation_policy(ActivationPolicy::Accessory);
+            if let Some(popup) = handle.get_webview_window("popup") {
+                let _ = popup.hide();
+            }
+            let _ = handle.set_activation_policy(ActivationPolicy::Regular);
+            return;
+        }
+    }
+
+    if let Some(popup) = handle.get_webview_window("popup") {
+        let _ = popup.hide();
+    }
+}
+
+/// Hide the popup window without surfacing the main window.
+///
+/// On macOS, simply calling `win.hide()` from JS causes the OS to promote the
+/// next window of the same Regular-policy app to the front — which is our main
+/// window.  This command first activates the prior (external) app so that macOS
+/// hands focus there instead of to our main window, then hides the popup.
+/// This is the correct hide path for Esc, blur, and row-click dismiss actions.
+/// Delegates to `hide_popup_internal` so `toggle_popup` shares the same path
+/// (V-10 fix).
+#[tauri::command]
+fn hide_popup(handle: tauri::AppHandle) {
+    hide_popup_internal(&handle);
+}
+
+/// Show a macOS notification banner after a successful copy.
+///
+/// Uses `osascript` to post a "display notification" so we don't need the
+/// tauri-plugin-notification or any entitlement changes.  Any failure
+/// (osascript missing, user denied Script Editor notifications, etc.) is
+/// silently ignored — this is purely cosmetic feedback.
+///
+/// `preview` is a short one-line string supplied by the frontend (already
+/// truncated to ≤60 chars).  The command sanitises it before embedding in the
+/// AppleScript literal to prevent injection via quotes, backslashes, or
+/// newlines/control chars (V-18 fix: newlines caused osascript to fail silently).
+///
+/// The command is cross-platform safe: on non-macOS it is a no-op.
+#[tauri::command]
+fn show_copy_notification(preview: String) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        // Sanitise preview: replace quotes, backslashes, newlines, carriage
+        // returns, and all other ASCII control characters with a space so they
+        // cannot escape the AppleScript string literal or cause osascript to
+        // fail silently on multi-line input (V-18 fix: \n was not stripped).
+        let safe: String = preview
+            .chars()
+            .map(|c| {
+                if c == '"' || c == '\\' || c == '\n' || c == '\r' || (c as u32) < 0x20 {
+                    ' '
+                } else {
+                    c
+                }
+            })
+            .take(60)
+            .collect();
+        let safe = safe.trim();
+
+        let title = "CopyPaste";
+        let body = if safe.is_empty() { "Copied" } else { safe };
+
+        // Build the AppleScript.  Double-quote delimiters are already safe
+        // because we stripped all `"` from the input above.
+        let script = format!(r#"display notification "{body}" with title "{title}""#);
+
+        // Spawn osascript on a background thread so we don't block the Tauri
+        // command handler.  Errors are logged at DEBUG level; they never surface
+        // to the user since this is purely cosmetic feedback.
+        std::thread::spawn(move || {
+            match Command::new("osascript").arg("-e").arg(&script).output() {
+                Ok(out) if !out.status.success() => {
+                    tracing::debug!(
+                        "show_copy_notification: osascript exited {:?}: {}",
+                        out.status.code(),
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!("show_copy_notification: failed to spawn osascript: {e}");
+                }
+                Ok(_) => {}
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = preview;
+    }
+}
+
 /// Toggle (show or hide) the quick-paste popup near the current cursor position.
 fn toggle_popup(handle: &tauri::AppHandle) {
     let Some(popup) = handle.get_webview_window("popup") else {
@@ -482,10 +705,12 @@ fn toggle_popup(handle: &tauri::AppHandle) {
         return;
     };
 
-    // If the popup is already visible, hide it.
+    // If the popup is already visible, hide it via the shared internal helper
+    // so the macOS prior-app activation runs (V-10 fix: was calling
+    // popup.hide() directly, which skipped activation and surfaced main window).
     let is_visible = popup.is_visible().unwrap_or(false);
     if is_visible {
-        let _ = popup.hide();
+        hide_popup_internal(handle);
         return;
     }
 
@@ -585,6 +810,24 @@ fn position_popup_near_cursor(win: &tauri::WebviewWindow) {
     let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
 }
 
+/// Wire the main window so closing it HIDES it to the tray instead of quitting
+/// the whole app. This is the standard macOS menu-bar pattern and is what keeps
+/// the app-owned daemon alive on a window close: only a real Quit (tray "Quit"
+/// → `app.exit(0)`) terminates the process and triggers `stop_daemon`.
+fn setup_main_window(app: &tauri::App) {
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    let win_clone = win.clone();
+    win.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            // Prevent the close from propagating to app exit; hide instead.
+            api.prevent_close();
+            let _ = win_clone.hide();
+        }
+    });
+}
+
 /// Ensure the popup window is created (it may already be created via tauri.conf.json).
 /// Attach a blur/focus-loss handler that auto-hides the popup.
 fn setup_popup_window(app: &tauri::App) -> tauri::Result<()> {
@@ -605,14 +848,24 @@ fn setup_popup_window(app: &tauri::App) -> tauri::Result<()> {
             .build()?
     };
 
-    // Hide on focus loss (user clicked away).
-    popup.on_window_event(|event| {
+    // V-12 fix: hide on focus loss, but guard with is_visible() to prevent
+    // double-activation when a JS-initiated hide (row click → invoke("hide_popup"))
+    // fires concurrently with this blur event.  Without the guard the prior app
+    // would be activated twice → focus flicker.  Also skip when a child/system
+    // dialog (e.g. file picker) steals focus — those cause Focused(false) too,
+    // and auto-dismissing the popup in that case is wrong.
+    // We clone the popup handle (cheap Arc clone in Tauri 2) so the 'static
+    // closure owns it without borrowing `popup`.
+    let popup_for_blur = popup.clone();
+    popup.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(false) = event {
-            // The window itself is `self` inside this closure; we cannot call
-            // .hide() here because we only have &WindowEvent, not the handle.
-            // We emit a JS event instead; the frontend listens and calls
-            // getCurrentWindow().hide() on Esc / blur.  The native hide on blur
-            // is handled by the JS focus-out listener in Popup.tsx.
+            // Skip if already hidden — avoids double hide_popup_internal call
+            // when JS already called invoke("hide_popup") on the same dismiss.
+            if !popup_for_blur.is_visible().unwrap_or(true) {
+                return;
+            }
+            // hide_popup_internal requires an AppHandle; get it from the window.
+            hide_popup_internal(popup_for_blur.app_handle());
         }
     });
 
@@ -673,6 +926,8 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     // --- "Recent" submenu ---
     // Fetch up to 10 recent items from the daemon. If the daemon is offline or
     // returns an empty list we show a single disabled placeholder entry.
+    // The submenu handle is stored in RecentSubmenu managed state so the
+    // background poller can rebuild it once the daemon is ready.
     let recent_submenu = {
         let mut builder = SubmenuBuilder::new(app, "Recent");
 
@@ -719,6 +974,14 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         builder.build()?
     };
 
+    // Store a clone of the submenu handle in managed state so the background
+    // poller can rebuild it without re-entering setup_tray.
+    {
+        let state: tauri::State<RecentSubmenu> = app.state();
+        let mut guard = state.0.lock().expect("mutex poisoned");
+        *guard = Some(recent_submenu.clone());
+    }
+
     // --- "Private Mode" check item ---
     // Query the daemon for the current state; fall back to false on any error.
     let private_mode_on: bool = ipc::call("get_private_mode", json!({}))
@@ -738,7 +1001,17 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .checked(private_mode_on)
         .build(app)?;
 
-    // Clone the CheckMenuItem so the event closure can read its checked state.
+    // V-21-A: Store the CheckMenuItem in managed state so the background
+    // daemon-ready poller (`spawn_tray_private_mode_resync`) can re-sync the
+    // checkmark once the socket becomes available after a startup race.
+    // CheckMenuItem<Wry> is Arc-backed; storing a clone here is cheap.
+    {
+        let state: tauri::State<PrivateModeMenuItem> = app.state();
+        let mut guard = state.0.lock().expect("mutex poisoned");
+        *guard = Some(private_mode.clone());
+    }
+
+    // Second clone used by the on_menu_event closure below (V-21-B rollback).
     // CheckMenuItem<R> is internally Arc-backed, so clone is cheap.
     let private_mode_clone = private_mode.clone();
 
@@ -762,15 +1035,19 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                 "open" => show_main(app),
                 "quit" => app.exit(0),
                 "private_mode" => {
-                    // Read the new checked state directly from the cloned item.
-                    // Tauri has already toggled the check mark before firing the event.
+                    // Tauri pre-toggles the checkmark before firing the event.
+                    // Read the new (already-toggled) state from the cloned item.
                     let new_state = private_mode_clone.is_checked().unwrap_or(false);
                     let result = ipc::call(
                         "set_private_mode",
                         serde_json::json!({ "enabled": new_state }),
                     );
                     if let Err(e) = result {
-                        tracing::warn!("set_private_mode IPC error: {e}");
+                        // V-21-B: IPC failed — the daemon did not change state.
+                        // Revert the checkmark so the tray reflects daemon truth
+                        // rather than staying in the (incorrect) toggled position.
+                        tracing::warn!("set_private_mode IPC error (reverting tray): {e}");
+                        let _ = private_mode_clone.set_checked(!new_state);
                     }
                 }
                 other if other.starts_with("recent:") && other != "recent:none" => {
@@ -797,6 +1074,241 @@ fn show_main(app: &tauri::AppHandle) {
         let _ = win.unminimize();
         let _ = win.set_focus();
     }
+}
+
+/// V-21-A: Startup-race tray re-sync.
+///
+/// `setup_tray` runs synchronously during app setup, before the daemon socket
+/// is necessarily bound.  If `get_private_mode` fails at that point the
+/// checkmark defaults to false even though the daemon may have loaded
+/// `private_mode = true` from its persisted settings.  This function spawns a
+/// background thread that polls with short sleeps until the daemon responds,
+/// then writes the real value back to the CheckMenuItem.
+///
+/// ## Stale-daemon race
+///
+/// `ensure_daemon_running_async` evicts any old daemon (SIGTERM + socket-
+/// released poll) and spawns a fresh one, but this runs on a **separate**
+/// background thread.  Because `setup_tray` and this resync thread both start
+/// before eviction completes, the first successful IPC reply may come from the
+/// **old** daemon (still alive during its graceful shutdown window).  If the
+/// old daemon's in-memory state differs from the persisted file (e.g. a prior
+/// `persist_private_mode` write failed silently), we would cache the stale
+/// value and exit, leaving the tray desynchronised from the new daemon.
+///
+/// Guard: require **two consecutive, identical** successful IPC replies before
+/// exiting.  The old daemon typically closes its socket within ~100 ms of
+/// SIGTERM; the 250 ms poll interval gives it time to die.  If the first reply
+/// came from the old daemon and the second call fails (socket gone), the
+/// counter resets and we keep polling until the new daemon is stable.
+fn spawn_tray_private_mode_resync(handle: tauri::AppHandle) {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    thread::spawn(move || {
+        const POLL_INTERVAL: Duration = Duration::from_millis(250);
+        const GIVE_UP_AFTER: Duration = Duration::from_secs(30);
+        // Two consecutive identical replies are required before exiting.
+        // This prevents caching a stale response from a dying old daemon.
+        const CONFIRM_ROUNDS: usize = 2;
+
+        let deadline = Instant::now() + GIVE_UP_AFTER;
+        let mut last_value: Option<bool> = None;
+        let mut confirm_count: usize = 0;
+
+        loop {
+            if Instant::now() >= deadline {
+                tracing::warn!(
+                    "tray private-mode re-sync: daemon not ready after 30 s — giving up"
+                );
+                return;
+            }
+
+            let result = ipc::call("get_private_mode", serde_json::json!({}));
+            match result {
+                Ok(reply) if reply.ok => {
+                    let real_value = reply
+                        .data
+                        .as_ref()
+                        .and_then(|d| d["private_mode"].as_bool())
+                        .unwrap_or(false);
+
+                    // Track consecutive identical responses to confirm stability.
+                    if last_value == Some(real_value) {
+                        confirm_count += 1;
+                    } else {
+                        last_value = Some(real_value);
+                        confirm_count = 1;
+                    }
+
+                    // Update the CheckMenuItem immediately with the best-known value.
+                    if let Some(state) = handle.try_state::<PrivateModeMenuItem>() {
+                        if let Ok(guard) = state.0.lock() {
+                            if let Some(ref item) = *guard {
+                                // Only write if the value actually differs from
+                                // what setup_tray already set, to avoid a
+                                // spurious visual flicker.
+                                let current = item.is_checked().unwrap_or(!real_value);
+                                if current != real_value {
+                                    tracing::info!(
+                                        "tray private-mode re-sync: {} → {}",
+                                        current,
+                                        real_value
+                                    );
+                                    let _ = item.set_checked(real_value);
+                                }
+                            }
+                        }
+                    }
+
+                    if confirm_count >= CONFIRM_ROUNDS {
+                        // Stable for CONFIRM_ROUNDS consecutive polls — done.
+                        return;
+                    }
+                    // Wait before the next confirmation poll.
+                    thread::sleep(POLL_INTERVAL);
+                }
+                // Daemon not yet ready or socket changed; reset stability counter.
+                _ => {
+                    last_value = None;
+                    confirm_count = 0;
+                    thread::sleep(POLL_INTERVAL);
+                }
+            }
+        }
+    });
+}
+
+/// Rebuild the Recent tray submenu from a fresh history_page call.
+///
+/// Clears all existing items in the submenu and repopulates with up to 10
+/// items from the daemon. Falls back to the "No recent items" placeholder if
+/// the daemon is offline or returns an empty list. The submenu handle is
+/// shared via `RecentSubmenu` managed state; no re-registration of the tray
+/// menu is needed because `Submenu<Wry>` is Arc-backed and mutations are
+/// reflected live in the displayed menu.
+///
+/// The existing `on_menu_event` handler dispatches on `other.starts_with("recent:")`
+/// so it automatically handles any item ID written here — no re-registration needed.
+fn rebuild_recent_submenu(
+    handle: &tauri::AppHandle,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use tauri::menu::MenuItemBuilder;
+
+    let state = handle
+        .try_state::<RecentSubmenu>()
+        .ok_or("RecentSubmenu state not registered")?;
+    let guard = state.0.lock().map_err(|e| format!("mutex poisoned: {e}"))?;
+    let submenu = guard
+        .as_ref()
+        .ok_or("RecentSubmenu not yet populated by setup_tray")?;
+
+    // Fetch up to 10 items. On any error, fall back to a placeholder.
+    let items_opt: Option<Vec<(String, String)>> = ipc::call(
+        "history_page",
+        serde_json::json!({ "limit": 10, "offset": 0 }),
+    )
+    .ok()
+    .and_then(|reply| {
+        if !reply.ok {
+            return None;
+        }
+        reply
+            .data
+            .as_ref()
+            .and_then(|d| d["items"].as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|item| {
+                        let id = item["id"].as_str()?.to_owned();
+                        let preview = item["preview"].as_str().unwrap_or("").to_owned();
+                        Some((id, preview))
+                    })
+                    .collect::<Vec<_>>()
+            })
+    });
+
+    // Remove all existing items (iterate in reverse so indices stay valid).
+    let existing = submenu.items()?;
+    for i in (0..existing.len()).rev() {
+        let _ = submenu.remove_at(i);
+    }
+
+    // Append fresh items.
+    match items_opt {
+        Some(items) if !items.is_empty() => {
+            for (id, preview) in &items {
+                let label = truncate_preview(preview, 40);
+                let menu_id = format!("recent:{id}");
+                let item = MenuItemBuilder::with_id(menu_id, label).build(handle)?;
+                submenu.append(&item)?;
+            }
+        }
+        _ => {
+            let placeholder = MenuItemBuilder::with_id("recent:none", "No recent items")
+                .enabled(false)
+                .build(handle)?;
+            submenu.append(&placeholder)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Startup-race + periodic Recent submenu resync.
+///
+/// `setup_tray` runs at startup before the daemon socket is necessarily bound,
+/// so the Recent submenu often shows a placeholder. This function spawns a
+/// background thread that:
+///
+/// 1. Polls until the daemon responds, then does an initial rebuild.
+/// 2. Continues polling every `REFRESH_INTERVAL` so the tray stays current as
+///    the user copies things.
+///
+/// The refresh is intentionally cheap: 10-item `history_page` call, only runs
+/// while the app is alive, stops after `GIVE_UP_AFTER` of daemon silence.
+fn spawn_tray_recent_resync(handle: tauri::AppHandle) {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    thread::spawn(move || {
+        /// How long to wait between refreshes once the daemon is up.
+        const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+        /// Poll interval while waiting for the daemon to come up initially.
+        const POLL_INTERVAL: Duration = Duration::from_millis(250);
+        /// Give up entirely if the daemon never responds within this window.
+        const GIVE_UP_AFTER: Duration = Duration::from_secs(30);
+
+        // Phase 1: wait for the daemon to become ready.
+        let deadline = Instant::now() + GIVE_UP_AFTER;
+        loop {
+            if Instant::now() >= deadline {
+                tracing::warn!("tray Recent re-sync: daemon not ready after 30 s — giving up");
+                return;
+            }
+
+            // A successful, ok=true history_page reply is the readiness signal.
+            let ready = ipc::call(
+                "history_page",
+                serde_json::json!({ "limit": 1, "offset": 0 }),
+            )
+            .map(|r| r.ok)
+            .unwrap_or(false);
+
+            if ready {
+                break;
+            }
+            thread::sleep(POLL_INTERVAL);
+        }
+
+        // Phase 2: rebuild now and then periodically.
+        loop {
+            if let Err(e) = rebuild_recent_submenu(&handle) {
+                tracing::warn!("tray Recent re-sync: rebuild failed: {e}");
+            }
+            thread::sleep(REFRESH_INTERVAL);
+        }
+    });
 }
 
 #[cfg(target_os = "macos")]
