@@ -2,6 +2,7 @@
 //! the daemon over the Unix-socket IPC via the `ipc_call` command (`ipc.rs`).
 //! This crate never links `copypaste-core`; all data access is IPC-only.
 
+mod daemon_lifecycle;
 mod ipc;
 
 #[cfg(target_os = "macos")]
@@ -84,6 +85,7 @@ pub fn run() {
     let cfg = UiConfig::default(); // will be overwritten in setup after handle is available
     tauri::Builder::default()
         .manage(CurrentShortcut(Mutex::new(cfg.popup_shortcut)))
+        .manage(daemon_lifecycle::DaemonChild::default())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             ipc::ipc_call,
@@ -106,6 +108,13 @@ pub fn run() {
                 *guard = persisted.popup_shortcut.clone();
             }
 
+            // App-owned daemon lifecycle: ensure the daemon is running BEFORE
+            // the tray (which queries it) is built. Failures are surfaced loudly
+            // via the log and the daemon-offline UI — never swallowed.
+            if let Err(e) = daemon_lifecycle::ensure_daemon_running(app.handle()) {
+                tracing::error!("failed to start app-owned daemon: {e}");
+            }
+
             // Register macOS-only managed state.
             #[cfg(target_os = "macos")]
             {
@@ -116,6 +125,7 @@ pub fn run() {
             setup_tray(app)?;
             register_popup_shortcut(app.handle(), &persisted.popup_shortcut)?;
             setup_popup_window(app)?;
+            setup_main_window(app);
 
             #[cfg(target_os = "macos")]
             {
@@ -125,8 +135,19 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running CopyPaste UI");
+        .build(tauri::generate_context!())
+        .expect("error while building CopyPaste UI")
+        .run(|handle, event| {
+            // App-owned daemon lifecycle: when the WHOLE app exits, stop the
+            // daemon we started. `RunEvent::Exit` fires only on a real quit
+            // (tray "Quit" → `app.exit(0)`, or process termination). Closing
+            // just the main WINDOW hides it to the tray (see
+            // `setup_main_window`) and never reaches Exit, so the daemon
+            // correctly survives a window close (standard macOS pattern).
+            if let tauri::RunEvent::Exit = event {
+                daemon_lifecycle::stop_daemon(handle);
+            }
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -583,6 +604,24 @@ fn position_popup_near_cursor(win: &tauri::WebviewWindow) {
     }
 
     let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
+}
+
+/// Wire the main window so closing it HIDES it to the tray instead of quitting
+/// the whole app. This is the standard macOS menu-bar pattern and is what keeps
+/// the app-owned daemon alive on a window close: only a real Quit (tray "Quit"
+/// → `app.exit(0)`) terminates the process and triggers `stop_daemon`.
+fn setup_main_window(app: &tauri::App) {
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    let win_clone = win.clone();
+    win.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            // Prevent the close from propagating to app exit; hide instead.
+            api.prevent_close();
+            let _ = win_clone.hide();
+        }
+    });
 }
 
 /// Ensure the popup window is created (it may already be created via tauri.conf.json).
