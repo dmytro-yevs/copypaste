@@ -350,7 +350,7 @@ class SyncManager(
                 plaintext = plaintext,
                 contentType = contentType,
                 lamportTs = lamportTs,
-                wallTime = lamportTs,
+                wallTime = wallTime,
                 deviceId = deviceId,
             )
         }
