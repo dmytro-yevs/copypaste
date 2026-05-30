@@ -76,6 +76,14 @@ struct PriorApp(Mutex<Option<String>>);
 #[cfg(target_os = "macos")]
 struct TapActive(Mutex<bool>);
 
+/// Handle to the "Private Mode" tray CheckMenuItem so the startup-race
+/// re-sync handler (V-21-A) can update the checkmark after the daemon is
+/// confirmed ready — without re-entering `setup_tray`.
+///
+/// `CheckMenuItem<Wry>` is internally `Arc`-backed, so cloning and storing
+/// here is cheap.  The `Option` is `None` until `setup_tray` runs.
+struct PrivateModeMenuItem(Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>);
+
 // ---------------------------------------------------------------------------
 // Tauri entry point
 // ---------------------------------------------------------------------------
@@ -88,6 +96,9 @@ pub fn run() {
         .manage(daemon_lifecycle::DaemonChild::default())
         .manage(daemon_lifecycle::DaemonSpawnError::default())
         .manage(daemon_lifecycle::DaemonLifecycleGen::default())
+        // V-21-A: placeholder populated by setup_tray; background poller uses
+        // it to re-sync the checkmark after the daemon socket becomes ready.
+        .manage(PrivateModeMenuItem(Mutex::new(None)))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             ipc::ipc_call,
@@ -135,6 +146,13 @@ pub fn run() {
             register_popup_shortcut(app.handle(), &persisted.popup_shortcut)?;
             setup_popup_window(app)?;
             setup_main_window(app);
+
+            // V-21-A: Startup race — the tray was built before the daemon socket
+            // was necessarily ready, so `get_private_mode` may have defaulted to
+            // false even though the daemon persisted private_mode=true.  Spawn a
+            // background thread that polls until the daemon responds, then
+            // re-syncs the CheckMenuItem to the daemon's true value.
+            spawn_tray_private_mode_resync(app.handle().clone());
 
             #[cfg(target_os = "macos")]
             {
@@ -921,7 +939,17 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .checked(private_mode_on)
         .build(app)?;
 
-    // Clone the CheckMenuItem so the event closure can read its checked state.
+    // V-21-A: Store the CheckMenuItem in managed state so the background
+    // daemon-ready poller (`spawn_tray_private_mode_resync`) can re-sync the
+    // checkmark once the socket becomes available after a startup race.
+    // CheckMenuItem<Wry> is Arc-backed; storing a clone here is cheap.
+    {
+        let state: tauri::State<PrivateModeMenuItem> = app.state();
+        let mut guard = state.0.lock().expect("mutex poisoned");
+        *guard = Some(private_mode.clone());
+    }
+
+    // Second clone used by the on_menu_event closure below (V-21-B rollback).
     // CheckMenuItem<R> is internally Arc-backed, so clone is cheap.
     let private_mode_clone = private_mode.clone();
 
@@ -945,15 +973,19 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                 "open" => show_main(app),
                 "quit" => app.exit(0),
                 "private_mode" => {
-                    // Read the new checked state directly from the cloned item.
-                    // Tauri has already toggled the check mark before firing the event.
+                    // Tauri pre-toggles the checkmark before firing the event.
+                    // Read the new (already-toggled) state from the cloned item.
                     let new_state = private_mode_clone.is_checked().unwrap_or(false);
                     let result = ipc::call(
                         "set_private_mode",
                         serde_json::json!({ "enabled": new_state }),
                     );
                     if let Err(e) = result {
-                        tracing::warn!("set_private_mode IPC error: {e}");
+                        // V-21-B: IPC failed — the daemon did not change state.
+                        // Revert the checkmark so the tray reflects daemon truth
+                        // rather than staying in the (incorrect) toggled position.
+                        tracing::warn!("set_private_mode IPC error (reverting tray): {e}");
+                        let _ = private_mode_clone.set_checked(!new_state);
                     }
                 }
                 other if other.starts_with("recent:") && other != "recent:none" => {
@@ -980,6 +1012,73 @@ fn show_main(app: &tauri::AppHandle) {
         let _ = win.unminimize();
         let _ = win.set_focus();
     }
+}
+
+/// V-21-A: Startup-race tray re-sync.
+///
+/// `setup_tray` runs synchronously during app setup, before the daemon socket
+/// is necessarily bound.  If `get_private_mode` fails at that point the
+/// checkmark defaults to false even though the daemon may have loaded
+/// `private_mode = true` from its persisted settings.  This function spawns a
+/// background thread that polls with short sleeps until the daemon responds,
+/// then writes the real value back to the CheckMenuItem.
+///
+/// The thread exits as soon as it obtains one successful IPC reply (or after
+/// 30 s to avoid leaking threads when the daemon never starts).
+fn spawn_tray_private_mode_resync(handle: tauri::AppHandle) {
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    thread::spawn(move || {
+        const POLL_INTERVAL: Duration = Duration::from_millis(250);
+        const GIVE_UP_AFTER: Duration = Duration::from_secs(30);
+
+        let deadline = Instant::now() + GIVE_UP_AFTER;
+
+        loop {
+            if Instant::now() >= deadline {
+                tracing::warn!(
+                    "tray private-mode re-sync: daemon not ready after 30 s — giving up"
+                );
+                return;
+            }
+
+            let result = ipc::call("get_private_mode", serde_json::json!({}));
+            match result {
+                Ok(reply) if reply.ok => {
+                    let real_value = reply
+                        .data
+                        .as_ref()
+                        .and_then(|d| d["private_mode"].as_bool())
+                        .unwrap_or(false);
+
+                    // Update the CheckMenuItem if we still have a handle to it.
+                    if let Some(state) = handle.try_state::<PrivateModeMenuItem>() {
+                        if let Ok(guard) = state.0.lock() {
+                            if let Some(ref item) = *guard {
+                                // Only write if the value actually differs from
+                                // what setup_tray already set, to avoid a
+                                // spurious visual flicker.
+                                let current = item.is_checked().unwrap_or(!real_value);
+                                if current != real_value {
+                                    tracing::info!(
+                                        "tray private-mode re-sync: {} → {}",
+                                        current,
+                                        real_value
+                                    );
+                                    let _ = item.set_checked(real_value);
+                                }
+                            }
+                        }
+                    }
+                    // Success — done.
+                    return;
+                }
+                // Daemon not yet ready; try again after a short delay.
+                _ => thread::sleep(POLL_INTERVAL),
+            }
+        }
+    });
 }
 
 #[cfg(target_os = "macos")]
