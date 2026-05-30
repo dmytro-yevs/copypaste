@@ -287,15 +287,27 @@ pub fn parse_pairing_qr(payload: String) -> Result<ScannedPairing, CopypasteErro
 /// reused for the life of the process. Multi-thread is required: the bootstrap
 /// handshake interleaves framed TLS reads and writes that would deadlock on a
 /// current-thread runtime under `block_on`.
-static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+///
+/// `OnceLock` only lets us store a fully-initialised value, so we store a
+/// `Result` (via an `Option`) to propagate build failures to callers instead
+/// of panicking across the FFI boundary. The `Option` is always `Some` after
+/// the first call; `None` is unreachable in practice but handled for
+/// soundness.
+static RUNTIME: OnceLock<Result<tokio::runtime::Runtime, String>> = OnceLock::new();
 
-fn runtime() -> &'static tokio::runtime::Runtime {
-    RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build tokio runtime for P2P FFI")
-    })
+/// Return a reference to the shared multi-thread runtime, or an error if it
+/// could not be built. Never panics — callers surface the error as
+/// `CopypasteError::P2pError` so the JVM is not killed.
+fn runtime() -> Result<&'static tokio::runtime::Runtime, CopypasteError> {
+    RUNTIME
+        .get_or_init(|| {
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("failed to build tokio runtime for P2P FFI: {e}"))
+        })
+        .as_ref()
+        .map_err(|e| CopypasteError::P2pError { reason: e.clone() })
 }
 
 /// FFI result of [`generate_device_cert`]: a fresh self-signed mTLS identity.
@@ -372,7 +384,7 @@ pub fn bootstrap_pair_initiator(
                     reason: format!("invalid addr_hint '{addr_hint}': {e}"),
                 })?;
 
-        let pairing = runtime()
+        let pairing = runtime()?
             .block_on(copypaste_p2p::bootstrap::run_initiator(
                 addr,
                 cert_der.to_vec(),
@@ -511,6 +523,14 @@ pub fn sync_with_peer(
                 })?;
 
         let shared = shared_sync_key_from_session(&session_key)?;
+        // FIXWAVE: `origin_device_id` below is stamped with a fresh random UUID
+        // on every sync call, so the peer sees a different "device" each time and
+        // cannot deduplicate by origin. The FFI signature is UDL-exported and
+        // changing it would break the Kotlin ABI, so this is deferred. The correct
+        // fix is to pass the caller's stable `device_id` (from `generate_device_cert`)
+        // into `sync_with_peer` as an extra parameter and use it here. Track as
+        // FIXWAVE(android/origin_device_id): add `device_id: String` param to
+        // `sync_with_peer` in the UDL and regenerate Kotlin bindings.
         let device_id = uuid::Uuid::new_v4().to_string();
 
         // Build the outbound `WireItem`s in the SAME sync-key-wrapped wire form
@@ -572,7 +592,7 @@ pub fn sync_with_peer(
         const DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
         const MAX_ITEMS: usize = 10_000;
 
-        let received: Vec<WireItem> = runtime()
+        let received: Vec<WireItem> = runtime()?
             .block_on(async {
                 let mut framed = transport.connect(addr, &peer_fingerprint).await?;
 
@@ -648,6 +668,15 @@ pub fn sync_with_peer(
             // silent `continue` is what hid the "decrypt 7/7" failure).
             if wire.content_type == "text" && wire.content_nonce.is_some() {
                 items_skipped_legacy = items_skipped_legacy.saturating_add(1);
+                // NOTE: eprintln! on Android goes to a logcat black hole (stderr
+                // is not captured by the Android logging subsystem). A proper fix
+                // requires adding `android_logger` or `tracing-logcat` to this
+                // crate's dependencies and initialising a log subscriber in the
+                // FFI entry point. Until then, the skip is counted in
+                // `items_skipped_legacy` (visible to Kotlin callers) so the
+                // build-skew condition remains observable without silent data loss.
+                // FIXWAVE: replace eprintln! with log::warn! once an android
+                // logging backend (android_logger/tracing-logcat) is wired up.
                 eprintln!(
                     "copypaste-android: WARN skipping legacy/non-rekeyed P2P text frame \
                      (item_id={}, origin={}): content_nonce is set, peer has not migrated \
