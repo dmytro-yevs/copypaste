@@ -145,7 +145,9 @@ export function Popup() {
           typeof copied === "object" && copied !== null && "preview" in copied
             ? String((copied as { preview: string }).preview)
             : "";
-        invoke("show_copy_notification", { preview }).catch(() => {/* cosmetic — ignore */});
+        // (unconditional show_copy_notification removed — the pref-gated path
+        //  below is the single notification source; firing it here caused a
+        //  double notification even when notifyOnCopy was OFF.)
         // Synthesise Cmd+V into the previously-focused app.
         await invoke("paste_to_frontmost");
         // Fire feedback AFTER paste is triggered so the sound/banner doesn't
