@@ -21,6 +21,16 @@ data class ClipboardItem(
      * yields a new ByteArray instance, which signals the row needs rebinding).
      */
     val imagePng: ByteArray? = null,
+    /**
+     * True when the user has explicitly pinned this item. Pinned items are:
+     *  - never pruned by the retention/quota pass
+     *  - never auto-wiped by [ClipboardRepository.wipeExpiredSensitive]
+     *  - cleared only by the explicit [ClipboardRepository.clearAll] user action
+     *
+     * Persisted in the "pinned_ids" SharedPreferences key as a comma-joined set
+     * (same pattern as synced_source_ids). Populated by [ClipboardRepository.getItems].
+     */
+    val pinned: Boolean = false,
 ) {
     /** True when this item carries an image payload that can be rendered as a thumbnail. */
     val isImage: Boolean get() = contentType.startsWith("image/") || contentType == "image"
