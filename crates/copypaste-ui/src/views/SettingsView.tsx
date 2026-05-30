@@ -18,16 +18,20 @@ function Toggle({
   checked,
   onChange,
   disabled,
+  label,
 }: {
   checked: boolean;
   onChange: (val: boolean) => void;
   disabled?: boolean;
+  /** Accessible name surfaced as aria-label on the switch button. */
+  label?: string;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={[
@@ -657,6 +661,36 @@ export function SettingsView() {
 
           {/* Sync */}
           <SectionHeader label="Sync" />
+          {/* P2P toggle — Fix #3: routes through handleSaveConfig so the full
+              AppSettings payload (including supabase_url / supabase_anon_key)
+              is always sent, never a partial object. */}
+          <Panel>
+            <SettingsRow label="P2P sync">
+              <Toggle
+                label="P2P sync"
+                checked={config.p2p_enabled}
+                onChange={(val) => {
+                  const next = { ...config, p2p_enabled: val };
+                  setConfig(next);
+                  // Persist immediately with the full payload.
+                  const full: import("../lib/ipc").AppSettings = {
+                    p2p_enabled: val,
+                    supabase_url: supabaseUrl.trim() || null,
+                    supabase_anon_key: supabaseKey.trim() || null,
+                  };
+                  void api.setConfig(full).catch((err) => {
+                    // Revert on failure.
+                    setConfig(config);
+                    const msg = err instanceof IpcError ? err.message : "Save failed";
+                    setSaveError(msg);
+                    if (saveErrTimer.current !== null) clearTimeout(saveErrTimer.current);
+                    saveErrTimer.current = setTimeout(() => setSaveError(null), 3500);
+                  });
+                }}
+                disabled={offline}
+              />
+            </SettingsRow>
+          </Panel>
           {/* Connection status banner — shown when Supabase is configured */}
           {syncStatus !== null && syncStatus.supabase_configured && (
             <div className="mb-1 rounded-ide border border-ide-success/30 bg-ide-success/5 px-3 py-2 text-[12px] text-ide-success">

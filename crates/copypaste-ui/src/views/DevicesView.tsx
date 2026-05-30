@@ -261,76 +261,75 @@ export function DevicesView() {
     devicesBody = <p className="text-[13px] text-ide-dim">Loading…</p>;
   } else if (loadState === "offline") {
     devicesBody = <p className="text-[13px] text-ide-dim">Daemon not running.</p>;
-  } else if (peers.length === 0) {
-    devicesBody = <p className="text-[13px] text-ide-dim">No paired devices.</p>;
   } else {
-    devicesBody = (
-      <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">
-        {peers.map((peer) => {
-          const rs = rowState[peer.fingerprint];
-          const isPending = rs?.pending ?? false;
-          const revokedAt = rs?.revokedAt ?? null;
-          const rowError = rs?.error ?? null;
-          // Label this device if its fingerprint matches our own.
-          const isThisDevice =
-            ownFingerprint !== null && peer.fingerprint === ownFingerprint;
+    // Fix #5: filter own device from the peer list in render using the latest
+    // ownFingerprint value. loadPeers may complete before getOwnFingerprint,
+    // so we guard here rather than relying on load order.
+    const remotePeers = ownFingerprint
+      ? peers.filter((p) => p.fingerprint !== ownFingerprint)
+      : peers;
 
-          return (
-            <div
-              key={peer.fingerprint}
-              className="flex items-center justify-between gap-4 px-3 py-2 hover:bg-ide-hover"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <p className="truncate text-[13px] font-medium text-ide-text">
-                    {/* Fix #8: friendly label — use peer.name; show short fingerprint prefix if blank */}
-                    {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
+    if (remotePeers.length === 0) {
+      devicesBody = <p className="text-[13px] text-ide-dim">No paired devices.</p>;
+    } else {
+      devicesBody = (
+        <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">
+          {remotePeers.map((peer) => {
+            const rs = rowState[peer.fingerprint];
+            const isPending = rs?.pending ?? false;
+            const revokedAt = rs?.revokedAt ?? null;
+            const rowError = rs?.error ?? null;
+
+            return (
+              <div
+                key={peer.fingerprint}
+                className="flex items-center justify-between gap-4 px-3 py-2 hover:bg-ide-hover"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <p className="truncate text-[13px] font-medium text-ide-text">
+                      {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
+                    </p>
+                  </div>
+                  <p
+                    className="font-mono text-[11px] text-ide-dim"
+                    title={peer.fingerprint}
+                  >
+                    {peer.fingerprint.length > 32
+                      ? `${peer.fingerprint.slice(0, 16)}…${peer.fingerprint.slice(-8)}`
+                      : peer.fingerprint}
                   </p>
-                  {isThisDevice && (
-                    <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium bg-ide-accent/15 text-ide-accent">
-                      This Mac
-                    </span>
+                  {revokedAt !== null && (
+                    <p className="text-[11px] text-ide-accent">
+                      Revoked · {formatWallTime(revokedAt)}
+                    </p>
+                  )}
+                  {rowError !== null && (
+                    <p className="text-[11px] text-ide-danger">{rowError}</p>
                   )}
                 </div>
-                {/* Fix #8: truncated fingerprint so the row stays compact */}
-                <p
-                  className="font-mono text-[11px] text-ide-dim"
-                  title={peer.fingerprint}
-                >
-                  {peer.fingerprint.length > 32
-                    ? `${peer.fingerprint.slice(0, 16)}…${peer.fingerprint.slice(-8)}`
-                    : peer.fingerprint}
-                </p>
-                {revokedAt !== null && (
-                  <p className="text-[11px] text-ide-accent">
-                    Revoked · {formatWallTime(revokedAt)}
-                  </p>
-                )}
-                {rowError !== null && (
-                  <p className="text-[11px] text-ide-danger">{rowError}</p>
-                )}
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <button
+                    onClick={() => void handleUnpair(peer.fingerprint)}
+                    disabled={isPending}
+                    className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isPending ? "…" : "Unpair"}
+                  </button>
+                  <button
+                    onClick={() => void handleRevoke(peer.fingerprint)}
+                    disabled={isPending}
+                    className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isPending ? "…" : "Revoke"}
+                  </button>
+                </div>
               </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                <button
-                  onClick={() => void handleUnpair(peer.fingerprint)}
-                  disabled={isPending}
-                  className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {isPending ? "…" : "Unpair"}
-                </button>
-                <button
-                  onClick={() => void handleRevoke(peer.fingerprint)}
-                  disabled={isPending}
-                  className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {isPending ? "…" : "Revoke"}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
+            );
+          })}
+        </div>
+      );
+    }
   }
 
   return (

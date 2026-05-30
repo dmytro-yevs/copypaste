@@ -59,13 +59,14 @@ export function AboutView() {
             )}
           </div>
 
-          {/* GitHub link — use window.open so Tauri opens in the system browser */}
+          {/* GitHub link — use window.open so Tauri opens in the system browser.
+              URL confirmed from git remote: github.com/dmytro-yevs/copypaste */}
           <button
             type="button"
-            onClick={() => window.open("https://github.com/dmytro/CopyPaste", "_blank")}
+            onClick={() => window.open("https://github.com/dmytro-yevs/copypaste", "_blank")}
             className="text-left text-[13px] text-ide-accent hover:underline cursor-pointer bg-transparent border-0 p-0"
           >
-            github.com/dmytro/CopyPaste ↗
+            github.com/dmytro-yevs/copypaste ↗
           </button>
 
         </div>

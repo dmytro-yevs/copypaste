@@ -60,10 +60,45 @@ export function Popup() {
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [refresh]);
 
+  // Visibility-gated polling: refresh items every ~3 seconds while the popup
+  // window is in the foreground so newly-copied content appears without the
+  // user having to close and re-open the popup.
+  useEffect(() => {
+    const POLL_MS = 3000;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const start = () => {
+      if (timer !== null) return;
+      timer = setInterval(() => void refresh(), POLL_MS);
+    };
+    const stop = () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    const sync = () => {
+      if (document.visibilityState === "visible") start();
+      else stop();
+    };
+
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [refresh]);
+
   // Filtered items based on the search query.
+  // Fix #1: run the filter against the SAME normalized label that PopupRow
+  // renders (`.replace(/\s+/g," ").trim()`), so highlight indices and filter
+  // results are always consistent with what the user sees on screen.
+  const normalizePreview = (raw: string) => raw.replace(/\s+/g, " ").trim();
   const filtered = query.trim()
     ? items.filter((item) =>
-        item.preview.toLowerCase().includes(query.toLowerCase())
+        normalizePreview(item.preview).toLowerCase().includes(query.toLowerCase())
       )
     : items;
 
