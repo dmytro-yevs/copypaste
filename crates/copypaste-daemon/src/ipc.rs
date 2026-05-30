@@ -5557,8 +5557,16 @@ mod tests {
         // redirect HOME (e.g. revoke_all_peers_revokes_every_peer) don't pick
         // up peers.json entries written by this test's servers. `EnvGuard`
         // holds ENV_LOCK for the duration, serialising env mutations.
+        //
+        // `COPYPASTE_CONFIG_DIR` is set first because `peers_file_path` checks
+        // it ahead of `dirs::config_dir()`; pinning it to this tempdir keeps the
+        // test hermetic even when the host/CI environment already exports a
+        // `COPYPASTE_CONFIG_DIR` that points at a dir which may not exist.
         let cfg_home = dir.path().join("cfg");
-        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
 
         // Use two server instances to simulate two separate daemons.
         let sock_a = dir.path().join("test-pake-rt-a.sock");
@@ -5784,6 +5792,21 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let sock = dir.path().join("test-revoke.sock");
+
+        // Redirect the config dir to this test's own tempdir so the
+        // `revoke_peer` handler's `save_peers` never writes to (and never
+        // depends on the existence of) the machine's real config dir. Under
+        // parallel CI execution the platform `dirs::config_dir()` may not
+        // exist, which previously made `save_peers` fail with ENOENT. Setting
+        // `COPYPASTE_CONFIG_DIR` (checked first by `peers_file_path`) plus the
+        // HOME/XDG fallbacks makes the test fully hermetic. `EnvGuard` holds
+        // the process-wide `TEST_ENV_LOCK` for its lifetime, so this does not
+        // race the other env-mutating tests in the workspace.
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
 
         // Build the server manually so we can reach the shared Database
         // handle for assertions after the call.
