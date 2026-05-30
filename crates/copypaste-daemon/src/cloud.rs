@@ -39,10 +39,10 @@ use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
 use copypaste_core::{
-    build_item_aad_v2, count_items, decrypt_from_cloud, decrypt_item_by_version, derive_v2, detect,
+    build_item_aad_v2, count_items, decrypt_from_cloud, decrypt_item_by_version, derive_v2,
     encrypt_for_cloud, encrypt_item_with_aad, exists_item_by_item_id, get_item_by_item_id,
-    insert_item, prune_to_cap, ClipboardItem, Database, SyncKey, AAD_SCHEMA_VERSION_V4,
-    ITEM_KEY_VERSION_CURRENT,
+    insert_item, is_sensitive_for_autowipe, prune_to_cap, ClipboardItem, Database, SyncKey,
+    AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
 };
 
 // Beta W2.3 (arch-1): canonical auth client lives in copypaste-supabase. The
@@ -2589,13 +2589,16 @@ fn build_local_item(
     let (nonce, ciphertext) =
         encrypt_item_with_aad(plaintext, &v2_key, &aad).map_err(|e| e.to_string())?;
 
-    // Fix CLOUD-SENSITIVE: run the same sensitive-content detector as the
-    // clipboard capture path so cross-device sensitive items are flagged for
-    // auto-wipe on the receiving device.  The plaintext is already in memory;
-    // detection is fast (regex only) and never logged.
+    // Fix CLOUD-SENSITIVE: run the same auto-wipe gate as the clipboard capture
+    // path (daemon handle_text) so cross-device sensitive items are flagged for
+    // auto-wipe on the receiving device using the SAME confidence floor (>=0.70).
+    // Using bare detect().is_some() here would over-flag (e.g. a phone number that
+    // never auto-wipes locally would auto-wipe when synced) — a cross-device
+    // data-loss asymmetry. The plaintext is already in memory; detection is fast
+    // (regex only) and never logged.
     let is_sensitive = if content_type == "text" {
         let text = std::str::from_utf8(plaintext).unwrap_or("");
-        detect(text).is_some()
+        is_sensitive_for_autowipe(text)
     } else {
         false
     };

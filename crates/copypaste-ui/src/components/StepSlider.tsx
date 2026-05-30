@@ -96,7 +96,7 @@ export function StepSlider<T>({
           ].join(" ")}
           style={{
             // Track: filled portion = accent, unfilled = elevated border
-            background: `linear-gradient(to right, #3592ff ${fillPercent}%, #383b42 ${fillPercent}%)`,
+            background: `linear-gradient(to right, #3D8BFF ${fillPercent}%, #383b42 ${fillPercent}%)`,
             height: "4px",
             borderRadius: "2px",
           }}
@@ -115,7 +115,7 @@ export function StepSlider<T>({
                   width: "2px",
                   height: "4px",
                   borderRadius: "1px",
-                  backgroundColor: active ? "#3592ff" : "#383b42",
+                  backgroundColor: active ? "#3D8BFF" : "#383b42",
                   opacity: active ? 0.7 : 0.5,
                 }}
               />
