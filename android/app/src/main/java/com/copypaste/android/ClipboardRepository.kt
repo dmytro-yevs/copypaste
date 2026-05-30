@@ -361,7 +361,7 @@ class ClipboardRepository(context: Context) {
          * Map a stored MIME-style content type to the canonical token the Rust
          * FFI send path (`sync_with_peer`) accepts when re-keying items for
          * peers. Stored text items use "text/plain"; the FFI only re-keys items
-         * whose content type is exactly "text", so any "text/*" value must be
+         * whose content type is exactly "text", so any "text/<any>" value must be
          * collapsed to "text" at the sync boundary or the item is silently
          * dropped (items_sent = 0). Non-text types pass through unchanged.
          */
@@ -486,7 +486,7 @@ class ClipboardRepository(context: Context) {
                 val parts = raw.split("|")
                 val wallTimeMs = parts[0].toLong()
                 // Normalize the stored MIME-style content type ("text/plain",
-                // "text/*") to the canonical "text" token the FFI send path
+                // "text/<any>") to the canonical "text" token the FFI send path
                 // (`sync_with_peer`) re-keys and offers to peers. Without this
                 // mapping every Android item is filtered out and ZERO items are
                 // sent. We only normalize at the sync boundary; the on-disk
