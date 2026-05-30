@@ -12,7 +12,7 @@
 //! The module is intentionally platform-agnostic: NSPasteboard reading lives
 //! in `copypaste-daemon`, so all code here is testable without macOS.
 
-use image::{DynamicImage, GenericImageView, ImageFormat};
+use image::{DynamicImage, GenericImageView, ImageFormat, ImageReader, Limits};
 use std::io::Cursor;
 use thiserror::Error;
 
@@ -50,31 +50,87 @@ pub struct ImageMeta {
     pub file_id: [u8; 16],
 }
 
+/// Build `image::Limits` from a decoded-bytes budget (MB).
+///
+/// `max_alloc` is set to `max_decoded_mb * 1024 * 1024` bytes.
+/// Width/height caps are derived conservatively: at 4 bytes/pixel (RGBA8),
+/// the worst case for a square image is `sqrt(budget_bytes / 4)` pixels per
+/// side.  We use that ceiling so the dimension limit is always consistent
+/// with the allocation budget and an attacker cannot craft a narrow-but-very-
+/// tall image that passes the per-axis check but exceeds the alloc budget
+/// before `total_bytes()` is called.
+fn make_limits(max_decoded_mb: u32) -> Limits {
+    // Saturating arithmetic: an absurdly large config value should just give a
+    // very generous limit rather than wrap or panic.
+    let max_bytes = (max_decoded_mb as u64).saturating_mul(1024 * 1024);
+    // bytes / 4 bpp → max pixels; integer sqrt → max side length.
+    let max_side = ((max_bytes / 4) as f64).sqrt() as u32;
+    // Limits is #[non_exhaustive] so we cannot use a struct literal — start
+    // from the default and overwrite the three fields we care about.
+    let mut limits = Limits::default();
+    limits.max_image_width = Some(max_side.max(1));
+    limits.max_image_height = Some(max_side.max(1));
+    limits.max_alloc = Some(max_bytes);
+    limits
+}
+
 /// Decode raw clipboard bytes (PNG or TIFF) into a `DynamicImage`.
 ///
-/// Tries PNG first, then TIFF. Returns `ImageError::UnsupportedFormat` if
+/// Enforces `image::Limits` capped at [`MAX_DECODED_IMAGE_MB`] (50 MB) so that
+/// a highly-compressed "decode-bomb" image is rejected before any large
+/// allocation occurs.  To supply a custom cap from `AppConfig` call
+/// [`decode_clipboard_image_limited`] instead.
+///
+/// Tries PNG first, then TIFF.  Returns `ImageError::UnsupportedFormat` if
 /// neither decode succeeds.
 pub fn decode_clipboard_image(raw: &[u8]) -> Result<DynamicImage, ImageError> {
+    decode_clipboard_image_limited(raw, crate::config::MAX_DECODED_IMAGE_MB)
+}
+
+/// Like [`decode_clipboard_image`] but accepts an explicit allocation cap in
+/// megabytes.  Pass `AppConfig::max_decoded_image_mb` here when you have a
+/// config available; otherwise prefer `decode_clipboard_image` which uses the
+/// compile-time default.
+pub fn decode_clipboard_image_limited(
+    raw: &[u8],
+    max_decoded_mb: u32,
+) -> Result<DynamicImage, ImageError> {
     if raw.is_empty() {
         return Err(ImageError::UnsupportedFormat);
     }
 
+    let limits = make_limits(max_decoded_mb);
+
     // Try PNG
-    if let Ok(img) = image::load_from_memory_with_format(raw, ImageFormat::Png) {
+    let mut png_reader = ImageReader::with_format(Cursor::new(raw), ImageFormat::Png);
+    png_reader.limits(limits.clone());
+    if let Ok(img) = png_reader.decode() {
         return Ok(img);
     }
 
     // Try TIFF (macOS often puts TIFF on pasteboard)
-    if let Ok(img) = image::load_from_memory_with_format(raw, ImageFormat::Tiff) {
+    let mut tiff_reader = ImageReader::with_format(Cursor::new(raw), ImageFormat::Tiff);
+    tiff_reader.limits(limits.clone());
+    if let Ok(img) = tiff_reader.decode() {
         return Ok(img);
     }
 
     // Generic sniff (handles BMP, etc.)
-    image::load_from_memory(raw).map_err(|e| ImageError::Decode(e.to_string()))
+    let mut generic_reader = ImageReader::new(Cursor::new(raw))
+        .with_guessed_format()
+        .map_err(|e| ImageError::Decode(e.to_string()))?;
+    generic_reader.limits(limits);
+    generic_reader
+        .decode()
+        .map_err(|e| ImageError::Decode(e.to_string()))
 }
 
 /// Decode raw image bytes (PNG/TIFF/BMP) and produce an RGBA8 thumbnail
 /// that fits within `(max_w, max_h)`, preserving aspect ratio.
+///
+/// Enforces the same [`MAX_DECODED_IMAGE_MB`] allocation cap as
+/// [`decode_clipboard_image`] so decode-bomb inputs are rejected before any
+/// large allocation.
 ///
 /// Returns `(rgba_bytes, width, height)` where `rgba_bytes.len() == width * height * 4`.
 ///
@@ -118,6 +174,10 @@ pub fn encode_as_png(img: &DynamicImage) -> Result<Vec<u8>, ImageError> {
 
 /// Full encode pipeline:
 ///   raw clipboard bytes → decode → PNG → split into chunks → encrypt
+///
+/// Enforces the same [`MAX_DECODED_IMAGE_MB`] allocation cap as
+/// [`decode_clipboard_image`] to prevent decode-bomb OOM before the pixel
+/// buffer is allocated.
 ///
 /// Returns `(ImageMeta, Vec<EncryptedChunk>)`.
 pub fn encode_image(
@@ -506,5 +566,52 @@ mod tests {
         let (_, chunks) = encode_image(&png, &key, &file_id).unwrap();
         let err = decode_image(&chunks, &key, &bad_file_id).unwrap_err();
         assert!(matches!(err, ImageError::Chunk(_)));
+    }
+
+    // --- Decode-bomb / OOM DoS prevention ---
+
+    /// A 66-byte PNG with a valid IHDR declaring 30000×30000 pixels (RGB8).
+    ///
+    /// At 3 bytes/pixel the uncompressed pixel buffer would be ~2.7 GB.
+    /// The file contains only a stub IDAT so it fits in 66 bytes total.
+    /// CRCs were pre-computed with Python's `zlib.crc32`.
+    ///
+    /// Structure: PNG signature (8) + IHDR chunk (25) + IDAT chunk (21) + IEND (12)
+    #[rustfmt::skip]
+    const DECODE_BOMB_PNG: &[u8] = &[
+        // PNG signature
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+        // IHDR chunk: length=13, type="IHDR"
+        0x00, 0x00, 0x00, 0x0D,
+        0x49, 0x48, 0x44, 0x52,
+        // width=30000 (0x00007530), height=30000
+        0x00, 0x00, 0x75, 0x30,
+        0x00, 0x00, 0x75, 0x30,
+        // bit_depth=8, color_type=2 (RGB), compression=0, filter=0, interlace=0
+        0x08, 0x02, 0x00, 0x00, 0x00,
+        // CRC of IHDR type+data
+        0xE9, 0x45, 0x6F, 0xED,
+        // IDAT chunk: length=9, type="IDAT", stub deflate stream, CRC
+        0x00, 0x00, 0x00, 0x09,
+        0x49, 0x44, 0x41, 0x54,
+        0x78, 0x9C, 0x62, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01,
+        0xFA, 0xCE, 0xC8, 0x14,
+        // IEND chunk
+        0x00, 0x00, 0x00, 0x00,
+        0x49, 0x45, 0x4E, 0x44,
+        0xAE, 0x42, 0x60, 0x82,
+    ];
+
+    #[test]
+    fn decode_bomb_png_rejected_before_oom() {
+        // With a 1 MB alloc cap the 30000×30000×3 ≈ 2.7 GB pixel buffer must be
+        // rejected by image::Limits before any large allocation occurs.
+        let err = decode_clipboard_image_limited(DECODE_BOMB_PNG, 1)
+            .expect_err("decode-bomb must be rejected by Limits");
+        // Must be a Decode error (from image::Limits), never a panic or OOM.
+        assert!(
+            matches!(err, ImageError::Decode(_) | ImageError::UnsupportedFormat),
+            "expected Decode or UnsupportedFormat, got: {err:?}"
+        );
     }
 }

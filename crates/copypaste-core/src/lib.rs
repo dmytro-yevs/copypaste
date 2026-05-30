@@ -22,8 +22,9 @@ pub use crypto::{
     HKDF_VERSION, PAIRING_QR_MAGIC, PAIRING_TOKEN_LEN,
 };
 pub use image::{
-    chunks_from_blob, chunks_to_blob, decode_clipboard_image, decode_image, encode_as_png,
-    encode_image, thumbnail, ImageError, ImageMeta, IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES,
+    chunks_from_blob, chunks_to_blob, decode_clipboard_image, decode_clipboard_image_limited,
+    decode_image, encode_as_png, encode_image, thumbnail, ImageError, ImageMeta, IMAGE_CHUNK_SIZE,
+    MAX_IMAGE_BYTES,
 };
 pub use sensitive::{
     detect, is_sensitive_app, luhn_valid, redact, PatternMatch, SensitiveCategory,
