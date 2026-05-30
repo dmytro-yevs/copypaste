@@ -69,6 +69,7 @@
     <!-- Content descriptions -->
     <string name="cd_back">Back</string>
     <string name="cd_refresh">Refresh</string>
+    <string name="cd_copy">Copy</string>
     <string name="cd_delete">Delete item</string>
     <string name="cd_sensitive_icon">Sensitive content marker</string>
 

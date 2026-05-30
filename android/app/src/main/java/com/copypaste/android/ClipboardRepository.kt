@@ -512,11 +512,20 @@ class ClipboardRepository(context: Context) {
      * Pull incoming relay items, decrypt each via UniFFI decryptText, and store
      * non-sensitive plaintext locally. Returns the list of decrypted strings that
      * were successfully received (storing may still be a no-op until the .so lands).
+     *
+     * Each [RelayItem] carries a stable [RelayClient.RelayItem.itemId] that is
+     * bound into the AEAD AAD on the sender side. We pass it as [sourceId] so
+     * the source-id dedup layer in [storeItem] rejects a relay item fetched by
+     * multiple concurrent listeners (FGS, accessibility service, activity) that
+     * each independently call syncItems() — without this the same remote item
+     * produces 2-3 duplicate local rows (Bug LOW-2 / HIGH-3 replay via relay).
      */
     suspend fun syncItems(syncManager: SyncManager, encryptionKey: ByteArray): List<String> =
         withContext(Dispatchers.IO) {
-            val decrypted = syncManager.syncIncoming(encryptionKey)
-            decrypted.forEach { plaintext -> storeItem(plaintext, encryptionKey) }
-            decrypted
+            val decrypted = syncManager.syncIncomingWithIds(encryptionKey)
+            decrypted.forEach { (sourceId, plaintext) ->
+                storeItem(plaintext, encryptionKey, sourceId = sourceId)
+            }
+            decrypted.map { it.second }
         }
 }

@@ -72,6 +72,14 @@ class SyncManager(
     // ── Relay backend (original) ──────────────────────────────────────────────
 
     suspend fun syncIncoming(encryptionKey: ByteArray): List<String> =
+        syncIncomingWithIds(encryptionKey).map { it.second }
+
+    /**
+     * Same as [syncIncoming] but returns (itemId, plaintext) pairs so the caller
+     * can pass the stable relay [RelayClient.RelayItem.itemId] as a [sourceId] to
+     * [ClipboardRepository.storeItem] for cross-listener dedup (Bug LOW-2).
+     */
+    suspend fun syncIncomingWithIds(encryptionKey: ByteArray): List<Pair<String, String>> =
         withContext(Dispatchers.IO) {
             val items = relayClient.pollItems(deviceId, token, lastLamportTs)
             items.mapNotNull { item ->
@@ -82,7 +90,7 @@ class SyncManager(
                     // mismatched value fails decryption (v0.3 schema).
                     val plainBytes = decryptText(item.itemId, ciphertext, nonce, encryptionKey)
                     lastLamportTs = maxOf(lastLamportTs, item.lamportTs)
-                    plainBytes.toString(Charsets.UTF_8)
+                    item.itemId to plainBytes.toString(Charsets.UTF_8)
                 } catch (e: Exception) {
                     null
                 }

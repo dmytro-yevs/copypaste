@@ -302,6 +302,13 @@ class ClipboardService : Service() {
                 SyncBackend.RELAY -> {
                     // Relay path: encrypt with local device key + v3/v4 AAD,
                     // upload to custom relay server. Local-network only.
+                    // Guard: connecting to the loopback default (localhost / 127.0.0.1)
+                    // from a real device always produces ECONNREFUSED (os error 111).
+                    // Skip the upload silently until the user configures a real URL.
+                    if (!settings.isRelayConfigured) {
+                        Log.d(TAG, "Relay URL not configured — skipping upload")
+                        return
+                    }
                     try {
                         // Generate the item id BEFORE encrypting so the same id can
                         // be bound into the AEAD AAD and forwarded to the relay. A

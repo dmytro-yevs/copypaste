@@ -51,8 +51,19 @@ class Settings(context: Context) {
     }
 
     var relayUrl: String
-        get() = prefs.getString("relay_url", "http://localhost:8080") ?: "http://localhost:8080"
+        get() = prefs.getString("relay_url", "") ?: ""
         set(v) = prefs.edit().putString("relay_url", v).apply()
+
+    /**
+     * True when the relay URL is non-blank AND not the loopback placeholder.
+     * Connecting to 127.0.0.1 from a real device always produces ECONNREFUSED
+     * (os error 111). The old default was "http://localhost:8080" which is
+     * unreachable on device; callers should gate relay I/O on this flag.
+     */
+    val isRelayConfigured: Boolean
+        get() = relayUrl.isNotBlank() &&
+                !relayUrl.contains("localhost") &&
+                !relayUrl.contains("127.0.0.1")
 
     var syncEnabled: Boolean
         get() = prefs.getBoolean("sync_enabled", false)
