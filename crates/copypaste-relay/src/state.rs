@@ -542,19 +542,36 @@ impl RelayStore {
         Ok(id)
     }
 
-    /// Return up to `limit` items in `device_id`'s sync inbox with
-    /// `wall_time > since`, ordered ascending by `wall_time`.
+    /// Return up to `limit` items in `device_id`'s sync inbox strictly after the
+    /// `(since, since_id)` composite cursor, ordered ascending.
+    ///
+    /// Pagination is driven by a strictly-monotonic `(wall_time, id)` tuple
+    /// rather than bare `wall_time` (relay H-1 / audit finding G). `wall_time`
+    /// is a sender-supplied millisecond timestamp, so ties are possible; a
+    /// `wall_time`-only cursor with a strict `>` floor would skip every item
+    /// sharing a boundary timestamp when a page boundary fell mid-run, silently
+    /// dropping items. The per-device `id` is unique and ascending, so the tuple
+    /// `(wall_time, id)` is a total order with no ties: items qualify iff
+    /// `(item.wall_time, item.id) > (since, since_id)`.
+    ///
+    /// `since_id` is optional for backward compatibility: when `None` the cursor
+    /// degrades to the historical `wall_time`-only floor (`wall_time > since`),
+    /// matching pre-cursor clients. New clients paginate by feeding back the
+    /// last returned `(wall_time, id)` as `(since, since_id)`.
     ///
     /// The inbox is kept sorted by `wall_time` on insert (see [`Self::push_item`]),
-    /// so this binary-searches for the first item past `since` and clones only
-    /// the (at most `limit`) items it returns — it no longer clones+sorts the
-    /// entire inbox under the global mutex (M4). A `limit` of `0` is treated as
-    /// "no items" rather than "unbounded"; callers wanting the whole window pass
-    /// a large explicit cap.
+    /// and within an equal `wall_time` run `id` is ascending too (ids are issued
+    /// monotonically and ties preserve insertion order), so the inbox is sorted
+    /// by the full `(wall_time, id)` tuple. This binary-searches for the first
+    /// item past the cursor and clones only the (at most `limit`) items it
+    /// returns — it never clones+sorts the whole inbox under the global mutex
+    /// (M4). A `limit` of `0` is treated as "no items" rather than "unbounded";
+    /// callers wanting the whole window pass a large explicit cap.
     pub fn pull_items(
         &self,
         device_id: &str,
         since: u64,
+        since_id: Option<i64>,
         limit: usize,
     ) -> Result<Vec<PullItem>, RelayError> {
         let inbox = self
@@ -562,9 +579,17 @@ impl RelayStore {
             .get(device_id)
             .ok_or(RelayError::DeviceNotFound)?;
 
-        // First index whose `wall_time > since`. The inbox is sorted ascending,
-        // so everything from `start` onward qualifies (no full scan/sort).
-        let start = inbox.partition_point(|item| item.wall_time <= since);
+        // First index strictly past the cursor. The inbox is sorted ascending by
+        // `(wall_time, id)`, so everything from `start` onward qualifies (no full
+        // scan/sort). With `since_id` we advance past every item up to and
+        // including the cursor tuple; without it we fall back to the legacy
+        // `wall_time`-only floor (`wall_time <= since`).
+        let start = match since_id {
+            Some(since_id) => {
+                inbox.partition_point(|item| (item.wall_time, item.id) <= (since, since_id))
+            }
+            None => inbox.partition_point(|item| item.wall_time <= since),
+        };
 
         let result: Vec<PullItem> = inbox[start..]
             .iter()
@@ -872,7 +897,9 @@ mod tests {
         push_text(&mut store, &device_a_id(), 1000);
         push_text(&mut store, &device_a_id(), 2000);
         push_text(&mut store, &device_a_id(), 3000);
-        let items = store.pull_items(&device_a_id(), 1000, usize::MAX).unwrap();
+        let items = store
+            .pull_items(&device_a_id(), 1000, None, usize::MAX)
+            .unwrap();
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].wall_time, 2000);
         assert_eq!(items[1].wall_time, 3000);
@@ -886,7 +913,9 @@ mod tests {
             .unwrap();
         push_text(&mut store, &device_a_id(), 100);
         push_text(&mut store, &device_a_id(), 200);
-        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
         assert_eq!(items.len(), 2);
     }
 
@@ -899,7 +928,9 @@ mod tests {
         push_text(&mut store, &device_a_id(), 3000);
         push_text(&mut store, &device_a_id(), 1000);
         push_text(&mut store, &device_a_id(), 2000);
-        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
         let times: Vec<u64> = items.iter().map(|i| i.wall_time).collect();
         assert_eq!(times, vec![1000, 2000, 3000]);
     }
@@ -962,7 +993,9 @@ mod tests {
         for t in 1u64..=(MAX_PUSH_ITEMS_PER_DEVICE as u64 + 1) {
             push_text(&mut store, &device_a_id(), t);
         }
-        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
         assert_eq!(items.len(), MAX_PUSH_ITEMS_PER_DEVICE);
         let min_wt = items.iter().map(|i| i.wall_time).min().unwrap();
         assert_eq!(min_wt, 2, "oldest item must be evicted");
@@ -972,7 +1005,7 @@ mod tests {
     fn pull_returns_device_not_found_for_unknown_device() {
         let store = make_store();
         let err = store
-            .pull_items("unknown-device", 0, usize::MAX)
+            .pull_items("unknown-device", 0, None, usize::MAX)
             .unwrap_err();
         assert!(matches!(err, RelayError::DeviceNotFound));
     }
@@ -1157,7 +1190,9 @@ mod tests {
             push_text(&mut store, &device_a_id(), t);
         }
 
-        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
         assert!(
             items.len() <= effective_cap,
             "inbox must never exceed the effective history cap ({effective_cap}), got {}",
@@ -1179,7 +1214,9 @@ mod tests {
             push_text(&mut store, &device_a_id(), t);
         }
 
-        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
         // Pro tier has no history limit, so only the absolute hard cap applies.
         assert_eq!(items.len(), MAX_PUSH_ITEMS_PER_DEVICE);
     }
@@ -1318,7 +1355,7 @@ mod tests {
         for t in 1u64..=10 {
             push_text(&mut store, &device_a_id(), t);
         }
-        let page = store.pull_items(&device_a_id(), 0, 3).unwrap();
+        let page = store.pull_items(&device_a_id(), 0, None, 3).unwrap();
         assert_eq!(page.len(), 3, "limit must cap the page size");
         assert_eq!(
             page.iter().map(|i| i.wall_time).collect::<Vec<_>>(),
@@ -1341,7 +1378,7 @@ mod tests {
         let mut seen = Vec::new();
         let mut since = 0u64;
         loop {
-            let page = store.pull_items(&device_a_id(), since, 2).unwrap();
+            let page = store.pull_items(&device_a_id(), since, None, 2).unwrap();
             if page.is_empty() {
                 break;
             }
@@ -1349,6 +1386,74 @@ mod tests {
             seen.extend(page.iter().map(|i| i.wall_time));
         }
         assert_eq!(seen, vec![1, 2, 3, 4, 5]);
+    }
+
+    /// Relay H-1 / audit finding G: pagination must not silently drop items
+    /// when a page boundary falls in the middle of a run of *equal*
+    /// sender-supplied `wall_time` values. Three items share `wall_time == 10`;
+    /// with `limit == 2` the boundary lands mid-run.
+    ///
+    /// Teeth: under the OLD `wall_time`-only cursor the client would feed
+    /// `since = 10` (the last page's `wall_time`) back with a strict `>` floor,
+    /// which skips BOTH remaining `wall_time == 10` items → the third item is
+    /// lost. The composite `(wall_time, id)` cursor (feeding back `since_id`)
+    /// advances only past the exact item already seen, so the run is walked in
+    /// full with no gaps and no duplicates. This test passes only with the tuple
+    /// cursor; the `assert_eq!(seen_ids, [id1, id2, id3])` below fails under the
+    /// legacy `since`-only pagination.
+    #[test]
+    fn pull_items_pagination_no_drop_on_tied_wall_times() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64())
+            .unwrap();
+        // Three items, identical wall_time, distinct ascending ids.
+        let id1 = push_text(&mut store, &device_a_id(), 10);
+        let id2 = push_text(&mut store, &device_a_id(), 10);
+        let id3 = push_text(&mut store, &device_a_id(), 10);
+
+        // Page 1: limit 2 → the boundary splits the tied run.
+        let page1 = store.pull_items(&device_a_id(), 0, None, 2).unwrap();
+        assert_eq!(page1.len(), 2, "first page returns 2 of the 3 tied items");
+        assert_eq!(
+            page1.iter().map(|i| i.id).collect::<Vec<_>>(),
+            vec![id1, id2]
+        );
+
+        // Page 2: feed back the composite cursor (wall_time, id) of the last
+        // item seen. With the tuple cursor this returns the third item; with the
+        // old wall_time-only `since = 10` strict-`>` floor it would return empty.
+        let last = page1.last().unwrap();
+        let page2 = store
+            .pull_items(&device_a_id(), last.wall_time, Some(last.id), 2)
+            .unwrap();
+        assert_eq!(
+            page2.iter().map(|i| i.id).collect::<Vec<_>>(),
+            vec![id3],
+            "composite cursor must return the remaining tied item, not drop it"
+        );
+
+        // Full walk must see every item exactly once (no gap, no dup).
+        let mut seen_ids = Vec::new();
+        let mut since = 0u64;
+        let mut since_id: Option<i64> = None;
+        loop {
+            let page = store
+                .pull_items(&device_a_id(), since, since_id, 2)
+                .unwrap();
+            if page.is_empty() {
+                break;
+            }
+            let last = page.last().unwrap();
+            since = last.wall_time;
+            since_id = Some(last.id);
+            seen_ids.extend(page.iter().map(|i| i.id));
+        }
+        assert_eq!(
+            seen_ids,
+            vec![id1, id2, id3],
+            "tuple-cursor pagination must walk all tied-wall_time items with no drops"
+        );
     }
 
     /// Out-of-order pushes must still be returned ascending by `wall_time`,
@@ -1362,7 +1467,9 @@ mod tests {
         for t in [50u64, 10, 30, 20, 40] {
             push_text(&mut store, &device_a_id(), t);
         }
-        let items = store.pull_items(&device_a_id(), 0, usize::MAX).unwrap();
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
         assert_eq!(
             items.iter().map(|i| i.wall_time).collect::<Vec<_>>(),
             vec![10, 20, 30, 40, 50]

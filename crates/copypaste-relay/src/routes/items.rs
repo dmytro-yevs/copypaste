@@ -119,6 +119,6 @@ pub async fn pull(
     // Auth: verify token belongs to this device.
     store.verify_token(&device_id, &token)?;
 
-    let items = store.pull_items(&device_id, params.since, limit)?;
+    let items = store.pull_items(&device_id, params.since, params.since_id, limit)?;
     Ok(Json(items))
 }
