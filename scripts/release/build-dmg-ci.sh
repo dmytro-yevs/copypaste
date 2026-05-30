@@ -187,15 +187,19 @@ SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 # makes the launchd label / item attributes deterministic and is required if a
 # Developer ID identity is later supplied.
 echo "==> Signing inner binaries with stable identifiers (identity: $SIGN_IDENTITY)"
-declare -A INNER_IDS=(
-    [copypaste-daemon]="com.copypaste.daemon"
-    [copypaste]="com.copypaste.cli"
-    [copypaste-relay]="com.copypaste.relay"
-)
+# NOTE: macOS ships bash 3.2, which has NO associative arrays (`declare -A` is
+# bash 4+). Use a case statement so this runs on the stock macOS interpreter as
+# well as the Linux CI runner — `declare -A` here fails with "unbound variable".
 for bin in copypaste-daemon copypaste copypaste-relay; do
+    case "$bin" in
+        copypaste-daemon) bin_id="com.copypaste.daemon" ;;
+        copypaste)        bin_id="com.copypaste.cli" ;;
+        copypaste-relay)  bin_id="com.copypaste.relay" ;;
+        *)                bin_id="com.copypaste.$bin" ;;
+    esac
     codesign --force \
         --sign "$SIGN_IDENTITY" \
-        --identifier "${INNER_IDS[$bin]}" \
+        --identifier "$bin_id" \
         --options runtime \
         --timestamp=none \
         "$APP_DIR/Contents/MacOS/$bin"
