@@ -4,6 +4,7 @@ import {
   IpcError,
   formatWallTime,
   pairingQrSvg,
+  probeStatus,
   type PairedDevice,
   type PairingQr,
 } from "../lib/ipc";
@@ -15,7 +16,10 @@ type QrState =
   | { status: "ready"; qr: PairingQr }
   | { status: "error"; message: string };
 
-type LoadState = "loading" | "offline" | "ready";
+// Devices load outcomes. `degraded` (daemon up, DB unavailable) and `error`
+// (some other failure) are split out from `offline` so a DB-degraded daemon is
+// no longer mislabeled "Daemon not running."
+type LoadState = "loading" | "offline" | "degraded" | "error" | "ready";
 
 interface DeviceRowState {
   revokedAt: number | null;
@@ -26,11 +30,15 @@ interface DeviceRowState {
 type FingerprintState =
   | { status: "loading" }
   | { status: "ready"; fingerprint: string }
+  | { status: "degraded"; reason: string | null }
   | { status: "offline" };
 
 export function DevicesView() {
   // --- Devices state ---
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  // Detail line for the degraded/error states so the failure path is LOUD
+  // (the real reason / message, never a blank or mislabeled screen).
+  const [loadDetail, setLoadDetail] = useState<string | null>(null);
   const [peers, setPeers] = useState<PairedDevice[]>([]);
   const [rowState, setRowState] = useState<Record<string, DeviceRowState>>({});
   const [revokeAllPending, setRevokeAllPending] = useState(false);
@@ -82,12 +90,29 @@ export function DevicesView() {
         }
         return next;
       });
+      setLoadDetail(null);
       setLoadState("ready");
     } catch (e) {
+      // A transport failure means the daemon is genuinely unreachable.
       if (e instanceof IpcError && e.code === "daemon_offline") {
+        setLoadDetail(null);
         setLoadState("offline");
+        return;
+      }
+      // The daemon answered but list_peers failed. Probe `status` to tell a
+      // DB-degraded daemon (recoverable via History → Reset database) apart from
+      // a generic error — previously both fell through to "offline" and the
+      // degraded case was mislabeled "Daemon not running."
+      const probe = await probeStatus();
+      if (probe.kind === "offline") {
+        setLoadDetail(null);
+        setLoadState("offline");
+      } else if (probe.kind === "degraded") {
+        setLoadDetail(probe.reason);
+        setLoadState("degraded");
       } else {
-        setLoadState("offline");
+        setLoadDetail(e instanceof IpcError ? e.message : String(e));
+        setLoadState("error");
       }
     }
   }, []);
@@ -104,9 +129,16 @@ export function DevicesView() {
         const code = err instanceof IpcError ? err.code : null;
         if (code === "daemon_offline") {
           setFpState({ status: "offline" });
-        } else {
-          setFpState({ status: "offline" });
+          return;
         }
+        // Daemon answered but the call failed — distinguish a DB-degraded daemon
+        // from a true offline daemon instead of collapsing both to "offline".
+        void probeStatus().then((probe) => {
+          if (cancelled) return;
+          if (probe.kind === "degraded")
+            setFpState({ status: "degraded", reason: probe.reason });
+          else setFpState({ status: "offline" });
+        });
       }
     );
     return () => {
@@ -261,6 +293,26 @@ export function DevicesView() {
     devicesBody = <p className="text-[13px] text-ide-dim">Loading…</p>;
   } else if (loadState === "offline") {
     devicesBody = <p className="text-[13px] text-ide-dim">Daemon not running.</p>;
+  } else if (loadState === "degraded") {
+    devicesBody = (
+      <div className="rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2.5 text-[13px] text-ide-warning">
+        <p className="font-medium">Clipboard database unavailable</p>
+        <p className="mt-1 text-[12px] text-ide-dim">
+          The daemon is running but its encrypted database could not be opened
+          {loadDetail ? ` (${loadDetail})` : ""}. Device pairing is paused until
+          it recovers. Open History to reset the database.
+        </p>
+      </div>
+    );
+  } else if (loadState === "error") {
+    devicesBody = (
+      <div className="rounded-ide border border-ide-danger/40 bg-ide-panel px-3 py-2.5 text-[13px] text-ide-danger">
+        <p className="font-medium">Couldn't load devices</p>
+        {loadDetail && (
+          <p className="mt-1 break-words text-[12px] text-ide-dim">{loadDetail}</p>
+        )}
+      </div>
+    );
   } else if (peers.length === 0) {
     devicesBody = <p className="text-[13px] text-ide-dim">No paired devices.</p>;
   } else {
@@ -359,6 +411,12 @@ export function DevicesView() {
             )}
             {fpState.status === "offline" && (
               <span className="text-[13px] text-ide-danger">Daemon not running.</span>
+            )}
+            {fpState.status === "degraded" && (
+              <span className="text-[13px] text-ide-warning">
+                Unavailable — database degraded
+                {fpState.reason ? ` (${fpState.reason})` : ""}.
+              </span>
             )}
             {fpState.status === "ready" && (
               <>

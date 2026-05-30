@@ -73,6 +73,58 @@ export interface AppSettings {
   supabase_anon_key: string | null;
 }
 
+/**
+ * Reply from the daemon's `status` method. This is the ONLY IPC method that
+ * reports degraded state: when the daemon is up but its backing database is
+ * unavailable (e.g. the SQLCipher key no longer matches after a reinstall) it
+ * returns `ok:true` with `degraded:true` / `ready:false` plus a machine-readable
+ * `degraded_reason`. A healthy daemon returns `degraded:false` / `ready:true`.
+ * A reachable socket alone does NOT mean the daemon is fully functional — views
+ * must inspect these fields.
+ */
+export interface DaemonStatus {
+  /** "running" when healthy, "degraded" when the DB is unavailable. */
+  status: string;
+  private_mode: boolean;
+  /** True only when the backing DB is open and usable. */
+  ready: boolean;
+  /** True when the daemon is up but its database cannot be opened/decrypted. */
+  degraded: boolean;
+  /** Human-readable reason for the degraded state, when present. */
+  degraded_reason?: string | null;
+}
+
+/**
+ * Normalized result of probing {@link api.status}. `kind` collapses the three
+ * meaningful daemon conditions into a single discriminant so views can branch
+ * without each re-implementing degraded/offline detection:
+ *  - "ok": daemon up and its DB is usable.
+ *  - "degraded": daemon up but DB unavailable (carries `reason`).
+ *  - "offline": daemon unreachable (transport failure / `daemon_offline`).
+ */
+export type StatusProbe =
+  | { kind: "ok" }
+  | { kind: "degraded"; reason: string | null }
+  | { kind: "offline" };
+
+/**
+ * Probe the daemon's status and collapse it to a {@link StatusProbe}. Never
+ * throws — a transport failure resolves to `{ kind: "offline" }` so every caller
+ * has a defined, non-blank failure path.
+ */
+export async function probeStatus(): Promise<StatusProbe> {
+  try {
+    const s = (await api.status()) as Partial<DaemonStatus>;
+    if (s && (s.degraded === true || s.ready === false)) {
+      return { kind: "degraded", reason: s.degraded_reason ?? null };
+    }
+    return { kind: "ok" };
+  } catch {
+    // Transport-level failure (daemon offline) — IpcError or otherwise.
+    return { kind: "offline" };
+  }
+}
+
 export interface SyncStatus {
   passphrase_set: boolean;
   supabase_configured: boolean;
@@ -83,16 +135,10 @@ export interface SyncStatus {
   supabase_url?: string | null;
   /** Signed-in account email, if available. */
   email?: string | null;
-  /**
-   * Optional, best-effort degraded-state flags the daemon MAY report when it is
-   * up but cannot do crypto/storage (e.g. the macOS Keychain is locked or the
-   * SQLCipher DB could not be opened). Treated as optional: the UI surfaces a
-   * banner when present but never depends on them.
-   */
-  keychain_locked?: boolean;
-  db_unavailable?: boolean;
-  /** Optional human-readable degraded-state reason, if the daemon supplies one. */
-  degraded_reason?: string | null;
+  // NOTE: degraded state is intentionally NOT modeled here. get_sync_status does
+  // not report it — the daemon exposes degraded/ready ONLY via `status` (see
+  // DaemonStatus / probeStatus). The former keychain_locked/db_unavailable/
+  // degraded_reason fields were dead code (never emitted) and were removed.
 }
 
 export interface PairedDevice {
@@ -217,4 +263,35 @@ export async function pairingQrSvg(): Promise<PairingQr> {
   } catch (e) {
     throw new Error(String(e));
   }
+}
+
+/** Reply from the daemon's `reset_database` recovery method. */
+export interface ResetDatabaseResult {
+  /** Always true on success. */
+  reset: boolean;
+  /** True when the daemon recovered in-place (no restart needed). */
+  ready: boolean;
+}
+
+/**
+ * Wipe and recreate the daemon's clipboard database (DESTRUCTIVE recovery).
+ *
+ * This is the escape hatch for a daemon stuck in degraded mode because its
+ * database cannot be decrypted. It erases all local clipboard history and
+ * creates a fresh empty database; the daemon recovers in-place. The Tauri
+ * backend always sends `confirm = true`. Throws a plain `Error` on failure
+ * (daemon offline, reset failed) so the caller can surface the real error.
+ */
+export async function resetDatabase(): Promise<ResetDatabaseResult> {
+  let reply: IpcReply;
+  try {
+    reply = await invoke<IpcReply>("reset_database");
+  } catch (e) {
+    throw new Error(String(e));
+  }
+  if (!reply.ok) {
+    throw new IpcError(reply.error ?? "reset_database failed", reply.error_code);
+  }
+  const data = (reply.data ?? {}) as Partial<ResetDatabaseResult>;
+  return { reset: data.reset ?? true, ready: data.ready ?? true };
 }

@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ViewShell } from "../components/ViewShell";
-import { api, formatWallTime, IpcError, type HistoryEntry } from "../lib/ipc";
+import {
+  api,
+  formatWallTime,
+  IpcError,
+  resetDatabase,
+  type HistoryEntry,
+} from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
 import { useUI } from "../store";
 
@@ -496,6 +502,16 @@ export function HistoryView() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  // Last error detail surfaced under the "error" load state — kept so the
+  // failure path is LOUD (shows the real message, not a blank screen).
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
+  // True when the daemon is reachable but its database is not ready (degraded
+  // mode — e.g. the DB cannot be decrypted). Drives the "Reset database"
+  // recovery affordance below.
+  const [degraded, setDegraded] = useState(false);
+  // Inline confirm + in-flight state for the destructive database reset.
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -526,13 +542,39 @@ export function HistoryView() {
         sigRef.current = newSig;
         setItems(incoming);
       }
+      setDegraded(false);
+      setErrorDetail(null);
       setLoadState("ready");
     } catch (err) {
       if (err instanceof IpcError && err.code === "daemon_offline") {
         setLoadState("offline");
-      } else {
-        setLoadState("error");
+        return;
       }
+      // The daemon is reachable but history failed. Surface the real error and,
+      // when the daemon reports a degraded/not-ready DB, offer the reset escape
+      // hatch instead of a dead-end "Failed to load history" screen.
+      setErrorDetail(err instanceof IpcError ? err.message : String(err));
+      const notReady =
+        err instanceof IpcError &&
+        (err.code === "ipc_not_ready" || err.code === "IPC_NOT_READY");
+      let isDegraded = notReady;
+      // Confirm via status: the daemon explicitly reports `degraded`.
+      try {
+        const status = (await api.status()) as {
+          degraded?: boolean;
+          degraded_reason?: string | null;
+        };
+        if (status && status.degraded) {
+          isDegraded = true;
+          if (status.degraded_reason) {
+            setErrorDetail(`Database unavailable (${status.degraded_reason}).`);
+          }
+        }
+      } catch {
+        // Status probe failed too; fall back to the not-ready signal above.
+      }
+      setDegraded(isDegraded);
+      setLoadState("error");
     }
   }, []);
 
@@ -735,6 +777,33 @@ export function HistoryView() {
     }
   }, [load, showToast]);
 
+  // Destructive database reset — the recovery escape hatch when the daemon is
+  // degraded (DB cannot be decrypted). Erases all local history and recreates a
+  // fresh empty database; the daemon recovers in-place. On success we re-fetch
+  // history so the now-healthy (empty) view replaces the error screen; on
+  // failure we keep the error visible and surface the real message (loud).
+  const handleResetConfirmed = useCallback(async () => {
+    setResetting(true);
+    try {
+      await resetDatabase();
+      setResetConfirm(false);
+      setDegraded(false);
+      setErrorDetail(null);
+      setSelectedId(null);
+      setItems([]);
+      imageCache.clear();
+      sigRef.current = "";
+      showToast("Database reset — local history erased", "success");
+      await load(false);
+    } catch (err) {
+      const msg = err instanceof IpcError ? err.message : String(err);
+      setErrorDetail(`Reset failed: ${msg}`);
+      showToast(`Reset failed: ${msg}`, "error");
+    } finally {
+      setResetting(false);
+    }
+  }, [load, showToast]);
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -796,8 +865,48 @@ export function HistoryView() {
     );
   } else if (loadState === "error") {
     body = (
-      <div className="flex h-full items-center justify-center text-[13px] text-ide-danger">
-        Failed to load history.
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <div className="text-[13px] font-medium text-ide-danger">
+          {degraded ? "Clipboard database can't be opened" : "Failed to load history."}
+        </div>
+        {errorDetail && (
+          <div className="max-w-md text-[12px] text-ide-dim break-words">{errorDetail}</div>
+        )}
+        {degraded && (
+          <>
+            <div className="max-w-md text-[12px] text-ide-dim">
+              The local database could not be decrypted (its key no longer matches).
+              You can reset it to recover — this permanently erases this device's
+              clipboard history.
+            </div>
+            {resetConfirm ? (
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] text-ide-dim">Erase and reset?</span>
+                <button
+                  disabled={resetting}
+                  onClick={() => void handleResetConfirmed()}
+                  className="rounded-ide border border-ide-danger/60 bg-ide-elevated px-3 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:opacity-50"
+                >
+                  {resetting ? "Resetting…" : "Yes, erase"}
+                </button>
+                <button
+                  disabled={resetting}
+                  onClick={() => setResetConfirm(false)}
+                  className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1 text-[12px] text-ide-dim hover:bg-ide-hover disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setResetConfirm(true)}
+                className="rounded-ide border border-ide-danger/60 bg-ide-elevated px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-hover"
+              >
+                Reset database (erases local history)
+              </button>
+            )}
+          </>
+        )}
       </div>
     );
   } else if (filtered.length === 0 && items.length === 0) {
