@@ -74,6 +74,26 @@ private const val PAIR_TOKEN_TTL_SECONDS = 120
 private const val PAIR_TOKEN_URGENT_THRESHOLD_SECONDS = 15
 
 /**
+ * Side of the rendered QR image, in dp. The QR, the placeholder icon, and the
+ * loading spinner all sit inside a reserved box of this size (plus
+ * [QR_PLATE_PADDING_DP] of white backing) so the layout never reflows when the
+ * content swaps between loading / present / placeholder. This is the single
+ * source of truth for the QR's on-screen size, keeping the image and its
+ * reserved container in lock-step (BUG 2).
+ */
+private const val QR_IMAGE_SIZE_DP = 240
+
+/** White backing-plate padding around the QR, in dp (each side). */
+private const val QR_PLATE_PADDING_DP = 12
+
+/**
+ * Fixed side of the reserved QR slot, in dp: the QR image plus its white plate
+ * padding on both sides. Every QR-area state renders into a box of exactly this
+ * size so the screen stays visually stable (no jitter — BUG 1).
+ */
+private const val QR_SLOT_SIZE_DP = QR_IMAGE_SIZE_DP + QR_PLATE_PADDING_DP * 2
+
+/**
  * Pair Device screen.
  *
  * Two flows:
@@ -349,47 +369,58 @@ fun PairScreen(
                         .padding(28.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    val bmp = qrBitmap
-                    when {
-                        loading -> {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                CircularProgressIndicator(
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    text = stringResource(R.string.status_pairing),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = IdeDim
+                    // Reserve a fixed-size slot for the QR area. Every state
+                    // (loading / QR present / placeholder) renders into this same
+                    // square, so the layout never reflows as the QR loads,
+                    // appears, expires, or the countdown ticks — no jitter.
+                    Box(
+                        modifier = Modifier.size(QR_SLOT_SIZE_DP.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val bmp = qrBitmap
+                        when {
+                            loading -> {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.status_pairing),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = IdeDim
+                                    )
+                                }
+                            }
+                            bmp != null && !expired -> {
+                                // QR needs a light, high-contrast backing to scan
+                                // reliably — sit the code on a white rounded plate
+                                // that fills the reserved slot exactly.
+                                Box(
+                                    modifier = Modifier
+                                        .size(QR_SLOT_SIZE_DP.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(androidx.compose.ui.graphics.Color.White)
+                                        .padding(QR_PLATE_PADDING_DP.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(),
+                                        contentDescription = "Pairing QR code",
+                                        modifier = Modifier.size(QR_IMAGE_SIZE_DP.dp)
+                                    )
+                                }
+                            }
+                            else -> {
+                                Icon(
+                                    imageVector = Icons.Filled.QrCode,
+                                    contentDescription = null,
+                                    tint = IdeDim,
+                                    modifier = Modifier.size(96.dp)
                                 )
                             }
-                        }
-                        bmp != null && !expired -> {
-                            // QR needs a light, high-contrast backing to scan
-                            // reliably — sit the code on a white rounded plate.
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(androidx.compose.ui.graphics.Color.White)
-                                    .padding(12.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Image(
-                                    bitmap = bmp.asImageBitmap(),
-                                    contentDescription = "Pairing QR code",
-                                    modifier = Modifier.size(240.dp)
-                                )
-                            }
-                        }
-                        else -> {
-                            Icon(
-                                imageVector = Icons.Filled.QrCode,
-                                contentDescription = null,
-                                tint = IdeDim,
-                                modifier = Modifier.size(96.dp)
-                            )
                         }
                     }
                 }
