@@ -154,10 +154,12 @@ export interface SyncStatus {
 export interface PairedDevice {
   fingerprint: string;
   name: string;
-  /** Unix timestamp (seconds) when this device was first paired. */
-  added_at?: number | null;
-  /** Peer's P2P sync-listener address (`host:port`), if known. */
-  address?: string | null;
+  /** Unix epoch seconds when this device was paired (0 if unknown). */
+  added_at: number;
+  /** Peer's P2P sync-listener address as "host:port", or null if not yet learned. */
+  address: string | null;
+  /** Base64 shared content-sync key (not displayed; serde default = null). */
+  sync_key_b64: string | null;
 }
 
 /** Result of `cloud_test_connection` — an end-to-end Supabase probe. */

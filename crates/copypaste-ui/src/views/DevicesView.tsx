@@ -40,6 +40,148 @@ type FingerprintState =
 const QR_TTL_SECS = 120;
 const QR_REFRESH_MARGIN_SECS = 15;
 
+/** Extract just the IP part from a "host:port" address string. */
+function extractIp(address: string | null | undefined): string | null {
+  if (!address) return null;
+  // IPv6 addresses look like [::1]:4242; IPv4 like 192.168.1.2:4242
+  const v6 = address.match(/^\[(.+)\]:\d+$/);
+  if (v6) return v6[1];
+  const colon = address.lastIndexOf(":");
+  if (colon > 0) return address.slice(0, colon);
+  return address;
+}
+
+// ---------------------------------------------------------------------------
+// DeviceRow — renders one device entry (this device or a peer)
+// ---------------------------------------------------------------------------
+
+interface DeviceRowProps {
+  peer: PairedDevice;
+  isThisDevice: boolean;
+  rowSt: DeviceRowState | undefined;
+  onUnpair: (fp: string) => void;
+  onRevoke: (fp: string) => void;
+  ownFingerprint: string | null;
+  fpCopied: boolean;
+  onCopyFingerprint: () => void;
+}
+
+function DeviceRow({
+  peer,
+  isThisDevice,
+  rowSt,
+  onUnpair,
+  onRevoke,
+  ownFingerprint: _ownFingerprint,
+  fpCopied,
+  onCopyFingerprint,
+}: DeviceRowProps) {
+  const isPending = rowSt?.pending ?? false;
+  const revokedAt = rowSt?.revokedAt ?? null;
+  const rowError = rowSt?.error ?? null;
+  const ip = extractIp(peer.address);
+
+  return (
+    <div className="px-3 py-2.5 hover:bg-ide-hover">
+      {/* Name row */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="truncate text-[13px] font-medium text-ide-text">
+              {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
+            </p>
+            {isThisDevice && (
+              <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium bg-ide-accent/15 text-ide-accent">
+                This Mac
+              </span>
+            )}
+          </div>
+
+          {/* Rich metadata block */}
+          <div className="mt-1 space-y-0.5">
+            {/* Fingerprint — full value for this device (copy button), truncated for peers */}
+            {isThisDevice ? (
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="select-all break-all font-mono text-[11px] text-ide-dim"
+                  title={peer.fingerprint}
+                >
+                  {peer.fingerprint}
+                </span>
+                <button
+                  type="button"
+                  onClick={onCopyFingerprint}
+                  className="shrink-0 rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text transition-colors"
+                >
+                  {fpCopied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            ) : (
+              <p
+                className="font-mono text-[11px] text-ide-dim"
+                title={peer.fingerprint}
+              >
+                {peer.fingerprint.length > 32
+                  ? `${peer.fingerprint.slice(0, 16)}…${peer.fingerprint.slice(-8)}`
+                  : peer.fingerprint}
+              </p>
+            )}
+
+            {/* IP address */}
+            {ip !== null && (
+              <p className="text-[11px] text-ide-faint">
+                <span className="text-ide-dim">IP</span>{" "}
+                <span className="font-mono">{ip}</span>
+              </p>
+            )}
+
+            {/* Paired date */}
+            {peer.added_at > 0 && (
+              <p className="text-[11px] text-ide-faint">
+                Paired {formatEpochSecs(peer.added_at)}
+              </p>
+            )}
+
+            {/* Revoked / error states */}
+            {revokedAt !== null && (
+              <p className="text-[11px] text-ide-accent">
+                Revoked · {formatWallTime(revokedAt)}
+              </p>
+            )}
+            {rowError !== null && (
+              <p className="text-[11px] text-ide-danger">{rowError}</p>
+            )}
+          </div>
+        </div>
+
+        {/* Actions — only for peer devices, not this device */}
+        {!isThisDevice && (
+          <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
+            <button
+              onClick={() => onUnpair(peer.fingerprint)}
+              disabled={isPending}
+              className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isPending ? "…" : "Unpair"}
+            </button>
+            <button
+              onClick={() => onRevoke(peer.fingerprint)}
+              disabled={isPending}
+              className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isPending ? "…" : "Revoke"}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main view
+// ---------------------------------------------------------------------------
+
 export function DevicesView() {
   // --- Devices state ---
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -53,7 +195,7 @@ export function DevicesView() {
   const [globalMsg, setGlobalMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const globalMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // --- Own fingerprint (for labelling this device in the list) ---
+  // --- Own fingerprint ---
   const [fpState, setFpState] = useState<FingerprintState>({ status: "loading" });
   const [copied, setCopied] = useState(false);
   // Incrementing this triggers a fingerprint re-fetch (e.g. after restart).
@@ -125,11 +267,8 @@ export function DevicesView() {
         return true;
       });
       setPeers(deduped);
-      // Fix #4: preserve transient per-row state (e.g. the "Revoked · <time>"
-      // line set by handleRevoke) across reloads. Previously this reset to {},
-      // so the revoked confirmation was wiped by the immediate loadPeers() that
-      // follows a revoke and never rendered. We keep state only for fingerprints
-      // still present in the refreshed peer list so stale rows don't accumulate.
+      // Preserve transient per-row state across reloads; discard rows no longer
+      // in the peer list so stale state doesn't accumulate.
       const liveFingerprints = new Set(deduped.map((p) => p.fingerprint));
       setRowState((prev) => {
         const next: Record<string, DeviceRowState> = {};
@@ -270,7 +409,7 @@ export function DevicesView() {
     }
   };
 
-  // --- Fingerprint copy ---
+  // --- Fingerprint copy (used both standalone and inside the device row) ---
   function handleCopy() {
     if (fpState.status !== "ready") return;
     navigator.clipboard.writeText(fpState.fingerprint).then(
@@ -279,8 +418,9 @@ export function DevicesView() {
         setTimeout(() => setCopied(false), 1500);
       },
       () => {
+        // Fallback for restricted clipboard contexts.
         const el = document.createElement("textarea");
-        el.value = fpState.fingerprint;
+        el.value = (fpState as { status: "ready"; fingerprint: string }).fingerprint;
         el.style.position = "fixed";
         el.style.opacity = "0";
         document.body.appendChild(el);
@@ -293,10 +433,25 @@ export function DevicesView() {
     );
   }
 
-  // --- Actions bar (top-right of ViewShell) ---
   const ownFingerprint =
     fpState.status === "ready" ? fpState.fingerprint : null;
 
+  // --- Build the synthetic "this device" row from fingerprint state ---
+  // Shown first in the list regardless of whether peers are loaded yet.
+  const thisDevicePeer: PairedDevice | null =
+    fpState.status === "ready"
+      ? {
+          fingerprint: fpState.fingerprint,
+          // Daemon doesn't expose this device's own name via get_own_fingerprint;
+          // fall back to "This Mac" display name (shown via badge in the row).
+          name: "This Mac",
+          added_at: 0, // own device — no "paired" date concept
+          address: null,
+          sync_key_b64: null,
+        }
+      : null;
+
+  // --- Actions bar ---
   const actions = (
     <div className="flex items-center gap-2">
       {globalMsg !== null && (
@@ -337,218 +492,135 @@ export function DevicesView() {
     </div>
   );
 
-  // --- Devices list body ---
-  let devicesBody: React.ReactNode;
-
-  if (loadState === "loading") {
-    devicesBody = <p className="text-[13px] text-ide-dim">Loading…</p>;
-  } else if (loadState === "offline") {
-    devicesBody = (
-      <div className="flex items-center gap-3">
-        <p className="text-[13px] text-ide-dim">Daemon not running.</p>
-        <RestartDaemonButton onRestarted={() => void loadPeers()} />
-      </div>
-    );
-  } else if (loadState === "degraded") {
-    devicesBody = (
-      <div className="rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2.5 text-[13px] text-ide-warning">
-        <p className="font-medium">Clipboard database unavailable</p>
-        <p className="mt-1 text-[12px] text-ide-dim">
-          The daemon is running but its encrypted database could not be opened
-          {loadDetail ? ` (${loadDetail})` : ""}. Device pairing is paused until
-          it recovers. Open History to reset the database.
-        </p>
-      </div>
-    );
-  } else if (loadState === "error") {
-    devicesBody = (
-      <div className="rounded-ide border border-ide-danger/40 bg-ide-panel px-3 py-2.5 text-[13px] text-ide-danger">
-        <p className="font-medium">Couldn't load devices</p>
-        {loadDetail && (
-          <p className="mt-1 break-words text-[12px] text-ide-dim">{loadDetail}</p>
-        )}
-      </div>
-    );
-  } else if (peers.length === 0) {
-    devicesBody = <p className="text-[13px] text-ide-dim">No paired devices.</p>;
-  } else {
-    devicesBody = (
-      <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">
-        {peers.map((peer) => {
-          const rs = rowState[peer.fingerprint];
-          const isPending = rs?.pending ?? false;
-          const revokedAt = rs?.revokedAt ?? null;
-          const rowError = rs?.error ?? null;
-          // Label this device if its fingerprint matches our own.
-          const isThisDevice =
-            ownFingerprint !== null && peer.fingerprint === ownFingerprint;
-
-          // Extract host from "host:port" address if present.
-          const peerHost = peer.address
-            ? peer.address.replace(/:\d+$/, "")
-            : null;
-
-          return (
-            <div
-              key={peer.fingerprint}
-              className="flex items-start justify-between gap-4 px-3 py-2.5 hover:bg-ide-hover"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <p className="truncate text-[13px] font-medium text-ide-text">
-                    {/* Fix #8: friendly label — use peer.name; show short fingerprint prefix if blank */}
-                    {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
-                  </p>
-                  {isThisDevice && (
-                    <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium bg-ide-accent/15 text-ide-accent">
-                      This Mac
-                    </span>
-                  )}
-                </div>
-
-                {/* Fix #8: truncated fingerprint so the row stays compact */}
-                <p
-                  className="font-mono text-[11px] text-ide-dim"
-                  title={peer.fingerprint}
-                >
-                  {peer.fingerprint.length > 32
-                    ? `${peer.fingerprint.slice(0, 16)}…${peer.fingerprint.slice(-8)}`
-                    : peer.fingerprint}
-                </p>
-
-                {/* Rich device metadata — only shown when data is available */}
-                <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
-                  {peerHost && (
-                    <span className="text-[11px] text-ide-faint">
-                      <span className="text-ide-dim">IP</span>{" "}
-                      <span className="font-mono">{peerHost}</span>
-                    </span>
-                  )}
-                  {peer.added_at != null && peer.added_at > 0 && (
-                    <span className="text-[11px] text-ide-faint">
-                      <span className="text-ide-dim">Paired</span>{" "}
-                      {formatEpochSecs(peer.added_at)}
-                    </span>
-                  )}
-                </div>
-
-                {revokedAt !== null && (
-                  <p className="text-[11px] text-ide-accent">
-                    Revoked · {formatWallTime(revokedAt)}
-                  </p>
-                )}
-                {rowError !== null && (
-                  <p className="text-[11px] text-ide-danger">{rowError}</p>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                <button
-                  onClick={() => void handleUnpair(peer.fingerprint)}
-                  disabled={isPending}
-                  className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {isPending ? "…" : "Unpair"}
-                </button>
-                <button
-                  onClick={() => void handleRevoke(peer.fingerprint)}
-                  disabled={isPending}
-                  className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {isPending ? "…" : "Revoke"}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+  // --- Offline state ---
+  if (loadState === "offline") {
+    return (
+      <ViewShell title="Devices" actions={actions}>
+        <div className="flex items-center gap-3">
+          <p className="text-[13px] text-ide-dim">Daemon not running.</p>
+          <RestartDaemonButton onRestarted={() => void loadPeers()} />
+        </div>
+      </ViewShell>
     );
   }
 
+  // --- Already-paired indicator for QR panel ---
+  // If the user shows a QR code but they already have paired devices, surface a
+  // note. The daemon will reject a duplicate-fingerprint scan with an error, but
+  // surfacing this proactively avoids confusion on the displaying side.
+  const alreadyPairedCount = peers.length;
+
   return (
     <ViewShell title="Devices" actions={actions}>
-      {/* ── Paired devices ─────────────────────────────────────── */}
-      {devicesBody}
+      {/* ── Devices section header ──────────────────────────────── */}
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ide-faint">
+        Devices
+      </p>
+
+      {/* ── Single unified device list (this Mac first, then peers) ── */}
+      <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">
+        {/* This device — always first */}
+        {fpState.status === "loading" && (
+          <div className="px-3 py-2.5">
+            <p className="text-[13px] text-ide-faint animate-pulse">Loading…</p>
+          </div>
+        )}
+        {fpState.status === "offline" && (
+          <div className="px-3 py-2.5">
+            <p className="text-[13px] text-ide-danger">Daemon not running.</p>
+          </div>
+        )}
+        {thisDevicePeer !== null && (
+          <DeviceRow
+            peer={thisDevicePeer}
+            isThisDevice={true}
+            rowSt={undefined}
+            onUnpair={() => undefined}
+            onRevoke={() => undefined}
+            ownFingerprint={ownFingerprint}
+            fpCopied={copied}
+            onCopyFingerprint={handleCopy}
+          />
+        )}
+
+        {/* Paired peers */}
+        {loadState === "loading" && (
+          <div className="px-3 py-2.5">
+            <p className="text-[13px] text-ide-faint animate-pulse">Loading peers…</p>
+          </div>
+        )}
+        {loadState === "ready" && peers.length === 0 && (
+          <div className="px-3 py-2.5">
+            <p className="text-[13px] text-ide-dim">No paired devices yet.</p>
+          </div>
+        )}
+        {loadState === "ready" &&
+          peers
+            // Don't render this device's own fingerprint a second time if it
+            // somehow appears in the peers list (defensive guard).
+            .filter((p) => ownFingerprint === null || p.fingerprint !== ownFingerprint)
+            .map((peer) => (
+              <DeviceRow
+                key={peer.fingerprint}
+                peer={peer}
+                isThisDevice={false}
+                rowSt={rowState[peer.fingerprint]}
+                onUnpair={(fp) => void handleUnpair(fp)}
+                onRevoke={(fp) => void handleRevoke(fp)}
+                ownFingerprint={ownFingerprint}
+                fpCopied={false}
+                onCopyFingerprint={() => undefined}
+              />
+            ))}
+      </div>
 
       {/* ── Divider ────────────────────────────────────────────── */}
       <div className="my-5 border-t border-ide-divider" />
 
-      {/* ── This device's fingerprint (info-only, no pairing form) ── */}
-      <p className="mb-3 text-[11px] font-medium uppercase tracking-wider text-ide-faint">
-        This device
+      {/* ── Pair via QR — full width, compact code ───────────────── */}
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ide-faint">
+        Pair a new device
       </p>
 
-      <div className="mx-auto max-w-md">
-        <section className="rounded-ide border border-ide-border bg-ide-panel p-4 space-y-2">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-ide-faint">
-            Fingerprint
-          </p>
-          <div className="flex items-center gap-2">
-            {fpState.status === "loading" && (
-              <span className="font-mono text-[13px] text-ide-faint animate-pulse">
-                Loading…
-              </span>
-            )}
-            {fpState.status === "offline" && (
-              <>
-                <span className="text-[13px] text-ide-danger">Daemon not running.</span>
-                <RestartDaemonButton
-                  onRestarted={() => {
-                    setFpReloadKey((k) => k + 1);
-                    void loadPeers();
-                  }}
-                />
-              </>
-            )}
-            {fpState.status === "degraded" && (
-              <span className="text-[13px] text-ide-warning">
-                Unavailable — database degraded
-                {fpState.reason ? ` (${fpState.reason})` : ""}.
-              </span>
-            )}
-            {fpState.status === "ready" && (
-              <>
-                <span className="select-all font-mono text-[13px] text-ide-text break-all">
-                  {fpState.fingerprint}
-                </span>
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="shrink-0 rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-hover hover:text-ide-text transition-colors"
-                >
-                  {copied ? "Copied" : "Copy"}
-                </button>
-              </>
-            )}
+      <section className="rounded-ide border border-ide-border bg-ide-panel p-4 space-y-3">
+        {/* Already-paired warning: shown when QR is visible and peers exist.
+            A device scanning this QR that is already paired will be rejected by
+            the daemon ("peer already paired") — surface the context proactively. */}
+        {qrState.status === "ready" && alreadyPairedCount > 0 && (
+          <div className="flex items-start gap-2 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2">
+            <span className="text-[11px] text-ide-warning">
+              {alreadyPairedCount === 1
+                ? "1 device is already paired. Scanning this code from an already-paired device will have no effect."
+                : `${alreadyPairedCount} devices are already paired. Scanning from an already-paired device will have no effect.`}
+            </span>
           </div>
-          <p className="text-[11px] text-ide-faint">
-            Share this fingerprint with another device to identify this Mac.
+        )}
+
+        {qrState.status === "idle" && (
+          <p className="text-[12px] text-ide-dim">
+            Generate a single-use code, then scan it from the CopyPaste app on
+            another device to pair automatically — no typing a password.
           </p>
-        </section>
+        )}
 
-        {/* ── Pair via QR ──────────────────────────────────────── */}
-        <section className="mt-4 rounded-ide border border-ide-border bg-ide-panel p-4 space-y-3">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-ide-faint">
-            Pair via QR
-          </p>
+        {qrState.status === "loading" && (
+          <p className="text-[12px] text-ide-dim animate-pulse">Generating…</p>
+        )}
 
-          {qrState.status === "loading" && (
-            <p className="text-[12px] text-ide-dim animate-pulse">Generating…</p>
-          )}
-
-          {qrState.status === "ready" && (
-            <div className="flex flex-col items-center gap-3">
-              {/* dangerouslySetInnerHTML is acceptable here. The SVG is
-                  produced entirely by our own Tauri backend (ipc.rs::render_svg
-                  via the `qrcode` crate) from a pairing payload — it never
-                  contains remote, daemon-supplied, or user-entered markup, so
-                  there is no XSS surface. Rendering as inline SVG (rather than a
-                  data-URI <img>) keeps the QR crisp at any DPI. */}
-              <div
-                className="rounded-ide bg-white p-3"
-                // eslint-disable-next-line react/no-danger
-                dangerouslySetInnerHTML={{ __html: qrState.qr.svg }}
-              />
-              <p className="select-all break-all text-center font-mono text-[10px] text-ide-faint">
+        {qrState.status === "ready" && (
+          <div className="flex items-start gap-5">
+            {/* QR code — constrained to ~190 px so it stays scannable but doesn't
+                dominate the view. The SVG comes from our own Tauri backend (qrcode
+                crate) and never contains remote markup — dangerouslySetInnerHTML
+                is safe here. */}
+            <div
+              className="shrink-0 rounded-ide bg-white p-2"
+              style={{ width: 190, height: 190 }}
+              // eslint-disable-next-line react/no-danger
+              dangerouslySetInnerHTML={{ __html: qrState.qr.svg }}
+            />
+            <div className="min-w-0 flex-1 space-y-2">
+              <p className="select-all break-all font-mono text-[10px] text-ide-faint">
                 {qrState.qr.payload}
               </p>
               {qrSecsLeft !== null && qrSecsLeft > 0 && (
@@ -564,26 +636,26 @@ export function DevicesView() {
                 </p>
               )}
             </div>
-          )}
+          </div>
+        )}
 
-          {qrState.status === "error" && (
-            <p className="text-[12px] text-ide-danger">{qrState.message}</p>
-          )}
+        {qrState.status === "error" && (
+          <p className="text-[12px] text-ide-danger">{qrState.message}</p>
+        )}
 
-          <button
-            type="button"
-            onClick={() => void generateQr()}
-            disabled={qrState.status === "loading"}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {qrState.status === "loading"
-              ? "Generating…"
-              : qrState.status === "ready"
-                ? "Regenerate code"
-                : "Generate code"}
-          </button>
-        </section>
-      </div>
+        <button
+          type="button"
+          onClick={() => void generateQr()}
+          disabled={qrState.status === "loading"}
+          className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {qrState.status === "loading"
+            ? "Generating…"
+            : qrState.status === "ready"
+              ? "Regenerate code"
+              : "Show pairing code"}
+        </button>
+      </section>
     </ViewShell>
   );
 }
