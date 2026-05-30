@@ -83,14 +83,16 @@ fun SettingsScreen(
     var previewDelay by remember { mutableStateOf(settings.previewDelay.toString()) }
 
     // ── Storage ──
+    // Display unit is MiB (1024*1024) to match the byte defaults in Settings.kt
+    // (which mirror copypaste-core defaults.rs, all powers-of-two).
     var maxTextSizeMb by remember {
-        mutableStateOf((settings.maxTextSizeBytes / 1_000_000L).toString())
+        mutableStateOf((settings.maxTextSizeBytes / (1024L * 1024L)).toString())
     }
     var maxImageSizeMb by remember {
-        mutableStateOf((settings.maxImageSizeBytes / 1_000_000L).toString())
+        mutableStateOf((settings.maxImageSizeBytes / (1024L * 1024L)).toString())
     }
     var storageQuotaMb by remember {
-        mutableStateOf((settings.storageQuotaBytes / 1_000_000L).toString())
+        mutableStateOf((settings.storageQuotaBytes / (1024L * 1024L)).toString())
     }
 
     // ── Sync ──
@@ -244,8 +246,8 @@ fun SettingsScreen(
                 value = maxTextSizeMb,
                 onValueChange = { maxTextSizeMb = it },
                 onCommit = {
-                    val mb = maxTextSizeMb.toLongOrNull()?.coerceIn(1L, 50L) ?: return@SettingsNumberField
-                    try { settings.maxTextSizeBytes = mb * 1_000_000L; maxTextSizeMb = mb.toString() }
+                    val mb = maxTextSizeMb.toLongOrNull()?.coerceIn(1L, 100L) ?: return@SettingsNumberField
+                    try { settings.maxTextSizeBytes = mb * 1024L * 1024L; maxTextSizeMb = mb.toString() }
                     catch (e: Exception) { settingsError = e.message }
                 },
             )
@@ -255,8 +257,8 @@ fun SettingsScreen(
                 value = maxImageSizeMb,
                 onValueChange = { maxImageSizeMb = it },
                 onCommit = {
-                    val mb = maxImageSizeMb.toLongOrNull()?.coerceIn(1L, 200L) ?: return@SettingsNumberField
-                    try { settings.maxImageSizeBytes = mb * 1_000_000L; maxImageSizeMb = mb.toString() }
+                    val mb = maxImageSizeMb.toLongOrNull()?.coerceIn(1L, 512L) ?: return@SettingsNumberField
+                    try { settings.maxImageSizeBytes = mb * 1024L * 1024L; maxImageSizeMb = mb.toString() }
                     catch (e: Exception) { settingsError = e.message }
                 },
             )
@@ -266,8 +268,10 @@ fun SettingsScreen(
                 value = storageQuotaMb,
                 onValueChange = { storageQuotaMb = it },
                 onCommit = {
-                    val mb = storageQuotaMb.toLongOrNull()?.coerceIn(50L, 10_000L) ?: return@SettingsNumberField
-                    try { settings.storageQuotaBytes = mb * 1_000_000L; storageQuotaMb = mb.toString() }
+                    // Upper bound 20 480 MiB (20 GiB) holds the 10 GiB default with headroom.
+                    // mb * 1024L * 1024L stays in Long range (~21.5e9 < Long.MAX).
+                    val mb = storageQuotaMb.toLongOrNull()?.coerceIn(50L, 20_480L) ?: return@SettingsNumberField
+                    try { settings.storageQuotaBytes = mb * 1024L * 1024L; storageQuotaMb = mb.toString() }
                     catch (e: Exception) { settingsError = e.message }
                 },
             )
