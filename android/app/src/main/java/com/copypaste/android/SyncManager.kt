@@ -309,7 +309,12 @@ class SyncManager(
         }
 
         val id = overrideId ?: UUID.randomUUID().toString()
-        val lamportTs = System.currentTimeMillis()
+        // Use a logical Lamport counter (not wall-millis) so LWW tiebreaks on
+        // the Rust/macOS daemon side compare causally-ordered integers, not huge
+        // wall-millis values that always win regardless of copy order.
+        // wall_time stays as wall-millis — it is the keyset cursor, not LWW.
+        val lamportTs = s.lamportClock.tick()
+        val wallTime = System.currentTimeMillis()
 
         var ok = client.push(
             bearerToken = bearer,
@@ -319,7 +324,7 @@ class SyncManager(
             plaintext = plaintext,
             contentType = contentType,
             lamportTs = lamportTs,
-            wallTime = lamportTs,
+            wallTime = wallTime,
             deviceId = deviceId,
         )
 
@@ -418,6 +423,14 @@ class SyncManager(
             sinceWallTime = sinceWallTime,
             sinceId = sinceId,
         )
+
+        // Advance the persistent logical clock past every remote lamport_ts so
+        // the next local tick() produces a value causally after all received items.
+        // This is the Lamport "observe" rule: local = max(local, incoming) + 1.
+        val clock = s.lamportClock
+        for (row in rows) {
+            clock.observe(row.lamportTs)
+        }
 
         SupabasePollBatch(rows = rows, syncKey = syncKeyBytes, client = client, bearer = bearer)
     }

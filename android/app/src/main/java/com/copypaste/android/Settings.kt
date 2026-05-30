@@ -567,6 +567,20 @@ class Settings(context: Context) {
         return keygen.generateKey()
     }
 
+    /**
+     * Process-wide logical Lamport clock, shared across all [Settings] instances.
+     *
+     * Backed by the same "copypaste" [SharedPreferences] so the counter
+     * survives process death. All clock operations are thread-safe (see
+     * [LamportClock]). Accessed via [Settings] so callers don't need to pass
+     * the prefs reference separately.
+     *
+     * Use [lamportClock.tick()] when creating a locally-captured item for push.
+     * Use [lamportClock.observe(incoming)] when ingesting a remote item.
+     */
+    val lamportClock: LamportClock
+        get() = getLamportClock(prefs)
+
     companion object {
         private const val TAG = "Settings"
 
@@ -585,6 +599,24 @@ class Settings(context: Context) {
 
         /** Guards the read-or-generate-UUID critical section in [deviceId]. */
         private val deviceIdLock = Any()
+
+        /**
+         * Process-wide [LamportClock] singleton. Constructed once (double-checked
+         * locking on [lamportClockLock]) and reused by all [Settings] instances.
+         * Using a shared instance ensures all code paths (FGS loop, WorkManager
+         * worker, push path) operate on the same monotonic counter.
+         */
+        @Volatile
+        private var cachedLamportClock: LamportClock? = null
+
+        private val lamportClockLock = Any()
+
+        private fun getLamportClock(prefs: SharedPreferences): LamportClock {
+            cachedLamportClock?.let { return it }
+            return synchronized(lamportClockLock) {
+                cachedLamportClock ?: LamportClock(prefs).also { cachedLamportClock = it }
+            }
+        }
 
         private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
         private const val KEK_ALIAS = "copypaste_master_kek_v1"
