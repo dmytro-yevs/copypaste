@@ -3577,6 +3577,27 @@ impl IpcServer {
                 }
             }
 
+            "get_app_icon" => {
+                let bundle_id = match req.params.get("bundle_id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => return Response::err(req.id, "missing param: bundle_id"),
+                };
+                // NSWorkspace / AppKit calls are blocking — offload to a
+                // dedicated blocking thread so we never stall the async runtime.
+                let join = tokio::task::spawn_blocking(move || {
+                    crate::app_icon::get_app_icon_base64(&bundle_id)
+                })
+                .await;
+                match join {
+                    Ok(png_b64) => Response::ok(req.id, serde_json::json!({ "png_b64": png_b64 })),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
+
             other => Response::err(req.id, format!("unknown method: {other}")),
         }
     }
