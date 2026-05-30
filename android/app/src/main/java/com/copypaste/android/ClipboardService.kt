@@ -376,6 +376,35 @@ class ClipboardService : Service() {
                 .apply()
         }
 
+        /**
+         * Reconcile the "captured today" counter after the user removes clips.
+         * Decrements by [count] (floored at 0) and re-issues the notification so
+         * the shown number reflects the store after a delete/clear. The counter
+         * is otherwise monotonic-on-capture, so without this a deletion left the
+         * notification reporting a stale, too-high total. Safe to call from any
+         * thread — SharedPreferences and NotificationManager are both
+         * thread-safe.
+         */
+        fun onItemsDeleted(context: Context, count: Int) {
+            if (count <= 0) return
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val today = todayBucket()
+            val storedBucket = prefs.getInt(KEY_DAY_BUCKET, -1)
+            // Only adjust when the stored bucket is today's — a delete of an
+            // older clip must not resurrect/zero a fresh day's bucket.
+            if (storedBucket != today) {
+                refreshNotification(context)
+                return
+            }
+            val current = prefs.getInt(KEY_TODAY_COUNT, 0)
+            val next = (current - count).coerceAtLeast(0)
+            prefs.edit()
+                .putInt(KEY_DAY_BUCKET, today)
+                .putInt(KEY_TODAY_COUNT, next)
+                .apply()
+            refreshNotification(context)
+        }
+
         private fun readTodayCount(context: Context): Int {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             val today = todayBucket()

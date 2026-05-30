@@ -24,6 +24,13 @@ import javax.crypto.spec.SecretKeySpec
  */
 class ClipboardRepository(context: Context) {
 
+    /**
+     * Application context retained so the delete path can keep the
+     * foreground-service notification counter honest (see [deleteItem]). Using
+     * the application context avoids leaking an Activity.
+     */
+    private val appContext: Context = context.applicationContext
+
     private val prefs: SharedPreferences =
         context.getSharedPreferences("copypaste_items", Context.MODE_PRIVATE)
 
@@ -112,7 +119,7 @@ class ClipboardRepository(context: Context) {
         }
 
     suspend fun deleteItem(id: String): Boolean = withContext(Dispatchers.IO) {
-        synchronized(idsWriteLock) {
+        val removed = synchronized(idsWriteLock) {
             val ids = storedIds().toMutableList()
             if (!ids.remove(id)) return@synchronized false
             prefs.edit()
@@ -121,6 +128,14 @@ class ClipboardRepository(context: Context) {
                 .apply()
             true
         }
+        // Keep the foreground-service notification's "captured today" count from
+        // drifting above reality after a deletion: decrement by one (floored at
+        // 0) and re-issue the notification so the shown number matches the store.
+        // Only fires when an item was actually removed.
+        if (removed) {
+            ClipboardService.onItemsDeleted(appContext, 1)
+        }
+        removed
     }
 
     /**
