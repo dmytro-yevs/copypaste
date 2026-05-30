@@ -10,6 +10,7 @@ import android.graphics.drawable.Drawable
 import android.util.Base64
 import android.util.Log
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Extracts and caches source-app icons for display alongside clipboard items.
@@ -19,9 +20,10 @@ import java.io.ByteArrayOutputStream
  *   val b64: String? = AppIconHelper.getAppIconBase64(context, "com.google.android.gm")
  *   // b64 is a base64-encoded PNG (32×32 dp), or null if the package is not installed.
  *
- * The result is cached in a plain HashMap so AppKit / PackageManager is only called
- * once per bundle ID per process lifetime.  `null` values are also cached so that
- * absent packages do not cause repeated PackageManager queries.
+ * The result is cached in a [ConcurrentHashMap] so AppKit / PackageManager is only
+ * called once per bundle ID per process lifetime.  `null` results are cached as the
+ * sentinel value [ABSENT] (empty string) because [ConcurrentHashMap] does not permit
+ * null values; [getAppIconBase64] translates the sentinel back to `null` on read.
  */
 object AppIconHelper {
 
@@ -31,27 +33,39 @@ object AppIconHelper {
     private const val ICON_SIZE_PX = 48
 
     /**
-     * In-memory cache.  Keys are package names; values are base64 PNG strings
-     * (or null meaning "already tried, package not installed / icon unavailable").
+     * Sentinel stored in [cache] to mean "already tried, package not installed /
+     * icon unavailable".  Translated back to `null` by [getAppIconBase64].
+     * An empty string is safe here because real base64-PNG output is never empty.
      */
-    private val cache = HashMap<String, String?>()
+    private const val ABSENT = ""
+
+    /**
+     * Thread-safe in-memory cache.  Keys are package names; values are base64 PNG
+     * strings or [ABSENT] meaning "already tried, not found".
+     *
+     * [ConcurrentHashMap] allows concurrent reads from [Dispatchers.Default] without
+     * explicit locking.  A small TOCTOU race on a cache miss (two threads both seeing
+     * a miss and both calling [extractIcon] for the same key) is harmless — both will
+     * store the same result and the extra PackageManager call is cheap.
+     */
+    private val cache = ConcurrentHashMap<String, String>()
 
     /**
      * Return a base64-encoded 48×48 PNG for [packageName], or `null` if the
      * package is not installed on this device.
      *
-     * Thread-safety: this method is synchronous and NOT thread-safe.  Call it
-     * from the main thread or from a dedicated icon-loading coroutine with
-     * appropriate synchronisation if needed.
+     * Thread-safe: may be called concurrently from any thread or coroutine
+     * dispatcher (e.g. [kotlinx.coroutines.Dispatchers.Default]).
      */
     fun getAppIconBase64(context: Context, packageName: String): String? {
         // Fast path: already cached (including negative results).
-        if (cache.containsKey(packageName)) {
-            return cache[packageName]
+        cache[packageName]?.let { cached ->
+            return if (cached == ABSENT) null else cached
         }
 
         val result = extractIcon(context, packageName)
-        cache[packageName] = result
+        // Store the result or the ABSENT sentinel (ConcurrentHashMap rejects null values).
+        cache[packageName] = result ?: ABSENT
         return result
     }
 
