@@ -11,13 +11,17 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.PixelFormat
 import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import android.view.SoundEffectConstants
+import android.view.View
+import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
@@ -82,6 +86,16 @@ class ClipboardService : Service() {
     private lateinit var clipboardManager: ClipboardManager
     private lateinit var syncManager: SyncManager
     private lateinit var fgsSyncLoop: FgsSyncLoop
+
+    /**
+     * The 1×1 px invisible overlay view that gives this process a WindowManager
+     * token, lifting the Android 10+ clipboard restriction so
+     * getPrimaryClip() returns non-null from background.
+     *
+     * Non-null only when the overlay has been successfully added.
+     * Guarded by [Settings.canDrawOverlays] before the add call.
+     */
+    private var captureOverlayView: View? = null
 
     // HIGH-7: refresh the notification whenever a UI-side write flips a flag
     // the service cares about (capture pause, sync toggle). Retained as a
@@ -175,7 +189,10 @@ class ClipboardService : Service() {
         }
 
         // Listener must be registered on the main thread (framework requirement).
+        // addCaptureOverlay is also called here: the overlay must exist before the
+        // first clipboard callback fires so that getPrimaryClip() sees the token.
         Handler(Looper.getMainLooper()).post {
+            addCaptureOverlay()
             monitorClipboard()
         }
 
@@ -212,6 +229,81 @@ class ClipboardService : Service() {
     }
 
     /**
+     * Add a 1×1 px invisible overlay window so this process holds a
+     * WindowManager token. On Android 10+ (API 29+) this token counts as
+     * "focused" and lifts the clipboard restriction that blocks
+     * getPrimaryClip() from background — the ClipCascade trick.
+     *
+     * Idempotent: does nothing if the overlay is already present.
+     * Guarded by Settings.canDrawOverlays — on devices without the
+     * SYSTEM_ALERT_WINDOW permission the call is a no-op and the existing
+     * AccessibilityService path continues to be the background capture mechanism.
+     *
+     * Must be called from the main thread (WindowManager.addView requirement).
+     * Only TYPE_APPLICATION_OVERLAY is legal for background services on API 26+.
+     *
+     * FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE: the overlay is completely
+     * invisible and input-transparent — it cannot steal focus or touches from
+     * the user. Its sole purpose is giving the process a window token.
+     */
+    private fun addCaptureOverlay() {
+        if (captureOverlayView != null) return  // already present — idempotent
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return  // canDrawOverlays needs API 23
+        if (!Settings.canDrawOverlays(this)) {
+            Log.d(TAG, "addCaptureOverlay: SYSTEM_ALERT_WINDOW not granted — skipping overlay (a11y path remains active)")
+            return
+        }
+
+        val wm = getSystemService(WINDOW_SERVICE) as? WindowManager ?: run {
+            Log.w(TAG, "addCaptureOverlay: WindowManager unavailable")
+            return
+        }
+
+        val params = WindowManager.LayoutParams(
+            /* width  */ 1,
+            /* height */ 1,
+            /* type   */ WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            /* flags  */ WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            /* format */ PixelFormat.TRANSLUCENT
+        ).apply {
+            alpha = 0f   // fully transparent — invisible to the user
+        }
+
+        val view = View(this)
+        try {
+            wm.addView(view, params)
+            captureOverlayView = view
+            Log.i(TAG, "addCaptureOverlay: invisible overlay added — background clipboard reads enabled")
+        } catch (e: Exception) {
+            // addView can throw if the permission was revoked between the
+            // canDrawOverlays check and the addView call, or on some OEM ROMs
+            // that return false from canDrawOverlays at add-time. Non-fatal —
+            // fall back to the AccessibilityService capture path.
+            Log.w(TAG, "addCaptureOverlay: addView failed (${e.javaClass.simpleName}: ${e.message}) — falling back to a11y path")
+        }
+    }
+
+    /**
+     * Remove the capture overlay if it was added. Idempotent.
+     * Safe to call from onDestroy even if addCaptureOverlay was never called or failed.
+     */
+    private fun removeCaptureOverlay() {
+        val view = captureOverlayView ?: return
+        captureOverlayView = null
+        val wm = getSystemService(WINDOW_SERVICE) as? WindowManager ?: return
+        try {
+            wm.removeView(view)
+            Log.i(TAG, "removeCaptureOverlay: overlay removed")
+        } catch (e: Exception) {
+            // removeView can throw if the view was already detached (e.g. the
+            // WindowManager died or the permission was revoked). Non-fatal.
+            Log.w(TAG, "removeCaptureOverlay: removeView failed (${e.javaClass.simpleName}: ${e.message})")
+        }
+    }
+
+    /**
      * Encrypt [text] and persist via [ClipboardRepository].
      * Falls back to local AES when the UniFFI .so is unavailable.
      * Skips storage for content flagged as sensitive.
@@ -226,6 +318,7 @@ class ClipboardService : Service() {
         fgsSyncLoop.stop()
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         settings.stopObserving(prefsListener)
+        removeCaptureOverlay()
         scope.cancel()
         super.onDestroy()
     }
