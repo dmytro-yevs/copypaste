@@ -1,4 +1,5 @@
 import { useUI, type ViewId } from "../store";
+import { SyncStatusChip } from "./SyncStatusChip";
 
 // ---------------------------------------------------------------------------
 // Lucide/Feather-style line icons — 1.5px stroke, currentColor, 16×16 viewport
@@ -156,7 +157,11 @@ export function Sidebar() {
           );
         })}
       </nav>
-      <div className="mt-auto px-3 py-2 text-[11px] text-ide-faint">CopyPaste</div>
+      {/* Footer: app name + sync status chip */}
+      <div className="mt-auto flex items-center justify-between px-3 py-2">
+        <span className="text-[11px] text-ide-faint">CopyPaste</span>
+        <SyncStatusChip />
+      </div>
     </aside>
   );
 }
