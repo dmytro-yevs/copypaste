@@ -98,6 +98,29 @@ export interface SyncStatus {
 export interface PairedDevice {
   fingerprint: string;
   name: string;
+  /** Unix epoch seconds when this device was paired (0 if unknown). */
+  added_at?: number;
+  /** Peer's P2P sync-listener address as "host:port", or null if not yet learned. */
+  address?: string | null;
+}
+
+/**
+ * Rich identity for THIS device, returned by `get_own_device_info`.
+ * All fields except `app_version` are optional — gracefully handle absent ones.
+ */
+export interface OwnDeviceInfo {
+  /** mTLS certificate fingerprint (same as `get_own_fingerprint`). Null when P2P is disabled. */
+  fingerprint: string | null;
+  /** User-visible device name (e.g. "Dmytro's MacBook Air"). */
+  device_name: string | null;
+  /** Friendly hardware model (e.g. "MacBook Air", "Mac mini"). */
+  device_model: string | null;
+  /** OS name + version (e.g. "macOS 15.5"). */
+  os_version: string | null;
+  /** Daemon / app version (always present). */
+  app_version: string;
+  /** Best LAN-routable IPv4 address; absent when no real LAN interface. */
+  local_ip: string | null;
 }
 
 /** Result of `cloud_test_connection` — an end-to-end Supabase probe. */
@@ -144,6 +167,8 @@ export const api = {
   getItemImage: (id: string) => ipcCall<{ data_uri: string }>("get_item_image", { id }),
 
   getOwnFingerprint: () => ipcCall<{ fingerprint: string }>("get_own_fingerprint"),
+  /** Rich identity for this device: name, model, OS, version, LAN IP, fingerprint. */
+  getOwnDeviceInfo: () => ipcCall<OwnDeviceInfo>("get_own_device_info"),
   /**
    * Ask the daemon for a fresh QR pairing payload. The returned `qr` string is
    * the `copypaste-core` pairing payload (`CPPAIR1.…`) another device scans to
@@ -166,6 +191,16 @@ export const api = {
 export function formatWallTime(ms: number): string {
   if (ms <= 0) return "—";
   return new Date(ms).toLocaleString();
+}
+
+/**
+ * Format a Unix timestamp in seconds (as stored in `PairedDevice.added_at`
+ * and the `added_at` field in peers.json) for human-readable display.
+ * Returns "—" for zero / negative values.
+ */
+export function formatEpochSecs(secs: number): string {
+  if (secs <= 0) return "—";
+  return new Date(secs * 1000).toLocaleString();
 }
 
 // ---------------------------------------------------------------------------
