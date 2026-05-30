@@ -297,6 +297,7 @@ class ClipboardRepository(context: Context) {
         sourceId: String? = null,
         overrideId: String? = null,
         contentType: String = "text/plain",
+        lamportTs: Long = 0L,
     ): String = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext ""
 
@@ -357,7 +358,7 @@ class ClipboardRepository(context: Context) {
             localAesEncrypt(textBytes, key)
         }
 
-        val encoded = encodeItem(blob, textBytes.size, contentType = contentType)
+        val encoded = encodeItem(blob, textBytes.size, contentType = contentType, lamportTs = lamportTs)
         synchronized(idsWriteLock) {
             val ids = storedIds().toMutableList().also { it.add(id) }
             prefs.edit()
@@ -716,6 +717,69 @@ class ClipboardRepository(context: Context) {
         val dedupLock = Any()
 
         /**
+         * "Expected next clip" guard for copy-from-history (HIGH-3 follow-up).
+         *
+         * When the user taps a row in [HistoryActivity] to copy it, the UI calls
+         * setPrimaryClip with that text. The capture listeners
+         * ([ClipboardService] / [ClipboardAccessibilityService]) then observe the
+         * SAME text as a fresh clipboard change and would re-capture it as a NEW
+         * row (outside the [DEDUP_WINDOW_MS] window when the original was copied
+         * long ago) — producing a duplicate row AND a redundant cloud re-push.
+         *
+         * [HistoryActivity] calls [expectClip] with the content-hash right BEFORE
+         * setPrimaryClip; [shouldSkipExpectedClip] consumes that expectation in
+         * the capture path and skips the re-capture exactly once. The expectation
+         * is single-shot ([expectedClipHash] is cleared on the first match) and
+         * also expires after [EXPECTED_CLIP_WINDOW_MS] so a stale expectation
+         * never silently drops a genuinely new copy of the same text.
+         *
+         * Process-wide ([companion object]) for the same reason as the dedup
+         * state: the UI activity sets it but the capture listeners (separate
+         * [ClipboardRepository] instances in the same process) consume it.
+         */
+        @Volatile var expectedClipHash: Int = 0
+        @Volatile var expectedClipHasValue: Boolean = false
+        @Volatile var expectedClipAtMs: Long = 0L
+        val expectedClipLock = Any()
+
+        private const val EXPECTED_CLIP_WINDOW_MS = 5_000L
+
+        /**
+         * Record that the next observed clipboard change carrying text whose
+         * hash equals [content].hashCode() is an internal copy-from-history echo
+         * and must NOT be re-captured. Call immediately before setPrimaryClip.
+         */
+        fun expectClip(content: String) {
+            synchronized(expectedClipLock) {
+                expectedClipHash = content.hashCode()
+                expectedClipHasValue = true
+                expectedClipAtMs = System.currentTimeMillis()
+            }
+        }
+
+        /**
+         * Returns true (and consumes the expectation) when [content] matches a
+         * pending [expectClip] within [EXPECTED_CLIP_WINDOW_MS]. Single-shot: the
+         * expectation is cleared on the first match (or once expired) so only the
+         * immediate echo is suppressed, never a later genuine re-copy.
+         */
+        fun shouldSkipExpectedClip(content: String): Boolean {
+            synchronized(expectedClipLock) {
+                if (!expectedClipHasValue) return false
+                val now = System.currentTimeMillis()
+                if (now - expectedClipAtMs > EXPECTED_CLIP_WINDOW_MS) {
+                    expectedClipHasValue = false
+                    return false
+                }
+                if (content.hashCode() == expectedClipHash) {
+                    expectedClipHasValue = false  // consume — single-shot
+                    return true
+                }
+                return false
+            }
+        }
+
+        /**
          * Zero the cross-listener dedup window. Call after [clearAll] so a re-copy
          * of the same text immediately after a clear is stored as a fresh row rather
          * than silently skipped as a recent duplicate.
@@ -724,6 +788,9 @@ class ClipboardRepository(context: Context) {
             synchronized(dedupLock) {
                 lastStoredHash = 0
                 lastStoredAtMs = 0L
+            }
+            synchronized(expectedClipLock) {
+                expectedClipHasValue = false
             }
         }
 

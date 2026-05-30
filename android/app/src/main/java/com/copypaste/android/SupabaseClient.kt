@@ -43,8 +43,14 @@ class SupabaseClient(
     companion object {
         private const val TAG = "SupabaseClient"
 
-        /** Maximum rows to fetch in a single poll (matches daemon's `limit=20`). */
-        private const val POLL_LIMIT = 20
+        /**
+         * Maximum rows to fetch in a single poll (matches daemon's `limit=20`).
+         *
+         * Public so callers can drain a backlog: a returned batch whose size
+         * equals POLL_LIMIT means the server very likely has more rows waiting,
+         * so the caller re-polls immediately instead of waiting the idle delay.
+         */
+        const val POLL_LIMIT = 20
 
         /** Connect / read timeout for every HTTP call, ms. */
         private const val TIMEOUT_MS = 15_000

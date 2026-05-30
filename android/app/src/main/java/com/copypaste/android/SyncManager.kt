@@ -275,6 +275,7 @@ class SyncManager(
         contentType: String = "text",
         overrideId: String? = null,
         deviceId: String = this.deviceId,
+        lamportTs: Long? = null,
     ): String? = withContext(Dispatchers.IO) {
         val s = settings ?: run {
             Log.w(TAG, "pushToSupabase: no Settings instance provided")
@@ -313,7 +314,14 @@ class SyncManager(
         // the Rust/macOS daemon side compare causally-ordered integers, not huge
         // wall-millis values that always win regardless of copy order.
         // wall_time stays as wall-millis — it is the keyset cursor, not LWW.
-        val lamportTs = s.lamportClock.tick()
+        //
+        // When the caller supplies [lamportTs] (the local-capture path generates
+        // ONE tick at capture time and threads the SAME value into both the
+        // stored local row and this push), reuse it so the stored row and the
+        // pushed row carry an identical lamport_ts and LWW reconciliation does
+        // not disagree on a later poll. Only mint a fresh tick when no value is
+        // supplied (e.g. a standalone push with no local row).
+        val effectiveLamportTs = lamportTs ?: s.lamportClock.tick()
         val wallTime = System.currentTimeMillis()
 
         var ok = client.push(
@@ -323,7 +331,7 @@ class SyncManager(
             itemId = id, // item_id == id (same as daemon convention)
             plaintext = plaintext,
             contentType = contentType,
-            lamportTs = lamportTs,
+            lamportTs = effectiveLamportTs,
             wallTime = wallTime,
             deviceId = deviceId,
         )
@@ -349,7 +357,7 @@ class SyncManager(
                 itemId = id,
                 plaintext = plaintext,
                 contentType = contentType,
-                lamportTs = lamportTs,
+                lamportTs = effectiveLamportTs,
                 wallTime = wallTime,
                 deviceId = deviceId,
             )

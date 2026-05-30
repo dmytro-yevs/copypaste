@@ -797,6 +797,11 @@ private fun HistoryList(
                                 val key = settings.encryptionKey
                                 val fullText = repository.loadFullPlaintext(item.id, key)
                                     ?: item.snippet
+                                // Register the expected content-hash BEFORE setting
+                                // the clip so the capture listeners recognise this
+                                // as an internal copy-from-history echo and do not
+                                // re-capture it as a duplicate row + cloud re-push.
+                                ClipboardRepository.expectClip(fullText)
                                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
                             }

@@ -125,8 +125,17 @@ class Settings(context: Context) {
      * DO NOT log or include in crash reports.
      */
     var cloudSyncPassphrase: String
-        get() = prefs.getString("cloud_sync_passphrase", "") ?: ""
-        set(v) = prefs.edit().putString("cloud_sync_passphrase", v).apply()
+        get() = readWrappedSecret(
+            KEY_PASSPHRASE_WRAPPED_B64,
+            KEY_PASSPHRASE_IV_B64,
+            KEY_LEGACY_PASSPHRASE_PLAIN,
+        )
+        set(v) = writeWrappedSecret(
+            KEY_PASSPHRASE_WRAPPED_B64,
+            KEY_PASSPHRASE_IV_B64,
+            KEY_LEGACY_PASSPHRASE_PLAIN,
+            v,
+        )
 
     /**
      * Which sync backend to use when [syncEnabled] is true.
@@ -165,8 +174,17 @@ class Settings(context: Context) {
      * DO NOT log or include in crash reports.
      */
     var supabasePassword: String
-        get() = prefs.getString("supabase_password", "") ?: ""
-        set(v) = prefs.edit().putString("supabase_password", v).apply()
+        get() = readWrappedSecret(
+            KEY_SUPABASE_PW_WRAPPED_B64,
+            KEY_SUPABASE_PW_IV_B64,
+            KEY_LEGACY_SUPABASE_PW_PLAIN,
+        )
+        set(v) = writeWrappedSecret(
+            KEY_SUPABASE_PW_WRAPPED_B64,
+            KEY_SUPABASE_PW_IV_B64,
+            KEY_LEGACY_SUPABASE_PW_PLAIN,
+            v,
+        )
 
     /** Returns true when Supabase sync is fully configured: URL, anon key, and passphrase. */
     val isSupabaseConfigured: Boolean
@@ -545,6 +563,77 @@ class Settings(context: Context) {
         return cipher.doFinal(wrapped)
     }
 
+    /**
+     * Read a KEK-wrapped UTF-8 string secret stored under [wrappedKey]/[ivKey],
+     * migrating any pre-existing plaintext value held under [legacyPlainKey].
+     *
+     * Resolution order:
+     *  1. If a wrapped blob exists, unwrap and return it (empty string when the
+     *     KEK can no longer decrypt it — same best-effort policy as
+     *     [pairedPeerSessionKey]: a lost KEK means the secret is simply re-prompted).
+     *  2. Otherwise, if a legacy plaintext value exists, wrap it now (so the
+     *     plaintext is scrubbed on first read post-upgrade) and return it.
+     *  3. Otherwise return "" (unset).
+     */
+    private fun readWrappedSecret(
+        wrappedKey: String,
+        ivKey: String,
+        legacyPlainKey: String,
+    ): String {
+        val wrappedB64 = prefs.getString(wrappedKey, null)
+        val ivB64 = prefs.getString(ivKey, null)
+        if (wrappedB64 != null && ivB64 != null) {
+            return runCatching {
+                String(
+                    unwrapKey(
+                        wrapped = Base64.decode(wrappedB64, Base64.DEFAULT),
+                        iv = Base64.decode(ivB64, Base64.DEFAULT),
+                    ),
+                    Charsets.UTF_8,
+                )
+            }.getOrElse { e ->
+                Log.w(TAG, "Failed to unwrap secret '$wrappedKey' (${e.javaClass.simpleName})", e)
+                ""
+            }
+        }
+
+        // Migration: a previous build persisted this secret in plain prefs.
+        val legacyPlain = prefs.getString(legacyPlainKey, null)
+        if (legacyPlain != null && legacyPlain.isNotEmpty()) {
+            Log.i(TAG, "Migrating plain secret '$legacyPlainKey' into AndroidKeyStore wrap")
+            writeWrappedSecret(wrappedKey, ivKey, legacyPlainKey, legacyPlain)
+            return legacyPlain
+        }
+        return ""
+    }
+
+    /**
+     * Wrap [value] with the KEK and persist under [wrappedKey]/[ivKey], scrubbing
+     * any legacy plaintext under [legacyPlainKey]. An empty [value] clears all
+     * three keys (logical "unset").
+     */
+    private fun writeWrappedSecret(
+        wrappedKey: String,
+        ivKey: String,
+        legacyPlainKey: String,
+        value: String,
+    ) {
+        if (value.isEmpty()) {
+            prefs.edit()
+                .remove(wrappedKey)
+                .remove(ivKey)
+                .remove(legacyPlainKey)
+                .apply()
+            return
+        }
+        val (wrapped, iv) = wrapKey(value.toByteArray(Charsets.UTF_8))
+        prefs.edit()
+            .putString(wrappedKey, Base64.encodeToString(wrapped, Base64.DEFAULT))
+            .putString(ivKey, Base64.encodeToString(iv, Base64.DEFAULT))
+            .remove(legacyPlainKey)
+            .apply()
+    }
+
     private fun getOrCreateKek(): SecretKey {
         val keystore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
         (keystore.getKey(KEK_ALIAS, null) as? SecretKey)?.let { return it }
@@ -627,5 +716,15 @@ class Settings(context: Context) {
         private const val KEY_LEGACY_PLAIN_KEY_B64 = "encryption_key_b64"
         private const val KEY_SESSION_WRAPPED_B64 = "paired_peer_session_key_wrapped_b64"
         private const val KEY_SESSION_IV_B64 = "paired_peer_session_key_iv_b64"
+
+        // ── KEK-wrapped cloud secrets (passphrase + Supabase password) ──────────
+        // Plaintext pref keys retained for read-time migration only.
+        private const val KEY_LEGACY_PASSPHRASE_PLAIN = "cloud_sync_passphrase"
+        private const val KEY_PASSPHRASE_WRAPPED_B64 = "cloud_sync_passphrase_wrapped_b64"
+        private const val KEY_PASSPHRASE_IV_B64 = "cloud_sync_passphrase_iv_b64"
+
+        private const val KEY_LEGACY_SUPABASE_PW_PLAIN = "supabase_password"
+        private const val KEY_SUPABASE_PW_WRAPPED_B64 = "supabase_password_wrapped_b64"
+        private const val KEY_SUPABASE_PW_IV_B64 = "supabase_password_iv_b64"
     }
 }

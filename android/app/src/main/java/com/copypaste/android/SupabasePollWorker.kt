@@ -57,53 +57,78 @@ class SupabasePollWorker(
         val syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
 
         return try {
-            val batch = syncManager.pollFromSupabase(
-                sinceWallTime = settings.lastSupabasePollWallTime,
-                sinceId = settings.lastSupabasePollId,
-            ) ?: return Result.success()
+            // Drain loop: a full batch (size == POLL_LIMIT) almost certainly
+            // means more rows are waiting, so re-poll IMMEDIATELY instead of
+            // waiting for the next 15-minute WorkManager cadence — otherwise a
+            // backlog would drain at only POLL_LIMIT rows per run. A SHORT batch
+            // (< POLL_LIMIT) means we have caught up, so we stop and succeed.
+            //
+            // Each iteration runs the original single-cycle logic unchanged (LWW,
+            // compound (wall_time, id) cursor, self-echo skip); the cursor is
+            // persisted after every cycle so a re-poll continues from the last row.
+            var totalFetched = 0
+            var totalNewCount = 0
+            while (true) {
+                val batch = syncManager.pollFromSupabase(
+                    sinceWallTime = settings.lastSupabasePollWallTime,
+                    sinceId = settings.lastSupabasePollId,
+                ) ?: break
 
-            var newCount = 0
-            var cursorWallTime = settings.lastSupabasePollWallTime
-            var cursorId = settings.lastSupabasePollId
+                var newCount = 0
+                val startWallTime = settings.lastSupabasePollWallTime
+                val startId = settings.lastSupabasePollId
+                var cursorWallTime = startWallTime
+                var cursorId = startId
 
-            for (row in batch.rows) {
-                // Task 6: advance cursor for EVERY row (including self-echo and blank)
-                // BEFORE any continue so a batch of own-device rows still advances.
-                if (row.wallTime > cursorWallTime ||
-                    (row.wallTime == cursorWallTime && row.id > cursorId)) {
-                    cursorWallTime = row.wallTime
-                    cursorId = row.id
+                for (row in batch.rows) {
+                    // Task 6: advance cursor for EVERY row (including self-echo and blank)
+                    // BEFORE any continue so a batch of own-device rows still advances.
+                    if (row.wallTime > cursorWallTime ||
+                        (row.wallTime == cursorWallTime && row.id > cursorId)) {
+                        cursorWallTime = row.wallTime
+                        cursorId = row.id
+                    }
+
+                    // Skip own-device rows (self-echo from our push).
+                    if (row.deviceId == settings.deviceId) continue
+
+                    // Decrypt the row; skip if decryption fails (wrong key / tampered).
+                    val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
+
+                    val text = item.plaintext.toString(Charsets.UTF_8)
+                    if (text.isBlank()) continue
+
+                    // Task 5: LWW replace — if item_id already exists locally, replace
+                    // only when the incoming lamport_ts is strictly newer.
+                    val stored = repository.storeItemWithLww(
+                        plaintext = text,
+                        key = settings.encryptionKey,
+                        itemId = item.itemId,
+                        incomingLamportTs = item.lamportTs,
+                    )
+                    if (stored) newCount++
                 }
 
-                // Skip own-device rows (self-echo from our push).
-                if (row.deviceId == settings.deviceId) continue
+                // Persist the advanced cursor after processing the full batch.
+                if (cursorWallTime > settings.lastSupabasePollWallTime ||
+                    (cursorWallTime == settings.lastSupabasePollWallTime &&
+                            cursorId > settings.lastSupabasePollId)) {
+                    settings.lastSupabasePollWallTime = cursorWallTime
+                    settings.lastSupabasePollId = cursorId
+                }
 
-                // Decrypt the row; skip if decryption fails (wrong key / tampered).
-                val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
+                totalFetched += batch.rows.size
+                totalNewCount += newCount
 
-                val text = item.plaintext.toString(Charsets.UTF_8)
-                if (text.isBlank()) continue
+                // Short batch → caught up. Stop draining.
+                if (batch.rows.size < SupabaseClient.POLL_LIMIT) break
 
-                // Task 5: LWW replace — if item_id already exists locally, replace
-                // only when the incoming lamport_ts is strictly newer.
-                val stored = repository.storeItemWithLww(
-                    plaintext = text,
-                    key = settings.encryptionKey,
-                    itemId = item.itemId,
-                    incomingLamportTs = item.lamportTs,
-                )
-                if (stored) newCount++
+                // Safety: if a full batch somehow failed to advance the cursor,
+                // break rather than spin forever re-fetching the same window.
+                if (cursorWallTime == startWallTime && cursorId == startId) break
             }
 
-            // Persist the advanced cursor after processing the full batch.
-            if (cursorWallTime > settings.lastSupabasePollWallTime ||
-                (cursorWallTime == settings.lastSupabasePollWallTime &&
-                        cursorId > settings.lastSupabasePollId)) {
-                settings.lastSupabasePollWallTime = cursorWallTime
-                settings.lastSupabasePollId = cursorId
-            }
-
-            Log.i(TAG, "Poll complete: ${batch.rows.size} fetched, $newCount stored")
+            Log.i(TAG, "Poll complete: $totalFetched fetched, $totalNewCount stored")
             Result.success()
         } catch (e: Exception) {
             Log.w(TAG, "Poll failed: ${e.message}")

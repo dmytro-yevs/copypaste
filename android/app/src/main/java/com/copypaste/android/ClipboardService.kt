@@ -393,6 +393,18 @@ class ClipboardService : Service() {
         ) {
             if (text.isBlank()) return
 
+            // Copy-from-history echo guard: when the user taps a row in
+            // HistoryActivity to copy it, the UI sets the primary clip to that
+            // text, which these listeners then observe as a "new" clipboard
+            // change. Outside the 2 s dedup window (the original was copied long
+            // ago) this would create a duplicate row AND re-push to the cloud.
+            // HistoryActivity registers the expected content-hash right before
+            // setPrimaryClip; consume it here and skip the re-capture once.
+            if (ClipboardRepository.shouldSkipExpectedClip(text)) {
+                Log.d(TAG, "Skipping copy-from-history echo (expected clip)")
+                return
+            }
+
             // Notification-driven pause: drop the change but keep listeners
             // registered so resuming is instant (no service restart).
             if (!settings.captureEnabled) {
@@ -420,10 +432,17 @@ class ClipboardService : Service() {
                 Log.w(TAG, "Native addClipboardItem failed (${e.message})")
             }
 
+            // Generate ONE lamport tick at capture time and thread the SAME value
+            // into both the stored local row AND the cloud push. Previously the
+            // stored row defaulted to lamport_ts=0 while the push minted a fresh
+            // tick, so the two disagreed and LWW reconciliation broke on a later
+            // poll (the synced-back row always looked "newer" than the local one).
+            val lamportTs = settings.lamportClock.tick()
+
             // Persist to the SharedPreferences repository — the single source the
             // UI reads. storeItem performs cross-listener dedup (HIGH-3) so a
             // single copy seen by multiple owners is stored (and counted) once.
-            val storedId = repository.storeItem(text, key)
+            val storedId = repository.storeItem(text, key, lamportTs = lamportTs)
             if (storedId.isNotEmpty()) {
                 Log.d(TAG, "Clipboard item stored successfully")
                 bumpTodayCounter(context)
@@ -431,7 +450,7 @@ class ClipboardService : Service() {
                 if (settings.notifyOnCopy) postCopyNotification(context)
                 if (settings.soundOnCopy) playCopySound(context)
                 if (settings.syncEnabled) {
-                    notifySyncManager(storedId, text, key, settings, syncManager)
+                    notifySyncManager(storedId, text, key, settings, syncManager, lamportTs)
                 }
             }
         }
@@ -521,6 +540,7 @@ class ClipboardService : Service() {
             key: ByteArray,
             settings: Settings,
             syncManager: SyncManager,
+            lamportTs: Long,
         ) {
             when (settings.syncBackend) {
                 SyncBackend.SUPABASE -> {
@@ -536,6 +556,7 @@ class ClipboardService : Service() {
                             contentType = "text",
                             overrideId = itemId,
                             deviceId = settings.deviceId,
+                            lamportTs = lamportTs,
                         )
                         if (id != null) {
                             Log.d(TAG, "Supabase push ok: $id")
@@ -832,7 +853,7 @@ class ClipboardService : Service() {
                 .setContentTitle(title)
                 .setContentText(content)
                 .setSmallIcon(android.R.drawable.ic_menu_edit)
-                .setColor(0xFF0066CC.toInt())
+                .setColor(0xFF3D8BFF.toInt())
                 .setOngoing(true)
                 .setShowWhen(false)
                 .setOnlyAlertOnce(true)

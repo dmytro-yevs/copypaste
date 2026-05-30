@@ -212,52 +212,77 @@ class FgsSyncLoop(
      * Returns the number of new/replaced items stored.
      */
     private suspend fun poll(): Int = withContext(Dispatchers.IO) {
-        val batch = syncManager.pollFromSupabase(
-            sinceWallTime = settings.lastSupabasePollWallTime,
-            sinceId = settings.lastSupabasePollId,
-        ) ?: return@withContext 0
+        // Drain loop: a full batch (size == POLL_LIMIT) almost certainly means
+        // the server has more rows waiting. Re-poll IMMEDIATELY in that case
+        // instead of returning and waiting the idle delay — otherwise a backlog
+        // of N rows would drain at only POLL_LIMIT rows per poll interval
+        // (~20/min). On a SHORT batch (< POLL_LIMIT) we have caught up, so we
+        // break and let the caller apply the normal idle delay.
+        //
+        // Each iteration runs the original single-cycle logic unchanged (LWW,
+        // compound (wall_time, id) cursor, self-echo skip). The cursor is
+        // persisted after every cycle, so a re-poll continues from where the
+        // previous cycle left off.
+        var totalNewCount = 0
+        while (isActive) {
+            val batch = syncManager.pollFromSupabase(
+                sinceWallTime = settings.lastSupabasePollWallTime,
+                sinceId = settings.lastSupabasePollId,
+            ) ?: break
 
-        var newCount = 0
-        var cursorWallTime = settings.lastSupabasePollWallTime
-        var cursorId = settings.lastSupabasePollId
+            var newCount = 0
+            val startWallTime = settings.lastSupabasePollWallTime
+            val startId = settings.lastSupabasePollId
+            var cursorWallTime = startWallTime
+            var cursorId = startId
 
-        for (row in batch.rows) {
-            // Task 6: advance cursor for EVERY row before any continue.
-            if (row.wallTime > cursorWallTime ||
-                (row.wallTime == cursorWallTime && row.id > cursorId)) {
-                cursorWallTime = row.wallTime
-                cursorId = row.id
+            for (row in batch.rows) {
+                // Task 6: advance cursor for EVERY row before any continue.
+                if (row.wallTime > cursorWallTime ||
+                    (row.wallTime == cursorWallTime && row.id > cursorId)) {
+                    cursorWallTime = row.wallTime
+                    cursorId = row.id
+                }
+
+                // Skip own-device rows (self-echo from our push).
+                if (row.deviceId == settings.deviceId) continue
+
+                // Decrypt; skip rows that fail (wrong key, tampered blob).
+                val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
+
+                val text = item.plaintext.toString(Charsets.UTF_8)
+                if (text.isBlank()) continue
+
+                // Task 5: LWW replace — replace only when incoming lamport_ts is
+                // strictly newer than the locally stored row for the same item_id.
+                val stored = repository.storeItemWithLww(
+                    plaintext = text,
+                    key = settings.encryptionKey,
+                    itemId = item.itemId,
+                    incomingLamportTs = item.lamportTs,
+                )
+                if (stored) newCount++
             }
 
-            // Skip own-device rows (self-echo from our push).
-            if (row.deviceId == settings.deviceId) continue
+            // Persist the advanced cursor after processing the full batch.
+            if (cursorWallTime > settings.lastSupabasePollWallTime ||
+                (cursorWallTime == settings.lastSupabasePollWallTime &&
+                        cursorId > settings.lastSupabasePollId)) {
+                settings.lastSupabasePollWallTime = cursorWallTime
+                settings.lastSupabasePollId = cursorId
+            }
 
-            // Decrypt; skip rows that fail (wrong key, tampered blob).
-            val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
+            totalNewCount += newCount
 
-            val text = item.plaintext.toString(Charsets.UTF_8)
-            if (text.isBlank()) continue
+            // Short batch → caught up. Stop draining and return.
+            if (batch.rows.size < SupabaseClient.POLL_LIMIT) break
 
-            // Task 5: LWW replace — replace only when incoming lamport_ts is
-            // strictly newer than the locally stored row for the same item_id.
-            val stored = repository.storeItemWithLww(
-                plaintext = text,
-                key = settings.encryptionKey,
-                itemId = item.itemId,
-                incomingLamportTs = item.lamportTs,
-            )
-            if (stored) newCount++
+            // Safety: if a full batch somehow failed to advance the cursor,
+            // break rather than spin forever re-fetching the same window.
+            if (cursorWallTime == startWallTime && cursorId == startId) break
         }
 
-        // Persist the advanced cursor after processing the full batch.
-        if (cursorWallTime > settings.lastSupabasePollWallTime ||
-            (cursorWallTime == settings.lastSupabasePollWallTime &&
-                    cursorId > settings.lastSupabasePollId)) {
-            settings.lastSupabasePollWallTime = cursorWallTime
-            settings.lastSupabasePollId = cursorId
-        }
-
-        newCount
+        totalNewCount
     }
 
     /**
