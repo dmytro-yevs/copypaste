@@ -109,8 +109,12 @@ impl RealtimeConfig {
         let anon_key = std::env::var("SUPABASE_ANON_KEY")
             .map_err(|_| RealtimeError::Config("SUPABASE_ANON_KEY env var not set".into()))?;
 
+        // Disabled iff the var is set to a truthy value. The old check
+        // (`v != "1"`) inverted this: `=true`/`=yes`/`=TRUE` all silently
+        // ENABLED realtime. Treat any of "1"/"true"/"yes" (trimmed,
+        // case-insensitive) as a request to disable; everything else enables.
         let enabled = std::env::var("SUPABASE_REALTIME_DISABLED")
-            .map(|v| v != "1")
+            .map(|v| !is_truthy(&v))
             .unwrap_or(true);
 
         let topic = std::env::var("SUPABASE_REALTIME_TOPIC")
@@ -145,6 +149,15 @@ impl RealtimeConfig {
             enabled,
         }
     }
+}
+
+/// Whether an env-var string represents a truthy/enabled flag value.
+///
+/// Accepts `1`, `true`, `yes` (trimmed, case-insensitive). Used to interpret
+/// `SUPABASE_REALTIME_DISABLED` so that e.g. `=TRUE` disables realtime instead
+/// of silently enabling it.
+fn is_truthy(value: &str) -> bool {
+    matches!(value.trim().to_lowercase().as_str(), "1" | "true" | "yes")
 }
 
 /// Convert a Supabase REST URL to the Realtime WebSocket URL.
@@ -454,10 +467,27 @@ async fn run_session(
             // Heartbeat payload ready to send.
             Some(payload) = hb_payload_rx.recv() => {
                 tracing::debug!("sending heartbeat");
-                if let Err(e) = sink.send(Message::Text(payload)).await {
-                    tracing::warn!(error = %e, "heartbeat send failed");
-                    let _ = hb_stop_tx.send(());
-                    return SessionResult::Disconnected;
+                // Bound the write: on a half-open socket `send` can stall
+                // indefinitely, silently starving heartbeats until the ~60s
+                // server timeout kills us. Treat a write that doesn't complete
+                // within one heartbeat interval as a disconnect and reconnect.
+                match tokio::time::timeout(
+                    heartbeat_interval,
+                    sink.send(Message::Text(payload)),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        tracing::warn!(error = %e, "heartbeat send failed");
+                        let _ = hb_stop_tx.send(());
+                        return SessionResult::Disconnected;
+                    }
+                    Err(_) => {
+                        tracing::warn!("heartbeat send timed out; treating as disconnect");
+                        let _ = hb_stop_tx.send(());
+                        return SessionResult::Disconnected;
+                    }
                 }
             }
 
@@ -621,6 +651,53 @@ mod tests {
             url,
             "wss://abc.supabase.co/realtime/v1/websocket?apikey=k&vsn=1.0.0"
         );
+    }
+
+    // ── Disable-flag parsing (truthy detection) ───────────────────────────────
+
+    #[test]
+    fn is_truthy_recognises_enabled_values() {
+        for v in [
+            "1", "true", "TRUE", "True", "yes", "YES", " true ", "\tyes\n",
+        ] {
+            assert!(is_truthy(v), "{v:?} should be truthy (disable realtime)");
+        }
+    }
+
+    #[test]
+    fn is_truthy_rejects_other_values() {
+        for v in ["0", "false", "no", "", "off", "2", "disabled", "enable"] {
+            assert!(!is_truthy(v), "{v:?} should NOT be truthy");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn disabled_flag_truthy_values_disable_realtime() {
+        std::env::set_var("SUPABASE_URL", "https://test.supabase.co");
+        std::env::set_var("SUPABASE_ANON_KEY", "k");
+        for v in ["1", "true", "TRUE", "yes"] {
+            std::env::set_var("SUPABASE_REALTIME_DISABLED", v);
+            let cfg = RealtimeConfig::from_env().expect("config builds");
+            assert!(
+                !cfg.enabled,
+                "SUPABASE_REALTIME_DISABLED={v} must DISABLE realtime"
+            );
+        }
+        // Unset / falsey → enabled.
+        std::env::remove_var("SUPABASE_REALTIME_DISABLED");
+        assert!(
+            RealtimeConfig::from_env().expect("config builds").enabled,
+            "unset disable flag should leave realtime enabled"
+        );
+        std::env::set_var("SUPABASE_REALTIME_DISABLED", "false");
+        assert!(
+            RealtimeConfig::from_env().expect("config builds").enabled,
+            "SUPABASE_REALTIME_DISABLED=false should leave realtime enabled"
+        );
+        std::env::remove_var("SUPABASE_REALTIME_DISABLED");
+        std::env::remove_var("SUPABASE_URL");
+        std::env::remove_var("SUPABASE_ANON_KEY");
     }
 
     // ── RealtimeConfig ────────────────────────────────────────────────────────
