@@ -34,7 +34,10 @@ pub fn init_patterns() -> Result<(), regex::Error> {
 /// category_index: 0=Credential, 1=Financial, 2=PersonalId, 3=Infrastructure
 pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[
     // ── Credentials ──────────────────────────────────────────────────────────
-    ("aws_access_key", r"(?:AKIA|ASIA)[0-9A-Z]{16}", 0, 0.99),
+    // Leading `\b` prevents matching AKIA/ASIA mid-token (e.g. "XAKIAIOSFODNN7EXAMPLE").
+    // No trailing `\b`: ASIA temporary keys may have trailing digits, and `E1` is
+    // two word-chars with no boundary between them.
+    ("aws_access_key", r"\b(?:AKIA|ASIA)[0-9A-Z]{16}", 0, 0.99),
     (
         "github_fine_grained",
         r"github_pat_[A-Za-z0-9]{22}_[A-Za-z0-9]{59}",
@@ -44,7 +47,10 @@ pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[
     ("github_classic_pat", r"ghp_[A-Za-z0-9]{36}", 0, 0.99),
     ("github_actions_token", r"ghs_[a-zA-Z0-9]{36}", 0, 0.99),
     ("openai_new", r"sk-proj-[A-Za-z0-9]{48}", 0, 0.99),
-    ("openai_legacy", r"sk-[A-Za-z0-9]{48}", 0, 0.95),
+    // `\b` boundaries prevent matching mid-token. No lookahead needed: `sk-proj-`
+    // keys contain a hyphen after "proj" which is not in [A-Za-z0-9], so this
+    // pattern structurally cannot match strings caught by `openai_new`.
+    ("openai_legacy", r"\bsk-[A-Za-z0-9]{48}\b", 0, 0.95),
     ("anthropic", r"sk-ant-api\d{2}-[A-Za-z0-9_-]{80,}", 0, 0.99),
     ("stripe_live", r"sk_live_[0-9A-Za-z]{24}", 0, 0.99),
     ("stripe_webhook", r"whsec_[a-zA-Z0-9]{32,64}", 0, 0.99),
@@ -76,7 +82,8 @@ pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[
         0,
         0.95,
     ),
-    ("hashicorp_vault", r"hvs\.[A-Za-z0-9]+", 0, 0.95),
+    // Require at least 32 chars after the dot to reduce FP on short `hvs.`-prefixed strings.
+    ("hashicorp_vault", r"hvs\.[A-Za-z0-9]{32,}", 0, 0.95),
     ("gcp_oauth", r"GOCSPX-[A-Za-z0-9_-]{28}", 0, 0.99),
     (
         "ssh_private_key",
@@ -148,7 +155,9 @@ pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[
         2,
         0.55,
     ),
-    ("passport", r"\b[A-Z]{1,2}[0-9]{6,9}\b", 2, 0.55),
+    // Raised min digits from 6 to 9 to cut FP on short uppercase+digit codes
+    // (order IDs, product codes, etc.). Still well below the auto-wipe floor.
+    ("passport", r"\b[A-Z]{1,2}[0-9]{9}\b", 2, 0.55),
     // ── Infrastructure ────────────────────────────────────────────────────────
     (
         "ip_with_port",
