@@ -409,7 +409,10 @@ fn contains_luhn_valid_card_run(text: &str) -> bool {
         // (e.g. after a semver bump changes syntax), degrade to a never-match
         // regex rather than panicking on the first clipboard capture.
         regex::Regex::new(r"\b(?:\d[\s-]?){12,18}\d\b")
-            .unwrap_or_else(|_| regex::Regex::new(r"(?!x)x").expect("never-match regex is valid"))
+            // `[^\s\S]` is the canonical never-match regex for the `regex` crate:
+            // it requires a character that is neither whitespace nor non-whitespace,
+            // which is impossible. Lookahead (`(?!x)x`) is not supported by `regex`.
+            .unwrap_or_else(|_| regex::Regex::new(r"[^\s\S]").expect("never-match regex is valid"))
     });
     for m in re.find_iter(text) {
         if luhn_valid_strict(m.as_str()) {
