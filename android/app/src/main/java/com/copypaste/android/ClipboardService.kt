@@ -277,22 +277,6 @@ class ClipboardService : Service() {
         private const val KEY_TODAY_COUNT = "today_count"
 
         /**
-         * Notification channel for per-copy event toasts (A-SET-6 parity).
-         * IMPORTANCE_MIN = no sound, no heads-up, no status-bar icon — just a
-         * silent badge. Auto-cancelled after 2 seconds.
-         */
-        const val CHANNEL_COPY_EVENT = "copypaste_copy_event"
-        private const val NOTIF_ID_COPY_EVENT = 1003
-
-        /**
-         * Debounce guard: if another capture arrives within [COPY_NOTIF_DEBOUNCE_MS],
-         * the notification is refreshed in-place rather than posting a new one.
-         */
-        @Volatile
-        private var lastCopyNotifMs = 0L
-        private const val COPY_NOTIF_DEBOUNCE_MS = 500L
-
-        /**
          * Shared capture pipeline: store + count + sync. HIGH-2.
          *
          * Both the foreground [ClipboardService] and the background
