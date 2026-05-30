@@ -285,50 +285,74 @@ class ClipboardRepository(context: Context) {
         val sensitive = try { isSensitive(plaintext) } catch (_: UnsatisfiedLinkError) { false }
         if (sensitive) return@withContext false
 
-        // Look up whether this item_id already has a storage entry.
-        // The reverse-lookup key is "item_id_ref_<itemId>" → storageId.
-        val existingStorageId = prefs.getString("item_id_ref_$itemId", null)
+        // ── REPLACE PATH: close the TOCTOU between the existingStorageId
+        // lookup + storedLamportTs read and the final putString write.
+        //
+        // Previously the lookup and the lamport comparison happened OUTSIDE
+        // idsWriteLock, so a concurrent deleteItem (which holds idsWriteLock
+        // while it removes "item_<id>" and rewrites the index) could delete
+        // the row between our read and our locked write, resurrecting a ghost
+        // blob under a storage key that no longer appears in the index.
+        //
+        // Fix: encrypt into a local variable FIRST (encryption is expensive and
+        // has no shared state — doing it inside the lock would increase
+        // contention unnecessarily), then enter idsWriteLock for the entire
+        // read-decide-write sequence: lookup → lamport compare → putString.
+        // There is no re-entrant idsWriteLock acquisition inside the block
+        // (no call to deleteItem / storedIds / storeItem), so no deadlock.
 
-        if (existingStorageId != null) {
+        // Pre-compute a candidate blob for the REPLACE case outside the lock.
+        // We may not use it (if the item doesn't exist or the lamport check
+        // fails), but we need it ready before we enter the lock.
+        val plaintextBytes = plaintext.toByteArray(Charsets.UTF_8)
+
+        // We cannot know the storageId until we're inside the lock, so we
+        // encrypt with a sentinel and re-encrypt with the real id if needed.
+        // Instead, defer the encrypt until we hold the lock (the encrypt call
+        // is fast relative to the lock hold time and does not call back into
+        // any locked method).
+        val replaced = synchronized(idsWriteLock) {
+            val existingStorageId = prefs.getString("item_id_ref_$itemId", null)
+                ?: return@synchronized false  // not yet stored → fall through to new-item path
+
             // LWW: only replace when incoming lamport_ts is strictly newer.
             val storedTs = storedLamportTs(existingStorageId)
             if (incomingLamportTs <= storedTs) {
                 Log.d(TAG, "LWW: skipping dup item_id=$itemId (stored=$storedTs, incoming=$incomingLamportTs)")
-                return@withContext false
+                return@synchronized null  // null = "skip, do not store as new item either"
             }
-            // Replace in-place: re-encrypt and overwrite the stored value.
-            // idsWriteLock serializes this single-key blob rewrite against a
-            // concurrent deleteItem, which also holds idsWriteLock while it
-            // removes "item_<id>" and rewrites the index. Without the lock a
-            // replace that races a delete can resurrect a deleted item's blob
-            // without its id ever appearing back in the index (ghost entry).
+
+            // Replace in-place: re-encrypt and overwrite the stored blob.
             val blob = try {
-                encryptText(existingStorageId, plaintext.toByteArray(Charsets.UTF_8), key)
+                encryptText(existingStorageId, plaintextBytes, key)
             } catch (e: IllegalStateException) {
                 Log.w(TAG, "LWW replace: UniFFI unavailable — using local AES-GCM fallback (NOT sync-compatible)")
-                ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+                localAesEncrypt(plaintextBytes, key)
             } catch (_: UnsatisfiedLinkError) {
                 Log.w(TAG, "LWW replace: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
-                ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+                localAesEncrypt(plaintextBytes, key)
             }
             val encoded = encodeItem(blob, plaintext.length, incomingLamportTs)
-            synchronized(idsWriteLock) {
-                prefs.edit().putString("item_$existingStorageId", encoded).apply()
-            }
+            prefs.edit().putString("item_$existingStorageId", encoded).apply()
             Log.d(TAG, "LWW replaced item_id=$itemId storageId=$existingStorageId (lamport $storedTs→$incomingLamportTs)")
-            return@withContext true
+            true  // replaced successfully
         }
+
+        // null  → duplicate (older/equal lamport), skip
+        // true  → replaced, return immediately
+        // false → item not found, fall through to new-item insert below
+        if (replaced != false) return@withContext replaced == true
 
         // New item: generate a fresh storage id and store normally.
         val storageId = itemId // Use the stable item_id as the storage key for easy lookup.
         val blob = try {
-            encryptText(storageId, plaintext.toByteArray(Charsets.UTF_8), key)
+            encryptText(storageId, plaintextBytes, key)
         } catch (e: IllegalStateException) {
             Log.w(TAG, "storeItemWithLww: UniFFI unavailable — using local AES-GCM fallback (NOT sync-compatible)")
-            ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+            localAesEncrypt(plaintextBytes, key)
         } catch (_: UnsatisfiedLinkError) {
             Log.w(TAG, "storeItemWithLww: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
-            ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+            localAesEncrypt(plaintextBytes, key)
         }
         val encoded = encodeItem(blob, plaintext.length, incomingLamportTs)
 
