@@ -2,10 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   CSS CUSTOM PROPERTIES
+   Mirror the Tailwind ide-* tokens as CSS vars so raw CSS rules below
+   can reference them without duplicating hex values.
+   ══════════════════════════════════════════════════════════════════════════ */
 :root {
   color-scheme: dark;
+
+  --ide-bg:           #13141a;
+  --ide-panel:        #1e1f26;
+  --ide-elevated:     #272930;
+  --ide-border:       #2e2f38;
+  --ide-divider:      #3a3b44;
+  --ide-hover:        #252730;
+  --ide-selection:    #253565;
+  --ide-text:         #e8eaed;
+  --ide-dim:          #9496a1;
+  --ide-faint:        #5c5e6a;
+  --ide-accent:       #3592ff;
+  --ide-accent-hover: #5aa8ff;
+  --ide-danger:       #e05c5c;
+  --ide-success:      #5fad65;
+  --ide-warning:      #d9a343;
+
+  /* Focus ring — 2 px glow, accent @ 40 % */
+  --ide-focus-ring: 0 0 0 2px rgba(53, 146, 255, 0.4);
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESET / LAYOUT
+   ══════════════════════════════════════════════════════════════════════════ */
 html,
 body,
 #root {
@@ -16,7 +43,7 @@ body {
   margin: 0;
   /* Transparent so the native macOS vibrancy (NSVisualEffectView) shows through. */
   background: transparent;
-  color: #dfe1e5;
+  color: var(--ide-text);
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
   font-size: 13px;
   line-height: 1.4;
@@ -29,26 +56,173 @@ body {
   display: flex;
 }
 
+/* Text nodes that need selection (inputs handled below) */
 input,
 textarea {
   user-select: text;
 }
 
-/* Thin IDE-style scrollbars. */
+/* ═══════════════════════════════════════════════════════════════════════════
+   FORM CONTROLS — unified JetBrains-style look
+   All inputs/selects/checkboxes share the same visual language:
+   elevated bg, hairline border, 6 px radius, accent focus ring.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* --- Text inputs, number inputs, textareas -------------------------------- */
+input[type="text"],
+input[type="number"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="url"],
+input[type="tel"],
+textarea {
+  background-color: var(--ide-elevated);
+  color: var(--ide-text);
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.4;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  /* Smooth focus transition */
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+input[type="text"]:hover,
+input[type="number"]:hover,
+input[type="email"]:hover,
+input[type="password"]:hover,
+input[type="search"]:hover,
+input[type="url"]:hover,
+input[type="tel"]:hover,
+textarea:hover {
+  border-color: var(--ide-divider);
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="search"]:focus,
+input[type="url"]:focus,
+input[type="tel"]:focus,
+textarea:focus {
+  border-color: var(--ide-accent);
+  box-shadow: var(--ide-focus-ring);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ide-faint);
+}
+
+textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+
+/* --- Select dropdowns ----------------------------------------------------- */
+select {
+  background-color: var(--ide-elevated);
+  color: var(--ide-text);
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  padding: 5px 28px 5px 8px;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: 1.4;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  /* Custom chevron icon (accent-tinted) */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239496a1' d='M6 8L1.5 3.5h9z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+select:hover {
+  border-color: var(--ide-divider);
+}
+
+select:focus {
+  border-color: var(--ide-accent);
+  box-shadow: var(--ide-focus-ring);
+}
+
+select option {
+  background-color: var(--ide-elevated);
+  color: var(--ide-text);
+}
+
+/* --- Checkboxes ----------------------------------------------------------- */
+input[type="checkbox"] {
+  /* Use accent-color as the cheapest cross-browser custom checkbox tint.
+     This paints the check mark and filled-box in the accent blue on modern
+     WebKit/Blink (which Tauri's webview uses). */
+  accent-color: var(--ide-accent);
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: box-shadow 120ms ease;
+}
+
+input[type="checkbox"]:focus-visible {
+  box-shadow: var(--ide-focus-ring);
+  outline: none;
+}
+
+/* --- Radio buttons -------------------------------------------------------- */
+input[type="radio"] {
+  accent-color: var(--ide-accent);
+  cursor: pointer;
+}
+
+/* --- Range sliders -------------------------------------------------------- */
+input[type="range"] {
+  accent-color: var(--ide-accent);
+}
+
+/* --- Buttons (base — components can override with Tailwind classes) ------- */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease,
+              border-color 120ms ease;
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: var(--ide-focus-ring);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SCROLLBARS — thin IDE-style, accent-tinted thumb
+   ══════════════════════════════════════════════════════════════════════════ */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 7px;
+  height: 7px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
-  border: 2px solid transparent;
-  border-radius: 6px;
+  /* Slightly accent-tinted white for a JetBrains feel */
+  background: rgba(140, 160, 200, 0.22);
+  border: 1px solid transparent;
+  border-radius: 4px;
   background-clip: padding-box;
+  transition: background 120ms ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.26);
+  background: rgba(140, 160, 200, 0.40);
   background-clip: padding-box;
 }
 
@@ -56,7 +230,49 @@ textarea {
   background: transparent;
 }
 
-/* Popup: compact single-line rows (Maccy-style) */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DEPTH UTILITIES — helper classes for panels/popups
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Subtle panel shadow (cards, side-panels) */
+.ide-shadow-panel {
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+/* Stronger elevation for modals / floating popups */
+.ide-shadow-popup {
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.65), 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* Optional: translucency hint class.
+   Apply to a container when the parent has a native NSVisualEffectView behind it.
+   Keeps text readable (88% opacity bg) while letting vibrancy bleed subtly. */
+.ide-translucent {
+  background-color: rgba(19, 20, 26, 0.88) !important;
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   INTERACTIVE TRANSITIONS — applied globally to common interactive elements
+   ══════════════════════════════════════════════════════════════════════════ */
+a {
+  color: var(--ide-accent);
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+
+a:hover {
+  color: var(--ide-accent-hover);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   POPUP LAYOUT — compact single-line rows (Maccy-style clipboard list)
+   ══════════════════════════════════════════════════════════════════════════ */
 .popup-row {
   height: 28px;
   min-height: 28px;
