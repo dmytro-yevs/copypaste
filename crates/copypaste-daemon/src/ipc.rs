@@ -3960,8 +3960,13 @@ impl IpcServer {
                             key_version_opt,
                         ))
                     };
+                    // Cap export_limit to i64::MAX before casting: u64 values
+                    // above i64::MAX would wrap negative after `as i64`, which
+                    // SQLite treats as unlimited — silently exporting everything
+                    // instead of the requested limit.
+                    let lim = export_limit.min(i64::MAX as u64) as i64;
                     let rows = if export_limit > 0 {
-                        stmt.query_map([export_limit as i64], map_row)?
+                        stmt.query_map([lim], map_row)?
                     } else {
                         stmt.query_map([], map_row)?
                     };
@@ -3983,7 +3988,17 @@ impl IpcServer {
                         // assume v1 rather than silently guessing v2 (which
                         // would produce an authentication-tag mismatch).
                         let key_version: u8 = match key_version_opt {
-                            Some(v) => v as u8,
+                            Some(v) => match u8::try_from(v) {
+                                Ok(kv) => kv,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        id = %id,
+                                        key_version = v,
+                                        "export: out-of-range key_version {v}, skipping"
+                                    );
+                                    continue;
+                                }
+                            },
                             None => {
                                 tracing::debug!(
                                     id = %id,
@@ -7072,11 +7087,16 @@ mod tests {
         let dir = tempdir().unwrap();
         let sock = dir.path().join("revoke_all_empty.sock");
         // Isolate the config dir so this test never touches the developer's
-        // real peers.json. `dirs::config_dir()` reads XDG_CONFIG_HOME on
-        // Linux/BSD and $HOME (→ Library/Application Support) on macOS, so set
-        // both. Held until end of test (RAII restore).
+        // real peers.json.  `peers_file_path()` checks COPYPASTE_CONFIG_DIR
+        // first (before dirs::config_dir()), which is necessary on macOS
+        // because dirs::config_dir() ignores $HOME and always resolves to
+        // ~/Library/Application Support — so setting only HOME/XDG_CONFIG_HOME
+        // was insufficient and the test leaked to the real peers.json.
         let cfg_home = dir.path().join("cfg");
-        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
         start_test_server(&sock).await;
         let resp = call_one(
             &sock,

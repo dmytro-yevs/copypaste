@@ -103,6 +103,12 @@ fn reset_unsupported_kinds_for_test() {
 pub struct ClipboardMonitor {
     last_change_count: i64,
     max_text_bytes: u64,
+    /// Maximum raw image bytes accepted from NSPasteboard before the READ gate
+    /// rejects the image.  Defaults to [`copypaste_core::MAX_IMAGE_BYTES`]
+    /// (10 MiB) when constructed via [`ClipboardMonitor::new`]; the daemon
+    /// overrides this with the user-configured `max_image_size_bytes` so the
+    /// READ gate matches the encode gate rather than the hardcoded core const.
+    max_image_bytes: usize,
     /// changeCount recorded after a daemon self-write to NSPasteboard (copy_item /
     /// "copy" IPC handler). When the next poll sees this exact changeCount the daemon
     /// caused the change itself — skip recording to prevent a duplicate row.
@@ -112,11 +118,19 @@ pub struct ClipboardMonitor {
 
 impl ClipboardMonitor {
     pub fn new(max_text_bytes: u64) -> Self {
+        use copypaste_core::MAX_IMAGE_BYTES;
         Self {
             last_change_count: -1,
             max_text_bytes,
+            max_image_bytes: MAX_IMAGE_BYTES,
             self_write_change_count: Arc::new(AtomicI64::new(-1)),
         }
+    }
+
+    /// Override the image-size READ gate with the user-configured cap.
+    /// Call this after [`ClipboardMonitor::new`] when a non-default cap is set.
+    pub fn set_max_image_bytes(&mut self, bytes: usize) {
+        self.max_image_bytes = bytes;
     }
 
     /// Poll for new clipboard content. Returns `Some` only if the pasteboard changed.
@@ -135,7 +149,6 @@ impl ClipboardMonitor {
     pub fn poll(&mut self) -> Result<Option<ClipboardContent>, ClipboardError> {
         #[cfg(target_os = "macos")]
         {
-            use copypaste_core::MAX_IMAGE_BYTES;
             use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
             use objc2_foundation::{NSArray, NSData, NSString};
 
@@ -283,9 +296,9 @@ impl ClipboardMonitor {
             }
 
             if let Some(bytes) = image_bytes {
-                if bytes.len() > MAX_IMAGE_BYTES {
+                if bytes.len() > self.max_image_bytes {
                     return Err(ClipboardError::ImageTooLarge {
-                        max: MAX_IMAGE_BYTES,
+                        max: self.max_image_bytes,
                         actual: bytes.len(),
                     });
                 }
