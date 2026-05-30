@@ -3,8 +3,8 @@
 package com.copypaste.android.ui.theme
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,9 +27,11 @@ import androidx.compose.ui.unit.dp
 // Shared design-system components — the single source of truth for chrome that
 // must look identical on every screen. Built to match the macOS desktop UI:
 //
-//   • Compact 44 dp IDE-style header on the #2b2d30 panel surface (NOT the blue
+//   • Compact IDE-style header on the #2b2d30 panel surface (NOT the blue
 //     accent header Material defaults to). This is what makes the History,
 //     Settings, Pair, Onboarding and Permissions screens read as siblings.
+//     The status-bar inset is applied via windowInsets (not a fixed height)
+//     so the header is never clipped under a notch or display cutout.
 //   • Rounded 12 dp cards on the #313438 elevated surface, hairline border.
 //   • Subdued section labels in the accent blue.
 //
@@ -37,7 +39,15 @@ import androidx.compose.ui.unit.dp
 // padding on this grid.
 // ---------------------------------------------------------------------------
 
-/** Standard compact header. Dark #2b2d30 panel, 44 dp tall, 14 sp medium title. */
+/**
+ * Standard compact header. Dark #2b2d30 panel, 14 sp medium title.
+ *
+ * windowInsets defaults to [TopAppBarDefaults.windowInsets] so the bar
+ * automatically pads its content below the status-bar / display-cutout on
+ * edge-to-edge screens. Do NOT pass a fixed height — that would clip the
+ * header on notched phones by capping the total height before the inset is
+ * accounted for.
+ */
 @Composable
 fun CopyPasteTopBar(
     title: String,
@@ -45,6 +55,7 @@ fun CopyPasteTopBar(
     onBack: () -> Unit = {},
     backContentDescription: String = "Back",
     actions: @Composable (androidx.compose.foundation.layout.RowScope.() -> Unit) = {},
+    windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
 ) {
     TopAppBar(
         title = {
@@ -73,8 +84,11 @@ fun CopyPasteTopBar(
             actionIconContentColor     = IdeDim,
             navigationIconContentColor = IdeDim,
         ),
-        // 44 dp matches the macOS ViewShell header (h-11) — a tight IDE toolbar.
-        modifier = Modifier.height(44.dp),
+        // Apply the status-bar / display-cutout inset as TOP PADDING so the
+        // bar's content sits *below* the notch, never under it. A hard fixed
+        // height must NOT be set here — it would clip the header on notched
+        // phones because the inset eats into the fixed total height.
+        windowInsets = windowInsets,
     )
 }
 
