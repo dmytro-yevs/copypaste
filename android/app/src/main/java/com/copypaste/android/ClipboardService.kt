@@ -9,6 +9,8 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -20,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 import java.util.Calendar
 
 /**
@@ -113,6 +116,24 @@ class ClipboardService : Service() {
             }
             return@OnPrimaryClipChangedListener
         }
+
+        // Detect image MIME before falling back to text. Check all MIME types on
+        // the ClipDescription; the first image/* type wins.
+        val imageMime = (0 until clip.description.mimeTypeCount)
+            .map { clip.description.getMimeType(it) }
+            .firstOrNull { it.startsWith("image/") }
+
+        if (imageMime != null) {
+            // Image clip: read URI from the first item and dispatch to image path.
+            val uri = clip.getItemAt(0)?.uri
+            if (uri != null) {
+                scope.launch { captureImageClip(this@ClipboardService, uri, imageMime, settings, repository, syncManager) }
+            } else {
+                Log.w(TAG, "Image clip has no URI — skipping")
+            }
+            return@OnPrimaryClipChangedListener
+        }
+
         val text = clip.getItemAt(0)?.text?.toString()
             ?: return@OnPrimaryClipChangedListener
 
@@ -313,6 +334,152 @@ class ClipboardService : Service() {
                 }
             }
         }
+
+        /**
+         * Capture an image clipboard item from a content:// [uri].
+         *
+         * Pipeline:
+         *  1. Open an InputStream via ContentResolver and decode into a Bitmap.
+         *  2. Downscale to fit within [IMAGE_MAX_PX] on the longest side using
+         *     BitmapFactory.Options.inSampleSize so large images never bloat
+         *     SharedPreferences. The sampling pass also caps memory usage.
+         *  3. Re-encode as PNG (lossless, good for screenshots/text images) into
+         *     a ByteArray and check the [IMAGE_MAX_BYTES] size cap before storing.
+         *  4. Store a placeholder text blob via [ClipboardRepository.storeItem]
+         *     with the real MIME content type so the row appears in the history
+         *     list with the correct icon/thumbnail slot.
+         *  5. Persist the scaled bytes via [ClipboardRepository.storeImageBytes]
+         *     under the same id returned by storeItem.
+         *
+         * Errors are logged with Log.w and never thrown — a failed image capture
+         * must not crash the service or suppress subsequent text captures.
+         *
+         * Android 10+ background restriction: the same API-29+ limitation that
+         * affects text capture applies here. The URI is readable when:
+         *   (a) the app is in the foreground (this FGS + activity listener), or
+         *   (b) [ClipboardAccessibilityService] is enabled (background path).
+         * Without the a11y service, getPrimaryClip() already returned null before
+         * we reach this function — so no special guard is needed here.
+         */
+        // syncManager is accepted for API symmetry with captureClip and future image-sync
+        // wiring; it is not yet used because image sync requires a separate Supabase
+        // upload path (binary blobs) that is not implemented in this version.
+        @Suppress("UNUSED_PARAMETER")
+        suspend fun captureImageClip(
+            context: Context,
+            uri: android.net.Uri,
+            mimeType: String,
+            settings: Settings,
+            repository: ClipboardRepository,
+            syncManager: SyncManager,
+        ) {
+            if (!settings.captureEnabled) {
+                Log.d(TAG, "Capture paused — dropping image clipboard change")
+                return
+            }
+
+            // ── Step 1: decode bounds only (no pixel allocation) to compute inSampleSize.
+            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            try {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, opts)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "captureImageClip: failed to read image bounds from $uri: ${e.message}")
+                return
+            }
+
+            val rawW = opts.outWidth
+            val rawH = opts.outHeight
+            if (rawW <= 0 || rawH <= 0) {
+                Log.w(TAG, "captureImageClip: invalid image dimensions ($rawW×$rawH) — skipping")
+                return
+            }
+
+            // ── Step 2: compute inSampleSize so the longest edge fits IMAGE_MAX_PX.
+            val longest = maxOf(rawW, rawH)
+            var sampleSize = 1
+            while (longest / (sampleSize * 2) > IMAGE_MAX_PX) {
+                sampleSize *= 2
+            }
+
+            // ── Step 3: decode the full pixels at the chosen sample size.
+            val decodeOpts = BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+            val bitmap: Bitmap? = try {
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, decodeOpts)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "captureImageClip: failed to decode image from $uri: ${e.message}")
+                return
+            }
+
+            if (bitmap == null) {
+                Log.w(TAG, "captureImageClip: BitmapFactory returned null for $uri — skipping")
+                return
+            }
+
+            // ── Step 4: re-encode as PNG into a ByteArray and check size cap.
+            // bitmap.recycle() is called in both success and failure paths so
+            // native pixel memory is released as soon as we have the byte array.
+            val pngBytes: ByteArray? = try {
+                ByteArrayOutputStream().use { baos ->
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                    baos.toByteArray()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "captureImageClip: PNG encode failed: ${e.message}")
+                null
+            } finally {
+                bitmap.recycle()
+            }
+
+            if (pngBytes == null) return
+
+            if (pngBytes.size > IMAGE_MAX_BYTES) {
+                Log.w(
+                    TAG,
+                    "captureImageClip: encoded PNG is ${pngBytes.size} bytes (cap $IMAGE_MAX_BYTES) — skipping"
+                )
+                return
+            }
+
+            // ── Step 5: persist a text-blob placeholder with the image MIME type so
+            // the row appears in history, then attach the image bytes under the same id.
+            // Use the URI string as placeholder text (non-blank, informational, safe).
+            val placeholder = uri.toString()
+            val key = settings.encryptionKey
+            val storedId = repository.storeItem(placeholder, key, contentType = mimeType)
+            if (storedId.isEmpty()) {
+                Log.d(TAG, "captureImageClip: storeItem returned empty (dedup or sensitive) — not storing bytes")
+                return
+            }
+
+            repository.storeImageBytes(storedId, pngBytes)
+            Log.d(TAG, "captureImageClip: stored image $storedId (${pngBytes.size} bytes, mime=$mimeType)")
+
+            bumpTodayCounter(context)
+            refreshNotification(context)
+            // Image sync is not wired in this version — text sync only for now.
+        }
+
+        /**
+         * Maximum pixel dimension (longest edge) for stored image thumbnails.
+         * A 1024 px cap keeps PNG size well under [IMAGE_MAX_BYTES] for typical
+         * screenshots while still being large enough to render a useful thumbnail.
+         */
+        private const val IMAGE_MAX_PX = 1024
+
+        /**
+         * Hard cap on stored image bytes (2 MB). SharedPreferences strings are
+         * stored in the app's private XML file; very large values slow down
+         * the prefs commit and inflate memory on load. 2 MB is conservative —
+         * a 1024×1024 PNG is typically 50–300 KB for screenshots.
+         */
+        private const val IMAGE_MAX_BYTES = 2 * 1024 * 1024
 
         /** Path to the app-private encrypted SQLite DB used by the UniFFI live binding. */
         private fun databasePath(context: Context): String =

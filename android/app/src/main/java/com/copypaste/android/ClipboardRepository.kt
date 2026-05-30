@@ -115,7 +115,7 @@ class ClipboardRepository(context: Context) {
         }
 
     /**
-     * Return the raw PNG bytes stored for image item [id], or null when none
+     * Return the raw PNG/JPEG bytes stored for image item [id], or null when none
      * are available (item not found, not an image, or not yet captured).
      *
      * Image bytes are persisted under the key "item_img_<id>" as a Base64
@@ -146,7 +146,7 @@ class ClipboardRepository(context: Context) {
      *
      * Storage note: SharedPreferences is not ideal for large blobs (Android
      * recommends files for >100 KB). For clipboard thumbnails (typically
-     * <50 KB after thumbnail scaling) this is acceptable; a future migration
+     * <100 KB after thumbnail scaling) this is acceptable; a future migration
      * can move them to the app's files directory if needed.
      *
      * @param id      The item id (same as the text blob key).
@@ -192,6 +192,12 @@ class ClipboardRepository(context: Context) {
      * on the originating device. For locally captured clips it is null and a
      * fresh UUID is minted. When supplied it is also the de-facto source id.
      *
+     * [contentType] defaults to "text/plain" for all existing text callers. Pass
+     * the actual MIME type (e.g. "image/png") when storing an image item so that
+     * [getItems] can distinguish image rows and attach [ClipboardItem.imagePng].
+     * The caller is responsible for separately calling [storeImageBytes] with the
+     * same returned id when the content type is an image MIME type.
+     *
      * [sourceId] is the STABLE remote identifier of an incoming synced item used
      * for cross-poll dedup (defaults to [overrideId] when that is set). See
      * LOW-2: [FgsSyncLoop.poll] and [SupabasePollWorker.doWork] share the
@@ -206,6 +212,7 @@ class ClipboardRepository(context: Context) {
         key: ByteArray,
         sourceId: String? = null,
         overrideId: String? = null,
+        contentType: String = "text/plain",
     ): String = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext ""
 
@@ -270,7 +277,7 @@ class ClipboardRepository(context: Context) {
             localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
         }
 
-        val encoded = encodeItem(blob, plaintext.length)
+        val encoded = encodeItem(blob, plaintext.length, contentType = contentType)
         // ── HIGH-8: synchronize the read-modify-write so concurrent writers
         // cannot clobber each other's entries in the comma-joined index.
         synchronized(idsWriteLock) {
@@ -380,7 +387,7 @@ class ClipboardRepository(context: Context) {
                 Log.w(TAG, "LWW replace: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
                 localAesEncrypt(plaintextBytes, key)
             }
-            val encoded = encodeItem(blob, plaintext.length, incomingLamportTs)
+            val encoded = encodeItem(blob, plaintext.length, lamportTs = incomingLamportTs)
             prefs.edit().putString("item_$existingStorageId", encoded).apply()
             Log.d(TAG, "LWW replaced item_id=$itemId storageId=$existingStorageId (lamport $storedTs→$incomingLamportTs)")
             true  // replaced successfully
@@ -402,7 +409,7 @@ class ClipboardRepository(context: Context) {
             Log.w(TAG, "storeItemWithLww: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
             localAesEncrypt(plaintextBytes, key)
         }
-        val encoded = encodeItem(blob, plaintext.length, incomingLamportTs)
+        val encoded = encodeItem(blob, plaintext.length, lamportTs = incomingLamportTs)
 
         synchronized(idsWriteLock) {
             val ids = storedIds().toMutableList().also { it.add(storageId) }
@@ -425,6 +432,18 @@ class ClipboardRepository(context: Context) {
         Log.d(TAG, "storeItemWithLww: stored new item_id=$itemId as storageId=$storageId")
         true
     }
+
+    /**
+     * Return the id of the most recently stored item, or null when the index is
+     * empty. Used by image capture callers that need the id that [storeItem] just
+     * wrote so they can call [storeImageBytes] under the same key.
+     *
+     * Safe to call immediately after [storeItem] returns true because storeItem
+     * appends the new id at the END of the comma-joined index before returning.
+     * The caller runs on [Dispatchers.IO] and storeItem holds [idsWriteLock] for
+     * the entire append, so by the time storeItem returns the id is visible here.
+     */
+    fun lastStoredId(): String? = storedIds().lastOrNull()
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -469,12 +488,22 @@ class ClipboardRepository(context: Context) {
      * The lamportTs field (index 5) was added for LWW cloud sync. Legacy rows
      * (only 5 fields) are read back with lamportTs=0, meaning they will be
      * replaced by any incoming cloud row with a positive lamport_ts.
+     *
+     * [contentType] defaults to "text/plain" for backward compatibility with all
+     * existing text call-sites; image capture passes the actual MIME type (e.g.
+     * "image/png") so [parseItem] can populate [ClipboardItem.contentType] correctly
+     * and [getItems] can attach the stored image bytes.
      */
-    private fun encodeItem(blob: EncryptedBlob, plaintextLen: Int, lamportTs: Long = 0L): String {
+    private fun encodeItem(
+        blob: EncryptedBlob,
+        plaintextLen: Int,
+        contentType: String = "text/plain",
+        lamportTs: Long = 0L,
+    ): String {
         val nonce64 = Base64.encodeToString(blob.nonce, Base64.NO_WRAP)
         val ct64 = Base64.encodeToString(blob.ciphertext, Base64.NO_WRAP)
         val ts = System.currentTimeMillis()
-        return "$ts|text/plain|$plaintextLen|$nonce64|$ct64|$lamportTs"
+        return "$ts|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs"
     }
 
     private fun parseItem(id: String, raw: String, key: ByteArray): ClipboardItem? {

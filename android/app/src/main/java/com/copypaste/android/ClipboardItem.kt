@@ -7,7 +7,7 @@ data class ClipboardItem(
     val wallTimeMs: Long,
     val snippet: String = "",
     /**
-     * Raw PNG bytes of the image thumbnail, non-null only when [contentType]
+     * Raw PNG/JPEG bytes of the image thumbnail, non-null only when [contentType]
      * is an image MIME type (e.g. "image/png", "image/jpeg").
      *
      * Populated by [ClipboardRepository.getItems] when image data is stored
