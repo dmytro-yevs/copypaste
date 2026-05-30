@@ -117,8 +117,7 @@ class LogcatCaptureService : Service() {
             return
         }
 
-        val pid = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) process.pid().toString() else "?"
-        AppLogger.i(TAG, "Logcat process started (pid=$pid)")
+        AppLogger.i(TAG, "Logcat process started")
 
         try {
             process.inputStream.bufferedReader().use { reader ->
