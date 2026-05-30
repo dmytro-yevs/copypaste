@@ -3903,22 +3903,50 @@ impl IpcServer {
             // ------------------------------------------------------------------
             "export" => {
                 use base64::Engine as _;
+                // `limit` > 0 → export the most-recent N items (DESC LIMIT in a
+                // subquery, then re-order ASC for deterministic import order).
+                // `limit` == 0 or absent → export ALL (legacy / unlimited).
+                let export_limit = req
+                    .params
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 let db_arc = self.db.clone();
                 let local_key_v1: [u8; 32] = **self.local_key;
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     let v2_key = derive_v2(&local_key_v1);
-                    // Fetch ALL items, oldest first, so the caller can re-import
-                    // in chronological order.
-                    let mut stmt = db.conn().prepare(
+                    // When a limit is requested we select the most-recent N rows
+                    // via a DESC subquery and then re-order ASC so the exported
+                    // JSON can be re-imported in chronological order.  When no
+                    // limit (or limit == 0) we return everything, oldest first.
+                    let sql = if export_limit > 0 {
+                        "SELECT id, item_id, content_type, content, content_nonce, \
+                         is_sensitive, is_synced, lamport_ts, wall_time, key_version \
+                         FROM ( \
+                             SELECT id, item_id, content_type, content, content_nonce, \
+                                    is_sensitive, is_synced, lamport_ts, wall_time, key_version \
+                             FROM clipboard_items \
+                             ORDER BY wall_time DESC \
+                             LIMIT ?1 \
+                         ) ORDER BY wall_time ASC"
+                            .to_string()
+                    } else {
                         "SELECT id, item_id, content_type, content, content_nonce, \
                          is_sensitive, is_synced, lamport_ts, wall_time, key_version \
                          FROM clipboard_items \
-                         ORDER BY wall_time ASC",
-                    )?;
+                         ORDER BY wall_time ASC"
+                            .to_string()
+                    };
+                    let mut stmt = db.conn().prepare(&sql)?;
                     let b64 = base64::engine::general_purpose::STANDARD;
                     let mut items: Vec<serde_json::Value> = Vec::new();
-                    let rows = stmt.query_map([], |row| {
+                    let map_row = |row: &rusqlite::Row<'_>| {
+                        // key_version can be NULL for genuine v1 rows written
+                        // before the column was added.  We read it as Option<i64>
+                        // and keep None distinct from a stored value of 1 or 2 so
+                        // we can log it clearly rather than silently guessing.
+                        let key_version_opt: Option<i64> = row.get(9)?;
                         Ok((
                             row.get::<_, String>(0)?,  // id
                             row.get::<_, String>(1)?,  // item_id
@@ -3929,12 +3957,17 @@ impl IpcServer {
                             row.get::<_, bool>(6)?,    // is_synced
                             row.get::<_, i64>(7)?,     // lamport_ts
                             row.get::<_, i64>(8)?,     // wall_time
-                            row.get::<_, i64>(9).unwrap_or(2) as u8, // key_version
+                            key_version_opt,
                         ))
-                    })?;
+                    };
+                    let rows = if export_limit > 0 {
+                        stmt.query_map([export_limit as i64], map_row)?
+                    } else {
+                        stmt.query_map([], map_row)?
+                    };
                     for row_result in rows {
                         let (id, item_id, content_type, content_opt, nonce_opt,
-                             is_sensitive, _is_synced, lamport_ts, wall_time, key_version)
+                             is_sensitive, _is_synced, lamport_ts, wall_time, key_version_opt)
                             = row_result?;
                         // Only export text items — the CLI import path only
                         // accepts content_bytes_b64 (raw bytes), and images are
@@ -3944,6 +3977,22 @@ impl IpcServer {
                         }
                         let Some(content) = content_opt else { continue };
                         let Some(nonce_vec) = nonce_opt else { continue };
+                        // Resolve key_version: NULL in the DB means the row
+                        // predates the key_version column (genuine v1 row).
+                        // Log NULL distinctly so mismatches are diagnosable;
+                        // assume v1 rather than silently guessing v2 (which
+                        // would produce an authentication-tag mismatch).
+                        let key_version: u8 = match key_version_opt {
+                            Some(v) => v as u8,
+                            None => {
+                                tracing::debug!(
+                                    id = %id,
+                                    "export: key_version is NULL (pre-column row); \
+                                     attempting decrypt as v1"
+                                );
+                                1
+                            }
+                        };
                         let nonce: &[u8; 24] = match nonce_vec.as_slice().try_into() {
                             Ok(n) => n,
                             Err(_) => {
@@ -6423,7 +6472,14 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let cfg_home = dir.path().join("cfg");
-        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        // Set COPYPASTE_CONFIG_DIR *first* — `peers_file_path` checks it ahead
+        // of dirs::config_dir(), so peers.json goes into cfg_home regardless of
+        // whether dirs::config_dir() is affected by HOME/XDG_CONFIG_HOME (macOS
+        // ignores HOME for Application Support).
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
 
         let sock_a = dir.path().join("test-qr-a.sock");
         let sock_b = dir.path().join("test-qr-b.sock");
@@ -6504,7 +6560,12 @@ mod tests {
         use base64::Engine as _;
         let dir = tempdir().unwrap();
         let cfg_home = dir.path().join("cfg");
-        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        // Include COPYPASTE_CONFIG_DIR so peers_file_path() points at cfg_home
+        // on macOS (where dirs::config_dir() ignores HOME).
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
         let sock = dir.path().join("test-qr-notoken.sock");
         start_test_server(&sock).await;
 
@@ -7040,17 +7101,21 @@ mod tests {
         // written for each (atomic batch via revoke_devices).
         let dir = tempdir().unwrap();
         let sock = dir.path().join("revoke_all_n.sock");
-        // Redirect the config dir (both Linux XDG and macOS HOME) to a temp
-        // path so we read/write an isolated peers.json, never the real one.
+        // Pin COPYPASTE_CONFIG_DIR first — peers_file_path() checks it before
+        // dirs::config_dir(), so the handler reads/writes cfg_home regardless
+        // of whether dirs::config_dir() is affected by HOME (macOS ignores HOME
+        // for Application Support). Without this pin the test accidentally
+        // reads/writes the developer's real peers.json on macOS.
         let cfg_home = dir.path().join("cfg");
-        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
 
-        // Resolve the actual peers.json location the same way the daemon does
-        // (`dirs::config_dir()/copypaste/peers.json`) so the seed lands exactly
-        // where the handler will read it, on whatever platform we run.
-        let peers_dir = dirs::config_dir()
-            .expect("config_dir resolvable under redirected HOME/XDG_CONFIG_HOME")
-            .join("copypaste");
+        // Seed peers.json exactly where peers_file_path() will look:
+        // cfg_home itself (COPYPASTE_CONFIG_DIR is the direct config dir, not a
+        // base — paths::config_dir() returns it as-is).
+        let peers_dir = cfg_home.clone();
         std::fs::create_dir_all(&peers_dir).unwrap();
         let peers_json = peers_dir.join("peers.json");
         // Use realistic (non-placeholder) fingerprints — the daemon filters out
@@ -7263,6 +7328,125 @@ mod tests {
             persisted.supabase_email.as_deref(),
             Some("seed@example.com"),
             "email must also survive"
+        );
+    }
+
+    // ── export: limit param ──────────────────────────────────────────────────
+
+    /// When `limit` > 0 the export handler must return at most `limit` items,
+    /// selecting the most-recent ones (DESC LIMIT subquery) and re-ordering
+    /// them oldest-first for deterministic import. When `limit` == 0 or is
+    /// absent all items are returned.
+    #[tokio::test]
+    async fn export_limit_returns_most_recent_n_oldest_first() {
+        use copypaste_core::{
+            build_item_aad_v2, derive_v2, encrypt_item_with_aad, AAD_SCHEMA_VERSION_V4,
+        };
+
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("export_limit.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // The test server uses a zero v1 key. Derive v2 the same way the
+        // handler does so we can produce decrypt-able ciphertext.
+        let v1_key = [0u8; 32];
+        let v2_key = derive_v2(&v1_key);
+
+        // Seed 5 text items with distinct, monotonically increasing wall_time
+        // values so we can verify ordering and limit selection.
+        const TOTAL: usize = 5;
+        let mut item_ids: Vec<String> = Vec::new();
+        {
+            let guard = db.lock().await;
+            for i in 0..TOTAL {
+                let plaintext = format!("item-{i}").into_bytes();
+                let item_id = uuid::Uuid::new_v4().to_string();
+                let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+                let (nonce, ciphertext) = encrypt_item_with_aad(&plaintext, &v2_key, &aad).unwrap();
+                // Use a distinct wall_time per item (base 1000 + i ms).
+                let wall_time = 1_000_000i64 + i as i64;
+                guard
+                    .conn()
+                    .execute(
+                        "INSERT INTO clipboard_items \
+                         (id, item_id, content_type, content, content_nonce, \
+                          is_sensitive, is_synced, lamport_ts, wall_time, key_version) \
+                         VALUES (?1, ?2, 'text', ?3, ?4, 0, 0, ?5, ?6, 2)",
+                        rusqlite::params![
+                            uuid::Uuid::new_v4().to_string(),
+                            item_id,
+                            ciphertext,
+                            nonce.as_slice(),
+                            i as i64 + 1,
+                            wall_time,
+                        ],
+                    )
+                    .unwrap();
+                item_ids.push(format!("item-{i}"));
+            }
+        }
+
+        // ── limit=3: must return the 3 most-recent items (item-2, item-3, item-4)
+        //    serialised oldest-first (item-2, item-3, item-4 in that order).
+        let resp = call_one(
+            &sock,
+            r#"{"id":"el1","method":"export","params":{"limit":3}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "export with limit=3 must succeed: {resp}");
+        let items = resp["data"]["items"].as_array().expect("items array");
+        assert_eq!(
+            items.len(),
+            3,
+            "limit=3 must return exactly 3 items, got {}: {resp}",
+            items.len()
+        );
+        // Verify chronological (ASC) ordering: wall_time must be non-decreasing.
+        let wall_times: Vec<i64> = items
+            .iter()
+            .map(|it| it["wall_time"].as_i64().unwrap())
+            .collect();
+        assert!(
+            wall_times.windows(2).all(|w| w[0] <= w[1]),
+            "items must be ordered oldest-first: {wall_times:?}"
+        );
+        // The 3 most-recent items have wall_times 1_000_002, 1_000_003, 1_000_004.
+        assert_eq!(
+            wall_times[0], 1_000_002,
+            "first exported item should be 3rd oldest"
+        );
+        assert_eq!(
+            wall_times[2], 1_000_004,
+            "last exported item should be newest"
+        );
+
+        // ── limit=0: must return ALL items (unlimited).
+        let resp = call_one(
+            &sock,
+            r#"{"id":"el2","method":"export","params":{"limit":0}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "export with limit=0 must succeed: {resp}");
+        let all_items = resp["data"]["items"].as_array().expect("items array");
+        assert_eq!(
+            all_items.len(),
+            TOTAL,
+            "limit=0 must return all {TOTAL} items, got {}",
+            all_items.len()
+        );
+
+        // ── limit absent: must also return ALL items.
+        let resp = call_one(&sock, r#"{"id":"el3","method":"export","params":{}}"#).await;
+        assert_eq!(
+            resp["ok"], true,
+            "export with no limit must succeed: {resp}"
+        );
+        let no_limit_items = resp["data"]["items"].as_array().expect("items array");
+        assert_eq!(
+            no_limit_items.len(),
+            TOTAL,
+            "absent limit must return all {TOTAL} items, got {}",
+            no_limit_items.len()
         );
     }
 
