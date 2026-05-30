@@ -402,10 +402,23 @@ export function SettingsView() {
   // -------------------------------------------------------------------------
 
   const handleSaveConfig = useCallback(async () => {
+    // V-9 fix: only send supabase_anon_key when the user has actually typed a
+    // new value.  If the field is blank AND the daemon already has a key stored
+    // (config.supabase_anon_key !== null), omit the field from the payload so
+    // the daemon's merge_config preserves the stored key.  Sending null would
+    // silently overwrite it — the field shows a "set ✓" placeholder in the UI
+    // precisely because get_config returns the key but the input stays empty
+    // when the user hasn't changed it.
+    const trimmedKey = supabaseKey.trim();
+    const anonKey: string | null =
+      trimmedKey !== ""
+        ? trimmedKey
+        : config.supabase_anon_key; // preserve existing; null only if never set
+
     const next: AppSettings = {
       p2p_enabled: config.p2p_enabled,
       supabase_url: supabaseUrl.trim() || null,
-      supabase_anon_key: supabaseKey.trim() || null,
+      supabase_anon_key: anonKey,
     };
     setSaveError(null);
     try {
@@ -420,7 +433,7 @@ export function SettingsView() {
       if (saveErrTimer.current !== null) clearTimeout(saveErrTimer.current);
       saveErrTimer.current = setTimeout(() => setSaveError(null), 3500);
     }
-  }, [config.p2p_enabled, supabaseUrl, supabaseKey, saveErrTimer]);
+  }, [config.p2p_enabled, config.supabase_anon_key, supabaseUrl, supabaseKey, saveErrTimer]);
 
   // Run the daemon-side end-to-end Supabase probe and surface a precise,
   // actionable diagnostic instead of leaving the user to guess why sync is

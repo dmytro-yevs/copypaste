@@ -82,18 +82,26 @@ export function Popup() {
     }
   }, [selectedIdx]);
 
-  // Fix #3: hide is async (win.hide() returns a promise). Await it so the
-  // window is actually hidden before we restore focus to the prior app and
-  // synthesise the paste — otherwise our popup can still be frontmost when the
-  // Cmd+V fires (blur race), pasting into the popup instead of the target app.
+  // V-10/V-11 fix: always use invoke("hide_popup") instead of win.hide() so
+  // the Rust side runs the prior-app activation before hiding.  Calling
+  // win.hide() directly from JS bypasses that logic and causes macOS to surface
+  // the main window (on toggle-close) or leave focus in limbo (no prior app).
+  // V-12 fix: guard with a ref so concurrent blur + row-click don't both call
+  // hide_popup → double activation → focus flicker.
+  const isHidingRef = useRef(false);
   const hide = useCallback(async () => {
+    if (isHidingRef.current) return;
+    isHidingRef.current = true;
     try {
-      await win.hide();
+      await invoke("hide_popup");
     } catch (e) {
       // Hiding can fail if the window was already destroyed; log, don't crash.
       console.error("popup hide failed", e);
+    } finally {
+      // Reset after a tick so a rapid re-show doesn't get stuck.
+      setTimeout(() => { isHidingRef.current = false; }, 100);
     }
-  }, [win]);
+  }, []);
 
   // Fix #2/#3: hide popup first (awaited), then copy + paste. Errors here used
   // to be silently swallowed (`catch {}`), masking real failures (daemon
@@ -103,7 +111,16 @@ export function Popup() {
     async (id: string) => {
       await hide();
       try {
-        await api.copyItem(id);
+        const copied = await api.copyItem(id);
+        // V-18: Show a macOS notification with the item preview.  The Rust
+        // command sanitises the preview (strips control chars, quotes,
+        // backslashes) before embedding it in the AppleScript literal.
+        // best-effort — never surface an error to the user for this.
+        const preview =
+          typeof copied === "object" && copied !== null && "preview" in copied
+            ? String((copied as { preview: string }).preview)
+            : "";
+        invoke("show_copy_notification", { preview }).catch(() => {/* cosmetic — ignore */});
         // Synthesise Cmd+V into the previously-focused app.
         await invoke("paste_to_frontmost");
       } catch (e) {
