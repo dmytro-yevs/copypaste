@@ -35,6 +35,12 @@ jobs:
   test:
     name: Test (macos-latest)
     runs-on: macos-latest
+    # Headless CI runners have a locked/unavailable login Keychain; the daemon's
+    # Security-framework path (e.g. revoke_peer building an IpcServer) panics
+    # there. The bypass uses an ephemeral in-memory key for tests — matches
+    # coverage.yml / acceptance.yml and the test harness.
+    env:
+      COPYPASTE_EPHEMERAL_KEY: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -59,6 +65,11 @@ jobs:
   test-macos-daemon:
     name: macOS daemon (Keychain)
     runs-on: macos-latest
+    # Real-Keychain integration tests are #[ignore]'d; the runnable daemon tests
+    # still hit the Security-framework path, which panics on the headless CI
+    # Keychain without the ephemeral-key bypass.
+    env:
+      COPYPASTE_EPHEMERAL_KEY: "1"
     steps:
       - uses: actions/checkout@v4
 
