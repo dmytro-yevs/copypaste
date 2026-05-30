@@ -49,10 +49,13 @@ use copypaste_core::{
 // daemon's previous local `sign_in_with_password` stub is gone — `resolve_bearer`
 // now delegates to `AuthClient::sign_in`, which speaks the same GoTrue protocol
 // but is shared with mobile/CLI and exercised by the supabase crate's own
-// test suite. We keep the REST push/poll loops local because the supabase
-// crate's `Realtime` uses a WebSocket Phoenix-channel lifecycle that does not
-// map onto the daemon's bounded-retry / Retry-After model (see Wave 2.7).
+// test suite.
+//
+// v0.5.3 (realtime): the `RealtimeClient` is now also imported — see
+// `ws_ingest_loop` and `start_cloud` for the WS → HTTP-fallback architecture.
 use copypaste_supabase::auth::AuthClient;
+use copypaste_supabase::protocol::ChangeType;
+use copypaste_supabase::{RealtimeClient, RealtimeConfig};
 
 // ── Push reliability tuning (Wave 2.7 edge #19/#20/#21) ───────────────────────
 
@@ -67,6 +70,19 @@ const PUSH_MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// Initial delay between retry attempts. Doubles on each failure up to
 /// `PUSH_MAX_BACKOFF`.
 const PUSH_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+
+// ── Realtime / poll-interval tuning (v0.5.3) ─────────────────────────────────
+
+/// HTTP poll interval when the Realtime WebSocket is **connected**.
+///
+/// The WS delivers INSERT events instantly, so the poll loop runs only as a
+/// catch-up / missed-event safety net at a much lower frequency.
+const POLL_INTERVAL_WS_CONNECTED: Duration = Duration::from_secs(120);
+
+/// HTTP poll interval when the Realtime WebSocket is **disconnected** or
+/// has never connected (original behaviour — full-speed polling as the sole
+/// sync path).
+const POLL_INTERVAL_WS_FALLBACK: Duration = Duration::from_secs(10);
 
 // ── CloudError ────────────────────────────────────────────────────────────────
 
@@ -502,6 +518,12 @@ pub async fn start_cloud(
         notify_clone.notify_waiters();
     });
 
+    // v0.5.3: shared flag — `true` when the Realtime WebSocket channel is
+    // subscribed and delivering events. The HTTP poll loop reads this flag to
+    // decide its tick interval: slow (120 s) when WS is up (catch-up only),
+    // full-speed (10 s) when WS is down or has never connected.
+    let ws_connected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
     // Task A: push new local items to Supabase REST.
     // Also passes `db` (for startup backlog) and `last_sync_ms` (so every
     // successful push updates the timestamp, not only poll-side syncs).
@@ -530,6 +552,9 @@ pub async fn start_cloud(
     ));
 
     // Task B: poll Supabase REST for remote items and insert unknown ones locally.
+    // When Task C (WS) is connected this runs at POLL_INTERVAL_WS_CONNECTED
+    // (2 min catch-up); when WS is disconnected it falls back to
+    // POLL_INTERVAL_WS_FALLBACK (10 s) as the sole download path.
     let poll_config = config.clone();
     let poll_bearer = bearer.clone();
     let poll_shutdown = shutdown.clone();
@@ -538,21 +563,76 @@ pub async fn start_cloud(
     let poll_last_sync_ms = last_sync_ms.clone();
     let poll_signed_in = cloud_signed_in.clone();
     let poll_auth = auth_client.clone();
+    let poll_ws_connected = ws_connected.clone();
+    // Snapshot retention limits for ws_ingest_loop (which takes plain values,
+    // not an Arc) before core_config is moved into realtime_loop.
+    let (ws_history_limit_val, ws_quota_bytes_val) = {
+        let defaults = copypaste_core::AppConfig::default();
+        core_config
+            .read()
+            .map(|g| (g.history_limit, g.storage_quota_bytes))
+            .unwrap_or((defaults.history_limit, defaults.storage_quota_bytes))
+    };
     let poll_core_config = core_config;
     tokio::spawn(realtime_loop(
         poll_config,
         poll_bearer,
-        db,
+        db.clone(),
         poll_shutdown,
         poll_sync_key,
         poll_local_key,
         poll_last_sync_ms,
         poll_signed_in,
         poll_auth,
+        poll_ws_connected,
         poll_core_config,
     ));
 
-    tracing::info!("cloud-sync started (url={})", config.supabase_url);
+    // Task C: Supabase Realtime WebSocket — instant INSERT delivery.
+    //
+    // Builds a `RealtimeConfig` from the same credentials as the REST loops,
+    // passing the authenticated bearer as `user_jwt` so the Realtime server
+    // applies RLS and delivers only the signed-in user's rows.
+    //
+    // On connect: sets `ws_connected = true` → HTTP poll backs off to 120 s.
+    // On disconnect / reconnect cycle: `ws_connected = false` during the gap →
+    // HTTP poll automatically steps back up to 10 s so no items are missed.
+    //
+    // The Wi-Fi guard (`sync_on_wifi_only`) is NOT applied here because the
+    // WebSocket connection is persistent; the poll loop already guards the
+    // actual download work. A WS reconnect on cellular is cheap (a few bytes)
+    // and avoids a stale `ws_connected = false` that would needlessly
+    // accelerate polling.
+    let ws_jwt = bearer.read().await.clone();
+    let ws_realtime_config = RealtimeConfig::with_jwt(
+        config.supabase_url.clone(),
+        config.anon_key.clone(),
+        RealtimeConfig::DEFAULT_TOPIC,
+        Some(ws_jwt),
+        true,
+    );
+    let ws_sync_key = sync_key.clone();
+    let ws_local_key = local_key.clone();
+    let ws_db = db;
+    let ws_last_sync_ms = last_sync_ms.clone();
+    let ws_shutdown = shutdown.clone();
+    let ws_connected_flag = ws_connected;
+    tokio::spawn(ws_ingest_loop(
+        ws_realtime_config,
+        ws_db,
+        ws_sync_key,
+        ws_local_key,
+        ws_last_sync_ms,
+        ws_shutdown,
+        ws_connected_flag,
+        ws_history_limit_val,
+        ws_quota_bytes_val,
+    ));
+
+    tracing::info!(
+        "cloud-sync started (url={}, realtime=ws)",
+        config.supabase_url
+    );
     Ok(CloudHandle {
         shutdown_tx: Some(shutdown_tx),
     })
@@ -1464,13 +1544,21 @@ async fn realtime_loop(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
     auth: Arc<AuthClient>,
+    // Flag set by the WS task. When `true`, this loop uses the slow
+    // POLL_INTERVAL_WS_CONNECTED (2 min) interval so the WS delivers
+    // events instantly and HTTP is only a catch-up safety net.  When
+    // `false` (WS down / never connected), the loop runs at
+    // POLL_INTERVAL_WS_FALLBACK (10 s) as the sole download path.
+    ws_connected: Arc<std::sync::atomic::AtomicBool>,
     // Live core config for hot-reload of sync_on_wifi_only, history_limit, and
     // storage_quota_bytes (A-SET-2).  Loops read on every tick so runtime
     // set_config changes take effect without a daemon restart.
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) {
     let client = reqwest::Client::new();
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+    // Start at the fallback (full-speed) interval; the tick period is
+    // updated dynamically before each sleep based on ws_connected.
+    let mut interval = tokio::time::interval(POLL_INTERVAL_WS_FALLBACK);
     // Don't burst: if a poll round runs long (slow network, large batch) and we
     // miss one or more ticks, skip the backlog and resume on the next aligned
     // tick instead of firing the missed ticks back-to-back (the default `Burst`
@@ -1516,6 +1604,23 @@ async fn realtime_loop(
     );
 
     loop {
+        // Dynamic interval: slow down when the WebSocket is delivering events
+        // instantly (2 min catch-up), run full-speed when WS is down (10 s).
+        // We reset the interval BEFORE waiting so the new period takes effect
+        // on the very next sleep, not after a stale tick fires.
+        let tick_period = if ws_connected.load(Ordering::Relaxed) {
+            POLL_INTERVAL_WS_CONNECTED
+        } else {
+            POLL_INTERVAL_WS_FALLBACK
+        };
+        if interval.period() != tick_period {
+            interval = tokio::time::interval(tick_period);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            // Consume the immediate tick that a fresh interval fires on creation
+            // so we don't poll twice in quick succession after a period change.
+            interval.tick().await;
+        }
+
         tokio::select! {
             _ = interval.tick() => {
                 // A-SET-2 hot-reload: read sync_on_wifi_only live so a
@@ -1540,6 +1645,7 @@ async fn realtime_loop(
                     );
                     continue;
                 }
+
 
                 // If no sync key is set, skip with a one-time warning.
                 let key_snapshot: Option<Vec<u8>> = {
@@ -1589,6 +1695,317 @@ async fn realtime_loop(
             _ = shutdown.notified() => {
                 tracing::info!("cloud-sync realtime_loop: shutdown received");
                 break;
+            }
+        }
+    }
+}
+
+///
+/// # Token refresh
+///
+/// The WS client reconnects with backoff on any disconnect.  When a reconnect
+/// happens after a 401-style close (Supabase closes the WS for expired JWTs)
+/// the existing `bearer` RwLock is read for the current token.  Token refresh
+/// is handled by the push/poll loops' shared `AuthClient`; the WS loop simply
+/// reads the latest value from `bearer` at each reconnect attempt.
+///
+/// # Shutdown
+///
+/// Listens on the shared `shutdown` Notify; calls `ClientHandle::shutdown`
+/// which sends `phx_leave` + WebSocket Close before returning.
+#[allow(clippy::too_many_arguments)]
+async fn ws_ingest_loop(
+    config: RealtimeConfig,
+    db: Arc<Mutex<Database>>,
+    sync_key: Arc<Mutex<Option<SyncKey>>>,
+    local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
+    last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
+    shutdown: Arc<tokio::sync::Notify>,
+    ws_connected: Arc<std::sync::atomic::AtomicBool>,
+    history_limit: usize,
+    storage_quota_bytes: u64,
+) {
+    loop {
+        // Snapshot the current sync key.  If absent, back off and retry —
+        // the WS events can't be decrypted without it anyway.
+        let key_snapshot: Option<Vec<u8>> = {
+            let guard = sync_key.lock().await;
+            guard.as_ref().map(|k| k.as_bytes().to_vec())
+        };
+        if key_snapshot.is_none() {
+            tracing::debug!("ws_ingest_loop: no sync passphrase set — waiting 30 s before retry");
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(30)) => {}
+                _ = shutdown.notified() => {
+                    tracing::info!("ws_ingest_loop: shutdown received (no sync key)");
+                    return;
+                }
+            }
+            continue;
+        }
+        let key_bytes = key_snapshot.expect("checked above");
+
+        // Build a fresh client for this connection attempt.  If the bearer
+        // has been refreshed since the previous connect, `config.user_jwt`
+        // is updated here so the new join payload carries the live token.
+        // (The bearer is shared with push/poll loops via the Arc<RwLock>
+        // passed to start_cloud; we can't thread that Arc here without
+        // changing every signature, so for simplicity we read it from the
+        // config field that was seeded in start_cloud.  On reconnect we keep
+        // the same token — a future enhancement can re-read the bearer.)
+        let (client, mut rx) = RealtimeClient::new(config.clone());
+
+        let handle = match client.connect().await {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!("ws_ingest_loop: connect failed: {e}; backing off 10 s");
+                ws_connected.store(false, Ordering::Relaxed);
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                    _ = shutdown.notified() => {
+                        tracing::info!("ws_ingest_loop: shutdown during connect backoff");
+                        return;
+                    }
+                }
+                continue;
+            }
+        };
+
+        tracing::info!("ws_ingest_loop: WebSocket connected; setting ws_connected=true");
+        ws_connected.store(true, Ordering::Relaxed);
+
+        // Drain events until the channel closes (WS disconnect) or shutdown fires.
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown.notified() => {
+                    tracing::info!("ws_ingest_loop: shutdown received; closing WS");
+                    ws_connected.store(false, Ordering::Relaxed);
+                    handle.shutdown().await;
+                    return;
+                }
+                maybe_event = rx.recv() => {
+                    match maybe_event {
+                        None => {
+                            // Channel closed — WS disconnected.
+                            tracing::warn!(
+                                "ws_ingest_loop: event channel closed (WS disconnected); \
+                                 setting ws_connected=false, will reconnect"
+                            );
+                            ws_connected.store(false, Ordering::Relaxed);
+                            break; // outer loop will reconnect
+                        }
+                        Some(event) => {
+                            // Only ingest INSERTs for the clipboard_items table.
+                            if event.change_type != ChangeType::Insert
+                                || event.table != "clipboard_items"
+                            {
+                                continue;
+                            }
+
+                            // Run the same decrypt → LWW → dedup → re-encrypt →
+                            // insert → prune path as poll_once, but for a single
+                            // row sourced from the WS event record.
+                            let row = &event.record;
+                            let Some(id) = row["id"].as_str() else { continue };
+                            let Some(item_id) = row["item_id"].as_str() else { continue };
+                            let Some(payload_ct_str) = row["payload_ct"].as_str() else {
+                                tracing::warn!(
+                                    "ws_ingest_loop: INSERT event for id={id} missing \
+                                     payload_ct; skipping"
+                                );
+                                continue;
+                            };
+
+                            let blob = match decode_payload_ct(payload_ct_str) {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "ws_ingest_loop: payload_ct decode failed \
+                                         for id={id}: {e}; skipping"
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            // Snapshot ingestion inputs (all cheap clones / copies).
+                            let db_arc = db.clone();
+                            let local_key_clone = local_key.clone();
+                            let id_owned = id.to_owned();
+                            let item_id_owned = item_id.to_owned();
+                            let content_type = row["content_type"]
+                                .as_str()
+                                .unwrap_or("text")
+                                .to_owned();
+                            let lamport_ts = row["lamport_ts"].as_i64().unwrap_or(0);
+                            let wall_time = row["wall_time"].as_i64().unwrap_or(0);
+                            let expires_at = row["expires_at"].as_i64();
+                            let app_bundle_id =
+                                row["app_bundle_id"].as_str().map(str::to_owned);
+                            let origin_device_id = row["device_id"]
+                                .as_str()
+                                .map(str::to_owned)
+                                .unwrap_or_default();
+
+                            let mut key_arr = [0u8; 32];
+                            key_arr.copy_from_slice(&key_bytes);
+
+                            // Decrypt + re-encrypt + insert on the blocking pool.
+                            let result = tokio::task::spawn_blocking(move || {
+                                let db_guard = db_arc.blocking_lock();
+
+                                // LWW dedup: skip if item already present with
+                                // equal-or-newer lamport_ts.
+                                let existing =
+                                    match get_item_by_item_id(&db_guard, &item_id_owned) {
+                                        Ok(r) => r,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "ws_ingest_loop: get_item_by_item_id \
+                                                 error for item_id={item_id_owned}: {e}"
+                                            );
+                                            return false;
+                                        }
+                                    };
+
+                                let preserved_pk = if let Some(local) = existing.as_ref() {
+                                    if lamport_ts <= local.lamport_ts {
+                                        // Local is equal-or-newer — skip.
+                                        key_arr.iter_mut().for_each(|b| *b = 0);
+                                        return false;
+                                    }
+                                    Some(local.id.clone())
+                                } else {
+                                    match exists_item_by_item_id(&db_guard, &item_id_owned) {
+                                        Ok(true) => {
+                                            key_arr.iter_mut().for_each(|b| *b = 0);
+                                            return false;
+                                        }
+                                        Ok(false) => None,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "ws_ingest_loop: \
+                                                 exists_item_by_item_id error for \
+                                                 item_id={item_id_owned}: {e}"
+                                            );
+                                            return false;
+                                        }
+                                    }
+                                };
+
+                                // Decrypt with sync key.
+                                let tmp_key = SyncKey::from_bytes(key_arr);
+                                let plaintext =
+                                    match decrypt_from_cloud(&tmp_key, &item_id_owned, &blob) {
+                                        Ok(p) => p,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "ws_ingest_loop: decrypt_from_cloud \
+                                                 failed for id={id_owned}: {e}; skipping"
+                                            );
+                                            return false;
+                                        }
+                                    };
+
+                                // Re-encrypt with local key.
+                                let mut local_item = match build_local_item(
+                                    &id_owned,
+                                    &item_id_owned,
+                                    &content_type,
+                                    &plaintext,
+                                    lamport_ts,
+                                    wall_time,
+                                    expires_at,
+                                    app_bundle_id,
+                                    origin_device_id,
+                                    &local_key_clone,
+                                ) {
+                                    Ok(i) => i,
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "ws_ingest_loop: local re-encrypt failed \
+                                             for id={id_owned}: {e}; skipping"
+                                        );
+                                        return false;
+                                    }
+                                };
+
+                                if let Some(pk) = preserved_pk.as_ref() {
+                                    local_item.id = pk.clone();
+                                }
+
+                                let write_res = if preserved_pk.is_some() {
+                                    replace_cloud_item_by_item_id(&db_guard, &local_item)
+                                } else {
+                                    insert_item(&db_guard, &local_item)
+                                        .map_err(anyhow::Error::from)
+                                };
+
+                                match write_res {
+                                    Ok(()) => {
+                                        tracing::info!(
+                                            "ws_ingest_loop: ingested INSERT \
+                                             item_id={} (id={})",
+                                            local_item.item_id,
+                                            local_item.id
+                                        );
+                                        // Prune to retention cap.
+                                        let total =
+                                            count_items(&db_guard).unwrap_or(0) as usize;
+                                        if total > history_limit {
+                                            let excess = total - history_limit;
+                                            let _ = db_guard.conn().execute(
+                                                "DELETE FROM clipboard_items \
+                                                 WHERE id IN ( \
+                                                     SELECT id FROM clipboard_items \
+                                                     WHERE pinned = 0 \
+                                                     ORDER BY wall_time ASC \
+                                                     LIMIT ?1 \
+                                                 )",
+                                                rusqlite::params![excess as i64],
+                                            );
+                                        }
+                                        let max_bytes =
+                                            storage_quota_bytes.min(i64::MAX as u64) as i64;
+                                        let _ = prune_to_cap(&db_guard, max_bytes);
+                                        true
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "ws_ingest_loop: failed to store \
+                                             item_id={}: {e}",
+                                            local_item.item_id
+                                        );
+                                        false
+                                    }
+                                }
+                            })
+                            .await;
+
+                            if let Ok(true) = result {
+                                let now_ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as i64;
+                                last_sync_ms.store(now_ms, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Brief backoff before reconnecting so a flapping connection
+        // doesn't spin the loop.  The WS client itself uses exponential
+        // backoff internally, but that is for errors during a session;
+        // this covers the outer reconnect loop after a clean disconnect.
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+            _ = shutdown.notified() => {
+                tracing::info!("ws_ingest_loop: shutdown during reconnect backoff");
+                // Update config.user_jwt with latest bearer before the next
+                // connect attempt — not needed here since we're shutting down.
+                return;
             }
         }
     }

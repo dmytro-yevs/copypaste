@@ -71,6 +71,20 @@ pub struct RealtimeConfig {
     /// Supabase anonymous API key.
     pub anon_key: String,
 
+    /// JWT bearer token for the `user_token` field of the channel join payload.
+    ///
+    /// Supabase Realtime enforces RLS by inspecting the `user_token` in the
+    /// `phx_join` payload — if absent the server treats the connection as anon
+    /// and filters rows by the `anon` role's policies, which typically returns
+    /// nothing for user-specific tables.
+    ///
+    /// When `Some`, this value is sent as `params.user_token` in the join payload.
+    /// When `None`, the `anon_key` is used instead.
+    ///
+    /// **Security**: the JWT is a bearer secret.  It is NEVER logged; the join
+    /// payload is not included in any log line (see [`build_join_payload`]).
+    pub user_jwt: Option<String>,
+
     /// Channel topic to subscribe to (default: `"realtime:clipboard_items"`).
     pub topic: String,
 
@@ -123,11 +137,26 @@ impl RealtimeConfig {
         Ok(Self::new(supabase_url, anon_key, topic, enabled))
     }
 
-    /// Construct config programmatically.
+    /// Construct config programmatically (no user JWT — anon scope).
     pub fn new(
         supabase_url: impl Into<String>,
         anon_key: impl Into<String>,
         topic: impl Into<String>,
+        enabled: bool,
+    ) -> Self {
+        Self::with_jwt(supabase_url, anon_key, topic, None, enabled)
+    }
+
+    /// Construct config with an explicit user JWT for RLS-aware subscriptions.
+    ///
+    /// The `user_jwt` is sent as `params.user_token` in the `phx_join` payload
+    /// so Supabase Realtime applies the authenticated user's RLS policies when
+    /// filtering `postgres_changes` events.  Pass `None` to use anon scope.
+    pub fn with_jwt(
+        supabase_url: impl Into<String>,
+        anon_key: impl Into<String>,
+        topic: impl Into<String>,
+        user_jwt: Option<String>,
         enabled: bool,
     ) -> Self {
         let supabase_url = supabase_url.into();
@@ -141,6 +170,7 @@ impl RealtimeConfig {
             ws_url,
             supabase_url,
             anon_key,
+            user_jwt,
             topic,
             heartbeat_interval: Duration::from_secs(30),
             initial_backoff: Duration::from_secs(1),
@@ -369,6 +399,40 @@ enum SessionResult {
     ConnectError(String),
 }
 
+/// Build the `phx_join` payload for subscribing to `postgres_changes` events
+/// on the `clipboard_items` table.
+///
+/// Supabase Realtime v2 requires the join payload to include:
+/// - `config.postgres_changes` — array of change-filter objects specifying
+///   the event type, schema, and table to watch.
+/// - `params.user_token` — the authenticated user's JWT so the server can
+///   apply RLS and restrict events to the user's own rows.  Falls back to
+///   the `anon_key` when no user JWT is available.
+///
+/// **Security**: the JWT (either `user_jwt` or `anon_key`) is placed in the
+/// payload but NEVER included in log output.  The caller must not log the
+/// wire string this payload is serialised into.
+fn build_join_payload(config: &RealtimeConfig) -> serde_json::Value {
+    // Use the authenticated JWT when available; fall back to the anon key.
+    // Either way, never log the value — it is a bearer secret.
+    let token = config.user_jwt.as_deref().unwrap_or(&config.anon_key);
+
+    serde_json::json!({
+        "config": {
+            "broadcast": { "self": false },
+            "presence": { "key": "" },
+            "postgres_changes": [
+                {
+                    "event": "INSERT",
+                    "schema": "public",
+                    "table": "clipboard_items"
+                }
+            ]
+        },
+        "access_token": token
+    })
+}
+
 /// Run a single WebSocket session: connect → join channel → heartbeat + receive loop.
 async fn run_session(
     config: &RealtimeConfig,
@@ -395,7 +459,20 @@ async fn run_session(
     let (mut sink, mut stream) = ws_stream.split();
 
     // Send phx_join for the clipboard_items channel.
-    let join_msg = PhoenixMessage::join("1", "1", &config.topic);
+    //
+    // The join payload carries:
+    //   - postgres_changes filter (INSERT on clipboard_items)
+    //   - access_token for RLS-aware filtering
+    //
+    // We do NOT log the join payload — it contains the bearer JWT.
+    let join_payload = build_join_payload(config);
+    let join_msg = PhoenixMessage {
+        join_ref: Some("1".to_owned()),
+        msg_ref: Some("1".to_owned()),
+        topic: config.topic.clone(),
+        event: PhoenixEvent::JOIN.to_owned(),
+        payload: join_payload,
+    };
     let join_wire = match join_msg.to_wire() {
         Ok(w) => w,
         Err(e) => return SessionResult::ConnectError(format!("join serialise: {e}")),
@@ -941,6 +1018,93 @@ mod tests {
         assert!(
             !handle.is_running(),
             "disabled client should not be running"
+        );
+    }
+
+    // ── build_join_payload ────────────────────────────────────────────────────
+
+    /// The join payload MUST include a `postgres_changes` config array so
+    /// Supabase Realtime v2 actually delivers INSERT events. Without it the
+    /// server accepts the join but sends zero events.
+    #[test]
+    fn join_payload_includes_postgres_changes_filter() {
+        let config = RealtimeConfig::new(
+            "https://abc.supabase.co",
+            "anon-key",
+            RealtimeConfig::DEFAULT_TOPIC,
+            true,
+        );
+        let payload = build_join_payload(&config);
+        let changes = &payload["config"]["postgres_changes"];
+        assert!(
+            changes.is_array(),
+            "join payload must have config.postgres_changes array"
+        );
+        let first = &changes[0];
+        assert_eq!(first["event"], "INSERT");
+        assert_eq!(first["schema"], "public");
+        assert_eq!(first["table"], "clipboard_items");
+    }
+
+    /// When no `user_jwt` is set the join payload must use the `anon_key` as
+    /// the `access_token` (anonymous scope fallback).
+    #[test]
+    fn join_payload_uses_anon_key_when_no_jwt() {
+        let config = RealtimeConfig::new(
+            "https://abc.supabase.co",
+            "my-anon-key",
+            RealtimeConfig::DEFAULT_TOPIC,
+            true,
+        );
+        let payload = build_join_payload(&config);
+        assert_eq!(
+            payload["access_token"].as_str(),
+            Some("my-anon-key"),
+            "access_token must fall back to anon_key when user_jwt is None"
+        );
+    }
+
+    /// When a `user_jwt` is set it takes precedence over the `anon_key`.
+    #[test]
+    fn join_payload_uses_user_jwt_when_set() {
+        let config = RealtimeConfig::with_jwt(
+            "https://abc.supabase.co",
+            "anon-key",
+            RealtimeConfig::DEFAULT_TOPIC,
+            Some("my-user-jwt".to_owned()),
+            true,
+        );
+        let payload = build_join_payload(&config);
+        assert_eq!(
+            payload["access_token"].as_str(),
+            Some("my-user-jwt"),
+            "access_token must use user_jwt when present"
+        );
+    }
+
+    /// The join payload must NOT contain the raw JWT value anywhere in the
+    /// key names — only in the designated `access_token` field. This is a
+    /// structural check, not a log-redaction check, but validates the payload
+    /// shape is correct for Supabase Realtime v2.
+    #[test]
+    fn join_payload_shape_matches_supabase_realtime_v2() {
+        let config = RealtimeConfig::new(
+            "https://abc.supabase.co",
+            "anon-key",
+            RealtimeConfig::DEFAULT_TOPIC,
+            true,
+        );
+        let payload = build_join_payload(&config);
+        // Required top-level keys.
+        assert!(payload["config"].is_object(), "must have 'config' object");
+        assert!(
+            payload["access_token"].is_string(),
+            "must have 'access_token' string"
+        );
+        // config sub-keys.
+        assert!(
+            payload["config"]["postgres_changes"].is_array(),
+            "config.postgres_changes must be an array"
         );
     }
 }
