@@ -15,6 +15,13 @@ pub enum ItemsError {
     /// An item carried a `key_version` outside the supported HKDF family set {1, 2}.
     #[error("unsupported key_version {0}; expected 1 or 2")]
     UnsupportedKeyVersion(u8),
+    /// The `key_version` column contains a value that does not fit in `u8`
+    /// (valid range 1–255). Surfaced instead of silently truncating so callers
+    /// can distinguish a corrupt/forward-compat row from a known key version.
+    #[error(
+        "key_version {0} is out of range (must fit in u8); row is corrupt or from a future version"
+    )]
+    CorruptKeyVersion(i64),
 }
 
 /// Validate that an item's `key_version` is a known HKDF family before it is
@@ -365,7 +372,9 @@ pub fn find_recent_by_hash(
     now_ms: i64,
     within_ms: i64,
 ) -> Result<Option<String>, ItemsError> {
-    let cutoff = now_ms - within_ms;
+    // Use saturating_sub for consistency with `delete_sensitive_expired` and to
+    // avoid a debug-mode panic when now_ms < within_ms (e.g. now_ms=0, within_ms=i64::MAX).
+    let cutoff = now_ms.saturating_sub(within_ms);
     let result = db.conn().query_row(
         "SELECT id FROM clipboard_items
          WHERE content_hash = ?1 AND wall_time >= ?2
@@ -506,6 +515,13 @@ pub fn get_item_by_id(db: &Database, id: &str) -> Result<Option<ClipboardItem>, 
     match result {
         Ok(item) => Ok(Some(item)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        // row_to_item emits IntegralValueOutOfRange(14, v) when key_version
+        // does not fit in u8 — re-surface as the typed CorruptKeyVersion
+        // variant so callers can distinguish schema corruption from other
+        // SQLite errors.
+        Err(rusqlite::Error::IntegralValueOutOfRange(14, v)) => {
+            Err(ItemsError::CorruptKeyVersion(v))
+        }
         Err(e) => Err(ItemsError::Sqlite(e)),
     }
 }
@@ -986,10 +1002,13 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
         app_bundle_id: row.get(11)?,
         content_hash: row.get(12)?,
         origin_device_id: row.get(13)?,
-        // Fix 6: use try_from to detect out-of-range values instead of silently truncating.
-        // key_version is a u8 field; values > 255 would silently truncate with `as u8`.
-        // On error (unexpected DB value) fall back to 0 so the caller can handle it gracefully.
-        key_version: u8::try_from(row.get::<_, i64>(14)?).unwrap_or(0),
+        key_version: {
+            let kv: i64 = row.get(14)?;
+            // Propagate a real error rather than silently truncating an
+            // out-of-range value: `999i64 as u8` would yield 231, masking
+            // corruption or a forward-compat row from a newer schema version.
+            u8::try_from(kv).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(14, kv))?
+        },
         pinned: row.get::<_, i64>(15)? != 0,
     })
 }
@@ -1787,6 +1806,46 @@ mod tests {
         let page = get_page_pinned_first(&db, 10, 0).unwrap();
         assert_eq!(page[0].id, id_a, "bumped item must appear at the top");
         assert_eq!(page[0].wall_time, 999);
+    }
+
+    /// Fix 4: `find_recent_by_hash` must not overflow when `now_ms < within_ms`
+    /// (e.g. now_ms=0 and within_ms=i64::MAX). Before the fix, the subtraction
+    /// `now_ms - within_ms` panics in debug builds.
+    #[test]
+    fn find_recent_by_hash_cutoff_no_overflow() {
+        let db = Database::open_in_memory().unwrap();
+        // now_ms=0, within_ms=i64::MAX → would overflow without saturating_sub.
+        let result = find_recent_by_hash(&db, "anyhash", 0, i64::MAX);
+        assert!(
+            result.is_ok(),
+            "must not panic or error on underflowing cutoff"
+        );
+        assert!(result.unwrap().is_none(), "empty db returns None");
+    }
+
+    /// Fix 3: `row_to_item` must return `CorruptKeyVersion` for out-of-range
+    /// key_version values (e.g. 999 does not fit in u8 without silent truncation).
+    #[test]
+    fn row_to_item_corrupt_key_version_returns_error() {
+        let db = Database::open_in_memory().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        // Insert a row with key_version=999 directly via SQL, bypassing insert_item's
+        // ITEM_KEY_VERSION_CURRENT stamp.
+        db.conn()
+            .execute(
+                "INSERT INTO clipboard_items
+                 (id, item_id, content_type, content, content_nonce, blob_ref,
+                  is_sensitive, is_synced, lamport_ts, wall_time, expires_at,
+                  app_bundle_id, content_hash, origin_device_id, key_version, pinned)
+                 VALUES (?1,?2,'text',NULL,NULL,NULL,0,0,1,1,NULL,NULL,NULL,'',999,0)",
+                rusqlite::params![id, uuid::Uuid::new_v4().to_string()],
+            )
+            .unwrap();
+        let result = get_item_by_id(&db, &id);
+        assert!(
+            matches!(result, Err(ItemsError::CorruptKeyVersion(999))),
+            "expected CorruptKeyVersion(999), got: {result:?}"
+        );
     }
 
     /// `find_recent_by_hash` finds a matching row when the window is wide open.
