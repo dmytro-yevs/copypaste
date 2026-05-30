@@ -4,6 +4,7 @@ package com.copypaste.android
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -28,11 +29,21 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BookmarkAdded
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -42,6 +53,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -50,6 +62,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,7 +95,10 @@ import java.util.Date
  *   - Dark Darcula background (#2b2d30 surface, #1e1f22 list bg)
  *   - Rows: left-aligned type icon + text preview (13 sp) + right faint timestamp
  *   - Thin dividers between rows (no card elevation)
- *   - Long-press reveals delete action (avoids permanent delete icon on every row)
+ *   - Long-press reveals delete/pin actions (avoids permanent icons on every row)
+ *   - Pinned items shown first, with a pin indicator icon
+ *   - Bulk multi-select mode: long-press enters selection, contextual top bar
+ *   - Clear All / Clear Unpinned in overflow menu with confirmation dialog
  */
 class HistoryActivity : ComponentActivity() {
 
@@ -109,6 +125,12 @@ class HistoryActivity : ComponentActivity() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Confirmation dialog enum — tracks which destructive action is pending
+// ─────────────────────────────────────────────────────────────────────────────
+
+private enum class ConfirmAction { CLEAR_ALL, CLEAR_UNPINNED, DELETE_SELECTED }
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Screen
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -127,6 +149,31 @@ fun HistoryScreen(
     val loadErrorTemplate = stringResource(R.string.error_load_history)
     val dismissLabel = stringResource(R.string.snackbar_dismiss)
 
+    // ── Selection state ──────────────────────────────────────────────────────
+    // rememberSaveable so it survives recomposition but resets on back-stack pop.
+    var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(setOf<String>()) }
+
+    // ── Confirmation dialog state ────────────────────────────────────────────
+    var pendingConfirm by remember { mutableStateOf<ConfirmAction?>(null) }
+
+    // ── Overflow menu state ──────────────────────────────────────────────────
+    var overflowExpanded by remember { mutableStateOf(false) }
+
+    // Sort: pinned items first, then by recency (descending wallTimeMs)
+    val sortedItems = remember(items) {
+        items.sortedWith(
+            compareByDescending<ClipboardItem> { it.pinned }
+                .thenByDescending { it.wallTimeMs }
+        )
+    }
+
+    // Exit selection mode when navigating back
+    BackHandler(enabled = selectionMode) {
+        selectionMode = false
+        selectedIds = emptySet()
+    }
+
     LaunchedEffect(Unit) { viewModel.loadItems() }
 
     LaunchedEffect(error) {
@@ -138,70 +185,346 @@ fun HistoryScreen(
         viewModel.clearError()
     }
 
+    // ── Confirmation dialog ──────────────────────────────────────────────────
+    pendingConfirm?.let { action ->
+        ConfirmationDialog(
+            action = action,
+            itemCount = when (action) {
+                ConfirmAction.CLEAR_ALL -> items.size
+                ConfirmAction.CLEAR_UNPINNED -> items.count { !it.pinned }
+                ConfirmAction.DELETE_SELECTED -> selectedIds.size
+            },
+            onConfirm = {
+                pendingConfirm = null
+                when (action) {
+                    ConfirmAction.CLEAR_ALL -> viewModel.clearAll()
+                    ConfirmAction.CLEAR_UNPINNED -> viewModel.clearUnpinned()
+                    ConfirmAction.DELETE_SELECTED -> {
+                        viewModel.deleteItems(selectedIds.toList())
+                        selectionMode = false
+                        selectedIds = emptySet()
+                    }
+                }
+            },
+            onDismiss = { pendingConfirm = null },
+        )
+    }
+
     Scaffold(
         modifier = modifier,
         containerColor = IdeBg,
         topBar = {
-            // ── Compact IDE-style header (44 dp, matches macOS ViewShell h-11) ──
-            TopAppBar(
-                // Title uses titleLarge, which the theme overrides to 14 sp to
-                // match the compact IDE bar (default Material titleLarge is 22 sp).
-                title = {
-                    Text(
-                        text = stringResource(R.string.title_history),
-                        style = MaterialTheme.typography.titleLarge,
-                        color = IdeText,
-                    )
-                },
-                navigationIcon = {
-                    if (showBackButton) {
-                        IconButton(onClick = onBack) {
+            if (selectionMode) {
+                // ── Contextual selection top bar ─────────────────────────────
+                SelectionTopBar(
+                    selectedCount = selectedIds.size,
+                    totalCount = sortedItems.size,
+                    onClose = {
+                        selectionMode = false
+                        selectedIds = emptySet()
+                    },
+                    onSelectAll = {
+                        selectedIds = if (selectedIds.size == sortedItems.size) {
+                            emptySet()
+                        } else {
+                            sortedItems.map { it.id }.toSet()
+                        }
+                    },
+                    onDeleteSelected = {
+                        if (selectedIds.isNotEmpty()) {
+                            pendingConfirm = ConfirmAction.DELETE_SELECTED
+                        }
+                    },
+                    onPinSelected = {
+                        // Pin all selected that are not yet pinned
+                        selectedIds.forEach { id ->
+                            val item = sortedItems.find { it.id == id }
+                            if (item != null && !item.pinned) {
+                                viewModel.setPinned(id, true)
+                            }
+                        }
+                        selectionMode = false
+                        selectedIds = emptySet()
+                    },
+                    onUnpinSelected = {
+                        // Unpin all selected that are pinned
+                        selectedIds.forEach { id ->
+                            val item = sortedItems.find { it.id == id }
+                            if (item != null && item.pinned) {
+                                viewModel.setPinned(id, false)
+                            }
+                        }
+                        selectionMode = false
+                        selectedIds = emptySet()
+                    },
+                )
+            } else {
+                // ── Normal top bar ───────────────────────────────────────────
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = stringResource(R.string.title_history),
+                            style = MaterialTheme.typography.titleLarge,
+                            color = IdeText,
+                        )
+                    },
+                    navigationIcon = {
+                        if (showBackButton) {
+                            IconButton(onClick = onBack) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = stringResource(R.string.cd_back),
+                                    tint = IdeDim,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { viewModel.loadItems() }) {
                             Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(R.string.cd_back),
+                                Icons.Filled.Refresh,
+                                contentDescription = stringResource(R.string.cd_refresh),
                                 tint = IdeDim,
                                 modifier = Modifier.size(18.dp),
                             )
                         }
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { viewModel.loadItems() }) {
-                        Icon(
-                            Icons.Filled.Refresh,
-                            contentDescription = stringResource(R.string.cd_refresh),
-                            tint = IdeDim,
-                            modifier = Modifier.size(18.dp),
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor       = IdePanel,
-                    titleContentColor    = IdeText,
-                    actionIconContentColor = IdeDim,
-                    navigationIconContentColor = IdeDim,
-                ),
-                // Apply the status-bar / display-cutout inset as TOP PADDING so the
-                // bar's content sits *below* the notch, never under it. We must NOT
-                // pin a fixed total height here (that was the bug: a hard 44 dp
-                // clipped the header on notched phones because the inset ate into
-                // it). The bar now measures as (status-bar inset + compact content)
-                // and the default M3 TopAppBar height keeps it visually compact.
-                windowInsets = TopAppBarDefaults.windowInsets,
-            )
+                        // Overflow menu: Clear All / Clear Unpinned
+                        if (items.isNotEmpty()) {
+                            Box {
+                                IconButton(onClick = { overflowExpanded = true }) {
+                                    Icon(
+                                        Icons.Filled.MoreVert,
+                                        contentDescription = null,
+                                        tint = IdeDim,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = overflowExpanded,
+                                    onDismissRequest = { overflowExpanded = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                stringResource(R.string.action_clear_all),
+                                                color = IdeDanger,
+                                            )
+                                        },
+                                        leadingIcon = {
+                                            Icon(
+                                                Icons.Filled.DeleteSweep,
+                                                contentDescription = null,
+                                                tint = IdeDanger,
+                                            )
+                                        },
+                                        onClick = {
+                                            overflowExpanded = false
+                                            pendingConfirm = ConfirmAction.CLEAR_ALL
+                                        },
+                                    )
+                                    val unpinnedCount = items.count { !it.pinned }
+                                    if (unpinnedCount > 0) {
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    stringResource(R.string.action_clear_unpinned),
+                                                    color = IdeText,
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Filled.Delete,
+                                                    contentDescription = null,
+                                                    tint = IdeDim,
+                                                )
+                                            },
+                                            onClick = {
+                                                overflowExpanded = false
+                                                pendingConfirm = ConfirmAction.CLEAR_UNPINNED
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = IdePanel,
+                        titleContentColor = IdeText,
+                        actionIconContentColor = IdeDim,
+                        navigationIconContentColor = IdeDim,
+                    ),
+                    // Apply the status-bar / display-cutout inset as TOP PADDING so the
+                    // bar's content sits *below* the notch, never under it.
+                    windowInsets = TopAppBarDefaults.windowInsets,
+                )
+            }
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
     ) { innerPadding ->
         when {
             loading -> LoadingBox(innerPadding)
-            items.isEmpty() -> EmptyState(innerPadding)
+            sortedItems.isEmpty() -> EmptyState(innerPadding)
             else -> HistoryList(
-                items = items,
+                items = sortedItems,
                 padding = innerPadding,
+                selectionMode = selectionMode,
+                selectedIds = selectedIds,
                 onDelete = { id -> viewModel.deleteItem(id) },
+                onSetPinned = { id, pinned -> viewModel.setPinned(id, pinned) },
+                onLongPress = { id ->
+                    // Long-press on a row: enter selection mode and select this item
+                    selectionMode = true
+                    selectedIds = setOf(id)
+                },
+                onToggleSelect = { id ->
+                    selectedIds = if (selectedIds.contains(id)) {
+                        selectedIds - id
+                    } else {
+                        selectedIds + id
+                    }
+                    // Auto-exit selection mode when last item deselected
+                    if (selectedIds.isEmpty()) {
+                        selectionMode = false
+                    }
+                },
             )
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Contextual selection top bar
+// ─────────────────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SelectionTopBar(
+    selectedCount: Int,
+    totalCount: Int,
+    onClose: () -> Unit,
+    onSelectAll: () -> Unit,
+    onDeleteSelected: () -> Unit,
+    onPinSelected: () -> Unit,
+    onUnpinSelected: () -> Unit,
+) {
+    TopAppBar(
+        title = {
+            Text(
+                text = stringResource(R.string.selection_count, selectedCount),
+                style = MaterialTheme.typography.titleLarge,
+                color = IdeText,
+            )
+        },
+        navigationIcon = {
+            IconButton(onClick = onClose) {
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = stringResource(R.string.cd_close_selection),
+                    tint = IdeDim,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        },
+        actions = {
+            // Toggle select-all / deselect-all
+            val allSelected = selectedCount == totalCount && totalCount > 0
+            IconButton(onClick = onSelectAll) {
+                Icon(
+                    if (allSelected) Icons.Filled.CheckBox else Icons.Filled.CheckBoxOutlineBlank,
+                    contentDescription = stringResource(R.string.cd_select_all),
+                    tint = if (allSelected) IdeAccent else IdeDim,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            // Pin selected
+            if (selectedCount > 0) {
+                IconButton(onClick = onPinSelected) {
+                    Icon(
+                        Icons.Filled.BookmarkAdded,
+                        contentDescription = stringResource(R.string.action_pin_selected),
+                        tint = IdeAccent,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                // Unpin selected
+                IconButton(onClick = onUnpinSelected) {
+                    Icon(
+                        Icons.Filled.BookmarkBorder,
+                        contentDescription = stringResource(R.string.action_unpin_selected),
+                        tint = IdeDim,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                // Delete selected
+                IconButton(onClick = onDeleteSelected) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = stringResource(R.string.action_delete_selected),
+                        tint = IdeDanger,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = IdeSelection,
+            titleContentColor = IdeText,
+            actionIconContentColor = IdeDim,
+            navigationIconContentColor = IdeDim,
+        ),
+        windowInsets = TopAppBarDefaults.windowInsets,
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Confirmation dialog
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ConfirmationDialog(
+    action: ConfirmAction,
+    itemCount: Int,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val title = when (action) {
+        ConfirmAction.CLEAR_ALL -> stringResource(R.string.dialog_clear_all_title)
+        ConfirmAction.CLEAR_UNPINNED -> stringResource(R.string.dialog_clear_unpinned_title)
+        ConfirmAction.DELETE_SELECTED -> stringResource(R.string.dialog_delete_selected_title)
+    }
+    val message = when (action) {
+        ConfirmAction.CLEAR_ALL ->
+            stringResource(R.string.dialog_clear_all_message, itemCount)
+        ConfirmAction.CLEAR_UNPINNED ->
+            stringResource(R.string.dialog_clear_unpinned_message)
+        ConfirmAction.DELETE_SELECTED ->
+            stringResource(R.string.dialog_delete_selected_message, itemCount)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, color = IdeText) },
+        text = { Text(message, color = IdeDim) },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(
+                    stringResource(R.string.dialog_confirm),
+                    color = IdeDanger,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    stringResource(R.string.dialog_cancel),
+                    color = IdeDim,
+                )
+            }
+        },
+        containerColor = IdePanel,
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,7 +574,12 @@ private fun EmptyState(padding: PaddingValues) {
 private fun HistoryList(
     items: List<ClipboardItem>,
     padding: PaddingValues,
+    selectionMode: Boolean,
+    selectedIds: Set<String>,
     onDelete: (String) -> Unit,
+    onSetPinned: (String, Boolean) -> Unit,
+    onLongPress: (String) -> Unit,
+    onToggleSelect: (String) -> Unit,
 ) {
     val ctx = LocalContext.current
     val maskSensitive = remember { Settings(ctx).maskSensitiveContent }
@@ -268,7 +596,12 @@ private fun HistoryList(
             HistoryRow(
                 item = item,
                 maskSensitive = maskSensitive,
+                selectionMode = selectionMode,
+                isSelected = selectedIds.contains(item.id),
                 onDelete = onDelete,
+                onSetPinned = onSetPinned,
+                onLongPress = { onLongPress(item.id) },
+                onToggleSelect = { onToggleSelect(item.id) },
             )
             HorizontalDivider(
                 color = IdeBorder.copy(alpha = 0.5f),
@@ -280,10 +613,10 @@ private fun HistoryList(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Row — compact IDE-style, matching the macOS HistoryRow layout:
-//   [type-icon]  [preview text ─────────────────────]  [timestamp]  [actions on expand]
+//   [checkbox?] [pin?] [type-icon]  [preview ─────────────]  [timestamp]  [actions]
 //
-// Long-press toggles the action row (delete / copy) to avoid cluttering every
-// row with a permanent delete button.
+// Normal mode: long-press toggles action row (delete / copy / pin).
+// Selection mode: tap toggles checkbox; long-press is a no-op (already in mode).
 // ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -291,21 +624,27 @@ private fun HistoryList(
 private fun HistoryRow(
     item: ClipboardItem,
     maskSensitive: Boolean,
+    selectionMode: Boolean,
+    isSelected: Boolean,
     onDelete: (String) -> Unit,
+    onSetPinned: (String, Boolean) -> Unit,
+    onLongPress: () -> Unit,
+    onToggleSelect: () -> Unit,
 ) {
-    // Sensitivity is computed in the repository against the FULL decrypted
-    // plaintext (see ClipboardRepository.parseItem). The snippet here is a
-    // truncated/sanitized preview, so re-running detection on it would be both
-    // redundant and lossy — trust the flag set at load time.
+    // Sensitivity flag is set at load time against the full plaintext — trust it.
     val detectedSensitive = item.isSensitive
 
     var expanded by remember(item.id) { mutableStateOf(false) }
-    // Auto-collapse after 4 seconds of inactivity.
+    // Auto-collapse the action row after 4 s of inactivity.
     LaunchedEffect(expanded) {
         if (expanded) {
             delay(4_000L)
             expanded = false
         }
+    }
+    // Collapse action row when entering selection mode
+    LaunchedEffect(selectionMode) {
+        if (selectionMode) expanded = false
     }
 
     val maskString = stringResource(R.string.sensitive_preview_mask)
@@ -315,6 +654,7 @@ private fun HistoryRow(
         else -> item.snippet
     }
     val rowBg = when {
+        isSelected         -> IdeAccent.copy(alpha = 0.15f)
         expanded           -> IdeSelection
         detectedSensitive  -> IdeDanger.copy(alpha = 0.07f)
         else               -> Color.Transparent
@@ -325,8 +665,19 @@ private fun HistoryRow(
             .fillMaxWidth()
             .background(rowBg)
             .combinedClickable(
-                onClick = { /* single tap: no-op on the row itself */ },
-                onLongClick = { expanded = !expanded },
+                onClick = {
+                    if (selectionMode) {
+                        onToggleSelect()
+                    }
+                    // In normal mode single-tap is no-op on the row itself
+                },
+                onLongClick = {
+                    if (selectionMode) {
+                        // Already in selection mode — long-press is no-op
+                    } else {
+                        onLongPress()
+                    }
+                },
             )
             .padding(horizontal = 12.dp, vertical = 0.dp),
     ) {
@@ -334,10 +685,31 @@ private fun HistoryRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(36.dp),           // compact 36 dp row (macOS ~28–34 px range)
+                .height(36.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Start,
         ) {
+            // Checkbox (selection mode) or pin indicator (normal mode)
+            if (selectionMode) {
+                Icon(
+                    imageVector = if (isSelected) Icons.Filled.CheckBox
+                                  else Icons.Filled.CheckBoxOutlineBlank,
+                    contentDescription = null,
+                    tint = if (isSelected) IdeAccent else IdeDim,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+            } else if (item.pinned) {
+                // Small pin indicator for pinned items
+                Icon(
+                    imageVector = Icons.Filled.BookmarkAdded,
+                    contentDescription = stringResource(R.string.cd_pin_item),
+                    tint = IdeAccent.copy(alpha = 0.7f),
+                    modifier = Modifier.size(12.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+            }
+
             // Type icon glyph (16 dp, left-pinned like macOS)
             TypeIcon(
                 contentType = item.contentType,
@@ -360,7 +732,7 @@ private fun HistoryRow(
             Spacer(Modifier.width(8.dp))
 
             // Timestamp — right-aligned, faint (matches macOS group-hover:hidden)
-            if (!expanded) {
+            if (!expanded && !selectionMode) {
                 Text(
                     text = formatTime(item.wallTimeMs),
                     style = MaterialTheme.typography.bodyMedium,
@@ -370,8 +742,8 @@ private fun HistoryRow(
             }
         }
 
-        // ── Action row (visible on long-press) ───────────────────────────
-        if (expanded) {
+        // ── Action row (visible on long-press in normal mode) ────────────
+        if (expanded && !selectionMode) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -384,6 +756,13 @@ private fun HistoryRow(
                     style = MaterialTheme.typography.bodyMedium,
                     color = IdeFaint,
                     modifier = Modifier.weight(1f),
+                )
+                // Pin / Unpin toggle
+                ActionChip(
+                    label = if (item.pinned) stringResource(R.string.action_unpin)
+                            else stringResource(R.string.action_pin),
+                    danger = false,
+                    onClick = { onSetPinned(item.id, !item.pinned) },
                 )
                 ActionChip(
                     label = stringResource(R.string.cd_delete),

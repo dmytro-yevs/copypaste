@@ -71,6 +71,30 @@
     <string name="cd_refresh">Refresh</string>
     <string name="cd_delete">Delete item</string>
     <string name="cd_sensitive_icon">Sensitive content marker</string>
+    <string name="cd_pin_item">Pin item</string>
+    <string name="cd_unpin_item">Unpin item</string>
+    <string name="cd_select_all">Select all</string>
+    <string name="cd_close_selection">Close selection mode</string>
+
+    <!-- History — bulk / pin actions -->
+    <string name="action_pin">Pin</string>
+    <string name="action_unpin">Unpin</string>
+    <string name="action_clear_all">Clear All</string>
+    <string name="action_clear_unpinned">Clear Unpinned</string>
+    <string name="action_delete_selected">Delete selected</string>
+    <string name="action_pin_selected">Pin selected</string>
+    <string name="action_unpin_selected">Unpin selected</string>
+    <string name="selection_count">%1$d selected</string>
+
+    <!-- Confirmation dialogs -->
+    <string name="dialog_clear_all_title">Clear All History</string>
+    <string name="dialog_clear_all_message">This will permanently delete all %1$d clipboard items. This cannot be undone.</string>
+    <string name="dialog_clear_unpinned_title">Clear Unpinned Items</string>
+    <string name="dialog_clear_unpinned_message">This will permanently delete all unpinned clipboard items. Pinned items will be kept.</string>
+    <string name="dialog_delete_selected_title">Delete Selected</string>
+    <string name="dialog_delete_selected_message">This will permanently delete %1$d selected items. This cannot be undone.</string>
+    <string name="dialog_confirm">Delete</string>
+    <string name="dialog_cancel">Cancel</string>
 
     <!-- Error / status -->
     <string name="error_generic">Failed: %1$s</string>
@@ -78,6 +102,9 @@
     <string name="error_delete_item">Failed to delete item: %1$s</string>
     <string name="error_pairing">Pairing failed: %1$s</string>
     <string name="error_settings_save">Could not save setting: %1$s</string>
+    <string name="error_clear_all">Failed to clear history: %1$s</string>
+    <string name="error_set_pinned">Failed to update pin: %1$s</string>
+    <string name="error_delete_items">Failed to delete items: %1$s</string>
     <string name="status_pairing">Generating pairing token…</string>
     <string name="snackbar_dismiss">Dismiss</string>
 </resources>
