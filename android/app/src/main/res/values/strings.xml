@@ -41,6 +41,40 @@
     <string name="title_permissions">Permissions</string>
     <string name="permissions_intro">Review the status of each permission CopyPaste uses. Tap a button to re-open its request or settings screen at any time.</string>
 
+    <!-- Background Capture Setup screen -->
+    <string name="title_bg_capture_setup">Background Capture Setup</string>
+    <string name="setting_bg_capture_title">Background Capture Setup</string>
+    <string name="setting_bg_capture_subtitle">Grant overlay + battery exemption for reliable background clipboard reads</string>
+    <string name="bg_capture_intro">Android 10+ blocks clipboard reads from background apps. Enable the three steps below to unlock reliable capture — the same combination ClipCascade uses.</string>
+
+    <!-- Step 1: SYSTEM_ALERT_WINDOW -->
+    <string name="bg_capture_overlay_title">Draw Over Other Apps (Overlay)</string>
+    <string name="bg_capture_overlay_desc">Grants the app a minimal invisible overlay window. When the overlay is active the system considers the process focused, lifting Android 10+\'s background clipboard restriction — the same mechanism used by ClipCascade.</string>
+    <string name="bg_capture_overlay_grant">Grant Overlay Permission</string>
+    <string name="bg_capture_overlay_granted">Open Overlay Settings</string>
+
+    <!-- Step 2: Battery Optimization exemption -->
+    <string name="bg_capture_battery_title">Disable Battery Optimization</string>
+    <string name="bg_capture_battery_desc">Prevents Android\'s Doze and App Standby modes from killing the clipboard-monitoring foreground service when the screen is off. Required for consistent background capture.</string>
+    <string name="bg_capture_battery_grant">Request Exemption</string>
+    <string name="bg_capture_battery_granted">Open Battery Settings</string>
+
+    <!-- Step 3: OEM autostart -->
+    <string name="bg_capture_oem_title">OEM Autostart / Power Manager</string>
+    <string name="bg_capture_oem_desc_base">Many manufacturers (Xiaomi, Huawei, Oppo, Vivo, Samsung, OnePlus, etc.) add an extra battery-saver layer that kills background apps regardless of Android\'s own battery optimisation. Whitelist CopyPaste in your phone\'s autostart or protected-apps screen.</string>
+    <string name="bg_capture_oem_desc_this_device">On this device: %1$s</string>
+    <string name="bg_capture_oem_button">Open OEM Power Settings</string>
+    <string name="bg_capture_oem_not_needed">Not needed on this device — no OEM power-manager layer detected. Stock Android battery exemption (step 2) is sufficient.</string>
+
+    <!-- Step 4: Final instruction -->
+    <string name="bg_capture_restart_title">Last Step — Force-Stop Once</string>
+    <string name="bg_capture_restart_desc">After completing the steps above, go to Settings › Apps › CopyPaste and tap Force Stop, then reopen the app. This lets the overlay window initialise on first launch so background capture activates immediately.</string>
+
+    <!-- Shared status labels (also used by PermissionsSettingsActivity) -->
+    <string name="status_granted">Granted</string>
+    <string name="status_not_granted">Not granted</string>
+    <string name="label_required">required</string>
+
     <!-- History — sensitive marker -->
     <string name="sensitive_preview_mask">••••••</string>
     <string name="sensitive_badge_label">Sensitive</string>

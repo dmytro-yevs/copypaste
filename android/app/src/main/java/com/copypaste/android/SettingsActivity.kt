@@ -172,6 +172,16 @@ fun SettingsScreen(
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
+            // ── Background Capture Setup ───────────────────────────────────────
+            SettingsNavRow(
+                title = stringResource(R.string.setting_bg_capture_title),
+                subtitle = stringResource(R.string.setting_bg_capture_subtitle),
+                onClick = {
+                    ctx.startActivity(Intent(ctx, BackgroundCaptureSetupActivity::class.java))
+                }
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
             // ── Sync backend selector ──────────────────────────────────────────
             SectionLabel("Sync Backend")
             SettingsRow(
