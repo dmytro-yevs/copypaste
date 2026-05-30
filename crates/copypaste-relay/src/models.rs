@@ -72,15 +72,25 @@ pub struct PullItem {
     pub wall_time: u64,
 }
 
-/// Query params for GET /devices/:id/items?since=<wall_time>&limit=<n>
+/// Query params for GET /devices/:id/items?since=<wall_time>&since_id=<id>&limit=<n>
 #[derive(Debug, Deserialize)]
 pub struct PullParams {
-    /// Return only items with wall_time > since (defaults to 0).
+    /// Return only items past the `(since, since_id)` cursor (defaults to 0).
     #[serde(default)]
     pub since: u64,
+    /// Composite-cursor companion to `since`: the `id` of the last item the
+    /// client already has at `wall_time == since` (relay H-1 / audit finding G).
+    /// Items qualify iff `(wall_time, id) > (since, since_id)`, a strictly
+    /// monotonic order with no ties — so a page boundary mid-run of equal
+    /// sender-supplied `wall_time` values can no longer silently drop the
+    /// remaining tied items. Absent → legacy `wall_time`-only floor
+    /// (`wall_time > since`), keeping pre-cursor clients backward-compatible.
+    #[serde(default)]
+    pub since_id: Option<i64>,
     /// Maximum number of items to return in this page (M4). Absent → server
     /// default (`DEFAULT_PULL_LIMIT`); clamped to `MAX_PULL_LIMIT`. Clients
-    /// paginate by passing the largest returned `wall_time` back as `since`.
+    /// paginate by passing the last returned `(wall_time, id)` back as
+    /// `(since, since_id)`.
     #[serde(default)]
     pub limit: Option<usize>,
 }

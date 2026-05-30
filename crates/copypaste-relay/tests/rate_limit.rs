@@ -270,7 +270,7 @@ fn quota_500_items_per_device_evicts_oldest() {
             .expect("push must succeed under cap");
     }
 
-    let items = store.pull_items(&id, 0, usize::MAX).unwrap();
+    let items = store.pull_items(&id, 0, None, usize::MAX).unwrap();
     assert_eq!(
         items.len(),
         MAX_PUSH_ITEMS_PER_DEVICE,
