@@ -1473,11 +1473,10 @@ fn load_local_key_bounded() -> KeyLoad {
     #[cfg(not(target_os = "macos"))]
     {
         // Non-macOS has no Keychain; the existing behaviour is an ephemeral
-        // key. Treat that as "Ready" so the platform's data-not-persisted
-        // contract is unchanged (no degraded banner where there was never a
-        // persistent key to begin with).
-        let (enc, pubk) = load_local_key_material();
-        KeyLoad::Ready(enc, pubk)
+        // key. `load_local_key_material` already returns `KeyLoad::Ready` there
+        // so the platform's data-not-persisted contract is unchanged (no
+        // degraded banner where there was never a persistent key to begin with).
+        load_local_key_material()
     }
 
     #[cfg(target_os = "macos")]
@@ -1485,11 +1484,10 @@ fn load_local_key_bounded() -> KeyLoad {
         // Dev/test bypass: keychain is bypassed centrally; reading is instant
         // and never prompts, so there is no need for the timeout dance.
         if crate::keychain::keychain_bypassed() {
-            let (enc, pubk) = load_local_key_material();
-            return KeyLoad::Ready(enc, pubk);
+            return load_local_key_material();
         }
 
-        let (tx, rx) = std::sync::mpsc::sync_channel::<(zeroize::Zeroizing<[u8; 32]>, [u8; 32])>(1);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<KeyLoad>(1);
         // A plain OS thread (not a tokio task): the Security-framework call is
         // blocking and may park on a GUI prompt indefinitely. We must be able
         // to walk away from it without blocking a runtime worker.
@@ -1502,7 +1500,9 @@ fn load_local_key_bounded() -> KeyLoad {
             });
 
         match rx.recv_timeout(KEYCHAIN_READ_TIMEOUT) {
-            Ok((enc, pubk)) => KeyLoad::Ready(enc, pubk),
+            // The thread already classified the outcome (Ready or Locked); a
+            // locked Keychain now propagates instead of being papered over.
+            Ok(key_load) => key_load,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 tracing::error!(
                     timeout_secs = KEYCHAIN_READ_TIMEOUT.as_secs(),
@@ -1540,18 +1540,37 @@ fn load_local_key_bounded() -> KeyLoad {
 /// the env var avoids it. Production (env unset) is unchanged: real users still
 /// get the persistent Keychain-backed key.
 #[tracing::instrument(name = "load_local_key_material")]
-fn load_local_key_material() -> (zeroize::Zeroizing<[u8; 32]>, [u8; 32]) {
+fn load_local_key_material() -> KeyLoad {
     #[cfg(target_os = "macos")]
     {
         match crate::keychain::load_or_create() {
             Ok(kp) => {
                 tracing::info!("device fingerprint={}", kp.fingerprint());
-                (kp.local_enc_key(), kp.public_key_bytes())
+                KeyLoad::Ready(kp.local_enc_key(), kp.public_key_bytes())
+            }
+            // A LOCKED/denied Keychain must NOT be papered over with an
+            // ephemeral key: if an encrypted DB already exists, that key would
+            // mismatch (SQLITE_NOTADB) and the daemon would either crash-loop or
+            // recreate over real data. Report `Locked` so `decide_db_startup`
+            // routes to the clean DEGRADED path (DB untouched, recovery status
+            // served). `load_or_create` now only returns `Locked` for genuine
+            // locked/denied/timeout statuses — a missing entry creates a key.
+            Err(crate::keychain::KeychainError::Locked(code)) => {
+                tracing::warn!(
+                    code,
+                    "Keychain locked or access denied; reporting Locked so startup \
+                     degrades cleanly instead of using an ephemeral key over an \
+                     existing encrypted database"
+                );
+                KeyLoad::Locked
             }
             Err(e) => {
+                // Other errors (e.g. invalid length, key-derivation) are not the
+                // locked case; preserve the prior behaviour of falling back to an
+                // ephemeral key so first-run / non-Keychain failures still boot.
                 tracing::warn!("Keychain unavailable ({e}), using ephemeral key");
                 let kp = DeviceKeypair::generate();
-                (kp.local_enc_key(), kp.public_key_bytes())
+                KeyLoad::Ready(kp.local_enc_key(), kp.public_key_bytes())
             }
         }
     }
@@ -1561,7 +1580,7 @@ fn load_local_key_material() -> (zeroize::Zeroizing<[u8; 32]>, [u8; 32]) {
         // On production macOS this branch is never compiled in. The public bytes
         // are a zero placeholder — there is no keychain-backed identity here.
         tracing::warn!("Non-macOS platform: using ephemeral encryption key (data not persisted across restarts)");
-        (DeviceKeypair::generate().local_enc_key(), [0u8; 32])
+        KeyLoad::Ready(DeviceKeypair::generate().local_enc_key(), [0u8; 32])
     }
 }
 

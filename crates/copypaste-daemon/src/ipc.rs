@@ -98,8 +98,31 @@ fn redact_config_secrets(value: &mut serde_json::Value) {
     );
 }
 
+/// Resolve the base config directory that BOTH `config.json` and `peers.json`
+/// live under. Honours the `COPYPASTE_CONFIG_DIR` override (used by the
+/// isolated integration harness and any deployment that relocates config)
+/// before falling back to the platform `dirs::config_dir()`. The returned path
+/// already includes the `copypaste/` subdirectory so the two files always
+/// co-locate across the override and the default. Returns `None` only when
+/// neither the override nor a platform config dir can be resolved (caller
+/// decides the fallback).
+///
+/// Fix (config-dir parity): `config.json` previously went through a raw
+/// `dirs::config_dir()` lookup that IGNORED `COPYPASTE_CONFIG_DIR`, while
+/// `peers_file_path()` honoured it — so under the override the two files
+/// landed in different directories. Routing both through this resolver keeps
+/// them together and preserves the existing macOS default
+/// (`~/Library/Application Support/.../copypaste` via `dirs::config_dir()`)
+/// when the override is unset.
+fn config_base_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("COPYPASTE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(dirs::config_dir)
+        .map(|base| base.join("copypaste"))
+}
+
 fn config_path() -> Option<std::path::PathBuf> {
-    dirs::config_dir().map(|d| d.join("copypaste").join("config.json"))
+    config_base_dir().map(|d| d.join("config.json"))
 }
 
 pub(crate) fn read_config() -> AppConfig {
@@ -119,6 +142,32 @@ pub(crate) fn read_config() -> AppConfig {
             );
             AppConfig::default()
         }
+    }
+}
+
+/// Merge an `incoming` config (as received over `set_config`) onto the
+/// `existing` persisted config, preserving secrets the caller omitted.
+///
+/// Rationale: `get_config` redacts `supabase_password` / `supabase_email` to
+/// presence booleans and strips the real values, so a client's
+/// read-modify-write cycle sends them back as `None`. Treating those `None`s
+/// as "clear the field" would wipe the stored GoTrue credentials and silently
+/// break the `authenticated`-scope RLS sign-in. Policy:
+///
+/// - Secret fields (`supabase_password`, `supabase_email`): keep the existing
+///   value when the incoming value is `None`; otherwise take the incoming one.
+/// - `supabase_url` / `supabase_anon_key`: same `None`-preserves-existing rule.
+///   The anon key is publishable (the UI prefills it) so it round-trips, but a
+///   client that omits it must not clear it either.
+/// - `p2p_enabled`: a plain `bool` with no "absent" sentinel in the wire shape,
+///   so the incoming value always wins (the UI toggle is authoritative).
+fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfig {
+    AppConfig {
+        p2p_enabled: incoming.p2p_enabled,
+        supabase_url: incoming.supabase_url.or(existing.supabase_url),
+        supabase_anon_key: incoming.supabase_anon_key.or(existing.supabase_anon_key),
+        supabase_email: incoming.supabase_email.or(existing.supabase_email),
+        supabase_password: incoming.supabase_password.or(existing.supabase_password),
     }
 }
 
@@ -193,9 +242,10 @@ fn format_fingerprint(bytes: &[u8]) -> String {
 /// default.
 pub(crate) fn peers_file_path() -> PathBuf {
     static FALLBACK_WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    let base = std::env::var_os("COPYPASTE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(dirs::config_dir)
+    // Share the override-aware resolver with `config_path` so config.json and
+    // peers.json always co-locate. `config_base_dir` already appends the
+    // `copypaste/` subdir; on the (rare) None case fall back to `./copypaste`.
+    config_base_dir()
         .unwrap_or_else(|| {
             FALLBACK_WARNED.get_or_init(|| {
                 tracing::warn!(
@@ -204,9 +254,9 @@ pub(crate) fn peers_file_path() -> PathBuf {
                      to silence this warning."
                 );
             });
-            PathBuf::from(".")
-        });
-    base.join("copypaste").join("peers.json")
+            PathBuf::from(".").join("copypaste")
+        })
+        .join("peers.json")
 }
 
 /// Return `true` when a colon-hex fingerprint is a placeholder/test value —
@@ -2051,11 +2101,20 @@ impl IpcServer {
                 }
             }
             "set_config" => {
-                let cfg: AppConfig = match serde_json::from_value(req.params.clone()) {
+                let incoming: AppConfig = match serde_json::from_value(req.params.clone()) {
                     Ok(c) => c,
                     Err(e) => return Response::err(req.id, format!("invalid config: {e}")),
                 };
-                match write_config(&cfg) {
+                // MERGE, don't overwrite. `get_config` redacts the secret
+                // fields (`supabase_password`, `supabase_email`) to `*_set`
+                // booleans and drops the real values, so a UI/CLI
+                // read-modify-write deserialises them as `None`. A blind
+                // whole-struct write would then persist null and silently WIPE
+                // the stored Supabase credentials, breaking cloud sync. Merge
+                // the incoming config onto the persisted one, preserving any
+                // secret the caller did not supply.
+                let merged = merge_config(read_config(), incoming);
+                match write_config(&merged) {
                     Ok(()) => Response::ok(req.id, serde_json::json!({"saved": true})),
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
@@ -6586,5 +6645,176 @@ mod tests {
             data2["signed_in"], true,
             "signed_in must track the real auth flag once set true: {data2}"
         );
+    }
+
+    // ── Fix #1: set_config MERGE preserves redacted secrets ─────────────────
+
+    /// `merge_config` must preserve an existing secret when the incoming config
+    /// omits it (the redacted read-modify-write shape deserialises the secret
+    /// fields to `None`). A blind overwrite would null the stored credentials.
+    #[test]
+    fn merge_config_preserves_omitted_secrets() {
+        let existing = AppConfig {
+            p2p_enabled: true,
+            supabase_url: Some("https://proj.supabase.co".into()),
+            supabase_anon_key: Some("anon-123".into()),
+            supabase_email: Some("user@example.com".into()),
+            supabase_password: Some("super-secret".into()),
+        };
+        // Incoming mirrors what the UI sends back after `get_config` redaction:
+        // secrets absent (None), only the toggle + publishable fields present.
+        let incoming = AppConfig {
+            p2p_enabled: false,
+            supabase_url: Some("https://proj.supabase.co".into()),
+            supabase_anon_key: Some("anon-123".into()),
+            supabase_email: None,
+            supabase_password: None,
+        };
+        let merged = merge_config(existing, incoming);
+        assert_eq!(
+            merged.supabase_password.as_deref(),
+            Some("super-secret"),
+            "omitted password must be preserved from the persisted config"
+        );
+        assert_eq!(
+            merged.supabase_email.as_deref(),
+            Some("user@example.com"),
+            "omitted email must be preserved"
+        );
+        // Non-secret authoritative field still takes the incoming value.
+        assert!(!merged.p2p_enabled, "p2p_enabled incoming value wins");
+    }
+
+    /// A provided secret in `set_config` overwrites the stored one (so the CLI
+    /// `cloud setup` can rotate credentials).
+    #[test]
+    fn merge_config_incoming_secret_overrides() {
+        let existing = AppConfig {
+            p2p_enabled: false,
+            supabase_url: None,
+            supabase_anon_key: None,
+            supabase_email: Some("old@example.com".into()),
+            supabase_password: Some("old-pw".into()),
+        };
+        let incoming = AppConfig {
+            p2p_enabled: false,
+            supabase_url: None,
+            supabase_anon_key: None,
+            supabase_email: Some("new@example.com".into()),
+            supabase_password: Some("new-pw".into()),
+        };
+        let merged = merge_config(existing, incoming);
+        assert_eq!(merged.supabase_password.as_deref(), Some("new-pw"));
+        assert_eq!(merged.supabase_email.as_deref(), Some("new@example.com"));
+    }
+
+    /// End-to-end: seed a config with a password, then run a `set_config` whose
+    /// params carry the REDACTED shape (`supabase_password_set: true`, no real
+    /// password). The stored password must survive — proving the
+    /// read-modify-write data-loss bug is fixed at the IPC boundary.
+    #[tokio::test]
+    async fn set_config_with_redacted_shape_preserves_stored_password() {
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+
+        // Seed: persist a config carrying a real password.
+        let seeded = AppConfig {
+            p2p_enabled: false,
+            supabase_url: Some("https://proj.supabase.co".into()),
+            supabase_anon_key: Some("anon-xyz".into()),
+            supabase_email: Some("seed@example.com".into()),
+            supabase_password: Some("do-not-wipe-me".into()),
+        };
+        write_config(&seeded).expect("seed write_config");
+
+        // Confirm get_config redacts the secret to a presence flag.
+        let server = bare_server();
+        let get_resp = server
+            .dispatch(r#"{"id":"g1","method":"get_config","params":{}}"#)
+            .await;
+        let got = get_resp.data.expect("get_config data");
+        assert_eq!(got["supabase_password_set"], true);
+        assert!(
+            got.get("supabase_password").is_none(),
+            "raw password must never leave the daemon: {got}"
+        );
+
+        // The UI/CLI sends this redacted shape straight back via set_config.
+        let set_body = format!(
+            r#"{{"id":"s1","method":"set_config","params":{}}}"#,
+            serde_json::to_string(&got).unwrap()
+        );
+        let set_resp = server.dispatch(&set_body).await;
+        assert_eq!(
+            set_resp.data.as_ref().map(|d| d["saved"].clone()),
+            Some(serde_json::json!(true)),
+            "set_config must succeed: {set_resp:?}"
+        );
+
+        // The persisted password must be intact.
+        let persisted = read_config();
+        assert_eq!(
+            persisted.supabase_password.as_deref(),
+            Some("do-not-wipe-me"),
+            "set_config with the redacted shape must NOT wipe the stored password"
+        );
+        assert_eq!(
+            persisted.supabase_email.as_deref(),
+            Some("seed@example.com"),
+            "email must also survive"
+        );
+    }
+
+    // ── Fix #2: config.json honours COPYPASTE_CONFIG_DIR ────────────────────
+
+    /// `COPYPASTE_CONFIG_DIR` must redirect `config.json` (not just
+    /// `peers.json`), and the two files must co-locate under the same
+    /// `copypaste/` subdir.
+    #[test]
+    fn config_dir_override_redirects_config_json() {
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("override-root");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+
+        let config = config_path().expect("config_path under override");
+        let peers = peers_file_path();
+
+        // config.json lands under the override, not the platform default.
+        assert!(
+            config.starts_with(&cfg_home),
+            "config.json must live under COPYPASTE_CONFIG_DIR: {}",
+            config.display()
+        );
+        assert!(config.ends_with("copypaste/config.json"));
+
+        // Both files share the SAME directory so a config write and a peers
+        // write can never diverge under the override.
+        assert_eq!(
+            config.parent(),
+            peers.parent(),
+            "config.json and peers.json must co-locate: {} vs {}",
+            config.display(),
+            peers.display()
+        );
+
+        // And a real round-trip write/read works through the redirected path.
+        let cfg = AppConfig {
+            p2p_enabled: true,
+            ..Default::default()
+        };
+        write_config(&cfg).expect("write under override");
+        assert!(
+            config.is_file(),
+            "config.json must be written at {}",
+            config.display()
+        );
+        assert!(read_config().p2p_enabled, "round-trip read under override");
     }
 }
