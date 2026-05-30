@@ -228,17 +228,35 @@ function ImageThumbnail({ id }: { id: string }) {
 
 interface RowProps {
   entry: HistoryEntry;
+  // Single-select id (keyboard/arrow navigation focus)
   selected: boolean;
+  // Multi-select checkbox state
+  multiSelected: boolean;
+  selectionMode: boolean;
   previewLines: number;
   previewSize: number;
   maskSensitive: boolean;
   onSelect: () => void;
+  onToggleMultiSelect: (e: React.MouseEvent) => void;
   onCopy: () => void;
   onPin: () => void;
   onDelete: () => void;
 }
 
-function HistoryRow({ entry, selected, previewLines, previewSize, maskSensitive, onSelect, onCopy, onPin, onDelete }: RowProps) {
+function HistoryRow({
+  entry,
+  selected,
+  multiSelected,
+  selectionMode,
+  previewLines,
+  previewSize,
+  maskSensitive,
+  onSelect,
+  onToggleMultiSelect,
+  onCopy,
+  onPin,
+  onDelete,
+}: RowProps) {
   // Fix #1: bare "image" content_type stored by daemon
   const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
 
@@ -256,23 +274,58 @@ function HistoryRow({ entry, selected, previewLines, previewSize, maskSensitive,
   // virtualizer via rowHeightFor so offsets stay consistent).
   const rowH = rowHeightFor(entry, previewSize);
 
+  // In selection mode, clicking the row toggles multi-select.
+  // Outside selection mode, clicking selects + copies (existing behavior).
+  const handleRowClick = (e: React.MouseEvent) => {
+    if (selectionMode) {
+      onToggleMultiSelect(e);
+    } else {
+      onSelect();
+      onCopy();
+    }
+  };
+
   return (
     <div
       role="option"
-      aria-selected={selected}
+      aria-selected={multiSelected || selected}
       className={[
         "group relative flex cursor-pointer select-none items-center gap-2 px-3",
         "border-b text-[13px]",
         entry.pinned ? "border-ide-warning/20 bg-ide-warning/5" : "border-ide-divider/40",
-        selected
+        multiSelected
+          ? "bg-ide-selection/70 text-ide-text"
+          : selected
           ? "bg-ide-selection text-ide-text"
           : entry.pinned
           ? "text-ide-text hover:bg-ide-warning/10"
           : "text-ide-text hover:bg-ide-hover",
       ].join(" ")}
       style={{ minHeight: rowH }}
-      onClick={() => { onSelect(); onCopy(); }}
+      onClick={handleRowClick}
     >
+      {/* Checkbox — shown when selection mode is active, or on hover */}
+      <span
+        className={[
+          "flex w-4 shrink-0 items-center justify-center",
+          selectionMode ? "opacity-100" : "opacity-0 group-hover:opacity-60",
+        ].join(" ")}
+        onClick={(e) => {
+          // Checkbox click always toggles multi-select, even outside selection mode.
+          e.stopPropagation();
+          onToggleMultiSelect(e);
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={multiSelected}
+          onChange={() => {/* controlled via onClick above */}}
+          className="h-3.5 w-3.5 accent-ide-accent cursor-pointer"
+          tabIndex={-1}
+          aria-label={`Select ${entry.preview.slice(0, 30)}`}
+        />
+      </span>
+
       {/* Pin indicator (only on pinned rows) */}
       {entry.pinned && (
         <span className="flex w-3 shrink-0 items-center justify-center">
@@ -310,18 +363,20 @@ function HistoryRow({ entry, selected, previewLines, previewSize, maskSensitive,
         {relativeTime(entry.wall_time)}
       </span>
 
-      {/* Action buttons — appear on hover or selection */}
-      <div
-        className={[
-          "absolute right-2 flex items-center gap-1",
-          selected ? "flex" : "hidden group-hover:flex",
-        ].join(" ")}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <ActionBtn label="Copy" onClick={onCopy} />
-        <ActionBtn label={entry.pinned ? "Unpin" : "Pin"} onClick={onPin} />
-        <ActionBtn label="Delete" danger onClick={onDelete} />
-      </div>
+      {/* Per-row action buttons — hidden in selection mode (bulk bar takes over) */}
+      {!selectionMode && (
+        <div
+          className={[
+            "absolute right-2 flex items-center gap-1",
+            selected ? "flex" : "hidden group-hover:flex",
+          ].join(" ")}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ActionBtn label="Copy" onClick={onCopy} />
+          <ActionBtn label={entry.pinned ? "Unpin" : "Pin"} onClick={onPin} />
+          <ActionBtn label="Delete" danger onClick={onDelete} />
+        </div>
+      )}
     </div>
   );
 }
@@ -346,6 +401,103 @@ function ActionBtn({
     >
       {label}
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bulk action bar — shown when ≥1 item is multi-selected
+// ---------------------------------------------------------------------------
+
+interface BulkBarProps {
+  count: number;
+  allSelected: boolean;
+  onSelectAll: () => void;
+  onClearSelection: () => void;
+  onBulkCopy: () => void;
+  onBulkPin: () => void;
+  onBulkUnpin: () => void;
+  onBulkDelete: () => void;
+  isBusy: boolean;
+}
+
+function BulkActionBar({
+  count,
+  allSelected,
+  onSelectAll,
+  onClearSelection,
+  onBulkCopy,
+  onBulkPin,
+  onBulkUnpin,
+  onBulkDelete,
+  isBusy,
+}: BulkBarProps) {
+  return (
+    <div
+      className={[
+        "flex items-center gap-2 border-b border-ide-warning/30 bg-ide-warning/10 px-3 py-1.5",
+        "text-[12px] text-ide-text",
+      ].join(" ")}
+    >
+      {/* Selection count */}
+      <span className="shrink-0 font-medium text-ide-warning">
+        {count} selected
+      </span>
+
+      <span className="text-ide-divider">|</span>
+
+      {/* Select-all toggle */}
+      <button
+        className="rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        onClick={allSelected ? onClearSelection : onSelectAll}
+        disabled={isBusy}
+      >
+        {allSelected ? "Deselect all" : "Select all"}
+      </button>
+
+      {/* Bulk actions */}
+      <button
+        className="rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        onClick={onBulkCopy}
+        disabled={isBusy}
+        title="Copy selected items (concatenated with newlines)"
+      >
+        Copy
+      </button>
+      <button
+        className="rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        onClick={onBulkPin}
+        disabled={isBusy}
+      >
+        Pin
+      </button>
+      <button
+        className="rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        onClick={onBulkUnpin}
+        disabled={isBusy}
+      >
+        Unpin
+      </button>
+      <button
+        className="rounded-ide border border-ide-danger/40 bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-danger hover:bg-ide-hover disabled:opacity-50"
+        onClick={onBulkDelete}
+        disabled={isBusy}
+      >
+        Delete
+      </button>
+
+      {/* Spacer */}
+      <span className="flex-1" />
+
+      {/* Clear selection */}
+      <button
+        className="rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover disabled:opacity-50"
+        onClick={onClearSelection}
+        disabled={isBusy}
+        title="Clear selection (Escape)"
+      >
+        Clear
+      </button>
+    </div>
   );
 }
 
@@ -497,6 +649,16 @@ export function HistoryView() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
 
+  // ---------------------------------------------------------------------------
+  // Multi-select state
+  // selectionMode: checkbox column is visible + bulk bar is shown
+  // multiSelectedIds: Set of item ids checked in the bulk-select UI
+  // bulkBusy: true while a bulk operation is in flight (disables buttons)
+  // ---------------------------------------------------------------------------
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   // Track current signature to avoid unnecessary re-renders on identical data.
@@ -593,6 +755,44 @@ export function HistoryView() {
     : items;
 
   // -------------------------------------------------------------------------
+  // Multi-select helpers
+  // -------------------------------------------------------------------------
+
+  /** Exit selection mode and clear all multi-select state. */
+  const clearSelection = useCallback(() => {
+    setSelectionMode(false);
+    setMultiSelectedIds(new Set());
+  }, []);
+
+  /** Toggle a single item's multi-select state; activates selection mode on first check. */
+  const toggleMultiSelect = useCallback((id: string) => {
+    setSelectionMode(true);
+    setMultiSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+        // If nothing left, exit selection mode.
+        if (next.size === 0) {
+          // Use a micro-task so the state update lands before we flip mode.
+          Promise.resolve().then(() => setSelectionMode(false));
+        }
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  /** Select all currently-visible (filtered) items. */
+  const selectAll = useCallback(() => {
+    setSelectionMode(true);
+    setMultiSelectedIds(new Set(filtered.map((it) => it.id)));
+  }, [filtered]);
+
+  const allSelected =
+    filtered.length > 0 && filtered.every((it) => multiSelectedIds.has(it.id));
+
+  // -------------------------------------------------------------------------
   // Keyboard navigation
   // -------------------------------------------------------------------------
 
@@ -620,6 +820,24 @@ export function HistoryView() {
 
   const handleKeyDown = useCallback(
     async (e: React.KeyboardEvent<HTMLDivElement>) => {
+      // Escape always clears multi-selection (or single selection if in selection mode).
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (selectionMode) {
+          clearSelection();
+        } else {
+          setSelectedId(null);
+        }
+        return;
+      }
+
+      // Cmd+A (or Ctrl+A on non-Mac) selects all when focused on the list.
+      if ((e.metaKey || e.ctrlKey) && e.key === "a") {
+        e.preventDefault();
+        selectAll();
+        return;
+      }
+
       if (filtered.length === 0) return;
 
       if (e.key === "ArrowDown") {
@@ -653,11 +871,11 @@ export function HistoryView() {
         }
       }
     },
-    [filtered, selectedIdx, selectedId, load, showToast]
+    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, load, showToast]
   );
 
   // -------------------------------------------------------------------------
-  // Actions
+  // Single-item actions (existing per-row behavior)
   // -------------------------------------------------------------------------
 
   const handleCopy = useCallback(
@@ -711,6 +929,118 @@ export function HistoryView() {
     [selectedId, load, showToast]
   );
 
+  // -------------------------------------------------------------------------
+  // Bulk actions — call single-item IPCs in a loop (no bulk IPC exists).
+  // api.deleteItem, api.pinItem are used per-item sequentially.
+  // For bulk copy we concatenate preview text of selected items (non-image,
+  // non-sensitive), then write to clipboard via api.copyItem on the first
+  // selected item (the daemon puts that item on the pasteboard). For a richer
+  // concatenation we rely on the browser clipboard API as a fallback.
+  // -------------------------------------------------------------------------
+
+  const handleBulkDelete = useCallback(async () => {
+    if (bulkBusy || multiSelectedIds.size === 0) return;
+    setBulkBusy(true);
+    const ids = Array.from(multiSelectedIds);
+    let failed = 0;
+    for (const id of ids) {
+      try {
+        await api.deleteItem(id);
+      } catch {
+        failed++;
+      }
+    }
+    // Clear selection and refresh regardless of partial failures.
+    clearSelection();
+    if (selectedId !== null && multiSelectedIds.has(selectedId)) setSelectedId(null);
+    sigRef.current = ""; // force re-render
+    void load(true);
+    setBulkBusy(false);
+    if (failed > 0) {
+      showToast(`Deleted ${ids.length - failed}/${ids.length} (${failed} failed)`, "error");
+    } else {
+      showToast(`Deleted ${ids.length} item${ids.length === 1 ? "" : "s"}`, "success");
+    }
+  }, [bulkBusy, multiSelectedIds, clearSelection, selectedId, load, showToast]);
+
+  const handleBulkPin = useCallback(
+    async (targetPinned: boolean) => {
+      if (bulkBusy || multiSelectedIds.size === 0) return;
+      setBulkBusy(true);
+      const ids = Array.from(multiSelectedIds);
+      let failed = 0;
+      for (const id of ids) {
+        try {
+          await api.pinItem(id, targetPinned);
+        } catch {
+          failed++;
+        }
+      }
+      clearSelection();
+      sigRef.current = "";
+      void load(true);
+      setBulkBusy(false);
+      const verb = targetPinned ? "Pinned" : "Unpinned";
+      if (failed > 0) {
+        showToast(`${verb} ${ids.length - failed}/${ids.length} (${failed} failed)`, "error");
+      } else {
+        showToast(`${verb} ${ids.length} item${ids.length === 1 ? "" : "s"}`, "success");
+      }
+    },
+    [bulkBusy, multiSelectedIds, clearSelection, load, showToast]
+  );
+
+  /**
+   * Bulk copy: copies the first selected item via daemon IPC (which puts it on
+   * the pasteboard), then also writes all non-sensitive preview text joined by
+   * newlines to the browser clipboard API for a richer paste target.
+   * Images are excluded from the text concatenation (they have no preview text).
+   */
+  const handleBulkCopy = useCallback(async () => {
+    if (bulkBusy || multiSelectedIds.size === 0) return;
+    setBulkBusy(true);
+
+    // Collect selected items in the current filtered order so the user gets
+    // the same order they see on screen.
+    const selectedItems = filtered.filter((it) => multiSelectedIds.has(it.id));
+
+    // Step 1: copy the first selected item via daemon (puts it on pasteboard).
+    const firstId = selectedItems[0]?.id;
+    if (firstId !== undefined) {
+      try {
+        await api.copyItem(firstId);
+      } catch (err) {
+        const msg = err instanceof IpcError ? err.message : "Copy failed";
+        showToast(msg, "error");
+        setBulkBusy(false);
+        return;
+      }
+    }
+
+    // Step 2: if the browser clipboard API is available, write the concatenated
+    // preview text of all selected non-sensitive, non-image items. This is
+    // best-effort — we don't surface an error if the API is unavailable.
+    const textItems = selectedItems.filter(
+      (it) =>
+        !it.is_sensitive &&
+        it.content_type !== "image" &&
+        !it.content_type.startsWith("image/")
+    );
+    if (textItems.length > 1 && typeof navigator?.clipboard?.writeText === "function") {
+      const concatenated = textItems.map((it) => it.preview).join("\n");
+      try {
+        await navigator.clipboard.writeText(concatenated);
+      } catch {
+        // Clipboard API unavailable or permission denied — daemon copy above already succeeded.
+      }
+    }
+
+    clearSelection();
+    void load(true);
+    setBulkBusy(false);
+    showToast(`Copied ${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`, "success");
+  }, [bulkBusy, multiSelectedIds, filtered, clearSelection, load, showToast]);
+
   // Inline confirm state — replaces window.confirm (which is blocked in Tauri webviews).
   const [confirmPending, setConfirmPending] = useState(false);
 
@@ -723,6 +1053,7 @@ export function HistoryView() {
     try {
       const result = await api.deleteAll();
       setSelectedId(null);
+      clearSelection();
       // Immediately clear the list so the view empties without waiting for the reload.
       setItems([]);
       imageCache.clear(); // the items are gone; drop their cached thumbnails too
@@ -733,11 +1064,33 @@ export function HistoryView() {
       const msg = err instanceof IpcError ? err.message : "Clear failed";
       showToast(msg, "error");
     }
-  }, [load, showToast]);
+  }, [load, clearSelection, showToast]);
 
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
+
+  // "Select" toggle button in the header toolbar.
+  const selectToggleBtn = (
+    <button
+      onClick={() => {
+        if (selectionMode) {
+          clearSelection();
+        } else {
+          setSelectionMode(true);
+        }
+      }}
+      className={[
+        "rounded-ide border px-2.5 py-1 text-[12px]",
+        selectionMode
+          ? "border-ide-accent/60 bg-ide-accent/15 text-ide-accent"
+          : "border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover",
+      ].join(" ")}
+      title="Toggle multi-select mode"
+    >
+      Select
+    </button>
+  );
 
   const actions = (
     <>
@@ -753,6 +1106,7 @@ export function HistoryView() {
           "focus:border-ide-accent focus:outline-none",
         ].join(" ")}
       />
+      {selectToggleBtn}
       {confirmPending ? (
         <span className="flex items-center gap-1.5 text-[12px]">
           <span className="text-ide-dim">Delete all?</span>
@@ -814,29 +1168,52 @@ export function HistoryView() {
     );
   } else {
     body = (
-      <VirtualList
-        items={filtered}
-        previewSize={previewSize}
-        listRef={listRef}
-        onKeyDown={(e) => void handleKeyDown(e)}
-        renderRow={(entry) => (
-          <HistoryRow
-            key={entry.id}
-            entry={entry}
-            selected={entry.id === selectedId}
-            previewLines={previewLines}
-            previewSize={previewSize}
-            maskSensitive={maskSensitive}
-            onSelect={() => {
-              setSelectedId(entry.id);
-              listRef.current?.focus();
-            }}
-            onCopy={() => void handleCopy(entry.id)}
-            onPin={() => void handlePin(entry.id, entry.pinned)}
-            onDelete={() => void handleDelete(entry.id)}
+      // Outer wrapper so the bulk bar and list share the same flex column.
+      <div className="flex h-full flex-col overflow-hidden">
+        {/* Bulk action bar — rendered above the list when items are selected */}
+        {multiSelectedIds.size > 0 && (
+          <BulkActionBar
+            count={multiSelectedIds.size}
+            allSelected={allSelected}
+            onSelectAll={selectAll}
+            onClearSelection={clearSelection}
+            onBulkCopy={() => void handleBulkCopy()}
+            onBulkPin={() => void handleBulkPin(true)}
+            onBulkUnpin={() => void handleBulkPin(false)}
+            onBulkDelete={() => void handleBulkDelete()}
+            isBusy={bulkBusy}
           />
         )}
-      />
+        <VirtualList
+          items={filtered}
+          previewSize={previewSize}
+          listRef={listRef}
+          onKeyDown={(e) => void handleKeyDown(e)}
+          renderRow={(entry) => (
+            <HistoryRow
+              key={entry.id}
+              entry={entry}
+              selected={entry.id === selectedId}
+              multiSelected={multiSelectedIds.has(entry.id)}
+              selectionMode={selectionMode}
+              previewLines={previewLines}
+              previewSize={previewSize}
+              maskSensitive={maskSensitive}
+              onSelect={() => {
+                setSelectedId(entry.id);
+                listRef.current?.focus();
+              }}
+              onToggleMultiSelect={(e) => {
+                e.stopPropagation();
+                toggleMultiSelect(entry.id);
+              }}
+              onCopy={() => void handleCopy(entry.id)}
+              onPin={() => void handlePin(entry.id, entry.pinned)}
+              onDelete={() => void handleDelete(entry.id)}
+            />
+          )}
+        />
+      </div>
     );
   }
 
