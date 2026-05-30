@@ -83,6 +83,17 @@
     <string name="cd_image_item">Image clipboard item</string>
     <string name="cd_image_thumbnail">Image thumbnail</string>
 
+    <!-- Log export -->
+    <string name="log_export_button">Export Logs</string>
+    <string name="log_export_description">Share diagnostic logs with the developer to help investigate issues.</string>
+    <string name="log_export_chooser_title">Share logs via…</string>
+    <string name="log_export_empty">No log files found yet.</string>
+    <string name="log_export_failed">Could not prepare log archive. Try adb pull instead.</string>
+    <string name="crash_detected_title">App crashed last time</string>
+    <string name="crash_detected_message">A crash was detected on the previous run. Export logs to help diagnose the issue?</string>
+    <string name="crash_detected_export">Export Logs</string>
+    <string name="crash_detected_dismiss">Dismiss</string>
+
     <!-- Error / status -->
     <string name="error_generic">Failed: %1$s</string>
     <string name="error_load_history">Failed to load history: %1$s</string>

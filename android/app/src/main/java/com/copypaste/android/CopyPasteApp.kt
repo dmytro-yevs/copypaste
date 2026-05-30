@@ -11,6 +11,14 @@ class CopyPasteApp : Application() {
         // but that only takes effect after uniffi-bindgen regenerates the bindings.
         // This runtime property works with both old and newly-generated bindings.
         System.setProperty("uniffi.component.copypaste_android.libraryOverride", "copypaste_android")
+
+        // ── Crash + file logging — install FIRST so even early-init crashes are captured ──
+        // AppLogger writes to getExternalFilesDir(null)/logs/ (app-scoped external storage).
+        // Files are adb-pullable without root even when the app is not running:
+        //   adb pull /sdcard/Android/data/com.copypaste.android/files/logs/
+        AppLogger.init(this)
+        CrashHandler.install(this)
+
         // Load native library (no-op if .so is absent — service degrades gracefully)
         runCatching { System.loadLibrary("copypaste_android") }
         NotificationHelper.createChannels(this)
