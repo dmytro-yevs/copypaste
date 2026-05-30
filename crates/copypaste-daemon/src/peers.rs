@@ -4,6 +4,7 @@
 //! The file is read at daemon startup and written whenever the pairing list
 //! changes.
 
+use std::io::Write as _;
 use std::path::Path;
 
 /// A device that has been paired with this instance.
@@ -68,19 +69,73 @@ pub fn load_peers(path: &Path) -> Vec<PairedDevice> {
 /// Persist `peers` to `path` as pretty-printed JSON.
 ///
 /// Creates parent directories if they do not already exist.
+///
+/// # Security
+///
+/// Uses an atomic write: the JSON is written to a temp file in the **same
+/// directory** (so the final `rename` is guaranteed to be on the same
+/// filesystem), the temp file is created with mode `0600` from the very first
+/// byte, and only then renamed over the destination. This eliminates the
+/// world-readable window that existed when using `std::fs::write` (creates at
+/// the umask-derived mode, typically `0644`) followed by `set_permissions`.
+/// The `sync_key_b64` field in `PairedDevice` is the shared P2P content key;
+/// it must never be readable by other users even momentarily.
 pub fn save_peers(path: &Path, peers: &[PairedDevice]) -> anyhow::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("peers path has no parent directory: {}", path.display()))?;
+    std::fs::create_dir_all(parent)?;
+
     let json = serde_json::to_string_pretty(peers)?;
-    std::fs::write(path, json)?;
-    // chmod 0600 — peer cert fingerprints + addresses are sensitive identifiers
-    // and must never be world-readable. Mirrors the IPC peers-surface writer.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+
+    // Atomic 0600 write: create a uniquely-named temp file in the SAME
+    // directory (same filesystem → rename is atomic), set mode 0600 before any
+    // secret bytes are written, write + flush + sync, then rename over the
+    // destination.  A crash between write and rename leaves an invisible temp
+    // file that will be cleaned up on the next successful write.
+    let tmp = parent.join(format!(
+        ".peers.json.tmp.{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // Create with 0600 from the outset — secret content is never
+            // momentarily group/other-readable between create and chmod.
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp)?;
+        // Defence-in-depth: re-assert 0600 in case a restrictive parent umask
+        // or a non-honouring filesystem ignored the create mode above.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        f.write_all(json.as_bytes())?;
+        f.flush()?;
+        f.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
     }
+
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+
     Ok(())
 }
 
@@ -123,6 +178,46 @@ mod tests {
         let path = dir.path().join("peers.json");
         std::fs::write(&path, b"not json").unwrap();
         assert!(load_peers(&path).is_empty());
+    }
+
+    /// Fix-2 (atomic 0600 write): `save_peers` must create `peers.json` with
+    /// mode 0600 so that the shared `sync_key_b64` is never world-readable.
+    /// The atomic temp-rename pattern must also leave no orphaned `.tmp.*` file
+    /// in the parent directory after a successful write.
+    #[cfg(unix)]
+    #[test]
+    fn save_peers_creates_file_with_mode_0600_and_no_tmp_orphan() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        let devices = vec![make_device("aabbcc", "Alice")];
+
+        save_peers(&path, &devices).unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "peers.json must be owner-only (0600), got {:o}",
+            mode & 0o777
+        );
+
+        // No orphaned temp file should remain after a successful write.
+        let orphans: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".peers.json.tmp.")
+            })
+            .collect();
+        assert!(
+            orphans.is_empty(),
+            "atomic write must not leave temp files behind: {:?}",
+            orphans
+        );
     }
 
     /// A `peers.json` written before the `address` field existed must still

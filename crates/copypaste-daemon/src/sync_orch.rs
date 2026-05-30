@@ -247,6 +247,11 @@ pub async fn merge_incoming_with_crypto(
             }
         };
         let exists = existing.is_some();
+        // Fix-3: capture local `pinned` before moving `existing` into `resolve`.
+        // The wire protocol carries no `pinned` field, so `wire_to_local` always
+        // sets it to `false`. If the local row was pinned we must OR-merge that
+        // value back in after constructing the to-insert row.
+        let local_pinned: bool = existing.as_ref().map(|r| r.pinned).unwrap_or(false);
         let take_remote = match existing.as_ref() {
             Some(local) => matches!(resolve(local, &wire), MergeOutcome::TakeRemote),
             None => true,
@@ -260,7 +265,7 @@ pub async fn merge_incoming_with_crypto(
         // P2P Phase 3: unwrap the shared-key payload into a row encrypted under
         // this device's own local key, recovering the plaintext for FTS. Returns
         // the row to insert plus the decrypted plaintext (when text) to index.
-        let (to_insert, fts_plaintext) = match crypto {
+        let (mut to_insert, fts_plaintext) = match crypto {
             Some(c) => match rekey_inbound(c, wire) {
                 Ok(pair) => pair,
                 Err(w) => {
@@ -270,6 +275,12 @@ pub async fn merge_incoming_with_crypto(
             },
             None => (wire_to_local(wire), None),
         };
+
+        // Fix-3 (cont.): OR-merge the local `pinned` flag so a pinned item that
+        // gets a content update via LWW TakeRemote is not silently unpinned.
+        // This keeps the local prune-exemption intact and prevents data loss via
+        // TTL deletion of an item the user explicitly pinned.
+        to_insert.pinned = to_insert.pinned || local_pinned;
 
         // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
         // ran `delete_item` then a separate `insert_item`; if the insert failed
@@ -775,6 +786,50 @@ mod tests {
         drop(local_tx);
         drop(_incoming_tx);
         handle.await.expect("task join");
+    }
+
+    /// Fix-3 (pinned preserved on LWW TakeRemote): when the local row is pinned
+    /// and the incoming wire item wins LWW (newer lamport), the stored row must
+    /// keep `pinned = true`.  The wire protocol has no `pinned` field, so
+    /// `wire_to_local` always produces `pinned = false`; the merge path must
+    /// OR-merge the existing value before the atomic replace.
+    ///
+    /// The current lookup path uses `wire.id` as the lookup key, so the local
+    /// row's `id` must equal `wire.id` for TakeRemote to fire.
+    #[tokio::test]
+    async fn merge_incoming_takeremode_preserves_pinned() {
+        let db = make_db();
+        // Local row: id matches the wire id so the LWW lookup finds it.
+        // lamport 3 < wire lamport 9 → TakeRemote will fire.
+        let mut local = ClipboardItem::new_text(vec![0x11], vec![0u8; 24], 3);
+        local.id = "shared-id".to_string();
+        local.item_id = "shared-id-iid".to_string();
+        local.pinned = true;
+        {
+            let g = db.lock().await;
+            insert_item(&g, &local).unwrap();
+            let stored = copypaste_core::get_item_by_id(&g, "shared-id")
+                .unwrap()
+                .unwrap();
+            assert!(stored.pinned, "setup: local row must be pinned");
+        }
+
+        // Wire id = "shared-id" so the lookup finds the existing row.
+        // make_wire("shared-id", …) sets item_id = "shared-id-iid" (matches).
+        let wire = make_wire("shared-id", 9, 0xFF);
+        assert_eq!(wire.id, "shared-id");
+
+        let upserted = merge_incoming(&db, vec![wire]).await.unwrap();
+        assert_eq!(upserted, 1, "newer remote must win LWW");
+
+        let g = db.lock().await;
+        let rows = copypaste_core::get_page(&g, 10, 0).unwrap();
+        assert_eq!(rows.len(), 1, "must remain ONE row");
+        assert!(
+            rows[0].pinned,
+            "pinned flag must be preserved after TakeRemote — got pinned={}",
+            rows[0].pinned
+        );
     }
 
     /// LWW: a stale wire item (lower lamport) must NOT overwrite the local row.

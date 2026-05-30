@@ -1567,6 +1567,62 @@ fn load_config() -> AppConfig {
     })
 }
 
+/// Write `text` to `path` atomically with mode `0600` (Fix-2).
+///
+/// Creates a uniquely-named temp file in the SAME directory (so rename is
+/// atomic and same-filesystem), sets mode `0600` before writing any bytes,
+/// writes + flushes + syncs, then renames over the destination. This prevents
+/// the world-readable window that exists between `std::fs::write` (creates at
+/// umask-derived mode, typically `0644`) and a subsequent `set_permissions`.
+fn write_text_atomic_0600(path: &std::path::Path, text: &str) -> anyhow::Result<()> {
+    use std::io::Write as _;
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("path has no parent directory: {}", path.display()))?;
+    std::fs::create_dir_all(parent)?;
+
+    let tmp = parent.join(format!(
+        ".{}.tmp.{}.{}",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        f.write_all(text.as_bytes())?;
+        f.flush()?;
+        f.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+    Ok(())
+}
+
 /// Loads the persistent device_id from disk, creating it on first run.
 ///
 /// Fixes arch LOW #24: previously the daemon regenerated a fresh UUID on
@@ -1604,21 +1660,11 @@ fn load_or_create_device_id() -> anyhow::Result<uuid::Uuid> {
     }
 
     let id = uuid::Uuid::new_v4();
-    std::fs::write(&path, id.to_string())?;
-
-    // Restrict to owner-only on Unix.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        if let Err(e) = std::fs::set_permissions(&path, perms) {
-            tracing::warn!(
-                path = %path.display(),
-                error = %e,
-                "could not chmod device_id to 0600"
-            );
-        }
-    }
+    // Fix-2 (atomic 0600 write): write via temp-then-rename so the device_id
+    // is never world-readable between create and chmod.  The device_id is not
+    // a secret per se, but it is used as the stable identity for pairing/sync
+    // and should be owner-only for consistency with peers.json and config.json.
+    write_text_atomic_0600(&path, &id.to_string())?;
 
     tracing::info!(device_id = %id, path = %path.display(), "created persistent device_id");
     Ok(id)

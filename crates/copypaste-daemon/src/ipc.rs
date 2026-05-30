@@ -47,10 +47,22 @@ const ERR_IPC_NOT_READY: &str = "IPC_NOT_READY";
 
 /// Persistent application configuration stored at
 /// `dirs::config_dir()/copypaste/config.json`.
+///
+/// # Fix-5: `p2p_enabled` is `Option<bool>`
+///
+/// Using a bare `bool` with `#[serde(default)]` meant that any `set_config`
+/// request omitting the field (e.g. a UI panel that only touches Supabase
+/// credentials) would deserialise `p2p_enabled` as `false` and then overwrite
+/// the stored `true` — silently disabling P2P. `Option<bool>` gives a clean
+/// "absent" sentinel: `None` means "caller did not specify; preserve existing"
+/// and `Some(v)` means "caller explicitly set this value". The `merge_config`
+/// helper applies this semantics on every `set_config` call.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct AppConfig {
-    #[serde(default)]
-    pub p2p_enabled: bool,
+    /// Whether P2P sync is enabled. `None` = not specified by the caller
+    /// (preserve the stored value). `Some(true/false)` = explicit toggle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p2p_enabled: Option<bool>,
     #[serde(default)]
     pub supabase_url: Option<String>,
     #[serde(default)]
@@ -122,18 +134,94 @@ pub(crate) fn read_config() -> AppConfig {
     }
 }
 
+/// Atomically write `cfg` to the `config.json` path with mode `0600`.
+///
+/// # Security (Fix-2)
+///
+/// The previous implementation called `std::fs::write(path, json)` (creates the
+/// file at the umask-derived mode, typically `0644`) and then
+/// `set_permissions(path, 0o600)`. Between the write and the chmod the file
+/// was world-readable for a brief window — long enough for a concurrent process
+/// running as the same user to read `supabase_password` or `supabase_anon_key`.
+///
+/// The fix uses the same atomic-0600 pattern as
+/// `keychain::file_store::write_secret_atomic_to`:
+/// 1. Ensure the parent directory exists (tightened to `0700`).
+/// 2. Create a uniquely-named temp file in the SAME directory.
+/// 3. Set mode `0600` on the temp file before writing any bytes.
+/// 4. Write + flush + sync the JSON payload.
+/// 5. `rename` the temp file over the destination.
 fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
+    use std::io::Write as _;
+
     let path = config_path().ok_or_else(|| anyhow::anyhow!("cannot determine config dir"))?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-        // Best-effort: tighten parent dir perms to user-only.
-        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
-    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("config path has no parent directory"))?;
+    std::fs::create_dir_all(parent)?;
+    // Best-effort: tighten parent dir to user-only.
+    let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+
     let json = serde_json::to_string_pretty(cfg)?;
-    std::fs::write(&path, json)?;
-    // chmod 0600 — config may carry supabase keys; never world-readable.
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+
+    let tmp = parent.join(format!(
+        ".config.json.tmp.{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        f.write_all(json.as_bytes())?;
+        f.flush()?;
+        f.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
     Ok(())
+}
+
+/// Merge an `incoming` config (as received over `set_config`) onto the
+/// `existing` persisted config, preserving any field the caller did not specify.
+///
+/// Policy:
+/// - `p2p_enabled`: `None` incoming → keep existing; `Some(v)` → take `v`.
+/// - All `Option<String>` fields: `None` incoming → keep existing; `Some(v)` → take `v`.
+///
+/// This allows UIs and CLIs to send partial configs (only the fields they manage)
+/// without accidentally resetting unrelated values — most importantly, `p2p_enabled`
+/// being absent must not disable P2P (Fix-5).
+fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfig {
+    AppConfig {
+        p2p_enabled: incoming.p2p_enabled.or(existing.p2p_enabled),
+        supabase_url: incoming.supabase_url.or(existing.supabase_url),
+        supabase_anon_key: incoming.supabase_anon_key.or(existing.supabase_anon_key),
+        supabase_email: incoming.supabase_email.or(existing.supabase_email),
+        supabase_password: incoming.supabase_password.or(existing.supabase_password),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1946,41 +2034,57 @@ impl IpcServer {
                                 format!("[image — id:{}]", &item.id[..8])
                             };
 
-                            // Compute sensitive_spans for non-sensitive text items.
-                            // We run the detector against the *preview* (the same
-                            // UTF-8 string the UI will display) so the char offsets
-                            // are correct without the UI having to re-detect.
-                            // For sensitive items the spans are empty — the whole
-                            // preview is already replaced with a placeholder.
-                            let sensitive_spans: Vec<serde_json::Value> = if !item.is_sensitive
-                                && item.content_type == "text"
-                            {
-                                // `detector.detect` returns byte ranges over the
-                                // NFKC-NORMALISED form of its input, NOT over the
-                                // string we pass. Slicing the original `preview`
-                                // with those byte offsets panicked whenever NFKC
-                                // changed widths (ligatures, full-width forms),
-                                // because the offsets could land mid-char or past
-                                // the end. Run the detector against the SAME string
-                                // we slice (the NFKC form), then map byte offsets
-                                // to char offsets with `byte_to_char_offset`, which
-                                // clamps to a valid char boundary and never panics.
-                                let normalised =
-                                    copypaste_core::sensitive::nfkc_normalize(&preview);
-                                detector
-                                    .detect(&normalised)
-                                    .into_iter()
-                                    .map(|m| {
-                                        let start =
-                                            byte_to_char_offset(&normalised, m.matched_range.start);
-                                        let end =
-                                            byte_to_char_offset(&normalised, m.matched_range.end);
-                                        serde_json::json!([start, end])
-                                    })
-                                    .collect()
-                            } else {
-                                vec![]
-                            };
+                            // Fix-1 (NFKC span-mask leak): the sensitive detector
+                            // internally normalises its input to NFKC before
+                            // matching, and reports byte ranges over that
+                            // normalised form — NOT over the raw string passed
+                            // in.  If NFKC changes codepoint widths (e.g. three-
+                            // byte full-width letters → one-byte ASCII, or
+                            // combining marks → precomposed forms), the char
+                            // offsets we compute here would not index the same
+                            // positions in the original `preview`.  The UI would
+                            // then mask the WRONG characters, potentially
+                            // EXPOSING part of a secret.
+                            //
+                            // Fix: normalise the preview to NFKC BEFORE running
+                            // the detector and use the normalised form as the
+                            // `preview` returned over IPC.  This guarantees that
+                            // the offsets we emit (char indices into `normalised`)
+                            // and the string the UI receives share one basis.
+                            // NFKC is human-faithful — it canonicalises Unicode
+                            // without changing the visible content for typical
+                            // clipboard text.
+                            //
+                            // For sensitive and non-text items `normalised` is
+                            // not computed (the branches below return early with
+                            // empty spans and the placeholder preview is
+                            // already ASCII so no normalisation is needed).
+                            let (preview, sensitive_spans): (String, Vec<serde_json::Value>) =
+                                if !item.is_sensitive && item.content_type == "text" {
+                                    let normalised =
+                                        copypaste_core::sensitive::nfkc_normalize(&preview);
+                                    let spans = detector
+                                        .detect(&normalised)
+                                        .into_iter()
+                                        .map(|m| {
+                                            let start = byte_to_char_offset(
+                                                &normalised,
+                                                m.matched_range.start,
+                                            );
+                                            let end = byte_to_char_offset(
+                                                &normalised,
+                                                m.matched_range.end,
+                                            );
+                                            serde_json::json!([start, end])
+                                        })
+                                        .collect();
+                                    // Return the normalised string so the UI
+                                    // receives exactly the string the offsets
+                                    // index into.
+                                    (normalised, spans)
+                                } else {
+                                    (preview, vec![])
+                                };
 
                             serde_json::json!({
                                 "id": item.id,
@@ -2029,11 +2133,16 @@ impl IpcServer {
                 }
             }
             "set_config" => {
-                let cfg: AppConfig = match serde_json::from_value(req.params.clone()) {
+                let incoming: AppConfig = match serde_json::from_value(req.params.clone()) {
                     Ok(c) => c,
                     Err(e) => return Response::err(req.id, format!("invalid config: {e}")),
                 };
-                match write_config(&cfg) {
+                // Fix-5: merge incoming onto existing so a caller that omits
+                // p2p_enabled (or any other field) does not reset it to the
+                // default.  Without this, a UI panel that only sends Supabase
+                // credentials would flip p2p_enabled from true→false.
+                let merged = merge_config(read_config(), incoming);
+                match write_config(&merged) {
                     Ok(()) => Response::ok(req.id, serde_json::json!({"saved": true})),
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
@@ -3618,22 +3727,45 @@ impl IpcServer {
                     None => return Err(PasteboardError::other("item has no content")),
                 };
 
-                // DUP-ON-COPY helper: reads and stores the post-write changeCount so
-                // the monitor's next tick can identify and suppress this self-write.
-                // Defined as a closure to avoid repeating the unsafe block.
-                let record_self_write = |self_write_cc: &Arc<std::sync::atomic::AtomicI64>| {
-                    use objc2_app_kit::NSPasteboard;
-                    let new_count =
-                        unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
-                    self_write_cc.store(new_count, std::sync::atomic::Ordering::Release);
-                    tracing::debug!(
-                        change_count = new_count,
-                        "clipboard: recorded self-write changeCount to suppress re-capture"
-                    );
-                };
-
                 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
                 use objc2_foundation::{NSData, NSString};
+
+                // Fix-4 (dup-on-copy race): stamp the self-write sentinel
+                // BEFORE calling clearContents/setString so the clipboard
+                // monitor can never observe the new changeCount with a stale
+                // (un-set) sentinel.
+                //
+                // Previous code read changeCount AFTER the write and stored
+                // it — a poll arriving between the write and the store would
+                // see an incremented changeCount with sentinel == -1 and
+                // record the just-pasted item as a fresh capture.
+                //
+                // Fix: read the current changeCount, pre-stamp
+                // `current + 2` as the expected post-write value
+                // (`clearContents` adds 1, `setString_forType` /
+                // `setData_forType` adds 1 more), then write. After the
+                // write, overwrite with the actual new count (handles cases
+                // where macOS increments by a different amount). On error,
+                // reset the sentinel to -1 so the monitor is not permanently
+                // suppressed.
+                let pre_count = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                // Pre-stamp with current+2 (the expected post-clearContents +
+                // post-setString count). The monitor polls only on a 500ms
+                // interval so a pre-stamp that is off by one is still safer
+                // than a window with no stamp at all.
+                self.self_write_change_count
+                    .store(pre_count + 2, std::sync::atomic::Ordering::Release);
+
+                // Helper to post-stamp with the actual post-write count and
+                // log it; called on the success path of each content branch.
+                let post_stamp = |self_write_cc: &Arc<std::sync::atomic::AtomicI64>| {
+                    let actual = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                    self_write_cc.store(actual, std::sync::atomic::Ordering::Release);
+                    tracing::debug!(
+                        change_count = actual,
+                        "clipboard: stamped self-write changeCount (post-write)"
+                    );
+                };
 
                 if item.content_type == "text" {
                     // ----- text: decrypt per-item ciphertext, then write -----
@@ -3677,34 +3809,44 @@ impl IpcServer {
                         nonce,
                         content,
                     )
-                    .map_err(|e| match e {
-                        EncryptError::AuthFailed | EncryptError::AadMismatch => {
-                            PasteboardError::decrypt(
-                                "Decryption failed: authentication tag mismatch".to_string(),
-                            )
+                    .map_err(|e| {
+                        // On decrypt failure reset the sentinel so the monitor
+                        // is not permanently suppressed (Fix-4 error path).
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        match e {
+                            EncryptError::AuthFailed | EncryptError::AadMismatch => {
+                                PasteboardError::decrypt(
+                                    "Decryption failed: authentication tag mismatch".to_string(),
+                                )
+                            }
+                            EncryptError::UnknownKeyVersion(_) => PasteboardError::decrypt(
+                                "Item encrypted with a previous key — cannot be recovered. \
+                                 Clear history to start fresh."
+                                    .to_string(),
+                            ),
+                            other => PasteboardError::decrypt(other.to_string()),
                         }
-                        EncryptError::UnknownKeyVersion(_) => PasteboardError::decrypt(
-                            "Item encrypted with a previous key — cannot be recovered. \
-                             Clear history to start fresh."
-                                .to_string(),
-                        ),
-                        other => PasteboardError::decrypt(other.to_string()),
                     })?;
                     let text = std::str::from_utf8(&plaintext_bytes).map_err(|e| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
                         PasteboardError::decrypt(format!("decrypted content is not UTF-8: {e}"))
                     })?;
-                    unsafe {
+                    let write_ok = unsafe {
                         let pb = NSPasteboard::generalPasteboard();
                         pb.clearContents();
                         let ns_str = NSString::from_str(text);
-                        let ok = pb.setString_forType(&ns_str, NSPasteboardTypeString);
-                        if !ok {
-                            return Err(PasteboardError::other(
-                                "NSPasteboard setString:forType: returned false",
-                            ));
-                        }
+                        pb.setString_forType(&ns_str, NSPasteboardTypeString)
+                    };
+                    if !write_ok {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        return Err(PasteboardError::other(
+                            "NSPasteboard setString:forType: returned false",
+                        ));
                     }
-                    record_self_write(&self.self_write_change_count);
+                    post_stamp(&self.self_write_change_count);
                     Ok(())
                 } else if item.content_type == "image" {
                     // ----- image: reassemble chunks → decrypt → write as PNG -----
@@ -3712,31 +3854,43 @@ impl IpcServer {
                     // `blob_ref` (see ClipboardItem::new_image in
                     // storage/items.rs).
                     let meta_json = item.blob_ref.as_deref().ok_or_else(|| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
                         PasteboardError::other("image item missing blob_ref metadata")
                     })?;
-                    let file_id = parse_image_file_id(meta_json).map_err(PasteboardError::other)?;
+                    let file_id = parse_image_file_id(meta_json).map_err(|e| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        PasteboardError::other(e)
+                    })?;
 
                     let chunks = chunks_from_blob(content).map_err(|e| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
                         PasteboardError::other(format!("image chunks_from_blob failed: {e}"))
                     })?;
                     let png_bytes =
                         decode_image(&chunks, &self.local_key, &file_id).map_err(|e| {
+                            self.self_write_change_count
+                                .store(-1, std::sync::atomic::Ordering::Release);
                             PasteboardError::decrypt(format!("image decode failed: {e}"))
                         })?;
 
-                    unsafe {
+                    let write_ok = unsafe {
                         let pb = NSPasteboard::generalPasteboard();
                         pb.clearContents();
                         let type_str = NSString::from_str("public.png");
                         let data = NSData::with_bytes(&png_bytes);
-                        let ok = pb.setData_forType(Some(&data), &type_str);
-                        if !ok {
-                            return Err(PasteboardError::other(
-                                "NSPasteboard setData:forType: returned false for public.png",
-                            ));
-                        }
+                        pb.setData_forType(Some(&data), &type_str)
+                    };
+                    if !write_ok {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        return Err(PasteboardError::other(
+                            "NSPasteboard setData:forType: returned false for public.png",
+                        ));
                     }
-                    record_self_write(&self.self_write_change_count);
+                    post_stamp(&self.self_write_change_count);
                     Ok(())
                 } else {
                     // Unknown content_type — keep a best-effort raw-bytes write,
@@ -3745,19 +3899,21 @@ impl IpcServer {
                     // ciphertext (no nonce / no chunk metadata). Used only by
                     // future content_types added without updating this handler.
                     let uti = map_content_type_to_uti(&item.content_type);
-                    unsafe {
+                    let write_ok = unsafe {
                         let pb = NSPasteboard::generalPasteboard();
                         pb.clearContents();
                         let type_str = NSString::from_str(&uti);
                         let data = NSData::with_bytes(content);
-                        let ok = pb.setData_forType(Some(&data), &type_str);
-                        if !ok {
-                            return Err(PasteboardError::other(format!(
-                                "NSPasteboard setData:forType: returned false for type '{uti}'"
-                            )));
-                        }
+                        pb.setData_forType(Some(&data), &type_str)
+                    };
+                    if !write_ok {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        return Err(PasteboardError::other(format!(
+                            "NSPasteboard setData:forType: returned false for type '{uti}'"
+                        )));
                     }
-                    record_self_write(&self.self_write_change_count);
+                    post_stamp(&self.self_write_change_count);
                     Ok(())
                 }
             })
@@ -5094,6 +5250,86 @@ mod tests {
         }
     }
 
+    /// Fix-1 (NFKC span-mask leak): when the preview contains full-width or
+    /// ligature chars that NFKC normalises to narrower forms, the returned
+    /// `preview` string must be the NORMALISED form so that the returned char
+    /// offsets (`sensitive_spans`) correctly index into it.
+    ///
+    /// Concretely: full-width "ＡＫＩＡ" (4 chars × 3 bytes each in the original)
+    /// normalises to ASCII "AKIA" (4 chars × 1 byte each).  The detector sees
+    /// "AKIA…" and reports a span at, say, chars [0..20].  If the daemon returned
+    /// the ORIGINAL (full-width) preview, the UI would apply [0..20] to a string
+    /// where char 0 is a 3-byte full-width 'Ａ' — the mask would cover the WRONG
+    /// characters and might expose part of the secret.  The fix: always return the
+    /// normalised preview so offsets and string share one basis.
+    #[tokio::test]
+    async fn history_page_spans_index_into_returned_preview_not_raw() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("span_basis.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // Full-width prefix: each char is 3 UTF-8 bytes in the original,
+        // but only 1 byte after NFKC.  The detector runs on NFKC form and
+        // produces a span anchored at byte offset 0 of the normalised string.
+        // If the daemon returns the raw (non-normalised) preview, char offset 0
+        // in that string still maps to the full-width Ａ — the span basis is wrong.
+        let plaintext = "ＡＫＩＡ0123456789ABCDEF trailing text";
+        {
+            let guard = db.lock().await;
+            let item = copypaste_core::ClipboardItem::new_text(vec![0xCD], vec![0u8; 24], 1);
+            copypaste_core::insert_item_with_fts(&guard, &item, plaintext).unwrap();
+        }
+
+        let resp = call_one(
+            &sock,
+            r#"{"id":"basis","method":"history_page","params":{"limit":10,"offset":0}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "history_page: {resp}");
+        let items = resp["data"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+
+        let preview = items[0]["preview"].as_str().unwrap();
+        let spans = items[0]["sensitive_spans"].as_array().unwrap();
+
+        // The detector must have flagged something (the normalised form is
+        // "AKIA0123456789ABCDEF…" which contains an AWS-key-like pattern).
+        assert!(
+            !spans.is_empty(),
+            "detector should flag the AKIA... pattern in the preview"
+        );
+
+        // KEY ASSERTION: every span must start with ASCII 'A' in the returned
+        // preview.  If the preview is the RAW full-width string the first char
+        // would be 'Ａ' (U+FF21), not 'A' (U+0041) — proving the span basis is
+        // wrong.  After the fix the preview is normalised and spans[0][0] == 0
+        // means preview.chars().nth(0) == 'A'.
+        for span in spans {
+            let pair = span.as_array().unwrap();
+            let start = pair[0].as_u64().unwrap() as usize;
+            let end = pair[1].as_u64().unwrap() as usize;
+            // Span must be within the returned preview's char length.
+            let char_len = preview.chars().count();
+            assert!(
+                end <= char_len,
+                "span [{}..{}] out of range for preview (len={}): {:?}",
+                start,
+                end,
+                char_len,
+                preview
+            );
+            // Each char in the spanned range must be ASCII (normalised).
+            // Full-width chars are 3 bytes wide; after NFKC they become ASCII.
+            let span_chars: String = preview.chars().skip(start).take(end - start).collect();
+            assert!(
+                span_chars.is_ascii(),
+                "span [{start}..{end}] covers non-ASCII chars in preview — \
+                 preview is NOT normalised (raw full-width form leaked): {:?}",
+                span_chars
+            );
+        }
+    }
+
     /// `byte_to_char_offset` clamps out-of-range and mid-codepoint byte indices
     /// to a valid char boundary and never panics.
     #[test]
@@ -6379,6 +6615,111 @@ mod tests {
         assert_eq!(
             data2["signed_in"], true,
             "signed_in must track the real auth flag once set true: {data2}"
+        );
+    }
+
+    // ── Fix-2: write_config must create config.json atomically at mode 0600 ──
+
+    /// `write_config` must produce a `config.json` with mode `0600` and must
+    /// not leave any orphaned `.tmp.*` file behind after a successful write.
+    /// The config may carry `supabase_password` / `supabase_anon_key`; it must
+    /// never be momentarily world-readable between create and chmod.
+    #[cfg(unix)]
+    #[test]
+    fn write_config_creates_file_with_mode_0600_and_no_tmp_orphan() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::set_all(
+            &["HOME", "XDG_CONFIG_HOME", "COPYPASTE_CONFIG_DIR"],
+            dir.path(),
+        );
+
+        let cfg = AppConfig {
+            p2p_enabled: Some(true),
+            supabase_password: Some("secret".into()),
+            ..Default::default()
+        };
+        write_config(&cfg).expect("write_config must succeed");
+
+        // Find the written config.json under the temp home.
+        let config = config_path().expect("config_path under override");
+        assert!(config.exists(), "config.json must be written");
+
+        let mode = std::fs::metadata(&config).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "config.json must be owner-only (0600), got {:o}",
+            mode & 0o777
+        );
+
+        // No orphaned temp file in the config dir.
+        let config_dir = config.parent().unwrap();
+        let orphans: Vec<_> = std::fs::read_dir(config_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".config.json.tmp.")
+            })
+            .collect();
+        assert!(
+            orphans.is_empty(),
+            "atomic write must not leave temp files behind: {:?}",
+            orphans
+        );
+    }
+
+    // ── Fix-5: p2p_enabled must be Option<bool> so omitting it preserves existing ──
+
+    /// A `set_config` request that omits `p2p_enabled` (the field is absent from
+    /// JSON or deserialises as `null`) must NOT flip the stored value to `false`.
+    /// Previously `p2p_enabled: bool` with `#[serde(default)]` meant any
+    /// deserialization that did not include the field produced `false`, silently
+    /// disabling P2P for every caller that only sends a subset of fields.
+    #[test]
+    fn p2p_enabled_option_none_preserves_existing() {
+        // When p2p_enabled is absent from JSON it must deserialise as None.
+        let json_without = r#"{"supabase_url": "https://x.supabase.co"}"#;
+        let cfg: AppConfig = serde_json::from_str(json_without).expect("deserialize");
+        assert!(
+            cfg.p2p_enabled.is_none(),
+            "absent p2p_enabled must deserialise as None, got {:?}",
+            cfg.p2p_enabled
+        );
+
+        // merge_config: when incoming has None, existing value must be preserved.
+        let existing = AppConfig {
+            p2p_enabled: Some(true),
+            ..Default::default()
+        };
+        let merged = merge_config(existing, cfg);
+        assert_eq!(
+            merged.p2p_enabled,
+            Some(true),
+            "merge_config must preserve existing p2p_enabled when incoming is None"
+        );
+    }
+
+    /// When `p2p_enabled: false` is explicitly sent, merge_config must take the
+    /// incoming value (the toggle is authoritative when present).
+    #[test]
+    fn p2p_enabled_option_some_false_wins() {
+        let existing = AppConfig {
+            p2p_enabled: Some(true),
+            ..Default::default()
+        };
+        let incoming = AppConfig {
+            p2p_enabled: Some(false),
+            ..Default::default()
+        };
+        let merged = merge_config(existing, incoming);
+        assert_eq!(
+            merged.p2p_enabled,
+            Some(false),
+            "explicit p2p_enabled=false must override existing true"
         );
     }
 }
