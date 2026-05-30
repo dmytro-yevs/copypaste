@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { api, HistoryEntry, IpcError, playCopySound, showCopyNotification } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
+import { fuzzyMatch } from "../lib/fuzzy";
 import { useUI } from "../store";
 import { ImageThumb } from "../components/ImageThumb";
 
@@ -77,19 +78,28 @@ export function Popup() {
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [refresh]);
 
-  // Filtered items based on the search query.
-  const filtered = query.trim()
-    ? items.filter((item) =>
-        item.preview.toLowerCase().includes(query.toLowerCase())
-      )
-    : items;
+  // Fuzzy-filtered and scored items. When the query is empty, preserve the
+  // original recency order from the daemon. When searching, sort best-first.
+  const filtered = useMemo<Array<{ item: HistoryEntry; positions: number[] }>>(() => {
+    const q = query.trim();
+    if (!q) {
+      return items.map((item) => ({ item, positions: [] }));
+    }
+    const scored: Array<{ item: HistoryEntry; positions: number[]; score: number }> = [];
+    for (const item of items) {
+      const result = fuzzyMatch(q, item.preview);
+      if (result !== null) {
+        scored.push({ item, positions: result.positions, score: result.score });
+      }
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.map(({ item, positions }) => ({ item, positions }));
+  }, [items, query]);
 
   // Keep the selected index in bounds when filter changes.
   useEffect(() => {
-    setSelectedIdx((prev) =>
-      filtered.length === 0 ? 0 : Math.min(prev, filtered.length - 1)
-    );
-  }, [filtered.length]);
+    setSelectedIdx((prev) => (filtered.length === 0 ? 0 : Math.min(prev, filtered.length - 1)));
+  }, [filtered.length]); // filtered.length is stable reference-wise when unchanged
 
   // Scroll the selected item into view.
   useEffect(() => {
@@ -175,9 +185,9 @@ export function Popup() {
   );
 
   const confirmSelection = useCallback(async () => {
-    const item = filtered[selectedIdx];
-    if (!item) return;
-    await copyAndPaste(item.id, item.preview);
+    const entry = filtered[selectedIdx];
+    if (!entry) return;
+    await copyAndPaste(entry.item.id, entry.item.preview);
   }, [filtered, selectedIdx, copyAndPaste]);
 
   const handleKeyDown = useCallback(
@@ -261,7 +271,7 @@ export function Popup() {
           className="flex-1 overflow-y-auto py-1"
           style={{ minHeight: 0 }}
         >
-          {filtered.map((item, idx) => (
+          {filtered.map(({ item, positions }, idx) => (
             <PopupRow
               key={item.id}
               item={item}
@@ -269,6 +279,7 @@ export function Popup() {
               textRowHeight={previewSize}
               imageMaxHeight={imageMaxHeight}
               maskSensitive={maskSensitive}
+              matchPositions={positions}
               onMouseEnter={() => setSelectedIdx(idx)}
               onClick={() => void copyAndPaste(item.id, item.preview)}
             />
@@ -291,8 +302,54 @@ interface PopupRowProps {
   textRowHeight: number;
   imageMaxHeight: number;
   maskSensitive: boolean;
+  /** Character positions in the preview that matched the fuzzy query. Empty when no active query. */
+  matchPositions: number[];
   onMouseEnter: () => void;
   onClick: () => void;
+}
+
+/**
+ * Render `text` with characters at `positions` wrapped in an accent highlight
+ * span. Runs consecutive matched chars together into a single span for fewer
+ * DOM nodes. Returns a plain string when there are no positions to highlight.
+ */
+function HighlightedText({
+  text,
+  positions,
+}: {
+  text: string;
+  positions: number[];
+}): React.ReactElement {
+  if (positions.length === 0) {
+    return <>{text}</>;
+  }
+
+  const posSet = new Set(positions);
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
+  while (i < text.length) {
+    if (posSet.has(i)) {
+      // Collect a contiguous run of matched characters.
+      let j = i;
+      while (j < text.length && posSet.has(j)) j++;
+      nodes.push(
+        <span
+          key={i}
+          className="text-ide-accent font-medium bg-ide-accent/20 rounded-[2px]"
+        >
+          {text.slice(i, j)}
+        </span>
+      );
+      i = j;
+    } else {
+      // Collect a contiguous run of unmatched characters.
+      let j = i;
+      while (j < text.length && !posSet.has(j)) j++;
+      nodes.push(text.slice(i, j));
+      i = j;
+    }
+  }
+  return <>{nodes}</>;
 }
 
 function PopupRow({
@@ -301,6 +358,7 @@ function PopupRow({
   textRowHeight,
   imageMaxHeight,
   maskSensitive,
+  matchPositions,
   onMouseEnter,
   onClick,
 }: PopupRowProps) {
@@ -310,19 +368,22 @@ function PopupRow({
 
   const rowH = popupRowHeight(isImage, textRowHeight, imageMaxHeight);
 
-  // Build the text label for non-image rows (images show a thumbnail instead).
-  let label = "";
-  if (!isImage) {
-    if (isSensitive) {
-      label = "••••••••";
-    } else if (maskSensitive && item.sensitive_spans && item.sensitive_spans.length > 0) {
-      label =
-        applySpanMasking(item.preview, item.sensitive_spans)
-          .replace(/\s+/g, " ")
-          .trim() || "(empty)";
-    } else {
-      label = item.preview.replace(/\s+/g, " ").trim() || "(empty)";
-    }
+  // Build the text label. For images, show a placeholder (thumbnail rendered separately).
+  // When sensitive or masked, skip highlight — the label is redacted.
+  let label: string;
+  let canHighlight = false;
+  if (isImage) {
+    label = "[Image]";
+  } else if (isSensitive) {
+    label = "••••••••";
+  } else if (maskSensitive && item.sensitive_spans && item.sensitive_spans.length > 0) {
+    label =
+      applySpanMasking(item.preview, item.sensitive_spans)
+        .replace(/\s+/g, " ")
+        .trim() || "(empty)";
+  } else {
+    label = item.preview.replace(/\s+/g, " ").trim() || "(empty)";
+    canHighlight = true;
   }
 
   return (
@@ -355,10 +416,13 @@ function PopupRow({
           className="flex-1 min-w-0 text-sm text-white/90"
           style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
         >
-          {label}
+          {canHighlight && matchPositions.length > 0 ? (
+            <HighlightedText text={label} positions={matchPositions} />
+          ) : (
+            label
+          )}
         </span>
       )}
-
       {item.pinned && (
         <span className="text-[10px] text-yellow-400/70 shrink-0">⚑</span>
       )}
