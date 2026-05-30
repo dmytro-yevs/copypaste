@@ -87,6 +87,7 @@ pub fn run() {
         .manage(CurrentShortcut(Mutex::new(cfg.popup_shortcut)))
         .manage(daemon_lifecycle::DaemonChild::default())
         .manage(daemon_lifecycle::DaemonSpawnError::default())
+        .manage(daemon_lifecycle::DaemonLifecycleGen::default())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             ipc::ipc_call,
