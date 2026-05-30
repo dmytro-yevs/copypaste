@@ -46,14 +46,14 @@ class ClipboardRepository(context: Context) {
      * within [DEDUP_WINDOW_MS]. The time window preserves the legitimate
      * "same text copied again later" case — re-copying after the window stores
      * a fresh row as expected.
+     *
+     * The dedup state ([lastStoredHash], [lastStoredAtMs], [dedupLock]) lives in
+     * the [companion object] so it is shared process-wide across every
+     * repository instance. All three listener owners run in the same process and
+     * each builds its own [ClipboardRepository]; per-instance state let the same
+     * physical copy slip past three independent guards, producing dup×3 rows,
+     * notifications and sync pushes.
      */
-    @Volatile
-    private var lastStoredHash: Int = 0
-
-    @Volatile
-    private var lastStoredAtMs: Long = 0L
-
-    private val dedupLock = Any()
 
     /**
      * Guard for read-modify-write on the comma-joined "synced_source_ids" set
@@ -393,6 +393,23 @@ class ClipboardRepository(context: Context) {
 
         /** Window in which an identical-content store is treated as a duplicate. */
         private const val DEDUP_WINDOW_MS = 2_000L
+
+        /**
+         * Process-wide dedup window state, shared by every [ClipboardRepository]
+         * instance. ClipboardService, ClipboardAccessibilityService and
+         * MainActivity each construct their own repository in the same process;
+         * if this state were per-instance, one OS clip change would pass all
+         * three independent guards and create three duplicate rows. Static state
+         * lets the first store set the marker so the other near-simultaneous
+         * stores are rejected within [DEDUP_WINDOW_MS].
+         */
+        @Volatile
+        private var lastStoredHash: Int = 0
+
+        @Volatile
+        private var lastStoredAtMs: Long = 0L
+
+        private val dedupLock = Any()
 
         /**
          * Pure LOW-2 dedup predicate: an incoming synced item is new (should be
