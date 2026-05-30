@@ -358,127 +358,6 @@ fn record_prior_app(handle: tauri::AppHandle) {
     let _ = handle;
 }
 
-/// Hide the popup window without surfacing the main window (D7 fix).
-///
-/// On macOS, simply calling `win.hide()` from JS causes the OS to promote the
-/// next window of the same Regular-policy app to the front — which is our main
-/// window.  This command first activates the prior (external) app so that macOS
-/// hands focus there instead of to our main window, then hides the popup.
-/// This is the correct hide path for both Esc and any other dismiss action.
-#[tauri::command]
-fn hide_popup(handle: tauri::AppHandle) {
-    #[cfg(target_os = "macos")]
-    {
-        // Activate the prior app first so macOS does not auto-focus our main
-        // window when the popup disappears (D7: Esc was surfacing main window).
-        let bundle_id: Option<String> = handle
-            .try_state::<PriorApp>()
-            .and_then(|s| s.0.lock().ok().map(|g| g.clone()))
-            .flatten();
-        if let Some(ref bid) = bundle_id {
-            activate_app_by_bundle_id(bid);
-        }
-    }
-
-    if let Some(popup) = handle.get_webview_window("popup") {
-        let _ = popup.hide();
-    }
-}
-
-/// Play a soft system sound (NSSound "Tink") after a successful copy.
-///
-/// Maccy parity: Maccy plays "Funk" or "Pop" depending on version; we use
-/// "Tink" because it is shorter and less intrusive. The sound plays on the
-/// main run-loop via `[NSSound play]` which is non-blocking from the Rust
-/// perspective. Any failure (sound file missing, audio device unavailable) is
-/// silently ignored so it never disrupts the copy flow.
-///
-/// The command is cross-platform safe: on non-macOS it is a no-op.
-#[tauri::command]
-fn play_copy_sound() {
-    #[cfg(target_os = "macos")]
-    {
-        use objc2_app_kit::NSSound;
-        use objc2_foundation::NSString;
-
-        // SAFETY: NSSound and NSString bindings are correct; ObjC calls are
-        // safe when invoked from a thread that has an autorelease pool. Tauri
-        // command handlers run on the Tokio runtime, which drives an ObjC
-        // autorelease pool on macOS — so this is safe here.
-        unsafe {
-            let name = NSString::from_str("Tink");
-            if let Some(sound) = NSSound::soundNamed(&name) {
-                // play returns bool; ignore the result — best-effort only.
-                let _ = sound.play();
-            } else {
-                tracing::debug!("play_copy_sound: NSSound 'Tink' not found (non-fatal)");
-            }
-        }
-    }
-}
-
-/// Show a macOS notification banner after a successful copy.
-///
-/// Uses `osascript` to post a "display notification" so we don't need the
-/// tauri-plugin-notification or any entitlement changes for a v0.5.2 feature
-/// flag. `osascript` notifications appear in Notification Centre and respect
-/// the user's Do Not Disturb setting. Any failure (osascript missing, user
-/// denied Script Editor notifications, etc.) is silently ignored.
-///
-/// `preview` is a short one-line string supplied by the frontend (already
-/// truncated to ≤60 chars). The command sanitises it before embedding in the
-/// AppleScript literal.
-///
-/// The command is cross-platform safe: on non-macOS it is a no-op.
-#[tauri::command]
-fn show_copy_notification(preview: String) {
-    #[cfg(target_os = "macos")]
-    {
-        use std::process::Command;
-
-        // Sanitise preview: strip quotes and backslashes so they cannot escape
-        // the AppleScript string literal.  We only allow printable ASCII + common
-        // Unicode; anything that could act as a metachar is replaced with a space.
-        let safe: String = preview
-            .chars()
-            .map(|c| if c == '"' || c == '\\' { ' ' } else { c })
-            .take(60)
-            .collect();
-        let safe = safe.trim();
-
-        let title = "CopyPaste";
-        let body = if safe.is_empty() { "Copied" } else { safe };
-
-        // Build the AppleScript. Double-quote delimiters are already safe because
-        // we stripped all `"` from the input above.
-        let script = format!(r#"display notification "{body}" with title "{title}""#,);
-
-        // Spawn osascript on a background thread so we don't block the Tauri
-        // command handler. Errors are logged at DEBUG level; they never surface
-        // to the user since this is purely cosmetic feedback.
-        std::thread::spawn(move || {
-            match Command::new("osascript").arg("-e").arg(&script).output() {
-                Ok(out) if !out.status.success() => {
-                    tracing::debug!(
-                        "show_copy_notification: osascript exited {:?}: {}",
-                        out.status.code(),
-                        String::from_utf8_lossy(&out.stderr).trim()
-                    );
-                }
-                Err(e) => {
-                    tracing::debug!("show_copy_notification: failed to spawn osascript: {e}");
-                }
-                Ok(_) => {}
-            }
-        });
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        // Non-macOS: notification is a no-op. preview is unused.
-        let _ = preview;
-    }
-}
-
 /// Activate the previously-focused application (restoring focus) and then
 /// synthesise a Cmd+V paste event so the clipboard content lands in the
 /// target app.  Call this after `api.copyItem` and before hiding the popup.
@@ -541,6 +420,38 @@ fn paste_to_frontmost(handle: tauri::AppHandle) -> Result<(), String> {
     {
         let _ = handle;
         Ok(())
+    }
+}
+
+/// Play a soft system sound (NSSound "Tink") after a successful copy.
+///
+/// Maccy parity: Maccy plays "Funk" or "Pop" depending on version; we use
+/// "Tink" because it is shorter and less intrusive. The sound plays on the
+/// main run-loop via `[NSSound play]` which is non-blocking from the Rust
+/// perspective. Any failure (sound file missing, audio device unavailable) is
+/// silently ignored so it never disrupts the copy flow.
+///
+/// The command is cross-platform safe: on non-macOS it is a no-op.
+#[tauri::command]
+fn play_copy_sound() {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSSound;
+        use objc2_foundation::NSString;
+
+        // SAFETY: NSSound and NSString bindings are correct; ObjC calls are
+        // safe when invoked from a thread that has an autorelease pool. Tauri
+        // command handlers run on the Tokio runtime, which drives an ObjC
+        // autorelease pool on macOS — so this is safe here.
+        unsafe {
+            let name = NSString::from_str("Tink");
+            if let Some(sound) = NSSound::soundNamed(&name) {
+                // play returns bool; ignore the result — best-effort only.
+                let _ = sound.play();
+            } else {
+                tracing::debug!("play_copy_sound: NSSound 'Tink' not found (non-fatal)");
+            }
+        }
     }
 }
 
@@ -644,6 +555,133 @@ fn register_popup_shortcut(
     Ok(())
 }
 
+/// Shared internal implementation for hiding the popup without surfacing the
+/// main window.  Both the `hide_popup` Tauri command and the `toggle_popup`
+/// close-branch call this so the macOS prior-app activation logic is never
+/// duplicated or skipped (V-10 fix: toggle_popup was calling `popup.hide()`
+/// directly, bypassing this path).
+///
+/// V-11 fix: when no prior app is recorded (e.g. first-ever popup open before
+/// the user has switched away to any external app), temporarily switch to the
+/// Accessory activation policy before hiding so macOS does not promote the
+/// main window.  The policy is restored to Regular immediately after — the
+/// switch is invisible to the user because the popup is still visible during
+/// the policy change.
+fn hide_popup_internal(handle: &tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        let bundle_id: Option<String> = handle
+            .try_state::<PriorApp>()
+            .and_then(|s| s.0.lock().ok().map(|g| g.clone()))
+            .flatten();
+
+        if let Some(ref bid) = bundle_id {
+            // Activate the prior external app so macOS hands focus there
+            // instead of to our main window (D7 fix).
+            activate_app_by_bundle_id(bid);
+        } else {
+            // V-11: No prior app recorded (first launch before any external
+            // app has been focused, or Esc pressed immediately).  Temporarily
+            // set Accessory policy so the OS does not auto-promote the main
+            // window when the popup disappears, then restore Regular so the
+            // Dock icon and Cmd+Tab entry remain visible.
+            use tauri::ActivationPolicy;
+            let _ = handle.set_activation_policy(ActivationPolicy::Accessory);
+            if let Some(popup) = handle.get_webview_window("popup") {
+                let _ = popup.hide();
+            }
+            let _ = handle.set_activation_policy(ActivationPolicy::Regular);
+            return;
+        }
+    }
+
+    if let Some(popup) = handle.get_webview_window("popup") {
+        let _ = popup.hide();
+    }
+}
+
+/// Hide the popup window without surfacing the main window.
+///
+/// On macOS, simply calling `win.hide()` from JS causes the OS to promote the
+/// next window of the same Regular-policy app to the front — which is our main
+/// window.  This command first activates the prior (external) app so that macOS
+/// hands focus there instead of to our main window, then hides the popup.
+/// This is the correct hide path for Esc, blur, and row-click dismiss actions.
+/// Delegates to `hide_popup_internal` so `toggle_popup` shares the same path
+/// (V-10 fix).
+#[tauri::command]
+fn hide_popup(handle: tauri::AppHandle) {
+    hide_popup_internal(&handle);
+}
+
+/// Show a macOS notification banner after a successful copy.
+///
+/// Uses `osascript` to post a "display notification" so we don't need the
+/// tauri-plugin-notification or any entitlement changes.  Any failure
+/// (osascript missing, user denied Script Editor notifications, etc.) is
+/// silently ignored — this is purely cosmetic feedback.
+///
+/// `preview` is a short one-line string supplied by the frontend (already
+/// truncated to ≤60 chars).  The command sanitises it before embedding in the
+/// AppleScript literal to prevent injection via quotes, backslashes, or
+/// newlines/control chars (V-18 fix: newlines caused osascript to fail silently).
+///
+/// The command is cross-platform safe: on non-macOS it is a no-op.
+#[tauri::command]
+fn show_copy_notification(preview: String) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        // Sanitise preview: replace quotes, backslashes, newlines, carriage
+        // returns, and all other ASCII control characters with a space so they
+        // cannot escape the AppleScript string literal or cause osascript to
+        // fail silently on multi-line input (V-18 fix: \n was not stripped).
+        let safe: String = preview
+            .chars()
+            .map(|c| {
+                if c == '"' || c == '\\' || c == '\n' || c == '\r' || (c as u32) < 0x20 {
+                    ' '
+                } else {
+                    c
+                }
+            })
+            .take(60)
+            .collect();
+        let safe = safe.trim();
+
+        let title = "CopyPaste";
+        let body = if safe.is_empty() { "Copied" } else { safe };
+
+        // Build the AppleScript.  Double-quote delimiters are already safe
+        // because we stripped all `"` from the input above.
+        let script = format!(r#"display notification "{body}" with title "{title}""#);
+
+        // Spawn osascript on a background thread so we don't block the Tauri
+        // command handler.  Errors are logged at DEBUG level; they never surface
+        // to the user since this is purely cosmetic feedback.
+        std::thread::spawn(move || {
+            match Command::new("osascript").arg("-e").arg(&script).output() {
+                Ok(out) if !out.status.success() => {
+                    tracing::debug!(
+                        "show_copy_notification: osascript exited {:?}: {}",
+                        out.status.code(),
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    );
+                }
+                Err(e) => {
+                    tracing::debug!("show_copy_notification: failed to spawn osascript: {e}");
+                }
+                Ok(_) => {}
+            }
+        });
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = preview;
+    }
+}
+
 /// Toggle (show or hide) the quick-paste popup near the current cursor position.
 fn toggle_popup(handle: &tauri::AppHandle) {
     let Some(popup) = handle.get_webview_window("popup") else {
@@ -651,10 +689,12 @@ fn toggle_popup(handle: &tauri::AppHandle) {
         return;
     };
 
-    // If the popup is already visible, hide it.
+    // If the popup is already visible, hide it via the shared internal helper
+    // so the macOS prior-app activation runs (V-10 fix: was calling
+    // popup.hide() directly, which skipped activation and surfaced main window).
     let is_visible = popup.is_visible().unwrap_or(false);
     if is_visible {
-        let _ = popup.hide();
+        hide_popup_internal(handle);
         return;
     }
 
@@ -792,28 +832,24 @@ fn setup_popup_window(app: &tauri::App) -> tauri::Result<()> {
             .build()?
     };
 
-    // D6 fix: hide the popup when it loses focus (user clicked outside).
-    // Clone the WebviewWindow handle (cheap Arc clone in Tauri 2) so we own it
-    // inside the 'static closure — the closure only receives &WindowEvent.
-    // We use the app handle to look up the prior-app state and activate it first
-    // (same logic as hide_popup) so macOS doesn't promote the main window (D7).
+    // V-12 fix: hide on focus loss, but guard with is_visible() to prevent
+    // double-activation when a JS-initiated hide (row click → invoke("hide_popup"))
+    // fires concurrently with this blur event.  Without the guard the prior app
+    // would be activated twice → focus flicker.  Also skip when a child/system
+    // dialog (e.g. file picker) steals focus — those cause Focused(false) too,
+    // and auto-dismissing the popup in that case is wrong.
+    // We clone the popup handle (cheap Arc clone in Tauri 2) so the 'static
+    // closure owns it without borrowing `popup`.
     let popup_for_blur = popup.clone();
     popup.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(false) = event {
-            // Activate the prior external app before hiding so macOS does not
-            // auto-focus our main window (mirrors the hide_popup command logic).
-            #[cfg(target_os = "macos")]
-            {
-                let bundle_id: Option<String> = popup_for_blur
-                    .app_handle()
-                    .try_state::<PriorApp>()
-                    .and_then(|s| s.0.lock().ok().map(|g| g.clone()))
-                    .flatten();
-                if let Some(ref bid) = bundle_id {
-                    activate_app_by_bundle_id(bid);
-                }
+            // Skip if already hidden — avoids double hide_popup_internal call
+            // when JS already called invoke("hide_popup") on the same dismiss.
+            if !popup_for_blur.is_visible().unwrap_or(true) {
+                return;
             }
-            let _ = popup_for_blur.hide();
+            // hide_popup_internal requires an AppHandle; get it from the window.
+            hide_popup_internal(popup_for_blur.app_handle());
         }
     });
 
