@@ -9,6 +9,7 @@ import {
   type PairingQr,
 } from "../lib/ipc";
 import { ViewShell } from "../components/ViewShell";
+import { RestartDaemonButton } from "../components/RestartDaemonButton";
 
 type QrState =
   | { status: "idle" }
@@ -49,6 +50,8 @@ export function DevicesView() {
   // --- Own fingerprint (for labelling this device in the list) ---
   const [fpState, setFpState] = useState<FingerprintState>({ status: "loading" });
   const [copied, setCopied] = useState(false);
+  // Incrementing this triggers a fingerprint re-fetch (e.g. after restart).
+  const [fpReloadKey, setFpReloadKey] = useState(0);
 
   // --- QR pairing (this device displays a code; other devices scan it) ---
   const [qrState, setQrState] = useState<QrState>({ status: "idle" });
@@ -120,6 +123,7 @@ export function DevicesView() {
   // --- Load own fingerprint ---
   useEffect(() => {
     let cancelled = false;
+    setFpState({ status: "loading" });
     api.getOwnFingerprint().then(
       ({ fingerprint }) => {
         if (!cancelled) setFpState({ status: "ready", fingerprint });
@@ -144,7 +148,9 @@ export function DevicesView() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  // fpReloadKey lets the RestartDaemonButton trigger a re-fetch after restart.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fpReloadKey]);
 
   useEffect(() => {
     void loadPeers();
@@ -292,7 +298,12 @@ export function DevicesView() {
   if (loadState === "loading") {
     devicesBody = <p className="text-[13px] text-ide-dim">Loading…</p>;
   } else if (loadState === "offline") {
-    devicesBody = <p className="text-[13px] text-ide-dim">Daemon not running.</p>;
+    devicesBody = (
+      <div className="flex items-center gap-3">
+        <p className="text-[13px] text-ide-dim">Daemon not running.</p>
+        <RestartDaemonButton onRestarted={() => void loadPeers()} />
+      </div>
+    );
   } else if (loadState === "degraded") {
     devicesBody = (
       <div className="rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2.5 text-[13px] text-ide-warning">
@@ -410,7 +421,15 @@ export function DevicesView() {
               </span>
             )}
             {fpState.status === "offline" && (
-              <span className="text-[13px] text-ide-danger">Daemon not running.</span>
+              <>
+                <span className="text-[13px] text-ide-danger">Daemon not running.</span>
+                <RestartDaemonButton
+                  onRestarted={() => {
+                    setFpReloadKey((k) => k + 1);
+                    void loadPeers();
+                  }}
+                />
+              </>
             )}
             {fpState.status === "degraded" && (
               <span className="text-[13px] text-ide-warning">

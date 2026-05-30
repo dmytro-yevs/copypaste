@@ -352,6 +352,11 @@ pub fn ensure_daemon_running(app: &tauri::AppHandle) -> Result<bool, String> {
     })?;
 
     let child = std::process::Command::new(&bin)
+        // Enable P2P (mTLS identity + mDNS LAN advertising) so the app-owned
+        // daemon advertises a device fingerprint and can generate pairing QRs.
+        // The daemon gates P2P on COPYPASTE_P2P; without this it runs P2P-off,
+        // leaving Devices->Fingerprint empty and LAN pairing impossible.
+        .env("COPYPASTE_P2P", "1")
         .spawn()
         .map_err(|e| format!("failed to spawn daemon at {}: {e}", bin.display()))?;
 
