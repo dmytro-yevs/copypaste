@@ -13,6 +13,7 @@
 
 #![allow(dead_code)]
 
+pub mod app_icon;
 pub mod clipboard;
 pub mod daemon;
 pub mod device_meta;

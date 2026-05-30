@@ -242,6 +242,15 @@ export const api = {
 
   getItemImage: (id: string) => ipcCall<{ data_uri: string }>("get_item_image", { id }),
 
+  /**
+   * Ask the daemon to resolve a source-app bundle identifier to a 32×32 PNG
+   * icon, base64-encoded.  Returns `null` when the app is not installed or
+   * the daemon cannot extract the icon.  Results are cached in the daemon so
+   * repeated calls for the same bundle ID are fast.
+   */
+  getAppIcon: (bundleId: string) =>
+    ipcCall<{ png_b64: string | null }>("get_app_icon", { bundle_id: bundleId }),
+
   getOwnFingerprint: () => ipcCall<{ fingerprint: string }>("get_own_fingerprint"),
   /** Rich identity for this device: name, model, OS, version, LAN IP, fingerprint. */
   getOwnDeviceInfo: () => ipcCall<OwnDeviceInfo>("get_own_device_info"),
