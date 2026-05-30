@@ -666,6 +666,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     };
 
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
+    // Override the READ-gate image cap with the user-configured value so the
+    // clipboard poll gate and the encode gate are consistent.  Without this,
+    // `poll()` was capped at the hardcoded core const (10 MiB) even when the
+    // user configured a higher value (default 25 MiB), making configs above
+    // 10 MiB silently ineffective.
+    monitor.set_max_image_bytes(usize::try_from(config.max_image_size_bytes).unwrap_or(usize::MAX));
     // DUP-ON-COPY fix: share the self-write sentinel with the IpcServer so
     // write_to_pasteboard can stamp the post-write changeCount and the monitor
     // can suppress the immediately-following re-capture of that same write.
