@@ -133,16 +133,18 @@ cp "$BIN_CLI"    "$APP_DIR/Contents/MacOS/"
 cp "$BIN_DAEMON" "$APP_DIR/Contents/MacOS/"
 cp "$BIN_RELAY"  "$APP_DIR/Contents/MacOS/"
 
-# LaunchAgent plist template: the Tauri setup code reads this from
-# Contents/Resources/com.copypaste.daemon.plist on first launch and
-# installs it into ~/Library/LaunchAgents/ (substituting USERNAME and
-# the /Applications path). Without this file the daemon never starts.
+# LaunchAgent plist (LEGACY): as of the app-owned daemon lifecycle
+# (ADR-014, 2026-05-30) the desktop app starts and stops the daemon itself as a
+# child process — it does NOT rely on a LaunchAgent, and in fact boots out any
+# leftover agent on launch/quit so launchd cannot resurrect the daemon behind
+# the app's back. We still ship the plist (RunAtLoad=false, KeepAlive=false) for
+# power users who want a CLI-managed, headless daemon via
+# scripts/launchd/install-agent.sh, but a default install never loads it.
 LAUNCHD_PLIST_SRC="packaging/macos/com.copypaste.daemon.plist"
 if [[ -f "$LAUNCHD_PLIST_SRC" ]]; then
     cp "$LAUNCHD_PLIST_SRC" "$APP_DIR/Contents/Resources/com.copypaste.daemon.plist"
 else
-    echo "ERROR: $LAUNCHD_PLIST_SRC missing — daemon will not start on first launch" >&2
-    exit 1
+    echo "warning: $LAUNCHD_PLIST_SRC missing — skipping legacy LaunchAgent template" >&2
 fi
 
 # Post-staging verification: confirm the assembled bundle is complete before
