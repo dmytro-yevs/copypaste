@@ -241,6 +241,31 @@ fun SettingsScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
 
+                // ── Cross-device account warning ───────────────────────────────
+                // Show the signed-in email (or a placeholder) and a prominent
+                // reminder that ALL devices must use the SAME Supabase account.
+                // A mismatch cannot be auto-detected (RLS isolates accounts at
+                // the server side), so we surface this hint preventively.
+                val accountDisplay = supabaseEmail.ifBlank { "(anon key — no sign-in)" }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "Signed-in account: $accountDisplay",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "All your devices must use THIS SAME Supabase account to sync — " +
+                            "different accounts can't see each other's clips.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+
                 SettingsTextField(
                     label = "Email",
                     hint = "user@example.com",

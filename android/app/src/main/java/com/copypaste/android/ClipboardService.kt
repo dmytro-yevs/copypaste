@@ -308,34 +308,24 @@ class ClipboardService : Service() {
                     }
                 }
                 SyncBackend.RELAY -> {
-                    // Relay path: encrypt with local device key + v3/v4 AAD,
-                    // upload to custom relay server. Local-network only.
-                    try {
-                        // STABLE identity: bind the row's persisted [itemId] into
-                        // the AEAD AAD and forward it to the relay, so a re-upload
-                        // of the same clip is the same logical item on the
-                        // receiver (was a fresh UUID per upload).
-                        val blob = try {
-                            encryptText(itemId, plaintext.toByteArray(Charsets.UTF_8), key)
-                        } catch (e: IllegalStateException) {
-                            Log.d(TAG, "Native encryptText unavailable (${e.message}) — local AES")
-                            ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
-                        } catch (_: UnsatisfiedLinkError) {
-                            ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
-                        }
-                        val lamportTs = System.currentTimeMillis()
-                        // Collapse "text/plain" -> canonical "text" at the sync
-                        // boundary. The relay server only accepts
-                        // {"text","image","file"} (rejects "text/plain" with HTTP
-                        // 400) and the daemon ingest only processes
-                        // content_type == "text", so an un-normalized value makes
-                        // EVERY relay push silently dropped. Mirrors the P2P /
-                        // Supabase paths which already send "text".
-                        val contentType = ClipboardRepository.normalizeContentTypeForSync("text/plain")
-                        syncManager.uploadItem(itemId, blob.ciphertext, blob.nonce, contentType, lamportTs)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Relay upload failed: ${e.message}")
-                    }
+                    // RELAY cloud backend is DISABLED.
+                    //
+                    // The relay path encrypted items with the local per-device AES
+                    // key (settings.encryptionKey) which no other device holds, so
+                    // every payload it uploaded was undecryptable by macOS or any
+                    // peer. The incoming poll (syncIncoming / syncItems) was also
+                    // never wired into any active code path, making the relay
+                    // write-only. This combination makes the relay cloud backend
+                    // completely broken for cross-device sync.
+                    //
+                    // Decision: cloud sync = Supabase only. Switch to Supabase in
+                    // Settings to enable cross-device cloud sync. The P2P/pairing
+                    // LAN path (dialPairedPeer in FgsSyncLoop) is unaffected.
+                    Log.w(
+                        TAG,
+                        "relay cloud backend is disabled — use Supabase for " +
+                            "cross-device cloud sync (Settings → Use Supabase Cloud Sync)"
+                    )
                 }
             }
         }
