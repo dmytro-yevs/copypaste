@@ -381,12 +381,16 @@ export function SettingsView() {
 
   const handlePrivateMode = useCallback(
     async (val: boolean) => {
+      // Optimistic update so the toggle responds immediately.
       setPrivateMode(val);
       setPrivateModeError(null);
       try {
-        await api.setPrivateMode(val);
+        // Daemon echoes back the confirmed value — use it so the displayed
+        // state always matches the actual daemon state, never an assumption.
+        const result = await api.setPrivateMode(val);
+        setPrivateMode(result.private_mode);
       } catch (err) {
-        // Revert on failure and show error
+        // Revert on failure and surface the error.
         setPrivateMode(!val);
         const msg = err instanceof IpcError ? err.message : "Failed to update private mode";
         setPrivateModeError(msg);
