@@ -133,8 +133,8 @@ class MainActivity : ComponentActivity() {
         if (text.isBlank()) return
         val sensitive = try { isSensitive(text) } catch (_: UnsatisfiedLinkError) { false }
         if (sensitive) return
-        val stored = repository.storeItem(text, settings.encryptionKey)
-        if (stored) {
+        val storedId = repository.storeItem(text, settings.encryptionKey)
+        if (storedId.isNotEmpty()) {
             Log.d(TAG, "MainActivity stored clip")
             viewModel.loadItems() // refresh the Clips tab
         }

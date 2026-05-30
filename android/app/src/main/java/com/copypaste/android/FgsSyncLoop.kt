@@ -200,17 +200,18 @@ class FgsSyncLoop(
         for (item in items) {
             val text = item.plaintext.toString(Charsets.UTF_8)
             if (text.isBlank()) continue
-            // Skip our OWN pushed rows. Local capture stores under a fresh UUID
-            // while the Supabase push mints a different item_id, so the
-            // source-id dedup below never recorded the pushed id — without this
-            // filter our own clip round-trips back and is stored as a DUPLICATE
-            // history row. Filtering on device_id at poll time is localized and
-            // robust; the source-id dedup stays intact for cross-device rows.
+            // Skip our OWN pushed rows (self-echo): without this our own clip
+            // round-trips back via the poll and is stored as a DUPLICATE.
             if (item.deviceId == settings.deviceId) continue
-            // LOW-2: pass the stable Supabase source id so a row re-fetched by
-            // the WorkManager worker (shared wall-time cursor) is not duplicated.
-            val stored = repository.storeItem(text, settings.encryptionKey, sourceId = item.itemId)
-            if (stored) newCount++
+            // Persist under the peer's STABLE item_id (overrideId): cross-poll
+            // dedup key AND the cross-device id reused on a later re-sync (no
+            // fresh local UUID that would resurface as a duplicate on the origin).
+            val stored = repository.storeItem(
+                text,
+                settings.encryptionKey,
+                overrideId = item.itemId,
+            )
+            if (stored.isNotEmpty()) newCount++
             if (item.wallTime > latestWallTime) latestWallTime = item.wallTime
         }
 
@@ -268,9 +269,14 @@ class FgsSyncLoop(
                     ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
                     Charsets.UTF_8,
                 )
-                // LOW-2: the P2P SyncedItem.id is the peer's stable row id;
-                // dedup against it so a re-dial does not re-insert the same row.
-                if (repository.storeItem(plaintext, key, sourceId = item.id)) stored += 1
+                // Persist under the peer's STABLE item_id (overrideId): dedups a
+                // re-dial AND lets a later re-sync of this clip reuse the same
+                // cross-device id instead of minting a fresh local UUID.
+                if (repository.storeItem(plaintext, key, overrideId = item.itemId)
+                        .isNotEmpty()
+                ) {
+                    stored += 1
+                }
             }
             if (result.itemsReceived > 0uL || result.itemsSent > 0uL) {
                 Log.i(

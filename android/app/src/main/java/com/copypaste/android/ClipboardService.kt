@@ -259,13 +259,15 @@ class ClipboardService : Service() {
             // Persist to the SharedPreferences repository — the single source the
             // UI reads. storeItem performs cross-listener dedup (HIGH-3) so a
             // single copy seen by multiple owners is stored (and counted) once.
-            val stored = repository.storeItem(text, key)
-            if (stored) {
+            // The returned id is this clip's STABLE cross-device item_id, minted
+            // once here and reused on every push/sync below.
+            val storedId = repository.storeItem(text, key)
+            if (storedId.isNotEmpty()) {
                 Log.d(TAG, "Clipboard item stored successfully")
                 bumpTodayCounter(context)
                 refreshNotification(context)
                 if (settings.syncEnabled) {
-                    notifySyncManager(text, key, settings, syncManager)
+                    notifySyncManager(storedId, text, key, settings, syncManager)
                 }
             }
         }
@@ -275,6 +277,7 @@ class ClipboardService : Service() {
             context.applicationContext.getDatabasePath("copypaste.db").absolutePath
 
         private suspend fun notifySyncManager(
+            itemId: String,
             plaintext: String,
             key: ByteArray,
             settings: Settings,
@@ -284,10 +287,15 @@ class ClipboardService : Service() {
                 SyncBackend.SUPABASE -> {
                     // Supabase path: encrypt with cross-device SyncKey (schema v5),
                     // push to Supabase PostgREST. Interoperates with macOS daemon.
+                    // STABLE identity: push under the row's persisted [itemId]
+                    // (overrideId) so the cloud item_id matches the local row and
+                    // is reused on every push — the daemon dedups/LWW-merges
+                    // instead of seeing a new item each time (the duplicates bug).
                     try {
                         val id = syncManager.pushToSupabase(
                             plaintext = plaintext.toByteArray(Charsets.UTF_8),
                             contentType = "text",
+                            overrideId = itemId,
                             deviceId = settings.deviceId,
                         )
                         if (id != null) {
@@ -303,10 +311,10 @@ class ClipboardService : Service() {
                     // Relay path: encrypt with local device key + v3/v4 AAD,
                     // upload to custom relay server. Local-network only.
                     try {
-                        // Generate the item id BEFORE encrypting so the same id can
-                        // be bound into the AEAD AAD and forwarded to the relay. A
-                        // mismatch would fail decryption on the receiver silently.
-                        val itemId = java.util.UUID.randomUUID().toString()
+                        // STABLE identity: bind the row's persisted [itemId] into
+                        // the AEAD AAD and forward it to the relay, so a re-upload
+                        // of the same clip is the same logical item on the
+                        // receiver (was a fresh UUID per upload).
                         val blob = try {
                             encryptText(itemId, plaintext.toByteArray(Charsets.UTF_8), key)
                         } catch (e: IllegalStateException) {

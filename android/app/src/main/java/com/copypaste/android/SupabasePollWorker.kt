@@ -64,18 +64,18 @@ class SupabasePollWorker(
             for (item in items) {
                 val text = item.plaintext.toString(Charsets.UTF_8)
                 if (text.isBlank()) continue
-                // Skip our OWN pushed rows. Local capture stores under a fresh
-                // UUID while the Supabase push mints a different item_id, so the
-                // source-id dedup below never recorded the pushed id — without
-                // this filter our own clip round-trips back and is stored as a
-                // DUPLICATE history row. Filtering on device_id at poll time is
-                // localized and robust; the source-id dedup stays intact for
-                // cross-device rows.
+                // Skip our OWN pushed rows (self-echo): without this our own
+                // clip round-trips back via the poll and is stored as a DUPLICATE.
                 if (item.deviceId == settings.deviceId) continue
-                // LOW-2: pass the stable Supabase source id so a row also fetched
-                // by the FGS loop (shared wall-time cursor) is not duplicated.
-                val stored = repository.storeItem(text, settings.encryptionKey, sourceId = item.itemId)
-                if (stored) newCount++
+                // Persist under the stable Supabase item_id (overrideId): cross-poll
+                // dedup key (a row also fetched by the FGS loop is not duplicated)
+                // AND the cross-device id a later re-sync reuses (no fresh UUID).
+                val stored = repository.storeItem(
+                    text,
+                    settings.encryptionKey,
+                    overrideId = item.itemId,
+                )
+                if (stored.isNotEmpty()) newCount++
                 if (item.wallTime > latestWallTime) latestWallTime = item.wallTime
             }
 

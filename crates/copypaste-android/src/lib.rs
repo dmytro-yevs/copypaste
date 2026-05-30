@@ -424,18 +424,30 @@ pub fn bootstrap_pair_initiator(
 const P2P_SYNC_KEY_SALT: &[u8] = b"copypaste/p2p/content-sync-key/v1";
 
 /// A local clipboard item (plaintext) offered to a peer during one sync session.
+///
+/// `item_id` is the STABLE cross-device identity minted ONCE at capture and
+/// reused on every push/sync — the daemon keys merge/dedup/LWW on it, so it
+/// must NOT change between sends of the same logical clip. `id` is the local
+/// row id (may differ per device). If `item_id` is empty (transitional rows
+/// captured before this field existed) the send path falls back to `id`.
 #[derive(Debug)]
 pub struct LocalItem {
     pub id: String,
+    pub item_id: String,
     pub wall_time_ms: i64,
     pub content_type: String,
     pub plaintext: Vec<u8>,
 }
 
 /// An item received from the peer during sync, decrypted back to plaintext.
+///
+/// `item_id` is the peer's STABLE cross-device identity for this clip. Kotlin
+/// MUST persist it on the stored row and reuse it on any later re-sync so the
+/// same logical item is never re-minted (which would resurface as a duplicate).
 #[derive(Debug)]
 pub struct SyncedItem {
     pub id: String,
+    pub item_id: String,
     pub content_type: String,
     pub plaintext: Vec<u8>,
     pub wall_time_ms: i64,
@@ -538,7 +550,17 @@ pub fn sync_with_peer(
             if !(it.content_type == "text" || it.content_type.starts_with("text/")) {
                 continue;
             }
-            let item_id = uuid::Uuid::new_v4().to_string();
+            // STABLE identity: reuse the caller's `item_id` (minted ONCE at
+            // capture and persisted on the row) on every send so the daemon
+            // dedups/LWW-merges this clip instead of seeing a new item each
+            // push. Only fall back to `id` for transitional rows that predate
+            // the `item_id` field; never mint a fresh `Uuid` here (that was the
+            // duplicates bug). The cloud blob's AAD is bound to this SAME id.
+            let item_id = if it.item_id.is_empty() {
+                it.id.clone()
+            } else {
+                it.item_id.clone()
+            };
             let id = if it.id.is_empty() {
                 item_id.clone()
             } else {
@@ -676,6 +698,9 @@ pub fn sync_with_peer(
             match decrypt_from_cloud(&shared, &wire.item_id, blob) {
                 Ok(plaintext) => items.push(SyncedItem {
                     id: wire.id.clone(),
+                    // Carry the peer's STABLE item_id through so Kotlin can
+                    // persist it and reuse it on any later re-sync.
+                    item_id: wire.item_id.clone(),
                     content_type: wire.content_type.clone(),
                     plaintext,
                     wall_time_ms: wire.wall_time,
@@ -1508,8 +1533,10 @@ mod tests {
         // The FFI under test offers ONE local item (exercising the send path)
         // and must receive the peer's pushed item decrypted to plaintext.
         let offered_plaintext = b"hello from android initiator".to_vec();
+        let offered_item_id = uuid::Uuid::new_v4().to_string();
         let local_items = vec![LocalItem {
             id: String::new(),
+            item_id: offered_item_id.clone(),
             wall_time_ms: 7,
             content_type: offered_content_type.to_string(),
             plaintext: offered_plaintext.clone(),
@@ -1541,6 +1568,12 @@ mod tests {
             .expect("the peer's item must come back decrypted to its plaintext");
         assert_eq!(got.content_type, "text");
         assert_eq!(got.plaintext, known_plaintext);
+        // The peer's STABLE item_id must be carried through to the SyncedItem so
+        // Kotlin can persist it and avoid re-minting on a later re-sync.
+        assert_eq!(
+            got.item_id, known_item_id,
+            "received SyncedItem must carry the peer's stable item_id"
+        );
 
         // The peer must have received the FFI's one offered item (send path).
         let frames_peer_got = peer_thread.join().expect("peer thread join");
@@ -1548,6 +1581,101 @@ mod tests {
             frames_peer_got, 1,
             "peer must have received the FFI initiator's one offered framed WireItem"
         );
+    }
+
+    /// STABLE-IDENTITY regression: `sync_with_peer` must put the caller's
+    /// `LocalItem.item_id` onto the outbound `WireItem.item_id` verbatim (no
+    /// fresh `Uuid::new_v4()` per send) — that re-minting was the desktop
+    /// "every clip is a new item → duplicates / broken LWW" bug. The fake peer
+    /// captures the `item_id` of the frame it receives and we assert it equals
+    /// the stable id we offered. Also covers the empty-`item_id` transitional
+    /// fallback to `id`.
+    #[test]
+    fn sync_with_peer_sends_stable_item_id() {
+        use bytes::Bytes;
+        use copypaste_p2p::pake::SessionKey;
+        use copypaste_p2p::transport::{PairedPeers, PeerTransport};
+        use copypaste_sync::protocol::WireItem;
+        use futures_util::StreamExt;
+        use std::sync::mpsc;
+        use tokio::net::TcpListener;
+
+        let session_key = [0x5Au8; 32];
+        let _shared = {
+            let sk = SessionKey(session_key);
+            copypaste_core::SyncKey::from_bytes(sk.derive_xchacha_key(P2P_SYNC_KEY_SALT))
+        };
+
+        let peer_cert = generate_device_cert().expect("peer cert");
+        let init_cert = generate_device_cert().expect("initiator cert");
+        let peer_fp = peer_cert.fingerprint.clone();
+        let init_fp = init_cert.fingerprint.clone();
+
+        // Channel carries the item_id of the FIRST frame the peer receives.
+        let (id_tx, id_rx) = mpsc::channel::<String>();
+        let (port_tx, port_rx) = mpsc::channel::<u16>();
+        let peer_cert_der = peer_cert.cert_der.clone();
+        let peer_key_der = peer_cert.key_der.clone();
+        let init_fp_for_peer = init_fp.clone();
+        let peer_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("peer runtime");
+            rt.block_on(async move {
+                let peers = PairedPeers::new();
+                peers.add(init_fp_for_peer, "android-initiator");
+                let transport = PeerTransport::from_cert(peer_cert_der, peer_key_der, peers);
+                let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+                port_tx
+                    .send(listener.local_addr().expect("addr").port())
+                    .expect("send port");
+                let (_addr, _fp, mut framed) = transport.accept(&listener).await.expect("accept");
+                // Read the FFI's offered frame and report its item_id.
+                if let Ok(Some(Ok(frame))) =
+                    tokio::time::timeout(std::time::Duration::from_secs(3), framed.next()).await
+                {
+                    if let Ok(w) = serde_json::from_slice::<WireItem>(&frame) {
+                        let _ = id_tx.send(w.item_id);
+                    }
+                }
+                // Keep the buffer typed for clarity; nothing else to send.
+                let _ = Bytes::new();
+            })
+        });
+
+        let port = port_rx.recv().expect("peer port");
+        let addr = format!("127.0.0.1:{port}");
+
+        let stable_id = uuid::Uuid::new_v4().to_string();
+        let local_items = vec![LocalItem {
+            id: "local-row-1".to_string(),
+            item_id: stable_id.clone(),
+            wall_time_ms: 11,
+            content_type: "text".to_string(),
+            plaintext: b"stable-id body".to_vec(),
+        }];
+
+        let result = sync_with_peer(
+            addr,
+            peer_fp,
+            session_key.to_vec(),
+            init_cert.cert_der.clone(),
+            init_cert.key_der.clone(),
+            local_items,
+        )
+        .expect("FFI sync_with_peer must succeed over loopback");
+        assert_eq!(result.items_sent, 1);
+
+        let sent_item_id = id_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("peer must report the received frame's item_id");
+        assert_eq!(
+            sent_item_id, stable_id,
+            "outbound WireItem.item_id must be the caller's stable item_id, not a fresh Uuid"
+        );
+
+        peer_thread.join().expect("peer thread join");
     }
 
     /// Defense-in-depth observability: a peer that pushes a text `WireItem`
