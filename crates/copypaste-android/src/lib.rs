@@ -111,12 +111,23 @@ pub fn decrypt_text(
     })
 }
 
+/// Returns `true` if `text` matches a sensitive pattern.
+///
+/// Wrapped in [`panic_boundary::catch`] because `copypaste_core::detect`
+/// runs regex/allocation that could panic; an unwound panic across the JNI
+/// boundary aborts the JVM. This export returns a plain `bool`, so a caught
+/// panic recovers to `false` (treat as "not sensitive" rather than crash).
 pub fn is_sensitive(text: String) -> bool {
-    detect(&text).is_some()
+    panic_boundary::catch(|| detect(&text).is_some()).unwrap_or(false)
 }
 
+/// Returns the sensitive-kind label for `text`, or `None` if not sensitive.
+///
+/// Wrapped in [`panic_boundary::catch`] for the same reason as
+/// [`is_sensitive`]. This export returns a plain `Option<String>`, so a caught
+/// panic recovers to `None`.
 pub fn sensitive_kind(text: String) -> Option<String> {
-    detect(&text).map(|k| format!("{:?}", k))
+    panic_boundary::catch(|| detect(&text).map(|k| format!("{:?}", k))).unwrap_or(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -930,6 +941,32 @@ mod tests {
             }
             other => panic!("expected CopypasteError::Panicked, got {other:?}"),
         }
+    }
+
+    /// CRASH FIX: `is_sensitive`/`sensitive_kind` are now wrapped in the
+    /// panic-boundary helper so a panic inside `detect()` can't unwind across
+    /// the JNI boundary and abort the JVM. The helper is testable from Rust:
+    /// confirm normal inputs return the expected values through the wrapper.
+    #[test]
+    fn is_sensitive_and_kind_return_expected_through_panic_boundary() {
+        // A GitHub PAT is detected by copypaste_core::detect.
+        let pat = format!("ghp_{}", "A".repeat(36));
+        assert!(is_sensitive(pat.clone()), "PAT must be flagged sensitive");
+        assert!(
+            sensitive_kind(pat).is_some(),
+            "PAT must yield a sensitive kind label"
+        );
+
+        // Plain text is not sensitive.
+        assert!(
+            !is_sensitive("just a plain note".into()),
+            "plain text must not be sensitive"
+        );
+        assert_eq!(
+            sensitive_kind("just a plain note".into()),
+            None,
+            "plain text must yield no kind"
+        );
     }
 
     #[test]
