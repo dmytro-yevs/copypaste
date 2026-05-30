@@ -66,8 +66,29 @@ class Settings(context: Context) {
                 !relayUrl.contains("127.0.0.1")
 
     var syncEnabled: Boolean
-        get() = prefs.getBoolean("sync_enabled", false)
+        get() = prefs.getBoolean("sync_enabled", true)
         set(v) = prefs.edit().putBoolean("sync_enabled", v).apply()
+
+    /**
+     * When true (default), post a brief [ClipboardService.CHANNEL_COPY_EVENT]
+     * notification each time a new clipboard item is captured. One per capture,
+     * debounced against rapid consecutive copies by a 500 ms guard in
+     * [ClipboardService.postCopyNotification]. Mirrors macOS Maccy-style
+     * "copy notification" parity goal (A-SET-6).
+     */
+    var notifyOnCopy: Boolean
+        get() = prefs.getBoolean("notify_on_copy", true)
+        set(v) = prefs.edit().putBoolean("notify_on_copy", v).apply()
+
+    /**
+     * When true (default), play a subtle click sound each time a new clipboard
+     * item is captured. Uses [android.media.AudioManager.playSoundEffect] with
+     * [android.view.SoundEffectConstants.CLICK] (available all API levels).
+     * Mirrors macOS Maccy-style copy sound parity (A-SET-6).
+     */
+    var soundOnCopy: Boolean
+        get() = prefs.getBoolean("sound_on_copy", true)
+        set(v) = prefs.edit().putBoolean("sound_on_copy", v).apply()
 
     // ── Supabase cloud sync ─────────────────────────────────────────────────
 

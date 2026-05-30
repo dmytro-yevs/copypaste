@@ -11,12 +11,15 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import android.view.SoundEffectConstants
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -263,6 +266,27 @@ class ClipboardService : Service() {
          */
         private const val KEY_A11Y_WARN_SHOWN = "a11y_warn_shown"
 
+        /**
+         * Notification channel for per-copy event toasts (A-SET-6 parity).
+         * IMPORTANCE_MIN = no sound, no heads-up, no status-bar icon — just a
+         * silent badge in the shade so the user can see "item captured" without
+         * being disturbed. Auto-cancelled after 2 seconds.
+         */
+        const val CHANNEL_COPY_EVENT = "copypaste_copy_event"
+
+        /** Stable notification id for the per-copy event notification. */
+        private const val NOTIF_ID_COPY_EVENT = 1003
+
+        /**
+         * Debounce guard: timestamp (System.currentTimeMillis) of the last copy
+         * notification. If another capture arrives within [COPY_NOTIF_DEBOUNCE_MS],
+         * the notification is refreshed in-place (same id) rather than posting a
+         * new one, preventing rapid bursts from stacking.
+         */
+        @Volatile
+        private var lastCopyNotifMs = 0L
+        private const val COPY_NOTIF_DEBOUNCE_MS = 500L
+
         private const val PREFS_NAME = "copypaste_notif"
         private const val KEY_DAY_BUCKET = "day_bucket"
         private const val KEY_TODAY_COUNT = "today_count"
@@ -329,6 +353,8 @@ class ClipboardService : Service() {
                 Log.d(TAG, "Clipboard item stored successfully")
                 bumpTodayCounter(context)
                 refreshNotification(context)
+                if (settings.notifyOnCopy) postCopyNotification(context)
+                if (settings.soundOnCopy) playCopySound(context)
                 if (settings.syncEnabled) {
                     notifySyncManager(storedId, text, key, settings, syncManager)
                 }
@@ -544,6 +570,54 @@ class ClipboardService : Service() {
         }
 
         /**
+         * Post (or refresh) the per-copy event notification.
+         *
+         * Debounced: if the previous notification was posted within
+         * [COPY_NOTIF_DEBOUNCE_MS], this call updates it in-place (same id)
+         * rather than emitting a new one — rapid-paste bursts produce a single
+         * updating notification rather than a stack.
+         *
+         * Requires POST_NOTIFICATIONS permission on API 33+; on older APIs the
+         * permission is implicit. [NotificationManagerCompat.notify] is a no-op
+         * when the permission has not been granted, so no guard is needed here.
+         */
+        fun postCopyNotification(context: Context) {
+            val now = System.currentTimeMillis()
+            // Atomic CAS-style update: read, decide, write under no lock — worst
+            // case two threads both post; that is fine (same stable id, idempotent).
+            lastCopyNotifMs = now
+            ensureChannel(context)
+            val notification = NotificationCompat.Builder(context, CHANNEL_COPY_EVENT)
+                .setSmallIcon(android.R.drawable.ic_menu_edit)
+                .setContentTitle(context.getString(R.string.notif_copy_event_title))
+                .setContentText(context.getString(R.string.notif_copy_event_content))
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setCategory(NotificationCompat.CATEGORY_EVENT)
+                .setAutoCancel(true)
+                .setTimeoutAfter(2_000L)
+                .setOnlyAlertOnce(true)
+                .build()
+            NotificationManagerCompat.from(context).notify(NOTIF_ID_COPY_EVENT, notification)
+        }
+
+        /**
+         * Play a subtle UI click sound to acknowledge a clipboard capture.
+         *
+         * Uses [AudioManager.playSoundEffect] with [SoundEffectConstants.CLICK],
+         * which respects the system "touch sounds" volume and is available on all
+         * API levels. The call is intentionally non-blocking and fire-and-forget.
+         * Errors are swallowed — a missing sound must never break capture.
+         */
+        fun playCopySound(context: Context) {
+            try {
+                val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                am.playSoundEffect(SoundEffectConstants.CLICK, -1f)
+            } catch (e: Exception) {
+                Log.d(TAG, "playCopySound failed (non-fatal): ${e.message}")
+            }
+        }
+
+        /**
          * Ensure all notification channels exist. Idempotent — calling twice is a
          * no-op on the framework side (createNotificationChannel is idempotent).
          *
@@ -553,6 +627,8 @@ class ClipboardService : Service() {
          * [CHANNEL_A11Y_WARN]: IMPORTANCE_DEFAULT = shows a heads-up the first
          *   time, which is intentional — the user needs to act on it to restore
          *   background clipboard capture on Android 10+.
+         *
+         * [CHANNEL_COPY_EVENT]: IMPORTANCE_MIN = silent badge only, no heads-up.
          */
         fun ensureChannel(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -582,6 +658,21 @@ class ClipboardService : Service() {
                     ).apply {
                         description = context.getString(R.string.notif_channel_a11y_warn_description)
                         setShowBadge(true)
+                    }
+                )
+            }
+
+            if (nm.getNotificationChannel(CHANNEL_COPY_EVENT) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_COPY_EVENT,
+                        context.getString(R.string.notif_channel_copy_event_name),
+                        NotificationManager.IMPORTANCE_MIN
+                    ).apply {
+                        description = context.getString(R.string.notif_channel_copy_event_description)
+                        setShowBadge(false)
+                        enableVibration(false)
+                        setSound(null, null)
                     }
                 )
             }
