@@ -205,6 +205,41 @@ mod tests {
     }
 
     #[test]
+    fn disconnect_before_dwell_blocks_later_reset() {
+        // Regression for audit finding D: the connector must call
+        // `record_disconnected` when it observes the sink gone, so a sub-dwell
+        // flap clears `connected_since`. Otherwise the OLD connect instant lingers
+        // and a later `maybe_reset_after_dwell` measures wall-time from it and
+        // wrongly resets the backoff even though the new connection never dwelled.
+        let mut s = DialBackoff::new();
+        let t0 = Instant::now();
+
+        // Escalate the backoff with a failure (idx 0 → 1).
+        s.record_failure(t0);
+        assert_eq!(s.backoff_idx(), 1);
+
+        // A connection comes up, then drops before MIN_HEALTHY_DWELL elapses.
+        // The connector observes the gone sink on a later tick and records the
+        // disconnect (this is the call the production loop was missing).
+        let connect_at = t0 + Duration::from_secs(1);
+        s.record_connected(connect_at);
+        s.record_disconnected();
+
+        // Long after the original connect instant — far beyond MIN_HEALTHY_DWELL
+        // of wall-time — a reset check must STILL be a no-op, because the link
+        // never actually dwelled (connected_since was cleared).
+        assert!(
+            !s.maybe_reset_after_dwell(connect_at + MIN_HEALTHY_DWELL + Duration::from_secs(60)),
+            "a sub-dwell flap must not reset backoff via stale wall-time"
+        );
+        assert_eq!(
+            s.backoff_idx(),
+            1,
+            "backoff must stay escalated after a disconnect-before-dwell"
+        );
+    }
+
+    #[test]
     fn healthy_dwell_resets_backoff() {
         let mut s = DialBackoff::new();
         let t0 = Instant::now();

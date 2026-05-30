@@ -586,6 +586,17 @@ async fn peer_connector_loop(
                 continue;
             }
 
+            // The sink is absent or stale, so the link is down. M3: tell the
+            // backoff state the connection dropped, clearing `connected_since`.
+            // Otherwise a sub-dwell flap leaves the OLD connect instant in place
+            // and a later `maybe_reset_after_dwell` would measure wall-time from
+            // it and wrongly reset the backoff even though the new connection
+            // never dwelled — defeating the anti-flap guarantee. The backoff
+            // index is preserved so escalation continues.
+            if let Some(state) = dial_state.get_mut(&peer.fingerprint) {
+                state.record_disconnected();
+            }
+
             // Respect per-peer backoff.
             if let Some(state) = dial_state.get(&peer.fingerprint) {
                 if !state.may_dial(now) {
