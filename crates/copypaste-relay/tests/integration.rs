@@ -397,6 +397,148 @@ async fn test_push_text_item_at_limit_is_accepted() {
     assert_eq!(status, StatusCode::CREATED);
 }
 
+// ---------------------------------------------------------------------------
+// last_seen wiring — handler-level proof that push/pull/delete advance it
+// ---------------------------------------------------------------------------
+
+/// Prove that the `push` route handler calls `update_last_seen` after a
+/// successful authenticated request.
+///
+/// The test rewinds `last_seen` on the device record to a time well past the
+/// cleanup threshold, then hits the push route.  After the route returns, it
+/// reads `last_seen` directly from the store and asserts it has advanced to
+/// (approximately) "now".  A device that has had its `last_seen` refreshed
+/// this way must survive `cleanup_inactive_devices` — proving the wiring
+/// between the HTTP handler and the store method is intact.
+///
+/// This guards against `update_last_seen` being inadvertently removed from
+/// `routes/items.rs`: if the call is dropped, `last_seen` stays at the rewound
+/// value and the device is evicted by cleanup despite being active.
+#[tokio::test]
+async fn test_push_route_advances_last_seen() {
+    use std::time::{Duration, Instant};
+
+    let (app, state) = make_app();
+
+    // Register a device directly in the store (no HTTP round-trip needed for setup).
+    let token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+            .unwrap()
+            .0
+    };
+
+    // Rewind last_seen to 2 hours ago — well past any realistic cleanup threshold.
+    let rewind = Duration::from_secs(2 * 3600);
+    {
+        let mut s = state.lock().unwrap();
+        let record = s.devices.get_mut(DEVICE_A).unwrap();
+        record.last_seen = Instant::now() - rewind;
+    }
+
+    // Capture a timestamp just before the HTTP request so we can assert that
+    // `last_seen` ends up >= this instant after the route runs.
+    let before = Instant::now();
+
+    // Hit the push route with a valid token and a minimal text payload.
+    let (status, _body) = post_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&token),
+        json!({
+            "content_type": "text",
+            "content_b64": sample_content_b64(),
+            "wall_time": 1000u64,
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "push must succeed");
+
+    // Read last_seen back from the store.
+    let last_seen = {
+        let s = state.lock().unwrap();
+        s.devices.get(DEVICE_A).unwrap().last_seen
+    };
+
+    // last_seen must have been advanced past the rewound value.
+    assert!(
+        last_seen >= before,
+        "push route must advance last_seen to >= the instant before the request \
+         (got elapsed since before = {:?})",
+        before.elapsed()
+    );
+
+    // Concretely: the device must now SURVIVE cleanup with a 1-hour threshold
+    // because last_seen was just refreshed to "now".
+    let threshold_secs = 3600u64; // 1 hour
+    let removed = {
+        let mut s = state.lock().unwrap();
+        s.cleanup_inactive_devices(threshold_secs)
+    };
+    assert_eq!(
+        removed, 0,
+        "device whose last_seen was just refreshed by push must survive cleanup"
+    );
+}
+
+/// Prove that the `pull` route handler calls `update_last_seen`.
+///
+/// Mirrors `test_push_route_advances_last_seen` for the GET /items route:
+/// after rewinding `last_seen` and issuing an authenticated pull, the device
+/// must survive `cleanup_inactive_devices`.
+#[tokio::test]
+async fn test_pull_route_advances_last_seen() {
+    use std::time::{Duration, Instant};
+
+    let (app, state) = make_app();
+
+    let token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+            .unwrap()
+            .0
+    };
+
+    // Rewind last_seen to 2 hours ago.
+    let rewind = Duration::from_secs(2 * 3600);
+    {
+        let mut s = state.lock().unwrap();
+        let record = s.devices.get_mut(DEVICE_A).unwrap();
+        record.last_seen = Instant::now() - rewind;
+    }
+
+    let before = Instant::now();
+
+    // Hit the pull route.
+    let (status, _body) = get_json(
+        app,
+        &format!("/devices/{DEVICE_A}/items?since=0"),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "pull must succeed");
+
+    let last_seen = {
+        let s = state.lock().unwrap();
+        s.devices.get(DEVICE_A).unwrap().last_seen
+    };
+
+    assert!(
+        last_seen >= before,
+        "pull route must advance last_seen to >= the instant before the request"
+    );
+
+    let threshold_secs = 3600u64;
+    let removed = {
+        let mut s = state.lock().unwrap();
+        s.cleanup_inactive_devices(threshold_secs)
+    };
+    assert_eq!(
+        removed, 0,
+        "device whose last_seen was just refreshed by pull must survive cleanup"
+    );
+}
+
 /// An image item up to the 10 MiB Free-tier limit must be accepted even though
 /// it far exceeds the 1 MiB text limit — the size check is content-type aware.
 #[tokio::test]
