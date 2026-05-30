@@ -57,8 +57,9 @@ pub async fn push(
 ) -> Result<(StatusCode, Json<PushResponse>), RelayError> {
     // Per-tier item-size quota — checked before taking the store mutex so an
     // oversized payload never contends for the lock. We decode `content_b64`
-    // once here to measure the true ciphertext size; `push_item` re-validates
-    // the base64 (and the operator body cap) under the lock.
+    // exactly once here to measure the true ciphertext size, then feed that
+    // length into both the quota check and `push_item_decoded` so the large
+    // base64 decode never runs again while the global store mutex is held (perf).
     let decoded_len = B64
         .decode(&body.content_b64)
         .map_err(|_| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?
@@ -84,10 +85,11 @@ pub async fn push(
     // `RelayConfig::default().max_item_bytes` silently ignored env vars.
     let max_item_bytes = config.max_item_bytes;
 
-    let id = store.push_item(
+    let id = store.push_item_decoded(
         &device_id,
         body.content_type,
         body.content_b64,
+        decoded_len,
         body.wall_time,
         max_item_bytes,
     )?;

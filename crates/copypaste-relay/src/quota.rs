@@ -37,8 +37,10 @@ impl Tier {
     /// Maximum decoded ciphertext size in bytes for a single clipboard item.
     pub fn max_item_bytes(self, content_type: &str) -> usize {
         match (self, content_type) {
-            // Images: 10 MiB for both tiers (pro has no additional benefit here).
-            (_, "image") => 10 * 1024 * 1024,
+            // Images and files: 10 MiB for both tiers (matches the operator body
+            // cap). `push_item` accepts "file", so it must share the image limit
+            // — otherwise file payloads >1 MiB are wrongly rejected with 413.
+            (_, "image") | (_, "file") => 10 * 1024 * 1024,
             // Text: 1 MiB for both tiers.
             _ => 1024 * 1024,
         }
@@ -210,6 +212,27 @@ mod tests {
     #[test]
     fn image_within_10mib_is_accepted() {
         assert!(check_item_size(Tier::Free, 10 * 1024 * 1024, "image").is_ok());
+    }
+
+    #[test]
+    fn file_item_limit_is_10mib() {
+        assert_eq!(Tier::Free.max_item_bytes("file"), 10 * 1024 * 1024);
+        assert_eq!(Tier::Pro.max_item_bytes("file"), 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn file_of_2mib_is_accepted() {
+        // Regression: "file" payloads between 1 MiB and 10 MiB must pass the
+        // per-tier item-size quota (previously fell into the 1 MiB text arm and
+        // was rejected 413 even though push_item accepts "file").
+        assert!(check_item_size(Tier::Free, 2 * 1024 * 1024, "file").is_ok());
+    }
+
+    #[test]
+    fn oversized_file_item_is_rejected() {
+        let limit = 10 * 1024 * 1024;
+        let err = check_item_size(Tier::Free, limit + 1, "file").unwrap_err();
+        assert_eq!(err, QuotaViolation::ItemTooLarge { limit_bytes: limit });
     }
 
     // ---- History quota -----------------------------------------------------

@@ -224,3 +224,87 @@ async fn ttl_evictor_task_fires_on_tick() {
 
     handle.abort();
 }
+
+// ---------------------------------------------------------------------------
+// Quota / push-path regressions
+// ---------------------------------------------------------------------------
+
+/// Fix #1: a ~2 MiB "file" payload must be accepted. Previously "file" fell
+/// into the 1 MiB text quota arm and was rejected 413, even though `push_item`
+/// accepts "file" and the operator body cap is 10 MiB.
+#[test]
+fn file_payload_over_1mib_is_accepted() {
+    let mut s = RelayStore::new(3600);
+    s.register_device(device_id(), "A".into(), valid_key_b64())
+        .unwrap();
+
+    // 2 MiB of decoded ciphertext.
+    let raw = vec![0xABu8; 2 * 1024 * 1024];
+    let decoded_len = raw.len();
+    let content_b64 = B64.encode(&raw);
+
+    // The per-tier quota the route applies must permit a 2 MiB file.
+    assert!(
+        quota::check_item_size(quota::Tier::Free, decoded_len, "file").is_ok(),
+        "2 MiB file must pass the per-tier item-size quota"
+    );
+
+    // And the full store push (with the 10 MiB operator body cap) must succeed.
+    let id = s
+        .push_item(
+            &device_id(),
+            "file".into(),
+            content_b64,
+            1000,
+            10 * 1024 * 1024,
+        )
+        .expect("2 MiB file push must succeed");
+    assert!(id >= 1);
+    assert_eq!(s.stats().1, 1);
+}
+
+/// Fix #4: `push_item_decoded` must behave identically to `push_item` for a
+/// valid payload — same acceptance, same stored item — but takes the
+/// caller-measured decoded length so the route does not re-decode under the
+/// store mutex.
+#[test]
+fn push_item_decoded_matches_push_item() {
+    let mut s = RelayStore::new(3600);
+    s.register_device(device_id(), "A".into(), valid_key_b64())
+        .unwrap();
+
+    let raw = vec![0x42u8; 4096];
+    let content_b64 = B64.encode(&raw);
+
+    let id = s
+        .push_item_decoded(
+            &device_id(),
+            "text".into(),
+            content_b64,
+            raw.len(),
+            2000,
+            10 * 1024,
+        )
+        .expect("push_item_decoded must accept an in-limit payload");
+    assert!(id >= 1);
+    assert_eq!(s.stats().1, 1);
+}
+
+/// Fix #4: the operator body cap is still enforced on the decoded-length path —
+/// a `decoded_len` over `max_item_bytes` is rejected with PayloadTooLarge.
+#[test]
+fn push_item_decoded_enforces_body_cap() {
+    use crate::error::RelayError;
+
+    let mut s = RelayStore::new(3600);
+    s.register_device(device_id(), "A".into(), valid_key_b64())
+        .unwrap();
+
+    let raw = vec![0u8; 11];
+    let content_b64 = B64.encode(&raw);
+    let err = s
+        .push_item_decoded(&device_id(), "text".into(), content_b64, raw.len(), 1, 10)
+        .unwrap_err();
+    assert!(matches!(err, RelayError::PayloadTooLarge));
+    assert_eq!(s.stats().1, 0);
+}
