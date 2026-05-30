@@ -158,10 +158,31 @@ pub struct RelayStore {
     /// Monotonic counter: total sync items removed by `prune_expired`
     /// (TTL eviction). Counter — only ever incremented.
     evictions_total: Arc<AtomicU64>,
+
+    /// Operator-configured ceiling on how many items a single device inbox
+    /// may hold. Sourced from `RelayConfig.max_items_per_device` (env:
+    /// `RELAY_MAX_ITEMS_PER_DEVICE`). Defaults to
+    /// `MAX_PUSH_ITEMS_PER_DEVICE` (500) when constructed via `new()`.
+    /// The per-tier `effective_history_cap` still applies as a further
+    /// tightener — this field is the *upper* ceiling over all tiers.
+    max_items_per_device: usize,
 }
 
 impl RelayStore {
+    /// Create a store with the default `MAX_PUSH_ITEMS_PER_DEVICE` inbox cap.
+    // Used by unit/integration tests (`make_store()`) and integration test
+    // binaries that `#[path]`-include state.rs. The production binary path
+    // uses `new_with_cap` to wire the operator config value, so the binary
+    // target sees this as dead — hence the allow.
+    #[allow(dead_code)]
     pub fn new(_sync_ttl_secs: u64) -> Self {
+        Self::new_with_cap(_sync_ttl_secs, MAX_PUSH_ITEMS_PER_DEVICE)
+    }
+
+    /// Create a store with an explicit inbox cap (`max_items_per_device`).
+    /// Used by `main` to wire the operator-configured value from
+    /// `RelayConfig`, and by tests that verify the cap is honoured.
+    pub fn new_with_cap(_sync_ttl_secs: u64, max_items_per_device: usize) -> Self {
         Self {
             devices: HashMap::new(),
             sync_items: HashMap::new(),
@@ -169,6 +190,7 @@ impl RelayStore {
             reg_attempts: HashMap::new(),
             items_total: Arc::new(AtomicU64::new(0)),
             evictions_total: Arc::new(AtomicU64::new(0)),
+            max_items_per_device,
         }
     }
 
@@ -461,13 +483,39 @@ impl RelayStore {
     /// cannot distinguish "wrong token" from "expired token". The equality
     /// check still runs before the expiry branch so the constant-time
     /// comparison path is unconditional.
+    ///
+    /// Clock errors fail CLOSED: if `SystemTime::now()` cannot produce a
+    /// valid duration (e.g. the system clock is set before UNIX_EPOCH), we
+    /// treat the token as expired and return `Unauthorized`. The previous
+    /// `unwrap_or_default()` yielded `now_unix = 0`, making
+    /// `0 <= expires_at_unix` always true and tokens never expire on a
+    /// broken clock — a fail-open security hole.
     pub fn verify_token(&self, device_id: &str, token: &str) -> Result<(), RelayError> {
-        // Collapse missing-device to `Unauthorized` (not `DeviceNotFound`) on
-        // token-guarded routes: returning a distinct 404 would let an attacker
-        // enumerate which device IDs are registered by probing push/pull/delete
-        // with a garbage token. `Unauthorized` is indistinguishable from a wrong
-        // token, closing that oracle while preserving GET /devices/:id 404 for the
-        // unauthenticated device-info endpoint.
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_secs() as i64);
+        self.verify_token_at(device_id, token, now_unix)
+    }
+
+    /// Internal helper: verify token with an explicit `now_unix` timestamp.
+    ///
+    /// `now_unix = None` represents a clock error and fails CLOSED
+    /// (returns `Unauthorized`). Extracted so tests can inject a
+    /// simulated clock fault without touching the OS clock.
+    ///
+    /// Collapse missing-device to `Unauthorized` (not `DeviceNotFound`) on
+    /// token-guarded routes: returning a distinct 404 would let an attacker
+    /// enumerate which device IDs are registered by probing push/pull/delete
+    /// with a garbage token. `Unauthorized` is indistinguishable from a wrong
+    /// token, closing that oracle while preserving GET /devices/:id 404 for the
+    /// unauthenticated device-info endpoint.
+    pub fn verify_token_at(
+        &self,
+        device_id: &str,
+        token: &str,
+        now_unix: Option<i64>,
+    ) -> Result<(), RelayError> {
         let record = self
             .devices
             .get(device_id)
@@ -477,11 +525,11 @@ impl RelayStore {
             .as_bytes()
             .ct_eq(token.as_bytes())
             .into();
-        let now_unix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-        let not_expired = now_unix <= record.expires_at_unix;
+        // Fail closed on clock error: None = unknown time = treat as expired.
+        let not_expired = match now_unix {
+            Some(now) => now <= record.expires_at_unix,
+            None => false,
+        };
         if token_ok && not_expired {
             Ok(())
         } else {
@@ -607,16 +655,19 @@ impl RelayStore {
         let pos = inbox.partition_point(|existing| existing.wall_time <= wall_time);
         inbox.insert(pos, item);
 
-        // History quota: cap the inbox at the tier-aware effective limit
-        // (the tighter of the absolute hard cap and the tier's
-        // `max_history_items`). Enforced as a silent prune of the oldest
-        // items rather than rejecting the push — the fan-out sender cannot
-        // know which recipient inboxes are full (see the relay v2 quotas
-        // plan). `effective_history_cap` already folds the tier history limit
-        // into the absolute hard cap, so this single guard subsumes the tier
-        // quota check for every current tier (Free's 1000 limit is looser than
-        // the 500 hard cap, Pro is unlimited).
-        let cap = effective_history_cap(tier);
+        // History quota: cap the inbox at the tighter of:
+        //   1. the operator-configured `max_items_per_device` (from
+        //      `RelayConfig` / `RELAY_MAX_ITEMS_PER_DEVICE`), which is the
+        //      live ceiling sourced from config — previously this field was
+        //      dead and the compile-time `MAX_PUSH_ITEMS_PER_DEVICE` was
+        //      always used instead, ignoring the env var entirely;
+        //   2. the tier-aware effective limit (`effective_history_cap`),
+        //      which is itself the tighter of the absolute hard cap and the
+        //      tier's `max_history_items`.
+        // Enforced as a silent prune of the oldest items (the fan-out sender
+        // cannot know which recipient inboxes are full — see relay v2 quotas
+        // plan).
+        let cap = effective_history_cap(tier).min(self.max_items_per_device);
         if inbox.len() > cap {
             inbox.drain(..inbox.len() - cap);
         }
@@ -1669,6 +1720,56 @@ mod tests {
         assert!(
             !store.devices.contains_key(&device_a_id()),
             "device must be gone after eviction"
+        );
+    }
+
+    // ---- Fix 1: verify_token fail-closed on clock error --------------------
+
+    /// When `verify_token` encounters a clock error it must fail CLOSED (return
+    /// `Unauthorized`), not silently treat `now_unix=0` as "valid" (the old
+    /// `unwrap_or_default()` behaviour that made `0 <= expires_at_unix` always
+    /// true). We test the internal helper `verify_token_at` directly, injecting
+    /// a simulated clock error via `None` for `now_unix`.
+    #[test]
+    fn verify_token_clock_error_returns_unauthorized() {
+        let mut store = make_store();
+        let (token, _) = store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        // None = simulated clock error → must fail closed.
+        let err = store
+            .verify_token_at(&device_a_id(), &token, None)
+            .unwrap_err();
+        assert!(
+            matches!(err, RelayError::Unauthorized),
+            "clock error must fail closed: got {err:?}"
+        );
+    }
+
+    // ---- Fix 3: max_items_per_device wired from config ----------------------
+
+    /// The config `max_items_per_device` must govern the inbox cap. A store
+    /// constructed with `new_with_cap(N)` must enforce N as the hard ceiling,
+    /// not the compile-time `MAX_PUSH_ITEMS_PER_DEVICE` (500).
+    #[test]
+    fn max_items_per_device_config_governs_cap() {
+        const CUSTOM_CAP: usize = 5;
+        let mut store = RelayStore::new_with_cap(3600, CUSTOM_CAP);
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        // Push more items than the custom cap.
+        for t in 1u64..=(CUSTOM_CAP as u64 + 3) {
+            push_text(&mut store, &device_a_id(), t);
+        }
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
+        assert_eq!(
+            items.len(),
+            CUSTOM_CAP,
+            "inbox must be capped at the config-supplied max_items_per_device ({CUSTOM_CAP}), got {}",
+            items.len()
         );
     }
 
