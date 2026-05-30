@@ -642,6 +642,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 cloud_last_sync_ms.clone(),
                 local_key_arc.clone(),
                 cloud_signed_in.clone(),
+                config.clone(),
+                config.sync_on_wifi_only,
             )
             .await
             {
