@@ -896,6 +896,25 @@ export function SettingsView() {
             </SettingsRow>
           </Panel>
 
+          {/* ── Notifications (W4-6) ────────────────────────────────── */}
+          {/* Maccy-style copy feedback toggles. Both default off (Maccy default).
+              Persisted to localStorage via UIPrefs — no daemon involvement. */}
+          <SectionHeader label="Notifications" />
+          <Panel>
+            <SettingsRow label="Play sound on copy">
+              <Toggle
+                checked={prefs.playSoundOnCopy}
+                onChange={(v) => setPrefs({ playSoundOnCopy: v })}
+              />
+            </SettingsRow>
+            <SettingsRow label="Show notification on copy">
+              <Toggle
+                checked={prefs.notifyOnCopy}
+                onChange={(v) => setPrefs({ notifyOnCopy: v })}
+              />
+            </SettingsRow>
+          </Panel>
+
           {/* ── Shortcuts ────────────────────────────────────────────────── */}
           {/* W4-3: SettingsRow now has min-w-[160px] on the label so "Open popup"
               never wraps; all label columns align with other rows. */}

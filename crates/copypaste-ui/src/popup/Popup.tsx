@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
-import { api, HistoryEntry, IpcError } from "../lib/ipc";
+import { api, HistoryEntry, IpcError, playCopySound, showCopyNotification } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
 import { useUI } from "../store";
 import { ImageThumb } from "../components/ImageThumb";
@@ -24,8 +24,9 @@ export function Popup() {
     maskSensitive,
     previewSize = DEFAULT_TEXT_ROW_H,
     imageMaxHeight = 40,
+    playSoundOnCopy = false,
+    notifyOnCopy = false,
   } = useUI((s) => s.prefs);
-
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -117,28 +118,46 @@ export function Popup() {
     }
   }, []);
 
-  // Hide first (awaited), then copy + paste. Errors are surfaced to the console
-  // and the error strip so failures aren't invisible.
+  // Fix #2/#3: hide popup first (awaited), then copy + paste. Errors here used
+  // to be silently swallowed (`catch {}`), masking real failures (daemon
+  // offline, missing Accessibility permission). Surface them to the console and
+  // the error strip so the failure isn't invisible.
+  //
+  // W4-6: after a successful copy, fire the optional sound and/or notification
+  // based on the persisted UIPrefs. Both are best-effort — failures are swallowed
+  // inside playCopySound/showCopyNotification so they never disrupt the flow.
+  // The Esc / auto-hide path calls `hide()` directly and does NOT reach this
+  // function, so sound/notify only fire on an actual copy action (Enter or click).
   const copyAndPaste = useCallback(
-    async (id: string) => {
+    async (id: string, preview: string) => {
       await hide();
       try {
         await api.copyItem(id);
         // Synthesise Cmd+V into the previously-focused app.
         await invoke("paste_to_frontmost");
+        // Fire feedback AFTER paste is triggered so the sound/banner doesn't
+        // interfere with the CGEventTap timing (paste happens on a bg thread).
+        if (playSoundOnCopy) {
+          void playCopySound();
+        }
+        if (notifyOnCopy) {
+          // Truncate the preview to a single short line for the banner title.
+          const title = preview.replace(/\s+/g, " ").trim().slice(0, 60) || "Copied";
+          void showCopyNotification(title);
+        }
       } catch (e) {
         const msg = e instanceof IpcError ? e.message : String(e);
         console.error("popup copy/paste failed", e);
         setError(`Paste failed: ${msg}`);
       }
     },
-    [hide]
+    [hide, playSoundOnCopy, notifyOnCopy]
   );
 
   const confirmSelection = useCallback(async () => {
     const item = filtered[selectedIdx];
     if (!item) return;
-    await copyAndPaste(item.id);
+    await copyAndPaste(item.id, item.preview);
   }, [filtered, selectedIdx, copyAndPaste]);
 
   const handleKeyDown = useCallback(
@@ -231,7 +250,7 @@ export function Popup() {
               imageMaxHeight={imageMaxHeight}
               maskSensitive={maskSensitive}
               onMouseEnter={() => setSelectedIdx(idx)}
-              onClick={() => void copyAndPaste(item.id)}
+              onClick={() => void copyAndPaste(item.id, item.preview)}
             />
           ))}
         </ul>

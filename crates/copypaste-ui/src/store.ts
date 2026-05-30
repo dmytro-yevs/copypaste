@@ -34,6 +34,16 @@ export interface UIPrefs {
    * TODO: wire this to a hover-preview component when one is built.
    */
   previewDelay: number;
+  /**
+   * Play a soft system sound (Tink) when an item is copied — Maccy parity.
+   * Default false (Maccy default is off).
+   */
+  playSoundOnCopy: boolean;
+  /**
+   * Show a macOS notification banner when an item is copied — Maccy parity.
+   * Default false (Maccy default is off).
+   */
+  notifyOnCopy: boolean;
 }
 
 const DEFAULT_PREFS: UIPrefs = {
@@ -43,6 +53,8 @@ const DEFAULT_PREFS: UIPrefs = {
   imageMaxHeight: 40,
   historySize: 200,
   previewDelay: 1500,
+  playSoundOnCopy: false,
+  notifyOnCopy: false,
 };
 
 function loadPrefs(): UIPrefs {
