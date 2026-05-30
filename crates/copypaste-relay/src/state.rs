@@ -330,19 +330,36 @@ impl RelayStore {
             )));
         }
 
+        // Read the wall clock *before* issuing the token. A token whose
+        // `expires_at_unix` is computed from a bogus near-epoch clock would be
+        // born already-expired, so every device it is issued to would get
+        // Unauthorized on the next request — a silent, total outage. Treat a
+        // `duration_since(UNIX_EPOCH)` error (clock before the epoch) or an
+        // implausibly-near-epoch reading as fatal and refuse to issue a token
+        // rather than handing back a dead credential. `MIN_PLAUSIBLE_UNIX` is
+        // 2020-01-01; any correctly-set host clock is far past it.
+        const MIN_PLAUSIBLE_UNIX: u64 = 1_577_836_800; // 2020-01-01T00:00:00Z
+        let now_unix = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(d) if d.as_secs() >= MIN_PLAUSIBLE_UNIX => d.as_secs() as i64,
+            other => {
+                tracing::error!(
+                    ?other,
+                    "host clock is before {MIN_PLAUSIBLE_UNIX} (near-epoch or pre-epoch); \
+                     refusing to issue an auth token that would be born expired"
+                );
+                return Err(RelayError::Internal(
+                    "server clock is not set correctly; cannot issue auth token".into(),
+                ));
+            }
+        };
+        let expires_at_unix = now_unix + 365 * 24 * 3600;
+
         // Generate bearer token from 16 random bytes (NEVER derive from
         // public key — that would let any client compute the secret).
         // Output: 32 hex characters representing 16 bytes of entropy.
         let mut token_bytes = [0u8; 16];
         OsRng.fill_bytes(&mut token_bytes);
         let bearer_token = hex_encode(&token_bytes);
-
-        // Expiry: 1 year from now expressed as Unix seconds.
-        let now_unix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-        let expires_at_unix = now_unix + 365 * 24 * 3600;
 
         self.devices.insert(
             device_id.clone(),
@@ -450,11 +467,52 @@ impl RelayStore {
     /// Validates that the decoded `content_b64` does not exceed `max_item_bytes`.
     /// Prunes the oldest item when the inbox exceeds `MAX_PUSH_ITEMS_PER_DEVICE`.
     /// Returns the auto-assigned integer ID.
+    //
+    // The HTTP `push` handler now calls `push_item_decoded` directly (it decodes
+    // the payload once *before* locking the store), so this self-decoding
+    // wrapper has no production caller. It is retained for the test suites and
+    // any future non-HTTP caller that holds only the raw base64.
+    #[allow(dead_code)]
     pub fn push_item(
         &mut self,
         device_id: &str,
         content_type: String,
         content_b64: String,
+        wall_time: u64,
+        max_item_bytes: usize,
+    ) -> Result<i64, RelayError> {
+        // Decode here so callers that haven't already measured the payload
+        // (tests, non-HTTP callers) keep working unchanged, then delegate to
+        // the length-aware path. The HTTP `push` handler instead decodes once
+        // *before* taking the store mutex and calls `push_item_decoded`
+        // directly, so the large base64 decode never runs under the lock (perf).
+        let decoded_len = B64
+            .decode(&content_b64)
+            .map_err(|_| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?
+            .len();
+        self.push_item_decoded(
+            device_id,
+            content_type,
+            content_b64,
+            decoded_len,
+            wall_time,
+            max_item_bytes,
+        )
+    }
+
+    /// Store an encrypted item whose decoded length is already known.
+    ///
+    /// Identical to [`push_item`](Self::push_item) except the caller passes the
+    /// pre-computed `decoded_len` (the number of decoded ciphertext bytes) so
+    /// the base64 payload is **not** decoded again while the store mutex is
+    /// held. `content_b64` is still validated for membership/quotas; it is the
+    /// caller's responsibility to ensure `decoded_len` matches `content_b64`.
+    pub fn push_item_decoded(
+        &mut self,
+        device_id: &str,
+        content_type: String,
+        content_b64: String,
+        decoded_len: usize,
         wall_time: u64,
         max_item_bytes: usize,
     ) -> Result<i64, RelayError> {
@@ -469,10 +527,7 @@ impl RelayStore {
             ));
         }
 
-        let decoded = B64
-            .decode(&content_b64)
-            .map_err(|_| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?;
-        if decoded.len() > max_item_bytes {
+        if decoded_len > max_item_bytes {
             return Err(RelayError::PayloadTooLarge);
         }
 
@@ -806,6 +861,32 @@ mod tests {
         assert_eq!(token.len(), 32);
         assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(expires_at > 0);
+    }
+
+    #[test]
+    fn issued_token_is_not_born_expired() {
+        // Guards the near-epoch-clock outage fix: under any correctly-set host
+        // clock the issued token must expire in the future (~1 year out), never
+        // at-or-before "now". A bogus near-epoch clock previously yielded
+        // `expires_at_unix ≈ 365d`, which is far in the past today, so every
+        // device would be Unauthorized on its next request.
+        let mut store = make_store();
+        let (token, expires_at) = store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("test host clock must be past the epoch")
+            .as_secs() as i64;
+        assert!(
+            expires_at > now_unix,
+            "token must not be born expired: expires_at={expires_at}, now={now_unix}"
+        );
+        // Roughly one year out (allow a few seconds of test scheduling slack).
+        let one_year = 365 * 24 * 3600;
+        assert!((expires_at - now_unix - one_year).abs() < 60);
+        // And the freshly-issued token must actually verify.
+        assert!(store.verify_token(&device_a_id(), &token).is_ok());
     }
 
     #[test]

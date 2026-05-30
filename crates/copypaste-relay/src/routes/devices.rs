@@ -74,28 +74,31 @@ pub async fn register(
     // (tests using `tower::ServiceExt::oneshot`) the IP becomes `None`,
     // preserving the previous per-device-only fallback for that path.
     let client_ip = connect_info.map(|Extension(ConnectInfo(addr))| addr.ip());
-    {
-        let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(retry_after) = store.check_registration_rate_limit(client_ip, &body.device_id) {
-            let body = serde_json::json!({
-                "error": "too many registration attempts",
-                "code": "RATE_LIMITED",
-                "retry_after_secs": retry_after,
-            });
-            let resp = (
-                StatusCode::TOO_MANY_REQUESTS,
-                [(axum::http::header::RETRY_AFTER, retry_after.to_string())],
-                Json(body),
-            )
-                .into_response();
-            return Err(resp);
-        }
-    }
 
     // Survive mutex poisoning (security INFO #21): if another thread panicked
     // while holding the lock, recover the inner data rather than crashing this
     // request. The data is still consistent because all writes are atomic.
+    //
+    // Hold a single guard across both the rate-limit check and the register
+    // call: re-locking between the two opened a needless drop/re-acquire window
+    // (lock churn, plus a benign TOCTOU gap) with no behavioural benefit. The
+    // limiter mutation and the registration are now one atomic critical section.
     let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
+    if let Err(retry_after) = store.check_registration_rate_limit(client_ip, &body.device_id) {
+        let body = serde_json::json!({
+            "error": "too many registration attempts",
+            "code": "RATE_LIMITED",
+            "retry_after_secs": retry_after,
+        });
+        let resp = (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(axum::http::header::RETRY_AFTER, retry_after.to_string())],
+            Json(body),
+        )
+            .into_response();
+        return Err(resp);
+    }
+
     // Scope the per-account device quota (H1) to the registering client IP so
     // it is a per-source cap, not a global ceiling that would reject the 6th
     // device across all users. `client_ip` is reused from the rate-limit check.
