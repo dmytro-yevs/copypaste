@@ -647,7 +647,7 @@ export function DevicesView() {
                 crate) and never contains remote markup — dangerouslySetInnerHTML
                 is safe here. */}
             <div
-              className="shrink-0 rounded-ide bg-white p-2"
+              className="shrink-0 rounded-ide bg-white p-2 overflow-hidden [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
               style={{ width: 190, height: 190 }}
               // eslint-disable-next-line react/no-danger
               dangerouslySetInnerHTML={{ __html: qrState.qr.svg }}

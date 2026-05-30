@@ -58,7 +58,7 @@ val buildCargoNdk by tasks.registering(Exec::class) {
     //   ./gradlew connectedDebugAndroidTest -PcargoNdkTargets=arm64-v8a -PcargoNdkLive=false
     val targets = (project.findProperty("cargoNdkTargets") as String?)
         ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
-        ?: listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        ?: listOf("arm64-v8a")
     val live = (project.findProperty("cargoNdkLive") as String?) != "false"
 
     val args = mutableListOf("cargo", "ndk")
@@ -93,7 +93,7 @@ android {
         // `./gradlew connectedDebugAndroidTest`.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += listOf("arm64-v8a")
         }
     }
 

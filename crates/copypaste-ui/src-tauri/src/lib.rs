@@ -1059,8 +1059,22 @@ fn show_main(app: &tauri::AppHandle) {
 /// background thread that polls with short sleeps until the daemon responds,
 /// then writes the real value back to the CheckMenuItem.
 ///
-/// The thread exits as soon as it obtains one successful IPC reply (or after
-/// 30 s to avoid leaking threads when the daemon never starts).
+/// ## Stale-daemon race
+///
+/// `ensure_daemon_running_async` evicts any old daemon (SIGTERM + socket-
+/// released poll) and spawns a fresh one, but this runs on a **separate**
+/// background thread.  Because `setup_tray` and this resync thread both start
+/// before eviction completes, the first successful IPC reply may come from the
+/// **old** daemon (still alive during its graceful shutdown window).  If the
+/// old daemon's in-memory state differs from the persisted file (e.g. a prior
+/// `persist_private_mode` write failed silently), we would cache the stale
+/// value and exit, leaving the tray desynchronised from the new daemon.
+///
+/// Guard: require **two consecutive, identical** successful IPC replies before
+/// exiting.  The old daemon typically closes its socket within ~100 ms of
+/// SIGTERM; the 250 ms poll interval gives it time to die.  If the first reply
+/// came from the old daemon and the second call fails (socket gone), the
+/// counter resets and we keep polling until the new daemon is stable.
 fn spawn_tray_private_mode_resync(handle: tauri::AppHandle) {
     use std::thread;
     use std::time::{Duration, Instant};
@@ -1068,8 +1082,13 @@ fn spawn_tray_private_mode_resync(handle: tauri::AppHandle) {
     thread::spawn(move || {
         const POLL_INTERVAL: Duration = Duration::from_millis(250);
         const GIVE_UP_AFTER: Duration = Duration::from_secs(30);
+        // Two consecutive identical replies are required before exiting.
+        // This prevents caching a stale response from a dying old daemon.
+        const CONFIRM_ROUNDS: usize = 2;
 
         let deadline = Instant::now() + GIVE_UP_AFTER;
+        let mut last_value: Option<bool> = None;
+        let mut confirm_count: usize = 0;
 
         loop {
             if Instant::now() >= deadline {
@@ -1088,7 +1107,15 @@ fn spawn_tray_private_mode_resync(handle: tauri::AppHandle) {
                         .and_then(|d| d["private_mode"].as_bool())
                         .unwrap_or(false);
 
-                    // Update the CheckMenuItem if we still have a handle to it.
+                    // Track consecutive identical responses to confirm stability.
+                    if last_value == Some(real_value) {
+                        confirm_count += 1;
+                    } else {
+                        last_value = Some(real_value);
+                        confirm_count = 1;
+                    }
+
+                    // Update the CheckMenuItem immediately with the best-known value.
                     if let Some(state) = handle.try_state::<PrivateModeMenuItem>() {
                         if let Ok(guard) = state.0.lock() {
                             if let Some(ref item) = *guard {
@@ -1107,11 +1134,20 @@ fn spawn_tray_private_mode_resync(handle: tauri::AppHandle) {
                             }
                         }
                     }
-                    // Success — done.
-                    return;
+
+                    if confirm_count >= CONFIRM_ROUNDS {
+                        // Stable for CONFIRM_ROUNDS consecutive polls — done.
+                        return;
+                    }
+                    // Wait before the next confirmation poll.
+                    thread::sleep(POLL_INTERVAL);
                 }
-                // Daemon not yet ready; try again after a short delay.
-                _ => thread::sleep(POLL_INTERVAL),
+                // Daemon not yet ready or socket changed; reset stability counter.
+                _ => {
+                    last_value = None;
+                    confirm_count = 0;
+                    thread::sleep(POLL_INTERVAL);
+                }
             }
         }
     });

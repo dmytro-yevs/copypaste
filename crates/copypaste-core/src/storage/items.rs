@@ -1984,7 +1984,7 @@ mod tests {
         // Run prune_to_cap.
         let deleted = prune_to_cap(&db, quota).unwrap();
         assert_eq!(
-            deleted as usize,
+            deleted,
             naive_delete.len(),
             "window-fn and naive must delete the same number of rows"
         );

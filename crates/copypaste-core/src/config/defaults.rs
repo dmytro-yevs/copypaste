@@ -1,17 +1,26 @@
 pub const CONFIG_VERSION: u32 = 1;
-pub const HISTORY_LIMIT: usize = 1000;
+// Intentionally generous: history should feel unbounded to the user; the local
+// DB is a cache (cloud / P2P holds the long tail).
+pub const HISTORY_LIMIT: usize = 100_000;
 pub const POLL_INTERVAL_MS: u64 = 500;
 pub const POLL_INTERVAL_MIN_MS: u64 = 100;
 pub const POLL_INTERVAL_MAX_MS: u64 = 5000;
-pub const MAX_TEXT_SIZE_BYTES: u64 = 1_000_000;
-pub const MAX_IMAGE_SIZE_BYTES: u64 = 25_000_000;
-pub const MAX_FILE_SIZE_BYTES: u64 = 100_000_000;
-pub const STORAGE_QUOTA_BYTES: u64 = 500_000_000;
-pub const SYNC_TTL_SECS: u64 = 86_400;
+// 15 MiB — stays safely under the 16 MiB P2P/IPC wire-frame cap.
+pub const MAX_TEXT_SIZE_BYTES: u64 = 15 * 1024 * 1024;
+// 64 MiB — supports high-res screenshots at original quality.
+pub const MAX_IMAGE_SIZE_BYTES: u64 = 64 * 1024 * 1024;
+// 1 GiB — generous; local DB is a cache, not the bottleneck.
+pub const MAX_FILE_SIZE_BYTES: u64 = 1024 * 1024 * 1024;
+// 10 GiB local quota; cloud / P2P back-fill is bounded by sync_ttl_secs.
+pub const STORAGE_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+// 30 days — cloud tail persists long enough for infrequent device pairs.
+pub const SYNC_TTL_SECS: u64 = 2_592_000;
 pub const SENSITIVE_TTL_RELAY_SECS: u64 = 1_800;
 pub const SENSITIVE_TTL_LOCAL_SECS: u64 = 1_800;
 pub const SENSITIVE_TTL_SECS: u64 = 30;
-pub const IMAGE_QUALITY: u8 = 80;
+// 100 = lossless / original quality (field is currently a no-op for PNG; kept
+// for future JPEG support — never compress by default).
+pub const IMAGE_QUALITY: u8 = 100;
 pub const SQLITE_CACHE_MB: u32 = 8;
 pub const ENCRYPTION_CHUNK_KB: u32 = 64;
 pub const MAX_DECODED_IMAGE_MB: u32 = 50;

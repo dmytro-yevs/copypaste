@@ -111,6 +111,11 @@ export function Popup() {
   const hide = useCallback(async () => {
     if (isHidingRef.current) return;
     isHidingRef.current = true;
+    // Reset scroll + selection so the next show always starts at the top.
+    // Manual wheel-scroll moves scrollTop without changing selectedIdx, so the
+    // scrollIntoView effect alone won't reset it on re-show — reset here on hide.
+    if (listRef.current) listRef.current.scrollTop = 0;
+    setSelectedIdx(0);
     try {
       await invoke("hide_popup");
     } catch (e) {

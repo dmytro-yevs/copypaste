@@ -114,7 +114,7 @@ mod tests {
         let cfg = AppConfig::default();
         cfg.save(&path).unwrap();
         let loaded = AppConfig::load(&path).unwrap();
-        assert_eq!(loaded.history_limit, 1000);
+        assert_eq!(loaded.history_limit, HISTORY_LIMIT);
         assert_eq!(loaded.poll_interval_ms, 500);
         assert!(!loaded.sync_on_wifi_only);
     }

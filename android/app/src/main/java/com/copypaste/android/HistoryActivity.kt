@@ -767,7 +767,8 @@ private fun HistoryRow(
             )
             .padding(horizontal = 12.dp, vertical = 0.dp),
     ) {
-        if (item.isImage && imageBitmap != null) {
+        val bmp = imageBitmap
+        if (item.isImage && bmp != null) {
             // ── Image thumbnail row ──────────────────────────────────────────
             // Bounding box: max 340 dp wide × imageMaxHeightDp dp tall.
             // ContentScale.Fit = uniform scale-down to fit inside the box.
@@ -809,7 +810,7 @@ private fun HistoryRow(
                 Spacer(Modifier.width(8.dp))
                 // Thumbnail — scales uniformly into the bounding box, never upscales
                 Image(
-                    bitmap = imageBitmap,
+                    bitmap = bmp,
                     contentDescription = stringResource(R.string.cd_image_thumbnail),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
