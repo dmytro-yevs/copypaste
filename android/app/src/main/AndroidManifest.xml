@@ -105,6 +105,12 @@
             android:exported="false"
             android:theme="@style/Theme.CopyPaste" />
 
+        <!-- In-app log viewer, launched from Settings › Diagnostics -->
+        <activity
+            android:name=".LogViewerActivity"
+            android:exported="false"
+            android:theme="@style/Theme.CopyPaste" />
+
         <!-- In-app Permissions review screen, launched from Settings -->
         <activity
             android:name=".PermissionsSettingsActivity"

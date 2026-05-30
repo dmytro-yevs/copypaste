@@ -159,19 +159,14 @@
     <string name="dialog_confirm">Delete</string>
     <string name="dialog_cancel">Cancel</string>
 
-    <!-- Log export -->
-    <string name="log_export_button">Export Logs</string>
-    <string name="log_export_description">Share diagnostic logs with the developer to help investigate issues.</string>
-    <string name="log_export_chooser_title">Share logs via…</string>
-    <string name="log_export_empty">No log files found yet.</string>
-    <string name="log_export_failed">Could not prepare log archive. Try adb pull instead.</string>
-    <string name="crash_detected_title">App crashed last time</string>
-    <string name="crash_detected_message">A crash was detected on the previous run. Export logs to help diagnose the issue?</string>
-    <string name="crash_detected_export">Export Logs</string>
-    <string name="crash_detected_dismiss">Dismiss</string>
+    <!-- Log viewer (in-app) -->
+    <string name="log_viewer_button">View Logs</string>
+    <string name="log_viewer_description">Browse diagnostic logs inside the app.</string>
 
-    <!-- Log export (in-app, from Settings) -->
+    <!-- Diagnostics section (Settings) -->
     <string name="section_diagnostics">Diagnostics</string>
+
+    <!-- Log export -->
     <string name="log_export_button">Export Logs</string>
     <string name="log_export_description">Share diagnostic logs with the developer to help investigate issues.\nLogs are also adb-pullable without root:\nadb pull /sdcard/Android/data/com.copypaste.android/files/logs/</string>
     <string name="log_export_chooser_title">Share logs via…</string>
