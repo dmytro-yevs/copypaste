@@ -10,37 +10,7 @@ import {
 import { applySpanMasking } from "../lib/masking";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
-
-// ---------------------------------------------------------------------------
-// Image thumbnail cache — keyed by item id, value is the data URI (or null
-// when the fetch failed / item is not an image).
-//
-// Bounded LRU: the cache is module-level and survives component unmount, so an
-// unbounded Map would leak forever. We cap it at IMAGE_CACHE_MAX entries and
-// evict the least-recently-used (oldest insertion / re-touched) entry. A plain
-// Map preserves insertion order, so "delete then re-set on access" gives LRU.
-// ---------------------------------------------------------------------------
-const IMAGE_CACHE_MAX = 50;
-const imageCache = new Map<string, string | null>();
-
-function imageCacheGet(id: string): string | null | undefined {
-  if (!imageCache.has(id)) return undefined;
-  const value = imageCache.get(id);
-  // Touch: move to most-recently-used position.
-  imageCache.delete(id);
-  imageCache.set(id, value as string | null);
-  return value;
-}
-
-function imageCacheSet(id: string, value: string | null): void {
-  if (imageCache.has(id)) imageCache.delete(id);
-  imageCache.set(id, value);
-  while (imageCache.size > IMAGE_CACHE_MAX) {
-    const oldest = imageCache.keys().next().value;
-    if (oldest === undefined) break;
-    imageCache.delete(oldest);
-  }
-}
+import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 
 // ---------------------------------------------------------------------------
 // Toast — ephemeral one-liner feedback strip
@@ -198,46 +168,40 @@ function PinIndicator() {
 }
 
 // ---------------------------------------------------------------------------
-// Sub-components
+// Row height model (shared by the row and the virtualizer)
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Lazy image thumbnail — fetches via IPC on first render, uses cache.
-// ---------------------------------------------------------------------------
-
-function ImageThumbnail({ id }: { id: string }) {
-  const [src, setSrc] = useState<string | null>(imageCacheGet(id) ?? null);
-
-  useEffect(() => {
-    if (imageCacheGet(id) !== undefined) return; // already fetched (hit or miss)
-    api
-      .getItemImage(id)
-      .then(({ data_uri }) => {
-        imageCacheSet(id, data_uri);
-        setSrc(data_uri);
-      })
-      .catch(() => {
-        imageCacheSet(id, null);
-      });
-  }, [id]);
-
-  if (!src) return null;
-
-  return (
-    <img
-      src={src}
-      alt=""
-      className="h-[22px] w-auto max-w-[60px] shrink-0 rounded object-contain"
-      loading="lazy"
-    />
-  );
+/**
+ * Compute the row height (px) for an entry.
+ *
+ * Maccy parity rules:
+ *  - Text rows: `previewSize` (min 22 px).
+ *  - Image rows: `imageMaxHeight` + 10 px padding (5 px top + 5 px bottom),
+ *    minimum 34 px.
+ *
+ * Kept in one place so the virtualizer's prefix-sum offset math stays in sync
+ * with what HistoryRow actually renders.
+ */
+export function rowHeightFor(
+  entry: HistoryEntry,
+  previewSize: number,
+  imageMaxHeight: number
+): number {
+  const isImage =
+    entry.content_type === "image" || entry.content_type.startsWith("image/");
+  return isImage ? Math.max(imageMaxHeight + 10, 34) : Math.max(previewSize, 22);
 }
+
+// ---------------------------------------------------------------------------
+// HistoryRow
+// ---------------------------------------------------------------------------
 
 interface RowProps {
   entry: HistoryEntry;
   selected: boolean;
   previewLines: number;
   previewSize: number;
+  imageMaxHeight: number;
   maskSensitive: boolean;
   onSelect: () => void;
   onCopy: () => void;
@@ -245,23 +209,32 @@ interface RowProps {
   onDelete: () => void;
 }
 
-function HistoryRow({ entry, selected, previewLines, previewSize, maskSensitive, onSelect, onCopy, onPin, onDelete }: RowProps) {
-  // Fix #1: bare "image" content_type stored by daemon
+function HistoryRow({
+  entry,
+  selected,
+  previewLines,
+  previewSize,
+  imageMaxHeight,
+  maskSensitive,
+  onSelect,
+  onCopy,
+  onPin,
+  onDelete,
+}: RowProps) {
+  // Bare "image" content_type (legacy) or MIME-typed "image/*" future rows.
   const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
 
   let preview: string;
   if (entry.is_sensitive) {
     preview = "•••••• (sensitive)";
   } else if (maskSensitive && entry.sensitive_spans && entry.sensitive_spans.length > 0) {
-    // Fix #7: redact only sensitive spans, show the rest
+    // Redact only sensitive spans, show the rest.
     preview = applySpanMasking(entry.preview, entry.sensitive_spans);
   } else {
     preview = entry.preview;
   }
 
-  // Fix #6: row height driven by previewSize setting (shared with the
-  // virtualizer via rowHeightFor so offsets stay consistent).
-  const rowH = rowHeightFor(entry, previewSize);
+  const rowH = rowHeightFor(entry, previewSize, imageMaxHeight);
 
   return (
     <div
@@ -292,28 +265,34 @@ function HistoryRow({ entry, selected, previewLines, previewSize, maskSensitive,
         <ContentIcon type={isImage ? "image" : entry.content_type} />
       </span>
 
-      {/* Image thumbnail (lazy-loaded, cached) — only shown for images */}
-      {isImage && <ImageThumbnail id={entry.id} />}
-
-      {/* Preview — Fix #5: multi-line via previewLines clamped with webkit-line-clamp */}
-      <span
-        className={["flex-1 min-w-0 break-words", entry.is_sensitive ? "italic text-ide-dim" : ""].join(" ")}
-        style={
-          previewLines > 1
-            ? {
-                display: "-webkit-box",
-                WebkitLineClamp: previewLines,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
-              }
-            : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
-        }
-      >
-        {isImage && !entry.is_sensitive ? `[Image] ${entry.preview}`.trim() : preview}
-      </span>
+      {isImage ? (
+        // Maccy parity: image rows show ONLY the thumbnail — no text title.
+        // ImageThumb is lazy: fetches via IPC on first render, uses shared LRU cache.
+        <ImageThumb id={entry.id} maxHeight={imageMaxHeight} />
+      ) : (
+        // Text / URL rows: multi-line preview clamped with webkit-line-clamp.
+        <span
+          className={[
+            "flex-1 min-w-0 break-words",
+            entry.is_sensitive ? "italic text-ide-dim" : "",
+          ].join(" ")}
+          style={
+            previewLines > 1
+              ? {
+                  display: "-webkit-box",
+                  WebkitLineClamp: previewLines,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }
+              : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
+          }
+        >
+          {preview}
+        </span>
+      )}
 
       {/* Time — hidden while action buttons are visible */}
-      <span className="shrink-0 text-[11px] text-ide-faint group-hover:hidden">
+      <span className="ml-auto shrink-0 text-[11px] text-ide-faint group-hover:hidden">
         {relativeTime(entry.wall_time)}
       </span>
 
@@ -357,37 +336,20 @@ function ActionBtn({
 }
 
 // ---------------------------------------------------------------------------
-// Row height model (shared by the row and the virtualizer)
-// ---------------------------------------------------------------------------
-
-/**
- * Compute the row height (px) for an entry, mirroring HistoryRow's own logic.
- * Image rows are taller; everything else is `previewSize`. Kept in one place so
- * the virtualizer's offset math stays in sync with what actually renders.
- */
-function rowHeightFor(entry: HistoryEntry, previewSize: number): number {
-  const isImage =
-    entry.content_type === "image" || entry.content_type.startsWith("image/");
-  return isImage ? Math.max(previewSize + 6, 34) : previewSize;
-}
-
-// ---------------------------------------------------------------------------
 // Virtualized list — windowing for large histories
 //
-// Fix #1: the history view previously rendered every row (up to 200), which
-// scales poorly as the cap grows and wastes DOM nodes / layout work. This
-// renders only the rows intersecting the viewport plus a small overscan buffer.
-// Row heights are known up front (see rowHeightFor), so we build a prefix-sum
-// offset table and binary-search the first visible row — supporting the mixed
-// image/text row heights exactly, not just a single fixed height.
+// Renders only the rows intersecting the viewport plus an overscan buffer.
+// Row heights are computed from rowHeightFor (supporting mixed image/text
+// heights), stored in a prefix-sum table, and binary-searched for the first
+// visible row — O(log n) per scroll event.
 // ---------------------------------------------------------------------------
 
 const OVERSCAN_PX = 240; // render a buffer above/below the viewport
 
 /**
- * Build the prefix-sum offset table for a list of rows. `offsets[i]` is the top
- * edge (px) of row `i`; `offsets[n]` is the total content height. Exported for
- * unit testing the virtualization math.
+ * Build the prefix-sum offset table for a list of row heights.
+ * `offsets[i]` is the top edge (px) of row `i`; `offsets[n]` is total height.
+ * Exported for unit testing the virtualization math.
  */
 export function buildOffsets(heights: number[]): number[] {
   const arr = new Array<number>(heights.length + 1);
@@ -398,9 +360,8 @@ export function buildOffsets(heights: number[]): number[] {
 
 /**
  * Given a prefix-sum offset table, the scroll position, and the viewport
- * height, return the `[start, end)` index range of rows to render (inclusive of
- * an overscan buffer). Pure and side-effect free so it can be unit tested
- * without a DOM. `end` is exclusive.
+ * height, return the `[start, end)` index range of rows to render (inclusive
+ * of an overscan buffer). Pure and side-effect free. `end` is exclusive.
  */
 export function computeVisibleWindow(
   offsets: number[],
@@ -432,17 +393,27 @@ export function computeVisibleWindow(
 interface VirtualListProps {
   items: HistoryEntry[];
   previewSize: number;
+  imageMaxHeight: number;
   listRef: React.RefObject<HTMLDivElement | null>;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
   renderRow: (entry: HistoryEntry) => React.ReactNode;
 }
 
-function VirtualList({ items, previewSize, listRef, onKeyDown, renderRow }: VirtualListProps) {
+function VirtualList({
+  items,
+  previewSize,
+  imageMaxHeight,
+  listRef,
+  onKeyDown,
+  renderRow,
+}: VirtualListProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
 
   // Prefix-sum offsets: offsets[i] is the top of row i; offsets[n] is total height.
-  const offsets = buildOffsets(items.map((it) => rowHeightFor(it, previewSize)));
+  const offsets = buildOffsets(
+    items.map((it) => rowHeightFor(it, previewSize, imageMaxHeight))
+  );
   const totalH = offsets[items.length] ?? 0;
 
   // Measure the viewport height and keep it current on resize.
@@ -497,7 +468,9 @@ interface ToastState {
 let _toastSeq = 0;
 
 export function HistoryView() {
-  const { previewLines, previewSize, maskSensitive } = useUI((s) => s.prefs);
+  const { previewLines, previewSize, imageMaxHeight, historySize, maskSensitive } =
+    useUI((s) => s.prefs);
+
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [search, setSearch] = useState("");
@@ -520,28 +493,40 @@ export function HistoryView() {
   const sigRef = useRef<string>("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showToast = useCallback((message: string, kind: ToastKind, durationMs = 2500) => {
-    const id = ++_toastSeq;
-    setToast({ id, message, kind });
-    if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = setTimeout(() => setToast(null), durationMs);
-  }, []);
+  const showToast = useCallback(
+    (message: string, kind: ToastKind, durationMs = 2500) => {
+      const id = ++_toastSeq;
+      setToast({ id, message, kind });
+      if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setToast(null), durationMs);
+    },
+    []
+  );
 
   // -------------------------------------------------------------------------
   // Data loading — shared by initial mount, interval, and manual triggers.
   // -------------------------------------------------------------------------
 
-  const load = useCallback(async (silent = false) => {
-    if (!silent) setLoadState("loading");
-    try {
-      const page = await api.historyPage(200, 0);
-      // Daemon returns pinned items first, then newest-first within each group.
-      // We trust the server sort; just surface items in the order returned.
-      const incoming = page.items;
-      const newSig = itemsSignature(incoming);
-      if (newSig !== sigRef.current) {
-        sigRef.current = newSig;
-        setItems(incoming);
+  const load = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoadState("loading");
+      try {
+        // historySize controls how many items to request; clamped by MAX_PAGE server-side.
+        const page = await api.historyPage(historySize, 0);
+        // Daemon returns pinned items first, then newest-first within each group.
+        const incoming = page.items;
+        const newSig = itemsSignature(incoming);
+        if (newSig !== sigRef.current) {
+          sigRef.current = newSig;
+          setItems(incoming);
+        }
+        setLoadState("ready");
+      } catch (err) {
+        if (err instanceof IpcError && err.code === "daemon_offline") {
+          setLoadState("offline");
+        } else {
+          setLoadState("error");
+        }
       }
       setDegraded(false);
       setErrorDetail(null);
@@ -577,17 +562,15 @@ export function HistoryView() {
       setDegraded(isDegraded);
       setLoadState("error");
     }
-  }, []);
+  }, [historySize]);
 
   // Initial load
   useEffect(() => {
     void load(false);
   }, [load]);
 
-  // Auto-refresh while the window is visible; preserve search + selectedId
-  // across ticks. Paused when the menu-bar window is hidden (no point polling a
-  // window the user can't see) and backed off when the daemon is unreachable so
-  // we don't hammer a dead daemon at full rate.
+  // Auto-refresh while the window is visible; backed off when the daemon is
+  // unreachable so we don't hammer a dead daemon at full rate.
   useEffect(() => {
     const ACTIVE_MS = 1200;
     const BACKOFF_MS = 5000;
@@ -642,16 +625,17 @@ export function HistoryView() {
   const selectedIdx = filtered.findIndex((it) => it.id === selectedId);
 
   // Keep the selected row visible. With virtualization an off-screen selected
-  // row isn't in the DOM, so we can't rely on Element.scrollIntoView — instead
-  // we compute its offset from the same height model the virtualizer uses and
-  // scroll the container so the row sits within the viewport.
+  // row isn't in the DOM, so we compute its offset from the height model and
+  // scroll the container directly instead of relying on scrollIntoView.
   useEffect(() => {
     if (selectedIdx < 0) return;
     const el = listRef.current;
     if (!el) return;
     let top = 0;
-    for (let i = 0; i < selectedIdx; i++) top += rowHeightFor(filtered[i], previewSize);
-    const rowH = rowHeightFor(filtered[selectedIdx], previewSize);
+    for (let i = 0; i < selectedIdx; i++) {
+      top += rowHeightFor(filtered[i], previewSize, imageMaxHeight);
+    }
+    const rowH = rowHeightFor(filtered[selectedIdx], previewSize, imageMaxHeight);
     const viewTop = el.scrollTop;
     const viewBottom = viewTop + el.clientHeight;
     if (top < viewTop) {
@@ -659,7 +643,7 @@ export function HistoryView() {
     } else if (top + rowH > viewBottom) {
       el.scrollTop = top + rowH - el.clientHeight;
     }
-  }, [selectedIdx, filtered, previewSize]);
+  }, [selectedIdx, filtered, previewSize, imageMaxHeight]);
 
   const handleKeyDown = useCallback(
     async (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -754,7 +738,7 @@ export function HistoryView() {
     [selectedId, load, showToast]
   );
 
-  // Inline confirm state — replaces window.confirm (which is blocked in Tauri webviews).
+  // Inline confirm state — replaces window.confirm (blocked in Tauri webviews).
   const [confirmPending, setConfirmPending] = useState(false);
 
   const handleClearAll = useCallback(() => {
@@ -766,11 +750,14 @@ export function HistoryView() {
     try {
       const result = await api.deleteAll();
       setSelectedId(null);
-      // Immediately clear the list so the view empties without waiting for the reload.
+      // Immediately clear the list so the view empties without waiting for reload.
       setItems([]);
-      imageCache.clear(); // the items are gone; drop their cached thumbnails too
+      clearImageCache(); // the items are gone; drop their cached thumbnails too
       sigRef.current = ""; // force re-render even if daemon returns identical sig
-      showToast(`Cleared ${result.deleted} item${result.deleted === 1 ? "" : "s"}`, "success");
+      showToast(
+        `Cleared ${result.deleted} item${result.deleted === 1 ? "" : "s"}`,
+        "success"
+      );
       void load(true);
     } catch (err) {
       const msg = err instanceof IpcError ? err.message : "Clear failed";
@@ -923,7 +910,7 @@ export function HistoryView() {
   } else if (filtered.length === 0) {
     body = (
       <div className="flex h-full items-center justify-center text-[13px] text-ide-dim">
-        No results for "{search}".
+        No results for &ldquo;{search}&rdquo;.
       </div>
     );
   } else {
@@ -931,6 +918,7 @@ export function HistoryView() {
       <VirtualList
         items={filtered}
         previewSize={previewSize}
+        imageMaxHeight={imageMaxHeight}
         listRef={listRef}
         onKeyDown={(e) => void handleKeyDown(e)}
         renderRow={(entry) => (
@@ -940,6 +928,7 @@ export function HistoryView() {
             selected={entry.id === selectedId}
             previewLines={previewLines}
             previewSize={previewSize}
+            imageMaxHeight={imageMaxHeight}
             maskSensitive={maskSensitive}
             onSelect={() => {
               setSelectedId(entry.id);
