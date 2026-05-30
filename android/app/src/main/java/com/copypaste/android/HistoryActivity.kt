@@ -2,12 +2,14 @@
 
 package com.copypaste.android
 
+import android.graphics.BitmapFactory
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -20,16 +22,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -55,6 +59,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,6 +72,7 @@ import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.IdeDanger
 import com.copypaste.android.ui.theme.IdeDim
+import com.copypaste.android.ui.theme.IdeElevated
 import com.copypaste.android.ui.theme.IdeFaint
 import com.copypaste.android.ui.theme.IdePanel
 import com.copypaste.android.ui.theme.IdeSelection
@@ -75,14 +82,17 @@ import java.text.DateFormat
 import java.util.Date
 
 /**
- * History screen — Compose list of last [HISTORY_LIMIT] clipboard items.
+ * History screen — Compose list of last N clipboard items, where N is read
+ * live from [Settings.historySize] (Maccy-parity display cap).
  *
  * Redesigned to match the macOS desktop UI:
  *   - Compact 44 dp header bar (IDE-style, 14 sp medium title)
  *   - Dark Darcula background (#2b2d30 surface, #1e1f22 list bg)
- *   - Rows: left-aligned type icon + text preview (13 sp) + right faint timestamp
+ *   - Image items: thumbnail scaled into 340 dp × imageMaxHeight dp bounding
+ *     box (ContentScale.Fit, never upscaled) instead of a text preview
+ *   - Text items: left-aligned type icon + text preview (13 sp) + right faint ts
  *   - Thin dividers between rows (no card elevation)
- *   - Long-press reveals delete action (avoids permanent delete icon on every row)
+ *   - Long-press reveals delete action; auto-collapses after [Settings.previewDelay]
  */
 class HistoryActivity : ComponentActivity() {
 
@@ -104,6 +114,7 @@ class HistoryActivity : ComponentActivity() {
     }
 
     companion object {
+        /** Fallback used only when Settings cannot be read (e.g. test context). */
         const val HISTORY_LIMIT = 50
     }
 }
@@ -176,9 +187,9 @@ fun HistoryScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor       = IdePanel,
-                    titleContentColor    = IdeText,
-                    actionIconContentColor = IdeDim,
+                    containerColor             = IdePanel,
+                    titleContentColor          = IdeText,
+                    actionIconContentColor     = IdeDim,
                     navigationIconContentColor = IdeDim,
                 ),
                 // Apply the status-bar / display-cutout inset as TOP PADDING so the
@@ -254,7 +265,15 @@ private fun HistoryList(
     onDelete: (String) -> Unit,
 ) {
     val ctx = LocalContext.current
-    val maskSensitive = remember { Settings(ctx).maskSensitiveContent }
+    val settings = remember { Settings(ctx) }
+    val maskSensitive = remember { settings.maskSensitiveContent }
+
+    // Read display settings live so the list responds to Settings changes
+    // without requiring a full history reload. Both values are read once per
+    // composition; they update on the next compose frame if settings change
+    // (the settings screen writes immediately via SharedPreferences).
+    val imageMaxHeightDp = remember { settings.imageMaxHeight }
+    val previewDelayMs = remember { settings.previewDelay }
 
     LazyColumn(
         modifier = Modifier
@@ -268,6 +287,8 @@ private fun HistoryList(
             HistoryRow(
                 item = item,
                 maskSensitive = maskSensitive,
+                imageMaxHeightDp = imageMaxHeightDp,
+                previewDelayMs = previewDelayMs,
                 onDelete = onDelete,
             )
             HorizontalDivider(
@@ -279,11 +300,19 @@ private fun HistoryList(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Row — compact IDE-style, matching the macOS HistoryRow layout:
-//   [type-icon]  [preview text ─────────────────────]  [timestamp]  [actions on expand]
+// Row — compact IDE-style, matching the macOS HistoryRow layout.
 //
-// Long-press toggles the action row (delete / copy) to avoid cluttering every
-// row with a permanent delete button.
+// Image items:
+//   The thumbnail is shown in place of the text preview, inside a bounding box
+//   of max-width 340 dp × max-height [imageMaxHeightDp] dp. ContentScale.Fit
+//   preserves the aspect ratio and never upscales beyond the image's natural
+//   size (the bitmap pixel size is compared to the bounding box at draw time).
+//
+// Text items (and fallback for image items whose bytes failed to decode):
+//   [type-icon]  [preview text ─────────────────────]  [timestamp]
+//
+// Long-press toggles the action row (delete/copy). Auto-collapses after
+// [previewDelayMs] of inactivity (Maccy-parity previewDelay setting).
 // ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -291,6 +320,8 @@ private fun HistoryList(
 private fun HistoryRow(
     item: ClipboardItem,
     maskSensitive: Boolean,
+    imageMaxHeightDp: Int,
+    previewDelayMs: Long,
     onDelete: (String) -> Unit,
 ) {
     // Sensitivity is computed in the repository against the FULL decrypted
@@ -300,11 +331,23 @@ private fun HistoryRow(
     val detectedSensitive = item.isSensitive
 
     var expanded by remember(item.id) { mutableStateOf(false) }
-    // Auto-collapse after 4 seconds of inactivity.
+    // Auto-collapse after previewDelayMs of inactivity (Maccy previewDelay parity).
     LaunchedEffect(expanded) {
         if (expanded) {
-            delay(4_000L)
+            delay(previewDelayMs)
             expanded = false
+        }
+    }
+
+    // Attempt to decode image bytes into an ImageBitmap for thumbnail rendering.
+    // BitmapFactory.decodeByteArray is CPU-bound but fast for thumbnails; it
+    // runs synchronously on the composition thread, which is acceptable because
+    // the bytes are small (thumbnail-scaled at capture time). If decoding fails
+    // (malformed bytes, OOM, or bytes == null) we fall back to the text preview.
+    val imageBitmap = remember(item.id, item.imagePng) {
+        item.imagePng?.let { bytes ->
+            runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
+                .getOrNull()
         }
     }
 
@@ -315,9 +358,9 @@ private fun HistoryRow(
         else -> item.snippet
     }
     val rowBg = when {
-        expanded           -> IdeSelection
-        detectedSensitive  -> IdeDanger.copy(alpha = 0.07f)
-        else               -> Color.Transparent
+        expanded          -> IdeSelection
+        detectedSensitive -> IdeDanger.copy(alpha = 0.07f)
+        else              -> Color.Transparent
     }
 
     Column(
@@ -330,43 +373,87 @@ private fun HistoryRow(
             )
             .padding(horizontal = 12.dp, vertical = 0.dp),
     ) {
-        // ── Main row (always visible) ────────────────────────────────────
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(36.dp),           // compact 36 dp row (macOS ~28–34 px range)
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Start,
-        ) {
-            // Type icon glyph (16 dp, left-pinned like macOS)
-            TypeIcon(
-                contentType = item.contentType,
-                isSensitive = detectedSensitive,
-                modifier = Modifier.size(14.dp),
-            )
-
-            Spacer(Modifier.width(8.dp))
-
-            // Preview text — single line with ellipsis, flex-1
-            Text(
-                text = display,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (detectedSensitive) IdeDim else IdeText,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-
-            Spacer(Modifier.width(8.dp))
-
-            // Timestamp — right-aligned, faint (matches macOS group-hover:hidden)
-            if (!expanded) {
-                Text(
-                    text = formatTime(item.wallTimeMs),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = IdeFaint,
-                    maxLines = 1,
+        if (item.isImage && imageBitmap != null) {
+            // ── Image thumbnail row ──────────────────────────────────────────
+            // Bounding box: max 340 dp wide × imageMaxHeightDp dp tall.
+            // ContentScale.Fit = uniform scale-down to fit inside the box.
+            // NEVER upscale: widthIn/heightIn use max constraints only, so an
+            // image smaller than the box is shown at its natural size.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Start,
+            ) {
+                // Small image-type icon to the left, matching the text-row icon gutter
+                Icon(
+                    imageVector = Icons.Filled.Image,
+                    contentDescription = stringResource(R.string.cd_image_item),
+                    tint = IdeAccent,
+                    modifier = Modifier.size(14.dp),
                 )
+                Spacer(Modifier.width(8.dp))
+                // Thumbnail — scales uniformly into the bounding box, never upscales
+                Image(
+                    bitmap = imageBitmap,
+                    contentDescription = stringResource(R.string.cd_image_thumbnail),
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .widthIn(max = 340.dp)
+                        .heightIn(max = imageMaxHeightDp.dp)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(IdeElevated),
+                )
+                Spacer(Modifier.weight(1f))
+                if (!expanded) {
+                    Text(
+                        text = formatTime(item.wallTimeMs),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = IdeFaint,
+                        maxLines = 1,
+                    )
+                }
+            }
+        } else {
+            // ── Text (or image-no-bytes fallback) row ────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(36.dp),           // compact 36 dp row (macOS ~28–34 px range)
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Start,
+            ) {
+                // Type icon glyph (16 dp, left-pinned like macOS)
+                TypeIcon(
+                    contentType = item.contentType,
+                    isSensitive = detectedSensitive,
+                    modifier = Modifier.size(14.dp),
+                )
+
+                Spacer(Modifier.width(8.dp))
+
+                // Preview text — single line with ellipsis, flex-1
+                Text(
+                    text = display,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (detectedSensitive) IdeDim else IdeText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+
+                Spacer(Modifier.width(8.dp))
+
+                // Timestamp — right-aligned, faint (matches macOS group-hover:hidden)
+                if (!expanded) {
+                    Text(
+                        text = formatTime(item.wallTimeMs),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = IdeFaint,
+                        maxLines = 1,
+                    )
+                }
             }
         }
 
@@ -406,9 +493,12 @@ private fun TypeIcon(
     modifier: Modifier = Modifier,
 ) {
     val (icon, tint) = when {
-        isSensitive              -> Icons.Filled.Lock to IdeDanger
-        contentType == "text"    -> Icons.Filled.ContentCopy to IdeAccent
-        else                     -> Icons.Filled.ContentCopy to IdeDim
+        isSensitive                          -> Icons.Filled.Lock to IdeDanger
+        contentType.startsWith("image/") ||
+            contentType == "image"           -> Icons.Filled.Image to IdeAccent
+        contentType == "text" ||
+            contentType.startsWith("text/")  -> Icons.Filled.ContentCopy to IdeAccent
+        else                                 -> Icons.Filled.ContentCopy to IdeDim
     }
     Icon(
         imageVector = icon,

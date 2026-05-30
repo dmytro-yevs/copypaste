@@ -107,9 +107,56 @@ class ClipboardRepository(context: Context) {
             val ids = storedIds().takeLast(limit)
             ids.mapNotNull { id ->
                 val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
-                parseItem(id, raw, key)
+                val item = parseItem(id, raw, key) ?: return@mapNotNull null
+                // Attach image bytes when available (stored separately to keep the
+                // main index string small). Non-null only for image/* content types.
+                if (item.isImage) item.copy(imagePng = getImageBytes(id)) else item
             }.reversed()
         }
+
+    /**
+     * Return the raw PNG bytes stored for image item [id], or null when none
+     * are available (item not found, not an image, or not yet captured).
+     *
+     * Image bytes are persisted under the key "item_img_<id>" as a Base64
+     * NO_WRAP string by [storeImageBytes]. This separation from the main
+     * pipe-delimited blob keeps the item index readable and allows independent
+     * eviction when the item is deleted.
+     *
+     * This is a PURE READ helper — it does not decrypt or re-encode the bytes.
+     * The bytes are stored as raw PNG/JPEG data and can be decoded directly via
+     * [android.graphics.BitmapFactory.decodeByteArray].
+     */
+    fun getImageBytes(id: String): ByteArray? {
+        val b64 = prefs.getString("item_img_$id", null) ?: return null
+        return try {
+            Base64.decode(b64, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            Log.w(TAG, "getImageBytes: failed to decode image for $id: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Persist raw image bytes for item [id].
+     *
+     * Called from the capture pipeline (e.g. [ClipboardService]) when the
+     * clipboard contains an image item. The bytes are stored as Base64 under
+     * "item_img_<id>" alongside the encrypted text blob.
+     *
+     * Storage note: SharedPreferences is not ideal for large blobs (Android
+     * recommends files for >100 KB). For clipboard thumbnails (typically
+     * <50 KB after thumbnail scaling) this is acceptable; a future migration
+     * can move them to the app's files directory if needed.
+     *
+     * @param id      The item id (same as the text blob key).
+     * @param bytes   Raw image bytes (PNG preferred; JPEG accepted).
+     */
+    fun storeImageBytes(id: String, bytes: ByteArray) {
+        val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        prefs.edit().putString("item_img_$id", b64).apply()
+        Log.d(TAG, "storeImageBytes: stored ${bytes.size} bytes for $id")
+    }
 
     suspend fun deleteItem(id: String): Boolean = withContext(Dispatchers.IO) {
         synchronized(idsWriteLock) {
@@ -117,6 +164,7 @@ class ClipboardRepository(context: Context) {
             if (!ids.remove(id)) return@synchronized false
             prefs.edit()
                 .remove("item_$id")
+                .remove("item_img_$id")   // also remove any associated image bytes
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
                 .apply()
             true

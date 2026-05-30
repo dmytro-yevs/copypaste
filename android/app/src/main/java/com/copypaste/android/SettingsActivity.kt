@@ -90,6 +90,11 @@ fun SettingsScreen(
     // ── Relay field ──
     var relayUrl by remember { mutableStateOf(settings.relayUrl) }
 
+    // ── Display settings (Maccy-parity) ──
+    var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.toString()) }
+    var historySize by remember { mutableStateOf(settings.historySize.toString()) }
+    var previewDelay by remember { mutableStateOf(settings.previewDelay.toString()) }
+
     var settingsError by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val errorTemplate = stringResource(R.string.error_settings_save)
@@ -283,6 +288,46 @@ fun SettingsScreen(
                 HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
             }
 
+            // ── Display settings (Maccy-parity) ───────────────────────────────
+            SectionLabel("Display")
+            SettingsNumberField(
+                label = "Image max height (dp)",
+                hint = "40",
+                value = imageMaxHeight,
+                onValueChange = { imageMaxHeight = it },
+                onCommit = {
+                    val v = imageMaxHeight.toIntOrNull()?.coerceIn(1, 200) ?: return@SettingsNumberField
+                    try { settings.imageMaxHeight = v } catch (e: Exception) {
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                },
+            )
+            SettingsNumberField(
+                label = "History size (items)",
+                hint = "200",
+                value = historySize,
+                onValueChange = { historySize = it },
+                onCommit = {
+                    val v = historySize.toIntOrNull()?.coerceIn(1, 999) ?: return@SettingsNumberField
+                    try { settings.historySize = v } catch (e: Exception) {
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                },
+            )
+            SettingsNumberField(
+                label = "Preview delay (ms)",
+                hint = "1500",
+                value = previewDelay,
+                onValueChange = { previewDelay = it },
+                onCommit = {
+                    val v = previewDelay.toLongOrNull()?.coerceIn(200L, 100_000L) ?: return@SettingsNumberField
+                    try { settings.previewDelay = v } catch (e: Exception) {
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                },
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
             // ── Device ID (read-only) ──────────────────────────────────────────
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text(
@@ -325,6 +370,40 @@ private fun SettingsTextField(
             androidx.compose.ui.text.input.VisualTransformation.None,
         keyboardOptions = if (password) KeyboardOptions(keyboardType = KeyboardType.Password)
             else KeyboardOptions.Default,
+    )
+}
+
+/**
+ * Number-input field for integer/long display settings (imageMaxHeight, historySize,
+ * previewDelay). Uses a numeric keyboard and commits on every keystroke so the
+ * setting takes effect without requiring an explicit "Save" tap, matching the
+ * pattern used by [SettingsTextField] for string fields above.
+ *
+ * [onCommit] is only called when [value] parses to a valid number; invalid
+ * intermediate input (e.g. an empty string while the user is typing) is silently
+ * ignored so the setting retains its previous value rather than being zeroed.
+ */
+@Composable
+private fun SettingsNumberField(
+    label: String,
+    hint: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    onCommit: () -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = {
+            onValueChange(it)
+            onCommit()
+        },
+        label = { Text(label) },
+        placeholder = { Text(hint, style = MaterialTheme.typography.bodySmall) },
+        singleLine = true,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
     )
 }
 

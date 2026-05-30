@@ -178,6 +178,49 @@ class Settings(context: Context) {
         get() = prefs.getInt("max_history_items", 1000)
         set(v) = prefs.edit().putInt("max_history_items", v).apply()
 
+    // ── Display settings (Maccy-parity) ────────────────────────────────────────
+
+    /**
+     * Maximum height (in dp) for image thumbnails in the history list.
+     *
+     * Matches Maccy's `imageMaxHeight` preference. The thumbnail is scaled into
+     * a bounding box of width ≈ 340 dp × height [imageMaxHeight] dp using
+     * [androidx.compose.ui.layout.ContentScale.Fit] (uniform, never upscales).
+     *
+     * Default 40 dp (compact list rows). Range 1–200.
+     */
+    var imageMaxHeight: Int
+        get() = prefs.getInt("image_max_height", 40).coerceIn(1, 200)
+        set(v) = prefs.edit().putInt("image_max_height", v.coerceIn(1, 200)).apply()
+
+    /**
+     * Maximum number of history items to display and retain on-device.
+     *
+     * Mirrors Maccy's `historySize` preference. The list scrolls vertically
+     * without a row-count cap. Range 1–999.
+     *
+     * Note: [maxHistoryItems] (above) controls the on-disk retention cap used
+     * by the capture pipeline. [historySize] is the display cap consumed by the
+     * history list to limit how many items are fetched for rendering. Both
+     * default to sensible values independently so upgrading users are unaffected.
+     */
+    var historySize: Int
+        get() = prefs.getInt("history_size", 200).coerceIn(1, 999)
+        set(v) = prefs.edit().putInt("history_size", v.coerceIn(1, 999)).apply()
+
+    /**
+     * Delay in milliseconds before showing an item preview on long-press.
+     *
+     * Mirrors Maccy's `previewDelay` preference. Currently wired to the
+     * auto-collapse delay in the history row (how long an expanded/action-row
+     * stays open before collapsing). Range 200–100 000 ms. Default 1500 ms.
+     *
+     * TODO: wire to a dedicated long-press preview popover if one is added.
+     */
+    var previewDelay: Long
+        get() = prefs.getLong("preview_delay_ms", 1500L).coerceIn(200L, 100_000L)
+        set(v) = prefs.edit().putLong("preview_delay_ms", v.coerceIn(200L, 100_000L)).apply()
+
     /**
      * 256-bit AES key used for local clipboard encryption.
      *
