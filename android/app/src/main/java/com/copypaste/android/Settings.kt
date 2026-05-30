@@ -178,6 +178,69 @@ class Settings(context: Context) {
         get() = prefs.getInt("max_history_items", 1000)
         set(v) = prefs.edit().putInt("max_history_items", v).apply()
 
+    // ── Sync Wi-Fi preference ───────────────────────────────────────────────
+
+    /**
+     * When true, sync operations (both Supabase poll and relay fan-out) should
+     * be restricted to Wi-Fi connections. Defaults to false (sync on any network).
+     * Enforcement hook needed: [SupabasePollWorker] and the relay POST/GET paths
+     * in [ClipboardService] / [FgsSyncLoop] must call
+     * `NetworkCapabilities.hasTransport(TRANSPORT_WIFI)` and skip upload/download
+     * when this flag is true and the active network is not Wi-Fi.
+     */
+    var syncOnWifiOnly: Boolean
+        get() = prefs.getBoolean("sync_on_wifi_only", false)
+        set(v) = prefs.edit().putBoolean("sync_on_wifi_only", v).apply()
+
+    // ── Storage / size limits ───────────────────────────────────────────────
+    // Defaults match crates/copypaste-core/src/config/defaults.rs.
+
+    /**
+     * Maximum size in bytes for a text clipboard item. Items larger than this
+     * are silently dropped at capture time.
+     * Default: 1 000 000 B (1 MB) — matches MAX_TEXT_SIZE_BYTES in defaults.rs.
+     * Enforcement hook needed: [ClipboardService] / [ClipboardRepository.insert]
+     * must check `text.toByteArray(Charsets.UTF_8).size <= settings.maxTextSizeBytes`.
+     */
+    var maxTextSizeBytes: Long
+        get() = prefs.getLong("max_text_size_bytes", 1_000_000L)
+        set(v) = prefs.edit().putLong("max_text_size_bytes", v).apply()
+
+    /**
+     * Maximum size in bytes for an image clipboard item. Images larger than this
+     * are silently dropped at capture time.
+     * Default: 25 000 000 B (25 MB) — matches MAX_IMAGE_SIZE_BYTES in defaults.rs.
+     * Enforcement hook needed: [ClipboardService] / [ClipboardRepository.insert]
+     * must check bitmap byte count against this limit before storing.
+     */
+    var maxImageSizeBytes: Long
+        get() = prefs.getLong("max_image_size_bytes", 25_000_000L)
+        set(v) = prefs.edit().putLong("max_image_size_bytes", v).apply()
+
+    /**
+     * Total local storage quota for the clipboard database, in bytes.
+     * When the database approaches this limit, the oldest non-sensitive items
+     * should be pruned by the repository.
+     * Default: 500 000 000 B (500 MB) — matches STORAGE_QUOTA_BYTES in defaults.rs.
+     * Enforcement hook needed: [ClipboardRepository] must compare total payload
+     * size against this quota after each insert and prune accordingly.
+     */
+    var storageQuotaBytes: Long
+        get() = prefs.getLong("storage_quota_bytes", 500_000_000L)
+        set(v) = prefs.edit().putLong("storage_quota_bytes", v).apply()
+
+    /**
+     * Seconds after which a sensitive clipboard item is automatically wiped
+     * from local storage. 0 = no auto-wipe.
+     * Default: 30 s — matches SENSITIVE_TTL_SECS in defaults.rs.
+     * Enforcement hook needed: [ClipboardRepository] periodic cleanup job (or
+     * [ClipboardService] on each poll tick) must delete items where
+     * `is_sensitive = true AND created_at < now() - sensitiveAutoWipeSecs`.
+     */
+    var sensitiveAutoWipeSecs: Int
+        get() = prefs.getInt("sensitive_auto_wipe_secs", 30)
+        set(v) = prefs.edit().putInt("sensitive_auto_wipe_secs", v).apply()
+
     /**
      * 256-bit AES key used for local clipboard encryption.
      *
