@@ -16,18 +16,45 @@ const DEFAULT_POPUP_SHORTCUT: &str = "CmdOrCtrl+Shift+V";
 const CONFIG_FILE: &str = "ui-config.json";
 
 // ---------------------------------------------------------------------------
-// Shortcut config — persisted to JSON
+// Shortcut + launch + position config — persisted to JSON
 // ---------------------------------------------------------------------------
+
+/// Popup position mode.  Variants must match the string values the React
+/// layer sends/receives so they are serialised as lowercase strings.
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+enum PopupPosition {
+    /// Show near the mouse cursor (Maccy default).
+    #[default]
+    Cursor,
+    /// Center of the active screen.
+    Center,
+    /// Below the tray / menu-bar icon (top-right of the primary display).
+    Menubar,
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct UiConfig {
     popup_shortcut: String,
+    /// Auto-start CopyPaste at macOS login.  Defaults to `true` so a fresh
+    /// install is convenient out-of-the-box; can be disabled in Settings.
+    #[serde(default = "default_launch_at_login")]
+    launch_at_login: bool,
+    /// Where to position the quick-paste popup when shown.
+    #[serde(default)]
+    popup_position: PopupPosition,
+}
+
+fn default_launch_at_login() -> bool {
+    true
 }
 
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
             popup_shortcut: DEFAULT_POPUP_SHORTCUT.to_string(),
+            launch_at_login: true,
+            popup_position: PopupPosition::default(),
         }
     }
 }
@@ -65,6 +92,10 @@ fn save_ui_config(handle: &tauri::AppHandle, cfg: &UiConfig) -> Result<(), Strin
 
 struct CurrentShortcut(Mutex<String>);
 
+/// Current popup-position mode.  Wrapped in Mutex so commands can update it
+/// without reloading the full config from disk on every call.
+struct CurrentPopupPosition(Mutex<PopupPosition>);
+
 /// Bundle ID (or process identifier as fallback) of the app that was
 /// frontmost when the popup was last shown.  Used to restore focus after
 /// the user picks an item.
@@ -100,6 +131,7 @@ pub fn run() {
     let cfg = UiConfig::default(); // will be overwritten in setup after handle is available
     tauri::Builder::default()
         .manage(CurrentShortcut(Mutex::new(cfg.popup_shortcut)))
+        .manage(CurrentPopupPosition(Mutex::new(cfg.popup_position)))
         .manage(daemon_lifecycle::DaemonChild::default())
         .manage(daemon_lifecycle::DaemonSpawnError::default())
         .manage(daemon_lifecycle::DaemonLifecycleGen::default())
@@ -110,6 +142,11 @@ pub fn run() {
         // rebuilds the submenu once the daemon responds and then periodically.
         .manage(RecentSubmenu(Mutex::new(None)))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            // No extra CLI args needed; the app launches the daemon itself.
+            None::<Vec<&str>>,
+        ))
         .invoke_handler(tauri::generate_handler![
             ipc::ipc_call,
             ipc::pairing_qr_svg,
@@ -128,6 +165,10 @@ pub fn run() {
             hide_popup,
             play_copy_sound,
             show_copy_notification,
+            get_launch_at_login,
+            set_launch_at_login,
+            get_popup_position,
+            set_popup_position,
         ])
         .setup(|app| {
             // Load persisted config now that we have the app handle.
@@ -136,6 +177,11 @@ pub fn run() {
                 let state: State<CurrentShortcut> = app.state();
                 let mut guard = state.0.lock().expect("mutex poisoned");
                 *guard = persisted.popup_shortcut.clone();
+            }
+            {
+                let state: State<CurrentPopupPosition> = app.state();
+                let mut guard = state.0.lock().expect("mutex poisoned");
+                *guard = persisted.popup_position.clone();
             }
 
             // App-owned daemon lifecycle: start the daemon on a background
@@ -151,6 +197,9 @@ pub fn run() {
                 app.manage(PriorApp(Mutex::new(None)));
                 app.manage(TapActive(Mutex::new(false)));
             }
+
+            // Apply persisted launch-at-login preference idempotently.
+            apply_launch_at_login(app.handle(), persisted.launch_at_login);
 
             setup_tray(app)?;
             register_popup_shortcut(app.handle(), &persisted.popup_shortcut)?;
@@ -260,10 +309,9 @@ fn set_popup_shortcut(
     #[cfg(not(target_os = "macos"))]
     plugin_result.map_err(|e| e.to_string())?;
 
-    // Persist the new accelerator.
-    let new_cfg = UiConfig {
-        popup_shortcut: accelerator.clone(),
-    };
+    // Persist the new accelerator (preserving other config fields).
+    let mut new_cfg = load_ui_config(&handle);
+    new_cfg.popup_shortcut = accelerator.clone();
     save_ui_config(&handle, &new_cfg)?;
 
     // Update in-memory state.
@@ -277,6 +325,87 @@ fn set_popup_shortcut(
     event_tap::update_tap_shortcut(&accelerator);
 
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Launch-at-login commands
+// ---------------------------------------------------------------------------
+
+/// Returns `true` when the app is registered to launch at macOS login.
+#[tauri::command]
+fn get_launch_at_login(handle: tauri::AppHandle) -> bool {
+    use tauri_plugin_autostart::ManagerExt;
+    handle.autolaunch().is_enabled().unwrap_or(false)
+}
+
+/// Enable or disable launching CopyPaste at macOS login.
+///
+/// The setting is persisted to `ui-config.json` so it survives reinstalls and
+/// re-reads on the next launch via `apply_launch_at_login`.
+#[tauri::command]
+fn set_launch_at_login(enabled: bool, handle: tauri::AppHandle) -> Result<(), String> {
+    apply_launch_at_login(&handle, enabled);
+    // Persist to config.
+    let mut cfg = load_ui_config(&handle);
+    cfg.launch_at_login = enabled;
+    save_ui_config(&handle, &cfg)
+}
+
+/// Idempotently sync the OS launch-agent state with the desired value.
+///
+/// Called both at startup (to enforce the persisted preference) and by
+/// `set_launch_at_login`.  Errors are logged but not surfaced — a failure to
+/// register/deregister a LaunchAgent is non-fatal for the running app.
+fn apply_launch_at_login(handle: &tauri::AppHandle, enabled: bool) {
+    use tauri_plugin_autostart::ManagerExt;
+    let mgr = handle.autolaunch();
+    let current = mgr.is_enabled().unwrap_or(false);
+    if enabled && !current {
+        if let Err(e) = mgr.enable() {
+            tracing::warn!("launch-at-login enable failed: {e}");
+        }
+    } else if !enabled && current {
+        if let Err(e) = mgr.disable() {
+            tracing::warn!("launch-at-login disable failed: {e}");
+        }
+    }
+    // If current == desired, nothing to do (idempotent).
+}
+
+// ---------------------------------------------------------------------------
+// Popup-position commands
+// ---------------------------------------------------------------------------
+
+/// Return the current popup-position mode as a string ("cursor", "center", "menubar").
+#[tauri::command]
+fn get_popup_position(state: State<'_, CurrentPopupPosition>) -> String {
+    let guard = state.0.lock().expect("mutex poisoned");
+    // serde_json serialises the enum as a lowercase string; strip the quotes.
+    serde_json::to_value(&*guard)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "cursor".to_owned())
+}
+
+/// Set the popup-position mode.  Accepted values: "cursor", "center", "menubar".
+/// Returns an error string for unknown values.
+#[tauri::command]
+fn set_popup_position(
+    mode: String,
+    handle: tauri::AppHandle,
+    state: State<'_, CurrentPopupPosition>,
+) -> Result<(), String> {
+    let pos: PopupPosition = serde_json::from_value(serde_json::Value::String(mode.clone()))
+        .map_err(|_| {
+            format!("unknown popup position mode: {mode:?} (expected cursor|center|menubar)")
+        })?;
+    {
+        let mut guard = state.0.lock().expect("mutex poisoned");
+        *guard = pos.clone();
+    }
+    let mut cfg = load_ui_config(&handle);
+    cfg.popup_position = pos;
+    save_ui_config(&handle, &cfg)
 }
 
 // ---------------------------------------------------------------------------
@@ -698,7 +827,7 @@ fn show_copy_notification(preview: String) {
     }
 }
 
-/// Toggle (show or hide) the quick-paste popup near the current cursor position.
+/// Toggle (show or hide) the quick-paste popup using the configured position mode.
 fn toggle_popup(handle: &tauri::AppHandle) {
     let Some(popup) = handle.get_webview_window("popup") else {
         tracing::warn!("popup window not found");
@@ -714,7 +843,13 @@ fn toggle_popup(handle: &tauri::AppHandle) {
         return;
     }
 
-    position_popup_near_cursor(&popup);
+    // Read the current position mode from managed state.
+    let mode = handle
+        .try_state::<CurrentPopupPosition>()
+        .map(|s| s.0.lock().expect("mutex poisoned").clone())
+        .unwrap_or_default();
+
+    position_popup(&popup, &mode);
 
     // Fix #3: record which app was frontmost BEFORE we bring our popup to focus,
     // so paste_to_frontmost can return focus there (not to the main window).
@@ -731,63 +866,105 @@ fn toggle_popup(handle: &tauri::AppHandle) {
     let _ = popup.set_focus();
 }
 
-/// Position the popup window near the current cursor, clamped to the monitor
-/// that contains the cursor.
+// ---------------------------------------------------------------------------
+// Popup positioning — multi-mode, clamped to visible screen frame
+// ---------------------------------------------------------------------------
+
+/// Logical popup dimensions (must match tauri.conf.json).
+const POPUP_W_LOGICAL: f64 = 420.0;
+const POPUP_H_LOGICAL: f64 = 520.0;
+
+/// Position the popup window according to `mode`, clamping it onto the visible
+/// screen frame so it never appears partially off-screen.
 ///
-/// Fix #4: iterate all available monitors and pick the one whose physical-pixel
-/// bounds contain the cursor (handles negative coordinates on secondary monitors
-/// and avoids `monitor_from_point` misses on multi-display setups).
-///
-/// All arithmetic is done in physical pixels:
-///   - `cursor_position()` returns physical px
-///   - `monitor.position()` / `monitor.size()` are already in physical px
+/// All arithmetic is in physical pixels:
+///   - `cursor_position()` / `monitor.position()` / `monitor.size()` are physical px
 ///   - `monitor.scale_factor()` converts logical popup dims to physical px
 ///   - `set_position(PhysicalPosition)` places the window in physical px
-fn position_popup_near_cursor(win: &tauri::WebviewWindow) {
-    // cursor_position() → physical pixels.
-    let cursor_pos: tauri::PhysicalPosition<i32> = win
-        .cursor_position()
-        .map(|p| tauri::PhysicalPosition {
-            x: p.x as i32,
-            y: p.y as i32,
-        })
-        .unwrap_or(tauri::PhysicalPosition { x: 0, y: 0 });
-
-    // Logical popup dimensions from tauri.conf.json.
-    const POPUP_W_LOGICAL: f64 = 420.0;
-    const POPUP_H_LOGICAL: f64 = 520.0;
-    // Small offset so the popup doesn't sit right on the cursor tip.
-    const OFFSET: i32 = 8;
-
-    let mut x = cursor_pos.x + OFFSET;
-    let mut y = cursor_pos.y + OFFSET;
-
-    // Fix #4: find the monitor whose physical bounds contain the cursor by
-    // iterating all monitors instead of relying on monitor_from_point, which
-    // can pick the wrong display on some multi-monitor configurations.
+fn position_popup(win: &tauri::WebviewWindow, mode: &PopupPosition) {
     let monitors = win.available_monitors().unwrap_or_default();
+    let primary = win.primary_monitor().ok().flatten();
 
-    // Helper: check if cursor falls within a monitor's physical rect.
-    let find_monitor = |cx: i32, cy: i32| -> Option<tauri::Monitor> {
-        monitors
-            .iter()
-            .find(|m| {
+    // Resolve the target monitor + raw (x, y) before clamping.
+    let (target_monitor, raw_x, raw_y): (Option<tauri::Monitor>, i32, i32) = match mode {
+        PopupPosition::Cursor => {
+            // cursor_position() returns physical pixels.
+            let cursor: tauri::PhysicalPosition<i32> = win
+                .cursor_position()
+                .map(|p| tauri::PhysicalPosition {
+                    x: p.x as i32,
+                    y: p.y as i32,
+                })
+                .unwrap_or(tauri::PhysicalPosition { x: 0, y: 0 });
+
+            // Small offset so the popup doesn't sit right on the cursor tip.
+            const OFFSET: i32 = 8;
+            let rx = cursor.x + OFFSET;
+            let ry = cursor.y + OFFSET;
+
+            // Find the monitor whose physical bounds contain the cursor.
+            // Iterate all monitors to handle negative coords on secondary displays.
+            let mon = monitors
+                .iter()
+                .find(|m| {
+                    let pos = m.position();
+                    let size = m.size();
+                    let (mx, my) = (pos.x, pos.y);
+                    let (mw, mh) = (size.width as i32, size.height as i32);
+                    cursor.x >= mx && cursor.x < mx + mw && cursor.y >= my && cursor.y < my + mh
+                })
+                .cloned()
+                .or_else(|| primary.clone());
+
+            (mon, rx, ry)
+        }
+
+        PopupPosition::Center => {
+            // Center on the primary monitor (or first available).
+            let mon = primary.clone().or_else(|| monitors.first().cloned());
+            let (rx, ry) = if let Some(ref m) = mon {
                 let pos = m.position();
                 let size = m.size();
-                let mx = pos.x;
-                let my = pos.y;
-                let mw = size.width as i32;
-                let mh = size.height as i32;
-                cx >= mx && cx < mx + mw && cy >= my && cy < my + mh
-            })
-            .cloned()
+                let scale = m.scale_factor();
+                let popup_w = (POPUP_W_LOGICAL * scale) as i32;
+                let popup_h = (POPUP_H_LOGICAL * scale) as i32;
+                let cx = pos.x + (size.width as i32 - popup_w) / 2;
+                let cy = pos.y + (size.height as i32 - popup_h) / 2;
+                (cx, cy)
+            } else {
+                (0, 0)
+            };
+            (mon, rx, ry)
+        }
+
+        PopupPosition::Menubar => {
+            // Place below the tray / menu-bar area — top-right of the primary monitor.
+            // macOS menu bar height is 24 pt logical; add a 4 pt gap.
+            const MENUBAR_HEIGHT_LOGICAL: f64 = 24.0;
+            const GAP_LOGICAL: f64 = 4.0;
+
+            let mon = primary.clone().or_else(|| monitors.first().cloned());
+            let (rx, ry) = if let Some(ref m) = mon {
+                let pos = m.position();
+                let size = m.size();
+                let scale = m.scale_factor();
+                let popup_w = (POPUP_W_LOGICAL * scale) as i32;
+                let bar_h = ((MENUBAR_HEIGHT_LOGICAL + GAP_LOGICAL) * scale) as i32;
+                // Align right edge with right edge of screen, 8 px inset.
+                const RIGHT_INSET_LOGICAL: f64 = 8.0;
+                let right_inset = (RIGHT_INSET_LOGICAL * scale) as i32;
+                let rx = pos.x + size.width as i32 - popup_w - right_inset;
+                let ry = pos.y + bar_h;
+                (rx, ry)
+            } else {
+                (0, 0)
+            };
+            (mon, rx, ry)
+        }
     };
 
-    // Try the cursor position first; fall back to primary monitor.
-    let monitor_opt =
-        find_monitor(cursor_pos.x, cursor_pos.y).or_else(|| win.primary_monitor().ok().flatten());
-
-    if let Some(monitor) = monitor_opt {
+    // Clamp raw position onto the monitor's frame so the popup is always fully visible.
+    let (x, y) = if let Some(monitor) = target_monitor {
         let pos = monitor.position();
         let size = monitor.size();
         let scale = monitor.scale_factor();
@@ -803,9 +980,13 @@ fn position_popup_near_cursor(win: &tauri::WebviewWindow) {
         let max_x = mon_x + mon_w - popup_w;
         let max_y = mon_y + mon_h - popup_h;
 
-        x = x.clamp(mon_x, max_x.max(mon_x));
-        y = y.clamp(mon_y, max_y.max(mon_y));
-    }
+        (
+            raw_x.clamp(mon_x, max_x.max(mon_x)),
+            raw_y.clamp(mon_y, max_y.max(mon_y)),
+        )
+    } else {
+        (raw_x, raw_y)
+    };
 
     let _ = win.set_position(tauri::PhysicalPosition::new(x, y));
 }
