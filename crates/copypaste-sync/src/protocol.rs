@@ -72,6 +72,28 @@ fn default_key_version() -> u8 {
     2
 }
 
+impl WireItem {
+    /// Clamp `lamport_ts` and `wall_time` to be non-negative.
+    ///
+    /// Both fields are `i64` on the wire for JSON compatibility, but are
+    /// semantically non-negative (they represent logical / Unix-ms timestamps).
+    /// A malformed or hostile peer could send negative values; clamping at the
+    /// decode boundary ensures no consumer ever sees a raw negative value,
+    /// preventing silent sign-extension bugs when casting to `u64` for the
+    /// Lamport clock or storing in the database.
+    ///
+    /// Call this once after deserialising a `WireItem` from the network, before
+    /// any further processing.  See `engine.rs` ingest loop for usage.
+    pub fn clamp_timestamps(&mut self) {
+        if self.lamport_ts < 0 {
+            self.lamport_ts = 0;
+        }
+        if self.wall_time < 0 {
+            self.wall_time = 0;
+        }
+    }
+}
+
 /// Top-level protocol message enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]

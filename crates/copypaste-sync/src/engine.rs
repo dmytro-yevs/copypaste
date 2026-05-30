@@ -37,6 +37,19 @@ use copypaste_core::storage::items::ClipboardItem;
 /// Protects against memory exhaustion from malicious/buggy peers.
 const MAX_FRAME_SIZE: u32 = 16 * 1024 * 1024;
 
+/// Maximum number of Lamport ticks a remote item is allowed to be ahead of the
+/// local clock before its timestamp is clamped.
+///
+/// Why this bound? A real deployment might have thousands of devices, each
+/// performing thousands of writes per day over years of uptime. 10^12 ticks is
+/// larger than (10^6 devices × 10^6 writes each), so it accommodates any
+/// realistic scenario while still preventing a single hostile/buggy peer from
+/// jamming the local clock to u64::MAX (which would make that peer win every
+/// future LWW conflict forever). The wall_time is a Unix-ms timestamp; 10^15 ms
+/// is roughly 31 years in the future, a similarly generous but finite bound.
+pub const MAX_LAMPORT_SKEW: u64 = 1_000_000_000_000; // 10^12 ticks
+pub const MAX_WALL_TIME_SKEW_MS: i64 = 1_000_000_000_000_000_i64; // ~31 years in ms
+
 /// Error type for sync operations.
 #[derive(Debug)]
 pub enum SyncError {
@@ -212,8 +225,25 @@ impl SyncEngine {
 
         let peer_have = recv_message(stream).await?;
         // peer_clock_map: item_id → lamport_ts from the remote side.
+        // Build peer_clock_map from the HAVE list, taking the MAX lamport_ts when
+        // the same item_id appears more than once.  `HashMap::collect` silently
+        // collapses duplicates with "last wins" (undefined iteration order), which
+        // could cause the engine to underestimate the peer's clock for an item and
+        // skip requesting it even when the peer's true latest version is newer than
+        // the local copy.  Taking MAX is the only semantically correct choice: the
+        // peer holds the item at the highest timestamp it announced, regardless of
+        // duplicates.
         let peer_clock_map: HashMap<String, i64> = match peer_have {
-            Message::Have { items } => items.into_iter().collect(),
+            Message::Have { items } => {
+                let mut map: HashMap<String, i64> = HashMap::with_capacity(items.len());
+                for (id, ts) in items {
+                    let entry = map.entry(id).or_insert(ts);
+                    if ts > *entry {
+                        *entry = ts;
+                    }
+                }
+                map
+            }
             other => {
                 return Err(SyncError::ProtocolViolation(format!(
                     "expected HAVE, got {:?}",
@@ -295,9 +325,11 @@ impl SyncEngine {
         // --- ITEMS exchange: we send what peer wants first ---
         // `items_peer_wants` is a list of `item_id`s (the WANT/HAVE wire lists
         // carry item_ids), so filter on `item.item_id`, not the per-row `id`.
+        // Build a HashSet for O(1) per-item lookup instead of O(n·m) linear scan.
+        let peer_wants_set: HashSet<&str> = items_peer_wants.iter().map(String::as_str).collect();
         let items_to_send: Vec<WireItem> = local_items
             .iter()
-            .filter(|item| items_peer_wants.contains(&item.item_id))
+            .filter(|item| peer_wants_set.contains(item.item_id.as_str()))
             .map(|item| local_to_wire(item, &self.device_id))
             .collect();
 
@@ -335,23 +367,50 @@ impl SyncEngine {
         let mut to_upsert: Vec<ClipboardItem> = Vec::new();
 
         for mut wire in received_items {
-            // L1: clamp a negative inbound `lamport_ts` at INGESTION, before it
-            // is used for the clock, the LWW merge, or storage. `lamport_ts` is
-            // i64 on the wire/row but u64 in the clock; a malformed/hostile peer
-            // could send a negative value. Previously only the clock-observe
-            // path clamped it while the original negative value still flowed
-            // into `resolve()` and `wire_to_local()` — so a negative ts was
-            // persisted to the row. Clamping the wire item in place fixes all
-            // three consumers at once and guarantees no negative ts is stored.
-            if wire.lamport_ts < 0 {
+            // Step 1 — lower-bound clamp (centralised in WireItem::clamp_timestamps):
+            // zero out any negative lamport_ts / wall_time before they touch the
+            // clock, the LWW merge, or storage.  i64 on the wire but u64 in the
+            // clock; a negative cast would silently wrap to a huge positive (L1).
+            wire.clamp_timestamps();
+
+            // Step 2 — upper-bound clamp: reject implausibly large lamport_ts /
+            // wall_time from a hostile or buggy peer.
+            //
+            // Without this bound a single peer can feed the local clock
+            // `observe(u64::MAX)` and saturate it, making that peer win every
+            // future LWW conflict forever — a silent, persistent data-loss attack.
+            //
+            // The ceiling is local_clock + MAX_LAMPORT_SKEW, i.e. the peer may
+            // be at most MAX_LAMPORT_SKEW ticks ahead of us (10^12, far beyond
+            // any real deployment).  Anything beyond that is clamped; the item
+            // is still accepted so we don't silently drop peer data, but with a
+            // safe timestamp that cannot jam the clock.
+            let local_now = self.clock.get();
+            let ceiling_lamport = local_now.saturating_add(MAX_LAMPORT_SKEW);
+            let wire_u64 = wire.lamport_ts as u64; // safe: already >= 0 after step 1
+            if wire_u64 > ceiling_lamport {
                 warn!(
-                    "received wire item {} with negative lamport_ts {} — clamping to 0",
-                    wire.id, wire.lamport_ts
+                    "received wire item {} with lamport_ts {} far ahead of local clock {} \
+                     (ceiling {}); clamping to ceiling",
+                    wire.id, wire.lamport_ts, local_now, ceiling_lamport
                 );
-                wire.lamport_ts = 0;
+                // Clamp to the ceiling as i64; saturating_as avoids overflow if
+                // ceiling somehow exceeds i64::MAX (theoretical with a saturated clock).
+                wire.lamport_ts = ceiling_lamport.min(i64::MAX as u64) as i64;
             }
-            // Advance our clock with the (now non-negative) item timestamp.
-            // observe() uses saturating_add internally (edge-cases LOW #34).
+            // Apply the same ceiling to wall_time (Unix ms).  A peer sending
+            // wall_time=i64::MAX would make its item win every future wall-time
+            // LWW tie-break, permanently shadowing all locally-captured items.
+            if wire.wall_time > MAX_WALL_TIME_SKEW_MS {
+                warn!(
+                    "received wire item {} with wall_time {} beyond ceiling {}; clamping",
+                    wire.id, wire.wall_time, MAX_WALL_TIME_SKEW_MS
+                );
+                wire.wall_time = MAX_WALL_TIME_SKEW_MS;
+            }
+
+            // Advance our clock with the (now bounded, non-negative) item timestamp.
+            // observe() uses saturating_add internally.
             self.clock.observe(wire.lamport_ts as u64);
 
             if let Some(existing) = local_by_item_id.get(wire.item_id.as_str()) {
