@@ -44,6 +44,12 @@ export interface UIPrefs {
    * Default true.
    */
   notifyOnCopy: boolean;
+  /**
+   * When true (default), the main window uses backdrop-blur translucency
+   * (native macOS vibrancy + CSS backdrop-filter). When false, all surfaces
+   * use solid opaque backgrounds — useful for accessibility or low-end GPUs.
+   */
+  translucency: boolean;
 }
 
 const DEFAULT_PREFS: UIPrefs = {
@@ -55,6 +61,7 @@ const DEFAULT_PREFS: UIPrefs = {
   previewDelay: 1500,
   playSoundOnCopy: true,
   notifyOnCopy: true,
+  translucency: true,
 };
 
 function loadPrefs(): UIPrefs {

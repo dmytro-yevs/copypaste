@@ -60,6 +60,27 @@ export interface HistoryEntry {
   /** Unix epoch milliseconds. */
   wall_time: number;
   pinned: boolean;
+  /**
+   * macOS bundle id of the app that copied this item, e.g. "com.google.Chrome".
+   * Present when the daemon captured the source app at copy time; null when
+   * unknown (synced items from another device, older daemon builds, etc.).
+   * The UI derives a short readable label via `sourceAppLabel()`.
+   */
+  app_bundle_id?: string | null;
+}
+
+/**
+ * Derive a short readable label from a macOS bundle id.
+ * "com.google.Chrome" → "Chrome", "com.apple.Safari" → "Safari".
+ * Falls back to the raw bundle id when it doesn't contain a dot, or to
+ * an empty string when the id is absent.
+ */
+export function sourceAppLabel(bundleId: string | null | undefined): string {
+  if (!bundleId) return "";
+  const parts = bundleId.split(".");
+  const last = parts[parts.length - 1];
+  // Title-case the last segment (handles e.g. "terminal" → "Terminal").
+  return last.charAt(0).toUpperCase() + last.slice(1);
 }
 
 export interface HistoryPage {

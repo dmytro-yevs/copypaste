@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
-import { api, HistoryEntry, IpcError, playCopySound, showCopyNotification } from "../lib/ipc";
+import { api, HistoryEntry, IpcError, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
 import { useUI } from "../store";
@@ -486,6 +486,24 @@ function PopupRow({
           )}
         </span>
       )}
+
+      {/* Source-app label — small muted chip when bundle id is known */}
+      {(() => {
+        const appLabel = sourceAppLabel(item.app_bundle_id);
+        return appLabel ? (
+          <span
+            className="shrink-0 text-[10px] leading-none px-1 py-0.5 rounded"
+            style={{
+              color: "rgba(255,255,255,0.28)",
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+            title={item.app_bundle_id ?? undefined}
+          >
+            {appLabel}
+          </span>
+        ) : null;
+      })()}
 
       {/* Pin indicator */}
       {item.pinned && (

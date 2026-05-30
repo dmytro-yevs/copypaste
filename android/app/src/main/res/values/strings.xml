@@ -46,6 +46,8 @@
     <string name="setting_sensitive_warnings_subtitle">Show a toast when card numbers or tokens are skipped.</string>
     <string name="setting_mask_sensitive_title">Mask Sensitive Content</string>
     <string name="setting_mask_sensitive_subtitle">Hide preview text for items flagged as sensitive. Tap an item to reveal for 5 seconds.</string>
+    <string name="setting_translucency_title">Transparency</string>
+    <string name="setting_translucency_subtitle">Use semi-transparent backgrounds on surfaces. Disable for fully solid backgrounds.</string>
     <string name="setting_image_max_height_label">Image max height (dp)</string>
     <string name="setting_image_max_height_hint">1–200 dp (default 40)</string>
     <string name="setting_preview_delay_label">Action-row auto-close delay (ms)</string>
