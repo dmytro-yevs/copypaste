@@ -34,7 +34,7 @@ fn full_encrypt_store_retrieve_decrypt_flow() {
     // is generated, then content is encrypted with AAD = (id, schema).
     let mut item = ClipboardItem::new_text(Vec::new(), Vec::new(), 1);
     let aad = build_item_aad(&item.id, AAD_SCHEMA_VERSION);
-    let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &*enc_key, &aad).unwrap();
+    let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &enc_key, &aad).unwrap();
     item.content = Some(ciphertext);
     item.content_nonce = Some(nonce.to_vec());
     insert_item(&db, &item).unwrap();
@@ -53,7 +53,7 @@ fn full_encrypt_store_retrieve_decrypt_flow() {
     let decrypted = decrypt_item_with_aad(
         stored.content.as_ref().unwrap(),
         &nonce_arr,
-        &*enc_key,
+        &enc_key,
         &stored_aad,
     )
     .unwrap();

@@ -149,9 +149,9 @@ fn key_length_matches_xchacha_requirement_32_bytes() {
     // Round-trip sanity: the derived key actually works with the AEAD layer.
     let plaintext = b"hkdf-versioning-roundtrip";
     let aad = build_item_aad("hkdf-roundtrip", AAD_SCHEMA_VERSION);
-    let (nonce, ct) = encrypt_item_with_aad(plaintext, &*net_key, &aad).unwrap();
+    let (nonce, ct) = encrypt_item_with_aad(plaintext, &net_key, &aad).unwrap();
     assert_eq!(nonce.len(), NONCE_SIZE);
-    let pt = decrypt_item_with_aad(&ct, &nonce, &*net_key, &aad).unwrap();
+    let pt = decrypt_item_with_aad(&ct, &nonce, &net_key, &aad).unwrap();
     assert_eq!(pt, plaintext);
 }
 
