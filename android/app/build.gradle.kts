@@ -65,7 +65,7 @@ val buildCargoNdk by tasks.registering(Exec::class) {
     targets.forEach { args += listOf("-t", it) }
     args += listOf(
         "-o", "android/app/src/main/jniLibs",
-        "build", "--release", "-p", "copypaste-android",
+        "build", "--profile", "release-size", "-p", "copypaste-android",
     )
     if (live) args += listOf("--features", "android-uniffi-live")
     commandLine(args)
@@ -92,6 +92,9 @@ android {
         // conformance test (CryptoConformanceTest.kt). Runs on the emulator via
         // `./gradlew connectedDebugAndroidTest`.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
     }
 
     signingConfigs {

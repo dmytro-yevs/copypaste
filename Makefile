@@ -74,7 +74,7 @@ android-so:
 		echo ""; \
 		exit 1; \
 	}
-	cargo ndk -t arm64-v8a -t x86_64 -o android/app/src/main/jniLibs build -p copypaste-android
+	cargo ndk -t arm64-v8a -t x86_64 -o android/app/src/main/jniLibs build --profile release-size -p copypaste-android
 
 # Build Android .so via the cached Docker builder image.
 # Uses the named volumes wired in docker-compose.yml so the cargo target,
