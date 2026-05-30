@@ -330,7 +330,7 @@ fun OnboardingScreen(
             Text(
                 text = "CopyPaste needs a few permissions to monitor and sync your clipboard.",
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
+                color = IdeText
             )
             Spacer(modifier = Modifier.height(4.dp))
 

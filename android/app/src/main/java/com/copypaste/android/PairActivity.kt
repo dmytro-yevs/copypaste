@@ -11,7 +11,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -25,8 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -50,11 +47,14 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
-import com.copypaste.android.ui.theme.IdeBorder
+import com.copypaste.android.ui.theme.IdeDanger
 import com.copypaste.android.ui.theme.IdeDim
+import com.copypaste.android.ui.theme.IdeText
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.journeyapps.barcodescanner.ScanContract
@@ -359,17 +359,10 @@ fun PairScreen(
             Text(
                 text = stringResource(R.string.pair_instructions),
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
+                color = IdeText
             )
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                ),
-                border = BorderStroke(1.dp, IdeBorder),
-            ) {
+            CopyPasteCard {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -392,7 +385,7 @@ fun PairScreen(
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     CircularProgressIndicator(
-                                        color = MaterialTheme.colorScheme.primary
+                                        color = IdeAccent
                                     )
                                     Text(
                                         text = stringResource(R.string.status_pairing),
@@ -516,7 +509,7 @@ fun PairScreen(
                 Text(
                     text = "Scanned: $info",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = IdeText
                 )
             }
 
@@ -532,7 +525,7 @@ fun PairScreen(
 
             if (syncing) {
                 CircularProgressIndicator(
-                    color = MaterialTheme.colorScheme.primary
+                    color = IdeAccent
                 )
             }
 
@@ -540,7 +533,7 @@ fun PairScreen(
                 Text(
                     text = msg,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary
+                    color = IdeAccent
                 )
             }
 
@@ -550,7 +543,7 @@ fun PairScreen(
                         Text(
                             text = stringResource(R.string.pair_token_expired),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
+                            color = IdeDanger
                         )
                     }
                     else -> {
@@ -561,16 +554,12 @@ fun PairScreen(
                                 remainingSeconds
                             ),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (urgent) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
+                            color = if (urgent) IdeDanger else IdeDim
                         )
                         Text(
                             text = stringResource(R.string.pair_token_note),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = IdeDim
                         )
                     }
                 }
