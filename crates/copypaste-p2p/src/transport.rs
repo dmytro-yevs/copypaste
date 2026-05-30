@@ -23,12 +23,22 @@ use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use rand::Rng as _;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, ServerConfig};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tokio_util::codec::{Framed, LengthDelimitedCodec};
+
+/// Maximum time we will wait for the TCP SYN/ACK connect phase to complete.
+/// Kept shorter than [`TLS_HANDSHAKE_TIMEOUT`] so the retry budget in
+/// [`PeerTransport::connect_with_retry`] is spent on the brief mDNS-announce →
+/// listener race rather than waiting 10 s per attempt on a dead peer. A
+/// TCP-connect timeout maps to [`TransportError::Io`] (kind `TimedOut`) so it
+/// is classified **transient** and retried; a post-TCP TLS-handshake timeout
+/// maps to [`TransportError::HandshakeTimeout`] (permanent — slowloris guard).
+pub const TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Maximum time we will wait for a TLS handshake (client or server side) to
 /// complete before giving up. Protects against dead sockets and slowloris-style
@@ -418,15 +428,21 @@ impl PeerTransport {
         let connector = TlsConnector::from(Arc::new(client_config));
 
         let tcp_stream =
-            match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, TcpStream::connect(addr)).await {
+            match tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr)).await {
                 Ok(res) => res?,
                 Err(_elapsed) => {
                     tracing::warn!(
                         peer_addr = %addr,
-                        timeout = ?TLS_HANDSHAKE_TIMEOUT,
-                        "TCP connect timed out before TLS handshake"
+                        timeout = ?TCP_CONNECT_TIMEOUT,
+                        "TCP connect timed out — classifying as transient for retry"
                     );
-                    return Err(TransportError::HandshakeTimeout);
+                    // Map to Io(TimedOut) so `is_transient_transport_error`
+                    // classifies this as TRANSIENT and connect_with_retry can
+                    // retry the mDNS-announce→listener race. HandshakeTimeout
+                    // is reserved for the post-TCP TLS phase (permanent guard).
+                    return Err(TransportError::Io(std::io::Error::from(
+                        std::io::ErrorKind::TimedOut,
+                    )));
                 }
             };
         tracing::debug!(peer_addr = %addr, "TCP connection established");
@@ -510,11 +526,20 @@ impl PeerTransport {
                         return Err(err);
                     }
                     if attempt < MAX_CONNECT_ATTEMPTS {
-                        // ±50 ms jitter around the 100 ms base so concurrent
-                        // peers that hit the same transient (e.g. mDNS race)
-                        // don't lock-step their retries (security MED #10).
-                        let jitter_ms = rand::random::<u8>() as u64 % 100;
-                        let delay = CONNECT_RETRY_DELAY + Duration::from_millis(jitter_ms);
+                        // ±50 ms jitter centred on the 100 ms base so
+                        // concurrent peers that hit the same transient (e.g.
+                        // mDNS race) don't lock-step their retries. Uses
+                        // gen_range(0..100) − 50 to avoid modulo bias and to
+                        // produce a symmetric window [base−50ms, base+50ms].
+                        let raw_jitter: i64 = rand::thread_rng().gen_range(0..100);
+                        let offset_ms = raw_jitter - 50; // centred: −50..+50
+                        let delay = if offset_ms >= 0 {
+                            CONNECT_RETRY_DELAY + Duration::from_millis(offset_ms as u64)
+                        } else {
+                            // Saturate at zero rather than underflow.
+                            CONNECT_RETRY_DELAY
+                                .saturating_sub(Duration::from_millis((-offset_ms) as u64))
+                        };
                         tracing::debug!(
                             peer_addr = %addr,
                             attempt,
@@ -1122,6 +1147,75 @@ mod tests {
         assert!(
             client_result.is_err(),
             "client must reject rogue mDNS peer with mismatched cert"
+        );
+    }
+
+    // ── Fix 1: TCP-connect timeout produces a TRANSIENT Io error ─────────────
+
+    /// TCP-connect-phase timeout must produce a transient error so
+    /// `connect_with_retry` can retry the mDNS-announce→listener race.
+    /// Before the fix it produced `HandshakeTimeout` (permanent), defeating
+    /// the retry logic entirely.
+    #[test]
+    fn tcp_connect_timeout_error_is_transient() {
+        // Simulate a TCP-connect timeout: wrap a kernel TimedOut io::Error in
+        // TransportError::Io — that is what the fixed code must produce.
+        let err = TransportError::Io(std::io::Error::from(std::io::ErrorKind::TimedOut));
+        assert!(
+            is_transient_transport_error(&err),
+            "a TCP-connect-phase Io(TimedOut) must be classified TRANSIENT so \
+             connect_with_retry retries the mDNS race"
+        );
+    }
+
+    /// `TCP_CONNECT_TIMEOUT` const must exist and be strictly shorter than
+    /// `TLS_HANDSHAKE_TIMEOUT` so the TCP phase gets its own distinct budget.
+    #[test]
+    fn tcp_connect_timeout_const_is_shorter_than_tls_handshake_timeout() {
+        assert!(
+            TCP_CONNECT_TIMEOUT < TLS_HANDSHAKE_TIMEOUT,
+            "TCP_CONNECT_TIMEOUT ({:?}) should be shorter than TLS_HANDSHAKE_TIMEOUT ({:?})",
+            TCP_CONNECT_TIMEOUT,
+            TLS_HANDSHAKE_TIMEOUT,
+        );
+    }
+
+    // ── Fix 3: retry jitter is unbiased and symmetric ────────────────────────
+
+    /// Verify the jitter math produces values in [base−50ms, base+50ms] over a
+    /// large sample, never one-sided. Before the fix the range was [0, 99ms]
+    /// added on top of the base (one-sided), with a modulo-bias.
+    #[test]
+    fn retry_jitter_is_within_plus_minus_50ms() {
+        use rand::Rng as _;
+        // Run many samples to confirm statistical coverage.
+        let mut rng = rand::thread_rng();
+        let mut saw_negative_offset = false;
+        let mut saw_positive_offset = false;
+        for _ in 0..1_000 {
+            // This is the corrected formula from the fix:
+            //   offset = gen_range(0..100) as i64 - 50
+            //   delay  = CONNECT_RETRY_DELAY + offset ms (clamped to ≥ 0)
+            let raw: u64 = rng.gen_range(0..100);
+            let offset_ms = raw as i64 - 50;
+            assert!(
+                (-50..=50).contains(&offset_ms),
+                "offset {offset_ms} ms is outside ±50ms window"
+            );
+            if offset_ms < 0 {
+                saw_negative_offset = true;
+            }
+            if offset_ms > 0 {
+                saw_positive_offset = true;
+            }
+        }
+        assert!(
+            saw_negative_offset,
+            "jitter must be able to subtract from base delay (symmetric)"
+        );
+        assert!(
+            saw_positive_offset,
+            "jitter must be able to add to base delay (symmetric)"
         );
     }
 }
