@@ -179,6 +179,37 @@ export function Popup() {
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [refresh]);
 
+  // Visibility-gated polling: refresh items every ~3 seconds while the popup
+  // window is in the foreground so newly-copied content appears without the
+  // user having to close and re-open the popup.
+  useEffect(() => {
+    const POLL_MS = 3000;
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const start = () => {
+      if (timer !== null) return;
+      timer = setInterval(() => void refresh(), POLL_MS);
+    };
+    const stop = () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+
+    const sync = () => {
+      if (document.visibilityState === "visible") start();
+      else stop();
+    };
+
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, [refresh]);
+
   // Fuzzy-filtered and scored items.
   const filtered = useMemo<Array<{ item: HistoryEntry; positions: number[] }>>(() => {
     const q = query.trim();

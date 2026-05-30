@@ -105,16 +105,15 @@ export function AboutView() {
             </span>
           </div>
 
-          {/* GitHub link — use window.open so Tauri opens in the system browser */}
-          <div className="px-6 py-3">
-            <button
-              type="button"
-              onClick={() => window.open("https://github.com/dmytro/CopyPaste", "_blank")}
-              className="cursor-pointer border-0 bg-transparent p-0 text-[13px] text-ide-accent transition-colors hover:text-ide-accent-hover hover:underline"
-            >
-              github.com/dmytro/CopyPaste ↗
-            </button>
-          </div>
+          {/* GitHub link — use window.open so Tauri opens in the system browser.
+              URL confirmed from git remote: github.com/dmytro-yevs/copypaste */}
+          <button
+            type="button"
+            onClick={() => window.open("https://github.com/dmytro-yevs/copypaste", "_blank")}
+            className="text-left text-[13px] text-ide-accent hover:underline cursor-pointer bg-transparent border-0 p-0"
+          >
+            github.com/dmytro-yevs/copypaste ↗
+          </button>
 
         </div>
       </div>
