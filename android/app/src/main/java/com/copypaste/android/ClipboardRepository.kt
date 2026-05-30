@@ -33,12 +33,12 @@ import javax.crypto.spec.SecretKeySpec
  * and have no TTL. They survive until the user explicitly clears them via
  * [clearAll] (which deletes everything) or [deleteItem] / [deleteItems].
  *
- * ## Sensitive auto-wipe
+ * ## Sensitive items
  *
- * [wipeExpiredSensitive] deletes sensitive items older than
- * [Settings.sensitiveAutoWipeSecs] seconds (disabled when the setting is 0).
- * It is called opportunistically inside [pruneToLimits] and should also be
- * called from a periodic service tick by the foreground-service agent.
+ * Sensitive items are DROPPED at capture time in [storeItem] and
+ * [storeItemWithLww] — Android never persists them. There is therefore no
+ * auto-wipe pass and no sensitiveAutoWipeSecs setting exposed on Android.
+ * (macOS stores them with a TTL; parity is a future goal, not v0.5.2.)
  */
 class ClipboardRepository(context: Context) {
 
@@ -309,49 +309,6 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Delete sensitive items whose wall-time age exceeds [Settings.sensitiveAutoWipeSecs].
-     * No-op when the setting is 0 (disabled).
-     *
-     * This method is safe to call from any coroutine context; it acquires
-     * [idsWriteLock] internally for the read-modify-write on the index.
-     *
-     * Should be called from the foreground-service tick (ClipboardService / FgsSyncLoop)
-     * and is also called opportunistically inside [pruneToLimits].
-     */
-    fun wipeExpiredSensitive() {
-        val ttlSecs = settings.sensitiveAutoWipeSecs
-        if (ttlSecs <= 0) return
-        val cutoffMs = System.currentTimeMillis() - ttlSecs * 1_000L
-        synchronized(idsWriteLock) {
-            val pinnedSet = storedPinnedIds()
-            val ids = storedIds()
-            val toWipe = ids.filter { id ->
-                if (id in pinnedSet) return@filter false  // pinned items are never auto-wiped
-                val raw = prefs.getString("item_$id", null) ?: return@filter false
-                val parts = raw.split("|")
-                val wallTimeMs = parts.getOrNull(0)?.toLongOrNull() ?: return@filter false
-                val isSensitivePart = parts.getOrNull(5)
-                // Field index 5 is sensitiveFlag in this worktree's format:
-                // <wallTimeMs>|<contentType>|<snippetLen>|<nonceB64>|<ciphertextB64>|<sensitiveFlag>
-                // If the field is absent or not "1", we cannot confirm sensitivity from
-                // the blob alone — skip to avoid wiping non-sensitive items. The flag
-                // is written by encodeItem when isSensitive=true.
-                val flaggedSensitive = isSensitivePart == "1"
-                flaggedSensitive && wallTimeMs < cutoffMs
-            }
-            if (toWipe.isEmpty()) return@synchronized
-            val remaining = ids.toMutableList().also { it.removeAll(toWipe.toSet()) }
-            val editor = prefs.edit()
-            for (id in toWipe) {
-                editor.remove("item_$id")
-                editor.remove("item_img_$id")
-            }
-            editor.putString(KEY_ITEM_IDS, remaining.joinToString(",")).apply()
-            Log.d(TAG, "wipeExpiredSensitive: wiped ${toWipe.size} sensitive items older than ${ttlSecs}s")
-        }
-    }
-
-    /**
      * Encrypt [plaintext] with [key] and persist, returning the STABLE row id of
      * the stored item — or an empty string when nothing was stored (blank text,
      * oversized text, sensitive content, a recent local duplicate, or — for synced
@@ -606,7 +563,7 @@ class ClipboardRepository(context: Context) {
 
     /**
      * Enforce item-count and storage-quota caps by evicting the oldest UNPINNED
-     * items. Also calls [wipeExpiredSensitive] opportunistically.
+     * items.
      *
      * Two eviction conditions, evaluated in a single pass:
      *   (a) count > [Settings.maxHistoryItems]
@@ -619,9 +576,6 @@ class ClipboardRepository(context: Context) {
      * PINNED items are counted in total bytes but never evicted.
      */
     private fun pruneToLimits() {
-        // Opportunistic sensitive wipe before the count/quota pass.
-        wipeExpiredSensitive()
-
         val maxItems = settings.maxHistoryItems.coerceAtLeast(1)
         val quotaBytes = settings.storageQuotaBytes.coerceAtLeast(0L)
 

@@ -24,7 +24,6 @@ data class ClipboardItem(
     /**
      * True when the user has explicitly pinned this item. Pinned items are:
      *  - never pruned by the retention/quota pass
-     *  - never auto-wiped by [ClipboardRepository.wipeExpiredSensitive]
      *  - cleared only by the explicit [ClipboardRepository.clearAll] user action
      *
      * Persisted in the "pinned_ids" SharedPreferences key as a comma-joined set

@@ -56,8 +56,7 @@
     <string name="setting_max_image_size_hint">1–200 MB (default 25)</string>
     <string name="setting_storage_quota_label">Local storage limit (MB)</string>
     <string name="setting_storage_quota_hint">50–10 000 MB (default 500)</string>
-    <string name="setting_sensitive_auto_wipe_label">Auto-wipe sensitive items (seconds)</string>
-    <string name="setting_sensitive_auto_wipe_hint">0 = disabled, max 3600 s (default 30)</string>
+
 
     <!-- Settings — Sync -->
     <string name="setting_sync_wifi_only_title">Sync on Wi-Fi only</string>

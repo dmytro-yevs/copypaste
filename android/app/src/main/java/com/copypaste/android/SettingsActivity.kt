@@ -93,8 +93,6 @@ fun SettingsScreen(
     var storageQuotaMb by remember {
         mutableStateOf((settings.storageQuotaBytes / 1_000_000L).toString())
     }
-    var sensitiveAutoWipeSecs by remember { mutableStateOf(settings.sensitiveAutoWipeSecs.toString()) }
-
     // ── Supabase fields ──
     var supabaseUrl by remember { mutableStateOf(settings.supabaseUrl) }
     var supabaseAnonKey by remember { mutableStateOf(settings.supabaseAnonKey) }
@@ -251,17 +249,6 @@ fun SettingsScreen(
                 onCommit = {
                     val mb = storageQuotaMb.toLongOrNull()?.coerceIn(50L, 10_000L) ?: return@SettingsNumberField
                     try { settings.storageQuotaBytes = mb * 1_000_000L; storageQuotaMb = mb.toString() }
-                    catch (e: Exception) { settingsError = e.message }
-                },
-            )
-            SettingsNumberField(
-                label = stringResource(R.string.setting_sensitive_auto_wipe_label),
-                hint = stringResource(R.string.setting_sensitive_auto_wipe_hint),
-                value = sensitiveAutoWipeSecs,
-                onValueChange = { sensitiveAutoWipeSecs = it },
-                onCommit = {
-                    val s = sensitiveAutoWipeSecs.toIntOrNull()?.coerceIn(0, 3600) ?: return@SettingsNumberField
-                    try { settings.sensitiveAutoWipeSecs = s; sensitiveAutoWipeSecs = s.toString() }
                     catch (e: Exception) { settingsError = e.message }
                 },
             )

@@ -314,18 +314,6 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putLong("storage_quota_bytes", v).apply()
 
     /**
-     * Seconds after which a sensitive clipboard item is automatically wiped
-     * from local storage. 0 = no auto-wipe.
-     * Default: 30 s — matches SENSITIVE_TTL_SECS in defaults.rs.
-     * Enforcement hook needed: [ClipboardRepository] periodic cleanup job (or
-     * [ClipboardService] on each poll tick) must delete items where
-     * `is_sensitive = true AND created_at < now() - sensitiveAutoWipeSecs`.
-     */
-    var sensitiveAutoWipeSecs: Int
-        get() = prefs.getInt("sensitive_auto_wipe_secs", 30)
-        set(v) = prefs.edit().putInt("sensitive_auto_wipe_secs", v).apply()
-
-    /**
      * 256-bit AES key used for local clipboard encryption.
      *
      * Storage: the raw 32 random bytes are wrapped with an AndroidKeyStore-
