@@ -633,6 +633,17 @@ impl RelayStore {
     /// Return up to `limit` items in `device_id`'s sync inbox strictly after the
     /// `(since, since_id)` composite cursor, ordered ascending.
     ///
+    /// # Contract
+    ///
+    /// This method returns [`RelayError::DeviceNotFound`] for an unknown
+    /// `device_id`. In production every call-site goes through
+    /// [`Self::verify_token`] first, which already collapses missing-device to
+    /// [`RelayError::Unauthorized`]. Callers that skip `verify_token` will
+    /// observe a `DeviceNotFound` rather than `Unauthorized` — that is
+    /// intentional: `pull_items` is a pure data accessor with no security
+    /// semantics of its own. **Always call `verify_token` before `pull_items`**
+    /// on any authenticated route.
+    ///
     /// Pagination is driven by a strictly-monotonic `(wall_time, id)` tuple
     /// rather than bare `wall_time` (relay H-1 / audit finding G). `wall_time`
     /// is a sender-supplied millisecond timestamp, so ties are possible; a
@@ -1570,6 +1581,96 @@ mod tests {
             seen_ids,
             vec![id1, id2, id3],
             "tuple-cursor pagination must walk all tied-wall_time items with no drops"
+        );
+    }
+
+    // ---- update_last_seen / cleanup_inactive_devices interaction ------------
+
+    /// Positive: a device that calls `update_last_seen` after the inactivity
+    /// threshold has elapsed must SURVIVE `cleanup_inactive_devices` — last_seen
+    /// is reset to "now" so the threshold is no longer exceeded.
+    ///
+    /// This guards the fix for the prior bug where `update_last_seen` was
+    /// defined but never called from the route handlers, so `last_seen` stayed
+    /// equal to `registered_at` and active devices were evicted after 30 days.
+    #[test]
+    fn update_last_seen_prevents_eviction_after_threshold() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+
+        // Simulate the device's last_seen being past the threshold by rewinding
+        // it to a time far in the past (subtract threshold + 1 second).
+        let threshold_secs = 60u64; // use a small finite threshold for the test
+        {
+            let record = store.devices.get_mut(&device_a_id()).unwrap();
+            // Rewind last_seen by (threshold + 1) seconds so cleanup would
+            // normally evict this device.
+            record.last_seen = Instant::now() - Duration::from_secs(threshold_secs + 1);
+        }
+
+        // Verify that WITHOUT update_last_seen the device would be evicted.
+        // (Snapshot the current last_seen before calling update.)
+        let would_evict = store
+            .devices
+            .get(&device_a_id())
+            .map(|r| r.last_seen.elapsed().as_secs() >= threshold_secs)
+            .unwrap_or(false);
+        assert!(
+            would_evict,
+            "precondition: device should be evictable before update_last_seen"
+        );
+
+        // Now call update_last_seen (simulating what the route handler does
+        // after a successful verify_token).
+        store.update_last_seen(&device_a_id());
+
+        // cleanup_inactive_devices with the same finite threshold must NOT
+        // evict the device whose last_seen was just refreshed.
+        let removed = store.cleanup_inactive_devices(threshold_secs);
+        assert_eq!(
+            removed, 0,
+            "device must survive cleanup after update_last_seen refreshes last_seen"
+        );
+        assert!(
+            store.devices.contains_key(&device_a_id()),
+            "device must still be registered"
+        );
+    }
+
+    /// Negative: a device that does NOT call `update_last_seen` after the
+    /// inactivity threshold has elapsed must be EVICTED by
+    /// `cleanup_inactive_devices`.
+    ///
+    /// This is the counterpart to `update_last_seen_prevents_eviction_after_threshold`:
+    /// it proves that cleanup actually reaps stale devices, so the positive test
+    /// above is meaningful (it would trivially pass if cleanup never evicted anything).
+    #[test]
+    fn no_update_last_seen_causes_eviction_after_threshold() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+
+        let threshold_secs = 60u64;
+
+        // Rewind last_seen past the threshold — no update_last_seen called.
+        {
+            let record = store.devices.get_mut(&device_a_id()).unwrap();
+            record.last_seen = Instant::now() - Duration::from_secs(threshold_secs + 1);
+        }
+
+        // cleanup must evict the device because last_seen is stale and inbox
+        // is empty.
+        let removed = store.cleanup_inactive_devices(threshold_secs);
+        assert_eq!(
+            removed, 1,
+            "stale device with no last_seen update must be evicted"
+        );
+        assert!(
+            !store.devices.contains_key(&device_a_id()),
+            "device must be gone after eviction"
         );
     }
 
