@@ -6,6 +6,7 @@ import { applySpanMasking } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
 import { useUI } from "../store";
 import { ImageThumb } from "../components/ImageThumb";
+import { AppIcon } from "../components/AppIcon";
 
 // Max items fetched for the popup list. Intentionally compact — the popup is a
 // quick-access surface, not a full history browser.
@@ -561,12 +562,12 @@ function PopupRow({
         </span>
       )}
 
-      {/* Source-app label — small muted chip when bundle id is known */}
-      {(() => {
+      {/* Source-app icon + label chip — subtle, right of preview text */}
+      {item.app_bundle_id && (() => {
         const appLabel = sourceAppLabel(item.app_bundle_id);
         return appLabel ? (
           <span
-            className="shrink-0 text-[10px] leading-none px-1 py-0.5 rounded"
+            className="flex shrink-0 items-center gap-1 text-[10px] leading-none px-1 py-0.5 rounded"
             style={{
               color: "rgba(255,255,255,0.28)",
               background: "rgba(255,255,255,0.06)",
@@ -574,6 +575,7 @@ function PopupRow({
             }}
             title={item.app_bundle_id ?? undefined}
           >
+            <AppIcon bundleId={item.app_bundle_id} size={12} />
             {appLabel}
           </span>
         ) : null;

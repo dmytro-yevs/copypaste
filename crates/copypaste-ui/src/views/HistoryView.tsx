@@ -12,6 +12,7 @@ import { applySpanMasking } from "../lib/masking";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
 import { ImageThumb, clearImageCache } from "../components/ImageThumb";
+import { AppIcon } from "../components/AppIcon";
 
 // ---------------------------------------------------------------------------
 // Toast — §8 slide-up, neutral panel + 6px semantic dot, one at a time
@@ -403,14 +404,15 @@ function HistoryRow({
         style={{ minWidth: "4.5rem" }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Source-app label — small muted chip; only rendered when present */}
-        {(() => {
+        {/* Source-app icon + label chip; only rendered when present */}
+        {entry.app_bundle_id && (() => {
           const appLabel = sourceAppLabel(entry.app_bundle_id);
           return appLabel ? (
             <span
-              className="text-[10px] text-ide-faint px-1 py-0.5 rounded border border-ide-divider/60 bg-ide-elevated/50 leading-none"
+              className="flex shrink-0 items-center gap-1 text-[10px] text-ide-faint px-1 py-0.5 rounded border border-ide-divider/60 bg-ide-elevated/50 leading-none"
               title={entry.app_bundle_id ?? undefined}
             >
+              <AppIcon bundleId={entry.app_bundle_id} size={14} />
               {appLabel}
             </span>
           ) : null;
