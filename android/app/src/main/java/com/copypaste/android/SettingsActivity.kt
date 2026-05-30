@@ -52,7 +52,14 @@ import com.copypaste.android.ui.theme.IdeDanger
 import com.copypaste.android.ui.theme.IdeDim
 import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeWarning
+import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_LABELS
+import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
+import com.copypaste.android.ui.theme.QUOTA_STEP_LABELS
+import com.copypaste.android.ui.theme.QUOTA_STEP_VALUES
 import com.copypaste.android.ui.theme.SectionLabel
+import com.copypaste.android.ui.theme.SteppedSliderRow
+import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_LABELS
+import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.ideSwitchColors
 import com.copypaste.android.ui.theme.ideTextFieldColors
 
@@ -95,17 +102,22 @@ fun SettingsScreen(
     var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.toString()) }
     var previewDelay by remember { mutableStateOf(settings.previewDelay.toString()) }
 
-    // ── Storage ──
-    // Display unit is MiB (1024*1024) to match the byte defaults in Settings.kt
-    // (which mirror copypaste-core defaults.rs, all powers-of-two).
-    var maxTextSizeMb by remember {
-        mutableStateOf((settings.maxTextSizeBytes / (1024L * 1024L)).toString())
+    // ── Storage — stepped slider state (raw bytes, snapped to nearest step on load) ──
+    // Slider saves raw bytes directly; no MB conversion needed.
+    var maxTextSizeBytes by remember {
+        mutableStateOf(
+            snapToNearestLong(TEXT_SIZE_STEP_VALUES, settings.maxTextSizeBytes)
+        )
     }
-    var maxImageSizeMb by remember {
-        mutableStateOf((settings.maxImageSizeBytes / (1024L * 1024L)).toString())
+    var maxImageSizeBytes by remember {
+        mutableStateOf(
+            snapToNearestLong(IMAGE_SIZE_STEP_VALUES, settings.maxImageSizeBytes)
+        )
     }
-    var storageQuotaMb by remember {
-        mutableStateOf((settings.storageQuotaBytes / (1024L * 1024L)).toString())
+    var storageQuotaBytes by remember {
+        mutableStateOf(
+            snapToNearestLong(QUOTA_STEP_VALUES, settings.storageQuotaBytes)
+        )
     }
 
     // ── Diagnostics ──
@@ -257,40 +269,39 @@ fun SettingsScreen(
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
             // ── STORAGE ──────────────────────────────────────────────────────
-            // NOTE: There is no item-count cap — size-only limits mirror the desktop.
+            // Stepped sliders — snap to fixed arrays, no arbitrary values possible.
+            // Arrays defined in Components.kt mirror StepSlider.tsx on desktop.
             SectionLabel(stringResource(R.string.section_storage_limits))
-            SettingsNumberField(
+            SteppedSliderRow(
                 label = stringResource(R.string.setting_max_text_size_label),
-                hint = stringResource(R.string.setting_max_text_size_hint),
-                value = maxTextSizeMb,
-                onValueChange = { maxTextSizeMb = it },
-                onCommit = {
-                    val mb = maxTextSizeMb.toLongOrNull()?.coerceIn(1L, 100L) ?: return@SettingsNumberField
-                    try { settings.maxTextSizeBytes = mb * 1024L * 1024L; maxTextSizeMb = mb.toString() }
+                stepValues = TEXT_SIZE_STEP_VALUES,
+                stepLabels = TEXT_SIZE_STEP_LABELS,
+                currentValue = maxTextSizeBytes,
+                onRelease = { bytes ->
+                    maxTextSizeBytes = bytes
+                    try { settings.maxTextSizeBytes = bytes }
                     catch (e: Exception) { settingsError = e.message }
                 },
             )
-            SettingsNumberField(
+            SteppedSliderRow(
                 label = stringResource(R.string.setting_max_image_size_label),
-                hint = stringResource(R.string.setting_max_image_size_hint),
-                value = maxImageSizeMb,
-                onValueChange = { maxImageSizeMb = it },
-                onCommit = {
-                    val mb = maxImageSizeMb.toLongOrNull()?.coerceIn(1L, 512L) ?: return@SettingsNumberField
-                    try { settings.maxImageSizeBytes = mb * 1024L * 1024L; maxImageSizeMb = mb.toString() }
+                stepValues = IMAGE_SIZE_STEP_VALUES,
+                stepLabels = IMAGE_SIZE_STEP_LABELS,
+                currentValue = maxImageSizeBytes,
+                onRelease = { bytes ->
+                    maxImageSizeBytes = bytes
+                    try { settings.maxImageSizeBytes = bytes }
                     catch (e: Exception) { settingsError = e.message }
                 },
             )
-            SettingsNumberField(
+            SteppedSliderRow(
                 label = stringResource(R.string.setting_storage_quota_label),
-                hint = stringResource(R.string.setting_storage_quota_hint),
-                value = storageQuotaMb,
-                onValueChange = { storageQuotaMb = it },
-                onCommit = {
-                    // Upper bound 20 480 MiB (20 GiB) holds the 10 GiB default with headroom.
-                    // mb * 1024L * 1024L stays in Long range (~21.5e9 < Long.MAX).
-                    val mb = storageQuotaMb.toLongOrNull()?.coerceIn(50L, 20_480L) ?: return@SettingsNumberField
-                    try { settings.storageQuotaBytes = mb * 1024L * 1024L; storageQuotaMb = mb.toString() }
+                stepValues = QUOTA_STEP_VALUES,
+                stepLabels = QUOTA_STEP_LABELS,
+                currentValue = storageQuotaBytes,
+                onRelease = { bytes ->
+                    storageQuotaBytes = bytes
+                    try { settings.storageQuotaBytes = bytes }
                     catch (e: Exception) { settingsError = e.message }
                 },
             )
@@ -752,4 +763,22 @@ private fun SettingsRow(
             colors = ideSwitchColors(),
         )
     }
+}
+
+/**
+ * Return the value in [steps] whose absolute distance to [raw] is smallest.
+ * Used to snap an existing config value to the nearest stepped-slider position
+ * on load, so arbitrary legacy values always display cleanly.
+ */
+private fun snapToNearestLong(steps: LongArray, raw: Long): Long {
+    var best = steps[0]
+    var bestDist = kotlin.math.abs(raw - best)
+    for (i in 1 until steps.size) {
+        val d = kotlin.math.abs(raw - steps[i])
+        if (d < bestDist) {
+            bestDist = d
+            best = steps[i]
+        }
+    }
+    return best
 }
