@@ -294,6 +294,9 @@ pub async fn merge_incoming_with_crypto(
                 debug!(item_id = %wire.item_id, "sync_orch: LWW kept local");
                 continue;
             }
+            // Fix-3: capture the local `pinned` flag before `wire_to_local`
+            // (which always sets pinned=false — the wire carries no pinned field).
+            let local_pinned: bool = existing.as_ref().map(|r| r.pinned).unwrap_or(false);
 
             // P2P Phase 3: unwrap the shared-key payload into a row encrypted under
             // this device's own local key, recovering the plaintext for FTS. Returns
@@ -316,6 +319,11 @@ pub async fn merge_incoming_with_crypto(
             if let Some(pk) = local_pk {
                 to_insert.id = pk;
             }
+
+            // Fix-3 (cont.): OR-merge the local `pinned` flag so a pinned item
+            // that gets a content update via LWW TakeRemote is not silently
+            // unpinned (losing its prune-exemption → TTL data loss).
+            to_insert.pinned = to_insert.pinned || local_pinned;
 
             // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
             // ran `delete_item` then a separate `insert_item`; if the insert failed
@@ -849,6 +857,50 @@ mod tests {
         drop(local_tx);
         drop(_incoming_tx);
         handle.await.expect("task join");
+    }
+
+    /// Fix-3 (pinned preserved on LWW TakeRemote): when the local row is pinned
+    /// and the incoming wire item wins LWW (newer lamport), the stored row must
+    /// keep `pinned = true`.  The wire protocol has no `pinned` field, so
+    /// `wire_to_local` always produces `pinned = false`; the merge path must
+    /// OR-merge the existing value before the atomic replace.
+    ///
+    /// The current lookup path uses `wire.id` as the lookup key, so the local
+    /// row's `id` must equal `wire.id` for TakeRemote to fire.
+    #[tokio::test]
+    async fn merge_incoming_takeremode_preserves_pinned() {
+        let db = make_db();
+        // Local row: id matches the wire id so the LWW lookup finds it.
+        // lamport 3 < wire lamport 9 → TakeRemote will fire.
+        let mut local = ClipboardItem::new_text(vec![0x11], vec![0u8; 24], 3);
+        local.id = "shared-id".to_string();
+        local.item_id = "shared-id-iid".to_string();
+        local.pinned = true;
+        {
+            let g = db.lock().await;
+            insert_item(&g, &local).unwrap();
+            let stored = copypaste_core::get_item_by_id(&g, "shared-id")
+                .unwrap()
+                .unwrap();
+            assert!(stored.pinned, "setup: local row must be pinned");
+        }
+
+        // Wire id = "shared-id" so the lookup finds the existing row.
+        // make_wire("shared-id", …) sets item_id = "shared-id-iid" (matches).
+        let wire = make_wire("shared-id", 9, 0xFF);
+        assert_eq!(wire.id, "shared-id");
+
+        let upserted = merge_incoming(&db, vec![wire]).await.unwrap();
+        assert_eq!(upserted, 1, "newer remote must win LWW");
+
+        let g = db.lock().await;
+        let rows = copypaste_core::get_page(&g, 10, 0).unwrap();
+        assert_eq!(rows.len(), 1, "must remain ONE row");
+        assert!(
+            rows[0].pinned,
+            "pinned flag must be preserved after TakeRemote — got pinned={}",
+            rows[0].pinned
+        );
     }
 
     /// LWW: a stale wire item (lower lamport) must NOT overwrite the local row.
