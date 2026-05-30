@@ -193,8 +193,44 @@ export function rowHeightFor(
 }
 
 // ---------------------------------------------------------------------------
+// Icon-only action button SVGs (inline, no external icon library needed)
+// ---------------------------------------------------------------------------
+
+/** Pin icon (filled thumbtack) */
+function IconPin({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true" className={className}>
+      <path d="M9.828 1.172a1.2 1.2 0 0 0-1.697 0L6.424 2.879 5.13 1.586a1 1 0 1 0-1.414 1.414L4.97 4.243 2.757 6.457A1 1 0 0 0 3.464 8H7v3.586l-.293.293a1 1 0 1 0 1.414 1.414l.293-.293.293.293a1 1 0 1 0 1.414-1.414L10 11.586V8h3.536a1 1 0 0 0 .707-1.707L12.03 4.07 13.172 2.93a1.2 1.2 0 0 0 0-1.697l-.344-.344a1.2 1.2 0 0 0-1.697 0L9.828 2.192z" />
+    </svg>
+  );
+}
+
+/** Unpin icon (outline thumbtack with slash) */
+function IconPinOff({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+      <line x1="2" y1="2" x2="14" y2="14" />
+      <path d="M9 3.5 12.5 7M7 5l-.3.3A1 1 0 0 0 7.7 7H10v4l-1 1-1-1V7" />
+      <path d="M6.5 7H3.7a1 1 0 0 1-.7-1.7L5.5 2.8" />
+    </svg>
+  );
+}
+
+/** Trash / delete icon */
+function IconTrash({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+      <path d="M2.5 4.5h11M6 4.5V3h4v1.5M4 4.5l.75 8.5h6.5L12 4.5" />
+      <line x1="6.5" y1="7" x2="6.5" y2="11" />
+      <line x1="9.5" y1="7" x2="9.5" y2="11" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // HistoryRow
 // ---------------------------------------------------------------------------
+
 
 interface RowProps {
   entry: HistoryEntry;
@@ -220,7 +256,7 @@ function HistoryRow({
   multiSelected,
   selectionMode,
   previewLines,
-  previewSize,
+  previewSize: _previewSize,
   imageMaxHeight,
   maskSensitive,
   onSelect,
@@ -242,7 +278,9 @@ function HistoryRow({
     preview = entry.preview;
   }
 
-  const rowH = rowHeightFor(entry, previewSize, imageMaxHeight);
+  // Row height is intentionally NOT driven by rowHeightFor — natural content
+  // height + py-1.5 padding avoids the hover layout-jump. rowHeightFor is only
+  // used by VirtualList for its offset math, not for DOM styling.
 
   // In selection mode, clicking the row toggles multi-select.
   // Outside selection mode, clicking selects + copies (existing behavior).
@@ -260,28 +298,25 @@ function HistoryRow({
       role="option"
       aria-selected={multiSelected || selected}
       className={[
-        "group relative flex cursor-pointer select-none items-center gap-2 px-3",
+        "group relative flex cursor-pointer select-none items-center gap-2 px-3 py-1.5",
         "border-b text-[13px]",
         entry.pinned ? "border-ide-warning/20 bg-ide-warning/5" : "border-ide-divider/40",
         multiSelected
-          ? "bg-ide-selection/70 text-ide-text"
+          ? "bg-ide-selection text-ide-text"
           : selected
           ? "bg-ide-selection text-ide-text"
           : entry.pinned
           ? "text-ide-text hover:bg-ide-warning/10"
           : "text-ide-text hover:bg-ide-hover",
       ].join(" ")}
-      style={{ minHeight: rowH }}
       onClick={handleRowClick}
     >
-      {/* Checkbox — shown when selection mode is active, or on hover */}
+      {/* Checkbox — always in flow (reserves 20px). Invisible at rest, fades in
+          on hover or when selection mode is active. Clicking it enters/toggles
+          multi-selection without propagating to the row-click copy handler. */}
       <span
-        className={[
-          "flex w-4 shrink-0 items-center justify-center",
-          selectionMode ? "opacity-100" : "opacity-0 group-hover:opacity-60",
-        ].join(" ")}
+        className="flex w-4 shrink-0 items-center justify-center"
         onClick={(e) => {
-          // Checkbox click always toggles multi-select, even outside selection mode.
           e.stopPropagation();
           onToggleMultiSelect(e);
         }}
@@ -290,7 +325,10 @@ function HistoryRow({
           type="checkbox"
           checked={multiSelected}
           onChange={() => {/* controlled via onClick above */}}
-          className="h-3.5 w-3.5 accent-ide-accent cursor-pointer"
+          className={[
+            "h-3.5 w-3.5 rounded accent-ide-accent cursor-pointer",
+            selectionMode ? "opacity-80" : "opacity-0 group-hover:opacity-60",
+          ].join(" ")}
           tabIndex={-1}
           aria-label={`Select ${entry.preview.slice(0, 30)}`}
         />
@@ -334,48 +372,71 @@ function HistoryRow({
         </span>
       )}
 
-      {/* Time — hidden while action buttons are visible */}
-      <span className="ml-auto shrink-0 text-[11px] text-ide-faint group-hover:hidden">
-        {relativeTime(entry.wall_time)}
-      </span>
+      {/* Right-side slot: timestamp (always visible) + icon action buttons (on hover).
+          Both live in the same fixed-width flex container so showing/hiding the
+          buttons never shifts the layout — the slot width is constant. */}
+      <div
+        className="flex shrink-0 items-center justify-end gap-1"
+        style={{ minWidth: "4.5rem" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Timestamp — always shown; sits before the buttons */}
+        <span className="text-[11px] text-ide-faint">
+          {relativeTime(entry.wall_time)}
+        </span>
 
-      {/* Per-row action buttons — hidden in selection mode (bulk bar takes over) */}
-      {!selectionMode && (
-        <div
-          className={[
-            "absolute right-2 flex items-center gap-1",
-            selected ? "flex" : "hidden group-hover:flex",
-          ].join(" ")}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <ActionBtn label="Copy" onClick={onCopy} />
-          <ActionBtn label={entry.pinned ? "Unpin" : "Pin"} onClick={onPin} />
-          <ActionBtn label="Delete" danger onClick={onDelete} />
-        </div>
-      )}
+        {/* Icon action buttons — invisible at rest, visible on hover.
+            They DO NOT shift the row because the slot width is reserved.
+            No "Copy" button: row-click copies instead. */}
+        {!selectionMode && (
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            <IconActionBtn
+              aria-label={entry.pinned ? "Unpin" : "Pin"}
+              title={entry.pinned ? "Unpin" : "Pin"}
+              onClick={onPin}
+            >
+              {entry.pinned ? <IconPinOff /> : <IconPin />}
+            </IconActionBtn>
+            <IconActionBtn
+              aria-label="Delete"
+              title="Delete"
+              danger
+              onClick={onDelete}
+            >
+              <IconTrash />
+            </IconActionBtn>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function ActionBtn({
-  label,
+function IconActionBtn({
+  "aria-label": ariaLabel,
+  title,
   danger,
   onClick,
+  children,
 }: {
-  label: string;
+  "aria-label": string;
+  title: string;
   danger?: boolean;
   onClick: () => void;
+  children: React.ReactNode;
 }) {
   return (
     <button
+      aria-label={ariaLabel}
+      title={title}
       className={[
-        "rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-0.5 text-[11px]",
-        "hover:bg-ide-hover",
-        danger ? "text-ide-danger" : "text-ide-text",
+        "flex h-5 w-5 items-center justify-center rounded",
+        "border border-transparent hover:border-ide-border hover:bg-ide-elevated",
+        danger ? "text-ide-danger" : "text-ide-dim hover:text-ide-text",
       ].join(" ")}
-      onClick={onClick}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
     >
-      {label}
+      {children}
     </button>
   );
 }
@@ -1126,28 +1187,6 @@ export function HistoryView() {
   // Render
   // -------------------------------------------------------------------------
 
-  // "Select" toggle button in the header toolbar.
-  const selectToggleBtn = (
-    <button
-      onClick={() => {
-        if (selectionMode) {
-          clearSelection();
-        } else {
-          setSelectionMode(true);
-        }
-      }}
-      className={[
-        "rounded-ide border px-2.5 py-1 text-[12px]",
-        selectionMode
-          ? "border-ide-accent/60 bg-ide-accent/15 text-ide-accent"
-          : "border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover",
-      ].join(" ")}
-      title="Toggle multi-select mode"
-    >
-      Select
-    </button>
-  );
-
   const actions = (
     <>
       <input
@@ -1162,7 +1201,6 @@ export function HistoryView() {
           "focus:border-ide-accent focus:outline-none",
         ].join(" ")}
       />
-      {selectToggleBtn}
       {confirmPending ? (
         <span className="flex items-center gap-1.5 text-[12px]">
           <span className="text-ide-dim">Delete all?</span>
