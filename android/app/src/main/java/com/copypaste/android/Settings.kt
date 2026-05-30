@@ -295,29 +295,30 @@ class Settings(context: Context) {
     /**
      * Maximum size in bytes for a text clipboard item. Items larger than this
      * are silently dropped at capture time.
-     * Default: 1 000 000 B (1 MB) — matches MAX_TEXT_SIZE_BYTES in defaults.rs.
+     * Default: 15 MiB (15 728 640 B) — matches MAX_TEXT_SIZE_BYTES in defaults.rs.
      */
     var maxTextSizeBytes: Long
-        get() = prefs.getLong("max_text_size_bytes", 1_000_000L)
+        get() = prefs.getLong("max_text_size_bytes", 15L * 1024 * 1024)
         set(v) = prefs.edit().putLong("max_text_size_bytes", v).apply()
 
     /**
      * Maximum size in bytes for an image clipboard item. Images larger than this
      * are silently dropped at capture time.
-     * Default: 25 000 000 B (25 MB) — matches MAX_IMAGE_SIZE_BYTES in defaults.rs.
+     * Default: 64 MiB (67 108 864 B) — matches MAX_IMAGE_SIZE_BYTES in defaults.rs.
      */
     var maxImageSizeBytes: Long
-        get() = prefs.getLong("max_image_size_bytes", 25_000_000L)
+        get() = prefs.getLong("max_image_size_bytes", 64L * 1024 * 1024)
         set(v) = prefs.edit().putLong("max_image_size_bytes", v).apply()
 
     /**
      * Total local storage quota for the clipboard database, in bytes.
      * When the database approaches this limit, the oldest non-sensitive items
      * should be pruned by the repository.
-     * Default: 500 000 000 B (500 MB) — matches STORAGE_QUOTA_BYTES in defaults.rs.
+     * Default: 10 GiB (10 737 418 240 B) — matches STORAGE_QUOTA_BYTES in defaults.rs.
+     * NOTE: 10 GiB exceeds Int range — the literal and pref MUST be Long.
      */
     var storageQuotaBytes: Long
-        get() = prefs.getLong("storage_quota_bytes", 500_000_000L)
+        get() = prefs.getLong("storage_quota_bytes", 10L * 1024 * 1024 * 1024)
         set(v) = prefs.edit().putLong("storage_quota_bytes", v).apply()
 
     /**
