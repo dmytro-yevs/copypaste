@@ -55,10 +55,20 @@ base64 = { version = "0.22" }
 # Beta W2.3 (arch-1): canonical Supabase client (auth + realtime).
 copypaste-supabase = { path = "../copypaste-supabase", optional = true }
 
+# UPGRADE/RESTART lifecycle: SIGTERM a stale predecessor daemon during socket
+# takeover (see `bind_with_stale_cleanup` in src/ipc.rs). `libc::kill` is the
+# minimal wrapper; libc is already in the dependency tree transitively.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
-objc2-foundation.workspace = true
-objc2-app-kit.workspace = true
+objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSDictionary", "NSGeometry"] }
+# NSWorkspace + NSImage + NSBitmapImageRep + NSImageRep + NSGraphicsContext needed for
+# app-icon extraction (app_icon.rs).  NSGraphics supplies NSDeviceRGBColorSpace and the
+# colorSpaceName: init variant of NSBitmapImageRep.  NSImageRep is required for the
+# NSBitmapImageRep struct to be re-exported from the crate root.
+objc2-app-kit = { version = "0.2", features = ["NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSImage", "NSBitmapImageRep", "NSImageRep", "NSGraphics", "NSGraphicsContext"] }
 security-framework.workspace = true
 # v0.3 Keychain ACL (THREAT-MODEL OI-4): security-framework 2.x does not bind
 # SecAccessCreate / SecTrustedApplicationCreateFromPath / SecKeychainItem*,

@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,7 +32,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
+import com.copypaste.android.ui.theme.IdeDim
 import com.copypaste.android.ui.theme.IdePanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,6 +62,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var clipboardManager: ClipboardManager
     private lateinit var repository: ClipboardRepository
     private lateinit var settings: Settings
+    private lateinit var syncManager: SyncManager
 
     /**
      * L10: whether the onboarding screen has already been forwarded to during
@@ -71,6 +75,22 @@ class MainActivity : ComponentActivity() {
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         val clip = clipboardManager.primaryClip ?: return@OnPrimaryClipChangedListener
+
+        // Image branch: check all MIME types before falling through to text.
+        // M7: lifecycleScope is used here too so the coroutine is cancelled in onDestroy.
+        val imageMime = (0 until clip.description.mimeTypeCount)
+            .map { clip.description.getMimeType(it) }
+            .firstOrNull { it.startsWith("image/") }
+        if (imageMime != null) {
+            val uri = clip.getItemAt(0)?.uri
+            if (uri != null) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    ClipboardService.captureImageClip(this@MainActivity, uri, imageMime, settings, repository, syncManager)
+                }
+            }
+            return@OnPrimaryClipChangedListener
+        }
+
         val text = clip.getItemAt(0)?.text?.toString() ?: return@OnPrimaryClipChangedListener
         // M7: use the Activity's lifecycleScope so the coroutine is cancelled
         // automatically in onDestroy — the old hand-rolled CoroutineScope was
@@ -89,6 +109,8 @@ class MainActivity : ComponentActivity() {
 
         settings = Settings(this)
         repository = ClipboardRepository(this)
+        val relayClient = RelayClient(settings.relayUrl)
+        syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager.addPrimaryClipChangedListener(clipListener)
 
@@ -130,14 +152,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun handleClipboardChange(text: String) {
-        if (text.isBlank()) return
-        val sensitive = try { isSensitive(text) } catch (_: UnsatisfiedLinkError) { false }
-        if (sensitive) return
-        val stored = repository.storeItem(text, settings.encryptionKey)
-        if (stored) {
-            Log.d(TAG, "MainActivity stored clip")
-            viewModel.loadItems() // refresh the Clips tab
-        }
+        // Route through the shared capture pipeline so foreground-captured clips
+        // are counted in the notification, trigger copy sound/notification, and
+        // sync — exactly like ClipboardService and ClipboardAccessibilityService.
+        // Previously this called repository.storeItem directly, skipping all of
+        // bumpTodayCounter / postCopyNotification / playCopySound / notifySyncManager.
+        ClipboardService.captureClip(this, text, settings, repository, syncManager)
+        // Refresh the Clips tab regardless of whether the item was new (captureClip
+        // deduplicates internally; a no-op store is silent and cheap here).
+        viewModel.loadItems()
     }
 
     companion object {
@@ -177,7 +200,14 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
                         icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label) }
+                        label = { Text(tab.label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor       = IdeAccent,
+                            selectedTextColor       = IdeAccent,
+                            indicatorColor          = IdeAccent.copy(alpha = 0.15f),
+                            unselectedIconColor     = IdeDim,
+                            unselectedTextColor     = IdeDim,
+                        ),
                     )
                 }
             }

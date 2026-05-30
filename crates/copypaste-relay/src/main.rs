@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = RelayConfig::from_env();
-    let relay_store = RelayStore::new(config.sync_ttl_secs);
+    let relay_store = RelayStore::new_with_cap(config.sync_ttl_secs, config.max_items_per_device);
     let state = Arc::new(Mutex::new(relay_store));
 
     // Background TTL evictor — see ADR-009 (in-memory store + periodic prune).
@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = routes::relay_router(state, config.clone());
 
-    let addr = format!("0.0.0.0:{}", config.port);
+    let addr = format!("{}:{}", config.bind_addr, config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!(
         "copypaste-relay listening on {addr} (ttl={}s, tick={}s)",

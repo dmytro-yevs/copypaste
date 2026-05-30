@@ -72,6 +72,28 @@ fn default_key_version() -> u8 {
     2
 }
 
+impl WireItem {
+    /// Clamp `lamport_ts` and `wall_time` to be non-negative.
+    ///
+    /// Both fields are `i64` on the wire for JSON compatibility, but are
+    /// semantically non-negative (they represent logical / Unix-ms timestamps).
+    /// A malformed or hostile peer could send negative values; clamping at the
+    /// decode boundary ensures no consumer ever sees a raw negative value,
+    /// preventing silent sign-extension bugs when casting to `u64` for the
+    /// Lamport clock or storing in the database.
+    ///
+    /// Call this once after deserialising a `WireItem` from the network, before
+    /// any further processing.  See `engine.rs` ingest loop for usage.
+    pub fn clamp_timestamps(&mut self) {
+        if self.lamport_ts < 0 {
+            self.lamport_ts = 0;
+        }
+        if self.wall_time < 0 {
+            self.wall_time = 0;
+        }
+    }
+}
+
 /// Top-level protocol message enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
@@ -86,22 +108,26 @@ pub enum Message {
         item_count: u64,
     },
 
-    /// Sender announces the IDs and Lamport clocks of all items it currently holds.
+    /// Sender announces the cross-device `item_id`s and Lamport clocks of all
+    /// items it currently holds.
     ///
-    /// Each entry is `(item_id, lamport_ts)`. The receiver uses the Lamport
-    /// timestamps to decide whether to request an update even for items it
-    /// already has locally (conflict detection / LWW comparison).
+    /// Each entry is `(item_id, lamport_ts)` — the stable cross-device
+    /// identity, NOT the per-row primary key `id` (which differs on every
+    /// device). The receiver uses the Lamport timestamps to decide whether to
+    /// request an update even for items it already has locally (conflict
+    /// detection / LWW comparison).
     Have {
-        /// `(id, lamport_ts)` pairs for all items the sender holds.
+        /// `(item_id, lamport_ts)` pairs for all items the sender holds.
         items: Vec<(String, i64)>,
     },
 
-    /// Sender requests the listed items from its peer.
+    /// Sender requests the listed items from its peer, identified by their
+    /// cross-device `item_id`s.
     ///
     /// Includes items the sender doesn't have *at all*, plus items where the
     /// peer's Lamport clock is higher than the sender's local copy.
     Want {
-        /// IDs the sender wants to receive (new or potentially outdated).
+        /// `item_id`s the sender wants to receive (new or potentially outdated).
         item_ids: Vec<String>,
     },
 

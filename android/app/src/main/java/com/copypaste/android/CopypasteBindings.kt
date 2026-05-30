@@ -5,17 +5,26 @@ import android.util.Log
 // UniFFI-compatible Kotlin bindings for libcopypaste_android.so
 // Generated API matches crates/copypaste-android/uniffi/copypaste_android.udl
 //
-// When the real .so is absent (no Android NDK in CI), all functions return stub
-// values instead of crashing. Build succeeds; stub behaviour is logged at WARN.
+// All public wrapper functions delegate to the GENERATED bindings in the
+// `uniffi.copypaste_android` package (copypaste_android.kt, auto-generated
+// by uniffi-bindgen). The generated API uses List<UByte> for byte arrays;
+// these wrappers convert ByteArray↔List<UByte> at the boundary so callers
+// (ClipboardRepository, SyncManager, etc.) keep their existing ByteArray types.
+//
+// The local `EncryptedBlob` data class (ByteArray fields) is kept for
+// ClipboardRepository compatibility. The generated `uniffi.copypaste_android
+// .EncryptedBlob` (List<UByte> fields) is only used internally below.
+//
+// When the real .so is absent (isNativeLibraryLoaded == false), all functions
+// throw IllegalStateException or return safe stub values — never plaintext.
 //
 // To regenerate from UDL:
 //   ./scripts/build-android.sh
 // (requires cargo-ndk + Android NDK)
 
 private const val TAG = "CopypasteBindings"
-private const val LIB_NAME = "copypaste_android"
 
-/** Mirrors `EncryptedBlob` in copypaste_android.udl */
+/** Mirrors `EncryptedBlob` in copypaste_android.udl — uses ByteArray for callers. */
 data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -34,64 +43,47 @@ sealed class CopypasteException(message: String) : Exception(message) {
     class InvalidKeyLength : CopypasteException("InvalidKeyLength")
 }
 
+// ---------------------------------------------------------------------------
+// ByteArray ↔ List<UByte> helpers
+// The generated UniFFI bindings accept/return List<UByte>; our callers use
+// ByteArray. Convert at the boundary — one allocation each way, O(n).
+// ---------------------------------------------------------------------------
+
+private fun ByteArray.toUByteList(): List<UByte> = map { it.toUByte() }
+private fun List<UByte>.toByteArray(): ByteArray = ByteArray(size) { this[it].toByte() }
+
+// ---------------------------------------------------------------------------
+// Library presence check
+// The generated bindings call System.loadLibrary via JNA's Native.load
+// (driven by findLibraryName). We attempt a direct loadLibrary here as a
+// fast gate so stub paths below can short-circuit without waiting for JNA.
+// ---------------------------------------------------------------------------
+
 /** True when libcopypaste_android.so was successfully loaded at startup. */
 val isNativeLibraryLoaded: Boolean = run {
     var loaded = false
     try {
-        System.loadLibrary(LIB_NAME)
+        System.loadLibrary("copypaste_android")
         loaded = true
-        Log.i(TAG, "Loaded $LIB_NAME native library")
+        Log.i(TAG, "Loaded copypaste_android native library")
     } catch (e: UnsatisfiedLinkError) {
-        Log.w(TAG, "Native library $LIB_NAME not available — stub mode active. $e")
+        Log.w(TAG, "Native library copypaste_android not available — stub mode active. $e")
     }
     loaded
 }
 
 // ---------------------------------------------------------------------------
-// JNI declarations — signatures match UniFFI scaffolding output for ABI 3.
-// These are only called when isNativeLibraryLoaded == true.
-//
-// CRITICAL: every signature MUST match the UDL exactly. The Rust side
-// (`crates/copypaste-android/src/lib.rs`) binds `item_id` into the AEAD AAD,
-// and `open_database` takes a 32-byte `key`. A sig mismatch will cause SIGABRT
-// or — worse — silently corrupt the AAD so legitimate ciphertext fails to
-// decrypt across reinstalls.
-// ---------------------------------------------------------------------------
-
-private external fun uniffiDeriveCloudSyncKey(passphrase: String): ByteArray
-private external fun uniffiCloudEncrypt(itemId: String, plaintext: ByteArray, syncKeyBytes: ByteArray): ByteArray
-private external fun uniffiCloudDecrypt(itemId: String, blob: ByteArray, syncKeyBytes: ByteArray): ByteArray
-private external fun uniffiEncryptText(itemId: String, bytes: ByteArray, key: ByteArray): EncryptedBlob
-private external fun uniffiDecryptText(itemId: String, ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray
-private external fun uniffiIsSensitive(text: String): Boolean
-private external fun uniffiSensitiveKind(text: String): String?
-private external fun uniffiOpenDatabase(path: String, key: ByteArray): Long
-private external fun uniffiCloseDatabase(handle: Long)
-private external fun uniffiAddClipboardItem(dbPath: String, key: ByteArray, text: String): String
-private external fun uniffiGetHistoryCount(dbPath: String, key: ByteArray): Long
-// QR pairing is provided by the generated UniFFI bindings (ABI 5):
-// `buildPairingQr` / `parsePairingQr` in the
-// `com.copypaste.generated.uniffi.copypaste_android` package. We delegate to
-// them directly (see startPairing / parsePairing below) rather than declaring
-// separate `external fun`s.
-
-// ---------------------------------------------------------------------------
-// Public API — matches UDL, wraps JNI calls with stub fallback.
+// Public API — delegates to uniffi.copypaste_android.* generated bindings.
+// No `external fun` declarations: all FFI goes through the UniFFI scaffold.
 // ---------------------------------------------------------------------------
 
 /**
- * Encrypts [bytes] with [key] (32 bytes, AES-256-GCM). [itemId] is bound into
- * the AEAD AAD (v0.3 schema) and MUST be persisted alongside the ciphertext
- * — pass the same value back to [decryptText] verbatim or decryption will fail.
+ * Encrypts [bytes] with [key] (32 bytes, XChaCha20-Poly1305, AAD = itemId|5).
+ * [itemId] is bound into the AEAD AAD and MUST be persisted alongside the
+ * ciphertext — pass the same value back to [decryptText] verbatim.
  *
  * Throws [CopypasteException.EncryptionFailed] on error.
- *
- * When the native library is unavailable this function throws
- * [IllegalStateException] rather than returning plaintext, so callers can fall
- * back to a Kotlin-side AES path explicitly (see [ClipboardRepository]). It is
- * NEVER safe for a function named `encryptText` to silently emit plaintext —
- * doing so would surface as a PII leak the moment a build accidentally ships
- * without the .so.
+ * Throws [IllegalStateException] when the native library is unavailable.
  */
 @Throws(CopypasteException::class, IllegalStateException::class)
 fun encryptText(itemId: String, bytes: ByteArray, key: ByteArray): EncryptedBlob {
@@ -100,7 +92,18 @@ fun encryptText(itemId: String, bytes: ByteArray, key: ByteArray): EncryptedBlob
         throw IllegalStateException("copypaste_android native library not loaded; encryptText is unavailable")
     }
     return try {
-        uniffiEncryptText(itemId, bytes, key)
+        val result = uniffi.copypaste_android.encryptText(
+            itemId = itemId,
+            bytes = bytes.toUByteList(),
+            key = key.toUByteList(),
+        )
+        EncryptedBlob(
+            nonce = result.nonce.toByteArray(),
+            ciphertext = result.ciphertext.toByteArray(),
+        )
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        Log.w(TAG, "encryptText: native call failed: ${e.message}", e)
+        throw CopypasteException.EncryptionFailed(e.message ?: "native encrypt failed")
     } catch (e: Exception) {
         Log.w(TAG, "encryptText: native call failed: ${e.message}", e)
         throw CopypasteException.EncryptionFailed(e.message ?: "native encrypt failed")
@@ -109,11 +112,10 @@ fun encryptText(itemId: String, bytes: ByteArray, key: ByteArray): EncryptedBlob
 
 /**
  * Decrypts [ciphertext] using [nonce] and [key]. [itemId] MUST match the value
- * passed to [encryptText] when the ciphertext was produced — the v0.3 schema
- * binds it into the AAD.
+ * passed to [encryptText] when the ciphertext was produced.
  *
- * Throws [CopypasteException.DecryptionFailed] on error, [IllegalStateException]
- * when the native library is unavailable.
+ * Throws [CopypasteException.DecryptionFailed] on error.
+ * Throws [IllegalStateException] when the native library is unavailable.
  */
 @Throws(CopypasteException::class, IllegalStateException::class)
 fun decryptText(itemId: String, ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray {
@@ -122,7 +124,15 @@ fun decryptText(itemId: String, ciphertext: ByteArray, nonce: ByteArray, key: By
         throw IllegalStateException("copypaste_android native library not loaded; decryptText is unavailable")
     }
     return try {
-        uniffiDecryptText(itemId, ciphertext, nonce, key)
+        uniffi.copypaste_android.decryptText(
+            itemId = itemId,
+            ciphertext = ciphertext.toUByteList(),
+            nonce = nonce.toUByteList(),
+            key = key.toUByteList(),
+        ).toByteArray()
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        Log.w(TAG, "decryptText: native call failed: ${e.message}", e)
+        throw CopypasteException.DecryptionFailed(e.message ?: "native decrypt failed")
     } catch (e: Exception) {
         Log.w(TAG, "decryptText: native call failed: ${e.message}", e)
         throw CopypasteException.DecryptionFailed(e.message ?: "native decrypt failed")
@@ -137,7 +147,12 @@ fun isSensitive(text: String): Boolean {
         Log.w(TAG, "isSensitive: stub — returns false")
         return false
     }
-    return uniffiIsSensitive(text)
+    return try {
+        uniffi.copypaste_android.isSensitive(text)
+    } catch (e: Exception) {
+        Log.w(TAG, "isSensitive: native call failed: ${e.message}")
+        false
+    }
 }
 
 /**
@@ -148,14 +163,18 @@ fun sensitiveKind(text: String): String? {
         Log.w(TAG, "sensitiveKind: stub — returns null")
         return null
     }
-    return uniffiSensitiveKind(text)
+    return try {
+        uniffi.copypaste_android.sensitiveKind(text)
+    } catch (e: Exception) {
+        Log.w(TAG, "sensitiveKind: native call failed: ${e.message}")
+        null
+    }
 }
 
 /**
- * Opens an encrypted SQLite database at [path] using the 32-byte [key] and
- * returns an opaque handle. The Rust UDL contract requires the key — passing
- * an arbitrary array does NOT work; it must be the same 32 bytes used to
- * encrypt the database originally (typically derived from Android Keystore).
+ * Opens an encrypted SQLite database at [path] using the 32-byte [key].
+ * Returns an opaque handle (Long). The generated UDL uses u64 (ULong);
+ * we return Long for backward-compat with existing callers.
  *
  * Throws [CopypasteException.DatabaseError] on failure.
  */
@@ -166,7 +185,12 @@ fun openDatabase(path: String, key: ByteArray): Long {
         return -1L
     }
     return try {
-        uniffiOpenDatabase(path, key)
+        uniffi.copypaste_android.openDatabase(
+            path = path,
+            key = key.toUByteList(),
+        ).toLong()
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "unknown")
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "unknown")
     }
@@ -180,16 +204,16 @@ fun closeDatabase(handle: Long) {
         Log.w(TAG, "closeDatabase: stub — no-op")
         return
     }
-    uniffiCloseDatabase(handle)
+    try {
+        uniffi.copypaste_android.closeDatabase(handle.toULong())
+    } catch (e: Exception) {
+        Log.w(TAG, "closeDatabase: native call failed: ${e.message}")
+    }
 }
 
 /**
  * Insert a clipboard text item into the encrypted SQLite database at [dbPath].
- * Returns the new row id, or an empty string when [text] is flagged as sensitive
- * (caller should skip storage in that case).
- *
- * Falls back to an empty string when the native .so is not loaded so callers can
- * still operate (the Kotlin-side SharedPreferences store still runs).
+ * Returns the new row id, or empty string when [text] is flagged as sensitive.
  *
  * Throws [CopypasteException.DatabaseError] if the Rust side reports a DB error.
  */
@@ -200,15 +224,21 @@ fun addClipboardItem(dbPath: String, key: ByteArray, text: String): String {
         return ""
     }
     return try {
-        uniffiAddClipboardItem(dbPath, key, text)
+        uniffi.copypaste_android.addClipboardItem(
+            dbPath = dbPath,
+            key = key.toUByteList(),
+            text = text,
+        )
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "addClipboardItem failed")
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "addClipboardItem failed")
     }
 }
 
 /**
- * Returns the number of items currently stored at [dbPath].
- * Returns 0 when the native .so is not loaded.
+ * Returns the number of items currently stored at [dbPath]. Returns 0 when
+ * the native .so is not loaded.
  */
 @Throws(CopypasteException::class)
 fun getHistoryCount(dbPath: String, key: ByteArray): Long {
@@ -217,7 +247,12 @@ fun getHistoryCount(dbPath: String, key: ByteArray): Long {
         return 0L
     }
     return try {
-        uniffiGetHistoryCount(dbPath, key)
+        uniffi.copypaste_android.getHistoryCount(
+            dbPath = dbPath,
+            key = key.toUByteList(),
+        ).toLong()
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "getHistoryCount failed")
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "getHistoryCount failed")
     }
@@ -241,11 +276,9 @@ fun getHistoryCount(dbPath: String, key: ByteArray): Long {
  * produces the identical 32-byte key, enabling cross-device decryption.
  *
  * The returned [ByteArray] should be used in-memory and NOT persisted to disk.
- * Pass it to [cloud_encrypt] / [cloud_decrypt] as `syncKeyBytes`.
  *
- * Throws [CopypasteException.EncryptionFailed] if Argon2id fails (should
- * never happen with hardcoded parameters). Throws [IllegalStateException]
- * if the native library is not loaded.
+ * Throws [CopypasteException.EncryptionFailed] if Argon2id fails.
+ * Throws [IllegalStateException] if the native library is not loaded.
  */
 @Throws(CopypasteException::class, IllegalStateException::class)
 fun derive_cloud_sync_key(passphrase: String): ByteArray {
@@ -253,25 +286,25 @@ fun derive_cloud_sync_key(passphrase: String): ByteArray {
         throw IllegalStateException("copypaste_android native library not loaded; derive_cloud_sync_key is unavailable")
     }
     return try {
-        uniffiDeriveCloudSyncKey(passphrase)
+        uniffi.copypaste_android.deriveCloudSyncKey(passphrase).toByteArray()
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.EncryptionFailed(e.message ?: "derive_cloud_sync_key failed")
     } catch (e: Exception) {
         throw CopypasteException.EncryptionFailed(e.message ?: "derive_cloud_sync_key failed")
     }
 }
 
 /**
- * Encrypt [plaintext] for cloud storage.
+ * Encrypt [plaintext] for cloud storage using XChaCha20-Poly1305.
  *
- * [itemId] is bound into the AEAD AAD as `"{itemId}|5"`. It MUST be the UUID
- * stored in the `item_id` column — a mismatch fails authentication on decrypt.
+ * [itemId] is bound into the AEAD AAD as `"{itemId}|5"`.
  * [syncKeyBytes] must be the 32 bytes returned by [derive_cloud_sync_key].
  *
- * Returns raw bytes: `nonce[24] || ciphertext_with_tag`. Callers (e.g.
- * [SupabaseClient]) must base64-encode this before storing in `payload_ct`.
+ * Returns raw bytes: `nonce[24] || ciphertext_with_tag`. Callers must
+ * base64-encode this before storing in `payload_ct`.
  *
- * Throws [CopypasteException.EncryptionFailed] on AEAD failure;
- * [CopypasteException.InvalidKeyLength] if key is not 32 bytes;
- * [IllegalStateException] if native lib is absent.
+ * Throws [CopypasteException.EncryptionFailed] on AEAD failure.
+ * Throws [IllegalStateException] if native lib is absent.
  */
 @Throws(CopypasteException::class, IllegalStateException::class)
 fun cloud_encrypt(itemId: String, plaintext: ByteArray, syncKeyBytes: ByteArray): ByteArray {
@@ -279,24 +312,29 @@ fun cloud_encrypt(itemId: String, plaintext: ByteArray, syncKeyBytes: ByteArray)
         throw IllegalStateException("copypaste_android native library not loaded; cloud_encrypt is unavailable")
     }
     return try {
-        uniffiCloudEncrypt(itemId, plaintext, syncKeyBytes)
+        uniffi.copypaste_android.cloudEncrypt(
+            itemId = itemId,
+            plaintext = plaintext.toUByteList(),
+            syncKeyBytes = syncKeyBytes.toUByteList(),
+        ).toByteArray()
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.EncryptionFailed(e.message ?: "cloud_encrypt failed")
     } catch (e: Exception) {
         throw CopypasteException.EncryptionFailed(e.message ?: "cloud_encrypt failed")
     }
 }
 
 /**
- * Decrypt a cloud blob.
+ * Decrypt a cloud blob using XChaCha20-Poly1305.
  *
- * [blob] is the raw bytes of `base64_decode(payload_ct)` from the Supabase row.
+ * [blob] is the raw bytes of `base64_decode(payload_ct)`.
  * [itemId] MUST match the `item_id` column value used during encryption.
  * [syncKeyBytes] must be the same 32-byte key used during encryption.
  *
  * Returns plaintext bytes on success.
  *
- * Throws [CopypasteException.DecryptionFailed] if the key, item_id, or blob
- * are wrong/tampered. Throws [CopypasteException.InvalidKeyLength] if key is
- * not 32 bytes. Throws [IllegalStateException] if native lib is absent.
+ * Throws [CopypasteException.DecryptionFailed] on failure.
+ * Throws [IllegalStateException] if native lib is absent.
  */
 @Throws(CopypasteException::class, IllegalStateException::class)
 fun cloud_decrypt(itemId: String, blob: ByteArray, syncKeyBytes: ByteArray): ByteArray {
@@ -304,28 +342,37 @@ fun cloud_decrypt(itemId: String, blob: ByteArray, syncKeyBytes: ByteArray): Byt
         throw IllegalStateException("copypaste_android native library not loaded; cloud_decrypt is unavailable")
     }
     return try {
-        uniffiCloudDecrypt(itemId, blob, syncKeyBytes)
+        uniffi.copypaste_android.cloudDecrypt(
+            itemId = itemId,
+            blob = blob.toUByteList(),
+            syncKeyBytes = syncKeyBytes.toUByteList(),
+        ).toByteArray()
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DecryptionFailed(e.message ?: "cloud_decrypt failed")
     } catch (e: Exception) {
         throw CopypasteException.DecryptionFailed(e.message ?: "cloud_decrypt failed")
     }
 }
 
+// ── AES-GCM fallback (rare path) ──────────────────────────────────────────────
+// The AES-256-GCM fallback implementation lives in ClipboardRepository
+// (ClipboardRepository.localAesEncrypt). It is invoked only when the native
+// .so is genuinely absent at runtime; a WARN is logged each time so operators
+// notice stub-mode behaviour in production logs.
+
+// ── QR device pairing ─────────────────────────────────────────────────────────
+
 /**
  * Result of [startPairing]: the encoded QR payload to display plus the PAKE
- * password derived from its single-use token. The displaying device must use
- * [pakePassword] when it answers the scanning device's PAKE handshake.
+ * password derived from its single-use token.
  */
 data class PairingQrResult(val qr: String, val pakePassword: String)
 
 /**
- * Begin device pairing (display side). Builds a QR payload via the Rust core
- * (`buildPairingQr`) containing [deviceId] as the device identifier, a fresh
- * single-use token, and metadata. The QR is purely a transport for the existing
- * PAKE pairing material — no new crypto. Render [PairingQrResult.qr] as a QR
- * code; the scanning device reads it and drives the password-authenticated
- * handshake.
+ * Begin device pairing (display side). Delegates to the generated
+ * `uniffi.copypaste_android.buildPairingQr`.
  *
- * If the native .so is unavailable, returns a deterministic stub payload so the
+ * If the native .so is unavailable, returns a deterministic stub payload so
  * [PairActivity] UI can still be exercised on devices without the Rust core.
  */
 fun startPairing(deviceId: String, deviceName: String): PairingQrResult {
@@ -350,11 +397,11 @@ fun startPairing(deviceId: String, deviceName: String): PairingQrResult {
 }
 
 /**
- * Parse a scanned QR payload (scan side). Returns the peer's pairing material —
- * fingerprint, device id/name, optional address hint, and the PAKE password to
- * feed into the initiator handshake. Throws [CopypasteException] if the payload
- * is malformed or uses an unsupported version, or [IllegalStateException] if the
- * native library is not loaded.
+ * Parse a scanned QR payload (scan side). Delegates to the generated
+ * `uniffi.copypaste_android.parsePairingQr`.
+ *
+ * Throws [CopypasteException] if the payload is malformed.
+ * Throws [IllegalStateException] if the native library is not loaded.
  */
 @Throws(CopypasteException::class, IllegalStateException::class)
 fun parsePairing(payload: String): uniffi.copypaste_android.ScannedPairing {

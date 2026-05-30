@@ -120,7 +120,7 @@ fn response_ok_with_history_items_array() {
     let actual = serde_json::to_string(&resp).expect("serialize ok response");
     // `data` precedes `error*` in struct declaration order; `error` and
     // `error_code` are omitted on success via `skip_serializing_if`.
-    let expected = r#"{"id":1,"ok":true,"data":{"items":[{"id":"a","preview":"hello"},{"id":"b","preview":"world"}],"total":2},"protocol_version":0}"#;
+    let expected = r#"{"id":1,"ok":true,"data":{"items":[{"id":"a","preview":"hello"},{"id":"b","preview":"world"}],"total":2},"protocol_version":1}"#;
     assert_eq!(actual, expected);
 }
 
@@ -131,7 +131,7 @@ fn response_err_with_error_code_present() {
     // string.
     let resp = Response::err_with_code(42, ERR_CODE_NOT_FOUND, "item missing");
     let actual = serde_json::to_string(&resp).expect("serialize err response");
-    let expected = r#"{"id":42,"ok":false,"error":"item missing","error_code":"not_found","protocol_version":0}"#;
+    let expected = r#"{"id":42,"ok":false,"error":"item missing","error_code":"not_found","protocol_version":1}"#;
     assert_eq!(actual, expected);
     // Explicit snake_case guard — a rename to e.g. `errorCode` would be a
     // breaking wire change.
@@ -146,7 +146,7 @@ fn response_err_without_error_code_omits_field() {
     // distinguish "no code provided" from "explicit null code".
     let resp = Response::err(2, "boom");
     let actual = serde_json::to_string(&resp).expect("serialize legacy err response");
-    let expected = r#"{"id":2,"ok":false,"error":"boom","protocol_version":0}"#;
+    let expected = r#"{"id":2,"ok":false,"error":"boom","protocol_version":1}"#;
     assert_eq!(actual, expected);
     assert!(
         !actual.contains("error_code"),

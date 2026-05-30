@@ -15,27 +15,33 @@
 //!   `protocol_version`).
 //! * Stable [error code constants](#constants) for machine-readable branching.
 //!
-//! ## Beta migration note
+//! ## Consumers
 //!
-//! This crate currently ships the *new* wire shape proposed in arch-2:
-//! numeric `id: u64` and an explicit `protocol_version: u32` field. The
-//! existing daemon/ui/cli code still uses the legacy `id: String` shape from
-//! `copypaste-daemon::protocol`. Consumer migration happens in Wave 2 / 3;
-//! this wave only lands the crate skeleton.
+//! Today only [`ErrorCode`] and the `METHOD_*` constants are actively consumed
+//! by the daemon/UI/CLI. The [`Request`] and [`Response`] structs define the
+//! *proposed* arch-2 wire shape but are **not yet live on the daemon wire**:
+//! the daemon still uses `id: String` whereas this crate uses `id: u64`.
+//!
+//! **Do NOT change `id: u64` to `String` here without a coordinated daemon
+//! migration** — the mismatch is intentional (arch-2 plan) and tracked as a
+//! TODO. Consumers that need the live daemon wire today should use the daemon's
+//! own `protocol` module directly until the migration is complete.
 
 #![deny(missing_docs)]
 #![deny(rust_2018_idioms)]
 
 pub mod error;
+pub mod methods;
 pub mod request;
 pub mod response;
 
 pub use error::ErrorCode;
+pub use methods::{ResetDatabaseRequest, ResetDatabaseResponse, METHOD_RESET_DATABASE};
 pub use request::Request;
 pub use response::{
-    Response, ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR, ERR_CODE_INVALID_ARGUMENT,
-    ERR_CODE_IPC_NOT_READY, ERR_CODE_MIGRATION_IN_PROGRESS, ERR_CODE_NOT_FOUND,
-    ERR_CODE_NOT_IMPLEMENTED,
+    Response, ERR_CODE_AUTH_FAILED, ERR_CODE_DAEMON_OFFLINE, ERR_CODE_INTERNAL_ERROR,
+    ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, ERR_CODE_MIGRATION_IN_PROGRESS,
+    ERR_CODE_NOT_FOUND, ERR_CODE_NOT_IMPLEMENTED, ERR_CODE_RATE_LIMITED, ERR_CODE_VERSION_MISMATCH,
 };
 
 /// Current IPC protocol version. Bump on breaking wire changes.

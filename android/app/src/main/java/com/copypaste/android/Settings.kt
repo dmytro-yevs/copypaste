@@ -51,12 +51,44 @@ class Settings(context: Context) {
     }
 
     var relayUrl: String
-        get() = prefs.getString("relay_url", "http://localhost:8080") ?: "http://localhost:8080"
+        get() = prefs.getString("relay_url", "") ?: ""
         set(v) = prefs.edit().putString("relay_url", v).apply()
 
+    /**
+     * True when the relay URL is non-blank AND not the loopback placeholder.
+     * Connecting to 127.0.0.1 from a real device always produces ECONNREFUSED
+     * (os error 111). The old default was "http://localhost:8080" which is
+     * unreachable on device; callers should gate relay I/O on this flag.
+     */
+    val isRelayConfigured: Boolean
+        get() = relayUrl.isNotBlank() &&
+                !relayUrl.contains("localhost") &&
+                !relayUrl.contains("127.0.0.1")
+
     var syncEnabled: Boolean
-        get() = prefs.getBoolean("sync_enabled", false)
+        get() = prefs.getBoolean("sync_enabled", true)
         set(v) = prefs.edit().putBoolean("sync_enabled", v).apply()
+
+    /**
+     * When true (default), post a brief [ClipboardService.CHANNEL_COPY_EVENT]
+     * notification each time a new clipboard item is captured. One per capture,
+     * debounced against rapid consecutive copies by a 500 ms guard in
+     * [ClipboardService.postCopyNotification]. Mirrors macOS Maccy-style
+     * "copy notification" parity goal (A-SET-6).
+     */
+    var notifyOnCopy: Boolean
+        get() = prefs.getBoolean("notify_on_copy", true)
+        set(v) = prefs.edit().putBoolean("notify_on_copy", v).apply()
+
+    /**
+     * When true (default), play a subtle click sound each time a new clipboard
+     * item is captured. Uses [android.media.AudioManager.playSoundEffect] with
+     * [android.view.SoundEffectConstants.CLICK] (available all API levels).
+     * Mirrors macOS Maccy-style copy sound parity (A-SET-6).
+     */
+    var soundOnCopy: Boolean
+        get() = prefs.getBoolean("sound_on_copy", true)
+        set(v) = prefs.edit().putBoolean("sound_on_copy", v).apply()
 
     // ── Supabase cloud sync ─────────────────────────────────────────────────
 
@@ -93,16 +125,36 @@ class Settings(context: Context) {
      * DO NOT log or include in crash reports.
      */
     var cloudSyncPassphrase: String
-        get() = prefs.getString("cloud_sync_passphrase", "") ?: ""
-        set(v) = prefs.edit().putString("cloud_sync_passphrase", v).apply()
+        get() = readWrappedSecret(
+            KEY_PASSPHRASE_WRAPPED_B64,
+            KEY_PASSPHRASE_IV_B64,
+            KEY_LEGACY_PASSPHRASE_PLAIN,
+        )
+        set(v) = writeWrappedSecret(
+            KEY_PASSPHRASE_WRAPPED_B64,
+            KEY_PASSPHRASE_IV_B64,
+            KEY_LEGACY_PASSPHRASE_PLAIN,
+            v,
+        )
 
     /**
      * Which sync backend to use when [syncEnabled] is true.
      * - [SyncBackend.RELAY]    — custom relay server (original, local-network-friendly)
      * - [SyncBackend.SUPABASE] — Supabase PostgREST (cross-device, cloud-based)
      */
+    /**
+     * Which sync backend to use when [syncEnabled] is true.
+     *
+     * DEFAULT is [SyncBackend.SUPABASE] — the only backend that interoperates
+     * with the macOS daemon via a shared cross-device sync key.
+     *
+     * [SyncBackend.RELAY] is kept for persisted-settings compatibility and
+     * P2P/pairing references but the RELAY *cloud* push path is a disabled
+     * no-op (see [ClipboardService.notifySyncManager]). New installs always
+     * start on Supabase.
+     */
     var syncBackend: SyncBackend
-        get() = when (prefs.getString("sync_backend", SyncBackend.RELAY.name)) {
+        get() = when (prefs.getString("sync_backend", SyncBackend.SUPABASE.name)) {
             SyncBackend.SUPABASE.name -> SyncBackend.SUPABASE
             else -> SyncBackend.RELAY
         }
@@ -122,8 +174,17 @@ class Settings(context: Context) {
      * DO NOT log or include in crash reports.
      */
     var supabasePassword: String
-        get() = prefs.getString("supabase_password", "") ?: ""
-        set(v) = prefs.edit().putString("supabase_password", v).apply()
+        get() = readWrappedSecret(
+            KEY_SUPABASE_PW_WRAPPED_B64,
+            KEY_SUPABASE_PW_IV_B64,
+            KEY_LEGACY_SUPABASE_PW_PLAIN,
+        )
+        set(v) = writeWrappedSecret(
+            KEY_SUPABASE_PW_WRAPPED_B64,
+            KEY_SUPABASE_PW_IV_B64,
+            KEY_LEGACY_SUPABASE_PW_PLAIN,
+            v,
+        )
 
     /** Returns true when Supabase sync is fully configured: URL, anon key, and passphrase. */
     val isSupabaseConfigured: Boolean
@@ -136,20 +197,46 @@ class Settings(context: Context) {
         get() = supabaseEmail.isNotBlank() && supabasePassword.isNotBlank()
 
     /**
-     * Wall-time (Unix ms) of the most recently processed Supabase poll item.
-     * [SupabasePollWorker] reads this to avoid re-processing already-seen rows.
+     * Compound keyset cursor for the Supabase ascending poll.
+     *
+     * Both fields are advanced together for EVERY row in a batch (including
+     * self-echo and blank rows) BEFORE any `continue`, so a batch that
+     * contains only own-device rows still advances the cursor and does not
+     * re-fetch the same window on the next poll.
+     *
+     * Mirror of the `(last_wall_time, last_id)` cursor in the macOS daemon's
+     * cloud.rs `build_poll_url`. PostgREST keyset filter:
+     *   or=(wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))
+     * with order=wall_time.asc,id.asc.
      */
     var lastSupabasePollWallTime: Long
         get() = prefs.getLong("supabase_last_poll_wall_time", 0L)
         set(v) = prefs.edit().putLong("supabase_last_poll_wall_time", v).apply()
 
+    /**
+     * Row `id` (UUID string) of the last processed Supabase poll row.
+     * Combined with [lastSupabasePollWallTime] to form the compound keyset
+     * cursor — prevents burst-loss when >20 rows share the same wall_time.
+     * Empty string means "no rows seen yet" (initial state).
+     */
+    var lastSupabasePollId: String
+        get() = prefs.getString("supabase_last_poll_id", "") ?: ""
+        set(v) = prefs.edit().putString("supabase_last_poll_id", v).apply()
+
     val deviceId: String
         get() {
-            val stored = prefs.getString("device_id", null)
-            if (stored != null) return stored
-            val new = UUID.randomUUID().toString()
-            prefs.edit().putString("device_id", new).apply()
-            return new
+            // Fast path: key already exists — SharedPreferences reads are process-local
+            // and safe without a lock.
+            prefs.getString("device_id", null)?.let { return it }
+            // Slow path: first call (or concurrent callers on two threads). Hold a lock
+            // so only one UUID is generated and persisted; the loser re-reads the winner's
+            // value after acquiring the monitor.
+            synchronized(deviceIdLock) {
+                prefs.getString("device_id", null)?.let { return it }
+                val new = UUID.randomUUID().toString()
+                prefs.edit().putString("device_id", new).apply()
+                return new
+            }
         }
 
     var showSensitiveWarnings: Boolean
@@ -177,6 +264,101 @@ class Settings(context: Context) {
     var maxHistoryItems: Int
         get() = prefs.getInt("max_history_items", 1000)
         set(v) = prefs.edit().putInt("max_history_items", v).apply()
+
+    // ── Display settings (Maccy-parity) ────────────────────────────────────────
+
+    /**
+     * When true (default), surfaces use translucent/semi-transparent backgrounds
+     * where the theme supports it. When false, all surfaces use fully opaque
+     * solid backgrounds — useful for accessibility or low-end devices.
+     *
+     * NOTE: Android Compose surfaces do not have native vibrancy (no
+     * NSVisualEffectView equivalent). This flag controls whether container
+     * alpha is reduced for a "glass-like" feel. On most devices the visual
+     * effect is subtle; it primarily mirrors the macOS translucency pref.
+     */
+    var translucency: Boolean
+        get() = prefs.getBoolean("translucency", true)
+        set(v) = prefs.edit().putBoolean("translucency", v).apply()
+
+    /**
+     * Maximum height (in dp) for image thumbnails in the history list.
+     *
+     * Matches Maccy's `imageMaxHeight` preference. The thumbnail is scaled into
+     * a bounding box of width ≈ 340 dp × height [imageMaxHeight] dp using
+     * [androidx.compose.ui.layout.ContentScale.Fit] (uniform, never upscales).
+     *
+     * Default 40 dp (compact list rows). Range 1–200.
+     */
+    var imageMaxHeight: Int
+        get() = prefs.getInt("image_max_height", 40).coerceIn(1, 200)
+        set(v) = prefs.edit().putInt("image_max_height", v.coerceIn(1, 200)).apply()
+
+    /**
+     * Maximum number of history items to display and retain on-device.
+     *
+     * Mirrors Maccy's `historySize` preference. The list scrolls vertically
+     * without a row-count cap. Range 1–999.
+     *
+     * Note: [maxHistoryItems] (above) controls the on-disk retention cap used
+     * by the capture pipeline. [historySize] is the display cap consumed by the
+     * history list to limit how many items are fetched for rendering. Both
+     * default to sensible values independently so upgrading users are unaffected.
+     */
+    var historySize: Int
+        get() = prefs.getInt("history_size", 200).coerceIn(1, 999)
+        set(v) = prefs.edit().putInt("history_size", v.coerceIn(1, 999)).apply()
+
+    /**
+     * Delay in milliseconds before auto-collapsing an expanded action row.
+     *
+     * Mirrors Maccy's `previewDelay` preference. Range 200–100 000 ms. Default 1500 ms.
+     */
+    var previewDelay: Long
+        get() = prefs.getLong("preview_delay_ms", 1500L).coerceIn(200L, 100_000L)
+        set(v) = prefs.edit().putLong("preview_delay_ms", v.coerceIn(200L, 100_000L)).apply()
+
+    // ── Sync Wi-Fi preference ───────────────────────────────────────────────
+
+    /**
+     * When true, sync operations (both Supabase poll and relay fan-out) should
+     * be restricted to Wi-Fi connections. Defaults to false (sync on any network).
+     */
+    var syncOnWifiOnly: Boolean
+        get() = prefs.getBoolean("sync_on_wifi_only", false)
+        set(v) = prefs.edit().putBoolean("sync_on_wifi_only", v).apply()
+
+    // ── Storage / size limits ───────────────────────────────────────────────
+    // Defaults match crates/copypaste-core/src/config/defaults.rs.
+
+    /**
+     * Maximum size in bytes for a text clipboard item. Items larger than this
+     * are silently dropped at capture time.
+     * Default: 15 MiB (15 728 640 B) — matches MAX_TEXT_SIZE_BYTES in defaults.rs.
+     */
+    var maxTextSizeBytes: Long
+        get() = prefs.getLong("max_text_size_bytes", 15L * 1024 * 1024)
+        set(v) = prefs.edit().putLong("max_text_size_bytes", v).apply()
+
+    /**
+     * Maximum size in bytes for an image clipboard item. Images larger than this
+     * are silently dropped at capture time.
+     * Default: 64 MiB (67 108 864 B) — matches MAX_IMAGE_SIZE_BYTES in defaults.rs.
+     */
+    var maxImageSizeBytes: Long
+        get() = prefs.getLong("max_image_size_bytes", 64L * 1024 * 1024)
+        set(v) = prefs.edit().putLong("max_image_size_bytes", v).apply()
+
+    /**
+     * Total local storage quota for the clipboard database, in bytes.
+     * When the database approaches this limit, the oldest non-sensitive items
+     * should be pruned by the repository.
+     * Default: 10 GiB (10 737 418 240 B) — matches STORAGE_QUOTA_BYTES in defaults.rs.
+     * NOTE: 10 GiB exceeds Int range — the literal and pref MUST be Long.
+     */
+    var storageQuotaBytes: Long
+        get() = prefs.getLong("storage_quota_bytes", 10L * 1024 * 1024 * 1024)
+        set(v) = prefs.edit().putLong("storage_quota_bytes", v).apply()
 
     /**
      * 256-bit AES key used for local clipboard encryption.
@@ -325,6 +507,36 @@ class Settings(context: Context) {
                 .apply()
         }
 
+    // ── Logcat capture (adb READ_LOGS fallback) ────────────────────────────
+
+    /**
+     * Whether the optional adb READ_LOGS logcat capture path is enabled.
+     *
+     * This setting only takes effect if `android.permission.READ_LOGS` has been
+     * granted via adb (`adb shell pm grant com.copypaste.android android.permission.READ_LOGS`).
+     * Without that grant the service refuses to start regardless of this flag.
+     *
+     * Default: false (opt-in power-user feature).
+     */
+    var logcatCaptureEnabled: Boolean
+        get() = prefs.getBoolean("logcat_capture_enabled", false)
+        set(v) = prefs.edit().putBoolean("logcat_capture_enabled", v).apply()
+
+    /**
+     * Runtime flag set by [LogcatCaptureService] to track whether it has
+     * successfully read at least one clipboard item via logcat.
+     *
+     * false → either not yet tried, or Android 11+ scoped-logcat is blocking
+     *          system-process log lines, or API 29+ clipboard background
+     *          restriction is still preventing getPrimaryClip from returning a value.
+     * true  → at least one text clip was captured and routed through the pipeline.
+     *
+     * Reset to false when the service is stopped.
+     */
+    var logcatCaptureWorking: Boolean
+        get() = prefs.getBoolean("logcat_capture_working", false)
+        set(v) = prefs.edit().putBoolean("logcat_capture_working", v).apply()
+
     fun clear() {
         // H4: drop the cached master key so a re-created key after clear() is
         // not shadowed by a stale RAM copy.
@@ -351,6 +563,77 @@ class Settings(context: Context) {
         return cipher.doFinal(wrapped)
     }
 
+    /**
+     * Read a KEK-wrapped UTF-8 string secret stored under [wrappedKey]/[ivKey],
+     * migrating any pre-existing plaintext value held under [legacyPlainKey].
+     *
+     * Resolution order:
+     *  1. If a wrapped blob exists, unwrap and return it (empty string when the
+     *     KEK can no longer decrypt it — same best-effort policy as
+     *     [pairedPeerSessionKey]: a lost KEK means the secret is simply re-prompted).
+     *  2. Otherwise, if a legacy plaintext value exists, wrap it now (so the
+     *     plaintext is scrubbed on first read post-upgrade) and return it.
+     *  3. Otherwise return "" (unset).
+     */
+    private fun readWrappedSecret(
+        wrappedKey: String,
+        ivKey: String,
+        legacyPlainKey: String,
+    ): String {
+        val wrappedB64 = prefs.getString(wrappedKey, null)
+        val ivB64 = prefs.getString(ivKey, null)
+        if (wrappedB64 != null && ivB64 != null) {
+            return runCatching {
+                String(
+                    unwrapKey(
+                        wrapped = Base64.decode(wrappedB64, Base64.DEFAULT),
+                        iv = Base64.decode(ivB64, Base64.DEFAULT),
+                    ),
+                    Charsets.UTF_8,
+                )
+            }.getOrElse { e ->
+                Log.w(TAG, "Failed to unwrap secret '$wrappedKey' (${e.javaClass.simpleName})", e)
+                ""
+            }
+        }
+
+        // Migration: a previous build persisted this secret in plain prefs.
+        val legacyPlain = prefs.getString(legacyPlainKey, null)
+        if (legacyPlain != null && legacyPlain.isNotEmpty()) {
+            Log.i(TAG, "Migrating plain secret '$legacyPlainKey' into AndroidKeyStore wrap")
+            writeWrappedSecret(wrappedKey, ivKey, legacyPlainKey, legacyPlain)
+            return legacyPlain
+        }
+        return ""
+    }
+
+    /**
+     * Wrap [value] with the KEK and persist under [wrappedKey]/[ivKey], scrubbing
+     * any legacy plaintext under [legacyPlainKey]. An empty [value] clears all
+     * three keys (logical "unset").
+     */
+    private fun writeWrappedSecret(
+        wrappedKey: String,
+        ivKey: String,
+        legacyPlainKey: String,
+        value: String,
+    ) {
+        if (value.isEmpty()) {
+            prefs.edit()
+                .remove(wrappedKey)
+                .remove(ivKey)
+                .remove(legacyPlainKey)
+                .apply()
+            return
+        }
+        val (wrapped, iv) = wrapKey(value.toByteArray(Charsets.UTF_8))
+        prefs.edit()
+            .putString(wrappedKey, Base64.encodeToString(wrapped, Base64.DEFAULT))
+            .putString(ivKey, Base64.encodeToString(iv, Base64.DEFAULT))
+            .remove(legacyPlainKey)
+            .apply()
+    }
+
     private fun getOrCreateKek(): SecretKey {
         val keystore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
         (keystore.getKey(KEK_ALIAS, null) as? SecretKey)?.let { return it }
@@ -373,6 +656,20 @@ class Settings(context: Context) {
         return keygen.generateKey()
     }
 
+    /**
+     * Process-wide logical Lamport clock, shared across all [Settings] instances.
+     *
+     * Backed by the same "copypaste" [SharedPreferences] so the counter
+     * survives process death. All clock operations are thread-safe (see
+     * [LamportClock]). Accessed via [Settings] so callers don't need to pass
+     * the prefs reference separately.
+     *
+     * Use [lamportClock.tick()] when creating a locally-captured item for push.
+     * Use [lamportClock.observe(incoming)] when ingesting a remote item.
+     */
+    val lamportClock: LamportClock
+        get() = getLamportClock(prefs)
+
     companion object {
         private const val TAG = "Settings"
 
@@ -389,6 +686,27 @@ class Settings(context: Context) {
 
         private val keyCacheLock = Any()
 
+        /** Guards the read-or-generate-UUID critical section in [deviceId]. */
+        private val deviceIdLock = Any()
+
+        /**
+         * Process-wide [LamportClock] singleton. Constructed once (double-checked
+         * locking on [lamportClockLock]) and reused by all [Settings] instances.
+         * Using a shared instance ensures all code paths (FGS loop, WorkManager
+         * worker, push path) operate on the same monotonic counter.
+         */
+        @Volatile
+        private var cachedLamportClock: LamportClock? = null
+
+        private val lamportClockLock = Any()
+
+        private fun getLamportClock(prefs: SharedPreferences): LamportClock {
+            cachedLamportClock?.let { return it }
+            return synchronized(lamportClockLock) {
+                cachedLamportClock ?: LamportClock(prefs).also { cachedLamportClock = it }
+            }
+        }
+
         private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
         private const val KEK_ALIAS = "copypaste_master_kek_v1"
         private const val KEK_TRANSFORMATION = "AES/GCM/NoPadding"
@@ -398,5 +716,15 @@ class Settings(context: Context) {
         private const val KEY_LEGACY_PLAIN_KEY_B64 = "encryption_key_b64"
         private const val KEY_SESSION_WRAPPED_B64 = "paired_peer_session_key_wrapped_b64"
         private const val KEY_SESSION_IV_B64 = "paired_peer_session_key_iv_b64"
+
+        // ── KEK-wrapped cloud secrets (passphrase + Supabase password) ──────────
+        // Plaintext pref keys retained for read-time migration only.
+        private const val KEY_LEGACY_PASSPHRASE_PLAIN = "cloud_sync_passphrase"
+        private const val KEY_PASSPHRASE_WRAPPED_B64 = "cloud_sync_passphrase_wrapped_b64"
+        private const val KEY_PASSPHRASE_IV_B64 = "cloud_sync_passphrase_iv_b64"
+
+        private const val KEY_LEGACY_SUPABASE_PW_PLAIN = "supabase_password"
+        private const val KEY_SUPABASE_PW_WRAPPED_B64 = "supabase_password_wrapped_b64"
+        private const val KEY_SUPABASE_PW_IV_B64 = "supabase_password_iv_b64"
     }
 }

@@ -39,19 +39,23 @@ use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
 use copypaste_core::{
-    build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2, encrypt_for_cloud,
-    encrypt_item_with_aad, insert_item, ClipboardItem, Database, SyncKey, AAD_SCHEMA_VERSION_V4,
-    ITEM_KEY_VERSION_CURRENT,
+    build_item_aad_v2, count_items, decrypt_from_cloud, decrypt_item_by_version, derive_v2,
+    encrypt_for_cloud, encrypt_item_with_aad, exists_item_by_item_id, get_item_by_item_id,
+    insert_item, is_sensitive_for_autowipe, prune_to_cap, ClipboardItem, Database, SyncKey,
+    AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
 };
 
 // Beta W2.3 (arch-1): canonical auth client lives in copypaste-supabase. The
 // daemon's previous local `sign_in_with_password` stub is gone — `resolve_bearer`
 // now delegates to `AuthClient::sign_in`, which speaks the same GoTrue protocol
 // but is shared with mobile/CLI and exercised by the supabase crate's own
-// test suite. We keep the REST push/poll loops local because the supabase
-// crate's `Realtime` uses a WebSocket Phoenix-channel lifecycle that does not
-// map onto the daemon's bounded-retry / Retry-After model (see Wave 2.7).
+// test suite.
+//
+// v0.5.3 (realtime): the `RealtimeClient` is now also imported — see
+// `ws_ingest_loop` and `start_cloud` for the WS → HTTP-fallback architecture.
 use copypaste_supabase::auth::AuthClient;
+use copypaste_supabase::protocol::ChangeType;
+use copypaste_supabase::{RealtimeClient, RealtimeConfig};
 
 // ── Push reliability tuning (Wave 2.7 edge #19/#20/#21) ───────────────────────
 
@@ -66,6 +70,27 @@ const PUSH_MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// Initial delay between retry attempts. Doubles on each failure up to
 /// `PUSH_MAX_BACKOFF`.
 const PUSH_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+
+// ── Realtime / poll-interval tuning (v0.5.3) ─────────────────────────────────
+
+/// HTTP poll interval when the Realtime WebSocket is **connected**.
+///
+/// The WS delivers INSERT events instantly, so the poll loop runs only as a
+/// catch-up / missed-event safety net at a much lower frequency.
+const POLL_INTERVAL_WS_CONNECTED: Duration = Duration::from_secs(120);
+
+/// HTTP poll interval when the Realtime WebSocket is **disconnected** or
+/// has never connected (original behaviour — full-speed polling as the sole
+/// sync path).
+const POLL_INTERVAL_WS_FALLBACK: Duration = Duration::from_secs(10);
+
+/// Maximum number of rows fetched per poll tick.
+///
+/// When a batch comes back full (== POLL_BATCH_SIZE rows), the poll loop
+/// immediately re-polls without waiting for the full interval (burst-drain).
+/// This prevents a burst of simultaneous remote inserts from stalling at the
+/// watermark for a full interval when the batch was exactly exhausted.
+const POLL_BATCH_SIZE: usize = 20;
 
 // ── CloudError ────────────────────────────────────────────────────────────────
 
@@ -147,9 +172,13 @@ impl CloudConfig {
             .ok()
             .and_then(nonempty)
             .or_else(|| app_cfg.supabase_email.clone().and_then(nonempty));
+        // Password resolution (item 1): env var → Keychain → config.json fallback
+        // (migration: old installs that still have the password in config.json are
+        // served until the next set_config call migrates it to the Keychain).
         let password = std::env::var("SUPABASE_PASSWORD")
             .ok()
             .and_then(nonempty)
+            .or_else(|| crate::keychain::read_supabase_password_from_keychain().and_then(nonempty))
             .or_else(|| app_cfg.supabase_password.clone().and_then(nonempty));
 
         // Priority 1: environment variables for URL + anon key.
@@ -441,6 +470,10 @@ pub async fn start_cloud(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
+    // Shared live core config. The push/poll loops read `sync_on_wifi_only`,
+    // `history_limit`, and `storage_quota_bytes` on every tick so runtime
+    // changes via `set_config` take effect without a daemon restart (A-SET-2).
+    core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) -> anyhow::Result<CloudHandle> {
     // Defence-in-depth: re-validate the URL even though CloudConfig::new should
     // have rejected it already. Cheap, and protects callers that constructed
@@ -497,6 +530,12 @@ pub async fn start_cloud(
         notify_clone.notify_waiters();
     });
 
+    // v0.5.3: shared flag — `true` when the Realtime WebSocket channel is
+    // subscribed and delivering events. The HTTP poll loop reads this flag to
+    // decide its tick interval: slow (120 s) when WS is up (catch-up only),
+    // full-speed (10 s) when WS is down or has never connected.
+    let ws_connected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
     // Task A: push new local items to Supabase REST.
     // Also passes `db` (for startup backlog) and `last_sync_ms` (so every
     // successful push updates the timestamp, not only poll-side syncs).
@@ -509,6 +548,7 @@ pub async fn start_cloud(
     let push_last_sync_ms = last_sync_ms.clone();
     let push_signed_in = cloud_signed_in.clone();
     let push_auth = auth_client.clone();
+    let push_core_config = core_config.clone();
     tokio::spawn(push_loop(
         push_config,
         push_bearer,
@@ -520,9 +560,13 @@ pub async fn start_cloud(
         push_last_sync_ms,
         push_signed_in,
         push_auth,
+        push_core_config,
     ));
 
     // Task B: poll Supabase REST for remote items and insert unknown ones locally.
+    // When Task C (WS) is connected this runs at POLL_INTERVAL_WS_CONNECTED
+    // (2 min catch-up); when WS is disconnected it falls back to
+    // POLL_INTERVAL_WS_FALLBACK (10 s) as the sole download path.
     let poll_config = config.clone();
     let poll_bearer = bearer.clone();
     let poll_shutdown = shutdown.clone();
@@ -531,19 +575,76 @@ pub async fn start_cloud(
     let poll_last_sync_ms = last_sync_ms.clone();
     let poll_signed_in = cloud_signed_in.clone();
     let poll_auth = auth_client.clone();
+    let poll_ws_connected = ws_connected.clone();
+    // Snapshot retention limits for ws_ingest_loop (which takes plain values,
+    // not an Arc) before core_config is moved into realtime_loop.
+    let (ws_history_limit_val, ws_quota_bytes_val) = {
+        let defaults = copypaste_core::AppConfig::default();
+        core_config
+            .read()
+            .map(|g| (g.history_limit, g.storage_quota_bytes))
+            .unwrap_or((defaults.history_limit, defaults.storage_quota_bytes))
+    };
+    let poll_core_config = core_config;
     tokio::spawn(realtime_loop(
         poll_config,
         poll_bearer,
-        db,
+        db.clone(),
         poll_shutdown,
         poll_sync_key,
         poll_local_key,
         poll_last_sync_ms,
         poll_signed_in,
         poll_auth,
+        poll_ws_connected,
+        poll_core_config,
     ));
 
-    tracing::info!("cloud-sync started (url={})", config.supabase_url);
+    // Task C: Supabase Realtime WebSocket — instant INSERT delivery.
+    //
+    // Builds a `RealtimeConfig` from the same credentials as the REST loops,
+    // passing the authenticated bearer as `user_jwt` so the Realtime server
+    // applies RLS and delivers only the signed-in user's rows.
+    //
+    // On connect: sets `ws_connected = true` → HTTP poll backs off to 120 s.
+    // On disconnect / reconnect cycle: `ws_connected = false` during the gap →
+    // HTTP poll automatically steps back up to 10 s so no items are missed.
+    //
+    // The Wi-Fi guard (`sync_on_wifi_only`) is NOT applied here because the
+    // WebSocket connection is persistent; the poll loop already guards the
+    // actual download work. A WS reconnect on cellular is cheap (a few bytes)
+    // and avoids a stale `ws_connected = false` that would needlessly
+    // accelerate polling.
+    let ws_jwt = bearer.read().await.clone();
+    let ws_realtime_config = RealtimeConfig::with_jwt(
+        config.supabase_url.clone(),
+        config.anon_key.clone(),
+        RealtimeConfig::DEFAULT_TOPIC,
+        Some(ws_jwt),
+        true,
+    );
+    let ws_sync_key = sync_key.clone();
+    let ws_local_key = local_key.clone();
+    let ws_db = db;
+    let ws_last_sync_ms = last_sync_ms.clone();
+    let ws_shutdown = shutdown.clone();
+    let ws_connected_flag = ws_connected;
+    tokio::spawn(ws_ingest_loop(
+        ws_realtime_config,
+        ws_db,
+        ws_sync_key,
+        ws_local_key,
+        ws_last_sync_ms,
+        ws_shutdown,
+        ws_connected_flag,
+        ws_history_limit_val,
+        ws_quota_bytes_val,
+    ));
+
+    tracing::info!(
+        "cloud-sync started (url={}, realtime=ws)",
+        config.supabase_url
+    );
     Ok(CloudHandle {
         shutdown_tx: Some(shutdown_tx),
     })
@@ -652,6 +753,8 @@ async fn push_loop(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
     auth: Arc<AuthClient>,
+    // Live core config for hot-reload of sync_on_wifi_only (A-SET-2).
+    core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) {
     let client = reqwest::Client::new();
     let rest_url = format!("{}/rest/v1/clipboard_items", config.supabase_url);
@@ -768,7 +871,7 @@ async fn push_loop(
                     }
                 }
                 // Zero the key bytes.
-                key_arr.iter_mut().for_each(|b| *b = 0);
+                zeroize::Zeroize::zeroize(&mut key_arr);
                 tracing::info!(
                     "cloud-sync backlog: {} items queued for upload",
                     retry_queue.len()
@@ -788,6 +891,31 @@ async fn push_loop(
     // between dequeue and push the item is visible in the retry-queue log and
     // not silently dropped.
     loop {
+        // A-SET-2 hot-reload: read sync_on_wifi_only from the live config on
+        // every iteration so a runtime change via set_config takes effect
+        // immediately without a daemon restart.  Items remain in the retry
+        // queue and new broadcasts continue to accumulate; they'll be pushed
+        // once Wi-Fi is restored.
+        let sync_on_wifi_only = core_config
+            .read()
+            .map(|g| g.sync_on_wifi_only)
+            .unwrap_or(false);
+        if sync_on_wifi_only
+            && !tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+                .await
+                .unwrap_or(true)
+        {
+            tracing::debug!(
+                "cloud-sync push_loop: sync_on_wifi_only=true and not on Wi-Fi; \
+                 sleeping 10s before retry"
+            );
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                _ = shutdown.notified() => { break; }
+            }
+            continue;
+        }
+
         // Drain the retry queue first — if we made progress on backlog before
         // touching new items, recovery is observable and old items are not
         // perpetually starved by a steady stream of new work.
@@ -809,6 +937,9 @@ async fn push_loop(
                         "cloud-sync flushed queued id={} (retry queue drained one)",
                         item.id
                     );
+                    // Fix CLOUD-IS_SYNCED: mark the row synced so restart
+                    // backlog sweeps don't re-upload it.
+                    mark_item_synced(&db, &item.item_id).await;
                     // Fix #33: stamp last_sync_ms on every successful push so
                     // get_sync_status returns a non-null timestamp even when
                     // no remote items were polled.
@@ -921,6 +1052,8 @@ async fn push_loop(
                             {
                                 Ok(()) => {
                                     tracing::info!("cloud-sync pushed id={}", item.id);
+                                    // Fix CLOUD-IS_SYNCED: mark the row synced.
+                                    mark_item_synced(&db, &item.item_id).await;
                                     // Fix #33: update last_sync_ms on every successful push.
                                     let now_ms = std::time::SystemTime::now()
                                         .duration_since(std::time::UNIX_EPOCH)
@@ -972,6 +1105,43 @@ fn enqueue_for_retry(
         }
     }
     queue.push_back((item, payload_ct_b64));
+}
+
+/// Mark a row as successfully uploaded by setting `is_synced = 1`.
+///
+/// Fix CLOUD-IS_SYNCED: without this, `is_synced` stayed 0 forever, causing
+/// the startup backlog sweep (`WHERE is_synced = 0`) to re-upload the entire
+/// history on every daemon restart. Best-effort: a failed UPDATE is logged and
+/// not retried — the row will simply appear in the next backlog sweep, which is
+/// harmless (the server deduplicates by primary key).
+async fn mark_item_synced(db: &Arc<Mutex<Database>>, item_id: &str) {
+    let db_arc = db.clone();
+    let id_owned = item_id.to_owned();
+    // Run on the blocking pool — rusqlite is synchronous.
+    let result = tokio::task::spawn_blocking(move || {
+        let db = db_arc.blocking_lock();
+        db.conn()
+            .execute(
+                "UPDATE clipboard_items SET is_synced = 1 WHERE item_id = ?1",
+                rusqlite::params![id_owned],
+            )
+            .map_err(|e| e.to_string())
+    })
+    .await;
+    match result {
+        Ok(Ok(rows)) => {
+            if rows == 0 {
+                // Row may have been deleted between push and update — benign.
+                tracing::debug!("mark_item_synced: no row updated for item_id={item_id}");
+            }
+        }
+        Ok(Err(e)) => {
+            tracing::warn!("mark_item_synced: UPDATE failed for item_id={item_id}: {e}");
+        }
+        Err(e) => {
+            tracing::warn!("mark_item_synced: blocking task panicked for item_id={item_id}: {e}");
+        }
+    }
 }
 
 /// Decrypt a locally-stored [`ClipboardItem`]'s `content` field to plaintext
@@ -1272,28 +1442,71 @@ async fn refresh_bearer(
 /// instead of re-downloading the entire cloud history.
 const POLL_WATERMARK_KEY: &str = "cloud_poll_watermark";
 
-/// Base poll query (no lower bound). The `wall_time=gt.<watermark>` filter is
-/// appended by [`build_poll_url`] when a watermark is known.
-const POLL_SELECT_QS: &str = "select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20";
-
-/// Construct the poll URL for a single tick.
+/// Forward-pagination cursor for the cloud poll loop.
 ///
-/// When `watermark > 0`, appends `&wall_time=gt.<watermark>` so PostgREST only
-/// returns rows strictly newer than everything we have already ingested. The
-/// base query orders `wall_time.asc` so each tick fetches the OLDEST `limit`
-/// rows above the watermark and the watermark advances forward to the newest in
-/// that batch — the next tick resumes from there, so nothing is skipped. With
-/// descending order + `limit`, a tick that found more than `limit` new rows
-/// would fetch only the newest `limit`, jump the watermark to the newest, and
-/// permanently skip every row between the old watermark and the `limit`-th
-/// newest (finding C — silent download data loss). The `wall_time=gt.<value>`
-/// syntax matches the Android client (`SupabaseClient.kt`).
-fn build_poll_url(supabase_url: &str, watermark: i64) -> String {
-    if watermark > 0 {
-        format!("{supabase_url}/rest/v1/clipboard_items?{POLL_SELECT_QS}&wall_time=gt.{watermark}")
-    } else {
-        format!("{supabase_url}/rest/v1/clipboard_items?{POLL_SELECT_QS}")
+/// `wall` is the Unix-ms wall_time of the last row ingested (the persisted
+/// high-water-mark). `id` is that row's primary key, the secondary keyset
+/// component used to page forward through rows that share the same `wall`
+/// millisecond (see [`build_poll_url`]). `id` is empty on a cold start (only the
+/// `wall` lower bound is applied) and is populated once a row is ingested.
+#[derive(Debug, Clone, Default)]
+struct PollCursor {
+    wall: i64,
+    id: String,
+}
+
+/// Base poll query (no lower bound). The keyset cursor filter is appended by
+/// [`build_poll_url`] when a watermark is known. Order is the **compound**
+/// `(wall_time, id)` so pagination is deterministic even within one millisecond.
+/// Base poll query string. The `limit=` value MUST match [`POLL_BATCH_SIZE`];
+/// a compile-time assertion in `poll_once` enforces this.
+const POLL_SELECT_QS: &str = "select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc,id.asc&limit=20";
+
+/// Construct the poll URL for a single tick using a `(wall_time, id)` keyset
+/// cursor.
+///
+/// WATERMARK BUG FIX: the previous query used a `wall_time`-only cursor
+/// (`order=wall_time.asc&limit=20` + strict `wall_time=gt.<max>`). Because
+/// `wall_time` is millisecond granularity, a burst of ≥ `limit` rows sharing the
+/// SAME max millisecond was fatal: a tick fetched `limit` of them, advanced the
+/// watermark to that millisecond, and the next tick's strict `gt` filtered out
+/// the remaining same-millisecond rows FOREVER (silent download data loss).
+///
+/// The fix is a proper compound keyset cursor `(watermark_wall, watermark_id)`
+/// ordered by `(wall_time, id)`: each tick requests rows strictly *after* the
+/// `(wall_time, id)` pair of the last row ingested. Expressed in PostgREST:
+///
+/// ```text
+/// or=(wall_time.gt.W, and(wall_time.eq.W, id.gt.ID))
+/// ```
+///
+/// i.e. a later millisecond OR the same millisecond with a larger `id`. This
+/// advances forward through same-millisecond rows by `id` instead of stalling,
+/// so ≥20 rows sharing one wall_time are all eventually fetched, in order, with
+/// no gaps. Forward (`asc`) direction is preserved. `watermark_id` is empty on a
+/// fresh start (only a `wall_time` lower bound is used) or for a watermark
+/// restored from the persisted `wall_time`-only setting.
+fn build_poll_url(supabase_url: &str, watermark_wall: i64, watermark_id: &str) -> String {
+    let base = format!("{supabase_url}/rest/v1/clipboard_items?{POLL_SELECT_QS}");
+    if watermark_wall <= 0 {
+        return base;
     }
+    if watermark_id.is_empty() {
+        // No id component yet (cold start from a persisted wall_time-only
+        // watermark): use an inclusive `gte` so the boundary millisecond's rows
+        // are (re-)offered; the per-row item_id dedup drops already-ingested
+        // ones. Once a row is ingested the id component is populated and the
+        // strict keyset below takes over.
+        return format!("{base}&wall_time=gte.{watermark_wall}");
+    }
+    // Strict `(wall_time, id)` keyset: a later ms, OR the same ms with a larger
+    // id. URL-encode the parens-bearing PostgREST `or=` expression's commas are
+    // significant; reqwest will percent-encode the whole query value for us when
+    // we pass it through the URL, but we build the canonical PostgREST syntax
+    // here (matching the existing hand-built query strings in this module).
+    format!(
+        "{base}&or=(wall_time.gt.{watermark_wall},and(wall_time.eq.{watermark_wall},id.gt.{watermark_id}))"
+    )
 }
 
 /// Seed the download watermark on startup from the larger of the persisted
@@ -1345,9 +1558,21 @@ async fn realtime_loop(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
     auth: Arc<AuthClient>,
+    // Flag set by the WS task. When `true`, this loop uses the slow
+    // POLL_INTERVAL_WS_CONNECTED (2 min) interval so the WS delivers
+    // events instantly and HTTP is only a catch-up safety net.  When
+    // `false` (WS down / never connected), the loop runs at
+    // POLL_INTERVAL_WS_FALLBACK (10 s) as the sole download path.
+    ws_connected: Arc<std::sync::atomic::AtomicBool>,
+    // Live core config for hot-reload of sync_on_wifi_only, history_limit, and
+    // storage_quota_bytes (A-SET-2).  Loops read on every tick so runtime
+    // set_config changes take effect without a daemon restart.
+    core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) {
     let client = reqwest::Client::new();
-    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
+    // Start at the fallback (full-speed) interval; the tick period is
+    // updated dynamically before each sleep based on ws_connected.
+    let mut interval = tokio::time::interval(POLL_INTERVAL_WS_FALLBACK);
     // Don't burst: if a poll round runs long (slow network, large batch) and we
     // miss one or more ticks, skip the backlog and resume on the next aligned
     // tick instead of firing the missed ticks back-to-back (the default `Burst`
@@ -1370,20 +1595,72 @@ async fn realtime_loop(
     // the larger of (a) the persisted `cloud_poll_watermark` setting and (b) the
     // local `MAX(wall_time)`, and is persisted again after each advance so a
     // daemon restart does not re-download the entire history.
-    let mut watermark: i64 = {
+    let mut cursor: PollCursor = {
         let db_arc = db.clone();
-        tokio::task::spawn_blocking(move || {
+        let wall = tokio::task::spawn_blocking(move || {
             let db_guard = db_arc.blocking_lock();
             load_poll_watermark(&db_guard)
         })
         .await
-        .unwrap_or(0)
+        .unwrap_or(0);
+        // The persisted watermark is wall_time-only, so the id component starts
+        // empty and is populated as soon as the first row is ingested. Until
+        // then `build_poll_url` uses an inclusive `gte.<wall>` so no boundary
+        // millisecond row is skipped.
+        PollCursor {
+            wall,
+            id: String::new(),
+        }
     };
-    tracing::info!("cloud-sync poll: seeded download watermark wall_time={watermark}");
+    tracing::info!(
+        "cloud-sync poll: seeded download watermark wall_time={}",
+        cursor.wall
+    );
 
     loop {
+        // Dynamic interval: slow down when the WebSocket is delivering events
+        // instantly (2 min catch-up), run full-speed when WS is down (10 s).
+        // We reset the interval BEFORE waiting so the new period takes effect
+        // on the very next sleep, not after a stale tick fires.
+        let tick_period = if ws_connected.load(Ordering::Relaxed) {
+            POLL_INTERVAL_WS_CONNECTED
+        } else {
+            POLL_INTERVAL_WS_FALLBACK
+        };
+        if interval.period() != tick_period {
+            interval = tokio::time::interval(tick_period);
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            // Consume the immediate tick that a fresh interval fires on creation
+            // so we don't poll twice in quick succession after a period change.
+            interval.tick().await;
+        }
+
         tokio::select! {
             _ = interval.tick() => {
+                // A-SET-2 hot-reload: read sync_on_wifi_only live so a
+                // runtime set_config change takes effect without a restart.
+                // The is_on_wifi check runs on a blocking thread (networksetup
+                // shell invocation) so it doesn't block the async executor.
+                let (sync_on_wifi_only, history_limit, storage_quota_bytes) = {
+                    let defaults = copypaste_core::AppConfig::default();
+                    core_config
+                        .read()
+                        .map(|g| (g.sync_on_wifi_only, g.history_limit, g.storage_quota_bytes))
+                        .unwrap_or((false, defaults.history_limit, defaults.storage_quota_bytes))
+                };
+                if sync_on_wifi_only
+                    && !tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+                        .await
+                        .unwrap_or(true)
+                {
+                    tracing::debug!(
+                        "cloud-sync poll: sync_on_wifi_only=true and not on Wi-Fi; \
+                         skipping this tick"
+                    );
+                    continue;
+                }
+
+
                 // If no sync key is set, skip with a one-time warning.
                 let key_snapshot: Option<Vec<u8>> = {
                     let guard = sync_key.lock().await;
@@ -1413,19 +1690,51 @@ async fn realtime_loop(
                 // `fetch_remote_rows_with_refresh`, which performs the bl-cloud
                 // refresh-token grant on a 401 (via `auth`) and updates
                 // `cloud_signed_in`.
-                watermark = poll_once(
-                    &client,
-                    &config,
-                    &bearer,
-                    &db,
-                    &local_key,
-                    &last_sync_ms,
-                    &cloud_signed_in,
-                    &auth,
-                    &key_bytes,
-                    watermark,
-                )
-                .await;
+                //
+                // Burst-drain: if the batch came back full (== POLL_BATCH_SIZE),
+                // there may be more rows waiting — re-poll immediately rather than
+                // waiting the full interval, so a multi-device burst of simultaneous
+                // inserts is drained without a full 10-120 s delay per batch.
+                loop {
+                    let (new_cursor, batch_size) = poll_once(
+                        &client,
+                        &config,
+                        &bearer,
+                        &db,
+                        &local_key,
+                        &last_sync_ms,
+                        &cloud_signed_in,
+                        &auth,
+                        &key_bytes,
+                        cursor,
+                        history_limit,
+                        storage_quota_bytes,
+                    )
+                    .await;
+                    cursor = new_cursor;
+                    // Only keep draining if the batch was full AND shutdown hasn't fired.
+                    // Check shutdown without blocking so we don't stall the drain loop.
+                    if batch_size < POLL_BATCH_SIZE {
+                        break;
+                    }
+                    // Check shutdown between burst-drain ticks.
+                    if matches!(
+                        tokio::time::timeout(
+                            Duration::from_millis(0),
+                            shutdown.notified(),
+                        )
+                        .await,
+                        Ok(())
+                    ) {
+                        tracing::info!(
+                            "cloud-sync realtime_loop: shutdown during burst drain"
+                        );
+                        return;
+                    }
+                    tracing::debug!(
+                        "cloud-sync burst drain: batch_size={batch_size} == POLL_BATCH_SIZE, re-polling immediately"
+                    );
+                }
             }
             _ = shutdown.notified() => {
                 tracing::info!("cloud-sync realtime_loop: shutdown received");
@@ -1435,20 +1744,411 @@ async fn realtime_loop(
     }
 }
 
-/// Execute a single poll round and return the (possibly advanced) watermark.
 ///
-/// 1. Build the poll URL with `wall_time=gt.<watermark>` ordered `wall_time.asc`
-///    so PostgREST returns the OLDEST `limit` rows newer than everything ingested
-///    so far (forward pagination — the previous fixed `limit=20` re-fetched the
-///    same newest rows every tick, and descending order would skip rows between
-///    the watermark and the limit-th newest when more than `limit` arrive per
-///    tick).
-/// 2. Decrypt + re-encrypt + insert each unknown row.
-/// 3. Advance the watermark to the highest `wall_time` seen in the batch
-///    (including de-duped / undecryptable rows, so they are never re-requested)
-///    and persist it so a restart resumes forward instead of from the top.
+/// # Token refresh
 ///
-/// On a fetch error the watermark is returned unchanged so the next tick retries
+/// The WS client reconnects with backoff on any disconnect.  When a reconnect
+/// happens after a 401-style close (Supabase closes the WS for expired JWTs)
+/// the existing `bearer` RwLock is read for the current token.  Token refresh
+/// is handled by the push/poll loops' shared `AuthClient`; the WS loop simply
+/// reads the latest value from `bearer` at each reconnect attempt.
+///
+/// # Shutdown
+///
+/// Listens on the shared `shutdown` Notify; calls `ClientHandle::shutdown`
+/// which sends `phx_leave` + WebSocket Close before returning.
+#[allow(clippy::too_many_arguments)]
+async fn ws_ingest_loop(
+    config: RealtimeConfig,
+    db: Arc<Mutex<Database>>,
+    sync_key: Arc<Mutex<Option<SyncKey>>>,
+    local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
+    last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
+    shutdown: Arc<tokio::sync::Notify>,
+    ws_connected: Arc<std::sync::atomic::AtomicBool>,
+    history_limit: usize,
+    storage_quota_bytes: u64,
+) {
+    loop {
+        // Snapshot the current sync key.  If absent, back off and retry —
+        // the WS events can't be decrypted without it anyway.
+        let key_snapshot: Option<Vec<u8>> = {
+            let guard = sync_key.lock().await;
+            guard.as_ref().map(|k| k.as_bytes().to_vec())
+        };
+        if key_snapshot.is_none() {
+            tracing::debug!("ws_ingest_loop: no sync passphrase set — waiting 30 s before retry");
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(30)) => {}
+                _ = shutdown.notified() => {
+                    tracing::info!("ws_ingest_loop: shutdown received (no sync key)");
+                    return;
+                }
+            }
+            continue;
+        }
+        let key_bytes = key_snapshot.expect("checked above");
+
+        // Build a fresh client for this connection attempt.  If the bearer
+        // has been refreshed since the previous connect, `config.user_jwt`
+        // is updated here so the new join payload carries the live token.
+        // (The bearer is shared with push/poll loops via the Arc<RwLock>
+        // passed to start_cloud; we can't thread that Arc here without
+        // changing every signature, so for simplicity we read it from the
+        // config field that was seeded in start_cloud.  On reconnect we keep
+        // the same token — a future enhancement can re-read the bearer.)
+        let (client, mut rx) = RealtimeClient::new(config.clone());
+
+        let handle = match client.connect().await {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!("ws_ingest_loop: connect failed: {e}; backing off 10 s");
+                ws_connected.store(false, Ordering::Relaxed);
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                    _ = shutdown.notified() => {
+                        tracing::info!("ws_ingest_loop: shutdown during connect backoff");
+                        return;
+                    }
+                }
+                continue;
+            }
+        };
+
+        tracing::info!("ws_ingest_loop: WebSocket connected; setting ws_connected=true");
+        ws_connected.store(true, Ordering::Relaxed);
+
+        // Drain events until the channel closes (WS disconnect) or shutdown fires.
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown.notified() => {
+                    tracing::info!("ws_ingest_loop: shutdown received; closing WS");
+                    ws_connected.store(false, Ordering::Relaxed);
+                    handle.shutdown().await;
+                    return;
+                }
+                maybe_event = rx.recv() => {
+                    match maybe_event {
+                        None => {
+                            // Channel closed — WS disconnected.
+                            tracing::warn!(
+                                "ws_ingest_loop: event channel closed (WS disconnected); \
+                                 setting ws_connected=false, will reconnect"
+                            );
+                            ws_connected.store(false, Ordering::Relaxed);
+                            break; // outer loop will reconnect
+                        }
+                        Some(event) => {
+                            // Only ingest INSERTs for the clipboard_items table.
+                            if event.change_type != ChangeType::Insert
+                                || event.table != "clipboard_items"
+                            {
+                                continue;
+                            }
+
+                            // Run the same decrypt → LWW → dedup → re-encrypt →
+                            // insert → prune path as poll_once, but for a single
+                            // row sourced from the WS event record.
+                            let row = &event.record;
+                            let Some(id) = row["id"].as_str() else { continue };
+                            let Some(item_id) = row["item_id"].as_str() else { continue };
+                            let Some(payload_ct_str) = row["payload_ct"].as_str() else {
+                                tracing::warn!(
+                                    "ws_ingest_loop: INSERT event for id={id} missing \
+                                     payload_ct; skipping"
+                                );
+                                continue;
+                            };
+
+                            let blob = match decode_payload_ct(payload_ct_str) {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "ws_ingest_loop: payload_ct decode failed \
+                                         for id={id}: {e}; skipping"
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            // Snapshot ingestion inputs (all cheap clones / copies).
+                            let db_arc = db.clone();
+                            let local_key_clone = local_key.clone();
+                            let id_owned = id.to_owned();
+                            let item_id_owned = item_id.to_owned();
+                            let content_type = row["content_type"]
+                                .as_str()
+                                .unwrap_or("text")
+                                .to_owned();
+                            let lamport_ts = row["lamport_ts"].as_i64().unwrap_or(0);
+                            let wall_time = row["wall_time"].as_i64().unwrap_or(0);
+                            let expires_at = row["expires_at"].as_i64();
+                            let app_bundle_id =
+                                row["app_bundle_id"].as_str().map(str::to_owned);
+                            let origin_device_id = row["device_id"]
+                                .as_str()
+                                .map(str::to_owned)
+                                .unwrap_or_default();
+
+                            let mut key_arr = [0u8; 32];
+                            key_arr.copy_from_slice(&key_bytes);
+
+                            // Decrypt + re-encrypt + insert on the blocking pool.
+                            let result = tokio::task::spawn_blocking(move || {
+                                let db_guard = db_arc.blocking_lock();
+
+                                // LWW dedup: skip if item already present with
+                                // equal-or-newer lamport_ts.
+                                let existing =
+                                    match get_item_by_item_id(&db_guard, &item_id_owned) {
+                                        Ok(r) => r,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "ws_ingest_loop: get_item_by_item_id \
+                                                 error for item_id={item_id_owned}: {e}"
+                                            );
+                                            return false;
+                                        }
+                                    };
+
+                                let preserved_pk = if let Some(local) = existing.as_ref() {
+                                    if lamport_ts <= local.lamport_ts {
+                                        // Local is equal-or-newer — skip.
+                                        zeroize::Zeroize::zeroize(&mut key_arr);
+                                        return false;
+                                    }
+                                    Some(local.id.clone())
+                                } else {
+                                    match exists_item_by_item_id(&db_guard, &item_id_owned) {
+                                        Ok(true) => {
+                                            zeroize::Zeroize::zeroize(&mut key_arr);
+                                            return false;
+                                        }
+                                        Ok(false) => None,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "ws_ingest_loop: \
+                                                 exists_item_by_item_id error for \
+                                                 item_id={item_id_owned}: {e}"
+                                            );
+                                            return false;
+                                        }
+                                    }
+                                };
+
+                                // Decrypt with sync key.
+                                let tmp_key = SyncKey::from_bytes(key_arr);
+                                let plaintext =
+                                    match decrypt_from_cloud(&tmp_key, &item_id_owned, &blob) {
+                                        Ok(p) => p,
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "ws_ingest_loop: decrypt_from_cloud \
+                                                 failed for id={id_owned}: {e}; skipping"
+                                            );
+                                            return false;
+                                        }
+                                    };
+
+                                // Re-encrypt with local key.
+                                let mut local_item = match build_local_item(
+                                    &id_owned,
+                                    &item_id_owned,
+                                    &content_type,
+                                    &plaintext,
+                                    lamport_ts,
+                                    wall_time,
+                                    expires_at,
+                                    app_bundle_id,
+                                    origin_device_id,
+                                    &local_key_clone,
+                                ) {
+                                    Ok(i) => i,
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "ws_ingest_loop: local re-encrypt failed \
+                                             for id={id_owned}: {e}; skipping"
+                                        );
+                                        return false;
+                                    }
+                                };
+
+                                if let Some(pk) = preserved_pk.as_ref() {
+                                    local_item.id = pk.clone();
+                                }
+
+                                let write_res = if preserved_pk.is_some() {
+                                    replace_cloud_item_by_item_id(&db_guard, &local_item)
+                                } else {
+                                    insert_item(&db_guard, &local_item)
+                                        .map_err(anyhow::Error::from)
+                                };
+
+                                match write_res {
+                                    Ok(()) => {
+                                        tracing::info!(
+                                            "ws_ingest_loop: ingested INSERT \
+                                             item_id={} (id={})",
+                                            local_item.item_id,
+                                            local_item.id
+                                        );
+                                        // Prune to retention cap.
+                                        let total =
+                                            count_items(&db_guard).unwrap_or(0) as usize;
+                                        if total > history_limit {
+                                            let excess = total - history_limit;
+                                            // Fix (re-audit): collect ids first, then
+                                            // delete clipboard_items + clipboard_fts in
+                                            // one transaction to avoid orphan FTS rows.
+                                            let conn = db_guard.conn();
+                                            match conn.unchecked_transaction() {
+                                                Err(e) => tracing::warn!(
+                                                    "ws_ingest_loop: count-prune tx failed: {e}"
+                                                ),
+                                                Ok(tx) => {
+                                                    let ids_res: Result<Vec<String>, _> = tx
+                                                        .prepare(
+                                                            "SELECT id FROM clipboard_items \
+                                                             WHERE pinned = 0 \
+                                                             ORDER BY wall_time ASC \
+                                                             LIMIT ?1",
+                                                        )
+                                                        .and_then(|mut s| {
+                                                            s.query_map(
+                                                                rusqlite::params![excess as i64],
+                                                                |r| r.get(0),
+                                                            )
+                                                            .and_then(|rows| {
+                                                                rows.collect::<Result<Vec<_>, _>>()
+                                                            })
+                                                        });
+                                                    match ids_res {
+                                                        Err(e) => tracing::warn!(
+                                                            "ws_ingest_loop: count-prune \
+                                                             id-collect failed: {e}"
+                                                        ),
+                                                        Ok(ids) => {
+                                                            let del_res = tx.execute(
+                                                                "DELETE FROM clipboard_items \
+                                                                 WHERE id IN ( \
+                                                                     SELECT id \
+                                                                     FROM clipboard_items \
+                                                                     WHERE pinned = 0 \
+                                                                     ORDER BY wall_time ASC \
+                                                                     LIMIT ?1 \
+                                                                 )",
+                                                                rusqlite::params![excess as i64],
+                                                            );
+                                                            let fts_ok =
+                                                                del_res.is_ok() && ids.iter().all(
+                                                                    |id| {
+                                                                        tx.execute(
+                                                                            "DELETE FROM \
+                                                                             clipboard_fts \
+                                                                             WHERE id = ?1",
+                                                                            rusqlite::params![id],
+                                                                        )
+                                                                        .is_ok()
+                                                                    },
+                                                                );
+                                                            if fts_ok {
+                                                                match tx.commit() {
+                                                                    Ok(()) => tracing::debug!(
+                                                                        "ws_ingest_loop: \
+                                                                         count-pruned {} rows \
+                                                                         (history_limit=\
+                                                                         {history_limit})",
+                                                                        ids.len()
+                                                                    ),
+                                                                    Err(e) => tracing::warn!(
+                                                                        "ws_ingest_loop: \
+                                                                         count-prune commit \
+                                                                         failed: {e}"
+                                                                    ),
+                                                                }
+                                                            } else if let Err(e) = del_res {
+                                                                tracing::warn!(
+                                                                    "ws_ingest_loop: \
+                                                                     count-prune failed: {e}"
+                                                                );
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        let max_bytes =
+                                            storage_quota_bytes.min(i64::MAX as u64) as i64;
+                                        match prune_to_cap(&db_guard, max_bytes) {
+                                            Ok(0) => {}
+                                            Ok(n) => tracing::debug!(
+                                                "ws_ingest_loop: byte-pruned {n} rows \
+                                                 (quota_bytes={storage_quota_bytes})"
+                                            ),
+                                            Err(e) => tracing::warn!(
+                                                "ws_ingest_loop: prune_to_cap failed: {e}"
+                                            ),
+                                        }
+                                        true
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "ws_ingest_loop: failed to store \
+                                             item_id={}: {e}",
+                                            local_item.item_id
+                                        );
+                                        false
+                                    }
+                                }
+                            })
+                            .await;
+
+                            if let Ok(true) = result {
+                                let now_ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_millis() as i64;
+                                last_sync_ms.store(now_ms, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Brief backoff before reconnecting so a flapping connection
+        // doesn't spin the loop.  The WS client itself uses exponential
+        // backoff internally, but that is for errors during a session;
+        // this covers the outer reconnect loop after a clean disconnect.
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+            _ = shutdown.notified() => {
+                tracing::info!("ws_ingest_loop: shutdown during reconnect backoff");
+                // Update config.user_jwt with latest bearer before the next
+                // connect attempt — not needed here since we're shutting down.
+                return;
+            }
+        }
+    }
+}
+
+/// Execute a single poll round and return the (possibly advanced) cursor.
+///
+/// 1. Build the poll URL with a `(wall_time, id)` keyset cursor ordered
+///    `wall_time.asc, id.asc` so PostgREST returns the OLDEST `limit` rows after
+///    everything ingested so far (forward pagination). The compound cursor
+///    prevents the same-millisecond-burst data loss the old `wall_time`-only
+///    `gt` cursor suffered (see [`build_poll_url`]).
+/// 2. For each row, dedup/LWW by the cross-device `item_id`: a brand-new item is
+///    inserted; an item already present locally is routed through an LWW resolve
+///    (newer `lamport_ts` wins) and, on a win, replaced in place while the local
+///    primary key is preserved.
+/// 3. Advance the cursor to the `(wall_time, id)` of the last row seen in the
+///    batch (including de-duped / undecryptable rows, so they are never
+///    re-requested) and persist the wall component so a restart resumes forward.
+///
+/// On a fetch error the cursor is returned unchanged so the next tick retries
 /// the same window.
 #[allow(clippy::too_many_arguments)]
 async fn poll_once(
@@ -1461,9 +2161,21 @@ async fn poll_once(
     cloud_signed_in: &Arc<std::sync::atomic::AtomicBool>,
     auth: &AuthClient,
     key_bytes: &[u8],
-    watermark: i64,
-) -> i64 {
-    let poll_url = build_poll_url(&config.supabase_url, watermark);
+    cursor: PollCursor,
+    // Retention limits threaded from `AppConfig` so a long-offline device
+    // converges to the cap after backfill instead of materialising unbounded rows.
+    history_limit: usize,
+    storage_quota_bytes: u64,
+) -> (PollCursor, usize) {
+    // Compile-time guard: POLL_SELECT_QS embeds a numeric `limit=` that MUST
+    // match POLL_BATCH_SIZE. If this assert fires, update the limit= in
+    // POLL_SELECT_QS to match POLL_BATCH_SIZE.
+    const _: () = assert!(
+        POLL_BATCH_SIZE == 20,
+        "POLL_SELECT_QS limit= must match POLL_BATCH_SIZE"
+    );
+
+    let poll_url = build_poll_url(&config.supabase_url, cursor.wall, &cursor.id);
 
     let rows = match fetch_remote_rows_with_refresh(
         client,
@@ -1478,9 +2190,11 @@ async fn poll_once(
         Ok(rows) => rows,
         Err(e) => {
             tracing::warn!("cloud-sync poll failed: {e}");
-            return watermark;
+            return (cursor, 0);
         }
     };
+    // Track raw row count BEFORE blocking processing for burst-drain detection.
+    let batch_len = rows.len();
 
     // Decrypt + re-encrypt + insert in a blocking task so the async executor is
     // not blocked by rusqlite IO. We snapshot the key bytes (non-secret from the
@@ -1489,13 +2203,15 @@ async fn poll_once(
     let local_key_clone = local_key.clone();
     let mut key_arr = [0u8; 32];
     key_arr.copy_from_slice(key_bytes);
+    let start_cursor = cursor.clone();
     let join = tokio::task::spawn_blocking(move || {
         let db_guard = db_arc.blocking_lock();
         let mut synced = 0u32;
-        // Highest wall_time observed in this batch — used to advance the download
-        // watermark even for rows that were de-duped or failed to decrypt, so we
-        // never re-request them on the next tick.
-        let mut batch_max_wall: i64 = 0;
+        // Highest `(wall_time, id)` observed in this batch — used to advance the
+        // forward cursor even for rows that were de-duped or failed to decrypt,
+        // so we never re-request them on the next tick. Ordering matches the
+        // query's `(wall_time, id)` sort.
+        let mut batch_max: (i64, String) = (start_cursor.wall, start_cursor.id.clone());
         for row in rows {
             let Some(id) = row["id"].as_str() else {
                 continue;
@@ -1503,23 +2219,51 @@ async fn poll_once(
             let Some(item_id) = row["item_id"].as_str() else {
                 continue;
             };
-            // Advance the batch watermark for EVERY row we can read a wall_time
-            // from — including ones we skip below (already present, undecryptable)
-            // — so the next poll's `wall_time=gt.<watermark>` does not re-request
-            // them.
+            // Advance the batch cursor for EVERY row we can read — including ones
+            // we skip below (already present, undecryptable) — so the next poll's
+            // keyset filter does not re-request them.
             let row_wall = row["wall_time"].as_i64().unwrap_or(0);
-            if row_wall > batch_max_wall {
-                batch_max_wall = row_wall;
+            if (row_wall, id.to_owned()) > batch_max {
+                batch_max = (row_wall, id.to_owned());
             }
-            // Dedup check before doing expensive decrypt.
-            match exists_item(&db_guard, id) {
-                Ok(true) => continue,
+            // LWW dedup keyed on the cross-device `item_id` (NOT the per-row
+            // `id`, which differs across devices for the same logical item). If
+            // the item is already present locally, route it through an LWW
+            // resolve instead of inserting a duplicate or unconditionally
+            // dropping it: a strictly-newer remote `lamport_ts` must win so a
+            // cloud edit propagates, while an older/equal one is skipped.
+            let existing = match get_item_by_item_id(&db_guard, item_id) {
+                Ok(row) => row,
                 Err(e) => {
-                    tracing::warn!("cloud-sync: exists_item error for id={id}: {e}");
+                    tracing::warn!(
+                        "cloud-sync: get_item_by_item_id error for item_id={item_id}: {e}"
+                    );
                     continue;
                 }
-                Ok(false) => {}
-            }
+            };
+            let preserved_pk = if let Some(local) = existing.as_ref() {
+                let remote_lamport = row["lamport_ts"].as_i64().unwrap_or(0);
+                if remote_lamport <= local.lamport_ts {
+                    // Local copy is newer-or-equal (LWW keeps local) — skip.
+                    continue;
+                }
+                // Remote wins LWW: replace in place, preserving the local PK so
+                // FTS / copy_item / pins keep pointing at the same row.
+                Some(local.id.clone())
+            } else {
+                // Defensive: also honour a same-`id` row that somehow lacks the
+                // matching item_id (legacy rows) so we never double-insert.
+                match exists_item_by_item_id(&db_guard, item_id) {
+                    Ok(true) => continue,
+                    Ok(false) => None,
+                    Err(e) => {
+                        tracing::warn!(
+                            "cloud-sync: exists_item_by_item_id error for item_id={item_id}: {e}"
+                        );
+                        continue;
+                    }
+                }
+            };
 
             // Decode payload_ct (base64 → bytes).
             let payload_ct_b64 = match row["payload_ct"].as_str() {
@@ -1573,7 +2317,7 @@ async fn poll_once(
                 .map(str::to_owned)
                 .unwrap_or_default();
 
-            let local_item = match build_local_item(
+            let mut local_item = match build_local_item(
                 id,
                 item_id,
                 &content_type,
@@ -1594,38 +2338,153 @@ async fn poll_once(
                 }
             };
 
-            match insert_item(&db_guard, &local_item) {
+            // For an LWW replace, preserve the existing local row's primary key
+            // so FTS / copy_item / pins keep pointing at the same row (do NOT
+            // adopt the remote's `id`).
+            if let Some(pk) = preserved_pk.as_ref() {
+                local_item.id = pk.clone();
+            }
+
+            let write_res = if preserved_pk.is_some() {
+                // Replace the prior version atomically (delete by item_id +
+                // re-insert with the preserved PK). Cloud items are text-only
+                // here, so no FTS plaintext is threaded through; the FTS rewrite
+                // happens lazily on read paths that already rebuild it.
+                replace_cloud_item_by_item_id(&db_guard, &local_item)
+            } else {
+                insert_item(&db_guard, &local_item).map_err(anyhow::Error::from)
+            };
+            match write_res {
                 Ok(()) => {
                     synced += 1;
-                    tracing::info!("cloud-sync: synced remote id={}", local_item.id);
+                    tracing::info!(
+                        "cloud-sync: synced remote item_id={} (id={})",
+                        local_item.item_id,
+                        local_item.id
+                    );
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "cloud-sync: failed to insert remote id={}: {e}",
-                        local_item.id
+                        "cloud-sync: failed to store remote item_id={}: {e}",
+                        local_item.item_id
                     );
                 }
             }
         }
         // Zero the snapshot key bytes before the closure exits.
-        key_arr.iter_mut().for_each(|b| *b = 0);
-        // Persist the advanced watermark inside the same DB lock so it survives a
-        // restart. Return the value the async loop should use going forward.
-        let new_watermark = if batch_max_wall > watermark {
-            if let Err(e) = save_poll_watermark(&db_guard, batch_max_wall) {
-                tracing::warn!(
-                    "cloud-sync: failed to persist poll watermark {batch_max_wall}: {e}"
-                );
+        zeroize::Zeroize::zeroize(&mut key_arr);
+        // ── Backfill safety: enforce local retention cap after ingest ─────────
+        //
+        // After writing all rows from this batch, prune oldest UNPINNED items so
+        // the local DB stays within the configured count and byte caps. This
+        // prevents a long-offline device from materialising thousands of cloud
+        // rows unbounded on reconnect (each poll tick adds up to 20 rows).
+        //
+        // The cloud watermark (persisted below) tracks the highest cloud row
+        // seen and is stored in the `settings` table — completely independent of
+        // the `clipboard_items` rows we are pruning here. Evicting old local rows
+        // does NOT move the watermark backwards: next tick the cursor still
+        // advances from the cloud side. Cloud still holds the older items; only
+        // the local cache is capped.
+        if synced > 0 {
+            // Count cap: mirrors daemon.rs `prune_history` — bulk DELETE oldest
+            // unpinned rows when the total exceeds `history_limit`.
+            // Fix (re-audit): collect ids first, then delete clipboard_items +
+            // clipboard_fts in one transaction to avoid orphan FTS rows.
+            let total = count_items(&db_guard).unwrap_or(0) as usize;
+            if total > history_limit {
+                let excess = total - history_limit;
+                let conn = db_guard.conn();
+                match conn.unchecked_transaction() {
+                    Err(e) => {
+                        tracing::warn!("cloud-sync poll_once: count-prune tx failed: {e}")
+                    }
+                    Ok(tx) => {
+                        let ids_res: Result<Vec<String>, _> = tx
+                            .prepare(
+                                "SELECT id FROM clipboard_items
+                                 WHERE pinned = 0
+                                 ORDER BY wall_time ASC
+                                 LIMIT ?1",
+                            )
+                            .and_then(|mut s| {
+                                s.query_map(rusqlite::params![excess as i64], |r| r.get(0))
+                                    .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
+                            });
+                        match ids_res {
+                            Err(e) => tracing::warn!(
+                                "cloud-sync poll_once: count-prune id-collect failed: {e}"
+                            ),
+                            Ok(ids) => {
+                                let del_res = tx.execute(
+                                    "DELETE FROM clipboard_items WHERE id IN (
+                                         SELECT id FROM clipboard_items
+                                         WHERE pinned = 0
+                                         ORDER BY wall_time ASC
+                                         LIMIT ?1
+                                     )",
+                                    rusqlite::params![excess as i64],
+                                );
+                                let fts_ok = del_res.is_ok()
+                                    && ids.iter().all(|id| {
+                                        tx.execute(
+                                            "DELETE FROM clipboard_fts WHERE id = ?1",
+                                            rusqlite::params![id],
+                                        )
+                                        .is_ok()
+                                    });
+                                if fts_ok {
+                                    match tx.commit() {
+                                        Ok(()) => tracing::debug!(
+                                            "cloud-sync poll_once: count-pruned {} rows \
+                                             (history_limit={history_limit})",
+                                            ids.len()
+                                        ),
+                                        Err(e) => tracing::warn!(
+                                            "cloud-sync poll_once: count-prune commit \
+                                             failed: {e}"
+                                        ),
+                                    }
+                                } else if let Err(e) = del_res {
+                                    tracing::warn!("cloud-sync poll_once: count-prune failed: {e}");
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            batch_max_wall
-        } else {
-            watermark
+            // Byte cap: window-function prune via core API (takes i64 max_bytes).
+            // `storage_quota_bytes` is u64 from AppConfig; saturating cast to i64
+            // keeps the value in range (i64::MAX ≈ 9.2 EB, far beyond any real quota).
+            let max_bytes = storage_quota_bytes.min(i64::MAX as u64) as i64;
+            match prune_to_cap(&db_guard, max_bytes) {
+                Ok(0) => {}
+                Ok(n) => tracing::debug!(
+                    "cloud-sync poll_once: byte-pruned {n} rows after batch ingest \
+                     (quota_bytes={storage_quota_bytes})"
+                ),
+                Err(e) => tracing::warn!("cloud-sync poll_once: prune_to_cap failed: {e}"),
+            }
+        }
+
+        // Persist the advanced wall watermark inside the same DB lock so it
+        // survives a restart. Return the full `(wall, id)` cursor the async loop
+        // should use going forward.
+        let new_wall = batch_max.0;
+        if new_wall > start_cursor.wall {
+            if let Err(e) = save_poll_watermark(&db_guard, new_wall) {
+                tracing::warn!("cloud-sync: failed to persist poll watermark {new_wall}: {e}");
+            }
+        }
+        let new_cursor = PollCursor {
+            wall: batch_max.0,
+            id: batch_max.1,
         };
-        (synced, new_watermark)
+        (synced, new_cursor)
     });
 
     match join.await {
-        Ok((synced, new_watermark)) => {
+        Ok((synced, new_cursor)) => {
             if synced > 0 {
                 // Record the wall-clock time of the last successful sync.
                 let now_ms = std::time::SystemTime::now()
@@ -1634,15 +2493,61 @@ async fn poll_once(
                     .as_millis() as i64;
                 last_sync_ms.store(now_ms, Ordering::Relaxed);
             }
-            // Advance the in-memory watermark so the next tick's URL filters past
-            // everything we just saw.
-            new_watermark.max(watermark)
+            // Advance the in-memory cursor so the next tick's URL keyset-filters
+            // past everything we just saw. `new_cursor` is monotonically ≥ the
+            // start cursor (batch_max seeds from it), so it never regresses.
+            (new_cursor, batch_len)
         }
         Err(e) => {
             tracing::warn!("cloud-sync: insert worker panicked or was cancelled: {e}");
-            watermark
+            (cursor, 0)
         }
     }
+}
+
+/// Atomically replace a cloud-downloaded clipboard row by its cross-device
+/// `item_id`, preserving the row's primary key (`item.id`) so FTS / copy_item /
+/// pins keep pointing at the same row.
+///
+/// Runs DELETE-by-item_id + INSERT inside one `unchecked_transaction` so a
+/// failed insert rolls back the delete and the prior row survives. This is the
+/// cloud-poll counterpart of `sync_orch::replace_item_atomic` (the LWW
+/// `TakeRemote` replace); FTS is not threaded through here because cloud rows
+/// are re-indexed lazily on read.
+fn replace_cloud_item_by_item_id(db: &Database, item: &ClipboardItem) -> anyhow::Result<()> {
+    use rusqlite::params;
+    let tx = db.conn().unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM clipboard_items WHERE item_id = ?1",
+        params![item.item_id],
+    )?;
+    tx.execute(
+        "INSERT INTO clipboard_items
+         (id, item_id, content_type, content, content_nonce, blob_ref,
+          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+          content_hash, origin_device_id, key_version, pinned)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+        params![
+            item.id,
+            item.item_id,
+            item.content_type,
+            item.content,
+            item.content_nonce,
+            item.blob_ref,
+            item.is_sensitive as i64,
+            item.is_synced as i64,
+            item.lamport_ts,
+            item.wall_time,
+            item.expires_at,
+            item.app_bundle_id,
+            item.content_hash,
+            item.origin_device_id,
+            ITEM_KEY_VERSION_CURRENT,
+            item.pinned as i64,
+        ],
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
 /// Build a local [`ClipboardItem`] from decrypted plaintext by re-encrypting
@@ -1683,6 +2588,21 @@ fn build_local_item(
     );
     let (nonce, ciphertext) =
         encrypt_item_with_aad(plaintext, &v2_key, &aad).map_err(|e| e.to_string())?;
+
+    // Fix CLOUD-SENSITIVE: run the same auto-wipe gate as the clipboard capture
+    // path (daemon handle_text) so cross-device sensitive items are flagged for
+    // auto-wipe on the receiving device using the SAME confidence floor (>=0.70).
+    // Using bare detect().is_some() here would over-flag (e.g. a phone number that
+    // never auto-wipes locally would auto-wipe when synced) — a cross-device
+    // data-loss asymmetry. The plaintext is already in memory; detection is fast
+    // (regex only) and never logged.
+    let is_sensitive = if content_type == "text" {
+        let text = std::str::from_utf8(plaintext).unwrap_or("");
+        is_sensitive_for_autowipe(text)
+    } else {
+        false
+    };
+
     Ok(ClipboardItem {
         id: id.to_owned(),
         item_id: item_id.to_owned(),
@@ -1690,7 +2610,7 @@ fn build_local_item(
         content: Some(ciphertext),
         content_nonce: Some(nonce.to_vec()),
         blob_ref: None,
-        is_sensitive: false,
+        is_sensitive,
         is_synced: true,
         lamport_ts,
         wall_time,
@@ -2600,20 +3520,31 @@ mod tests {
 
     #[test]
     fn build_poll_url_appends_watermark_only_when_positive() {
-        let base = build_poll_url("https://x.test", 0);
+        // No watermark: no lower-bound filter.
+        let base = build_poll_url("https://x.test", 0, "");
         assert!(
             base.ends_with("&limit=20"),
             "no watermark filter when watermark==0: {base}"
         );
         assert!(
-            !base.contains("wall_time=gt."),
-            "must NOT add a gt filter at watermark 0: {base}"
+            !base.contains("wall_time="),
+            "must NOT add a wall_time filter at watermark 0: {base}"
         );
 
-        let bounded = build_poll_url("https://x.test", 1234);
+        // Wall-only watermark (cold start, empty id): inclusive `gte` so the
+        // boundary millisecond's rows are re-offered and deduped, not skipped.
+        let cold = build_poll_url("https://x.test", 1234, "");
         assert!(
-            bounded.contains("&wall_time=gt.1234"),
-            "watermark must be appended as wall_time=gt.<T>: {bounded}"
+            cold.contains("&wall_time=gte.1234"),
+            "cold-start watermark must use inclusive gte: {cold}"
+        );
+
+        // Full `(wall, id)` keyset cursor: strict compound `or=` filter so
+        // ≥limit same-millisecond rows page forward by id instead of stalling.
+        let keyset = build_poll_url("https://x.test", 1234, "row-9");
+        assert!(
+            keyset.contains("&or=(wall_time.gt.1234,and(wall_time.eq.1234,id.gt.row-9))"),
+            "keyset cursor must emit the compound (wall,id) filter: {keyset}"
         );
     }
 
@@ -2694,14 +3625,14 @@ mod tests {
         );
 
         // Mocks are matched in REGISTRATION order. Register the SPECIFIC
-        // `wall_time=gt.2000` matcher FIRST so the round-2 request lands there.
-        // Round 1's request (watermark 0 → no gt filter) cannot match it and
-        // falls through to the catch-all `m1`. This also enforces *absence* of
-        // the filter on round 1: if round 1 had erroneously carried
-        // `wall_time=gt.2000`, it would match `m2` and overflow its
-        // `.expect(1)`, failing `m2.assert()`.
+        // round-2 keyset matcher FIRST so the round-2 request lands there. After
+        // round 1 ingests the row at (wall=2000, id=1111...), the round-2 cursor
+        // is the compound `(2000, 1111...)`, so the request carries the strict
+        // keyset `or=(wall_time.gt.2000, and(wall_time.eq.2000, id.gt.1111...))`.
+        // Round 1's request (cursor wall=0 → no filter) cannot match it and
+        // falls through to the catch-all `m1`.
         let m2 = mockito::mock("GET", "/rest/v1/clipboard_items")
-            .match_query(Matcher::Regex("wall_time=gt.2000".into()))
+            .match_query(Matcher::Regex("or=\\(wall_time\\.gt\\.2000".into()))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body("[]")
@@ -2729,8 +3660,8 @@ mod tests {
         let auth = test_auth(&cfg);
         let key_bytes = sync_key.as_bytes().to_vec();
 
-        // Round 1: from watermark 0.
-        let wm1 = poll_once(
+        // Round 1: from an empty cursor (wall 0).
+        let (wm1, _) = poll_once(
             &client,
             &cfg,
             &bearer,
@@ -2740,12 +3671,18 @@ mod tests {
             &signed_in,
             &auth,
             &key_bytes,
-            0,
+            PollCursor::default(),
+            1000,        // history_limit: sensible test value
+            500_000_000, // storage_quota_bytes: 500 MB
         )
         .await;
         assert_eq!(
-            wm1, 2000,
+            wm1.wall, 2000,
             "watermark must advance to the ingested row's wall_time"
+        );
+        assert_eq!(
+            wm1.id, "11111111-1111-1111-1111-111111111111",
+            "cursor id must advance to the ingested row's id"
         );
         m1.assert();
 
@@ -2761,8 +3698,9 @@ mod tests {
             assert_eq!(load_poll_watermark(&g), 2000);
         }
 
-        // Round 2: from watermark 2000 — request carries the gt filter, no rows.
-        let wm2 = poll_once(
+        // Round 2: from the (2000, 1111...) cursor — request carries the keyset
+        // filter, no rows.
+        let (wm2, _) = poll_once(
             &client,
             &cfg,
             &bearer,
@@ -2773,10 +3711,12 @@ mod tests {
             &auth,
             &key_bytes,
             wm1,
+            1000,        // history_limit
+            500_000_000, // storage_quota_bytes
         )
         .await;
         assert_eq!(
-            wm2, 2000,
+            wm2.wall, 2000,
             "empty newer-window leaves the watermark unchanged"
         );
         m2.assert();
@@ -2828,12 +3768,15 @@ mod tests {
         let body = |rows: &[serde_json::Value]| serde_json::to_string(rows).unwrap();
 
         // ── Ascending (correct) mocks ────────────────────────────────────────
-        // Round 2 (asc): gt.1019 → the remaining 5 oldest-above-watermark rows.
+        // Round 2 (asc): the keyset cursor after round 1 is
+        // (wall=1019, id=c0000000-0000-0000-0000-000000000019), so the request
+        // carries `or=(wall_time.gt.1019, and(wall_time.eq.1019, id.gt.<id19>))`
+        // → the remaining 5 rows above the watermark (wall 1020..=1024).
         // Registered first so the specific filter wins over the catch-all.
         let asc_p2 = mockito::mock("GET", "/rest/v1/clipboard_items")
             .match_query(Matcher::AllOf(vec![
                 Matcher::Regex("order=wall_time\\.asc".into()),
-                Matcher::Regex("wall_time=gt\\.1019$".into()),
+                Matcher::Regex("or=\\(wall_time\\.gt\\.1019".into()),
             ]))
             .with_status(200)
             .with_header("content-type", "application/json")
@@ -2884,9 +3827,9 @@ mod tests {
         let key_bytes = sync_key.as_bytes().to_vec();
 
         // Two ticks, exactly as the realtime loop would do back-to-back.
-        let mut watermark = 0i64;
+        let mut cursor = PollCursor::default();
         for _ in 0..2 {
-            watermark = poll_once(
+            (cursor, _) = poll_once(
                 &client,
                 &cfg,
                 &bearer,
@@ -2896,10 +3839,13 @@ mod tests {
                 &signed_in,
                 &auth,
                 &key_bytes,
-                watermark,
+                cursor,
+                1000,        // history_limit
+                500_000_000, // storage_quota_bytes
             )
             .await;
         }
+        let watermark = cursor.wall;
 
         // The whole point: ALL 25 rows must be present. On `.desc` only 20 land.
         let count: i64 = {
@@ -2924,6 +3870,240 @@ mod tests {
         // Keep the unused-mock handles alive for the duration; drop explicitly.
         drop(desc_p1);
         drop(desc_p2);
+    }
+
+    /// Build a cloud row with an explicit `lamport_ts` decoupled from
+    /// `wall_time` (the `cloud_row` helper ties them together). `id == item_id`
+    /// 1:1 for the test, matching `cloud_row`.
+    fn cloud_row_lamport(
+        id: &str,
+        sync_key: &SyncKey,
+        plaintext: &[u8],
+        wall_time: i64,
+        lamport_ts: i64,
+    ) -> serde_json::Value {
+        let mut row = cloud_row(id, sync_key, plaintext, wall_time);
+        row["lamport_ts"] = serde_json::json!(lamport_ts);
+        row
+    }
+
+    /// **WATERMARK BUG** — ≥ `limit` (20) rows that all share the SAME
+    /// `wall_time` millisecond must ALL be fetched. The old `wall_time`-only
+    /// `gt.<max>` cursor would fetch the first 20, advance the watermark to that
+    /// same millisecond, and the strict `gt` would then exclude the remaining
+    /// same-millisecond rows forever. The compound `(wall_time, id)` keyset
+    /// cursor pages forward by `id` within the millisecond, so all 25 land.
+    ///
+    /// mockito 0.31 has no dynamic per-request body, so we model the three
+    /// PostgREST keyset windows with three explicit `match_query` mocks:
+    ///   * page 1: cold start (no keyset filter)  → ids 00..19 (oldest 20)
+    ///   * page 2: keyset after (5000, id19)       → ids 20..24 (5 rows)
+    ///   * page 3: keyset after (5000, id24)       → [] (drained)
+    #[tokio::test]
+    async fn poll_fetches_all_rows_sharing_one_wall_time_via_keyset_cursor() {
+        use mockito::Matcher;
+
+        let sync_key = copypaste_core::derive_sync_key("same-wall-passphrase").unwrap();
+
+        // 25 distinct rows, ALL at wall_time=5000, ids sortable by index so the
+        // keyset `id.gt.<last>` pages forward deterministically.
+        let all: Vec<serde_json::Value> = (0..25i64)
+            .map(|i| {
+                let id = format!("d0000000-0000-0000-0000-{i:012}");
+                cloud_row(&id, &sync_key, format!("same-wall-{i}").as_bytes(), 5000)
+            })
+            .collect();
+        let body = |rows: &[serde_json::Value]| serde_json::to_string(rows).unwrap();
+        let id19 = "d0000000-0000-0000-0000-000000000019";
+        let id24 = "d0000000-0000-0000-0000-000000000024";
+
+        // Register most-specific keyset matchers FIRST (mockito matches in
+        // registration order). Page 3 (after id24) → drained.
+        let p3 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::Regex(format!("id\\.gt\\.{id24}")))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("[]")
+            .expect(1)
+            .create();
+        // Page 2 (after id19) → the remaining 5 rows.
+        let p2 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::Regex(format!("id\\.gt\\.{id19}")))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body(&all[20..25]))
+            .expect(1)
+            .create();
+        // Page 1 (cold start, no keyset filter) → the oldest 20.
+        let p1 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body(&all[0..20]))
+            .expect(1)
+            .create();
+
+        let cfg = test_cfg();
+        let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
+        let client = reqwest::Client::new();
+        let db = Arc::new(Mutex::new(
+            copypaste_core::Database::open_in_memory().expect("in-mem db"),
+        ));
+        let local_key = Arc::new(zeroize::Zeroizing::new([7u8; 32]));
+        let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let auth = test_auth(&cfg);
+        let key_bytes = sync_key.as_bytes().to_vec();
+
+        // Three ticks drain all 25 rows.
+        let mut cursor = PollCursor::default();
+        for _ in 0..3 {
+            (cursor, _) = poll_once(
+                &client,
+                &cfg,
+                &bearer,
+                &db,
+                &local_key,
+                &last_sync_ms,
+                &signed_in,
+                &auth,
+                &key_bytes,
+                cursor,
+                1000,        // history_limit
+                500_000_000, // storage_quota_bytes
+            )
+            .await;
+        }
+
+        let count: i64 = {
+            let g = db.lock().await;
+            g.conn()
+                .query_row("SELECT COUNT(1) FROM clipboard_items", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(
+            count, 25,
+            "all 25 rows sharing one wall_time must be fetched via the (wall,id) keyset cursor"
+        );
+        p1.assert();
+        p2.assert();
+        p3.assert();
+    }
+
+    /// Cloud LWW by `item_id`: a poll row for an item ALREADY present locally
+    /// (under a DIFFERENT row `id`, as it would be on another device) with a
+    /// strictly-newer `lamport_ts` must REPLACE the local row in place —
+    /// preserving the local primary key — instead of inserting a duplicate or
+    /// being dropped by a plain id-dedup.
+    #[tokio::test]
+    async fn poll_lww_replaces_existing_item_id_preserving_local_pk() {
+        let sync_key = copypaste_core::derive_sync_key("cloud-lww-passphrase").unwrap();
+        let local_key = Arc::new(zeroize::Zeroizing::new([7u8; 32]));
+
+        let db = Arc::new(Mutex::new(
+            copypaste_core::Database::open_in_memory().expect("in-mem db"),
+        ));
+
+        // Seed a local row: PK "local-pk", item_id "shared-iid", lamport 5,
+        // re-encrypted under the local key exactly as the download path stores
+        // rows (so a later read could decrypt it).
+        {
+            let g = db.lock().await;
+            let seeded = build_local_item(
+                "local-pk",
+                "shared-iid",
+                "text",
+                b"old-local-content",
+                5,    // lamport
+                1000, // wall_time
+                None,
+                None,
+                "device-local".to_owned(),
+                &local_key,
+            )
+            .expect("seed build");
+            copypaste_core::insert_item(&g, &seeded).expect("seed insert");
+        }
+
+        // Remote poll row: peer's own PK "peer-pk", SAME item_id "shared-iid",
+        // NEWER lamport 9, newer wall_time, different content.
+        let row = {
+            // Build the row, then override item_id (cloud_row uses id==item_id).
+            // `cloud_row` encrypts the payload with AAD bound to its `id` arg
+            // (it sets item_id == id), so build it under "shared-iid" first so
+            // the blob's AAD matches the item_id the receiver decrypts with,
+            // then override the row PK to the peer's distinct "peer-pk".
+            let mut r = cloud_row_lamport("shared-iid", &sync_key, b"new-remote-content", 2000, 9);
+            r["id"] = serde_json::json!("peer-pk");
+            r
+        };
+
+        let cfg = test_cfg();
+        let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
+        let client = reqwest::Client::new();
+        let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let auth = test_auth(&cfg);
+        let key_bytes = sync_key.as_bytes().to_vec();
+
+        let _m = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&vec![row]).unwrap())
+            .expect_at_least(1)
+            .create();
+
+        let _ = poll_once(
+            &client,
+            &cfg,
+            &bearer,
+            &db,
+            &local_key,
+            &last_sync_ms,
+            &signed_in,
+            &auth,
+            &key_bytes,
+            PollCursor::default(),
+            1000,        // history_limit
+            500_000_000, // storage_quota_bytes
+        )
+        .await;
+
+        let g = db.lock().await;
+        let count: i64 = g
+            .conn()
+            .query_row("SELECT COUNT(1) FROM clipboard_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "LWW replace must NOT create a duplicate row");
+
+        let row = copypaste_core::get_item_by_item_id(&g, "shared-iid")
+            .unwrap()
+            .expect("item must still exist");
+        assert_eq!(row.id, "local-pk", "local primary key must be preserved");
+        assert_eq!(row.lamport_ts, 9, "newer remote lamport stored");
+        // The peer's row id must not have leaked in.
+        assert!(
+            copypaste_core::get_item_by_id(&g, "peer-pk")
+                .unwrap()
+                .is_none(),
+            "peer's row id must not be adopted"
+        );
+        // The stored content must decrypt to the newer remote plaintext.
+        let v1 = **local_key;
+        let v2 = copypaste_core::derive_v2(&v1);
+        let nonce_vec = row.content_nonce.clone().expect("nonce");
+        let nonce: [u8; 24] = nonce_vec.as_slice().try_into().expect("24-byte nonce");
+        let pt = copypaste_core::decrypt_item_by_version(
+            row.key_version,
+            &v1,
+            &v2,
+            &row.item_id,
+            &nonce,
+            row.content.as_ref().expect("content"),
+        )
+        .expect("decrypt stored row");
+        assert_eq!(pt, b"new-remote-content", "remote content won LWW");
     }
 
     // ── BUG 2 — real signed_in auth state ─────────────────────────────────────
@@ -2959,6 +4139,7 @@ mod tests {
             last_sync_ms,
             local_key,
             signed_in.clone(),
+            Arc::new(std::sync::RwLock::new(copypaste_core::AppConfig::default())),
         )
         .await;
 

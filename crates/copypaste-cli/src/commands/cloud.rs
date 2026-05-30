@@ -18,6 +18,49 @@ use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 use anyhow::{anyhow, Result};
 use std::path::Path;
+use zeroize::Zeroizing;
+
+// ── macOS Keychain constants for Supabase password storage ─────────────────
+//
+// The Supabase account password is security-sensitive and must NOT be
+// persisted in config.json (plaintext on disk). On macOS we store it in the
+// Keychain under these coordinates so the daemon can read it back.
+//
+// FIXWAVE: daemon must read supabase_password from Keychain instead of
+// config.json. In `copypaste-daemon/src/supabase.rs` (or wherever the
+// Supabase client is initialised), replace `cfg.supabase_password` with a
+// Keychain lookup using:
+//   service  = "com.copypaste.daemon"
+//   account  = "supabase-password"
+// The daemon already has `security-framework` and the `get_generic_password`
+// helper in its keychain module — wire it up there. Until that daemon-side
+// change lands, the password is sent via set_config but stripped from the
+// persisted JSON by the daemon if/when it reads from Keychain instead.
+#[cfg(target_os = "macos")]
+const KEYCHAIN_SERVICE: &str = "com.copypaste.daemon";
+#[cfg(target_os = "macos")]
+const KEYCHAIN_ACCOUNT_SUPABASE_PW: &str = "supabase-password";
+
+/// Store the Supabase password in the macOS Keychain.
+/// Returns Ok(()) on success; on failure returns an error with guidance.
+#[cfg(target_os = "macos")]
+fn store_supabase_password_in_keychain(password: &str) -> Result<()> {
+    use security_framework::passwords::set_generic_password;
+    set_generic_password(
+        KEYCHAIN_SERVICE,
+        KEYCHAIN_ACCOUNT_SUPABASE_PW,
+        password.as_bytes(),
+    )
+    .map_err(|e| anyhow!("failed to store Supabase password in Keychain: {e}"))?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn store_supabase_password_in_keychain(_password: &str) -> Result<()> {
+    // Non-macOS: no Keychain available; password is sent via IPC only (not
+    // persisted to disk by this function). The daemon must handle storage.
+    Ok(())
+}
 
 /// Idempotent schema + RLS provisioning SQL, embedded so the CLI always emits
 /// exactly the file shipped in the repo. Kept in sync via `include_str!`.
@@ -64,11 +107,11 @@ pub fn setup(
     }
 
     // Resolve the anon key without leaking it via `ps`: explicit --anon-key
-    // (deprecated) → SUPABASE_ANON_KEY env → interactive prompt.
+    // (deprecated) → SUPABASE_ANON_KEY env → no-echo interactive prompt.
     let anon_key = resolve_secret(
         anon_key,
         "SUPABASE_ANON_KEY",
-        "Supabase anon/public API key (input is visible): ",
+        "Supabase anon/public API key: ",
     )?;
     let anon_key = anon_key.trim();
     if anon_key.is_empty() {
@@ -76,20 +119,23 @@ pub fn setup(
     }
 
     // Resolve the password without leaking it into shell history: explicit
-    // --password arg (discouraged) → SUPABASE_PASSWORD env → interactive prompt.
-    let password = resolve_secret(
-        password,
-        "SUPABASE_PASSWORD",
-        "Supabase account password (input is visible): ",
-    )?;
+    // --password arg (discouraged) → SUPABASE_PASSWORD env → interactive
+    // no-echo prompt (rpassword). Wrap in Zeroizing so it is wiped on drop.
+    let password_raw = resolve_secret(password, "SUPABASE_PASSWORD", "Supabase account password")?;
+    let password = Zeroizing::new(password_raw);
     if password.trim().is_empty() {
         return Err(anyhow!("password must not be empty"));
     }
 
+    // On macOS: persist the password in the Keychain so it is never written
+    // to config.json in plaintext. See FIXWAVE comment near
+    // KEYCHAIN_ACCOUNT_SUPABASE_PW for the required daemon-side follow-up.
+    store_supabase_password_in_keychain(password.trim())?;
+
     // Read-merge-write: fetch current config so we don't drop other fields.
     let mut cfg = {
         let mut client = IpcClient::connect(socket_path)?;
-        let req = serde_json::json!({ "id": "1", "method": "get_config", "params": {} });
+        let req = IpcClient::build_request("1", "get_config", serde_json::json!({}));
         let resp = client.call(&req)?;
         exit_on_err(&resp);
         resp.data.unwrap_or_else(|| serde_json::json!({}))
@@ -99,22 +145,33 @@ pub fn setup(
         obj.insert("supabase_url".into(), serde_json::json!(url));
         obj.insert("supabase_anon_key".into(), serde_json::json!(anon_key));
         obj.insert("supabase_email".into(), serde_json::json!(email));
-        obj.insert("supabase_password".into(), serde_json::json!(password));
+        // FIXWAVE: remove supabase_password from set_config once the daemon
+        // reads it from the Keychain (see KEYCHAIN_ACCOUNT_SUPABASE_PW).
+        // Until then we send it over IPC so the daemon can authenticate; the
+        // daemon must NOT persist this field to config.json on disk.
+        obj.insert(
+            "supabase_password".into(),
+            serde_json::json!(password.trim()),
+        );
     } else {
         cfg = serde_json::json!({
             "supabase_url": url,
             "supabase_anon_key": anon_key,
             "supabase_email": email,
-            "supabase_password": password,
+            // FIXWAVE: same as above — remove once daemon reads from Keychain.
+            "supabase_password": password.trim(),
         });
     }
 
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({ "id": "1", "method": "set_config", "params": cfg });
+    let req = IpcClient::build_request("1", "set_config", cfg);
     let resp = client.call(&req)?;
+    // `password` (Zeroizing) is dropped and zeroed after the IPC call completes.
     exit_on_err(&resp);
 
-    println!("Supabase credentials saved (URL, anon key, email/password).");
+    println!("Supabase credentials saved (URL, anon key, email).");
+    #[cfg(target_os = "macos")]
+    println!("Password stored in macOS Keychain (service: com.copypaste.daemon).");
     println!("Next:");
     println!("  1. copypaste cloud setup-sql | pbcopy   # provision schema + RLS in Supabase");
     println!("  2. copypaste cloud test                 # verify the connection");
@@ -123,13 +180,16 @@ pub fn setup(
 
 /// Resolve a secret value (anon key or password) without leaking it via the
 /// process list or shell history: explicit value (deprecated argv flag) →
-/// `env_var` → interactive stdin prompt. We never echo it back and never log it.
+/// `env_var` → interactive no-echo prompt.
 ///
-/// stdin prompt note: this reads a line in cleartext (the terminal echoes it)
-/// — acceptable for a one-time setup step and strictly better than an argv flag
-/// (which would persist in shell history and `ps` output). A no-echo prompt
-/// would require an extra crate (`rpassword`); deferred to avoid a new pinned
-/// dependency.
+/// The interactive path uses `rpassword::prompt_password` which disables
+/// terminal echo in-process (via termios on Unix) so the secret is never
+/// visible on-screen or in terminal scroll-back. Echo is always restored by
+/// rpassword even when the user hits Ctrl-C or an error occurs.
+///
+/// Non-TTY path (pipes, CI): `rpassword` falls back to reading stdin without
+/// echo-disabling; callers that truly cannot provide a TTY should set the env
+/// var instead.
 fn resolve_secret(explicit: Option<String>, env_var: &str, prompt: &str) -> Result<String> {
     if let Some(v) = explicit {
         return Ok(v);
@@ -139,20 +199,18 @@ fn resolve_secret(explicit: Option<String>, env_var: &str, prompt: &str) -> Resu
             return Ok(v);
         }
     }
-    use std::io::Write;
-    print!("{prompt}");
-    std::io::stdout().flush()?;
-    let mut buf = String::new();
-    std::io::stdin().read_line(&mut buf)?;
-    // Strip the trailing newline only; preserve any intentional internal chars.
-    let trimmed = buf.trim_end_matches(['\n', '\r']).to_owned();
-    Ok(trimmed)
+    // rpassword::prompt_password disables terminal echo in-process (termios)
+    // and always restores it on return, even on error. This prevents the secret
+    // from appearing in the terminal or in scroll-back history.
+    let value = rpassword::prompt_password(prompt)
+        .map_err(|e| anyhow::anyhow!("failed to read secret from terminal: {e}"))?;
+    Ok(value)
 }
 
 /// Print the current cloud-sync status reported by the daemon.
 pub fn status(socket_path: &Path) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({ "id": "1", "method": "get_sync_status", "params": {} });
+    let req = IpcClient::build_request("1", "get_sync_status", serde_json::json!({}));
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
@@ -185,7 +243,7 @@ pub fn status(socket_path: &Path) -> Result<()> {
 /// is scriptable (`copypaste cloud test && echo ok`).
 pub fn test(socket_path: &Path) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({ "id": "1", "method": "cloud_test_connection", "params": {} });
+    let req = IpcClient::build_request("1", "cloud_test_connection", serde_json::json!({}));
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 

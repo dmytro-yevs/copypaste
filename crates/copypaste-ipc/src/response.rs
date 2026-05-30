@@ -28,6 +28,15 @@ pub const ERR_CODE_INTERNAL_ERROR: &str = "internal_error";
 /// rather than writing new items to avoid mixing key versions during the
 /// sweep. Clients should back off and retry after a short delay.
 pub const ERR_CODE_MIGRATION_IN_PROGRESS: &str = "migration_in_progress";
+/// Wire protocol version mismatch between peers. The receiver must reject the
+/// message and the sender must upgrade.
+pub const ERR_CODE_VERSION_MISMATCH: &str = "version_mismatch";
+/// Request rejected because the caller exceeded a rate limit. Clients should
+/// back off and retry after a delay.
+pub const ERR_CODE_RATE_LIMITED: &str = "rate_limited";
+/// Daemon socket is missing or refused connection. Emitted by the UI/CLI
+/// client when the daemon is not running.
+pub const ERR_CODE_DAEMON_OFFLINE: &str = "daemon_offline";
 
 /// A single JSON-RPC-style response emitted by the daemon for a matching
 /// [`crate::Request`].
@@ -67,7 +76,7 @@ impl Response {
             data: Some(data),
             error: None,
             error_code: None,
-            protocol_version: 0,
+            protocol_version: crate::PROTOCOL_VERSION,
         }
     }
 
@@ -80,7 +89,7 @@ impl Response {
             data: None,
             error: Some(msg.into()),
             error_code: None,
-            protocol_version: 0,
+            protocol_version: crate::PROTOCOL_VERSION,
         }
     }
 
@@ -95,7 +104,7 @@ impl Response {
             data: None,
             error: Some(msg.into()),
             error_code: Some(code),
-            protocol_version: 0,
+            protocol_version: crate::PROTOCOL_VERSION,
         }
     }
 

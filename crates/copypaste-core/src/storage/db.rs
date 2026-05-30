@@ -159,13 +159,19 @@ pub struct Database {
 
 /// Format a 32-byte key as the hex string SQLCipher expects:
 ///   PRAGMA key = "x'<64 hex chars>'"
-fn key_pragma(key: &[u8; 32]) -> String {
+///
+/// Returns a `Zeroizing<String>` so the key hex is scrubbed from the heap
+/// as soon as the returned value is dropped, limiting the window during
+/// which plaintext key material appears in a heap dump.
+fn key_pragma(key: &[u8; 32]) -> zeroize::Zeroizing<String> {
     use std::fmt::Write;
-    let mut hex = String::with_capacity(64);
+    let mut hex = zeroize::Zeroizing::new(String::with_capacity(64));
     for b in key {
-        write!(hex, "{:02x}", b).unwrap();
+        // Infallible: `fmt::Write for String` only grows a heap buffer and
+        // never returns Err, so this formatted write cannot fail.
+        write!(*hex, "{:02x}", b).unwrap();
     }
-    format!("PRAGMA key = \"x'{}'\"", hex)
+    zeroize::Zeroizing::new(format!("PRAGMA key = \"x'{}'\"", *hex))
 }
 
 /// Per-connection PRAGMAs that must follow `PRAGMA key`. These are NOT
@@ -179,11 +185,19 @@ fn key_pragma(key: &[u8; 32]) -> String {
 /// — every code path that opens a SQLCipher connection must apply the same
 /// set so behaviour is uniform across UI reader, daemon writer, and the
 /// migration pass.
+///
+/// Item 4: `cache_size = -8192` sets an 8 MB page cache per connection
+/// (negative value = KiB units; 8192 KiB = 8 MB = `SQLITE_CACHE_MB` default).
+/// Previously absent, so SQLite fell back to its own tiny default (≈2 MB).
+/// If a future change threads `AppConfig::sqlite_cache_mb` through `open()`,
+/// replace the literal with `-N*1024` computed at runtime and remove this pragma
+/// from the static constant.
 pub(crate) const CONNECTION_PRAGMAS: &str = "\
 PRAGMA busy_timeout = 5000;\n\
 PRAGMA synchronous = NORMAL;\n\
 PRAGMA foreign_keys = ON;\n\
-PRAGMA temp_store = MEMORY;\n";
+PRAGMA temp_store = MEMORY;\n\
+PRAGMA cache_size = -8192;\n";
 
 impl Database {
     /// Open (or create) an encrypted database at `path`.
@@ -347,22 +361,27 @@ impl Database {
         let _ = std::fs::remove_file(&tmp_path);
 
         // Build the hex key for the ATTACH statement.
-        let mut hex = String::with_capacity(64);
+        // Wrapped in Zeroizing so the hex string is scrubbed from the heap
+        // when `key_hex` goes out of scope (heap-dump leak fix).
+        let mut raw_hex = zeroize::Zeroizing::new(String::with_capacity(64));
         for b in key {
-            write!(hex, "{:02x}", b).unwrap();
+            // Infallible: `fmt::Write for String` only grows a heap buffer and
+            // never returns Err, so this formatted write cannot fail.
+            write!(*raw_hex, "{:02x}", b).unwrap();
         }
-        let key_hex = hex;
+        // The ATTACH SQL also contains the key hex; wrap it in Zeroizing too.
+        let attach_sql = zeroize::Zeroizing::new(format!(
+            "ATTACH DATABASE '{}' AS encrypted KEY \"x'{}'\"",
+            tmp_path.display(),
+            *raw_hex
+        ));
 
         // Open the plaintext source (no key pragma needed).
         let plaintext_conn = Connection::open(path)
             .map_err(|e| DbError::Migration(format!("open plaintext: {e}")))?;
 
         // ATTACH a new encrypted DB as 'encrypted'.
-        let attach_sql = format!(
-            "ATTACH DATABASE '{}' AS encrypted KEY \"x'{}'\"",
-            tmp_path.display(),
-            key_hex
-        );
+
         plaintext_conn
             .execute_batch(&attach_sql)
             .map_err(|e| DbError::Migration(format!("ATTACH encrypted: {e}")))?;
@@ -456,11 +475,14 @@ impl Database {
             Some(p) => p,
             None => {
                 checkpoint_with_retry(&self.conn)?;
-                let mut hex = String::with_capacity(64);
+                // Wrap hex in Zeroizing so key material is scrubbed on drop.
+                let mut hex = zeroize::Zeroizing::new(String::with_capacity(64));
                 for b in new_key {
-                    write!(hex, "{:02x}", b).unwrap();
+                    // Infallible: `fmt::Write for String` only grows a heap
+                    // buffer and never returns Err, so this write cannot fail.
+                    write!(*hex, "{:02x}", b).unwrap();
                 }
-                let sql = format!("PRAGMA rekey = \"x'{}'\"", hex);
+                let sql = zeroize::Zeroizing::new(format!("PRAGMA rekey = \"x'{}'\"", *hex));
                 self.conn.execute_batch(&sql)?;
                 return Ok(Self {
                     conn: self.conn,
@@ -478,15 +500,18 @@ impl Database {
         let tmp_path = path.with_extension("db.rekey-tmp");
         let _ = std::fs::remove_file(&tmp_path);
 
-        let mut new_hex = String::with_capacity(64);
+        // Wrap hex in Zeroizing so key material is scrubbed from the heap on drop.
+        let mut new_hex = zeroize::Zeroizing::new(String::with_capacity(64));
         for b in new_key {
-            write!(new_hex, "{:02x}", b).unwrap();
+            // Infallible: `fmt::Write for String` only grows a heap buffer and
+            // never returns Err, so this formatted write cannot fail.
+            write!(*new_hex, "{:02x}", b).unwrap();
         }
-        let attach_sql = format!(
+        let attach_sql = zeroize::Zeroizing::new(format!(
             "ATTACH DATABASE '{}' AS rekeyed KEY \"x'{}'\"",
             tmp_path.display(),
-            new_hex
-        );
+            *new_hex
+        ));
         self.conn
             .execute_batch(&attach_sql)
             .map_err(|e| DbError::Migration(format!("ATTACH rekeyed: {e}")))?;
@@ -832,16 +857,19 @@ impl Database {
     /// (the FTS `id` mirrors `clipboard_items.id`). Returns the number of rows
     /// deleted from `clipboard_items`.
     pub fn purge_dead_v1_rows(&self) -> Result<usize, DbError> {
-        // Remove the matching FTS entries first (no ON DELETE CASCADE wires the
-        // external-content FTS table to clipboard_items), then the rows.
-        self.conn.execute(
+        // Wrap both DELETEs in a single transaction so a crash between the two
+        // cannot leave clipboard_items rows without their FTS counterparts
+        // (mirrors the atomic FTS+row writes in items::insert_item_and_fts).
+        // The external-content FTS5 table has no ON DELETE CASCADE, so we must
+        // delete the FTS entries explicitly before removing the source rows.
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
             "DELETE FROM clipboard_fts \
              WHERE id IN (SELECT id FROM clipboard_items WHERE key_version = 1)",
             [],
         )?;
-        let deleted = self
-            .conn
-            .execute("DELETE FROM clipboard_items WHERE key_version = 1", [])?;
+        let deleted = tx.execute("DELETE FROM clipboard_items WHERE key_version = 1", [])?;
+        tx.commit()?;
         if deleted > 0 {
             tracing::warn!(
                 deleted,
@@ -1149,6 +1177,56 @@ mod tests {
 
         // Purge is idempotent — a second run deletes nothing.
         assert_eq!(db.purge_dead_v1_rows().unwrap(), 0);
+    }
+
+    /// Fix 1: `purge_dead_v1_rows` must wrap both DELETEs in a single
+    /// transaction so a crash between the two cannot leave items rows without
+    /// their FTS counterparts. This test verifies that after a successful call
+    /// the database is consistent: clipboard_items and clipboard_fts agree.
+    #[test]
+    fn purge_dead_v1_rows_is_atomic_fts_and_items_consistent() {
+        let db = Database::open_in_memory().unwrap();
+        let foreign = [0xABu8; 32];
+
+        // Seed 3 dead v1 rows, each with a matching FTS entry.
+        for _ in 0..3 {
+            seed_unrotatable_v1_text_row(&db, &foreign);
+        }
+        let dead_ids: Vec<String> = db
+            .conn()
+            .prepare("SELECT id FROM clipboard_items WHERE key_version = 1")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        for id in &dead_ids {
+            db.conn()
+                .execute(
+                    "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, 'dead text')",
+                    rusqlite::params![id],
+                )
+                .unwrap();
+        }
+
+        // After purge: clipboard_items and clipboard_fts must both be empty
+        // for the purged ids (no orphan rows in either direction).
+        let deleted = db.purge_dead_v1_rows().unwrap();
+        assert_eq!(deleted, 3, "all 3 v1 rows must be deleted");
+
+        let fts_count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_fts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            fts_count, 0,
+            "FTS must be empty after purge — no orphan rows"
+        );
+        let items_count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(items_count, 0, "clipboard_items must be empty after purge");
     }
 
     #[test]

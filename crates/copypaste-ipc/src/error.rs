@@ -135,8 +135,11 @@ mod tests {
         ];
         for code in all {
             let s = code.as_str();
-            let parsed =
-                ErrorCode::parse(s).unwrap_or_else(|| panic!("parse failed to handle {s}"));
+            // unwrap_or_else with panic! previously panicked the CLI/UI process
+            // if a new variant was added without updating parse(). Use expect()
+            // here so a missing mapping is a test failure, not a process abort.
+            let parsed = ErrorCode::parse(s)
+                .expect("every variant's as_str() must round-trip through parse()");
             assert_eq!(parsed, code, "round-trip mismatch for {s}");
         }
     }
@@ -179,9 +182,10 @@ mod tests {
         // already shipped in `response.rs`. If anyone renames either side,
         // this test catches the drift.
         use crate::response::{
-            ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR, ERR_CODE_INVALID_ARGUMENT,
-            ERR_CODE_IPC_NOT_READY, ERR_CODE_MIGRATION_IN_PROGRESS, ERR_CODE_NOT_FOUND,
-            ERR_CODE_NOT_IMPLEMENTED,
+            ERR_CODE_AUTH_FAILED, ERR_CODE_DAEMON_OFFLINE, ERR_CODE_INTERNAL_ERROR,
+            ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, ERR_CODE_MIGRATION_IN_PROGRESS,
+            ERR_CODE_NOT_FOUND, ERR_CODE_NOT_IMPLEMENTED, ERR_CODE_RATE_LIMITED,
+            ERR_CODE_VERSION_MISMATCH,
         };
         assert_eq!(ErrorCode::NotFound.as_str(), ERR_CODE_NOT_FOUND);
         assert_eq!(ErrorCode::AuthFailed.as_str(), ERR_CODE_AUTH_FAILED);
@@ -196,6 +200,12 @@ mod tests {
             ErrorCode::MigrationInProgress.as_str(),
             ERR_CODE_MIGRATION_IN_PROGRESS
         );
+        assert_eq!(
+            ErrorCode::VersionMismatch.as_str(),
+            ERR_CODE_VERSION_MISMATCH
+        );
+        assert_eq!(ErrorCode::RateLimited.as_str(), ERR_CODE_RATE_LIMITED);
+        assert_eq!(ErrorCode::DaemonOffline.as_str(), ERR_CODE_DAEMON_OFFLINE);
     }
 
     /// The `migration_in_progress` wire code (emitted by the daemon's v4

@@ -12,6 +12,28 @@ pub enum ItemsError {
     /// A write was attempted while the v4 migration sweep is in progress.
     #[error("v4 key-version migration sweep is in progress; write rejected")]
     MigrationInProgress,
+    /// An item carried a `key_version` outside the supported HKDF family set {1, 2}.
+    #[error("unsupported key_version {0}; expected 1 or 2")]
+    UnsupportedKeyVersion(u8),
+    /// The `key_version` column contains a value that does not fit in `u8`
+    /// (valid range 1–255). Surfaced instead of silently truncating so callers
+    /// can distinguish a corrupt/forward-compat row from a known key version.
+    #[error(
+        "key_version {0} is out of range (must fit in u8); row is corrupt or from a future version"
+    )]
+    CorruptKeyVersion(i64),
+}
+
+/// Validate that an item's `key_version` is a known HKDF family before it is
+/// persisted. Rows are written verbatim from `item.key_version`, so an
+/// out-of-range value would later be undecryptable. We reject rather than
+/// clamp so the caller learns the value was wrong instead of silently
+/// mislabelling the ciphertext's key family.
+fn validate_key_version(key_version: u8) -> Result<i64, ItemsError> {
+    match key_version {
+        1 | 2 => Ok(key_version as i64),
+        other => Err(ItemsError::UnsupportedKeyVersion(other)),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -54,10 +76,27 @@ pub struct ClipboardItem {
 }
 
 impl ClipboardItem {
+    /// Create a brand-new text item.
+    ///
+    /// NOTE: `item_id` is the **cross-device identity** of the logical item. It
+    /// is bound into the AEAD AAD and carries a UNIQUE index
+    /// (`idx_clipboard_item_id`, schema v5), and the sync/merge layer keys
+    /// HAVE/WANT/LWW/dedup on it — NOT on `id`, which is a fresh per-row primary
+    /// key. The constructor seeds `item_id` with a fresh UUID for a genuinely
+    /// new capture, but when **reconstructing a known item** (cloud/P2P
+    /// download, sync replay) the caller MUST overwrite `item_id` with the
+    /// originating device's value and MUST NEVER regenerate it — otherwise the
+    /// same logical item lands under a different identity on each device, LWW
+    /// never fires, and duplicate rows accumulate.
     pub fn new_text(encrypted_content: Vec<u8>, nonce: Vec<u8>, lamport_ts: i64) -> Self {
+        // `duration_since(UNIX_EPOCH)` can only fail when the system clock is set
+        // before the Unix epoch (1970-01-01). That is pathological on any correctly
+        // configured host. `unwrap_or_default()` degrades to `wall_time = 0` (epoch)
+        // rather than panicking, so a misconfigured clock produces a mis-ordered item
+        // instead of crashing the daemon.
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as i64;
         Self {
             id: Uuid::new_v4().to_string(),
@@ -85,10 +124,21 @@ impl ClipboardItem {
     /// `image_meta_json` stores width/height/chunk_count/file_id as JSON in `blob_ref`.
     /// The `content_nonce` field is left `None` because XChaCha20 nonces are stored
     /// per-chunk inside the blob itself (no single item-level nonce needed).
+    ///
+    /// NOTE: like [`new_text`](Self::new_text), `item_id` is the cross-device
+    /// identity the sync/merge/dedup layer keys on. The constructor seeds it
+    /// with a fresh UUID, but a capture pipeline that can derive a stable
+    /// content identity (e.g. from the image `file_id`) SHOULD overwrite
+    /// `item_id` once at capture so the same image converges to one row across
+    /// devices, and a reconstructed item MUST preserve the originating
+    /// `item_id` rather than regenerate it.
     pub fn new_image(encrypted_blob: Vec<u8>, image_meta_json: String, lamport_ts: i64) -> Self {
+        // Same clock-before-epoch degradation contract as `new_text`: prefer
+        // `unwrap_or_default()` over `unwrap()` so a pathological host clock
+        // yields `wall_time = 0` rather than a daemon panic.
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as i64;
         Self {
             id: Uuid::new_v4().to_string(),
@@ -127,6 +177,7 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
     if matches!(db.migration_state()?, MigrationState::InProgress { .. }) {
         return Err(ItemsError::MigrationInProgress);
     }
+    let key_version = validate_key_version(item.key_version)?;
     db.conn().execute(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
@@ -148,7 +199,7 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
             item.app_bundle_id,
             item.content_hash,
             item.origin_device_id,
-            ITEM_KEY_VERSION_CURRENT,
+            key_version,
             item.pinned as i64,
         ],
     )?;
@@ -200,6 +251,7 @@ pub fn insert_item_with_fts(
     if matches!(db.migration_state()?, MigrationState::InProgress { .. }) {
         return Err(ItemsError::MigrationInProgress);
     }
+    let key_version = validate_key_version(item.key_version)?;
     let conn = db.conn();
     let tx = conn.unchecked_transaction()?;
     let insert_res = tx.execute(
@@ -223,7 +275,7 @@ pub fn insert_item_with_fts(
             item.app_bundle_id,
             item.content_hash,
             item.origin_device_id,
-            ITEM_KEY_VERSION_CURRENT,
+            key_version,
             item.pinned as i64,
         ],
     );
@@ -320,7 +372,9 @@ pub fn find_recent_by_hash(
     now_ms: i64,
     within_ms: i64,
 ) -> Result<Option<String>, ItemsError> {
-    let cutoff = now_ms - within_ms;
+    // Use saturating_sub for consistency with `delete_sensitive_expired` and to
+    // avoid a debug-mode panic when now_ms < within_ms (e.g. now_ms=0, within_ms=i64::MAX).
+    let cutoff = now_ms.saturating_sub(within_ms);
     let result = db.conn().query_row(
         "SELECT id FROM clipboard_items
          WHERE content_hash = ?1 AND wall_time >= ?2
@@ -340,6 +394,10 @@ pub fn get_page(
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>, ItemsError> {
+    // Fix 6: clamp before cast — a usize > i64::MAX would wrap negative, turning
+    // LIMIT into "no limit" in SQLite (negative LIMIT means unlimited rows).
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    let offset_i64 = offset.min(i64::MAX as usize) as i64;
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
@@ -347,7 +405,7 @@ pub fn get_page(
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
-        .query_map(params![limit as i64, offset as i64], row_to_item)?
+        .query_map(params![limit_i64, offset_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(items)
 }
@@ -367,6 +425,9 @@ pub fn get_page_pinned_first(
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>, ItemsError> {
+    // Fix 6: clamp before cast to avoid negative LIMIT/OFFSET in SQLite.
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    let offset_i64 = offset.min(i64::MAX as usize) as i64;
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
@@ -374,7 +435,7 @@ pub fn get_page_pinned_first(
          FROM clipboard_items ORDER BY pinned DESC, wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
-        .query_map(params![limit as i64, offset as i64], row_to_item)?
+        .query_map(params![limit_i64, offset_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(items)
 }
@@ -421,6 +482,9 @@ pub fn get_page_meta(
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>, ItemsError> {
+    // Fix 6: clamp before cast to avoid negative LIMIT/OFFSET in SQLite.
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    let offset_i64 = offset.min(i64::MAX as usize) as i64;
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, NULL AS content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
@@ -428,7 +492,7 @@ pub fn get_page_meta(
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
-        .query_map(params![limit as i64, offset as i64], row_to_item)?
+        .query_map(params![limit_i64, offset_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(items)
 }
@@ -451,30 +515,117 @@ pub fn get_item_by_id(db: &Database, id: &str) -> Result<Option<ClipboardItem>, 
     match result {
         Ok(item) => Ok(Some(item)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        // row_to_item emits IntegralValueOutOfRange(14, v) when key_version
+        // does not fit in u8 — re-surface as the typed CorruptKeyVersion
+        // variant so callers can distinguish schema corruption from other
+        // SQLite errors.
+        Err(rusqlite::Error::IntegralValueOutOfRange(14, v)) => {
+            Err(ItemsError::CorruptKeyVersion(v))
+        }
         Err(e) => Err(ItemsError::Sqlite(e)),
     }
 }
 
+/// Fetch a single clipboard item by its **cross-device** `item_id`.
+///
+/// `item_id` is the stable logical identity of an item across devices (it is
+/// bound into the AEAD AAD and carries the `idx_clipboard_item_id` UNIQUE
+/// index). The sync/merge layer resolves an incoming peer item against the
+/// local row by `item_id` — NOT by the per-row primary key `id`, which is a
+/// fresh `Uuid::new_v4()` on every device and so differs for the same logical
+/// item. Returns `Ok(None)` when no row matches.
+pub fn get_item_by_item_id(
+    db: &Database,
+    item_id: &str,
+) -> Result<Option<ClipboardItem>, ItemsError> {
+    let result = db.conn().query_row(
+        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+                content_hash, origin_device_id, key_version, pinned
+         FROM clipboard_items WHERE item_id = ?1",
+        params![item_id],
+        row_to_item,
+    );
+    match result {
+        Ok(item) => Ok(Some(item)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(ItemsError::Sqlite(e)),
+    }
+}
+
+/// Return `true` when a row with the given cross-device `item_id` already
+/// exists locally. Used by the sync/cloud dedup path to decide between an
+/// LWW resolve+replace (item already known) and a fresh insert.
+pub fn exists_item_by_item_id(db: &Database, item_id: &str) -> Result<bool, ItemsError> {
+    let count: i64 = db.conn().query_row(
+        "SELECT COUNT(1) FROM clipboard_items WHERE item_id = ?1",
+        params![item_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
-    let changed = db.conn().execute(
+    // Fix 4: delete matching FTS rows in the same transaction so no orphan FTS
+    // entries accumulate when items are TTL-pruned.
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+    // Collect ids before deleting so we can prune FTS in the same tx.
+    let mut stmt = tx.prepare(
+        "SELECT id FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1 AND pinned = 0",
+    )?;
+    let ids: Vec<String> = stmt
+        .query_map(params![now_ms], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    drop(stmt);
+    let changed = tx.execute(
         "DELETE FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1 AND pinned = 0",
         params![now_ms],
     )?;
+    for id in &ids {
+        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    }
+    tx.commit()?;
     Ok(changed)
 }
 
 /// Delete sensitive items whose `wall_time` is older than `sensitive_ttl_ms` milliseconds ago.
 /// This enforces a local auto-wipe TTL for items marked `is_sensitive = 1`.
+///
+/// Pinned items are excluded (Fix 1). Threshold uses saturating_sub to avoid
+/// underflow when sensitive_ttl_ms > now_ms (Fix 2). FTS rows are pruned in
+/// the same transaction to avoid orphan FTS entries (Fix 4).
 pub fn delete_sensitive_expired(
     db: &Database,
     now_ms: i64,
     sensitive_ttl_ms: i64,
 ) -> Result<usize, ItemsError> {
-    let threshold = now_ms - sensitive_ttl_ms;
-    let changed = db.conn().execute(
-        "DELETE FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1",
+    // saturating_sub prevents underflow when ttl > now (e.g. in tests or on a
+    // clock that has not advanced far past epoch).
+    let threshold = now_ms.saturating_sub(sensitive_ttl_ms);
+    // Collect ids first, then delete items + FTS in one transaction so no
+    // orphan FTS entries accumulate (mirrors delete_expired).
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+    let mut stmt = tx.prepare(
+        // `AND pinned = 0` mirrors `delete_expired`: pinned items are exempt from
+        // every TTL prune (see ClipboardItem::pinned docs). Without this guard a
+        // pinned+sensitive item is silently wiped after the sensitive TTL,
+        // violating the pin contract.
+        "SELECT id FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1 AND pinned = 0",
+    )?;
+    let ids: Vec<String> = stmt
+        .query_map(params![threshold], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    drop(stmt);
+    let changed = tx.execute(
+        "DELETE FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1 AND pinned = 0",
         params![threshold],
     )?;
+    for id in &ids {
+        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    }
+    tx.commit()?;
     Ok(changed)
 }
 
@@ -483,10 +634,15 @@ pub fn delete_sensitive_expired(
 /// Returns the number of rows actually removed (`0` when no row matched).
 /// Callers can use this to distinguish a real deletion from a no-op against a
 /// non-existent id.
+///
+/// Fix 4: also removes the matching `clipboard_fts` row in the same transaction
+/// so callers (daemon prune-by-id paths) don't need to call `delete_fts` separately.
 pub fn delete_item(db: &Database, id: &str) -> Result<usize, ItemsError> {
-    let removed = db
-        .conn()
-        .execute("DELETE FROM clipboard_items WHERE id=?1", params![id])?;
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+    let removed = tx.execute("DELETE FROM clipboard_items WHERE id=?1", params![id])?;
+    tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    tx.commit()?;
     Ok(removed)
 }
 
@@ -511,6 +667,120 @@ pub fn unpin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
         rusqlite::params![id],
     )?;
     Ok(())
+}
+
+/// Prune the oldest unpinned clipboard items so that the total byte size of
+/// all unpinned `content` blobs does not exceed `max_bytes`.
+///
+/// # Eviction semantics
+///
+/// * **Pinned items are never evicted** — only rows with `pinned = 0` are
+///   considered for deletion or counted towards the quota.
+/// * **Oldest-first ordering** — rows are sorted by `(wall_time ASC, id ASC)`
+///   before eviction. When two items share the same millisecond timestamp,
+///   the lexicographically smaller UUID is evicted first (deterministic).
+/// * **The "tipping" row is evicted** — the first row whose inclusion brings
+///   the running cumulative byte total to or past the excess is deleted, not
+///   kept. After the prune, remaining unpinned bytes ≤ `max_bytes`.
+/// * **Images are counted** — `content` stores the encrypted blob for both
+///   text and image items in the same `clipboard_items` table; `LENGTH(content)`
+///   includes image bytes correctly. There is no separate image store at this
+///   layer, so the quota is byte-accurate across all content types.
+///
+/// # Performance
+///
+/// Uses a single-pass SQLite window function
+/// `SUM(LENGTH(COALESCE(content,''))) OVER (ORDER BY wall_time ASC, id ASC
+/// ROWS UNBOUNDED PRECEDING)` to compute a running cumulative byte total in
+/// O(n log n). The previous correlated-subquery approach (O(n²)) was
+/// prohibitively slow on large databases after a cloud backfill batch.
+///
+/// SQLite ≥ 3.25 is required for window functions. The bundled SQLCipher
+/// version shipping with `rusqlite = "0.32" / bundled-sqlcipher` includes
+/// SQLite ≥ 3.47, which satisfies this requirement.
+///
+/// # Returns
+///
+/// The number of rows deleted (0 when the quota is already satisfied).
+pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> {
+    // Fast path: if total unpinned bytes are within the quota nothing to do.
+    // This avoids constructing the window-function query on every insert when
+    // the DB is well under the cap (the common case).
+    let total_unpinned: i64 = db.conn().query_row(
+        "SELECT COALESCE(SUM(LENGTH(COALESCE(content,''))),0) \
+         FROM clipboard_items WHERE pinned = 0",
+        [],
+        |r| r.get(0),
+    )?;
+    if total_unpinned <= max_bytes {
+        return Ok(0);
+    }
+
+    // Compute excess = bytes that must be freed.
+    // Cast is safe: total_unpinned > max_bytes >= 0, so excess > 0 and fits in i64.
+    let excess = total_unpinned - max_bytes;
+
+    // Fix (re-audit): collect the ids to evict first, then delete clipboard_items
+    // AND clipboard_fts in a single transaction — mirrors the pattern used in
+    // `delete_expired` / `delete_sensitive_expired`. Without the FTS sweep every
+    // size-cap eviction leaves orphan FTS rows, causing unbounded FTS growth and
+    // ghost search results.
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+
+    // Single-pass window function: select the ids in the eviction prefix.
+    // A row belongs to the prefix when cum_bytes - row_bytes < excess (i.e. the
+    // running total before this row has not yet covered the excess).  The
+    // "tipping" row (first one that brings the total to or past excess) is
+    // included because cum_bytes[tipping-1] < excess by definition.
+    let mut stmt = tx.prepare(
+        "WITH ranked AS (
+             SELECT
+                 id,
+                 LENGTH(COALESCE(content, '')) AS row_bytes,
+                 SUM(LENGTH(COALESCE(content, ''))) OVER (
+                     ORDER BY wall_time ASC, id ASC
+                     ROWS UNBOUNDED PRECEDING
+                 ) AS cum_bytes
+             FROM clipboard_items
+             WHERE pinned = 0
+         )
+         SELECT id FROM ranked
+         WHERE cum_bytes - row_bytes < ?1",
+    )?;
+    let ids: Vec<String> = stmt
+        .query_map(params![excess], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    drop(stmt);
+
+    if ids.is_empty() {
+        return Ok(0);
+    }
+
+    let deleted = tx.execute(
+        "WITH ranked AS (
+             SELECT
+                 id,
+                 LENGTH(COALESCE(content, '')) AS row_bytes,
+                 SUM(LENGTH(COALESCE(content, ''))) OVER (
+                     ORDER BY wall_time ASC, id ASC
+                     ROWS UNBOUNDED PRECEDING
+                 ) AS cum_bytes
+             FROM clipboard_items
+             WHERE pinned = 0
+         )
+         DELETE FROM clipboard_items
+         WHERE id IN (
+             SELECT id FROM ranked
+             WHERE cum_bytes - row_bytes < ?1
+         )",
+        params![excess],
+    )?;
+    for id in &ids {
+        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    }
+    tx.commit()?;
+    Ok(deleted)
 }
 
 pub fn count_items(db: &Database) -> Result<i64, ItemsError> {
@@ -627,6 +897,21 @@ fn sanitize_fts5_query(raw: &str) -> Option<String> {
         return None;
     }
 
+    // Fix 5: count double-quotes; if the count is odd the phrase is unclosed and
+    // FTS5 will return a syntax error.  Strip all double-quotes in that case so
+    // the query degrades to a plain token search rather than an SQL error.
+    let quote_count = trimmed.chars().filter(|&c| c == '"').count();
+    let balanced = if quote_count % 2 == 0 {
+        trimmed.to_string()
+    } else {
+        // Odd number of quotes — remove all quotes to avoid an unclosed FTS5 phrase.
+        trimmed.chars().filter(|&c| c != '"').collect()
+    };
+    let trimmed = balanced.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
     // Pass through quoted phrases and explicit prefix queries unchanged.
     // A quoted phrase looks like `"foo bar"` — starts and ends with a double-quote.
     if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() > 1)
@@ -692,8 +977,10 @@ pub fn search_items(
          LIMIT ?2",
     )?;
 
+    // Fix 6: clamp before cast to avoid negative LIMIT in SQLite.
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
     let rows: Vec<ClipboardItem> = stmt
-        .query_map(params![safe_query, limit as i64], row_to_item)?
+        .query_map(params![safe_query, limit_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows)
@@ -715,7 +1002,13 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
         app_bundle_id: row.get(11)?,
         content_hash: row.get(12)?,
         origin_device_id: row.get(13)?,
-        key_version: row.get::<_, i64>(14)? as u8,
+        key_version: {
+            let kv: i64 = row.get(14)?;
+            // Propagate a real error rather than silently truncating an
+            // out-of-range value: `999i64 as u8` would yield 231, masking
+            // corruption or a forward-compat row from a newer schema version.
+            u8::try_from(kv).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(14, kv))?
+        },
         pinned: row.get::<_, i64>(15)? != 0,
     })
 }
@@ -1006,6 +1299,36 @@ mod tests {
     }
 
     #[test]
+    fn delete_sensitive_expired_keeps_pinned_items() {
+        // Regression: a pinned + sensitive item past the sensitive cutoff must
+        // NOT be auto-wiped — pinned rows are exempt from every TTL prune.
+        let db = Database::open_in_memory().unwrap();
+
+        // Pinned + sensitive + old wall_time → must survive the prune.
+        let mut pinned_sensitive = make_item(1);
+        pinned_sensitive.is_sensitive = true;
+        pinned_sensitive.pinned = true;
+        pinned_sensitive.wall_time = 1_000; // well past the cutoff below
+        let pinned_id = pinned_sensitive.id.clone();
+        insert_item(&db, &pinned_sensitive).unwrap();
+
+        // Unpinned + sensitive + old wall_time → control row, must be deleted.
+        let mut unpinned_sensitive = make_item(2);
+        unpinned_sensitive.is_sensitive = true;
+        unpinned_sensitive.pinned = false;
+        unpinned_sensitive.wall_time = 1_000;
+        insert_item(&db, &unpinned_sensitive).unwrap();
+
+        // now_ms=200_000, ttl=30_000 → threshold=170_000; both wall_times qualify.
+        let removed = delete_sensitive_expired(&db, 200_000, 30_000).unwrap();
+        assert_eq!(removed, 1, "only the unpinned sensitive row is wiped");
+        assert!(
+            get_item_by_id(&db, &pinned_id).unwrap().is_some(),
+            "pinned+sensitive item must survive the sensitive TTL prune"
+        );
+    }
+
+    #[test]
     fn pin_item_removes_expiry() {
         let db = Database::open_in_memory().unwrap();
         let mut item = make_item(1);
@@ -1030,6 +1353,41 @@ mod tests {
             "insert_item must stamp the current key_version on new rows"
         );
         assert_eq!(ITEM_KEY_VERSION_CURRENT, 2);
+    }
+
+    #[test]
+    fn insert_persists_item_key_version_not_constant() {
+        // Regression: insert must bind `item.key_version`, not the
+        // ITEM_KEY_VERSION_CURRENT constant. A v1 item must persist as 1.
+        let db = Database::open_in_memory().unwrap();
+        let mut item = make_item(1);
+        item.key_version = 1;
+        insert_item(&db, &item).unwrap();
+        assert_eq!(
+            get_key_version(&db, &item.id).unwrap(),
+            Some(1),
+            "insert_item must persist item.key_version verbatim"
+        );
+
+        // Same contract for the FTS path.
+        let mut item2 = make_item(2);
+        item2.key_version = 1;
+        let id2 = insert_item_with_fts(&db, &item2, "indexed text").unwrap();
+        assert_eq!(get_key_version(&db, &id2).unwrap(), Some(1));
+    }
+
+    #[test]
+    fn insert_rejects_out_of_range_key_version() {
+        let db = Database::open_in_memory().unwrap();
+        let mut item = make_item(1);
+        item.key_version = 3; // outside the supported {1, 2} set
+        let err = insert_item(&db, &item).unwrap_err();
+        assert!(
+            matches!(err, ItemsError::UnsupportedKeyVersion(3)),
+            "out-of-range key_version must be rejected, not silently written: {err:?}"
+        );
+        // Nothing should have been persisted.
+        assert_eq!(count_items(&db).unwrap(), 0);
     }
 
     #[test]
@@ -1450,6 +1808,46 @@ mod tests {
         assert_eq!(page[0].wall_time, 999);
     }
 
+    /// Fix 4: `find_recent_by_hash` must not overflow when `now_ms < within_ms`
+    /// (e.g. now_ms=0 and within_ms=i64::MAX). Before the fix, the subtraction
+    /// `now_ms - within_ms` panics in debug builds.
+    #[test]
+    fn find_recent_by_hash_cutoff_no_overflow() {
+        let db = Database::open_in_memory().unwrap();
+        // now_ms=0, within_ms=i64::MAX → would overflow without saturating_sub.
+        let result = find_recent_by_hash(&db, "anyhash", 0, i64::MAX);
+        assert!(
+            result.is_ok(),
+            "must not panic or error on underflowing cutoff"
+        );
+        assert!(result.unwrap().is_none(), "empty db returns None");
+    }
+
+    /// Fix 3: `row_to_item` must return `CorruptKeyVersion` for out-of-range
+    /// key_version values (e.g. 999 does not fit in u8 without silent truncation).
+    #[test]
+    fn row_to_item_corrupt_key_version_returns_error() {
+        let db = Database::open_in_memory().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        // Insert a row with key_version=999 directly via SQL, bypassing insert_item's
+        // ITEM_KEY_VERSION_CURRENT stamp.
+        db.conn()
+            .execute(
+                "INSERT INTO clipboard_items
+                 (id, item_id, content_type, content, content_nonce, blob_ref,
+                  is_sensitive, is_synced, lamport_ts, wall_time, expires_at,
+                  app_bundle_id, content_hash, origin_device_id, key_version, pinned)
+                 VALUES (?1,?2,'text',NULL,NULL,NULL,0,0,1,1,NULL,NULL,NULL,'',999,0)",
+                rusqlite::params![id, uuid::Uuid::new_v4().to_string()],
+            )
+            .unwrap();
+        let result = get_item_by_id(&db, &id);
+        assert!(
+            matches!(result, Err(ItemsError::CorruptKeyVersion(999))),
+            "expected CorruptKeyVersion(999), got: {result:?}"
+        );
+    }
+
     /// `find_recent_by_hash` finds a matching row when the window is wide open.
     #[test]
     fn find_recent_by_hash_finds_any_row_with_wide_window() {
@@ -1522,5 +1920,317 @@ mod tests {
             "bumped item must appear first after recency update"
         );
         assert_eq!(page[0].wall_time, now_ms);
+    }
+
+    // ── prune_to_cap tests ────────────────────────────────────────────────────
+
+    /// Build a ClipboardItem whose encrypted content is exactly `size` bytes,
+    /// with a deterministic wall_time so tests can control eviction order.
+    fn make_sized_item(lamport: i64, wall_time_ms: i64, size: usize) -> ClipboardItem {
+        let mut item = make_item(lamport);
+        item.wall_time = wall_time_ms;
+        item.content = Some(vec![0xCC; size]);
+        item
+    }
+
+    /// Under the quota: nothing deleted.
+    #[test]
+    fn prune_to_cap_no_op_when_under_quota() {
+        let db = Database::open_in_memory().unwrap();
+        // 3 items × 10 bytes = 30 bytes; quota = 100.
+        for i in 0..3_i64 {
+            insert_item(&db, &make_sized_item(i, i * 1_000, 10)).unwrap();
+        }
+        let deleted = prune_to_cap(&db, 100).unwrap();
+        assert_eq!(deleted, 0, "no eviction when total < quota");
+        assert_eq!(count_items(&db).unwrap(), 3);
+    }
+
+    /// Exactly at the quota: nothing deleted.
+    #[test]
+    fn prune_to_cap_no_op_when_exactly_at_quota() {
+        let db = Database::open_in_memory().unwrap();
+        // 5 items × 20 bytes = 100 bytes; quota = 100.
+        for i in 0..5_i64 {
+            insert_item(&db, &make_sized_item(i, i * 1_000, 20)).unwrap();
+        }
+        let deleted = prune_to_cap(&db, 100).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(count_items(&db).unwrap(), 5);
+    }
+
+    /// Oldest items are evicted first (wall_time ASC ordering).
+    #[test]
+    fn prune_to_cap_evicts_oldest_first() {
+        let db = Database::open_in_memory().unwrap();
+        // Items ordered by wall_time: 1=oldest … 5=newest, each 20 bytes.
+        // Total = 100, quota = 60 → excess = 40 → must remove 2 oldest (40 bytes).
+        let mut ids = Vec::new();
+        for i in 1..=5_i64 {
+            let item = make_sized_item(i, i * 1_000, 20);
+            ids.push(item.id.clone());
+            insert_item(&db, &item).unwrap();
+        }
+        let deleted = prune_to_cap(&db, 60).unwrap();
+        assert_eq!(deleted, 2, "exactly 2 oldest rows deleted");
+        // Oldest two ids must be gone; newest three must remain.
+        let conn = db.conn();
+        let exists = |id: &str| -> bool {
+            conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE id=?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+                > 0
+        };
+        assert!(!exists(&ids[0]), "oldest must be gone");
+        assert!(!exists(&ids[1]), "second oldest must be gone");
+        assert!(exists(&ids[2]), "third must remain");
+        assert!(exists(&ids[3]), "fourth must remain");
+        assert!(exists(&ids[4]), "newest must remain");
+    }
+
+    /// The "tipping" row that crosses the byte threshold is evicted.
+    #[test]
+    fn prune_to_cap_tipping_row_is_evicted() {
+        let db = Database::open_in_memory().unwrap();
+        // 3 rows: 10 bytes, 10 bytes, 50 bytes (oldest → newest).
+        // Total = 70, quota = 60 → excess = 10.
+        // Row 1 (10 bytes): cum=10, cum-row=0 < 10 → DELETE (tipping).
+        // Row 2 (10 bytes): cum=20, cum-row=10, 10 < 10 is FALSE → KEEP.
+        let item1 = make_sized_item(1, 1_000, 10);
+        let item2 = make_sized_item(2, 2_000, 10);
+        let item3 = make_sized_item(3, 3_000, 50);
+        let id1 = item1.id.clone();
+        let id2 = item2.id.clone();
+        let id3 = item3.id.clone();
+        insert_item(&db, &item1).unwrap();
+        insert_item(&db, &item2).unwrap();
+        insert_item(&db, &item3).unwrap();
+
+        let deleted = prune_to_cap(&db, 60).unwrap();
+        assert_eq!(deleted, 1, "only the tipping row (oldest) deleted");
+        let conn = db.conn();
+        let exists = |id: &str| -> bool {
+            conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE id=?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+                > 0
+        };
+        assert!(!exists(&id1), "tipping row deleted");
+        assert!(exists(&id2), "row 2 kept");
+        assert!(exists(&id3), "row 3 kept");
+    }
+
+    /// Pinned items are never evicted, even when they are the oldest.
+    #[test]
+    fn prune_to_cap_pinned_items_never_evicted() {
+        let db = Database::open_in_memory().unwrap();
+        // Pin the oldest item; its bytes must not count toward the quota.
+        // 3 items × 20 bytes = 60 bytes. Quota = 30.
+        // Unpinned bytes = 40 (rows 2 and 3). Excess = 10. Row 2 is evicted.
+        let item1 = make_sized_item(1, 1_000, 20); // will be pinned
+        let item2 = make_sized_item(2, 2_000, 20);
+        let item3 = make_sized_item(3, 3_000, 20);
+        let id1 = item1.id.clone();
+        let id2 = item2.id.clone();
+        let id3 = item3.id.clone();
+        insert_item(&db, &item1).unwrap();
+        insert_item(&db, &item2).unwrap();
+        insert_item(&db, &item3).unwrap();
+        pin_item(&db, &id1).unwrap();
+
+        let deleted = prune_to_cap(&db, 30).unwrap();
+        assert_eq!(deleted, 1, "one unpinned row evicted");
+        let conn = db.conn();
+        let exists = |id: &str| -> bool {
+            conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE id=?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+                > 0
+        };
+        assert!(exists(&id1), "pinned oldest must not be evicted");
+        assert!(!exists(&id2), "oldest unpinned evicted");
+        assert!(exists(&id3), "newest unpinned kept");
+    }
+
+    /// After `prune_to_cap` evicts rows, no orphan FTS rows must remain and
+    /// a full-text search for a pruned term must return nothing.
+    #[test]
+    fn prune_to_cap_no_fts_orphans_after_eviction() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Insert 3 items with FTS entries (oldest → newest, 20 bytes each).
+        // Total = 60 bytes. Quota = 20 → excess = 40 → oldest 2 evicted.
+        let mut ids = Vec::new();
+        let terms = ["alpha unique term", "beta unique term", "gamma unique term"];
+        for (i, term) in terms.iter().enumerate() {
+            let item = make_sized_item(i as i64, (i as i64 + 1) * 1_000, 20);
+            ids.push(item.id.clone());
+            insert_item(&db, &item).unwrap();
+            upsert_fts(&db, &item.id, term).unwrap();
+        }
+
+        let deleted = prune_to_cap(&db, 20).unwrap();
+        assert_eq!(deleted, 2, "2 oldest items evicted");
+
+        // No orphan FTS rows: count(fts) must equal count(items).
+        let item_count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
+            .unwrap();
+        let fts_count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_fts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            fts_count, item_count,
+            "clipboard_fts count ({fts_count}) must equal clipboard_items count \
+             ({item_count}) — no orphan FTS rows after size-cap eviction"
+        );
+
+        // Ghost-search check: pruned terms must not appear in search results.
+        let r_alpha = search_items(&db, "alpha", 10).unwrap();
+        assert!(
+            r_alpha.is_empty(),
+            "pruned term 'alpha' must not appear in search results"
+        );
+        let r_beta = search_items(&db, "beta", 10).unwrap();
+        assert!(
+            r_beta.is_empty(),
+            "pruned term 'beta' must not appear in search results"
+        );
+
+        // The surviving item must still be searchable.
+        let r_gamma = search_items(&db, "gamma", 10).unwrap();
+        assert_eq!(
+            r_gamma.len(),
+            1,
+            "surviving item with term 'gamma' must still be found"
+        );
+        assert_eq!(r_gamma[0].id, ids[2]);
+    }
+
+    /// Empty database: prune is a no-op.
+    #[test]
+    fn prune_to_cap_empty_db_is_noop() {
+        let db = Database::open_in_memory().unwrap();
+        let deleted = prune_to_cap(&db, 1024).unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    /// Items with NULL content (e.g. blob_ref-only rows) count as 0 bytes.
+    #[test]
+    fn prune_to_cap_null_content_counts_as_zero_bytes() {
+        let db = Database::open_in_memory().unwrap();
+        // One item with NULL content + one with 50 bytes. Total = 50. Quota = 40.
+        // The NULL-content row is oldest; it contributes 0 bytes so cum_bytes
+        // after it is 0, meaning cum-row=0 < 10 (excess) → it gets evicted first.
+        // After evicting it: remaining = 50 bytes which still > 40. Then the
+        // 50-byte row: cum=50, cum-row=0 < 10 → also evicted.
+        // Wait — excess = 50 - 40 = 10. Row1 (0 bytes): cum=0, cum-row=0 < 10 → DELETE.
+        // Row2 (50 bytes): cum=50, cum-row=0 < 10 → DELETE.
+        // So both deleted, 0 remaining.  Let's redesign to make it meaningful:
+        // NULL row (0b) at t=1, 50b at t=2. Total=50. Quota=50 → NO-OP.
+        // NULL row (0b) at t=1, 50b at t=2. Total=50. Quota=49 → excess=1.
+        // Row1: cum=0, 0-0=0 < 1 → DELETE; Row2: cum=50, 50-50=0 < 1 → DELETE.
+        // Hmm — a NULL-content row always has cum-row=0 which is < any positive excess.
+        // Use quota=50 for the no-op assertion:
+        let mut item_null = make_item(1);
+        item_null.wall_time = 1_000;
+        item_null.content = None;
+        let item_big = make_sized_item(2, 2_000, 50);
+        insert_item(&db, &item_null).unwrap();
+        insert_item(&db, &item_big).unwrap();
+        // Quota exactly equals total (50). No prune.
+        let deleted = prune_to_cap(&db, 50).unwrap();
+        assert_eq!(deleted, 0, "no eviction when quota met");
+        assert_eq!(count_items(&db).unwrap(), 2);
+    }
+
+    /// Large dataset (50 rows): window-function rewrite produces identical
+    /// eviction to the reference naive algorithm (compute total, subtract quota,
+    /// delete oldest prefix summing to ≥ excess).
+    #[test]
+    fn prune_to_cap_large_dataset_matches_naive_eviction() {
+        use std::collections::HashSet;
+
+        let db = Database::open_in_memory().unwrap();
+
+        // Insert 50 items with varying sizes (5..=54 bytes) and distinct
+        // wall_times so the ordering is deterministic.
+        let mut items: Vec<ClipboardItem> = (0..50_i64)
+            .map(|i| make_sized_item(i, (i + 1) * 1_000, 5 + i as usize))
+            .collect();
+        for item in &items {
+            insert_item(&db, item).unwrap();
+        }
+
+        // Pin the 3 most-recent items so they survive unconditionally.
+        let pinned_ids: HashSet<String> = items[47..].iter().map(|i| i.id.clone()).collect();
+        for id in &pinned_ids {
+            pin_item(&db, id).unwrap();
+        }
+
+        // Total bytes (items is sorted oldest-first, sizes 5..54 bytes).
+        // Unpinned = items[0..47]; total_unpinned = sum(5..52) = 47*(5+51)/2 = 1316.
+        let total_unpinned: i64 = items[..47]
+            .iter()
+            .map(|it| it.content.as_ref().map_or(0, |c| c.len() as i64))
+            .sum();
+        let quota: i64 = 800;
+        let excess = total_unpinned - quota;
+        assert!(excess > 0, "sanity: quota must be below total");
+
+        // Naive reference: collect oldest-first ids until cumulative bytes >= excess.
+        items[..47].sort_by_key(|it| (it.wall_time, it.id.clone()));
+        let mut cum: i64 = 0;
+        let mut naive_delete: HashSet<String> = HashSet::new();
+        for it in &items[..47] {
+            let row_bytes = it.content.as_ref().map_or(0, |c| c.len() as i64);
+            if cum < excess {
+                naive_delete.insert(it.id.clone());
+                cum += row_bytes;
+            }
+        }
+
+        // Run prune_to_cap.
+        let deleted = prune_to_cap(&db, quota).unwrap();
+        assert_eq!(
+            deleted,
+            naive_delete.len(),
+            "window-fn and naive must delete the same number of rows"
+        );
+
+        // Verify each id matches.
+        let conn = db.conn();
+        for id in &naive_delete {
+            let found: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM clipboard_items WHERE id=?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 0, "naive-evicted row {id} must be gone");
+        }
+        // Pinned items must still be present.
+        for id in &pinned_ids {
+            let found: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM clipboard_items WHERE id=?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 1, "pinned row {id} must remain");
+        }
     }
 }

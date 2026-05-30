@@ -82,6 +82,70 @@ fn url_credentials_redacted() {
 }
 
 #[test]
+fn home_path_without_trailing_slash_redacted() {
+    // Regression: `/Users/<name>` with no trailing slash (e.g. from an
+    // ENOENT / stat error string) previously leaked the username because
+    // the pattern required a trailing `/`.
+    let out = scrub("/Users/secretuser");
+    assert!(!out.contains("secretuser"), "got: {out}");
+    assert!(out.contains("~/"), "got: {out}");
+
+    let out = scrub("cannot stat /Users/jdoe");
+    assert!(!out.contains("jdoe"), "got: {out}");
+    assert!(out.contains("~/"), "got: {out}");
+
+    // Linux analogue.
+    let out = scrub("ENOENT /home/bob");
+    assert!(!out.contains("bob"), "got: {out}");
+    assert!(out.contains("~/"), "got: {out}");
+}
+
+#[test]
+fn home_path_username_with_space_redacted() {
+    // Regression: usernames containing spaces previously leaked because the
+    // pattern excluded whitespace from the username class.
+    let out = scrub("/Users/John Doe/file");
+    assert!(!out.contains("John Doe"), "got: {out}");
+    assert!(!out.contains("John"), "got: {out}");
+    assert!(out.contains("~/file"), "got: {out}");
+}
+
+#[test]
+fn url_password_containing_at_sign_redacted() {
+    // Regression: a password containing `@` (e.g. `p@ss`) used to leak its
+    // tail because the password class stopped at the first `@`.
+    let out = scrub("https://user:p@ss@host/x");
+    assert!(out.contains("<REDACTED-AUTH>@"), "got: {out}");
+    assert!(!out.contains("user:p@ss"), "got: {out}");
+    assert!(!out.contains("p@ss"), "got: {out}");
+    assert!(out.contains("host/x"), "host/path should survive: {out}");
+}
+
+#[test]
+fn adjacent_ipv6_addresses_both_redacted() {
+    // Regression: the trailing boundary char was consumed into the match,
+    // so `replace_all` resumed after it and the second adjacent IPv6 leaked.
+    let out = scrub("::1 ::1");
+    assert_eq!(
+        out.matches("<REDACTED-IP>").count(),
+        2,
+        "both addresses must redact, got: {out}"
+    );
+    assert!(!out.contains("::1"), "got: {out}");
+}
+
+#[test]
+fn email_with_long_hex_domain_label_fully_redacted() {
+    // Regression/ordering: an email whose domain label is a long hex string
+    // must be fully redacted as an email, not fragmented by the hex rule.
+    let hex_label = "a".repeat(32);
+    let input = format!("bob@{hex_label}.com");
+    let out = scrub(&input);
+    assert!(out.contains("<REDACTED-EMAIL>"), "got: {out}");
+    assert!(!out.contains("bob"), "local part leaked: {out}");
+}
+
+#[test]
 fn non_pii_strings_unchanged() {
     // Canonical taxonomy strings the codebase uses.
     for s in [

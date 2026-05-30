@@ -13,11 +13,6 @@ import kotlinx.coroutines.launch
  * ViewModel for clipboard history UI.
  * Extends [AndroidViewModel] to obtain [Application] context required by
  * [ClipboardRepository] for SharedPreferences access.
- *
- * Errors from repository / UniFFI calls are surfaced via [errors] (one-shot
- * messages). The UI is expected to observe and present them as a Snackbar,
- * then call [clearError] once shown to prevent re-display on configuration
- * change.
  */
 class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -34,18 +29,14 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     val errors: LiveData<String?> = _errors
 
     /**
-     * Auto-refresh the history whenever the backing store changes. This is the
-     * fix for "captured clips don't appear": the foreground service and the
-     * accessibility service write to the same SharedPreferences store the UI
-     * reads, but nothing told the UI to re-load after a BACKGROUND capture, so
-     * the list only updated on a manual Refresh. We watch the item-index key
-     * ([ClipboardRepository.KEY_ITEM_IDS], rewritten on every add/delete) and
-     * reload when it mutates. Retained as a field — SharedPreferences holds a
-     * weak reference to the listener.
+     * Auto-refresh the history whenever the backing store changes.
+     * Watches [ClipboardRepository.KEY_ITEM_IDS] (rewritten on every add/delete).
+     * Retained as a field — SharedPreferences holds a weak reference to the listener.
      */
     private val storeListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == ClipboardRepository.KEY_ITEM_IDS) {
+            if (key == ClipboardRepository.KEY_ITEM_IDS ||
+                key == ClipboardRepository.KEY_PINNED_IDS) {
                 loadItems()
             }
         }
@@ -58,7 +49,11 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _loading.value = true
             try {
-                _items.value = repository.getItems(settings.encryptionKey)
+                // Use historySize (Maccy-parity display cap) as the fetch limit so
+                // the list respects the user's configured max without requiring a
+                // separate trim pass. The on-disk retention cap (maxHistoryItems) is
+                // enforced at write time by the capture pipeline.
+                _items.value = repository.getItems(settings.encryptionKey, settings.historySize)
             } catch (e: Exception) {
                 Log.w(TAG, "loadItems failed", e)
                 _errors.value = e.message ?: e.javaClass.simpleName
@@ -72,9 +67,57 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 repository.deleteItem(id)
-                loadItems() // refresh
+                loadItems()
             } catch (e: Exception) {
                 Log.w(TAG, "deleteItem($id) failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            }
+        }
+    }
+
+    fun deleteItems(ids: List<String>) {
+        viewModelScope.launch {
+            try {
+                repository.deleteItems(ids)
+                loadItems()
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteItems(${ids.size}) failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            }
+        }
+    }
+
+    fun clearAll() {
+        viewModelScope.launch {
+            try {
+                repository.clearAll()
+                loadItems()
+            } catch (e: Exception) {
+                Log.w(TAG, "clearAll failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            }
+        }
+    }
+
+    fun clearUnpinned() {
+        viewModelScope.launch {
+            try {
+                repository.clearUnpinned()
+                loadItems()
+            } catch (e: Exception) {
+                Log.w(TAG, "clearUnpinned failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            }
+        }
+    }
+
+    fun setPinned(id: String, pinned: Boolean) {
+        viewModelScope.launch {
+            try {
+                repository.setPinned(id, pinned)
+                loadItems()
+            } catch (e: Exception) {
+                Log.w(TAG, "setPinned($id, $pinned) failed", e)
                 _errors.value = e.message ?: e.javaClass.simpleName
             }
         }

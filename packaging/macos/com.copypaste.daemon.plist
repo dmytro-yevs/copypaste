@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
+<!--
+    LEGACY / OPT-IN ONLY (ADR-014, app-owned daemon lifecycle, 2026-05-30).
+
+    The default install does NOT use this LaunchAgent. The CopyPaste desktop app
+    starts the daemon as a child process on launch and SIGTERMs it on quit, and
+    proactively `launchctl bootout`s this label on both launch and quit so a
+    leftover agent can never resurrect the daemon behind the app's back.
+
+    This plist is retained only for power users who want a headless,
+    CLI-managed daemon WITHOUT the desktop app, via
+    scripts/launchd/install-agent.sh (which kickstarts it explicitly). Do not
+    load it alongside the app — the app will boot it out.
+-->
 <dict>
     <key>Label</key>
     <string>com.copypaste.daemon</string>

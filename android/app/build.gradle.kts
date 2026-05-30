@@ -58,14 +58,14 @@ val buildCargoNdk by tasks.registering(Exec::class) {
     //   ./gradlew connectedDebugAndroidTest -PcargoNdkTargets=arm64-v8a -PcargoNdkLive=false
     val targets = (project.findProperty("cargoNdkTargets") as String?)
         ?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }
-        ?: listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        ?: listOf("arm64-v8a")
     val live = (project.findProperty("cargoNdkLive") as String?) != "false"
 
     val args = mutableListOf("cargo", "ndk")
     targets.forEach { args += listOf("-t", it) }
     args += listOf(
         "-o", "android/app/src/main/jniLibs",
-        "build", "--release", "-p", "copypaste-android",
+        "build", "--profile", "release-size", "-p", "copypaste-android",
     )
     if (live) args += listOf("--features", "android-uniffi-live")
     commandLine(args)
@@ -92,9 +92,35 @@ android {
         // conformance test (CryptoConformanceTest.kt). Runs on the emulator via
         // `./gradlew connectedDebugAndroidTest`.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+    }
+
+    signingConfigs {
+        // Use a committed, stable debug keystore so every build (local and CI)
+        // is signed with the SAME certificate. Without this, Android rejects
+        // over-the-air updates with INSTALL_FAILED_UPDATE_INCOMPATIBLE because
+        // Gradle auto-generates a fresh debug keystore on each machine/runner.
+        //
+        // THIS IS NOT A PRODUCTION SECRET — it is the standard debug key used
+        // only for sideloaded/debug APKs. Do not use this keystore for Play Store
+        // submissions; create a separate release keystore stored outside the repo.
+        //
+        // Credentials: storePassword=android, keyAlias=androiddebugkey, keyPassword=android
+        // SHA-256: F6:23:D7:B2:FB:23:7D:F5:60:9E:7B:D7:A8:BB:FD:9D:7C:CF:A9:4C:AF:87:E8:D2:1D:3E:99:34:1F:CE:D9:53
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             // R8 keep-rules are REQUIRED here: the UniFFI bindings + JNA bind to
@@ -175,11 +201,21 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     // UniFFI generated Kotlin bindings use JNA for native interop.
-    // Plain coordinate (no @aar): Gradle resolves JAR via POM for kotlinc compile
-    // classpath + AAR .so resources at runtime. @aar bypasses POM resolution and
-    // puts only the AAR on the classpath (dex-time only), causing "Unresolved
-    // reference: Structure/Library/Native" in compileDebugKotlin.
-    implementation("net.java.dev.jna:jna:5.14.0")
+    // We need TWO entries for JNA in the main app:
+    //   1. Plain coordinate: Gradle resolves the JAR via POM so kotlinc has
+    //      Structure/Library/Native on its compile classpath. @aar alone bypasses
+    //      POM resolution and causes "Unresolved reference" in compileDebugKotlin.
+    //   2. @aar: packages libjnidispatch.so (arm64-v8a / armeabi-v7a / x86_64)
+    //      into the main APK so UniFFI's Native.load("copypaste_android") finds
+    //      the JNA dispatch library at runtime.  Without this the main production
+    //      app crashes with UnsatisfiedLinkError on first FFI call even when
+    //      libcopypaste_android.so is present.
+    // JNA @aar ONLY: the Android aar bundles the JNA classes (for the kotlinc
+    // compile classpath) AND the per-ABI libjnidispatch.so (packaged into the
+    // APK so UniFFI's Native.load resolves at runtime). Do NOT also depend on
+    // the plain `jna:5.14.0` jar — having both puts the same com.sun.jna.*
+    // classes on the classpath twice and D8 fails with "Duplicate class".
+    implementation("net.java.dev.jna:jna:5.14.0@aar")
 
     // UniFFI Kotlin bindings are compiled as source (CopypasteBindings.kt).
     // Uncomment the line below only when using a separately-packaged bindings jar

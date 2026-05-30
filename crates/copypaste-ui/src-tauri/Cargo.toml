@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
 serde = { workspace = true }
 serde_json.workspace = true
 anyhow.workspace = true
@@ -39,4 +40,4 @@ core-graphics = { version = "0.25", features = ["highsierra"] }
 core-foundation = "0.10"
 objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSString"] }
-objc2-app-kit = { version = "0.2", features = ["NSWorkspace", "NSRunningApplication"] }
+objc2-app-kit = { version = "0.2", features = ["NSWorkspace", "NSRunningApplication", "NSSound"] }

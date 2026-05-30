@@ -78,6 +78,11 @@ pub struct DeviceRecord {
     /// from the public key (which would make it a deterministic oracle).
     pub bearer_token: String,
     pub registered_at: Instant,
+    /// Last time this device was seen making an authenticated request (push or
+    /// pull). Updated by `update_last_seen`. Used by `cleanup_inactive_devices`
+    /// instead of `registered_at` so that an active device that has drained its
+    /// inbox is not evicted simply because it registered long ago.
+    pub last_seen: Instant,
     /// Unix timestamp (seconds since epoch) when the token expires (1 year).
     pub expires_at_unix: i64,
     /// Subscription tier — determines device count and history quotas.
@@ -153,10 +158,31 @@ pub struct RelayStore {
     /// Monotonic counter: total sync items removed by `prune_expired`
     /// (TTL eviction). Counter — only ever incremented.
     evictions_total: Arc<AtomicU64>,
+
+    /// Operator-configured ceiling on how many items a single device inbox
+    /// may hold. Sourced from `RelayConfig.max_items_per_device` (env:
+    /// `RELAY_MAX_ITEMS_PER_DEVICE`). Defaults to
+    /// `MAX_PUSH_ITEMS_PER_DEVICE` (500) when constructed via `new()`.
+    /// The per-tier `effective_history_cap` still applies as a further
+    /// tightener — this field is the *upper* ceiling over all tiers.
+    max_items_per_device: usize,
 }
 
 impl RelayStore {
+    /// Create a store with the default `MAX_PUSH_ITEMS_PER_DEVICE` inbox cap.
+    // Used by unit/integration tests (`make_store()`) and integration test
+    // binaries that `#[path]`-include state.rs. The production binary path
+    // uses `new_with_cap` to wire the operator config value, so the binary
+    // target sees this as dead — hence the allow.
+    #[allow(dead_code)]
     pub fn new(_sync_ttl_secs: u64) -> Self {
+        Self::new_with_cap(_sync_ttl_secs, MAX_PUSH_ITEMS_PER_DEVICE)
+    }
+
+    /// Create a store with an explicit inbox cap (`max_items_per_device`).
+    /// Used by `main` to wire the operator-configured value from
+    /// `RelayConfig`, and by tests that verify the cap is honoured.
+    pub fn new_with_cap(_sync_ttl_secs: u64, max_items_per_device: usize) -> Self {
         Self {
             devices: HashMap::new(),
             sync_items: HashMap::new(),
@@ -164,6 +190,7 @@ impl RelayStore {
             reg_attempts: HashMap::new(),
             items_total: Arc::new(AtomicU64::new(0)),
             evictions_total: Arc::new(AtomicU64::new(0)),
+            max_items_per_device,
         }
     }
 
@@ -330,6 +357,30 @@ impl RelayStore {
             )));
         }
 
+        // Read the wall clock *before* issuing the token. A token whose
+        // `expires_at_unix` is computed from a bogus near-epoch clock would be
+        // born already-expired, so every device it is issued to would get
+        // Unauthorized on the next request — a silent, total outage. Treat a
+        // `duration_since(UNIX_EPOCH)` error (clock before the epoch) or an
+        // implausibly-near-epoch reading as fatal and refuse to issue a token
+        // rather than handing back a dead credential. `MIN_PLAUSIBLE_UNIX` is
+        // 2020-01-01; any correctly-set host clock is far past it.
+        const MIN_PLAUSIBLE_UNIX: u64 = 1_577_836_800; // 2020-01-01T00:00:00Z
+        let now_unix = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+            Ok(d) if d.as_secs() >= MIN_PLAUSIBLE_UNIX => d.as_secs() as i64,
+            other => {
+                tracing::error!(
+                    ?other,
+                    "host clock is before {MIN_PLAUSIBLE_UNIX} (near-epoch or pre-epoch); \
+                     refusing to issue an auth token that would be born expired"
+                );
+                return Err(RelayError::Internal(
+                    "server clock is not set correctly; cannot issue auth token".into(),
+                ));
+            }
+        };
+        let expires_at_unix = now_unix + 365 * 24 * 3600;
+
         // Generate bearer token from 16 random bytes (NEVER derive from
         // public key — that would let any client compute the secret).
         // Output: 32 hex characters representing 16 bytes of entropy.
@@ -337,13 +388,7 @@ impl RelayStore {
         OsRng.fill_bytes(&mut token_bytes);
         let bearer_token = hex_encode(&token_bytes);
 
-        // Expiry: 1 year from now expressed as Unix seconds.
-        let now_unix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-        let expires_at_unix = now_unix + 365 * 24 * 3600;
-
+        let now = Instant::now();
         self.devices.insert(
             device_id.clone(),
             DeviceRecord {
@@ -351,7 +396,8 @@ impl RelayStore {
                 device_name,
                 public_key_b64,
                 bearer_token: bearer_token.clone(),
-                registered_at: Instant::now(),
+                registered_at: now,
+                last_seen: now,
                 expires_at_unix,
                 tier,
                 registered_from_ip: client_ip,
@@ -408,6 +454,24 @@ impl RelayStore {
     }
 
     // -----------------------------------------------------------------------
+    // Activity tracking
+    // -----------------------------------------------------------------------
+
+    /// Stamp `last_seen` to `Instant::now()` for `device_id`.
+    ///
+    /// Call this after every successful `verify_token` so that `cleanup_inactive_devices`
+    /// evicts on actual inactivity, not on registration age. A device that registers,
+    /// drains its inbox, and then stays idle for the threshold will be evicted — but
+    /// one that continues to pull (even an empty inbox) will not.
+    // Called from routes/items.rs after every successful verify_token in the
+    // push, pull, and delete_item handlers.
+    pub fn update_last_seen(&mut self, device_id: &str) {
+        if let Some(record) = self.devices.get_mut(device_id) {
+            record.last_seen = Instant::now();
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Auth
     // -----------------------------------------------------------------------
 
@@ -419,21 +483,53 @@ impl RelayStore {
     /// cannot distinguish "wrong token" from "expired token". The equality
     /// check still runs before the expiry branch so the constant-time
     /// comparison path is unconditional.
+    ///
+    /// Clock errors fail CLOSED: if `SystemTime::now()` cannot produce a
+    /// valid duration (e.g. the system clock is set before UNIX_EPOCH), we
+    /// treat the token as expired and return `Unauthorized`. The previous
+    /// `unwrap_or_default()` yielded `now_unix = 0`, making
+    /// `0 <= expires_at_unix` always true and tokens never expire on a
+    /// broken clock — a fail-open security hole.
     pub fn verify_token(&self, device_id: &str, token: &str) -> Result<(), RelayError> {
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .map(|d| d.as_secs() as i64);
+        self.verify_token_at(device_id, token, now_unix)
+    }
+
+    /// Internal helper: verify token with an explicit `now_unix` timestamp.
+    ///
+    /// `now_unix = None` represents a clock error and fails CLOSED
+    /// (returns `Unauthorized`). Extracted so tests can inject a
+    /// simulated clock fault without touching the OS clock.
+    ///
+    /// Collapse missing-device to `Unauthorized` (not `DeviceNotFound`) on
+    /// token-guarded routes: returning a distinct 404 would let an attacker
+    /// enumerate which device IDs are registered by probing push/pull/delete
+    /// with a garbage token. `Unauthorized` is indistinguishable from a wrong
+    /// token, closing that oracle while preserving GET /devices/:id 404 for the
+    /// unauthenticated device-info endpoint.
+    pub fn verify_token_at(
+        &self,
+        device_id: &str,
+        token: &str,
+        now_unix: Option<i64>,
+    ) -> Result<(), RelayError> {
         let record = self
             .devices
             .get(device_id)
-            .ok_or(RelayError::DeviceNotFound)?;
+            .ok_or(RelayError::Unauthorized)?;
         let token_ok: bool = record
             .bearer_token
             .as_bytes()
             .ct_eq(token.as_bytes())
             .into();
-        let now_unix = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-        let not_expired = now_unix <= record.expires_at_unix;
+        // Fail closed on clock error: None = unknown time = treat as expired.
+        let not_expired = match now_unix {
+            Some(now) => now <= record.expires_at_unix,
+            None => false,
+        };
         if token_ok && not_expired {
             Ok(())
         } else {
@@ -450,11 +546,52 @@ impl RelayStore {
     /// Validates that the decoded `content_b64` does not exceed `max_item_bytes`.
     /// Prunes the oldest item when the inbox exceeds `MAX_PUSH_ITEMS_PER_DEVICE`.
     /// Returns the auto-assigned integer ID.
+    //
+    // The HTTP `push` handler now calls `push_item_decoded` directly (it decodes
+    // the payload once *before* locking the store), so this self-decoding
+    // wrapper has no production caller. It is retained for the test suites and
+    // any future non-HTTP caller that holds only the raw base64.
+    #[allow(dead_code)]
     pub fn push_item(
         &mut self,
         device_id: &str,
         content_type: String,
         content_b64: String,
+        wall_time: u64,
+        max_item_bytes: usize,
+    ) -> Result<i64, RelayError> {
+        // Decode here so callers that haven't already measured the payload
+        // (tests, non-HTTP callers) keep working unchanged, then delegate to
+        // the length-aware path. The HTTP `push` handler instead decodes once
+        // *before* taking the store mutex and calls `push_item_decoded`
+        // directly, so the large base64 decode never runs under the lock (perf).
+        let decoded_len = B64
+            .decode(&content_b64)
+            .map_err(|_| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?
+            .len();
+        self.push_item_decoded(
+            device_id,
+            content_type,
+            content_b64,
+            decoded_len,
+            wall_time,
+            max_item_bytes,
+        )
+    }
+
+    /// Store an encrypted item whose decoded length is already known.
+    ///
+    /// Identical to [`push_item`](Self::push_item) except the caller passes the
+    /// pre-computed `decoded_len` (the number of decoded ciphertext bytes) so
+    /// the base64 payload is **not** decoded again while the store mutex is
+    /// held. `content_b64` is still validated for membership/quotas; it is the
+    /// caller's responsibility to ensure `decoded_len` matches `content_b64`.
+    pub fn push_item_decoded(
+        &mut self,
+        device_id: &str,
+        content_type: String,
+        content_b64: String,
+        decoded_len: usize,
         wall_time: u64,
         max_item_bytes: usize,
     ) -> Result<i64, RelayError> {
@@ -469,10 +606,7 @@ impl RelayStore {
             ));
         }
 
-        let decoded = B64
-            .decode(&content_b64)
-            .map_err(|_| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?;
-        if decoded.len() > max_item_bytes {
+        if decoded_len > max_item_bytes {
             return Err(RelayError::PayloadTooLarge);
         }
 
@@ -521,16 +655,19 @@ impl RelayStore {
         let pos = inbox.partition_point(|existing| existing.wall_time <= wall_time);
         inbox.insert(pos, item);
 
-        // History quota: cap the inbox at the tier-aware effective limit
-        // (the tighter of the absolute hard cap and the tier's
-        // `max_history_items`). Enforced as a silent prune of the oldest
-        // items rather than rejecting the push — the fan-out sender cannot
-        // know which recipient inboxes are full (see the relay v2 quotas
-        // plan). `effective_history_cap` already folds the tier history limit
-        // into the absolute hard cap, so this single guard subsumes the tier
-        // quota check for every current tier (Free's 1000 limit is looser than
-        // the 500 hard cap, Pro is unlimited).
-        let cap = effective_history_cap(tier);
+        // History quota: cap the inbox at the tighter of:
+        //   1. the operator-configured `max_items_per_device` (from
+        //      `RelayConfig` / `RELAY_MAX_ITEMS_PER_DEVICE`), which is the
+        //      live ceiling sourced from config — previously this field was
+        //      dead and the compile-time `MAX_PUSH_ITEMS_PER_DEVICE` was
+        //      always used instead, ignoring the env var entirely;
+        //   2. the tier-aware effective limit (`effective_history_cap`),
+        //      which is itself the tighter of the absolute hard cap and the
+        //      tier's `max_history_items`.
+        // Enforced as a silent prune of the oldest items (the fan-out sender
+        // cannot know which recipient inboxes are full — see relay v2 quotas
+        // plan).
+        let cap = effective_history_cap(tier).min(self.max_items_per_device);
         if inbox.len() > cap {
             inbox.drain(..inbox.len() - cap);
         }
@@ -544,6 +681,17 @@ impl RelayStore {
 
     /// Return up to `limit` items in `device_id`'s sync inbox strictly after the
     /// `(since, since_id)` composite cursor, ordered ascending.
+    ///
+    /// # Contract
+    ///
+    /// This method returns [`RelayError::DeviceNotFound`] for an unknown
+    /// `device_id`. In production every call-site goes through
+    /// [`Self::verify_token`] first, which already collapses missing-device to
+    /// [`RelayError::Unauthorized`]. Callers that skip `verify_token` will
+    /// observe a `DeviceNotFound` rather than `Unauthorized` — that is
+    /// intentional: `pull_items` is a pure data accessor with no security
+    /// semantics of its own. **Always call `verify_token` before `pull_items`**
+    /// on any authenticated route.
     ///
     /// Pagination is driven by a strictly-monotonic `(wall_time, id)` tuple
     /// rather than bare `wall_time` (relay H-1 / audit finding G). `wall_time`
@@ -644,8 +792,11 @@ impl RelayStore {
             .devices
             .iter()
             .filter(|(id, record)| {
-                let old_enough =
-                    record.registered_at.elapsed().as_secs() >= inactive_threshold_secs;
+                // Evict on `last_seen`, not `registered_at`. A device that was
+                // registered long ago but has actively pulled recently should NOT be
+                // evicted — `registered_at` never advances after creation, so using it
+                // would lock out any active receiver whose inbox happens to be empty.
+                let old_enough = record.last_seen.elapsed().as_secs() >= inactive_threshold_secs;
                 if !old_enough {
                     return false;
                 }
@@ -806,6 +957,32 @@ mod tests {
         assert_eq!(token.len(), 32);
         assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(expires_at > 0);
+    }
+
+    #[test]
+    fn issued_token_is_not_born_expired() {
+        // Guards the near-epoch-clock outage fix: under any correctly-set host
+        // clock the issued token must expire in the future (~1 year out), never
+        // at-or-before "now". A bogus near-epoch clock previously yielded
+        // `expires_at_unix ≈ 365d`, which is far in the past today, so every
+        // device would be Unauthorized on its next request.
+        let mut store = make_store();
+        let (token, expires_at) = store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("test host clock must be past the epoch")
+            .as_secs() as i64;
+        assert!(
+            expires_at > now_unix,
+            "token must not be born expired: expires_at={expires_at}, now={now_unix}"
+        );
+        // Roughly one year out (allow a few seconds of test scheduling slack).
+        let one_year = 365 * 24 * 3600;
+        assert!((expires_at - now_unix - one_year).abs() < 60);
+        // And the freshly-issued token must actually verify.
+        assert!(store.verify_token(&device_a_id(), &token).is_ok());
     }
 
     #[test]
@@ -1453,6 +1630,146 @@ mod tests {
             seen_ids,
             vec![id1, id2, id3],
             "tuple-cursor pagination must walk all tied-wall_time items with no drops"
+        );
+    }
+
+    // ---- update_last_seen / cleanup_inactive_devices interaction ------------
+
+    /// Positive: a device that calls `update_last_seen` after the inactivity
+    /// threshold has elapsed must SURVIVE `cleanup_inactive_devices` — last_seen
+    /// is reset to "now" so the threshold is no longer exceeded.
+    ///
+    /// This guards the fix for the prior bug where `update_last_seen` was
+    /// defined but never called from the route handlers, so `last_seen` stayed
+    /// equal to `registered_at` and active devices were evicted after 30 days.
+    #[test]
+    fn update_last_seen_prevents_eviction_after_threshold() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+
+        // Simulate the device's last_seen being past the threshold by rewinding
+        // it to a time far in the past (subtract threshold + 1 second).
+        let threshold_secs = 60u64; // use a small finite threshold for the test
+        {
+            let record = store.devices.get_mut(&device_a_id()).unwrap();
+            // Rewind last_seen by (threshold + 1) seconds so cleanup would
+            // normally evict this device.
+            record.last_seen = Instant::now() - Duration::from_secs(threshold_secs + 1);
+        }
+
+        // Verify that WITHOUT update_last_seen the device would be evicted.
+        // (Snapshot the current last_seen before calling update.)
+        let would_evict = store
+            .devices
+            .get(&device_a_id())
+            .map(|r| r.last_seen.elapsed().as_secs() >= threshold_secs)
+            .unwrap_or(false);
+        assert!(
+            would_evict,
+            "precondition: device should be evictable before update_last_seen"
+        );
+
+        // Now call update_last_seen (simulating what the route handler does
+        // after a successful verify_token).
+        store.update_last_seen(&device_a_id());
+
+        // cleanup_inactive_devices with the same finite threshold must NOT
+        // evict the device whose last_seen was just refreshed.
+        let removed = store.cleanup_inactive_devices(threshold_secs);
+        assert_eq!(
+            removed, 0,
+            "device must survive cleanup after update_last_seen refreshes last_seen"
+        );
+        assert!(
+            store.devices.contains_key(&device_a_id()),
+            "device must still be registered"
+        );
+    }
+
+    /// Negative: a device that does NOT call `update_last_seen` after the
+    /// inactivity threshold has elapsed must be EVICTED by
+    /// `cleanup_inactive_devices`.
+    ///
+    /// This is the counterpart to `update_last_seen_prevents_eviction_after_threshold`:
+    /// it proves that cleanup actually reaps stale devices, so the positive test
+    /// above is meaningful (it would trivially pass if cleanup never evicted anything).
+    #[test]
+    fn no_update_last_seen_causes_eviction_after_threshold() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+
+        let threshold_secs = 60u64;
+
+        // Rewind last_seen past the threshold — no update_last_seen called.
+        {
+            let record = store.devices.get_mut(&device_a_id()).unwrap();
+            record.last_seen = Instant::now() - Duration::from_secs(threshold_secs + 1);
+        }
+
+        // cleanup must evict the device because last_seen is stale and inbox
+        // is empty.
+        let removed = store.cleanup_inactive_devices(threshold_secs);
+        assert_eq!(
+            removed, 1,
+            "stale device with no last_seen update must be evicted"
+        );
+        assert!(
+            !store.devices.contains_key(&device_a_id()),
+            "device must be gone after eviction"
+        );
+    }
+
+    // ---- Fix 1: verify_token fail-closed on clock error --------------------
+
+    /// When `verify_token` encounters a clock error it must fail CLOSED (return
+    /// `Unauthorized`), not silently treat `now_unix=0` as "valid" (the old
+    /// `unwrap_or_default()` behaviour that made `0 <= expires_at_unix` always
+    /// true). We test the internal helper `verify_token_at` directly, injecting
+    /// a simulated clock error via `None` for `now_unix`.
+    #[test]
+    fn verify_token_clock_error_returns_unauthorized() {
+        let mut store = make_store();
+        let (token, _) = store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        // None = simulated clock error → must fail closed.
+        let err = store
+            .verify_token_at(&device_a_id(), &token, None)
+            .unwrap_err();
+        assert!(
+            matches!(err, RelayError::Unauthorized),
+            "clock error must fail closed: got {err:?}"
+        );
+    }
+
+    // ---- Fix 3: max_items_per_device wired from config ----------------------
+
+    /// The config `max_items_per_device` must govern the inbox cap. A store
+    /// constructed with `new_with_cap(N)` must enforce N as the hard ceiling,
+    /// not the compile-time `MAX_PUSH_ITEMS_PER_DEVICE` (500).
+    #[test]
+    fn max_items_per_device_config_governs_cap() {
+        const CUSTOM_CAP: usize = 5;
+        let mut store = RelayStore::new_with_cap(3600, CUSTOM_CAP);
+        store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        // Push more items than the custom cap.
+        for t in 1u64..=(CUSTOM_CAP as u64 + 3) {
+            push_text(&mut store, &device_a_id(), t);
+        }
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
+        assert_eq!(
+            items.len(),
+            CUSTOM_CAP,
+            "inbox must be capped at the config-supplied max_items_per_device ({CUSTOM_CAP}), got {}",
+            items.len()
         );
     }
 

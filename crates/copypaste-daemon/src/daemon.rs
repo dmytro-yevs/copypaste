@@ -5,9 +5,10 @@ use crate::{
     p2p, paths,
 };
 use copypaste_core::{
-    build_item_aad_v2, bump_item_recency, chunks_to_blob, derive_v2, detect, encode_image,
-    encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts, AppConfig,
-    ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION_V4,
+    build_item_aad_v2, bump_item_recency, chunks_to_blob, derive_v2, encode_image_with_limit,
+    encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts,
+    is_sensitive_for_autowipe, prune_to_cap, AppConfig, ClipboardItem, Database, DeviceKeypair,
+    AAD_SCHEMA_VERSION_V4,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -26,6 +27,7 @@ use std::time::Duration;
 /// abandoned thread may stay parked on the OS prompt; that is acceptable — it
 /// holds only a clone of nothing and is reaped when the process exits.
 const KEYCHAIN_READ_TIMEOUT: Duration = Duration::from_secs(8);
+use std::sync::RwLock;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::time::interval;
 // D1: CancellationToken for coordinated graceful shutdown across all tasks.
@@ -50,10 +52,14 @@ pub async fn run() -> anyhow::Result<()> {
 pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()> {
     let config = load_config();
     tracing::info!(
-        "poll_interval={}ms history_limit={}",
+        "poll_interval={}ms storage_quota_bytes={}",
         config.poll_interval_ms,
-        config.history_limit
+        config.storage_quota_bytes
     );
+    // Shared live core config — written by `set_config` IPC handler so limit/feature
+    // changes (e.g. paste_as_plain_text, excluded_app_bundle_ids, sync_on_wifi_only)
+    // hot-reload into the tick loop and paste path without a daemon restart.
+    let core_config_arc: Arc<RwLock<AppConfig>> = Arc::new(RwLock::new(config.clone()));
 
     // v0.3 (THREAT-MODEL OI-4): upgrade the Keychain entry's ACL on first
     // launch after install/upgrade.  Idempotent + best-effort — a failure
@@ -171,7 +177,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                      intact on disk and recoverable once the matching key is \
                      restored."
                 );
-                return run_degraded(crate::ipc::DEGRADED_REASON_KEYCHAIN_LOCKED, quit_flag).await;
+                // The key WAS obtained (we are on the `Open`/`OpenEphemeral`
+                // path) but it does not match this database, so the accurate
+                // reason is a key MISMATCH — not a locked/unreachable Keychain.
+                // Reporting `keychain_locked` here would wrongly tell the user
+                // to re-grant the Keychain prompt, which cannot fix a wrong key.
+                return run_degraded(crate::ipc::DEGRADED_REASON_DB_KEY_MISMATCH, quit_flag).await;
             }
         },
     ));
@@ -307,7 +318,19 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // Create it here (before both the IPC task and `start_p2p`) and hand each a
     // clone; `PairedPeers` is interior-mutable, so clones observe one another.
     // `None` when P2P is disabled — IPC pairing then only persists to peers.json.
-    let p2p_enabled = std::env::var("COPYPASTE_P2P").as_deref() == Ok("1");
+    //
+    // A-SET-4: env var is the override (the app always spawns with COPYPASTE_P2P=1
+    // when it wants P2P enabled); when env var is absent, fall back to the
+    // persisted IPC config's p2p_enabled so the user's UI toggle takes effect.
+    // The IPC AppConfig (config.json) owns p2p_enabled; the core AppConfig
+    // (config.toml) owns limits. Read the IPC config here just for this field.
+    let p2p_enabled = match std::env::var("COPYPASTE_P2P").as_deref() {
+        Ok("1") => true,
+        Ok("0") => false,
+        // Item 6: single source of truth — delegate to the public accessor so
+        // daemon.rs and any future caller always agree on the read path.
+        _ => crate::ipc::p2p_enabled_from_config(),
+    };
     let p2p_peers: Option<copypaste_p2p::transport::PairedPeers> = if p2p_enabled {
         Some(copypaste_p2p::transport::PairedPeers::new())
     } else {
@@ -418,7 +441,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             local_key_arc.clone(),
             device_public_key_arc.clone(),
         )
-        .with_new_item_tx(new_item_tx.clone());
+        .with_new_item_tx(new_item_tx.clone())
+        .with_core_config(core_config_arc.clone());
         if let Some(peers) = p2p_peers.clone() {
             server = server.with_p2p_peers(peers);
         }
@@ -606,6 +630,10 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     } else {
         None
     };
+    // Pass the configured quota so the P2P merge path prunes to the same cap
+    // as the cloud path (Fix HIGH-3). Saturating cast: values above i64::MAX
+    // (>9 EB) are unreachable in practice.
+    let sync_quota_bytes = config.storage_quota_bytes.min(i64::MAX as u64) as i64;
     let sync_handle = tokio::spawn(async move {
         if let Err(e) = sync_orch::run(
             sync_db,
@@ -614,6 +642,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             sync_outbound_tx,
             sync_device_id,
             sync_crypto,
+            sync_quota_bytes,
             sync_shutdown,
         )
         .await
@@ -642,6 +671,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 cloud_last_sync_ms.clone(),
                 local_key_arc.clone(),
                 cloud_signed_in.clone(),
+                core_config_arc.clone(),
             )
             .await
             {
@@ -661,6 +691,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     };
 
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
+    // Override the READ-gate image cap with the user-configured value so the
+    // clipboard poll gate and the encode gate are consistent.  Without this,
+    // `poll()` was capped at the hardcoded core const (10 MiB) even when the
+    // user configured a higher value (default 25 MiB), making configs above
+    // 10 MiB silently ineffective.
+    monitor.set_max_image_bytes(usize::try_from(config.max_image_size_bytes).unwrap_or(usize::MAX));
     // DUP-ON-COPY fix: share the self-write sentinel with the IpcServer so
     // write_to_pasteboard can stamp the post-write changeCount and the monitor
     // can suppress the immediately-following re-capture of that same write.
@@ -672,13 +708,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let mut cleanup_ticks: u64 = 0;
     // Sensitive TTL cleanup runs every 5 seconds; track elapsed ticks separately.
     let mut sensitive_cleanup_ticks: u64 = 0;
-    let sensitive_ttl_ms = config.sensitive_ttl_secs as i64 * 1000;
 
     tracing::info!("clipboard monitor started");
     tracing::info!(
-        "sensitive auto-wipe TTL: {}s ({}ms), checked every 5s",
+        "sensitive auto-wipe TTL: {}s, checked every 5s",
         config.sensitive_ttl_secs,
-        sensitive_ttl_ms,
     );
 
     #[cfg(target_os = "macos")]
@@ -696,7 +730,16 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx, &local_device_id).await;
+                    // Hot-reload: snapshot the current live config on every tick
+                    // so limit/feature changes from set_config take effect without
+                    // a daemon restart (excluded_app_bundle_ids, paste_as_plain_text,
+                    // sensitive_ttl_secs, etc.).
+                    let live_config = core_config_arc
+                        .read()
+                        .map(|g| g.clone())
+                        .unwrap_or_else(|_| config.clone());
+                    let sensitive_ttl_ms = live_config.sensitive_ttl_secs as i64 * 1000;
+                    handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -752,7 +795,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx, &local_device_id).await;
+                    let live_config = core_config_arc
+                        .read()
+                        .map(|g| g.clone())
+                        .unwrap_or_else(|_| config.clone());
+                    let sensitive_ttl_ms = live_config.sensitive_ttl_secs as i64 * 1000;
+                    handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -1000,6 +1048,45 @@ async fn handle_tick(
         return;
     }
 
+    // EXCLUDE APPS: if the frontmost app's bundle ID is in the exclusion list,
+    // advance the change-count but do not store the item.  cfg(macos) because
+    // `lsappinfo front` is a macOS-only tool.
+    #[cfg(target_os = "macos")]
+    if !config.excluded_app_bundle_ids.is_empty() {
+        // `lsappinfo front` prints a record for the frontmost process.
+        // We extract the bundleID field from lines like:
+        //   "bundleID" = "com.1password.1password"
+        let frontmost_bundle_id: Option<String> = std::process::Command::new("lsappinfo")
+            .args(["front"])
+            .output()
+            .ok()
+            .and_then(|out| {
+                let text = String::from_utf8_lossy(&out.stdout);
+                for line in text.lines() {
+                    let trimmed = line.trim();
+                    // Match: "bundleID" = "com.example.app"
+                    if let Some(rest) = trimmed.strip_prefix("\"bundleID\" = \"") {
+                        if let Some(bid) = rest.strip_suffix('"') {
+                            return Some(bid.to_owned());
+                        }
+                    }
+                }
+                None
+            });
+        if let Some(ref bid) = frontmost_bundle_id {
+            if config.excluded_app_bundle_ids.iter().any(|ex| ex == bid) {
+                // Advance the change-count so this item is not re-offered on
+                // the next tick (same pattern as private-mode).
+                let _ = monitor.poll();
+                tracing::debug!(
+                    bundle_id = %bid,
+                    "clipboard: skipping capture — app is in excluded_app_bundle_ids"
+                );
+                return;
+            }
+        }
+    }
+
     match monitor.poll() {
         Ok(Some(ClipboardContent::Text(text))) => {
             // beta.5 Bug-1 visibility: log every capture at info level so
@@ -1095,7 +1182,11 @@ async fn handle_text(
     // `insert_item` / `insert_item_with_fts` (ItemsError::MigrationInProgress).
     // The call-site guard that used to live here has been removed.
 
-    let is_sensitive = detect(&text).is_some();
+    // Item 2: use confidence-gated autowipe check (floor 0.70) so low-signal
+    // patterns (phone numbers, order-ids) no longer trigger the 30s TTL wipe.
+    // The old `detect(&text).is_some()` fired on any match regardless of
+    // confidence; `is_sensitive_for_autowipe` requires confidence >= 0.70.
+    let is_sensitive = is_sensitive_for_autowipe(&text);
 
     // Compute SHA-256 content hash of the PLAINTEXT bytes.
     // This is used for deduplication: if an identical item already exists in
@@ -1211,11 +1302,33 @@ async fn handle_text(
         match insert_item_with_fts(&db_guard, &item, &text) {
             Ok(stored_id) => {
                 if stored_id != item.id {
+                    // Fix MED #4: `insert_item_with_fts` deduped `item` against
+                    // an existing row identified by `stored_id`. Broadcasting
+                    // `item` (which carries the REJECTED new uuid) would cause
+                    // subscribers (P2P, sync) to look up a nonexistent row.
+                    // Fetch the ACTUAL stored row and broadcast that instead, so
+                    // all consumers observe a valid, persisted item. If the fetch
+                    // fails (extreme race), produce no broadcast for this poll.
                     tracing::debug!(
                         requested = %item.id,
                         existing = %stored_id,
-                        "text item deduped against existing row (UNIQUE index race)"
+                        "text item deduped against existing row (UNIQUE index race) — broadcasting stored row"
                     );
+                    prune_history(&db_guard, &config);
+                    match get_item_by_id(&db_guard, &stored_id) {
+                        Ok(Some(stored_item)) => Some(stored_item),
+                        Ok(None) => {
+                            tracing::debug!(
+                                id = %stored_id,
+                                "text dedup: stored row disappeared before fetch (deleted concurrently)"
+                            );
+                            None
+                        }
+                        Err(e) => {
+                            tracing::warn!("text dedup: failed to fetch stored row for broadcast: {e}");
+                            None
+                        }
+                    }
                 } else {
                     tracing::info!(
                         id = %item.id,
@@ -1224,9 +1337,9 @@ async fn handle_text(
                         item.id,
                         is_sensitive
                     );
+                    prune_history(&db_guard, &config);
+                    Some(item)
                 }
-                prune_history(&db_guard, &config);
-                Some(item)
             }
             Err(e) => {
                 tracing::warn!("failed to store text item: {e}");
@@ -1269,7 +1382,21 @@ async fn handle_image(
         // dedup naturally (Wave 2.1 security LOW #19).
         let file_id = crate::clipboard::image_content_hash(&raw_bytes);
 
-        match encode_image(&raw_bytes, &local_key, &file_id) {
+        // Honour the user-configured raw-image cap (default 25 MB) instead of
+        // the library's hard 10 MB floor, which silently rejected 10–25 MB
+        // images the config permitted. `usize::MAX` saturation keeps 32-bit
+        // targets safe.
+        let max_image_bytes = usize::try_from(config.max_image_size_bytes).unwrap_or(usize::MAX);
+        // Item 3: pass config.max_decoded_image_mb so the decode-bomb budget
+        // comes from the live AppConfig rather than the compile-time default
+        // baked into the `encode_image` wrapper.
+        match encode_image_with_limit(
+            &raw_bytes,
+            &local_key,
+            &file_id,
+            max_image_bytes,
+            config.max_decoded_image_mb,
+        ) {
             Ok((meta, chunks)) => {
                 let blob = chunks_to_blob(&chunks);
                 let meta_json = format!(
@@ -1277,6 +1404,17 @@ async fn handle_image(
                     meta.width, meta.height, meta.original_size, meta.chunk_count, meta.file_id
                 );
                 let mut item = ClipboardItem::new_image(blob, meta_json, 0);
+                // Stable cross-device item identity (mirror handle_text, which
+                // sets `item.item_id` once at capture). `new_image` seeds a fresh
+                // random `item_id`; that would give the SAME image a different
+                // identity on each device, so the sync/merge/dedup layer (which
+                // keys on `item_id`) would never converge them and duplicate rows
+                // would accumulate. Derive the `item_id` deterministically from
+                // the content-hash `file_id` so identical images share one
+                // identity across devices and LWW can fire. (The image AEAD AAD
+                // is bound to `file_id`, not `item_id`, so this does not affect
+                // chunk encryption.)
+                item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
                 // Stamp stable device identity (same fix as handle_text).
                 item.origin_device_id = local_device_id;
                 tracing::debug!(
@@ -1327,36 +1465,18 @@ async fn handle_image(
     }
 }
 
+/// Enforce the size-only cap after each local insert.
+///
+/// The count cap (`history_limit`) has been removed: the local DB is bounded
+/// exclusively by `storage_quota_bytes`. Pinned items are never evicted.
+///
+/// `storage_quota_bytes` is u64 in AppConfig; saturating cast to i64 is safe
+/// because values above i64::MAX (>9 EB) are unreachable in practice.
 fn prune_history(db: &Database, config: &AppConfig) {
-    let total = copypaste_core::count_items(db).unwrap_or(0) as usize;
-    if total > config.history_limit {
-        let excess = total - config.history_limit;
-        // Direct SQL DELETE ordered by `wall_time ASC` — bulk-removes the
-        // oldest rows in a single statement (audit HIGH #4). The previous
-        // implementation went through `get_page` + per-row `delete_item`,
-        // which was both N+1 and risked pruning the wrong page if the
-        // pagination math drifted.
-        //
-        // `pinned = 0` excludes explicitly pinned items so they are never
-        // deleted by the history-limit prune (schema v7, see `pin_item`).
-        let res = db.conn().execute(
-            "DELETE FROM clipboard_items WHERE id IN (
-                SELECT id FROM clipboard_items
-                WHERE pinned = 0
-                ORDER BY wall_time ASC
-                LIMIT ?1
-            )",
-            rusqlite::params![excess as i64],
-        );
-        match res {
-            Ok(n) => tracing::debug!(
-                "pruned {} of {} requested items over history_limit={}",
-                n,
-                excess,
-                config.history_limit
-            ),
-            Err(e) => tracing::warn!("prune_history failed: {e}"),
-        }
+    match prune_to_cap(db, config.storage_quota_bytes as i64) {
+        Ok(0) => {}
+        Ok(n) => tracing::debug!("prune_history: byte-cap pruned {n} rows"),
+        Err(e) => tracing::warn!("prune_history: byte-cap prune failed: {e}"),
     }
 }
 
@@ -1376,10 +1496,12 @@ fn prune_history(db: &Database, config: &AppConfig) {
 /// matched what real v1 rows were encrypted under, so every legacy
 /// `key_version = 1` row failed with an auth-tag mismatch and was never
 /// rotated.
-fn sweep_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+fn sweep_keys(seed: &[u8; 32]) -> ([u8; 32], zeroize::Zeroizing<[u8; 32]>) {
     // v1_key: the seed itself, used directly — exactly as the read path uses
     //         `**self.local_key` for `key_version = 1` rows.
     // v2_key: `derive_v2(seed)`, matching the read path's `derive_v2(&v1_key)`.
+    // Item 5: derive_v2 now returns Zeroizing<[u8;32]>; propagate the wrapper
+    // so the key bytes are scrubbed when the caller drops the tuple.
     (*seed, derive_v2(seed))
 }
 
@@ -1463,11 +1585,10 @@ fn load_local_key_bounded() -> KeyLoad {
     #[cfg(not(target_os = "macos"))]
     {
         // Non-macOS has no Keychain; the existing behaviour is an ephemeral
-        // key. Treat that as "Ready" so the platform's data-not-persisted
-        // contract is unchanged (no degraded banner where there was never a
-        // persistent key to begin with).
-        let (enc, pubk) = load_local_key_material();
-        KeyLoad::Ready(enc, pubk)
+        // key. `load_local_key_material` already returns `KeyLoad::Ready` there
+        // so the platform's data-not-persisted contract is unchanged (no
+        // degraded banner where there was never a persistent key to begin with).
+        load_local_key_material()
     }
 
     #[cfg(target_os = "macos")]
@@ -1475,11 +1596,10 @@ fn load_local_key_bounded() -> KeyLoad {
         // Dev/test bypass: keychain is bypassed centrally; reading is instant
         // and never prompts, so there is no need for the timeout dance.
         if crate::keychain::keychain_bypassed() {
-            let (enc, pubk) = load_local_key_material();
-            return KeyLoad::Ready(enc, pubk);
+            return load_local_key_material();
         }
 
-        let (tx, rx) = std::sync::mpsc::sync_channel::<(zeroize::Zeroizing<[u8; 32]>, [u8; 32])>(1);
+        let (tx, rx) = std::sync::mpsc::sync_channel::<KeyLoad>(1);
         // A plain OS thread (not a tokio task): the Security-framework call is
         // blocking and may park on a GUI prompt indefinitely. We must be able
         // to walk away from it without blocking a runtime worker.
@@ -1492,7 +1612,9 @@ fn load_local_key_bounded() -> KeyLoad {
             });
 
         match rx.recv_timeout(KEYCHAIN_READ_TIMEOUT) {
-            Ok((enc, pubk)) => KeyLoad::Ready(enc, pubk),
+            // The thread already classified the outcome (Ready or Locked); a
+            // locked Keychain now propagates instead of being papered over.
+            Ok(key_load) => key_load,
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 tracing::error!(
                     timeout_secs = KEYCHAIN_READ_TIMEOUT.as_secs(),
@@ -1530,18 +1652,37 @@ fn load_local_key_bounded() -> KeyLoad {
 /// the env var avoids it. Production (env unset) is unchanged: real users still
 /// get the persistent Keychain-backed key.
 #[tracing::instrument(name = "load_local_key_material")]
-fn load_local_key_material() -> (zeroize::Zeroizing<[u8; 32]>, [u8; 32]) {
+fn load_local_key_material() -> KeyLoad {
     #[cfg(target_os = "macos")]
     {
         match crate::keychain::load_or_create() {
             Ok(kp) => {
                 tracing::info!("device fingerprint={}", kp.fingerprint());
-                (kp.local_enc_key(), kp.public_key_bytes())
+                KeyLoad::Ready(kp.local_enc_key(), kp.public_key_bytes())
+            }
+            // A LOCKED/denied Keychain must NOT be papered over with an
+            // ephemeral key: if an encrypted DB already exists, that key would
+            // mismatch (SQLITE_NOTADB) and the daemon would either crash-loop or
+            // recreate over real data. Report `Locked` so `decide_db_startup`
+            // routes to the clean DEGRADED path (DB untouched, recovery status
+            // served). `load_or_create` now only returns `Locked` for genuine
+            // locked/denied/timeout statuses — a missing entry creates a key.
+            Err(crate::keychain::KeychainError::Locked(code)) => {
+                tracing::warn!(
+                    code,
+                    "Keychain locked or access denied; reporting Locked so startup \
+                     degrades cleanly instead of using an ephemeral key over an \
+                     existing encrypted database"
+                );
+                KeyLoad::Locked
             }
             Err(e) => {
+                // Other errors (e.g. invalid length, key-derivation) are not the
+                // locked case; preserve the prior behaviour of falling back to an
+                // ephemeral key so first-run / non-Keychain failures still boot.
                 tracing::warn!("Keychain unavailable ({e}), using ephemeral key");
                 let kp = DeviceKeypair::generate();
-                (kp.local_enc_key(), kp.public_key_bytes())
+                KeyLoad::Ready(kp.local_enc_key(), kp.public_key_bytes())
             }
         }
     }
@@ -1551,7 +1692,7 @@ fn load_local_key_material() -> (zeroize::Zeroizing<[u8; 32]>, [u8; 32]) {
         // On production macOS this branch is never compiled in. The public bytes
         // are a zero placeholder — there is no keychain-backed identity here.
         tracing::warn!("Non-macOS platform: using ephemeral encryption key (data not persisted across restarts)");
-        (DeviceKeypair::generate().local_enc_key(), [0u8; 32])
+        KeyLoad::Ready(DeviceKeypair::generate().local_enc_key(), [0u8; 32])
     }
 }
 
@@ -1565,6 +1706,62 @@ fn load_config() -> AppConfig {
         }
         cfg
     })
+}
+
+/// Write `text` to `path` atomically with mode `0600` (Fix-2).
+///
+/// Creates a uniquely-named temp file in the SAME directory (so rename is
+/// atomic and same-filesystem), sets mode `0600` before writing any bytes,
+/// writes + flushes + syncs, then renames over the destination. This prevents
+/// the world-readable window that exists between `std::fs::write` (creates at
+/// umask-derived mode, typically `0644`) and a subsequent `set_permissions`.
+fn write_text_atomic_0600(path: &std::path::Path, text: &str) -> anyhow::Result<()> {
+    use std::io::Write as _;
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("path has no parent directory: {}", path.display()))?;
+    std::fs::create_dir_all(parent)?;
+
+    let tmp = parent.join(format!(
+        ".{}.tmp.{}.{}",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        f.write_all(text.as_bytes())?;
+        f.flush()?;
+        f.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+    Ok(())
 }
 
 /// Loads the persistent device_id from disk, creating it on first run.
@@ -1604,21 +1801,11 @@ fn load_or_create_device_id() -> anyhow::Result<uuid::Uuid> {
     }
 
     let id = uuid::Uuid::new_v4();
-    std::fs::write(&path, id.to_string())?;
-
-    // Restrict to owner-only on Unix.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        if let Err(e) = std::fs::set_permissions(&path, perms) {
-            tracing::warn!(
-                path = %path.display(),
-                error = %e,
-                "could not chmod device_id to 0600"
-            );
-        }
-    }
+    // Fix-2 (atomic 0600 write): write via temp-then-rename so the device_id
+    // is never world-readable between create and chmod.  The device_id is not
+    // a secret per se, but it is used as the stable identity for pairing/sync
+    // and should be owner-only for consistency with peers.json and config.json.
+    write_text_atomic_0600(&path, &id.to_string())?;
 
     tracing::info!(device_id = %id, path = %path.display(), "created persistent device_id");
     Ok(id)

@@ -24,6 +24,11 @@ pub async fn delete_item(
     // already used in devices.rs.
     let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
     store.verify_token(&device_id, &token)?;
+    // Advance last_seen so an actively-deleting device is not evicted by
+    // cleanup_inactive_devices (which reaps on last_seen.elapsed(), not
+    // registered_at). Without this, a device that continuously polls and
+    // deletes items still gets evicted once registered_at passes the threshold.
+    store.update_last_seen(&device_id);
     store.delete_item(&device_id, &item_id)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -55,10 +60,21 @@ pub async fn push(
     BearerToken(token): BearerToken,
     Json(body): Json<PushRequest>,
 ) -> Result<(StatusCode, Json<PushResponse>), RelayError> {
-    // Per-tier item-size quota — checked before taking the store mutex so an
-    // oversized payload never contends for the lock. We decode `content_b64`
-    // once here to measure the true ciphertext size; `push_item` re-validates
-    // the base64 (and the operator body cap) under the lock.
+    // Auth FIRST — verify the bearer token before doing any CPU/alloc work on
+    // the request body. Previously the base64 decode (up to ~13 MiB) happened
+    // before auth, letting unauthenticated callers trigger full decode work
+    // (pre-auth CPU/alloc amplification). Authenticating first makes
+    // unauthenticated pushes fail fast at the lock with a cheap map lookup.
+    {
+        // Short critical section: auth only, no decode under the lock.
+        let store = state.lock().unwrap_or_else(|e| e.into_inner());
+        store.verify_token(&device_id, &token)?;
+    }
+
+    // Per-tier item-size quota — checked after auth but before re-taking the
+    // store mutex for the actual insert. We decode `content_b64` once here to
+    // measure the true ciphertext size; `push_item_decoded` re-validates the
+    // base64 (and the operator body cap) under the lock.
     let decoded_len = B64
         .decode(&body.content_b64)
         .map_err(|_| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?
@@ -76,18 +92,23 @@ pub async fn push(
     // Survive mutex poisoning (security HIGH #1).
     let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
 
-    // Auth: verify token belongs to this device.
-    store.verify_token(&device_id, &token)?;
+    // Advance last_seen so an actively-pushing device is never evicted by
+    // cleanup_inactive_devices — which reaps on last_seen.elapsed(), not
+    // registered_at. Without this call, last_seen stays at registered_at
+    // forever and the device is evicted after the inactivity threshold even
+    // though it is actively syncing.
+    store.update_last_seen(&device_id);
 
     // Honor the operator-configured RELAY_MAX_ITEM_BYTES rather than the
     // hardcoded default (security HIGH #2) — previously
     // `RelayConfig::default().max_item_bytes` silently ignored env vars.
     let max_item_bytes = config.max_item_bytes;
 
-    let id = store.push_item(
+    let id = store.push_item_decoded(
         &device_id,
         body.content_type,
         body.content_b64,
+        decoded_len,
         body.wall_time,
         max_item_bytes,
     )?;
@@ -114,10 +135,17 @@ pub async fn pull(
         .min(MAX_PULL_LIMIT);
 
     // Survive mutex poisoning (security HIGH #1).
-    let store = state.lock().unwrap_or_else(|e| e.into_inner());
+    // pull needs a mutable borrow to call update_last_seen after auth.
+    let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
 
     // Auth: verify token belongs to this device.
     store.verify_token(&device_id, &token)?;
+
+    // Advance last_seen so an actively-polling device (even one with an empty
+    // inbox) is never reaped by cleanup_inactive_devices. Without this,
+    // last_seen stays at registered_at forever and the device is evicted after
+    // the inactivity threshold even though it is continuously polling.
+    store.update_last_seen(&device_id);
 
     let items = store.pull_items(&device_id, params.since, params.since_id, limit)?;
     Ok(Json(items))

@@ -91,20 +91,20 @@ hdiutil detach "$MOUNT_POINT" -quiet
 trap - EXIT
 rm -rf "$TMP"
 
-# Optional: (re)load launchd agent if user already has one configured.
-# Use the modern bootout → enable → bootstrap flow. We deliberately avoid
-# `launchctl unload -w` / `load -w`: the `-w` flag writes a *persistent
-# disable override* that prevents the daemon from ever restarting (the v0.4
-# startup bug). `enable` is idempotent and clears any pre-existing override.
+# App-owned daemon lifecycle (ADR-014): the CopyPaste app starts/stops the
+# daemon itself as a child process. We therefore do NOT bootstrap an always-on
+# LaunchAgent here — that would fight the app (launchd would relaunch the daemon
+# after the app quits). If a leftover agent from an older install is loaded, the
+# app boots it out on launch; we also boot out any stale one now so a freshly
+# installed app never races a launchd-managed daemon on the socket.
 if [[ -f "$LAUNCH_AGENT" ]]; then
-    echo "==> (Re)loading launchd agent at $LAUNCH_AGENT"
+    echo "==> Booting out leftover launchd agent (app now owns the daemon)"
     UID_NUM="$(id -u)"
     launchctl bootout "gui/${UID_NUM}/com.copypaste.daemon" 2>/dev/null || true
-    launchctl enable "gui/${UID_NUM}/com.copypaste.daemon" 2>/dev/null || true
-    launchctl bootstrap "gui/${UID_NUM}" "$LAUNCH_AGENT" 2>/dev/null || true
+    echo "    The app will start the daemon on launch. To run a headless,"
+    echo "    CLI-managed daemon WITHOUT the app, see: copypaste daemon install"
 else
-    echo "==> No launchd agent at $LAUNCH_AGENT (skipping autostart wiring)"
-    echo "    To enable autostart later, run: copypaste daemon install"
+    echo "==> Daemon is app-managed; just launch CopyPaste.app to start it."
 fi
 
 CLI_PATH="/Applications/${APP_BUNDLE}/Contents/MacOS/copypaste"

@@ -263,11 +263,28 @@ fn build_access(descriptor: &str, paths: &[PathBuf]) -> Result<SecAccessRef, Key
 /// already exists — this is enforced via the OSStatus check (errSecDuplicateItem
 /// = -25299 surfaces as `OsStatus`).
 pub fn store_with_acl(secret: &[u8; 32], paths: &[PathBuf]) -> Result<(), KeychainError> {
+    store_with_acl_account(secret, paths, ACCOUNT)
+}
+
+/// Backup account used as a crash-safe staging slot during ACL rotation.
+/// Holds a transient copy of the device secret so that a crash/kill in the
+/// delete→recreate window of `rotate_acl_to_current_install` cannot destroy
+/// the only copy of the DB key. Cleaned up once the primary entry is back.
+pub(crate) const ACCOUNT_ROTATE_BACKUP: &str = "device-secret-key.rotate-backup";
+
+/// Like [`store_with_acl`] but lets the caller pick the `account` (the
+/// `SERVICE` is fixed). Used by the rotation path to stage a backup copy under
+/// [`ACCOUNT_ROTATE_BACKUP`] before touching the primary entry.
+fn store_with_acl_account(
+    secret: &[u8; 32],
+    paths: &[PathBuf],
+    account: &str,
+) -> Result<(), KeychainError> {
     let access = build_access("CopyPaste device key", paths)?;
 
     // Build the attribute list (service + account).
     let service_bytes = SERVICE.as_bytes();
-    let account_bytes = ACCOUNT.as_bytes();
+    let account_bytes = account.as_bytes();
     let mut attrs = [
         SecKeychainAttribute {
             tag: kSecServiceItemAttr,
@@ -464,11 +481,49 @@ pub fn rotate_acl_to_current_install() -> Result<bool, KeychainError> {
         }
     }
 
-    // Delete + recreate.  The secret bytes are in memory; rotation is atomic
-    // from the user's perspective (worst case: brief window with no entry —
-    // any concurrent reader gets `errSecItemNotFound` and retries).
-    delete_generic_password(SERVICE, ACCOUNT).map_err(KeychainError::Keychain)?;
+    // Crash-safe rotation (data-loss fix). The OLD code did
+    // `delete_generic_password` THEN `store_with_acl`: a crash/kill/power-loss
+    // in that window left ZERO copies of the device secret in the Keychain,
+    // and the device secret is the only key that can open the SQLCipher DB —
+    // an unrecoverable loss. We now guarantee a copy of the secret exists in
+    // the Keychain at every instant:
+    //
+    //   1. Stage the secret under a BACKUP account. (Primary still intact.)
+    //   2. Delete the primary (ACL-less / stale) entry.       <- backup covers
+    //   3. Recreate the primary WITH the new ACL.             <- primary back
+    //   4. Delete the backup.                                 <- cleanup
+    //
+    // If we die after step 1/2/3, the next startup re-runs this function: the
+    // backup (or a freshly-recreated primary) still carries the secret, so the
+    // DB stays openable. The backup may linger after a mid-rotation crash; we
+    // best-effort clear any stale backup up front so a leftover never shadows a
+    // newer secret.
+    let _ = delete_generic_password(SERVICE, ACCOUNT_ROTATE_BACKUP);
+
+    // Step 1: stage a backup copy BEFORE deleting anything.
+    store_with_acl_account(&secret_arr, &trusted, ACCOUNT_ROTATE_BACKUP)?;
+
+    // Step 2: now it is safe to delete the primary — the backup holds the key.
+    // Tolerate `errSecItemNotFound` in case a prior partial run already removed
+    // it.
+    match delete_generic_password(SERVICE, ACCOUNT) {
+        Ok(()) => {}
+        Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {}
+        Err(e) => {
+            // Leave the backup in place so the secret is not lost; surface the
+            // error so the caller can decide whether to degrade.
+            return Err(KeychainError::Keychain(e));
+        }
+    }
+
+    // Step 3: recreate the primary with the up-to-date ACL.
     store_with_acl(&secret_arr, &trusted)?;
+
+    // Step 4: primary is confirmed present — remove the backup. Best-effort;
+    // a lingering backup is harmless (it is cleared at the top of the next
+    // rotation) and must never fail the rotation.
+    let _ = delete_generic_password(SERVICE, ACCOUNT_ROTATE_BACKUP);
+
     // Best-effort zero of the local copy.
     for b in secret_arr.iter_mut() {
         *b = 0;

@@ -3,57 +3,79 @@ package com.copypaste.android.ui.theme
 import androidx.compose.ui.graphics.Color
 
 // ---------------------------------------------------------------------------
-// JetBrains "New UI" / Darcula-inspired palette — mirrors the macOS desktop
-// UI tokens defined in crates/copypaste-ui/tailwind.config.js.
+// Design System v2 "Quiet Precision" — canonical palette §0
 //
-// Desktop reference tokens (tailwind ide.*):
-//   bg         #1e1f22   panel      #2b2d30   elevated   #313438
-//   border     #393b40   divider    #43454a   selection  #2e436e
-//   hover      #34373b   text       #dfe1e5   dim        #9da0a8
-//   faint      #6f737a   accent     #3574f0   danger     #db5c5c
-//   success    #5fad65   warning    #d9a343
+// Single source of truth: mirrors crates/copypaste-ui/tailwind.config.js
+// exactly. Any drift between this file and tailwind.config.js is a bug.
+//
+// Canonical ramp (reconciled 2026-05-30 per DESIGN-SYSTEM-v2.md §0):
+//   bg        #13141A   panel     #1B1C22   elevated  #23252D
+//   raised    #2D2F34   border    #383B42   divider   #2E3035
+//   text      #E8EAED   dim       #9DA0A8   faint     #6B6F78
+//   accent    #3D8BFF   success   #5FAD65   warning   #D9A343
+//   danger    #E05C5C   info/url  #56B6C2   violet    #C678DD
 // ---------------------------------------------------------------------------
 
-// ── Surface hierarchy (light dark for readability; Android uses "dark" layer names) ─
+// ── Surface hierarchy (darkest → most elevated) ───────────────────────────
 
-val IdeBg        = Color(0xFF1E1F22)   // outermost window / root background
-val IdePanel     = Color(0xFF2B2D30)   // primary surface (list background)
-val IdeElevated  = Color(0xFF313438)   // elevated cards, chips, inputs
-val IdeBorder    = Color(0xFF393B40)   // separator / outline
-val IdeDivider   = Color(0xFF43454A)   // lighter divider between rows
+val IdeBg        = Color(0xFF13141A)   // §0 canonical bg (root window / darkest)
+val IdePanel     = Color(0xFF1B1C22)   // §0 canonical panel (primary surface: list bg, nav bar)
+val IdeElevated  = Color(0xFF23252D)   // §0 canonical elevated (cards, inputs)
+val IdeRaised    = Color(0xFF2D2F34)   // hover / pressed on elevated
 
-// ── Interaction states ───────────────────────────────────────────────────────
+// ── Borders & dividers ────────────────────────────────────────────────────
 
-val IdeSelection = Color(0xFF2E436E)   // selected row background (blue tint)
-val IdeHover     = Color(0xFF34373B)   // pressed / ripple surface
+val IdeBorder    = Color(0xFF383B42)   // outline borders (hairline 1dp)
+val IdeDivider   = Color(0xFF2E3035)   // row separators (subtler than border)
 
-// ── Text ─────────────────────────────────────────────────────────────────────
+// ── Interaction states ────────────────────────────────────────────────────
 
-val IdeText      = Color(0xFFDFE1E5)   // primary text
+val IdeSelection = Color(0xFF3D8BFF).copy(alpha = 0.16f)  // selected row — accent/16 tint (§3)
+val IdeHover     = Color(0xFFFFFFFF).copy(alpha = 0.045f) // surface hover (§3)
+val IdeMultiSel  = Color(0xFF3D8BFF).copy(alpha = 0.20f)  // multi-select fill (§3)
+
+// ── Text hierarchy ────────────────────────────────────────────────────────
+
+val IdeText      = Color(0xFFE8EAED)   // §0 canonical primary text
 val IdeDim       = Color(0xFF9DA0A8)   // secondary / subdued text
-val IdeFaint     = Color(0xFF6F737A)   // placeholder / timestamp
+val IdeFaint     = Color(0xFF6B6F78)   // placeholder / timestamp / hero-icon
 
-// ── Brand / semantic ─────────────────────────────────────────────────────────
+// ── Brand / accent ────────────────────────────────────────────────────────
 
-val IdeAccent    = Color(0xFF3574F0)   // primary action blue (matches macOS accent)
+val IdeAccent    = Color(0xFF3D8BFF)   // §0 canonical accent blue
 val IdeAccentOn  = Color(0xFFFFFFFF)   // text on accent surfaces
-val IdeDanger    = Color(0xFFDB5C5C)   // destructive / error
-val IdeSuccess   = Color(0xFF5FAD65)   // success / green
-val IdeWarning   = Color(0xFFD9A343)   // warning / amber (pinned rows)
+val IdeAccentDim = Color(0xFF3D8BFF).copy(alpha = 0.12f)  // accent container tint
 
-// ── Error container (for sensitive-item badge) ───────────────────────────────
+// ── §3 Semantic colours ───────────────────────────────────────────────────
+
+val IdeSuccess     = Color(0xFF5FAD65)  // success / green
+val IdeSuccessDim  = Color(0xFF5FAD65).copy(alpha = 0.10f)
+
+val IdeWarning     = Color(0xFFD9A343)  // warning / amber (pinned rows, degraded)
+val IdeWarningDim  = Color(0xFFD9A343).copy(alpha = 0.10f)
+
+val IdeDanger      = Color(0xFFE05C5C)  // destructive / error
+val IdeDangerDim   = Color(0xFFE05C5C).copy(alpha = 0.10f)
+
+val IdeInfo        = Color(0xFF56B6C2)  // url / info (teal)
+val IdeInfoDim     = Color(0xFF56B6C2).copy(alpha = 0.12f)
+
+val IdeViolet      = Color(0xFFC678DD)  // image / code (purple)
+val IdeVioletDim   = Color(0xFFC678DD).copy(alpha = 0.12f)
+
+// ── Error container (for sensitive-item badge) ────────────────────────────
 
 val IdeErrorContainer     = Color(0xFF4A1A1A)
-val IdeOnErrorContainer   = Color(0xFFDB5C5C)
+val IdeOnErrorContainer   = IdeDanger
 
-// ── Dark scheme overrides (used on all Android builds; the app is always dark) ─
+// ── Dark scheme overrides (always-dark app) ───────────────────────────────
 
 val DarkPrimary            = IdeAccent
 val DarkOnPrimary          = IdeAccentOn
-val DarkPrimaryContainer   = Color(0xFF1A3A7A)   // deep blue container
-val DarkOnPrimaryContainer = Color(0xFFAEC6F5)   // muted blue text
+val DarkPrimaryContainer   = Color(0xFF1A3D7A)   // deep blue container
+val DarkOnPrimaryContainer = Color(0xFFB0CAFF)   // muted blue text on container
 
 val DarkSecondary            = IdeWarning
 val DarkOnSecondary          = Color(0xFF1A1200)
-val DarkSecondaryContainer   = Color(0xFF3A2800)
+val DarkSecondaryContainer   = IdeWarningDim
 val DarkOnSecondaryContainer = Color(0xFFFFD98B)

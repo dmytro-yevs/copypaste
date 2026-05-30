@@ -25,10 +25,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Battery5Bar
+import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhonelinkSetup
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -36,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.CopyPasteCard
@@ -111,15 +115,34 @@ class OnboardingActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Check whether the previous run ended with an uncaught crash.
+        // consumeCrashedLastRun clears the flag so the dialog only appears once.
+        val crashedLastRun = CrashHandler.consumeCrashedLastRun(this)
+
         setContent {
             CopyPasteTheme {
                 val trigger by refreshTrigger
                 @Suppress("UNUSED_EXPRESSION") trigger // read so Compose tracks it
+
+                // ── Crash-detected dialog ────────────────────────────────────
+                var showCrashDialog by remember { mutableStateOf(crashedLastRun) }
+                if (showCrashDialog) {
+                    CrashDetectedDialog(
+                        onExport = {
+                            showCrashDialog = false
+                            LogExportHelper.shareLogsZip(this@OnboardingActivity)
+                        },
+                        onDismiss = { showCrashDialog = false }
+                    )
+                }
+
                 OnboardingScreen(
                     onRequestNotification = { requestNotificationPermission() },
                     onOpenAccessibility = { openAccessibilitySettings() },
                     onRequestBattery = { requestBatteryOptimizationExemption() },
                     onOpenOemAutoStart = { openOemAutoStart() },
+                    onExportLogs = { LogExportHelper.shareLogsZip(this@OnboardingActivity) },
                     onDone = { finish() }
                 )
             }
@@ -235,6 +258,28 @@ class OnboardingActivity : ComponentActivity() {
     }
 }
 
+@Composable
+private fun CrashDetectedDialog(
+    onExport: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.crash_detected_title)) },
+        text = { Text(stringResource(R.string.crash_detected_message)) },
+        confirmButton = {
+            Button(onClick = onExport) {
+                Text(stringResource(R.string.crash_detected_export))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.crash_detected_dismiss))
+            }
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OnboardingScreen(
@@ -242,6 +287,7 @@ fun OnboardingScreen(
     onOpenAccessibility: () -> Unit,
     onRequestBattery: () -> Unit,
     onOpenOemAutoStart: () -> Unit,
+    onExportLogs: () -> Unit,
     onDone: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -284,7 +330,7 @@ fun OnboardingScreen(
             Text(
                 text = "CopyPaste needs a few permissions to monitor and sync your clipboard.",
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
+                color = IdeText
             )
             Spacer(modifier = Modifier.height(4.dp))
 
@@ -364,6 +410,44 @@ fun OnboardingScreen(
                 onClick = {},
                 required = false,
             )
+
+            // 6. Export Logs
+            // Log files are always adb-pullable without root, even when the app is closed:
+            //   adb pull /sdcard/Android/data/com.copypaste.android/files/logs/
+            // This card provides an in-app Share path for users without adb access.
+            CopyPasteCard(accent = IdeBorder) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.BugReport,
+                            contentDescription = null,
+                            tint = IdeDim
+                        )
+                        Text(
+                            text = stringResource(R.string.log_export_button),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = IdeText,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = stringResource(R.string.log_export_description),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = IdeDim
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onExportLogs,
+                        modifier = Modifier.align(Alignment.End)
+                    ) {
+                        Text(stringResource(R.string.log_export_button))
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(8.dp))
 

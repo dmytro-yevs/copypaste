@@ -62,16 +62,21 @@ impl PiiScrubber {
 
     /// Construct a scrubber preloaded with the built-in pattern set:
     ///
-    /// 1. Hex strings ≥32 chars (UUIDs, keys, digests).
-    /// 2. JWT-like three-segment tokens.
-    /// 3. URLs containing `user:password@` — credentials stripped.
-    /// 4. Email addresses.
+    /// 1. URLs containing `user:password@` — credentials stripped.
+    /// 2. Email addresses.
+    /// 3. Hex strings ≥32 chars (UUIDs, keys, digests).
+    /// 4. JWT-like three-segment tokens.
     /// 5. IPv4 and IPv6 addresses.
     /// 6. `/Users/<name>/` and `/home/<name>/` prefixes — replaced with `~/`.
     ///
-    /// The order matters: more specific patterns (hex, JWT, URL credentials)
-    /// run before more general ones (email, IP, paths) so they are not
-    /// partially eaten by a broader rule.
+    /// The order matters and encodes two dependencies:
+    /// - URL credentials run before email, because a `user:pass@host`
+    ///   authority contains an `@` that the email rule would otherwise eat.
+    /// - Email runs before the long-hex rule, so an address whose domain
+    ///   label is a long hex string is redacted whole rather than fragmented.
+    ///
+    /// More specific patterns generally run before more general ones (IP,
+    /// paths) so they are not partially eaten by a broader rule.
     ///
     /// Patterns are conservative and prefer false positives (over-redaction)
     /// to false negatives (PII leakage).
@@ -80,6 +85,40 @@ impl PiiScrubber {
         // crate test time, so `expect` is safe and the alternative
         // (returning `Result`) would only complicate the call sites.
         let patterns = vec![
+            // URL credentials: strip the `user:pass@` portion, keep scheme
+            // and host so the error class remains debuggable.
+            //
+            // This runs *first* — before the email rule — because a
+            // `user:pass@host` authority contains an `@` and would otherwise
+            // be partially eaten by the email pattern (e.g.
+            // `https://user:secret@db.internal/path` → the email rule would
+            // match `secret@db.internal` and the credential rule could no
+            // longer fire).
+            //
+            // The password span must be allowed to contain `@` so that a
+            // password like `p@ss` in `https://user:p@ss@host/x` does not
+            // leak its tail. We consume everything (sans whitespace and `/`,
+            // which would end the authority) greedily up to the *last* `@`
+            // before the path: `[^\s/]*@` backtracks to that final `@`,
+            // leaving the host intact.
+            Pattern {
+                re: Regex::new(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^/\s:@]+:[^\s/]*@")
+                    .expect("url-auth pattern is valid"),
+                replacement: "$1<REDACTED-AUTH>@",
+            },
+            // Email addresses. Conservative local-part character class to
+            // avoid eating surrounding punctuation.
+            //
+            // This runs *before* the long-hex rule: an email whose domain
+            // label is a long hex string (e.g. `a@deadbeef…32hexchars.com`)
+            // would otherwise have its domain partially redacted to
+            // `<REDACTED-HEX>` first, leaving a dangling local part that the
+            // email rule could no longer match — leaking the local part.
+            Pattern {
+                re: Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+                    .expect("email pattern is valid"),
+                replacement: "<REDACTED-EMAIL>",
+            },
             // Long hex strings: UUIDs (with or without dashes), SHA-256
             // digests, API keys with hex encoding. 32+ hex chars catches
             // MD5 and up. We allow optional dashes inside to match UUIDs.
@@ -102,20 +141,6 @@ impl PiiScrubber {
                     .expect("jwt pattern is valid"),
                 replacement: "<REDACTED-JWT>",
             },
-            // URL credentials: strip the `user:pass@` portion, keep scheme
-            // and host so the error class remains debuggable.
-            Pattern {
-                re: Regex::new(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^/\s:@]+:[^/\s@]+@")
-                    .expect("url-auth pattern is valid"),
-                replacement: "$1<REDACTED-AUTH>@",
-            },
-            // Email addresses. Conservative local-part character class to
-            // avoid eating surrounding punctuation.
-            Pattern {
-                re: Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
-                    .expect("email pattern is valid"),
-                replacement: "<REDACTED-EMAIL>",
-            },
             // IPv4 — four 1-3 digit groups. We do not enforce 0-255 bounds
             // because we'd rather over-match than under-match.
             Pattern {
@@ -125,8 +150,19 @@ impl PiiScrubber {
             // IPv6 — we anchor on ASCII non-hex non-colon boundaries
             // rather than `\b` because `:` itself is not a word character —
             // the original `\b::` form matched erratically depending on
-            // what surrounded the colons. The boundary chars are captured
-            // into `$1`/`$2` so the replacement preserves them.
+            // what surrounded the colons. The leading boundary char is
+            // captured into `$1` so the replacement preserves it.
+            //
+            // There is *no* trailing boundary assertion. The `regex` crate
+            // has no look-around, and consuming a trailing boundary char
+            // (the original `($|[^0-9a-fA-F:])` group) breaks adjacency:
+            // `replace_all` would resume scanning *after* the consumed char,
+            // so the space between the two addresses in `"::1 ::1"` was
+            // eaten by the first match and the second `::1` leaked. A
+            // trailing assertion is unnecessary anyway — the address body
+            // matches only `[0-9a-fA-F:]`, so it is already maximal and
+            // stops exactly at the first non-hex-non-colon char without
+            // consuming it.
             //
             // We accept any run that contains at least two `:` separators
             // and only [0-9a-fA-F:] in between, which is permissive enough
@@ -135,23 +171,38 @@ impl PiiScrubber {
             // boundary group prevents matching inside a longer
             // alphanumeric run (e.g. a hash that happens to contain
             // colons in a different schema).
+            //
+            // NOTE: this permissive `{0,4}` form is deliberate — it accepts
+            // every IPv6 shorthand including the leading-`::` compressed
+            // loopback `::1`. A previous tightening to require a non-empty
+            // leading hextet broke `::1` (regression caught by
+            // `adjacent_ipv6_addresses_both_redacted`). Over-redaction of bare
+            // colon-delimited tokens is an accepted, fail-safe tradeoff: the
+            // scrubber prefers false positives, and telemetry is unwired today.
             Pattern {
-                re: Regex::new(
-                    r"(^|[^0-9a-fA-F:])([0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7})($|[^0-9a-fA-F:])",
-                )
-                .expect("ipv6 pattern is valid"),
-                replacement: "$1<REDACTED-IP>$3",
+                re: Regex::new(r"(^|[^0-9a-fA-F:])([0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7})")
+                    .expect("ipv6 pattern is valid"),
+                replacement: "$1<REDACTED-IP>",
             },
             // Home directory prefixes: macOS `/Users/<name>/…` and Linux
             // `/home/<name>/…`. We collapse to `~/` so the structural part
             // of the path (which is often the useful debugging signal)
             // survives.
+            //
+            // The username segment is everything after `/Users/` up to the
+            // next `/` or end-of-line. The trailing `/` is *optional* so a
+            // bare `/Users/secretuser` (with no trailing slash — common in
+            // ENOENT / `stat` error strings like `cannot stat /Users/jdoe`)
+            // still redacts. We exclude only `\n`, *not* spaces, so a
+            // username containing a space (`/Users/John Doe/file`) cannot
+            // leak; stopping at the first `/` ensures we never over-redact
+            // the deeper path segments that carry the debugging signal.
             Pattern {
-                re: Regex::new(r"/Users/[^/\s]+/").expect("macos home pattern is valid"),
+                re: Regex::new(r"/Users/[^/\n]+?(?:/|$)").expect("macos home pattern is valid"),
                 replacement: "~/",
             },
             Pattern {
-                re: Regex::new(r"/home/[^/\s]+/").expect("linux home pattern is valid"),
+                re: Regex::new(r"/home/[^/\n]+?(?:/|$)").expect("linux home pattern is valid"),
                 replacement: "~/",
             },
         ];

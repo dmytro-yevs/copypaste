@@ -198,17 +198,27 @@ dictionary BootstrapResult {
 };
 
 // A local clipboard item (plaintext) Android offers to a peer during sync.
-// `id` is the stable row id; `item_id` is regenerated internally if empty.
+// `id` is the local row id (may differ per device). `item_id` is the STABLE
+// cross-device identity minted ONCE at capture and reused on every push/sync —
+// the daemon keys merge/dedup/LWW on it, so Kotlin MUST thread the row's
+// persisted item_id in here and never re-mint it per send (that was the
+// duplicates bug). If `item_id` is empty (transitional rows) the send path
+// falls back to `id`.
 dictionary LocalItem {
   string id;
+  string item_id;
   i64 wall_time_ms;
   string content_type;
   sequence<u8> plaintext;
 };
 
 // An item received from the peer during sync, decrypted back to plaintext.
+// `item_id` is the peer's STABLE cross-device identity — Kotlin MUST persist it
+// on the stored row and reuse it on any later re-sync so the same logical clip
+// is not re-minted (which would resurface as a duplicate).
 dictionary SyncedItem {
   string id;
+  string item_id;
   string content_type;
   sequence<u8> plaintext;
   i64 wall_time_ms;

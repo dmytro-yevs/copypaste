@@ -40,6 +40,17 @@ import uniffi.copypaste_android.syncWithPeer
  * WorkManager restarts the poll on a 15-minute cadence. This is the safety net.
  * The FGS loop is the fast path; WorkManager is the fallback.
  *
+ * ## Cursor strategy (Tasks 4/5/6)
+ * Uses an ascending compound keyset cursor (wall_time, id) that mirrors the
+ * macOS daemon's `build_poll_url`. For every row in the batch — including
+ * self-echo (own deviceId) rows and blank rows — the cursor is advanced BEFORE
+ * any `continue`. This prevents stalling on a batch of own-device rows.
+ *
+ * ## LWW replace (Task 5)
+ * When an incoming row's item_id already exists locally, the incoming
+ * lamport_ts is compared to the stored row's. If strictly newer, the local
+ * row is replaced (last-writer-wins), mirroring the daemon's cloud.rs LWW.
+ *
  * ## Interval tuning
  * - POLL_INTERVAL_MS = 60_000 (1 min) while the FGS is alive and network is up.
  * - RETRY_BACKOFF_BASE_MS = 30_000 (30 s) — first retry after a transient error;
@@ -187,31 +198,91 @@ class FgsSyncLoop(
     }
 
     /**
-     * Perform one poll cycle: fetch from Supabase since the last known wall-time,
-     * store new items, advance the cursor. Returns the number of new items stored.
+     * Perform one poll cycle using the compound keyset cursor.
+     *
+     * For every row in the batch (Tasks 4/5/6):
+     *   1. Advance the (wall_time, id) cursor BEFORE any continue — so a batch
+     *      of only own-device rows still moves the cursor forward.
+     *   2. Skip self-echo rows (own deviceId).
+     *   3. Decrypt; skip if decryption fails.
+     *   4. Skip blank plaintext.
+     *   5. LWW replace: if item_id exists locally with an older lamport_ts,
+     *      replace it; otherwise skip as a dup.
+     *
+     * Returns the number of new/replaced items stored.
      */
     private suspend fun poll(): Int = withContext(Dispatchers.IO) {
-        val sinceWallTime = settings.lastSupabasePollWallTime
-        val items = syncManager.pollFromSupabase(sinceWallTime = sinceWallTime)
+        // Drain loop: a full batch (size == POLL_LIMIT) almost certainly means
+        // the server has more rows waiting. Re-poll IMMEDIATELY in that case
+        // instead of returning and waiting the idle delay — otherwise a backlog
+        // of N rows would drain at only POLL_LIMIT rows per poll interval
+        // (~20/min). On a SHORT batch (< POLL_LIMIT) we have caught up, so we
+        // break and let the caller apply the normal idle delay.
+        //
+        // Each iteration runs the original single-cycle logic unchanged (LWW,
+        // compound (wall_time, id) cursor, self-echo skip). The cursor is
+        // persisted after every cycle, so a re-poll continues from where the
+        // previous cycle left off.
+        var totalNewCount = 0
+        while (isActive) {
+            val batch = syncManager.pollFromSupabase(
+                sinceWallTime = settings.lastSupabasePollWallTime,
+                sinceId = settings.lastSupabasePollId,
+            ) ?: break
 
-        var newCount = 0
-        var latestWallTime = sinceWallTime
+            var newCount = 0
+            val startWallTime = settings.lastSupabasePollWallTime
+            val startId = settings.lastSupabasePollId
+            var cursorWallTime = startWallTime
+            var cursorId = startId
 
-        for (item in items) {
-            val text = item.plaintext.toString(Charsets.UTF_8)
-            if (text.isBlank()) continue
-            // LOW-2: pass the stable Supabase source id so a row re-fetched by
-            // the WorkManager worker (shared wall-time cursor) is not duplicated.
-            val stored = repository.storeItem(text, settings.encryptionKey, sourceId = item.itemId)
-            if (stored) newCount++
-            if (item.wallTime > latestWallTime) latestWallTime = item.wallTime
+            for (row in batch.rows) {
+                // Task 6: advance cursor for EVERY row before any continue.
+                if (row.wallTime > cursorWallTime ||
+                    (row.wallTime == cursorWallTime && row.id > cursorId)) {
+                    cursorWallTime = row.wallTime
+                    cursorId = row.id
+                }
+
+                // Skip own-device rows (self-echo from our push).
+                if (row.deviceId == settings.deviceId) continue
+
+                // Decrypt; skip rows that fail (wrong key, tampered blob).
+                val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
+
+                val text = item.plaintext.toString(Charsets.UTF_8)
+                if (text.isBlank()) continue
+
+                // Task 5: LWW replace — replace only when incoming lamport_ts is
+                // strictly newer than the locally stored row for the same item_id.
+                val stored = repository.storeItemWithLww(
+                    plaintext = text,
+                    key = settings.encryptionKey,
+                    itemId = item.itemId,
+                    incomingLamportTs = item.lamportTs,
+                )
+                if (stored) newCount++
+            }
+
+            // Persist the advanced cursor after processing the full batch.
+            if (cursorWallTime > settings.lastSupabasePollWallTime ||
+                (cursorWallTime == settings.lastSupabasePollWallTime &&
+                        cursorId > settings.lastSupabasePollId)) {
+                settings.lastSupabasePollWallTime = cursorWallTime
+                settings.lastSupabasePollId = cursorId
+            }
+
+            totalNewCount += newCount
+
+            // Short batch → caught up. Stop draining and return.
+            if (batch.rows.size < SupabaseClient.POLL_LIMIT) break
+
+            // Safety: if a full batch somehow failed to advance the cursor,
+            // break rather than spin forever re-fetching the same window.
+            if (cursorWallTime == startWallTime && cursorId == startId) break
         }
 
-        if (latestWallTime > sinceWallTime) {
-            settings.lastSupabasePollWallTime = latestWallTime
-        }
-
-        newCount
+        totalNewCount
     }
 
     /**
@@ -261,9 +332,14 @@ class FgsSyncLoop(
                     ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
                     Charsets.UTF_8,
                 )
-                // LOW-2: the P2P SyncedItem.id is the peer's stable row id;
-                // dedup against it so a re-dial does not re-insert the same row.
-                if (repository.storeItem(plaintext, key, sourceId = item.id)) stored += 1
+                // Persist under the peer's STABLE item_id (overrideId): dedups a
+                // re-dial AND lets a later re-sync of this clip reuse the same
+                // cross-device id instead of minting a fresh local UUID.
+                if (repository.storeItem(plaintext, key, overrideId = item.itemId)
+                        .isNotEmpty()
+                ) {
+                    stored += 1
+                }
             }
             if (result.itemsReceived > 0uL || result.itemsSent > 0uL) {
                 Log.i(

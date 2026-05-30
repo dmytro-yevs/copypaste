@@ -141,6 +141,33 @@ async fn refresh_session_invalid_token_returns_error() {
     );
 }
 
+#[tokio::test]
+async fn refresh_session_structured_error_code_returns_refresh_error() {
+    // Newer GoTrue surfaces a structured `error_code` rather than (or in
+    // addition to) the OAuth `error`. A refresh grant that 400s must still be
+    // classified as a refresh-token error, and the message must surface.
+    let _m = mockito::mock("POST", "/auth/v1/token?grant_type=refresh_token")
+        .with_status(400)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"code":400,"error_code":"refresh_token_not_found","msg":"Invalid Refresh Token: Not Found"}"#,
+        )
+        .create();
+
+    let client = AuthClient::new(server_url(), "anon-key");
+    let err = client
+        .refresh_session("missing-token")
+        .await
+        .expect_err("should fail");
+
+    match err {
+        AuthError::InvalidRefreshToken(msg) => {
+            assert_eq!(msg, "Invalid Refresh Token: Not Found");
+        }
+        other => panic!("expected InvalidRefreshToken, got {other:?}"),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // sign_out tests
 // ---------------------------------------------------------------------------

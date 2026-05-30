@@ -17,11 +17,14 @@ pub fn nfkc_normalize(text: &str) -> String {
 /// credential, suppressing benign prose like `password: foo` or `// api_key=demo`.
 ///
 /// Strong = any one of:
-///   - value length ≥ 10
+///   - value length ≥ 10 characters (Unicode scalar values, not bytes)
 ///   - contains a special char `[!@#$%^&*+/=]`
 ///   - mix of letter AND digit
 fn is_credential_value_strong(value: &str) -> bool {
-    if value.len() >= 10 {
+    // Count chars, not bytes: a multibyte secret (e.g. CJK/accented) must be
+    // gated on its character length, otherwise a short multibyte value would
+    // be over-counted by `.len()` (byte length) and mis-classified as strong.
+    if value.chars().count() >= 10 {
         return true;
     }
     let mut has_letter = false;
@@ -110,11 +113,19 @@ impl SensitiveDetector {
     /// over the *normalised* string.
     pub fn detect(&self, text: &str) -> Vec<PatternMatch> {
         let normalised = nfkc_normalize(text);
+        self.detect_normalised(&normalised)
+    }
+
+    /// Detect over an *already* NFKC-normalised string. Internal hot-path entry
+    /// that skips re-normalisation; callers (`detect`, `is_sensitive`) must pass
+    /// a string already run through [`nfkc_normalize`]. Returned byte ranges are
+    /// over `normalised`.
+    fn detect_normalised(&self, normalised: &str) -> Vec<PatternMatch> {
         let mut results: Vec<PatternMatch> = Vec::new();
         for (i, re) in patterns().iter().enumerate() {
-            for m in re.find_iter(&normalised) {
+            for m in re.find_iter(normalised) {
                 let range = m.range();
-                if match_is_false_positive(i, m.as_str(), &normalised, &range) {
+                if match_is_false_positive(i, m.as_str(), normalised, &range) {
                     continue;
                 }
                 results.push(PatternMatch {
@@ -145,13 +156,64 @@ impl SensitiveDetector {
         {
             return true;
         }
-        // Only generic_password_kv candidates remain — validate at least one is strong.
-        !self.detect(&normalised).is_empty()
+        // Only generic_password_kv candidates remain — validate at least one is
+        // strong. `normalised` is already NFKC-normalised, so use the inner
+        // entry to avoid a redundant second normalisation pass on the hot path.
+        !self.detect_normalised(&normalised).is_empty()
     }
 
     /// Returns true if any pattern exceeds the confidence threshold.
     pub fn is_sensitive_threshold(&self, text: &str, threshold: f32) -> bool {
         self.detect(text).iter().any(|m| m.confidence >= threshold)
+    }
+
+    /// Returns true only if the text contains a **high-confidence** credential
+    /// match (confidence >= 0.70) that warrants automatic expiry / wipe.
+    ///
+    /// This is the **correct gate for the auto-wipe / `sensitive_ttl` path**.
+    /// Low-confidence patterns (phone_us 0.55, passport 0.55, email 0.60, bare
+    /// IBAN 0.85 is above floor but Financial-only) are intentionally excluded
+    /// so routine phone numbers or order IDs never trigger silent data deletion.
+    ///
+    /// High-confidence examples that DO trigger (>= 0.70):
+    ///   AWS keys (0.99), JWTs (0.95), OpenAI/Anthropic keys, SSH private keys,
+    ///   Stripe/GitHub/npm tokens, Vault tokens (0.95), credit cards (Luhn).
+    ///
+    /// # FIXWAVE
+    /// daemon should call `SensitiveDetector::new().is_sensitive_for_autowipe(&text)`
+    /// (or the free function `is_sensitive_for_autowipe(&text)`) **instead of**
+    /// `detect(&text).is_some()` for the `is_sensitive` / `expires_at` gate in
+    /// `daemon.rs` (around line 1177). The existing `detect()` call for
+    /// per-pattern annotations and redaction remains unchanged.
+    pub fn is_sensitive_for_autowipe(&self, text: &str) -> bool {
+        /// Minimum confidence for a match to trigger automatic expiry/wipe.
+        const AUTOWIPE_CONFIDENCE_FLOOR: f32 = 0.70;
+        let normalised = nfkc_normalize(text);
+        // Fast path: RegexSet tells us which patterns fired; then check confidence.
+        let candidate_indices: Vec<usize> =
+            pattern_set().matches(&normalised).into_iter().collect();
+        if candidate_indices.is_empty() {
+            // No regex match at all — check credit cards via Luhn (they bypass
+            // the pattern set and have implicit confidence 0.99).
+            return contains_luhn_valid_card_run(&normalised);
+        }
+        for &idx in &candidate_indices {
+            if pattern_confidence(idx) < AUTOWIPE_CONFIDENCE_FLOOR {
+                continue; // below floor — skip (phone_us 0.55, passport 0.55, email 0.60)
+            }
+            // For generic_password_kv (0.75 >= floor) we still require value strength.
+            if pattern_name(idx) == "generic_password_kv" {
+                let re = &patterns()[idx];
+                if let Some(m) = re.find(&normalised) {
+                    if match_is_false_positive(idx, m.as_str(), &normalised, &m.range()) {
+                        continue;
+                    }
+                }
+            }
+            return true;
+        }
+        // Patterns fired but all were below the floor — still check Luhn cards.
+        contains_luhn_valid_card_run(&normalised)
     }
 
     /// Returns the highest-confidence match, if any.
@@ -283,6 +345,20 @@ impl SensitiveKind {
     }
 }
 
+/// Free-function convenience wrapper around
+/// [`SensitiveDetector::is_sensitive_for_autowipe`].
+///
+/// Returns `true` only for high-confidence (>= 0.70) credential matches that
+/// should trigger automatic expiry/wipe. Low-confidence heuristics (phone,
+/// passport, email) are excluded so routine clipboard content is never silently
+/// deleted.
+///
+/// # FIXWAVE: daemon should call this instead of `detect(&text).is_some()`
+/// for the `is_sensitive` / `expires_at` gate (daemon.rs ~line 1177).
+pub fn is_sensitive_for_autowipe(text: &str) -> bool {
+    SensitiveDetector::new().is_sensitive_for_autowipe(text)
+}
+
 pub fn detect(text: &str) -> Option<SensitiveKind> {
     let normalised = nfkc_normalize(text);
     let candidate_indices: Vec<usize> = pattern_set().matches(&normalised).into_iter().collect();
@@ -328,7 +404,15 @@ fn contains_luhn_valid_card_run(text: &str) -> bool {
         // digit (so total = 14..=20 digits). The leading run already
         // matches one digit so we accept totals 13..=19 effectively;
         // the explicit Luhn `digits.len() < 13 || > 19` clamp filters.
-        regex::Regex::new(r"\b(?:\d[\s-]?){12,18}\d\b").expect("static card-run regex is valid")
+        //
+        // Graceful fallback: if the regex crate ever rejects this pattern
+        // (e.g. after a semver bump changes syntax), degrade to a never-match
+        // regex rather than panicking on the first clipboard capture.
+        regex::Regex::new(r"\b(?:\d[\s-]?){12,18}\d\b")
+            // `[^\s\S]` is the canonical never-match regex for the `regex` crate:
+            // it requires a character that is neither whitespace nor non-whitespace,
+            // which is impossible. Lookahead (`(?!x)x`) is not supported by `regex`.
+            .unwrap_or_else(|_| regex::Regex::new(r"[^\s\S]").expect("never-match regex is valid"))
     });
     for m in re.find_iter(text) {
         if luhn_valid_strict(m.as_str()) {
@@ -490,9 +574,10 @@ mod tests {
         // classify as CreditCard. We assert *only* "not classified as
         // CreditCard" — the input may still trigger an unrelated pattern
         // (e.g. phone_us on a 10-digit subrun), which is out of scope.
-        // (Earlier fixtures used "all zeros" or "all ones": the former
-        // is Luhn-valid (sum=0 ≡ 0 mod 10) and the latter trips phone_us.)
-        let blob = "ref=4242424242422 EOT";
+        // NOTE: the previous fixture "4242424242422" was accidentally Luhn-valid
+        // (4+2+4+... alternating produces sum=50 ≡ 0 mod 10). Updated to
+        // "4242424242421" which is provably Luhn-invalid (sum=49 mod 10 ≠ 0).
+        let blob = "ref=4242424242421 EOT";
         let kind = detect(blob);
         assert!(
             !matches!(kind, Some(SensitiveKind::CreditCard)),
@@ -642,5 +727,144 @@ mod tests {
     #[test]
     fn long_password_value_detected() {
         assert!(detect("password: abcdefghij").is_some()); // 10 chars
+    }
+
+    #[test]
+    fn multibyte_value_gated_on_chars_not_bytes() {
+        // 9 CJK characters = 27 UTF-8 bytes. The byte-length gate (`>= 10`)
+        // would mis-classify this short value as "strong" purely because of
+        // its byte width; the char-count gate (`chars().count() >= 10`)
+        // correctly treats 9 letters with no digit/special as weak.
+        let nine_cjk = "私的秘密言葉確認鍵"; // 9 chars, 27 bytes
+        assert_eq!(nine_cjk.chars().count(), 9);
+        assert!(nine_cjk.len() >= 10, "precondition: byte length exceeds 10");
+        assert!(
+            !is_credential_value_strong(nine_cjk),
+            "a 9-char multibyte letters-only value must be weak (char gate, not byte gate)"
+        );
+
+        // 10 multibyte chars clears the char-count gate → strong.
+        let ten_cjk = "私的秘密言葉確認鍵値"; // 10 chars
+        assert_eq!(ten_cjk.chars().count(), 10);
+        assert!(is_credential_value_strong(ten_cjk));
+    }
+
+    // ── is_sensitive_for_autowipe: confidence floor tests ─────────────────────
+
+    /// HIGH-confidence credentials MUST trigger auto-wipe.
+    #[test]
+    fn autowipe_triggers_for_aws_key() {
+        assert!(is_sensitive_for_autowipe("AKIAIOSFODNN7EXAMPLE"));
+    }
+
+    #[test]
+    fn autowipe_triggers_for_jwt() {
+        assert!(is_sensitive_for_autowipe(
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        ));
+    }
+
+    #[test]
+    fn autowipe_triggers_for_ssh_private_key() {
+        assert!(is_sensitive_for_autowipe(
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEo..."
+        ));
+    }
+
+    #[test]
+    fn autowipe_triggers_for_credit_card() {
+        assert!(is_sensitive_for_autowipe("4111111111111111"));
+    }
+
+    #[test]
+    fn autowipe_triggers_for_openai_key() {
+        assert!(is_sensitive_for_autowipe(
+            &("sk-proj-".to_string() + &"A".repeat(48))
+        ));
+    }
+
+    /// LOW-confidence patterns MUST NOT trigger auto-wipe (data-loss fix).
+    #[test]
+    fn autowipe_does_not_trigger_for_phone_number() {
+        // phone_us has confidence 0.55 — below the 0.70 floor.
+        assert!(
+            !is_sensitive_for_autowipe("Call me at (555) 867-5309"),
+            "phone number must not trigger auto-wipe"
+        );
+    }
+
+    #[test]
+    fn autowipe_does_not_trigger_for_email_address() {
+        // email has confidence 0.60 — below the 0.70 floor.
+        assert!(
+            !is_sensitive_for_autowipe("Send to alice@example.com"),
+            "email address must not trigger auto-wipe"
+        );
+    }
+
+    #[test]
+    fn autowipe_does_not_trigger_for_passport_like_code() {
+        // passport has confidence 0.55 — below the 0.70 floor.
+        // 9-digit passport number format: 2 uppercase letters + 9 digits.
+        assert!(
+            !is_sensitive_for_autowipe("Order AB123456789 is ready"),
+            "passport-like code must not trigger auto-wipe"
+        );
+    }
+
+    #[test]
+    fn autowipe_does_not_trigger_for_plain_text() {
+        assert!(!is_sensitive_for_autowipe(
+            "Lorem ipsum dolor sit amet, consectetur adipiscing elit."
+        ));
+    }
+
+    /// Vault tokens below 32 chars (now filtered by pattern) must not wipe.
+    #[test]
+    fn autowipe_does_not_trigger_for_short_hvs_prefix() {
+        // Short "hvs.abc" (only 3 chars after dot) should not match the
+        // tightened vault pattern requiring {32,} chars.
+        assert!(
+            !is_sensitive_for_autowipe("hvs.abc123"),
+            "short hvs. prefix must not trigger auto-wipe"
+        );
+    }
+
+    /// Real Vault token (32+ chars after dot) still triggers.
+    #[test]
+    fn autowipe_triggers_for_real_vault_token() {
+        let token = "hvs.".to_string() + &"A".repeat(32);
+        assert!(
+            is_sensitive_for_autowipe(&token),
+            "real vault token (32+ chars) must trigger auto-wipe"
+        );
+    }
+
+    /// openai_legacy sk- with 48 chars (not sk-proj-) must still trigger.
+    #[test]
+    fn autowipe_triggers_for_openai_legacy_key() {
+        let key = "sk-".to_string() + &"A".repeat(48);
+        assert!(
+            is_sensitive_for_autowipe(&key),
+            "openai legacy key must trigger auto-wipe"
+        );
+    }
+
+    /// sk-proj- must NOT also fire openai_legacy (double-match guard).
+    #[test]
+    fn openai_legacy_does_not_match_proj_prefix() {
+        // sk-proj- keys are caught by openai_new; openai_legacy must not
+        // also match them (the (?!proj-) lookahead prevents double-fire).
+        let d = SensitiveDetector::new();
+        let key = "sk-proj-".to_string() + &"A".repeat(48);
+        let matches = d.detect(&key);
+        let legacy_hits: Vec<_> = matches
+            .iter()
+            .filter(|m| m.pattern_name == "openai_legacy")
+            .collect();
+        assert!(
+            legacy_hits.is_empty(),
+            "openai_legacy must not fire on sk-proj- keys; got: {legacy_hits:?}"
+        );
     }
 }

@@ -84,7 +84,7 @@ fn salt_v1_and_v2_derive_different_keys_from_same_input() {
     // production code actually uses HKDF_SALT_V1_BYTES, not some other salt).
     let key_via_api = alice.derive_enc_key(&bob_pub, "alice", "bob");
     assert_eq!(
-        key_via_api, key_v1,
+        *key_via_api, key_v1,
         "DeviceKeypair::derive_enc_key MUST use HKDF_SALT_V1 \
          (b\"copypaste-v1-salt\") — if this fails, the production salt \
          constant has drifted from the documented value"

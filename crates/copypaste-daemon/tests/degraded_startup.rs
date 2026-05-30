@@ -10,8 +10,8 @@
 //! Both outcomes left no daemon and a blank UI. The fix makes startup ALWAYS
 //! reach a defined state in bounded time and, when the key cannot open an
 //! existing encrypted DB, come up DEGRADED: socket bound, `status` reports
-//! `status="degraded"` + `degraded_reason="keychain_locked"`, DB-touching
-//! methods return `IPC_NOT_READY`, and the existing DB file is left untouched.
+//! `status="degraded"` + an accurate `degraded_reason`, DB-touching methods
+//! return `IPC_NOT_READY`, and the existing DB file is left untouched.
 //!
 //! How this test forces the degraded path deterministically WITHOUT a real
 //! Keychain: it runs the daemon with `COPYPASTE_EPHEMERAL_KEY=1` (so the key is
@@ -19,6 +19,9 @@
 //! that is not a valid SQLCipher database under that key. `Database::open` then
 //! fails with SQLITE_NOTADB — exactly the "wrong key vs existing encrypted DB"
 //! shape — and the daemon takes the degraded safety-net path instead of exiting.
+//! Because the key WAS obtained (it is just the wrong one), the accurate reason
+//! here is `db_key_mismatch`, NOT `keychain_locked` (which is reserved for the
+//! key-UNREACHABLE case — a locked/denied Keychain read).
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -138,7 +141,7 @@ fn spawn_degraded() -> DegradedDaemon {
 /// the key cannot open an existing encrypted DB — it binds the socket and
 /// serves a degraded status in bounded time.
 #[test]
-fn degraded_startup_binds_socket_and_reports_keychain_locked() {
+fn degraded_startup_binds_socket_and_reports_db_key_mismatch() {
     let daemon = spawn_degraded();
 
     assert!(
@@ -158,8 +161,9 @@ fn degraded_startup_binds_socket_and_reports_keychain_locked() {
         "status must be 'degraded', got: {resp}"
     );
     assert_eq!(
-        resp["data"]["degraded_reason"], "keychain_locked",
-        "degraded_reason must be the canonical 'keychain_locked', got: {resp}"
+        resp["data"]["degraded_reason"], "db_key_mismatch",
+        "degraded_reason must be the canonical 'db_key_mismatch' (key present but \
+         wrong — NOT 'keychain_locked', which is for an unreachable key), got: {resp}"
     );
     assert_eq!(
         resp["data"]["degraded"], true,
@@ -191,6 +195,115 @@ fn degraded_startup_rejects_db_methods_with_not_ready() {
     assert!(
         blob.contains("IPC_NOT_READY"),
         "rejection must carry IPC_NOT_READY, got: {resp}"
+    );
+}
+
+/// Recovery escape hatch: `reset_database` (the user-facing "Reset database"
+/// button) MUST work in degraded mode and bring the daemon back to healthy.
+///
+/// Drives the full flow end-to-end against a real degraded daemon subprocess:
+///   1. confirm the daemon is degraded and `history_page` is rejected,
+///   2. `reset_database` WITHOUT confirm is rejected (`invalid_argument`),
+///   3. `reset_database` WITH `confirm=true` succeeds and reports `ready=true`,
+///   4. afterwards `status` is no longer degraded and `history_page` returns an
+///      empty page (the fresh DB) — all WITHOUT restarting the process.
+#[test]
+fn reset_database_recovers_degraded_daemon_in_place() {
+    let daemon = spawn_degraded();
+    assert!(
+        wait_for_socket(&daemon.socket_path, SOCKET_READY_TIMEOUT),
+        "degraded daemon must bind its socket"
+    );
+
+    // Precondition: degraded + DB methods rejected.
+    let status = request(
+        &daemon.socket_path,
+        r#"{"id":"r-pre","method":"status","protocol_version":1}"#,
+    );
+    assert_eq!(
+        status["data"]["degraded"], true,
+        "precondition: daemon must start degraded, got: {status}"
+    );
+    let hp = request(
+        &daemon.socket_path,
+        r#"{"id":"r-hp1","method":"history_page","params":{"limit":10},"protocol_version":1}"#,
+    );
+    assert_eq!(
+        hp["ok"], false,
+        "precondition: history_page must be rejected while degraded, got: {hp}"
+    );
+
+    // Guard: without confirm=true the reset is refused.
+    let no_confirm = request(
+        &daemon.socket_path,
+        r#"{"id":"r-nc","method":"reset_database","params":{},"protocol_version":1}"#,
+    );
+    assert_eq!(
+        no_confirm["ok"], false,
+        "reset_database without confirm must be rejected, got: {no_confirm}"
+    );
+    assert_eq!(
+        no_confirm["error_code"], "invalid_argument",
+        "missing-confirm rejection must be invalid_argument, got: {no_confirm}"
+    );
+
+    // The destructive reset with explicit confirm must succeed.
+    let reset = request(
+        &daemon.socket_path,
+        r#"{"id":"r-go","method":"reset_database","params":{"confirm":true},"protocol_version":1}"#,
+    );
+    assert_eq!(
+        reset["ok"], true,
+        "reset_database with confirm=true must succeed, got: {reset}"
+    );
+    assert_eq!(
+        reset["data"]["reset"], true,
+        "reset_database must report reset=true, got: {reset}"
+    );
+    assert_eq!(
+        reset["data"]["ready"], true,
+        "reset_database must recover in-place (ready=true), got: {reset}"
+    );
+
+    // The daemon must now be healthy: status no longer degraded.
+    let status_after = request(
+        &daemon.socket_path,
+        r#"{"id":"r-post","method":"status","protocol_version":1}"#,
+    );
+    assert_eq!(
+        status_after["data"]["degraded"], false,
+        "after reset the daemon must no longer be degraded, got: {status_after}"
+    );
+    assert_eq!(
+        status_after["data"]["status"], "running",
+        "after reset status must be 'running', got: {status_after}"
+    );
+
+    // And a DB-touching method must now succeed against the fresh empty DB.
+    let hp_after = request(
+        &daemon.socket_path,
+        r#"{"id":"r-hp2","method":"history_page","params":{"limit":10},"protocol_version":1}"#,
+    );
+    assert_eq!(
+        hp_after["ok"], true,
+        "history_page must succeed after reset, got: {hp_after}"
+    );
+    assert_eq!(
+        hp_after["data"]["total"], 0,
+        "the fresh database must be empty, got: {hp_after}"
+    );
+
+    // The on-disk DB file must exist and be a real (non-zero) SQLCipher file —
+    // i.e. recreated, not the seeded corrupt blob.
+    let on_disk = std::fs::read(&daemon.db_path).expect("fresh db file present");
+    assert!(
+        !on_disk.is_empty(),
+        "the recreated database file must be non-empty"
+    );
+    assert_ne!(
+        on_disk.as_slice(),
+        PREEXISTING_DB_BYTES,
+        "the corrupt seed bytes must have been wiped and replaced"
     );
 }
 

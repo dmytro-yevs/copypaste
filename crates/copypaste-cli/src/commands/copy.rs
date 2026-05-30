@@ -1,3 +1,4 @@
+use crate::commands::common::format_unix_ms;
 use crate::ipc::IpcClient;
 use anyhow::{anyhow, bail, Result};
 use std::path::Path;
@@ -110,11 +111,11 @@ pub fn cmd_copy_by_index(socket_path: &Path, n: u64, limit: u64) -> Result<()> {
 /// Search history and copy the first result.
 pub fn cmd_copy_by_search(socket_path: &Path, query: &str, limit: u64) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({
-        "id": "1",
-        "method": "search",
-        "params": {"query": query, "limit": limit}
-    });
+    let req = IpcClient::build_request(
+        "1",
+        "search",
+        serde_json::json!({"query": query, "limit": limit}),
+    );
     let resp = client.call(&req)?;
 
     if !resp.ok {
@@ -143,11 +144,7 @@ pub fn cmd_copy_by_search(socket_path: &Path, query: &str, limit: u64) -> Result
 /// Send `copy` IPC for a known UUID.
 pub fn cmd_copy_by_id(socket_path: &Path, id: &str) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({
-        "id": "1",
-        "method": "copy",
-        "params": {"id": id}
-    });
+    let req = IpcClient::build_request("1", "copy", serde_json::json!({"id": id}));
     let resp = client.call(&req)?;
 
     if resp.ok {
@@ -170,11 +167,11 @@ pub fn cmd_copy_by_id(socket_path: &Path, id: &str) -> Result<()> {
 /// Fetch up to `limit` history items from the daemon via the `list` IPC method.
 pub fn fetch_history(socket_path: &Path, limit: u64) -> Result<Vec<serde_json::Value>> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({
-        "id": "1",
-        "method": "list",
-        "params": {"limit": limit, "offset": 0}
-    });
+    let req = IpcClient::build_request(
+        "1",
+        "list",
+        serde_json::json!({"limit": limit, "offset": 0}),
+    );
     let resp = client.call(&req)?;
 
     if !resp.ok {
@@ -188,63 +185,6 @@ pub fn fetch_history(socket_path: &Path, limit: u64) -> Result<Vec<serde_json::V
         .and_then(|d| d["items"].as_array())
         .cloned()
         .unwrap_or_default())
-}
-
-/// Format Unix epoch milliseconds as "YYYY-MM-DD HH:MM:SS" (std only, no chrono).
-fn format_unix_ms(ms: i64) -> String {
-    if ms <= 0 {
-        return "\u{2014}".to_string();
-    }
-    let secs = (ms / 1000) as u64;
-    let ss = secs % 60;
-    let mins = secs / 60;
-    let mi = mins % 60;
-    let hours = mins / 60;
-    let h = hours % 24;
-    let days = hours / 24;
-    let (y, mo, d) = days_to_ymd(days);
-    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, mo, d, h, mi, ss)
-}
-
-fn days_to_ymd(days: u64) -> (u64, u64, u64) {
-    let mut remaining = days;
-    let mut year = 1970u64;
-    loop {
-        let diy = if is_leap(year) { 366 } else { 365 };
-        if remaining < diy {
-            break;
-        }
-        remaining -= diy;
-        year += 1;
-    }
-    let leap = is_leap(year);
-    let month_days: [u64; 12] = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    let mut month = 1u64;
-    for &md in &month_days {
-        if remaining < md {
-            break;
-        }
-        remaining -= md;
-        month += 1;
-    }
-    (year, month, remaining + 1)
-}
-
-fn is_leap(y: u64) -> bool {
-    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -263,42 +203,6 @@ mod tests {
     fn run_signature_accepts_all_modes() {
         #[allow(clippy::type_complexity)]
         let _: fn(&Path, Option<u64>, Option<&str>, Option<&str>, bool, u64) -> Result<()> = run;
-    }
-
-    // ── Unit: format_unix_ms ────────────────────────────────────────────
-
-    #[test]
-    fn format_unix_ms_zero_returns_dash() {
-        assert_eq!(format_unix_ms(0), "\u{2014}");
-    }
-
-    #[test]
-    fn format_unix_ms_negative_returns_dash() {
-        assert_eq!(format_unix_ms(-1), "\u{2014}");
-    }
-
-    #[test]
-    fn format_unix_ms_known_epoch() {
-        // 2024-01-01 00:00:00 UTC = 1704067200000 ms
-        assert_eq!(format_unix_ms(1_704_067_200_000i64), "2024-01-01 00:00:00");
-    }
-
-    #[test]
-    fn format_unix_ms_structure() {
-        let s = format_unix_ms(1_750_000_496_000i64);
-        assert_eq!(s.len(), 19);
-        assert_eq!(&s[4..5], "-");
-        assert_eq!(&s[7..8], "-");
-    }
-
-    // ── Unit: is_leap ───────────────────────────────────────────────────
-
-    #[test]
-    fn is_leap_correct() {
-        assert!(is_leap(2000));
-        assert!(is_leap(2024));
-        assert!(!is_leap(1900));
-        assert!(!is_leap(2025));
     }
 
     // ── Unit: index validation ──────────────────────────────────────────

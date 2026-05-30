@@ -162,6 +162,14 @@ impl SyncKey {
 // Errors
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Minimum passphrase length enforced by `derive_sync_key`.
+///
+/// A passphrase shorter than this is trivially brute-forceable even with
+/// Argon2id's memory-hard work factor. Eight characters is a conservative
+/// floor that blocks the worst cases (empty string, single char) without
+/// being onerous for real users.
+pub const MIN_PASSPHRASE_LEN: usize = 8;
+
 /// Errors returned by sync-key derivation and cloud encrypt/decrypt.
 #[derive(Debug, Error)]
 pub enum SyncKeyError {
@@ -188,6 +196,12 @@ pub enum SyncKeyError {
     /// (24-byte nonce prefix).
     #[error("Cloud blob too short: expected at least {NONCE_SIZE} bytes, got {0}")]
     BlobTooShort(usize),
+
+    /// The passphrase is shorter than `MIN_PASSPHRASE_LEN` characters.
+    /// Short passphrases are trivially brute-forceable; the IPC layer
+    /// should surface this as a user-actionable validation error.
+    #[error("passphrase too short: must be at least {MIN_PASSPHRASE_LEN} characters, got {0}")]
+    PassphraseTooShort(usize),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -202,11 +216,20 @@ pub enum SyncKeyError {
 /// security rationale for the fixed salt.
 ///
 /// # Errors
+/// Returns `SyncKeyError::PassphraseTooShort` if `passphrase` is shorter than
+/// `MIN_PASSPHRASE_LEN` characters (prevents trivial brute force).
 /// Returns `SyncKeyError::Argon2Params` if the Argon2id parameter struct
 /// cannot be built (only possible if the hardcoded constants are invalid),
 /// or `SyncKeyError::Argon2Hash` if the hashing operation fails at runtime.
 pub fn derive_sync_key(passphrase: &str) -> Result<SyncKey, SyncKeyError> {
     use argon2::{Algorithm, Argon2, Params, Version};
+
+    // Fix [HIGH]: reject trivially short passphrases before hashing so the
+    // IPC layer can surface a user-actionable error rather than silently
+    // accepting a 0- or 1-character passphrase that is brute-forceable.
+    if passphrase.chars().count() < MIN_PASSPHRASE_LEN {
+        return Err(SyncKeyError::PassphraseTooShort(passphrase.chars().count()));
+    }
 
     let params = Params::new(ARGON2_M_COST_KIB, ARGON2_T_COST, ARGON2_P_COST, Some(32))
         .map_err(|e| SyncKeyError::Argon2Params(e.to_string()))?;
@@ -286,11 +309,11 @@ pub fn decrypt_from_cloud(
     }
 
     let (nonce_bytes, ciphertext) = blob.split_at(NONCE_SIZE);
-    // SAFETY: split_at guarantees nonce_bytes.len() == NONCE_SIZE == 24.
-    let nonce = XNonce::from(
-        *<&[u8; NONCE_SIZE]>::try_from(nonce_bytes)
-            .expect("split_at(NONCE_SIZE) guarantees exactly NONCE_SIZE bytes"),
-    );
+    // SAFETY: `split_at(NONCE_SIZE)` guarantees `nonce_bytes.len() == NONCE_SIZE == 24`.
+    // `XNonce::from_slice` is the idiomatic infallible constructor for a known-length
+    // slice; it panics only when the length differs from 24, which is structurally
+    // impossible here. Prefer it over `try_into().expect()` to avoid the bare `expect`.
+    let nonce = *XNonce::from_slice(nonce_bytes);
 
     let cipher = XChaCha20Poly1305::new(key.as_bytes().into());
     let aad = build_cloud_aad(item_id);
@@ -543,5 +566,41 @@ mod tests {
             "wrong key via from_bytes must return DecryptFailed, got {:?}",
             result
         );
+    }
+
+    // ── passphrase length enforcement ────────────────────────────────────────
+
+    /// Fix [HIGH]: passphrases shorter than MIN_PASSPHRASE_LEN must be rejected
+    /// with `PassphraseTooShort` before Argon2id even runs.
+    #[test]
+    fn short_passphrase_returns_passphrase_too_short() {
+        for short in &["", "a", "1234567"] {
+            let result = derive_sync_key(short);
+            assert!(
+                matches!(result, Err(SyncKeyError::PassphraseTooShort(_))),
+                "passphrase {:?} (len {}) must produce PassphraseTooShort",
+                short,
+                short.chars().count(),
+            );
+        }
+    }
+
+    /// A passphrase of exactly MIN_PASSPHRASE_LEN characters must succeed.
+    #[test]
+    fn passphrase_at_min_length_succeeds() {
+        // "12345678" is exactly 8 chars — must not return PassphraseTooShort.
+        assert!(
+            derive_sync_key("12345678").is_ok(),
+            "passphrase of exactly {MIN_PASSPHRASE_LEN} chars must succeed"
+        );
+    }
+
+    /// The PassphraseTooShort error carries the actual char count.
+    #[test]
+    fn passphrase_too_short_error_contains_length() {
+        match derive_sync_key("abc") {
+            Err(SyncKeyError::PassphraseTooShort(n)) => assert_eq!(n, 3),
+            _ => panic!("expected PassphraseTooShort(3), got Err variant or Ok"),
+        }
     }
 }

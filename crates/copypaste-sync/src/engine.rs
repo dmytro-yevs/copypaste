@@ -37,6 +37,19 @@ use copypaste_core::storage::items::ClipboardItem;
 /// Protects against memory exhaustion from malicious/buggy peers.
 const MAX_FRAME_SIZE: u32 = 16 * 1024 * 1024;
 
+/// Maximum number of Lamport ticks a remote item is allowed to be ahead of the
+/// local clock before its timestamp is clamped.
+///
+/// Why this bound? A real deployment might have thousands of devices, each
+/// performing thousands of writes per day over years of uptime. 10^12 ticks is
+/// larger than (10^6 devices × 10^6 writes each), so it accommodates any
+/// realistic scenario while still preventing a single hostile/buggy peer from
+/// jamming the local clock to u64::MAX (which would make that peer win every
+/// future LWW conflict forever). The wall_time is a Unix-ms timestamp; 10^15 ms
+/// is roughly 31 years in the future, a similarly generous but finite bound.
+pub const MAX_LAMPORT_SKEW: u64 = 1_000_000_000_000; // 10^12 ticks
+pub const MAX_WALL_TIME_SKEW_MS: i64 = 1_000_000_000_000_000_i64; // ~31 years in ms
+
 /// Error type for sync operations.
 #[derive(Debug)]
 pub enum SyncError {
@@ -189,25 +202,48 @@ impl SyncEngine {
         self.clock.observe(peer_clock);
 
         // --- HAVE exchange ---
-        // Build a map of id → lamport_ts for local items (for conflict detection).
+        // Build a map of item_id → lamport_ts for local items (for conflict
+        // detection). We key on the cross-device `item_id`, NOT the per-row
+        // primary key `id`: `id` is a fresh `Uuid::new_v4()` on every device,
+        // so the same logical item has a different `id` on each side and HAVE/
+        // WANT/LWW would never match — duplicate rows would accumulate. The
+        // stable `item_id` (bound into the AEAD AAD, UNIQUE-indexed) is the
+        // identity every device agrees on.
         let local_clock_map: HashMap<String, i64> = local_items
             .iter()
-            .map(|i| (i.id.clone(), i.lamport_ts))
+            .map(|i| (i.item_id.clone(), i.lamport_ts))
             .collect();
         let local_ids: HashSet<&String> = local_clock_map.keys().collect();
 
         let my_have = Message::Have {
             items: local_items
                 .iter()
-                .map(|i| (i.id.clone(), i.lamport_ts))
+                .map(|i| (i.item_id.clone(), i.lamport_ts))
                 .collect(),
         };
         send_message(stream, &my_have).await?;
 
         let peer_have = recv_message(stream).await?;
-        // peer_clock_map: id → lamport_ts from the remote side.
+        // peer_clock_map: item_id → lamport_ts from the remote side.
+        // Build peer_clock_map from the HAVE list, taking the MAX lamport_ts when
+        // the same item_id appears more than once.  `HashMap::collect` silently
+        // collapses duplicates with "last wins" (undefined iteration order), which
+        // could cause the engine to underestimate the peer's clock for an item and
+        // skip requesting it even when the peer's true latest version is newer than
+        // the local copy.  Taking MAX is the only semantically correct choice: the
+        // peer holds the item at the highest timestamp it announced, regardless of
+        // duplicates.
         let peer_clock_map: HashMap<String, i64> = match peer_have {
-            Message::Have { items } => items.into_iter().collect(),
+            Message::Have { items } => {
+                let mut map: HashMap<String, i64> = HashMap::with_capacity(items.len());
+                for (id, ts) in items {
+                    let entry = map.entry(id).or_insert(ts);
+                    if ts > *entry {
+                        *entry = ts;
+                    }
+                }
+                map
+            }
             other => {
                 return Err(SyncError::ProtocolViolation(format!(
                     "expected HAVE, got {:?}",
@@ -287,9 +323,13 @@ impl SyncEngine {
         };
 
         // --- ITEMS exchange: we send what peer wants first ---
+        // `items_peer_wants` is a list of `item_id`s (the WANT/HAVE wire lists
+        // carry item_ids), so filter on `item.item_id`, not the per-row `id`.
+        // Build a HashSet for O(1) per-item lookup instead of O(n·m) linear scan.
+        let peer_wants_set: HashSet<&str> = items_peer_wants.iter().map(String::as_str).collect();
         let items_to_send: Vec<WireItem> = local_items
             .iter()
-            .filter(|item| items_peer_wants.contains(&item.id))
+            .filter(|item| peer_wants_set.contains(item.item_id.as_str()))
             .map(|item| local_to_wire(item, &self.device_id))
             .collect();
 
@@ -315,48 +355,80 @@ impl SyncEngine {
             }
         };
 
-        // Build a local index for fast lookup during merge.
-        let local_by_id: HashMap<&str, &ClipboardItem> =
-            local_items.iter().map(|i| (i.id.as_str(), i)).collect();
+        // Build a local index for fast lookup during merge, keyed on the
+        // cross-device `item_id` so an incoming wire item resolves against the
+        // local row that represents the SAME logical item (its per-row `id`
+        // differs across devices).
+        let local_by_item_id: HashMap<&str, &ClipboardItem> = local_items
+            .iter()
+            .map(|i| (i.item_id.as_str(), i))
+            .collect();
 
         let mut to_upsert: Vec<ClipboardItem> = Vec::new();
 
         for mut wire in received_items {
-            // L1: clamp a negative inbound `lamport_ts` at INGESTION, before it
-            // is used for the clock, the LWW merge, or storage. `lamport_ts` is
-            // i64 on the wire/row but u64 in the clock; a malformed/hostile peer
-            // could send a negative value. Previously only the clock-observe
-            // path clamped it while the original negative value still flowed
-            // into `resolve()` and `wire_to_local()` — so a negative ts was
-            // persisted to the row. Clamping the wire item in place fixes all
-            // three consumers at once and guarantees no negative ts is stored.
-            if wire.lamport_ts < 0 {
+            // Step 1 — lower-bound clamp (centralised in WireItem::clamp_timestamps):
+            // zero out any negative lamport_ts / wall_time before they touch the
+            // clock, the LWW merge, or storage.  i64 on the wire but u64 in the
+            // clock; a negative cast would silently wrap to a huge positive (L1).
+            wire.clamp_timestamps();
+
+            // Step 2 — upper-bound clamp: reject implausibly large lamport_ts /
+            // wall_time from a hostile or buggy peer.
+            //
+            // Without this bound a single peer can feed the local clock
+            // `observe(u64::MAX)` and saturate it, making that peer win every
+            // future LWW conflict forever — a silent, persistent data-loss attack.
+            //
+            // The ceiling is local_clock + MAX_LAMPORT_SKEW, i.e. the peer may
+            // be at most MAX_LAMPORT_SKEW ticks ahead of us (10^12, far beyond
+            // any real deployment).  Anything beyond that is clamped; the item
+            // is still accepted so we don't silently drop peer data, but with a
+            // safe timestamp that cannot jam the clock.
+            let local_now = self.clock.get();
+            let ceiling_lamport = local_now.saturating_add(MAX_LAMPORT_SKEW);
+            let wire_u64 = wire.lamport_ts as u64; // safe: already >= 0 after step 1
+            if wire_u64 > ceiling_lamport {
                 warn!(
-                    "received wire item {} with negative lamport_ts {} — clamping to 0",
-                    wire.id, wire.lamport_ts
+                    "received wire item {} with lamport_ts {} far ahead of local clock {} \
+                     (ceiling {}); clamping to ceiling",
+                    wire.id, wire.lamport_ts, local_now, ceiling_lamport
                 );
-                wire.lamport_ts = 0;
+                // Clamp to the ceiling as i64; saturating_as avoids overflow if
+                // ceiling somehow exceeds i64::MAX (theoretical with a saturated clock).
+                wire.lamport_ts = ceiling_lamport.min(i64::MAX as u64) as i64;
             }
-            // Advance our clock with the (now non-negative) item timestamp.
-            // observe() uses saturating_add internally (edge-cases LOW #34).
+            // Apply the same ceiling to wall_time (Unix ms).  A peer sending
+            // wall_time=i64::MAX would make its item win every future wall-time
+            // LWW tie-break, permanently shadowing all locally-captured items.
+            if wire.wall_time > MAX_WALL_TIME_SKEW_MS {
+                warn!(
+                    "received wire item {} with wall_time {} beyond ceiling {}; clamping",
+                    wire.id, wire.wall_time, MAX_WALL_TIME_SKEW_MS
+                );
+                wire.wall_time = MAX_WALL_TIME_SKEW_MS;
+            }
+
+            // Advance our clock with the (now bounded, non-negative) item timestamp.
+            // observe() uses saturating_add internally.
             self.clock.observe(wire.lamport_ts as u64);
 
-            if let Some(existing) = local_by_id.get(wire.id.as_str()) {
-                // Item exists locally — apply LWW merge.
+            if let Some(existing) = local_by_item_id.get(wire.item_id.as_str()) {
+                // Item exists locally (same cross-device item_id) — apply LWW.
                 match resolve(existing, &wire) {
                     MergeOutcome::TakeRemote => {
-                        debug!("LWW: take remote for item {}", wire.id);
+                        debug!("LWW: take remote for item_id {}", wire.item_id);
                         to_upsert.push(wire_to_local(wire));
                         result.items_received += 1;
                     }
                     MergeOutcome::KeepLocal => {
-                        debug!("LWW: keep local for item {}", wire.id);
+                        debug!("LWW: keep local for item_id {}", wire.item_id);
                         result.items_skipped += 1;
                     }
                 }
             } else {
-                // New item — accept unconditionally.
-                debug!("accepting new item {} from peer", wire.id);
+                // New item (item_id not seen locally) — accept unconditionally.
+                debug!("accepting new item_id {} from peer", wire.item_id);
                 to_upsert.push(wire_to_local(wire));
                 result.items_received += 1;
             }
@@ -737,5 +809,97 @@ mod tests {
 
         assert!(res_a.is_ok());
         assert!(res_b.is_ok());
+    }
+
+    /// CRDT stable-identity regression: the SAME logical item captured on two
+    /// devices has DIFFERENT per-row `id`s (each device runs `Uuid::new_v4()`)
+    /// but the SAME cross-device `item_id`. HAVE/WANT/LWW must key on `item_id`
+    /// so the two converge to ONE item — the higher-lamport version winning —
+    /// instead of each device treating the other's copy as a brand-new item and
+    /// accumulating a duplicate.
+    #[tokio::test]
+    async fn same_item_id_different_row_id_converges_to_one_row() {
+        // Device A: row id A1, item_id X, lamport 5.
+        let mut a = make_item("A1", 5);
+        a.item_id = "X".to_string();
+        a.content = Some(vec![0xAA]);
+        // Device B: row id B9 (different!), item_id X (same logical item),
+        // lamport 7, different content → B's version must win LWW.
+        let mut b = make_item("B9", 7);
+        b.item_id = "X".to_string();
+        b.content = Some(vec![0xBB]);
+
+        let mut engine_a = SyncEngine::new("device-A");
+        let mut engine_b = SyncEngine::new("device-B");
+        let (mut sa, mut sb) = make_duplex();
+        let items_a = [a];
+        let items_b = [b];
+        let (res_a, res_b) = tokio::join!(
+            engine_a.run_session(&mut sa, &items_a),
+            engine_b.run_session(&mut sb, &items_b),
+        );
+        let (result_a, upsert_a) = res_a.expect("engine A ok");
+        let (result_b, upsert_b) = res_b.expect("engine B ok");
+
+        // A must accept B's newer version of item_id X (LWW: lamport 7 > 5).
+        assert_eq!(upsert_a.len(), 1, "A converges to the single shared item");
+        assert_eq!(upsert_a[0].item_id, "X");
+        assert_eq!(upsert_a[0].lamport_ts, 7, "higher-lamport version wins");
+        assert_eq!(upsert_a[0].content, Some(vec![0xBB]), "B's content wins");
+        assert_eq!(result_a.items_received, 1);
+
+        // B already holds the winning (higher-lamport) version of item_id X. The
+        // HAVE/WANT exchange — now keyed on item_id — recognises A's copy as the
+        // SAME item, so B never even requests A's older version: nothing is
+        // transferred to B and nothing is upserted. This is the convergence
+        // guarantee: B keeps its winner, A adopts it, ONE row results. (Pre-fix,
+        // A's differently-`id`'d copy looked like a brand-new item to B and would
+        // have been ingested as a duplicate.)
+        assert!(
+            upsert_b.is_empty(),
+            "B must not ingest A's older same-item_id copy as a new row"
+        );
+        assert_eq!(
+            result_b.items_received, 0,
+            "B receives nothing — A's copy is the same logical item, not new"
+        );
+        assert_eq!(
+            result_b.items_sent, 1,
+            "B sends its winning version of item_id X to A"
+        );
+    }
+
+    /// The inverse guarantee: two items with the SAME content but DISTINCT
+    /// `item_id`s (X1 / X2) are INTENTIONALLY-different captures and must BOTH
+    /// survive a sync. Identity is `item_id`, never the content hash — keying on
+    /// content would wrongly collapse deliberate duplicate captures.
+    #[tokio::test]
+    async fn intentional_duplicate_captures_stay_distinct() {
+        // A holds item_id X1; B holds item_id X2 — identical content, distinct
+        // logical items.
+        let mut a = make_item("rowA", 3);
+        a.item_id = "X1".to_string();
+        a.content = Some(vec![0xEE]);
+        let mut b = make_item("rowB", 3);
+        b.item_id = "X2".to_string();
+        b.content = Some(vec![0xEE]); // SAME content as A
+
+        let mut engine_a = SyncEngine::new("device-A");
+        let mut engine_b = SyncEngine::new("device-B");
+        let (mut sa, mut sb) = make_duplex();
+        let items_a = [a];
+        let items_b = [b];
+        let (res_a, res_b) = tokio::join!(
+            engine_a.run_session(&mut sa, &items_a),
+            engine_b.run_session(&mut sb, &items_b),
+        );
+        let (_ra, upsert_a) = res_a.expect("engine A ok");
+        let (_rb, upsert_b) = res_b.expect("engine B ok");
+
+        // Each side learns the OTHER's distinct item_id — both survive.
+        assert_eq!(upsert_a.len(), 1, "A must receive X2");
+        assert_eq!(upsert_a[0].item_id, "X2");
+        assert_eq!(upsert_b.len(), 1, "B must receive X1");
+        assert_eq!(upsert_b[0].item_id, "X1");
     }
 }

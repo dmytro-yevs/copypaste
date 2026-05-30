@@ -11,7 +11,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -25,8 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -50,11 +47,18 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
-import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeBorder
+import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.IdeAccent
+import com.copypaste.android.ui.theme.IdeBg
+import com.copypaste.android.ui.theme.IdeDanger
 import com.copypaste.android.ui.theme.IdeDim
+import com.copypaste.android.ui.theme.IdeText
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.journeyapps.barcodescanner.ScanContract
@@ -72,6 +76,26 @@ private const val PAIR_TOKEN_TTL_SECONDS = 120
 
 /** Threshold below which the countdown switches to an urgency color. */
 private const val PAIR_TOKEN_URGENT_THRESHOLD_SECONDS = 15
+
+/**
+ * Side of the rendered QR image, in dp. The QR, the placeholder icon, and the
+ * loading spinner all sit inside a reserved box of this size (plus
+ * [QR_PLATE_PADDING_DP] of white backing) so the layout never reflows when the
+ * content swaps between loading / present / placeholder. This is the single
+ * source of truth for the QR's on-screen size, keeping the image and its
+ * reserved container in lock-step (BUG 2).
+ */
+private const val QR_IMAGE_SIZE_DP = 240
+
+/** White backing-plate padding around the QR, in dp (each side). */
+private const val QR_PLATE_PADDING_DP = 12
+
+/**
+ * Fixed side of the reserved QR slot, in dp: the QR image plus its white plate
+ * padding on both sides. Every QR-area state renders into a box of exactly this
+ * size so the screen stays visually stable (no jitter — BUG 1).
+ */
+private const val QR_SLOT_SIZE_DP = QR_IMAGE_SIZE_DP + QR_PLATE_PADDING_DP * 2
 
 /**
  * Pair Device screen.
@@ -267,7 +291,14 @@ fun PairScreen(
                             ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
                             Charsets.UTF_8,
                         )
-                        if (repository.storeItem(plaintext, key)) stored += 1
+                        // Persist under the peer's STABLE item_id so a later
+                        // re-sync of this clip reuses it (no duplicate on the
+                        // originating device). itemId doubles as the dedup key.
+                        if (repository.storeItem(plaintext, key, overrideId = item.itemId)
+                                .isNotEmpty()
+                        ) {
+                            stored += 1
+                        }
                     }
                     // Persist the peer for future syncs. The session key is
                     // stored securely (KEK-wrapped) so the background dialer in
@@ -332,64 +363,68 @@ fun PairScreen(
             Text(
                 text = stringResource(R.string.pair_instructions),
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
+                color = IdeText
             )
 
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                ),
-                border = BorderStroke(1.dp, IdeBorder),
-            ) {
+            CopyPasteCard {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(28.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    val bmp = qrBitmap
-                    when {
-                        loading -> {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                CircularProgressIndicator(
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    text = stringResource(R.string.status_pairing),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = IdeDim
+                    // Reserve a fixed-size slot for the QR area. Every state
+                    // (loading / QR present / placeholder) renders into this same
+                    // square, so the layout never reflows as the QR loads,
+                    // appears, expires, or the countdown ticks — no jitter.
+                    Box(
+                        modifier = Modifier.size(QR_SLOT_SIZE_DP.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val bmp = qrBitmap
+                        when {
+                            loading -> {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = IdeAccent
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.status_pairing),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = IdeDim
+                                    )
+                                }
+                            }
+                            bmp != null && !expired -> {
+                                // QR needs a light, high-contrast backing to scan
+                                // reliably — sit the code on a white rounded plate
+                                // that fills the reserved slot exactly.
+                                Box(
+                                    modifier = Modifier
+                                        .size(QR_SLOT_SIZE_DP.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(androidx.compose.ui.graphics.Color.White)
+                                        .padding(QR_PLATE_PADDING_DP.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Image(
+                                        bitmap = bmp.asImageBitmap(),
+                                        contentDescription = "Pairing QR code",
+                                        modifier = Modifier.size(QR_IMAGE_SIZE_DP.dp)
+                                    )
+                                }
+                            }
+                            else -> {
+                                Icon(
+                                    imageVector = Icons.Filled.QrCode,
+                                    contentDescription = null,
+                                    tint = IdeDim,
+                                    modifier = Modifier.size(96.dp)
                                 )
                             }
-                        }
-                        bmp != null && !expired -> {
-                            // QR needs a light, high-contrast backing to scan
-                            // reliably — sit the code on a white rounded plate.
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(androidx.compose.ui.graphics.Color.White)
-                                    .padding(12.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Image(
-                                    bitmap = bmp.asImageBitmap(),
-                                    contentDescription = "Pairing QR code",
-                                    modifier = Modifier.size(240.dp)
-                                )
-                            }
-                        }
-                        else -> {
-                            Icon(
-                                imageVector = Icons.Filled.QrCode,
-                                contentDescription = null,
-                                tint = IdeDim,
-                                modifier = Modifier.size(96.dp)
-                            )
                         }
                     }
                 }
@@ -436,11 +471,49 @@ fun PairScreen(
                 Text(text = "Scan a device's QR")
             }
 
+            // ── Paired device display ─────────────────────────────────────
+            // Show the persisted paired peer (fingerprint + sync address) so the
+            // user can confirm which device is paired after navigating away and
+            // returning. Reads directly from Settings each recomposition — the
+            // values are written by runPairAndSync and are stable once set.
+            val pairedFingerprint = settings.pairedPeerFingerprint
+            val pairedAddr = settings.pairedPeerSyncAddr
+            if (pairedFingerprint.isNotBlank()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    border = BorderStroke(1.dp, IdeBorder),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Paired device",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = pairedFingerprint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        if (pairedAddr.isNotBlank()) {
+                            Text(
+                                text = pairedAddr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = IdeDim,
+                            )
+                        }
+                    }
+                }
+            }
+
             scannedInfo?.let { info ->
                 Text(
                     text = "Scanned: $info",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = IdeText
                 )
             }
 
@@ -456,7 +529,7 @@ fun PairScreen(
 
             if (syncing) {
                 CircularProgressIndicator(
-                    color = MaterialTheme.colorScheme.primary
+                    color = IdeAccent
                 )
             }
 
@@ -464,7 +537,7 @@ fun PairScreen(
                 Text(
                     text = msg,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary
+                    color = IdeAccent
                 )
             }
 
@@ -474,7 +547,7 @@ fun PairScreen(
                         Text(
                             text = stringResource(R.string.pair_token_expired),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.error
+                            color = IdeDanger
                         )
                     }
                     else -> {
@@ -485,16 +558,12 @@ fun PairScreen(
                                 remainingSeconds
                             ),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = if (urgent) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
+                            color = if (urgent) IdeDanger else IdeDim
                         )
                         Text(
                             text = stringResource(R.string.pair_token_note),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = IdeDim
                         )
                     }
                 }

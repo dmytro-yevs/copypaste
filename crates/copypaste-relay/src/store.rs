@@ -52,10 +52,21 @@ pub fn spawn_ttl_evictor(state: AppState, ttl_secs: u64, tick_secs: u64) -> Join
         ticker.tick().await;
         loop {
             ticker.tick().await;
-            let now_unix = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            let now_unix = match SystemTime::now().duration_since(UNIX_EPOCH) {
+                Ok(d) => d.as_secs(),
+                Err(e) => {
+                    // The system clock is set before the UNIX epoch — this is
+                    // an operator/OS misconfiguration. Warn visibly so the
+                    // fault is not silently swallowed. Fall back to 0 so
+                    // eviction stalls (no items expire) rather than panicking;
+                    // the warn makes the stall observable.
+                    tracing::warn!(
+                        error = %e,
+                        "relay TTL evictor: system clock before UNIX epoch — eviction stalled"
+                    );
+                    0
+                }
+            };
             let (evicted, reclaimed) = {
                 let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
                 let evicted = store.prune_expired(now_unix, ttl_secs);

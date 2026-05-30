@@ -22,6 +22,16 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+/// Build-version string stamped by `build.rs` (`<crate-version>+<git-sha>`, or
+/// just `<crate-version>` when git is unavailable at build time). Surfaced in
+/// the `status`/`stats` IPC replies so a client can detect a STALE daemon left
+/// running after an upgrade (a different value answering the socket means the
+/// on-disk binary changed but the old process is still serving old code).
+pub const BUILD_VERSION: &str = match option_env!("COPYPASTE_BUILD_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 /// Maximum size of a single IPC request line. Clients exceeding this receive
 /// an error response and have their connection closed. Prevents OOM from a
 /// malicious or buggy client sending an unbounded stream without newlines.
@@ -47,12 +57,54 @@ const ERR_IPC_NOT_READY: &str = "IPC_NOT_READY";
 
 /// Persistent application configuration stored at
 /// `dirs::config_dir()/copypaste/config.json`.
+///
+/// # X5 Canonical cloud-config field set
+///
+/// These are the **authoritative** field names used by every platform. The macOS
+/// daemon owns this struct; Android's `Settings.kt` mirrors the same names via
+/// `SharedPreferences` keys. Any naming deviation on the Android side should be
+/// aligned to these names, not the reverse.
+///
+/// | Field               | `get_config` IPC shape                  | Notes                                          |
+/// |---------------------|-----------------------------------------|------------------------------------------------|
+/// | `supabase_url`      | verbatim `String \| null`               | HTTPS required; trailing `/` stripped on write |
+/// | `supabase_anon_key` | verbatim `String \| null`               | Publishable JWT; safe to surface in UI         |
+/// | `supabase_email`    | **omitted**; `supabase_email_set: bool`    | GoTrue account email; redacted on read         |
+/// | `supabase_password` | **omitted**; `supabase_password_set: bool` | GoTrue account password; redacted on read      |
+///
+/// The sync passphrase is **not** stored here. It is set via the
+/// `set_sync_passphrase` IPC method and held in the macOS Keychain (or the
+/// file-store fallback on unsigned builds). Android stores it under
+/// `cloud_sync_passphrase` in `SharedPreferences` — that name deviates; the
+/// Android side should be updated to call the FFI layer's `set_sync_passphrase`
+/// instead of storing it locally, to match macOS semantics.
+///
+/// `get_config` never returns `supabase_email` or `supabase_password` in plain
+/// text: it replaces them with `supabase_email_set: bool` and
+/// `supabase_password_set: bool`. `set_config` accepts plain-text values and
+/// persists them; `null` / absent means "preserve existing" — the merge policy
+/// in [`merge_config`] prevents a UI round-trip from wiping stored credentials.
+///
+/// The limit fields (`max_text_size_bytes`, `max_image_size_bytes`,
+/// `max_file_size_bytes`, `storage_quota_bytes`, `sensitive_ttl_secs`,
+/// `image_quality`, `sync_on_wifi_only`) are mirrored into the core
+/// `config.toml` on `set_config` and read back from it on `get_config`,
+/// so they survive daemon restarts and hot-reload into the running monitor.
+///
+/// Fix-5: `p2p_enabled` is `Option<bool>` so a `set_config` that omits it
+/// (`None`) preserves the stored value instead of silently disabling P2P.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct AppConfig {
-    #[serde(default)]
-    pub p2p_enabled: bool,
+    /// Whether P2P sync is enabled. `None` = not specified by the caller
+    /// (preserve the stored value). `Some(true/false)` = explicit toggle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p2p_enabled: Option<bool>,
+    /// Supabase project URL (e.g. `https://xxxx.supabase.co`). See X5 table
+    /// above. Env override: `SUPABASE_URL`.
     #[serde(default)]
     pub supabase_url: Option<String>,
+    /// Supabase publishable anon/public JWT. Safe to surface in UI. Env
+    /// override: `SUPABASE_ANON_KEY`.
     #[serde(default)]
     pub supabase_anon_key: Option<String>,
     /// GoTrue account email for the `authenticated` scope sign-in. Persisted
@@ -60,13 +112,42 @@ pub struct AppConfig {
     /// daemon that authenticates and passes the `authenticated`-only RLS
     /// policies — anon-key-only requests are rejected by RLS and sync silently
     /// fails. Stored in the same `0600` `config.json` as `supabase_anon_key`.
+    /// Redacted to `supabase_email_set: bool` by `get_config`. Env override:
+    /// `SUPABASE_EMAIL`.
     #[serde(default)]
     pub supabase_email: Option<String>,
     /// GoTrue account password. See [`Self::supabase_email`]. Never logged; the
     /// `Debug` derive is acceptable because the daemon does not debug-print the
     /// whole config (only individual non-secret fields are surfaced over IPC).
+    /// Redacted to `supabase_password_set: bool` by `get_config`. Env override:
+    /// `SUPABASE_PASSWORD`.
     #[serde(default)]
     pub supabase_password: Option<String>,
+
+    // ── Limit fields — persisted to config.toml via set_config ──────────────
+    // `None` means "use whatever is already in config.toml" (presence-optional
+    // so a UI that only touches p2p_enabled never accidentally resets quotas).
+    /// Maximum size of a single captured text item (bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_text_size_bytes: Option<u64>,
+    /// Maximum size of a captured image (bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_size_bytes: Option<u64>,
+    /// Maximum size of a captured file reference (bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_file_size_bytes: Option<u64>,
+    /// Maximum total byte size of unpinned clipboard items in the local DB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_quota_bytes: Option<u64>,
+    /// Auto-wipe TTL for sensitive items (seconds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensitive_ttl_secs: Option<u64>,
+    /// Image quality (1–100; 100 = lossless).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_quality: Option<u8>,
+    /// If true, skip cloud/P2P sync when not on Wi-Fi.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_on_wifi_only: Option<bool>,
 }
 
 /// Strip account credentials from a serialised [`AppConfig`] before it leaves
@@ -98,41 +179,261 @@ fn redact_config_secrets(value: &mut serde_json::Value) {
     );
 }
 
+/// Resolve the base config directory that BOTH `config.json` and `peers.json`
+/// live under.
+///
+/// Fix (unified config-dir resolver): previously `config.json` used
+/// `dirs::config_dir()/copypaste` (lowercase subdir) while the DB and socket
+/// lived under `paths::app_support_dir()` (…/CopyPaste, capitalised). This
+/// caused config.json to land in a different directory than the DB on macOS and
+/// made `COPYPASTE_CONFIG_DIR` only partially effective.
+///
+/// Now we delegate to `crate::paths::config_dir()` which:
+///   1. Honours `COPYPASTE_CONFIG_DIR` (same variable, same semantics).
+///   2. Uses `APP_NAME = "CopyPaste"` on macOS/Windows, lowercase on Linux —
+///      matching `app_support_dir()` so config and DB always co-locate.
+///   3. Falls back to `$TMPDIR/CopyPaste/config` when the platform cannot
+///      resolve a home directory, consistent with every other path helper.
+///
+/// The returned path is the directory itself (no trailing filename). Returns
+/// `Some` unconditionally because `paths::config_dir()` is infallible.
+fn config_base_dir() -> Option<std::path::PathBuf> {
+    Some(crate::paths::config_dir())
+}
+
 fn config_path() -> Option<std::path::PathBuf> {
-    dirs::config_dir().map(|d| d.join("copypaste").join("config.json"))
+    config_base_dir().map(|d| d.join("config.json"))
 }
 
+/// Legacy config location used before the unified-resolver fix.
+///
+/// The old code used `dirs::config_dir()/copypaste/config.json` (lowercase
+/// subdir). On macOS `dirs::config_dir()` returns `~/Library/Application
+/// Support`, so this resolves to `…/copypaste/config.json` instead of the
+/// correct `…/CopyPaste/config.json`. Kept here only for the one-time
+/// migration in `read_config`.
+fn legacy_config_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|base| base.join("copypaste").join("config.json"))
+}
+
+/// Public accessor for `p2p_enabled` so daemon.rs (and other callers that
+/// cannot import `AppConfig` directly) can honour the persisted flag without
+/// re-reading the full config.
+///
+/// # FIXWAVE: daemon.rs must call `ipc::read_config().p2p_enabled` (or this
+/// accessor) when deciding whether to start the P2P subsystem. Currently
+/// `daemon.rs` reads the env-var `COPYPASTE_P2P` only and never consults the
+/// persisted `AppConfig::p2p_enabled` value written by `set_config`, so toggling
+/// P2P from the settings UI has no effect until the env-var is set. Wiring
+/// requires editing `daemon.rs` (out of scope for this agent) — the call site
+/// is the block immediately before `start_p2p` in `daemon::run`.
+pub fn p2p_enabled_from_config() -> bool {
+    read_config().p2p_enabled.unwrap_or(false)
+}
+
+/// Load the IPC `AppConfig` (config.json) and overlay the limit fields from the
+/// core `AppConfig` (config.toml) so `get_config` returns a merged view.
+///
+/// Fields that exist only in config.json (Supabase credentials, p2p_enabled)
+/// come from there. Limit fields (max_*_size_bytes, storage_quota_bytes, etc.)
+/// are always read from config.toml so daemon.rs and the UI always agree.
 pub(crate) fn read_config() -> AppConfig {
+    // Load core config (config.toml) — this is the authoritative source for
+    // all limit fields.
+    let core = copypaste_core::AppConfig::load(&crate::paths::config_path()).unwrap_or_default();
+
     let Some(path) = config_path() else {
-        return AppConfig::default();
+        // No config.json yet — return defaults with limits from core.
+        return AppConfig {
+            max_text_size_bytes: Some(core.max_text_size_bytes),
+            max_image_size_bytes: Some(core.max_image_size_bytes),
+            max_file_size_bytes: Some(core.max_file_size_bytes),
+            storage_quota_bytes: Some(core.storage_quota_bytes),
+            sensitive_ttl_secs: Some(core.sensitive_ttl_secs),
+            image_quality: Some(core.image_quality),
+            sync_on_wifi_only: Some(core.sync_on_wifi_only),
+            ..AppConfig::default()
+        };
     };
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(_) => return AppConfig::default(),
+    // Try the canonical (new) path first; fall back to the legacy lowercase
+    // location for a one-time migration.
+    let raw_opt = std::fs::read_to_string(&path).ok().or_else(|| {
+        legacy_config_path().and_then(|old| {
+            if old != path {
+                if let Ok(raw) = std::fs::read_to_string(&old) {
+                    tracing::info!(
+                        "config: migrating from legacy path {} to {}",
+                        old.display(),
+                        path.display()
+                    );
+                    return Some(raw);
+                }
+            }
+            None
+        })
+    });
+    let mut cfg: AppConfig = match raw_opt {
+        None => AppConfig::default(),
+        Some(raw) => match serde_json::from_str(&raw) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    "config parse failed at {}: {e}, using defaults",
+                    path.display()
+                );
+                AppConfig::default()
+            }
+        },
     };
-    match serde_json::from_str(&raw) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "config parse failed at {}: {e}, using defaults",
-                path.display()
-            );
-            AppConfig::default()
-        }
+    // Always overlay limits from core config.toml so they survive restarts
+    // and so `get_config` returns the values the monitor is actually using.
+    cfg.max_text_size_bytes = Some(core.max_text_size_bytes);
+    cfg.max_image_size_bytes = Some(core.max_image_size_bytes);
+    cfg.max_file_size_bytes = Some(core.max_file_size_bytes);
+    cfg.storage_quota_bytes = Some(core.storage_quota_bytes);
+    cfg.sensitive_ttl_secs = Some(core.sensitive_ttl_secs);
+    cfg.image_quality = Some(core.image_quality);
+    cfg.sync_on_wifi_only = Some(core.sync_on_wifi_only);
+    cfg
+}
+
+/// Persist the limit fields from an IPC `AppConfig` into the core `config.toml`.
+///
+/// Only fields that the caller supplied (Some) are written; None means "preserve
+/// the existing value". Returns Ok(new_core_config) so callers can hot-reload.
+pub(crate) fn update_core_config(
+    incoming: &AppConfig,
+) -> anyhow::Result<copypaste_core::AppConfig> {
+    let toml_path = crate::paths::config_path();
+    let mut core = copypaste_core::AppConfig::load(&toml_path).unwrap_or_default();
+    if let Some(v) = incoming.max_text_size_bytes {
+        core.max_text_size_bytes = v;
+    }
+    if let Some(v) = incoming.max_image_size_bytes {
+        core.max_image_size_bytes = v;
+    }
+    if let Some(v) = incoming.max_file_size_bytes {
+        core.max_file_size_bytes = v;
+    }
+    if let Some(v) = incoming.storage_quota_bytes {
+        core.storage_quota_bytes = v;
+    }
+    if let Some(v) = incoming.sensitive_ttl_secs {
+        core.sensitive_ttl_secs = v;
+    }
+    if let Some(v) = incoming.image_quality {
+        core.image_quality = v;
+    }
+    if let Some(v) = incoming.sync_on_wifi_only {
+        core.sync_on_wifi_only = v;
+    }
+    // core.save() writes via a sibling temp file + atomic rename and does NOT
+    // create the parent dir; ensure it exists (mirrors write_config for the
+    // sibling config.json) so first-run / test config dirs don't ENOENT.
+    if let Some(parent) = toml_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| anyhow::anyhow!("failed to create config dir: {e}"))?;
+    }
+    core.save(&toml_path)
+        .map_err(|e| anyhow::anyhow!("failed to save config.toml: {e}"))?;
+    Ok(core)
+}
+
+/// Merge an `incoming` config (as received over `set_config`) onto the
+/// `existing` persisted config, preserving secrets the caller omitted.
+///
+/// Rationale: `get_config` redacts `supabase_password` / `supabase_email` to
+/// presence booleans and strips the real values, so a client's
+/// read-modify-write cycle sends them back as `None`. Treating those `None`s
+/// as "clear the field" would wipe the stored GoTrue credentials and silently
+/// break the `authenticated`-scope RLS sign-in. Policy:
+///
+/// - Secret fields (`supabase_password`, `supabase_email`): keep the existing
+///   value when the incoming value is `None`; otherwise take the incoming one.
+/// - `supabase_url` / `supabase_anon_key`: same `None`-preserves-existing rule.
+///   The anon key is publishable (the UI prefills it) so it round-trips, but a
+///   client that omits it must not clear it either.
+/// - `p2p_enabled` (Fix-5): `Option<bool>`; `None` incoming → keep existing,
+///   `Some(v)` → take `v`. A partial `set_config` that omits the toggle must not
+///   silently disable P2P.
+fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfig {
+    AppConfig {
+        p2p_enabled: incoming.p2p_enabled.or(existing.p2p_enabled),
+        supabase_url: incoming.supabase_url.or(existing.supabase_url),
+        supabase_anon_key: incoming.supabase_anon_key.or(existing.supabase_anon_key),
+        supabase_email: incoming.supabase_email.or(existing.supabase_email),
+        supabase_password: incoming.supabase_password.or(existing.supabase_password),
+        ..incoming
     }
 }
 
+/// Atomically write `cfg` to the `config.json` path with mode `0600`.
+///
+/// # Security (Fix-2)
+///
+/// The previous implementation called `std::fs::write(path, json)` (creates the
+/// file at the umask-derived mode, typically `0644`) and then
+/// `set_permissions(path, 0o600)`. Between the write and the chmod the file
+/// was world-readable for a brief window — long enough for a concurrent process
+/// running as the same user to read `supabase_password` or `supabase_anon_key`.
+///
+/// The fix uses the same atomic-0600 pattern as
+/// `keychain::file_store::write_secret_atomic_to`:
+/// 1. Ensure the parent directory exists (tightened to `0700`).
+/// 2. Create a uniquely-named temp file in the SAME directory.
+/// 3. Set mode `0600` on the temp file before writing any bytes.
+/// 4. Write + flush + sync the JSON payload.
+/// 5. `rename` the temp file over the destination.
 fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
+    use std::io::Write as _;
+
     let path = config_path().ok_or_else(|| anyhow::anyhow!("cannot determine config dir"))?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-        // Best-effort: tighten parent dir perms to user-only.
-        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
-    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("config path has no parent directory"))?;
+    std::fs::create_dir_all(parent)?;
+    // Best-effort: tighten parent dir to user-only.
+    let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+
     let json = serde_json::to_string_pretty(cfg)?;
-    std::fs::write(&path, json)?;
-    // chmod 0600 — config may carry supabase keys; never world-readable.
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+
+    let tmp = parent.join(format!(
+        ".config.json.tmp.{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        f.write_all(json.as_bytes())?;
+        f.flush()?;
+        f.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
     Ok(())
 }
 
@@ -193,9 +494,12 @@ fn format_fingerprint(bytes: &[u8]) -> String {
 /// default.
 pub(crate) fn peers_file_path() -> PathBuf {
     static FALLBACK_WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    let base = std::env::var_os("COPYPASTE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(dirs::config_dir)
+    // Share the resolver with `config_path` so config.json and peers.json
+    // always co-locate under the same directory. `config_base_dir` now
+    // delegates to `paths::config_dir()` which is infallible, so the
+    // None case (fallback to `./copypaste`) is only reached if somehow
+    // config_base_dir returns None (currently unreachable).
+    config_base_dir()
         .unwrap_or_else(|| {
             FALLBACK_WARNED.get_or_init(|| {
                 tracing::warn!(
@@ -204,9 +508,9 @@ pub(crate) fn peers_file_path() -> PathBuf {
                      to silence this warning."
                 );
             });
-            PathBuf::from(".")
-        });
-    base.join("copypaste").join("peers.json")
+            PathBuf::from(".").join("copypaste")
+        })
+        .join("peers.json")
 }
 
 /// Return `true` when a colon-hex fingerprint is a placeholder/test value —
@@ -526,13 +830,36 @@ pub struct IpcServer {
     /// `IPC_NOT_READY`; this field tells the client *why* and that recovery is
     /// possible (re-grant Keychain access, then relaunch). See the
     /// [`DEGRADED_REASON_KEYCHAIN_LOCKED`] constant for the canonical value.
-    degraded_reason: Option<String>,
+    ///
+    /// Interior-mutable (`Arc<Mutex<…>>`) because the `reset_database` recovery
+    /// handler clears it in-place — after wiping and recreating a fresh empty DB
+    /// it brings the daemon OUT of degraded mode (sets `ready = true`, clears
+    /// this reason) without a process restart. A `std::sync::Mutex` (not tokio's)
+    /// is used because every critical section is a trivial read/write with no
+    /// `.await`.
+    degraded_reason: Arc<std::sync::Mutex<Option<String>>>,
+    /// Shared live core config (`config.toml`). The `set_config` IPC handler
+    /// writes new limit/feature values here after persisting to disk so the
+    /// clipboard monitor, paste path, and prune code pick them up on the next
+    /// tick without a daemon restart.
+    /// `None` when not wired in (degraded mode / tests that don't need hot-reload).
+    pub core_config: Option<Arc<std::sync::RwLock<copypaste_core::AppConfig>>>,
 }
 
 /// Canonical `status.degraded_reason` value for the keychain-locked /
 /// DB-unavailable degraded startup (the post-reinstall regression). The UI
 /// keys its recovery banner off this exact string.
 pub const DEGRADED_REASON_KEYCHAIN_LOCKED: &str = "keychain_locked";
+
+/// Canonical `status.degraded_reason` value for the case where the SQLCipher
+/// key WAS obtained but does NOT match the existing database (SQLITE_NOTADB /
+/// `file is not a database`). Distinct from `keychain_locked` (key unreachable)
+/// because the recovery story differs: the key is present but wrong — e.g. a
+/// re-keyed device, a restored/foreign Keychain entry, or a fresh file-store
+/// key minted over a DB encrypted by a pre-file-store (v0.5.1) Keychain key.
+/// The UI shows a distinct banner so users are not told to "re-grant the
+/// Keychain prompt" when that will not help.
+pub const DEGRADED_REASON_DB_KEY_MISMATCH: &str = "db_key_mismatch";
 
 impl IpcServer {
     pub fn new(
@@ -562,7 +889,8 @@ impl IpcServer {
             #[cfg(feature = "cloud-sync")]
             cloud_signed_in: Arc::new(AtomicBool::new(false)),
             new_item_tx: None,
-            degraded_reason: None,
+            degraded_reason: Arc::new(std::sync::Mutex::new(None)),
+            core_config: None,
         }
     }
 
@@ -570,8 +898,13 @@ impl IpcServer {
     /// db-unavailable). The reason is echoed in the `status` response so the UI
     /// can show a recovery banner. Pair this with `new_with_ready(.., false)`
     /// so DB-touching methods return `IPC_NOT_READY`.
-    pub fn with_degraded_reason(mut self, reason: impl Into<String>) -> Self {
-        self.degraded_reason = Some(reason.into());
+    pub fn with_degraded_reason(self, reason: impl Into<String>) -> Self {
+        // Poisoned mutex (a prior panic while holding the lock) is recovered:
+        // the slot holds only a non-secret reason string.
+        *self
+            .degraded_reason
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(reason.into());
         self
     }
 
@@ -712,8 +1045,22 @@ impl IpcServer {
             #[cfg(feature = "cloud-sync")]
             cloud_signed_in: Arc::new(AtomicBool::new(false)),
             new_item_tx: None,
-            degraded_reason: None,
+            degraded_reason: Arc::new(std::sync::Mutex::new(None)),
+            core_config: None,
         }
+    }
+
+    /// Attach the shared live core config (`config.toml`) for hot-reload.
+    ///
+    /// The `set_config` IPC handler writes updated limit/feature values into this
+    /// Arc after persisting to disk, so the clipboard monitor, paste path, and
+    /// prune code pick them up on the next tick without a daemon restart.
+    pub fn with_core_config(
+        mut self,
+        core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+    ) -> Self {
+        self.core_config = Some(core_config);
+        self
     }
 
     /// Insert a PAKE session under `session_id`, first evicting stale and
@@ -1082,6 +1429,10 @@ impl IpcServer {
                 | "pin_item"
                 | "history_page"
                 | "import"
+                // export decrypts every row — needs a ready DB.
+                | "export"
+                // get_item_image decrypts image chunks — needs a ready DB.
+                | "get_item_image"
                 | "revoke_peer"
                 | "revoke_all_peers"
         )
@@ -1534,9 +1885,16 @@ impl IpcServer {
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     let total = copypaste_core::count_items(&db).unwrap_or(0);
-                    // Count sensitive items via get_page scan (limited to first 1000)
-                    let sample = copypaste_core::get_page(&db, 1000, 0).unwrap_or_default();
-                    let sensitive_count = sample.iter().filter(|i| i.is_sensitive).count() as i64;
+                    // Fix HIGH #5: accurate sensitive count via a dedicated
+                    // COUNT query instead of scanning the first 1000 rows.
+                    let sensitive_count: i64 = db
+                        .conn()
+                        .query_row(
+                            "SELECT COUNT(*) FROM clipboard_items WHERE is_sensitive = 1",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(0);
                     (total, sensitive_count)
                 })
                 .await;
@@ -1546,7 +1904,8 @@ impl IpcServer {
                         serde_json::json!({
                             "total_items": total,
                             "sensitive_items": sensitive_count,
-                            "version": "1"
+                            "version": "1",
+                            "build_version": BUILD_VERSION,
                         }),
                     ),
                     Err(e) => Response::err_with_code(
@@ -1946,41 +2305,57 @@ impl IpcServer {
                                 format!("[image — id:{}]", &item.id[..8])
                             };
 
-                            // Compute sensitive_spans for non-sensitive text items.
-                            // We run the detector against the *preview* (the same
-                            // UTF-8 string the UI will display) so the char offsets
-                            // are correct without the UI having to re-detect.
-                            // For sensitive items the spans are empty — the whole
-                            // preview is already replaced with a placeholder.
-                            let sensitive_spans: Vec<serde_json::Value> = if !item.is_sensitive
-                                && item.content_type == "text"
-                            {
-                                // `detector.detect` returns byte ranges over the
-                                // NFKC-NORMALISED form of its input, NOT over the
-                                // string we pass. Slicing the original `preview`
-                                // with those byte offsets panicked whenever NFKC
-                                // changed widths (ligatures, full-width forms),
-                                // because the offsets could land mid-char or past
-                                // the end. Run the detector against the SAME string
-                                // we slice (the NFKC form), then map byte offsets
-                                // to char offsets with `byte_to_char_offset`, which
-                                // clamps to a valid char boundary and never panics.
-                                let normalised =
-                                    copypaste_core::sensitive::nfkc_normalize(&preview);
-                                detector
-                                    .detect(&normalised)
-                                    .into_iter()
-                                    .map(|m| {
-                                        let start =
-                                            byte_to_char_offset(&normalised, m.matched_range.start);
-                                        let end =
-                                            byte_to_char_offset(&normalised, m.matched_range.end);
-                                        serde_json::json!([start, end])
-                                    })
-                                    .collect()
-                            } else {
-                                vec![]
-                            };
+                            // Fix-1 (NFKC span-mask leak): the sensitive detector
+                            // internally normalises its input to NFKC before
+                            // matching, and reports byte ranges over that
+                            // normalised form — NOT over the raw string passed
+                            // in.  If NFKC changes codepoint widths (e.g. three-
+                            // byte full-width letters → one-byte ASCII, or
+                            // combining marks → precomposed forms), the char
+                            // offsets we compute here would not index the same
+                            // positions in the original `preview`.  The UI would
+                            // then mask the WRONG characters, potentially
+                            // EXPOSING part of a secret.
+                            //
+                            // Fix: normalise the preview to NFKC BEFORE running
+                            // the detector and use the normalised form as the
+                            // `preview` returned over IPC.  This guarantees that
+                            // the offsets we emit (char indices into `normalised`)
+                            // and the string the UI receives share one basis.
+                            // NFKC is human-faithful — it canonicalises Unicode
+                            // without changing the visible content for typical
+                            // clipboard text.
+                            //
+                            // For sensitive and non-text items `normalised` is
+                            // not computed (the branches below return early with
+                            // empty spans and the placeholder preview is
+                            // already ASCII so no normalisation is needed).
+                            let (preview, sensitive_spans): (String, Vec<serde_json::Value>) =
+                                if !item.is_sensitive && item.content_type == "text" {
+                                    let normalised =
+                                        copypaste_core::sensitive::nfkc_normalize(&preview);
+                                    let spans = detector
+                                        .detect(&normalised)
+                                        .into_iter()
+                                        .map(|m| {
+                                            let start = byte_to_char_offset(
+                                                &normalised,
+                                                m.matched_range.start,
+                                            );
+                                            let end = byte_to_char_offset(
+                                                &normalised,
+                                                m.matched_range.end,
+                                            );
+                                            serde_json::json!([start, end])
+                                        })
+                                        .collect();
+                                    // Return the normalised string so the UI
+                                    // receives exactly the string the offsets
+                                    // index into.
+                                    (normalised, spans)
+                                } else {
+                                    (preview, vec![])
+                                };
 
                             serde_json::json!({
                                 "id": item.id,
@@ -2019,23 +2394,113 @@ impl IpcServer {
                 // replaces them with boolean presence flags. The Supabase
                 // anon/public key is, by design, a publishable key and is kept
                 // so the UI can prefill the settings field.
-                let cfg = read_config();
-                match serde_json::to_value(&cfg) {
-                    Ok(mut v) => {
-                        redact_config_secrets(&mut v);
-                        Response::ok(req.id, v)
-                    }
-                    Err(e) => Response::err(req.id, e.to_string()),
+                //
+                // Fix HIGH #3: read_config() does blocking fs I/O (reads
+                // config.json + config.toml); run it on the blocking thread
+                // pool so the async worker is never stalled by disk I/O.
+                let join = tokio::task::spawn_blocking(read_config).await;
+                match join {
+                    Ok(cfg) => match serde_json::to_value(&cfg) {
+                        Ok(mut v) => {
+                            redact_config_secrets(&mut v);
+                            Response::ok(req.id, v)
+                        }
+                        Err(e) => Response::err(req.id, e.to_string()),
+                    },
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("get_config blocking task failed: {e}"),
+                    ),
                 }
             }
             "set_config" => {
-                let cfg: AppConfig = match serde_json::from_value(req.params.clone()) {
+                let incoming: AppConfig = match serde_json::from_value(req.params.clone()) {
                     Ok(c) => c,
                     Err(e) => return Response::err(req.id, format!("invalid config: {e}")),
                 };
-                match write_config(&cfg) {
-                    Ok(()) => Response::ok(req.id, serde_json::json!({"saved": true})),
-                    Err(e) => Response::err(req.id, e.to_string()),
+                // MERGE, don't overwrite. `get_config` redacts the secret
+                // fields (`supabase_password`, `supabase_email`) to `*_set`
+                // booleans and drops the real values, so a UI/CLI
+                // read-modify-write deserialises them as `None`. A blind
+                // whole-struct write would then persist null and silently WIPE
+                // the stored Supabase credentials, breaking cloud sync. Merge
+                // the incoming config onto the persisted one, preserving any
+                // secret the caller did not supply.
+                //
+                // Fix HIGH #3: read_config()/write_config()/update_core_config()
+                // all do blocking fs I/O; run them on the blocking thread pool.
+                let core_config_arc = self.core_config.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let mut merged = merge_config(read_config(), incoming);
+                    // Item 1 (keychain supabase_password): if the caller supplied a
+                    // new password, migrate it to the macOS Keychain and remove it
+                    // from the config struct so it is NOT written to config.json in
+                    // plain text. On failure (non-macOS, unsigned build without
+                    // Keychain access) we keep the existing config.json behaviour as
+                    // a fallback — the password stays in merged and is written to
+                    // the 0600 config.json, same as before the fix.
+                    if let Some(ref pw) = merged.supabase_password.clone() {
+                        match crate::keychain::store_supabase_password_to_keychain(pw) {
+                            Ok(()) => {
+                                // Only drop the plaintext from config.json once the
+                                // Keychain ACTUALLY returns it. Under the ephemeral-key
+                                // bypass (CI / unsigned dev builds) `store_*` is a no-op
+                                // that still returns Ok(()); a blind strip would then
+                                // silently lose the secret from both stores. The
+                                // read-back confirms real persistence before we delete
+                                // the on-disk copy.
+                                if crate::keychain::read_supabase_password_from_keychain()
+                                    .as_deref()
+                                    == Some(pw.as_str())
+                                {
+                                    tracing::info!(
+                                        "supabase_password migrated to Keychain; \
+                                         removing from config.json"
+                                    );
+                                    merged.supabase_password = None;
+                                } else {
+                                    tracing::debug!(
+                                        "supabase_password Keychain store is a no-op \
+                                         (ephemeral/bypass mode); keeping it in config.json"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    "supabase_password Keychain store failed; \
+                                     falling back to config.json persistence"
+                                );
+                                // Leave merged.supabase_password as-is so
+                                // write_config below persists it to the 0600
+                                // config.json (existing behaviour pre-fix).
+                            }
+                        }
+                    }
+                    // Persist IPC fields (Supabase creds, p2p_enabled) to config.json.
+                    write_config(&merged)?;
+                    // Persist limit fields to config.toml AND return the new
+                    // core config for hot-reload in the caller.
+                    let new_core = update_core_config(&merged)?;
+                    Ok::<_, anyhow::Error>((merged, new_core))
+                })
+                .await;
+                match join {
+                    Ok(Ok((_merged, new_core))) => {
+                        if let Some(ref arc) = core_config_arc {
+                            if let Ok(mut guard) = arc.write() {
+                                *guard = new_core;
+                            }
+                        }
+                        Response::ok(req.id, serde_json::json!({"saved": true}))
+                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("set_config blocking task failed: {e}"),
+                    ),
                 }
             }
             // Cloud auth — stubs until Supabase integration lands.
@@ -2131,7 +2596,18 @@ impl IpcServer {
             #[cfg(feature = "cloud-sync")]
             "get_sync_status" => {
                 let passphrase_set = self.sync_key.lock().await.is_some();
-                let app_cfg = read_config();
+                // Fix HIGH #3: read_config() does blocking fs I/O; move it to
+                // the blocking thread pool so the async worker is not stalled.
+                let app_cfg = match tokio::task::spawn_blocking(read_config).await {
+                    Ok(cfg) => cfg,
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("get_sync_status blocking task failed: {e}"),
+                        )
+                    }
+                };
                 let supabase_configured = app_cfg.supabase_url.is_some()
                     && app_cfg.supabase_anon_key.is_some()
                     || std::env::var("SUPABASE_URL").is_ok();
@@ -2153,12 +2629,30 @@ impl IpcServer {
                 let supabase_url_val: Option<String> = std::env::var("SUPABASE_URL")
                     .ok()
                     .or_else(|| app_cfg.supabase_url.clone());
-                // Email: env var first, else the persisted config (written by
-                // `copypaste cloud setup`). We surface only the email — never the
-                // password, anon key, or passphrase.
+                // M3 FIX: mask the email before sending over IPC so arbitrary
+                // same-UID processes cannot harvest the full GoTrue address.
+                // `a***@example.com` preserves the account-indicator the UI
+                // needs (SettingsView shows "Signed in as …") without leaking
+                // the full address. Mirrors `cloud::redact_email` — inlined
+                // here because that helper is private to the cloud module.
                 let email_val: Option<String> = std::env::var("SUPABASE_EMAIL")
                     .ok()
-                    .or_else(|| app_cfg.supabase_email.clone());
+                    .or_else(|| app_cfg.supabase_email.clone())
+                    .map(|e| {
+                        // Show first char + *** + @domain; non-address input →
+                        // "<redacted>" (same contract as cloud::redact_email).
+                        match e.split_once('@') {
+                            Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {
+                                let first = local.chars().next().unwrap_or('*');
+                                if local.chars().count() <= 1 {
+                                    format!("*@{domain}")
+                                } else {
+                                    format!("{first}***@{domain}")
+                                }
+                            }
+                            _ => "<redacted>".to_string(),
+                        }
+                    });
                 Response::ok(
                     req.id,
                     serde_json::json!({
@@ -2217,7 +2711,16 @@ impl IpcServer {
                 // socket as "everything is fine". When healthy, `ready` is true
                 // and `degraded_reason` is absent — unchanged shape for clients
                 // that only read `status`/`private_mode`.
-                match self.degraded_reason.as_deref() {
+                // `build_version` + `pid` let a client (or a newer daemon doing
+                // socket takeover) detect and evict a STALE predecessor after an
+                // upgrade. Both are reported even in the degraded branch so the
+                // stale check works without a healthy DB.
+                let reason = self
+                    .degraded_reason
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone();
+                match reason {
                     Some(reason) => Response::ok(
                         req.id,
                         serde_json::json!({
@@ -2226,6 +2729,8 @@ impl IpcServer {
                             "ready": false,
                             "degraded": true,
                             "degraded_reason": reason,
+                            "build_version": BUILD_VERSION,
+                            "pid": std::process::id(),
                         }),
                     ),
                     None => Response::ok(
@@ -2235,7 +2740,165 @@ impl IpcServer {
                             "private_mode": enabled,
                             "ready": self.ready.load(Ordering::Relaxed),
                             "degraded": false,
+                            "build_version": BUILD_VERSION,
+                            "pid": std::process::id(),
                         }),
+                    ),
+                }
+            }
+
+            // ------------------------------------------------------------------
+            // Destructive recovery: wipe + recreate the clipboard database.
+            //
+            // This is the explicit escape hatch for a daemon stuck in DEGRADED
+            // mode because `clipboard.db` cannot be decrypted (key mismatch /
+            // "file is not a database"). UNLIKE every other DB-touching method,
+            // this one is NOT gated behind the `ready` flag — recovering FROM
+            // degraded mode is its entire reason to exist, so it must run while
+            // `ready = false`. It therefore appears BEFORE the readiness gate in
+            // spirit (the gate's `requires_db` allow-list deliberately omits it).
+            // ------------------------------------------------------------------
+            "reset_database" => {
+                // Guard #1: an explicit confirm flag is mandatory so a stray or
+                // replayed call can never erase the user's history by accident.
+                let confirm = req
+                    .params
+                    .get("confirm")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if !confirm {
+                    tracing::warn!(
+                        "reset_database rejected: missing confirm=true — refusing \
+                         to wipe the clipboard database without explicit confirmation"
+                    );
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "reset_database requires confirm=true",
+                    );
+                }
+
+                let db_path = crate::paths::db_path();
+                tracing::warn!(
+                    db_path = %db_path.display(),
+                    "reset_database INVOKED: WIPING and RECREATING the clipboard \
+                     database. All local clipboard history will be PERMANENTLY \
+                     DELETED. This is the user-confirmed recovery escape hatch for \
+                     a daemon stuck in degraded mode (undecryptable DB)."
+                );
+
+                // Resolve the key for the FRESH database. Prefer the real
+                // device key from the Keychain (so the new DB re-opens normally
+                // on the next restart); if that is unreachable (the very reason
+                // we may be degraded), fall back to the key this server already
+                // holds. Either way the fresh empty DB is self-consistent and
+                // immediately usable this session.
+                let fresh_key: zeroize::Zeroizing<[u8; 32]> = {
+                    #[cfg(target_os = "macos")]
+                    {
+                        match crate::keychain::load_or_create() {
+                            Ok(kp) => {
+                                tracing::info!(
+                                    "reset_database: using the device Keychain key for the \
+                                     fresh database"
+                                );
+                                kp.local_enc_key()
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    "reset_database: Keychain key unavailable; recreating the \
+                                     fresh database with the daemon's current in-memory key"
+                                );
+                                zeroize::Zeroizing::new(**self.local_key)
+                            }
+                        }
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        zeroize::Zeroizing::new(**self.local_key)
+                    }
+                };
+
+                // Do the destructive filesystem work + reopen on a blocking
+                // thread (rusqlite is sync). We hold the DB mutex for the whole
+                // operation so no other request can touch the handle mid-swap.
+                let db_arc = self.db.clone();
+                let path_for_task = db_path.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let mut guard = db_arc.blocking_lock();
+
+                    // 1. Close the current connection. Swapping in a throwaway
+                    //    in-memory DB drops the old `Database` (and its open
+                    //    file handles / WAL) so the files can be removed cleanly.
+                    *guard = Database::open_in_memory()
+                        .map_err(|e| format!("failed to open transient in-memory DB: {e}"))?;
+
+                    // 2. Delete clipboard.db and its WAL/SHM siblings. A missing
+                    //    file is fine (NotFound is not an error here).
+                    for suffix in ["", "-wal", "-shm"] {
+                        let mut p = path_for_task.clone().into_os_string();
+                        p.push(suffix);
+                        let p = std::path::PathBuf::from(p);
+                        match std::fs::remove_file(&p) {
+                            Ok(()) => {
+                                tracing::warn!(file = %p.display(), "reset_database: deleted")
+                            }
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(e) => {
+                                return Err(format!("failed to delete {}: {e}", p.display()));
+                            }
+                        }
+                    }
+
+                    // 3. Recreate a fresh empty encrypted DB with the chosen key
+                    //    using the SAME open/migrate path a clean install uses.
+                    let fresh = Database::open(&path_for_task, &fresh_key)
+                        .map_err(|e| format!("failed to create fresh database: {e}"))?;
+
+                    // 4. Ensure the additive audit table the IPC layer relies on
+                    //    exists, matching the normal `serve()` startup path.
+                    if let Err(e) = ensure_revoked_devices_table(fresh.conn()) {
+                        tracing::warn!("reset_database: ensure_revoked_devices_table failed: {e}");
+                    }
+
+                    // 5. Install the fresh DB as the live handle.
+                    *guard = fresh;
+                    Ok::<(), String>(())
+                })
+                .await;
+
+                match join {
+                    Ok(Ok(())) => {
+                        // Bring the daemon OUT of degraded mode IN-PLACE: the new
+                        // empty DB is live, so flip readiness on and clear the
+                        // degraded reason. Subsequent history_page / status calls
+                        // now succeed without a process restart.
+                        self.ready.store(true, Ordering::Relaxed);
+                        *self
+                            .degraded_reason
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner()) = None;
+                        tracing::warn!(
+                            db_path = %db_path.display(),
+                            "reset_database COMPLETE: fresh empty database created, daemon \
+                             recovered in-place (no longer degraded, ready=true)"
+                        );
+                        Response::ok(req.id, serde_json::json!({ "reset": true, "ready": true }))
+                    }
+                    Ok(Err(msg)) => {
+                        tracing::error!(
+                            db_path = %db_path.display(),
+                            error = %msg,
+                            "reset_database FAILED: the clipboard database could not be \
+                             wiped/recreated. The daemon remains in its prior state."
+                        );
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, msg)
+                    }
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("reset_database blocking task failed: {e}"),
                     ),
                 }
             }
@@ -2265,6 +2928,50 @@ impl IpcServer {
                          to advertise for pairing",
                     ),
                 }
+            }
+
+            // ----------------------------------------------------------------
+            // `get_own_device_info` — rich identity for THIS device.
+            //
+            // Returns fingerprint (same as `get_own_fingerprint`) PLUS
+            // human-readable metadata: device name, model, OS, app version,
+            // and LAN IP.  All fields except `app_version` and `fingerprint`
+            // are optional (`skip_serializing_if = "is_none"`) so older UI
+            // versions that don't know about them still get a valid response.
+            //
+            // The fingerprint field is omitted when P2P is disabled — callers
+            // must gracefully handle a `null` fingerprint (same contract as
+            // `get_own_fingerprint`).
+            //
+            // DeviceMeta::collect spawns child processes (scutil, sysctl,
+            // sw_vers) that can block up to 2 s each.  We run them on a
+            // dedicated blocking thread so the async IPC worker is never
+            // stalled.
+            // ----------------------------------------------------------------
+            "get_own_device_info" => {
+                let fingerprint_val = self.cert_fingerprint.clone();
+                let meta = tokio::task::spawn_blocking(|| {
+                    crate::device_meta::DeviceMeta::collect(env!("CARGO_PKG_VERSION"))
+                })
+                .await
+                .unwrap_or_else(|_| crate::device_meta::DeviceMeta {
+                    device_name: None,
+                    device_model: None,
+                    os_version: None,
+                    app_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    local_ip: None,
+                });
+                Response::ok(
+                    req.id,
+                    serde_json::json!({
+                        "fingerprint": fingerprint_val,
+                        "device_name": meta.device_name,
+                        "device_model": meta.device_model,
+                        "os_version": meta.os_version,
+                        "app_version": meta.app_version,
+                        "local_ip": meta.local_ip,
+                    }),
+                )
             }
 
             "list_peers" => match load_peers() {
@@ -2317,7 +3024,15 @@ impl IpcServer {
                         }));
 
                         match save_peers(&peers) {
-                            Ok(_) => Response::ok(req.id, serde_json::json!({ "ok": true })),
+                            Ok(_) => {
+                                // Fix HIGH #4: manual pair_peer didn't register
+                                // the peer in the live mTLS allowlist, so the
+                                // accepted connection required a daemon restart.
+                                // Mirror what pair_peer_with_password "finish"
+                                // does: register into the live allowlist now.
+                                self.register_live_peer(&fingerprint);
+                                Response::ok(req.id, serde_json::json!({ "ok": true }))
+                            }
                             Err(e) => Response::err(req.id, format!("failed to save peers: {e}")),
                         }
                     }
@@ -2431,15 +3146,25 @@ impl IpcServer {
                 .await;
 
                 match join {
-                    Ok(Ok(revoked_at)) => Response::ok(
-                        req.id,
-                        serde_json::json!({
-                            "ok": true,
-                            "removed": removed,
-                            "revoked_at": revoked_at,
-                            "fingerprint": fingerprint,
-                        }),
-                    ),
+                    Ok(Ok(revoked_at)) => {
+                        // Fix CRITICAL #1: remove the peer from the live in-memory
+                        // mTLS allowlist so the revoked peer's existing (or new)
+                        // mTLS session is rejected immediately — without waiting
+                        // for a daemon restart. Normalise to canonical lowercase
+                        // hex (strip colons) to match PairedPeers' key format.
+                        if let Some(ref peers) = self.p2p_peers {
+                            peers.remove(&canonical_fingerprint(&fingerprint));
+                        }
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({
+                                "ok": true,
+                                "removed": removed,
+                                "revoked_at": revoked_at,
+                                "fingerprint": fingerprint,
+                            }),
+                        )
+                    }
                     Ok(Err(e)) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -2521,6 +3246,16 @@ impl IpcServer {
                         ERR_CODE_INTERNAL_ERROR,
                         format!("revocations recorded but failed to clear peers: {e}"),
                     );
+                }
+
+                // Fix CRITICAL #1: evict every revoked peer from the live mTLS
+                // allowlist so their sessions are rejected immediately without
+                // a daemon restart. Normalise each fingerprint to canonical
+                // lowercase hex (strip colons) to match PairedPeers' key format.
+                if let Some(ref peers) = self.p2p_peers {
+                    for (fp, _) in &captured {
+                        peers.remove(&canonical_fingerprint(fp));
+                    }
                 }
 
                 Response::ok(
@@ -3577,6 +4312,217 @@ impl IpcServer {
                 }
             }
 
+            // ------------------------------------------------------------------
+            // export — return all decrypted items so the CLI backup command
+            // can serialise them for `import`.
+            //
+            // Params: {} (no params required)
+            // Success: {"items": [ {
+            //     "id": "<row-uuid>",
+            //     "item_id": "<item-uuid>",
+            //     "content_type": "text"|...,
+            //     "content_bytes_b64": "<base64 plaintext>",
+            //     "created_at_ms": <i64 unix-ms>,
+            //     "wall_time": <i64>,
+            //     "lamport_ts": <i64>,
+            //     "is_sensitive": <bool>
+            // }, ... ]}
+            //
+            // Non-text items (images, etc.) are skipped — their chunked
+            // ciphertext cannot be trivially re-imported by the CLI `import`
+            // path (which only handles `content_bytes_b64`).
+            //
+            // Gated behind `requires_db` (see above) so it returns
+            // IPC_NOT_READY during degraded/pre-ready startup.
+            // ------------------------------------------------------------------
+            "export" => {
+                use base64::Engine as _;
+                // `limit` > 0 → export the most-recent N items (DESC LIMIT in a
+                // subquery, then re-order ASC for deterministic import order).
+                // `limit` == 0 or absent → export ALL (legacy / unlimited).
+                let export_limit = req
+                    .params
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let db_arc = self.db.clone();
+                let local_key_v1: [u8; 32] = **self.local_key;
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let v2_key = derive_v2(&local_key_v1);
+                    // When a limit is requested we select the most-recent N rows
+                    // via a DESC subquery and then re-order ASC so the exported
+                    // JSON can be re-imported in chronological order.  When no
+                    // limit (or limit == 0) we return everything, oldest first.
+                    let sql = if export_limit > 0 {
+                        "SELECT id, item_id, content_type, content, content_nonce, \
+                         is_sensitive, is_synced, lamport_ts, wall_time, key_version \
+                         FROM ( \
+                             SELECT id, item_id, content_type, content, content_nonce, \
+                                    is_sensitive, is_synced, lamport_ts, wall_time, key_version \
+                             FROM clipboard_items \
+                             ORDER BY wall_time DESC \
+                             LIMIT ?1 \
+                         ) ORDER BY wall_time ASC"
+                            .to_string()
+                    } else {
+                        "SELECT id, item_id, content_type, content, content_nonce, \
+                         is_sensitive, is_synced, lamport_ts, wall_time, key_version \
+                         FROM clipboard_items \
+                         ORDER BY wall_time ASC"
+                            .to_string()
+                    };
+                    let mut stmt = db.conn().prepare(&sql)?;
+                    let b64 = base64::engine::general_purpose::STANDARD;
+                    let mut items: Vec<serde_json::Value> = Vec::new();
+                    let map_row = |row: &rusqlite::Row<'_>| {
+                        // key_version can be NULL for genuine v1 rows written
+                        // before the column was added.  We read it as Option<i64>
+                        // and keep None distinct from a stored value of 1 or 2 so
+                        // we can log it clearly rather than silently guessing.
+                        let key_version_opt: Option<i64> = row.get(9)?;
+                        Ok((
+                            row.get::<_, String>(0)?,  // id
+                            row.get::<_, String>(1)?,  // item_id
+                            row.get::<_, String>(2)?,  // content_type
+                            row.get::<_, Option<Vec<u8>>>(3)?,  // content
+                            row.get::<_, Option<Vec<u8>>>(4)?,  // content_nonce
+                            row.get::<_, bool>(5)?,    // is_sensitive
+                            row.get::<_, bool>(6)?,    // is_synced
+                            row.get::<_, i64>(7)?,     // lamport_ts
+                            row.get::<_, i64>(8)?,     // wall_time
+                            key_version_opt,
+                        ))
+                    };
+                    // Cap export_limit to i64::MAX before casting: u64 values
+                    // above i64::MAX would wrap negative after `as i64`, which
+                    // SQLite treats as unlimited — silently exporting everything
+                    // instead of the requested limit.
+                    let lim = export_limit.min(i64::MAX as u64) as i64;
+                    let rows = if export_limit > 0 {
+                        stmt.query_map([lim], map_row)?
+                    } else {
+                        stmt.query_map([], map_row)?
+                    };
+                    for row_result in rows {
+                        let (id, item_id, content_type, content_opt, nonce_opt,
+                             is_sensitive, _is_synced, lamport_ts, wall_time, key_version_opt)
+                            = row_result?;
+                        // Only export text items — the CLI import path only
+                        // accepts content_bytes_b64 (raw bytes), and images are
+                        // stored as chunked AEAD blobs that require extra context.
+                        if content_type != "text" {
+                            continue;
+                        }
+                        let Some(content) = content_opt else { continue };
+                        let Some(nonce_vec) = nonce_opt else { continue };
+                        // Resolve key_version: NULL in the DB means the row
+                        // predates the key_version column (genuine v1 row).
+                        // Log NULL distinctly so mismatches are diagnosable;
+                        // assume v1 rather than silently guessing v2 (which
+                        // would produce an authentication-tag mismatch).
+                        let key_version: u8 = match key_version_opt {
+                            Some(v) => match u8::try_from(v) {
+                                Ok(kv) => kv,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        id = %id,
+                                        key_version = v,
+                                        "export: out-of-range key_version {v}, skipping"
+                                    );
+                                    continue;
+                                }
+                            },
+                            None => {
+                                tracing::debug!(
+                                    id = %id,
+                                    "export: key_version is NULL (pre-column row); \
+                                     attempting decrypt as v1"
+                                );
+                                1
+                            }
+                        };
+                        let nonce: &[u8; 24] = match nonce_vec.as_slice().try_into() {
+                            Ok(n) => n,
+                            Err(_) => {
+                                tracing::warn!(
+                                    id = %id,
+                                    "export: skipping item with invalid nonce length {}", nonce_vec.len()
+                                );
+                                continue;
+                            }
+                        };
+                        let plaintext = match decrypt_item_by_version(
+                            key_version,
+                            &local_key_v1,
+                            &v2_key,
+                            &item_id,
+                            nonce,
+                            &content,
+                        ) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                tracing::warn!(
+                                    id = %id,
+                                    "export: decrypt failed for item ({e}); skipping"
+                                );
+                                continue;
+                            }
+                        };
+                        items.push(serde_json::json!({
+                            "id": id,
+                            "item_id": item_id,
+                            "content_type": content_type,
+                            "content_bytes_b64": b64.encode(&plaintext),
+                            "created_at_ms": wall_time,
+                            "wall_time": wall_time,
+                            "lamport_ts": lamport_ts,
+                            "is_sensitive": is_sensitive,
+                        }));
+                    }
+                    Ok::<Vec<serde_json::Value>, anyhow::Error>(items)
+                })
+                .await;
+                match join {
+                    Ok(Ok(items)) => {
+                        let count = items.len();
+                        tracing::info!("export: returning {count} text items");
+                        Response::ok(req.id, serde_json::json!({ "items": items }))
+                    }
+                    Ok(Err(e)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("export failed: {e}"),
+                    ),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
+
+            "get_app_icon" => {
+                let bundle_id = match req.params.get("bundle_id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => return Response::err(req.id, "missing param: bundle_id"),
+                };
+                // NSWorkspace / AppKit calls are blocking — offload to a
+                // dedicated blocking thread so we never stall the async runtime.
+                let join = tokio::task::spawn_blocking(move || {
+                    crate::app_icon::get_app_icon_base64(&bundle_id)
+                })
+                .await;
+                match join {
+                    Ok(png_b64) => Response::ok(req.id, serde_json::json!({ "png_b64": png_b64 })),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
+
             other => Response::err(req.id, format!("unknown method: {other}")),
         }
     }
@@ -3618,22 +4564,45 @@ impl IpcServer {
                     None => return Err(PasteboardError::other("item has no content")),
                 };
 
-                // DUP-ON-COPY helper: reads and stores the post-write changeCount so
-                // the monitor's next tick can identify and suppress this self-write.
-                // Defined as a closure to avoid repeating the unsafe block.
-                let record_self_write = |self_write_cc: &Arc<std::sync::atomic::AtomicI64>| {
-                    use objc2_app_kit::NSPasteboard;
-                    let new_count =
-                        unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
-                    self_write_cc.store(new_count, std::sync::atomic::Ordering::Release);
-                    tracing::debug!(
-                        change_count = new_count,
-                        "clipboard: recorded self-write changeCount to suppress re-capture"
-                    );
-                };
-
                 use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
                 use objc2_foundation::{NSData, NSString};
+
+                // Fix-4 (dup-on-copy race): stamp the self-write sentinel
+                // BEFORE calling clearContents/setString so the clipboard
+                // monitor can never observe the new changeCount with a stale
+                // (un-set) sentinel.
+                //
+                // Previous code read changeCount AFTER the write and stored
+                // it — a poll arriving between the write and the store would
+                // see an incremented changeCount with sentinel == -1 and
+                // record the just-pasted item as a fresh capture.
+                //
+                // Fix: read the current changeCount, pre-stamp
+                // `current + 2` as the expected post-write value
+                // (`clearContents` adds 1, `setString_forType` /
+                // `setData_forType` adds 1 more), then write. After the
+                // write, overwrite with the actual new count (handles cases
+                // where macOS increments by a different amount). On error,
+                // reset the sentinel to -1 so the monitor is not permanently
+                // suppressed.
+                let pre_count = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                // Pre-stamp with current+2 (the expected post-clearContents +
+                // post-setString count). The monitor polls only on a 500ms
+                // interval so a pre-stamp that is off by one is still safer
+                // than a window with no stamp at all.
+                self.self_write_change_count
+                    .store(pre_count + 2, std::sync::atomic::Ordering::Release);
+
+                // Helper to post-stamp with the actual post-write count and
+                // log it; called on the success path of each content branch.
+                let post_stamp = |self_write_cc: &Arc<std::sync::atomic::AtomicI64>| {
+                    let actual = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                    self_write_cc.store(actual, std::sync::atomic::Ordering::Release);
+                    tracing::debug!(
+                        change_count = actual,
+                        "clipboard: stamped self-write changeCount (post-write)"
+                    );
+                };
 
                 if item.content_type == "text" {
                     // ----- text: decrypt per-item ciphertext, then write -----
@@ -3677,34 +4646,71 @@ impl IpcServer {
                         nonce,
                         content,
                     )
-                    .map_err(|e| match e {
-                        EncryptError::AuthFailed | EncryptError::AadMismatch => {
-                            PasteboardError::decrypt(
-                                "Decryption failed: authentication tag mismatch".to_string(),
-                            )
+                    .map_err(|e| {
+                        // On decrypt failure reset the sentinel so the monitor
+                        // is not permanently suppressed (Fix-4 error path).
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        match e {
+                            EncryptError::AuthFailed | EncryptError::AadMismatch => {
+                                PasteboardError::decrypt(
+                                    "Decryption failed: authentication tag mismatch".to_string(),
+                                )
+                            }
+                            EncryptError::UnknownKeyVersion(_) => PasteboardError::decrypt(
+                                "Item encrypted with a previous key — cannot be recovered. \
+                                 Clear history to start fresh."
+                                    .to_string(),
+                            ),
+                            other => PasteboardError::decrypt(other.to_string()),
                         }
-                        EncryptError::UnknownKeyVersion(_) => PasteboardError::decrypt(
-                            "Item encrypted with a previous key — cannot be recovered. \
-                             Clear history to start fresh."
-                                .to_string(),
-                        ),
-                        other => PasteboardError::decrypt(other.to_string()),
                     })?;
                     let text = std::str::from_utf8(&plaintext_bytes).map_err(|e| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
                         PasteboardError::decrypt(format!("decrypted content is not UTF-8: {e}"))
                     })?;
+
+                    // paste_as_plain_text: read the live config flag. When true,
+                    // write only `public.utf8-plain-text` (strips RTF/HTML/attributed
+                    // strings from the pasteboard so the receiving app gets bare text).
+                    // When false (default), use NSPasteboardTypeString which is the
+                    // standard "general string" UTI that most apps expect.
+                    let plain_only = self
+                        .core_config
+                        .as_ref()
+                        .and_then(|arc| arc.read().ok())
+                        .map(|cfg| cfg.paste_as_plain_text)
+                        .unwrap_or(false);
+
                     unsafe {
                         let pb = NSPasteboard::generalPasteboard();
                         pb.clearContents();
                         let ns_str = NSString::from_str(text);
-                        let ok = pb.setString_forType(&ns_str, NSPasteboardTypeString);
+                        // `public.utf8-plain-text` is the "bare UTF-8" UTI that
+                        // explicitly strips rich formatting (RTF, HTML, etc.) on
+                        // paste. NSPasteboardTypeString is also `public.utf8-plain-text`
+                        // on modern macOS, but using the explicit UTI literal when
+                        // paste_as_plain_text=true makes the intent unambiguous and
+                        // avoids any implicit coercion bridges the system type may carry.
+                        let ok = if plain_only {
+                            let plain_uti = NSString::from_str("public.utf8-plain-text");
+                            pb.setString_forType(&ns_str, &plain_uti)
+                        } else {
+                            pb.setString_forType(&ns_str, NSPasteboardTypeString)
+                        };
                         if !ok {
+                            // Fix-4: reset the self-write sentinel on write failure so
+                            // a failed paste does not leave a stale changeCount that
+                            // suppresses a later genuine capture.
+                            self.self_write_change_count
+                                .store(-1, std::sync::atomic::Ordering::Release);
                             return Err(PasteboardError::other(
                                 "NSPasteboard setString:forType: returned false",
                             ));
                         }
                     }
-                    record_self_write(&self.self_write_change_count);
+                    post_stamp(&self.self_write_change_count);
                     Ok(())
                 } else if item.content_type == "image" {
                     // ----- image: reassemble chunks → decrypt → write as PNG -----
@@ -3712,31 +4718,43 @@ impl IpcServer {
                     // `blob_ref` (see ClipboardItem::new_image in
                     // storage/items.rs).
                     let meta_json = item.blob_ref.as_deref().ok_or_else(|| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
                         PasteboardError::other("image item missing blob_ref metadata")
                     })?;
-                    let file_id = parse_image_file_id(meta_json).map_err(PasteboardError::other)?;
+                    let file_id = parse_image_file_id(meta_json).map_err(|e| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        PasteboardError::other(e)
+                    })?;
 
                     let chunks = chunks_from_blob(content).map_err(|e| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
                         PasteboardError::other(format!("image chunks_from_blob failed: {e}"))
                     })?;
                     let png_bytes =
                         decode_image(&chunks, &self.local_key, &file_id).map_err(|e| {
+                            self.self_write_change_count
+                                .store(-1, std::sync::atomic::Ordering::Release);
                             PasteboardError::decrypt(format!("image decode failed: {e}"))
                         })?;
 
-                    unsafe {
+                    let write_ok = unsafe {
                         let pb = NSPasteboard::generalPasteboard();
                         pb.clearContents();
                         let type_str = NSString::from_str("public.png");
                         let data = NSData::with_bytes(&png_bytes);
-                        let ok = pb.setData_forType(Some(&data), &type_str);
-                        if !ok {
-                            return Err(PasteboardError::other(
-                                "NSPasteboard setData:forType: returned false for public.png",
-                            ));
-                        }
+                        pb.setData_forType(Some(&data), &type_str)
+                    };
+                    if !write_ok {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        return Err(PasteboardError::other(
+                            "NSPasteboard setData:forType: returned false for public.png",
+                        ));
                     }
-                    record_self_write(&self.self_write_change_count);
+                    post_stamp(&self.self_write_change_count);
                     Ok(())
                 } else {
                     // Unknown content_type — keep a best-effort raw-bytes write,
@@ -3745,19 +4763,21 @@ impl IpcServer {
                     // ciphertext (no nonce / no chunk metadata). Used only by
                     // future content_types added without updating this handler.
                     let uti = map_content_type_to_uti(&item.content_type);
-                    unsafe {
+                    let write_ok = unsafe {
                         let pb = NSPasteboard::generalPasteboard();
                         pb.clearContents();
                         let type_str = NSString::from_str(&uti);
                         let data = NSData::with_bytes(content);
-                        let ok = pb.setData_forType(Some(&data), &type_str);
-                        if !ok {
-                            return Err(PasteboardError::other(format!(
-                                "NSPasteboard setData:forType: returned false for type '{uti}'"
-                            )));
-                        }
+                        pb.setData_forType(Some(&data), &type_str)
+                    };
+                    if !write_ok {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        return Err(PasteboardError::other(format!(
+                            "NSPasteboard setData:forType: returned false for type '{uti}'"
+                        )));
                     }
-                    record_self_write(&self.self_write_change_count);
+                    post_stamp(&self.self_write_change_count);
                     Ok(())
                 }
             })
@@ -3791,7 +4811,126 @@ fn is_socket_live(socket_path: &std::path::Path) -> bool {
     std::os::unix::net::UnixStream::connect(socket_path).is_ok()
 }
 
-/// Bind a [`UnixListener`] at `socket_path`, self-healing a stale socket file.
+/// What the synchronous `status` probe learned about the daemon currently
+/// listening on the socket.
+#[derive(Debug, Default)]
+struct ProbedDaemon {
+    /// The peer's `build_version` (`<crate-version>+<git-sha>`), if it reported
+    /// one. A pre-takeover daemon (older build) will not include this field.
+    build_version: Option<String>,
+    /// The peer's OS process id, if reported. Used to SIGTERM a stale
+    /// predecessor that does not cooperate via IPC.
+    pid: Option<u32>,
+    /// True when the peer reported `"degraded": true` in its `status` response.
+    /// A same-version daemon that is degraded (e.g. keychain-locked / DB
+    /// unavailable) should be replaced by a healthy same-version daemon — the
+    /// usual "same version = healthy, do not steal" rule does not apply.
+    degraded: bool,
+}
+
+/// Synchronously connect to a live socket and ask `status`, returning the
+/// peer's `build_version` + `pid` if it answered. Best-effort: any IO/parse
+/// failure yields `None` (treated as "unknown / probably stale").
+///
+/// This is the blocking, pre-bind sibling of the async `status` dispatch — it
+/// runs in the new daemon's startup path *before* the tokio runtime owns the
+/// socket, so it deliberately uses `std::os::unix::net` with short timeouts.
+fn probe_listening_daemon(socket_path: &std::path::Path) -> Option<ProbedDaemon> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::time::Duration;
+
+    let stream = std::os::unix::net::UnixStream::connect(socket_path).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
+
+    let mut req = serde_json::to_string(
+        &serde_json::json!({"id":"takeover-probe","method":"status","params":{}}),
+    )
+    .ok()?;
+    req.push('\n');
+    (&stream).write_all(req.as_bytes()).ok()?;
+
+    let mut reader = BufReader::new(&stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).ok()?;
+    let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    let data = &v["data"];
+    Some(ProbedDaemon {
+        build_version: data["build_version"].as_str().map(str::to_owned),
+        pid: data["pid"].as_u64().and_then(|p| u32::try_from(p).ok()),
+        // A peer that does not emit `degraded` is assumed healthy (false).
+        degraded: data["degraded"].as_bool().unwrap_or(false),
+    })
+}
+
+/// Attempt to evict a stale predecessor daemon and free its socket.
+///
+/// Sends `SIGTERM` to `pid` (a clean shutdown — launchd's `KeepAlive` only
+/// respawns on a *crash*, so a SIGTERM exit will not race us back onto the
+/// socket) and polls until the socket stops answering or a short deadline
+/// elapses. Returns `true` once the socket is free.
+///
+/// TOCTOU / pid-recycle guard (LOW):
+/// * pid == 0 or pid == 1 would send SIGTERM to every process in the group /
+///   init respectively — never valid targets.
+/// * pid == std::process::id() would suicide the new daemon before it starts.
+/// * After sending SIGTERM we verify the socket *actually* freed (re-probe) —
+///   if a recycled pid (different process, same number) was signalled but still
+///   held the socket, we surface failure rather than unlinking a live socket.
+#[cfg(unix)]
+fn evict_stale_daemon(socket_path: &std::path::Path, pid: u32) -> bool {
+    use std::time::{Duration, Instant};
+
+    // Guard: never signal pid=0 (whole process group), pid=1 (init), or
+    // ourselves. Any of these would be a dangerous misfire from a recycled pid.
+    if pid == 0 || pid == 1 || pid == std::process::id() {
+        tracing::warn!(
+            "evict_stale_daemon: refusing to signal dangerous pid {pid} \
+             (0=process-group, 1=init, self={self_pid})",
+            self_pid = std::process::id()
+        );
+        return false;
+    }
+
+    // SAFETY: `kill(2)` with SIGTERM is a thin libc wrapper; the only effect is
+    // delivering a signal to `pid`. We have already excluded 0, 1, and self
+    // above, so this is safe to call.
+    let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+    if rc != 0 {
+        let err = std::io::Error::last_os_error();
+        // ESRCH = no such process: the predecessor already exited; treat the
+        // socket as ours to reclaim. Any other error (e.g. EPERM) means we
+        // could not signal it — give up so we don't unlink a live socket.
+        if err.raw_os_error() != Some(libc::ESRCH) {
+            tracing::warn!("failed to SIGTERM stale daemon pid {pid}: {err}");
+            return false;
+        }
+        // ESRCH: predecessor already gone — check whether the socket freed.
+    } else {
+        tracing::warn!(
+            "sent SIGTERM to stale daemon pid {pid}; waiting for it to release the socket"
+        );
+    }
+
+    // Poll until the socket stops answering (the peer shut down and closed its
+    // fd) or the deadline expires. We re-probe the socket rather than just
+    // checking for the file, because a pid-recycled process (different process,
+    // same numeric pid) could have received SIGTERM and exited while the
+    // *original* stale daemon still holds the socket — we only declare success
+    // when the socket itself is no longer live.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if !is_socket_live(socket_path) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    // Final re-probe: success only when the socket is confirmed free.
+    !is_socket_live(socket_path)
+}
+
+/// Bind a [`UnixListener`] at `socket_path`, self-healing a stale socket file
+/// and evicting a stale *predecessor* daemon left over from an upgrade.
 ///
 /// macOS / Linux refuse to `bind()` over an existing socket path
 /// (`EADDRINUSE`), so a socket file left behind by a previous daemon would
@@ -3799,19 +4938,70 @@ fn is_socket_live(socket_path: &std::path::Path) -> bool {
 /// socket not reachable" symptom seen after a v0.3.4 → v0.4.0 upgrade where an
 /// old daemon died without cleaning up.
 ///
-/// Policy:
-///   * No file present  → bind directly.
-///   * File present, NO live listener → stale; remove it and bind.
-///   * File present, live listener answers → another healthy daemon already
-///     owns the socket. Do NOT steal it (that would orphan the running
-///     daemon); return an error so the caller logs and exits cleanly.
+/// Policy (newest binary wins on upgrade):
+///   * No file present → bind directly.
+///   * File present, NO live listener → stale file; remove it and bind.
+///   * File present, live listener that reports the SAME `build_version` as us
+///     → a healthy same-version daemon already owns the socket; do NOT steal it
+///     (that would needlessly orphan a running peer) — return an error so the
+///     caller logs and exits cleanly.
+///   * File present, live listener that reports a DIFFERENT `build_version`, or
+///     no version at all (an older build predating this takeover logic) → a
+///     STALE predecessor still serving old code after an upgrade. Evict it
+///     (SIGTERM its reported pid, wait for the socket to free), then remove the
+///     socket file and bind. This is what lets the freshly-installed binary
+///     take over without a manual `kill`.
 fn bind_with_stale_cleanup(socket_path: &std::path::Path) -> anyhow::Result<UnixListener> {
     if socket_path.exists() {
         if is_socket_live(socket_path) {
-            anyhow::bail!(
-                "another daemon is already listening on {} — refusing to steal the socket",
+            let probed = probe_listening_daemon(socket_path).unwrap_or_default();
+            // Decide whether to evict or refuse.
+            //
+            // Same version AND not degraded → healthy peer; do not steal.
+            if probed.build_version.as_deref() == Some(BUILD_VERSION) && !probed.degraded {
+                anyhow::bail!(
+                    "another daemon (build {BUILD_VERSION}) is already listening on {} — \
+                     refusing to steal the socket from a healthy same-version peer",
+                    socket_path.display()
+                );
+            }
+            // All other cases (different version, no version, or same version
+            // but degraded) → attempt to evict so a healthy daemon can take over.
+            let evict_reason = if probed.build_version.as_deref() == Some(BUILD_VERSION) {
+                // Same version, but degraded.
+                format!("same-version daemon (build {BUILD_VERSION}) is DEGRADED")
+            } else {
+                let reported = probed.build_version.as_deref().unwrap_or("<none>");
+                format!("stale daemon (build {reported}); this build is {BUILD_VERSION}")
+            };
+            tracing::warn!(
+                "{evict_reason} holds {}; evicting so the healthy instance can take over.",
                 socket_path.display()
             );
+            match probed.pid {
+                Some(pid) if evict_stale_daemon(socket_path, pid) => {
+                    tracing::info!("evicted daemon pid {pid} — socket released");
+                }
+                Some(pid) => {
+                    anyhow::bail!(
+                        "could not evict daemon pid {pid} holding {} ({evict_reason}) — \
+                         use the app's \"Restart daemon\" control or \
+                         `launchctl kickstart -k gui/$UID/com.copypaste.daemon`",
+                        socket_path.display()
+                    );
+                }
+                None => {
+                    // Old build reported no pid: we cannot signal it.
+                    // Surface a clear, actionable error rather than
+                    // unlinking a socket a live process still owns.
+                    anyhow::bail!(
+                        "daemon ({evict_reason}, no pid reported) holds {} and \
+                         cannot be evicted automatically — use the app's \"Restart daemon\" \
+                         control or `launchctl kickstart -k gui/$UID/com.copypaste.daemon`",
+                        socket_path.display()
+                    );
+                }
+            }
         }
         tracing::warn!(
             "removing stale IPC socket at {} (no live listener answered)",
@@ -4255,6 +5445,19 @@ mod tests {
         assert!(!is_socket_live(&sock));
     }
 
+    /// `BUILD_VERSION` must be non-empty and start with the crate's semver so
+    /// clients can compare it against their own version prefix to detect a
+    /// stale daemon after an upgrade.
+    #[test]
+    fn build_version_is_crate_version_prefixed() {
+        assert!(!BUILD_VERSION.is_empty(), "BUILD_VERSION must not be empty");
+        let crate_ver = env!("CARGO_PKG_VERSION");
+        assert!(
+            BUILD_VERSION == crate_ver || BUILD_VERSION.starts_with(&format!("{crate_ver}+")),
+            "BUILD_VERSION {BUILD_VERSION:?} must equal or be `<{crate_ver}>+<sha>`"
+        );
+    }
+
     /// A leftover socket *file* with no process accepting on it is stale:
     /// `bind_with_stale_cleanup` must remove it and successfully rebind,
     /// rather than failing with `EADDRINUSE`. This is the core self-heal for
@@ -4288,10 +5491,13 @@ mod tests {
         drop(listener);
     }
 
-    /// When a *live* daemon already owns the socket, the helper must refuse to
-    /// steal it (returning an error) so the running daemon is not orphaned.
+    /// A live listener that does NOT speak our protocol (never answers
+    /// `status`, so reports no `build_version`/`pid`) cannot be safely evicted:
+    /// the helper must refuse to bind rather than unlink a socket a live
+    /// process still owns. (A real same-version daemon answers `status` and is
+    /// covered by `..._refuses_to_steal_healthy_same_version_daemon` below.)
     #[tokio::test]
-    async fn bind_with_stale_cleanup_refuses_to_steal_live_socket() {
+    async fn bind_with_stale_cleanup_refuses_unidentifiable_live_socket() {
         let dir = tempdir().unwrap();
         let sock = dir.path().join("daemon.sock");
 
@@ -4303,9 +5509,135 @@ mod tests {
             bind_with_stale_cleanup(&sock).expect_err("must refuse to bind over a live socket");
         let msg = err.to_string();
         assert!(
-            msg.contains("already listening"),
-            "expected a 'already listening' refusal, got: {msg}"
+            msg.contains("cannot be evicted automatically"),
+            "expected a 'cannot be evicted' refusal, got: {msg}"
         );
+    }
+
+    /// A live daemon answering `status` with the SAME `build_version` as us is
+    /// a healthy same-version peer — the helper must NOT steal its socket.
+    #[tokio::test]
+    async fn bind_with_stale_cleanup_refuses_to_steal_healthy_same_version_daemon() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("daemon.sock");
+
+        // A minimal acceptor that replies to `status` with OUR build_version
+        // and a bogus pid. It keeps accepting for the whole test (loop on a
+        // cloned fd) so the socket stays live through the probe.
+        let listener = std::os::unix::net::UnixListener::bind(&sock).expect("seed bind");
+        let acceptor = listener.try_clone().expect("clone listener fd");
+        let body = serde_json::json!({
+            "ok": true,
+            "data": { "build_version": BUILD_VERSION, "pid": 999_999u32 },
+        })
+        .to_string();
+        let handle = std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader, Write};
+            loop {
+                let Ok((stream, _)) = acceptor.accept() else {
+                    break;
+                };
+                let mut reader = BufReader::new(&stream);
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_ok() && line.contains("status") {
+                    let mut resp = body.clone();
+                    resp.push('\n');
+                    let _ = (&stream).write_all(resp.as_bytes());
+                }
+            }
+        });
+
+        let err = bind_with_stale_cleanup(&sock)
+            .expect_err("must refuse to steal a healthy same-version daemon's socket");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("healthy same-version peer"),
+            "expected same-version refusal, got: {msg}"
+        );
+        drop(listener); // ends the acceptor thread; tempdir teardown frees the path.
+        let _ = handle;
+    }
+
+    /// A live daemon answering `status` with a DIFFERENT `build_version` is a
+    /// STALE predecessor from before an upgrade. The helper must try to evict
+    /// it (SIGTERM its reported pid). Here the reported pid is unsignalable
+    /// (ESRCH), so the socket is never released and we must surface a clear,
+    /// actionable error rather than silently coexisting / unlinking a live
+    /// socket.
+    #[tokio::test]
+    async fn bind_with_stale_cleanup_attempts_eviction_for_different_version() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("daemon.sock");
+
+        // The seed acceptor keeps the socket live for the WHOLE test (looping on
+        // blocking accept) so eviction genuinely cannot succeed. We hold the
+        // original listener in the test and hand the thread a `try_clone` so the
+        // socket stays bound until the test's tempdir teardown frees the path.
+        let listener = std::os::unix::net::UnixListener::bind(&sock).expect("seed bind");
+        let acceptor = listener.try_clone().expect("clone listener fd");
+        // Report a different build version + a pid that maps to ESRCH (no such
+        // process), so `evict_stale_daemon` SIGTERMs nothing and then times out
+        // observing the socket is still held.
+        let body = serde_json::json!({
+            "ok": true,
+            "data": { "build_version": "0.0.0-stale+deadbeef", "pid": 2_000_000_001u32 },
+        })
+        .to_string();
+        let handle = std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader, Write};
+            loop {
+                let Ok((stream, _)) = acceptor.accept() else {
+                    break;
+                };
+                let mut reader = BufReader::new(&stream);
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_ok() && line.contains("status") {
+                    let mut resp = body.clone();
+                    resp.push('\n');
+                    let _ = (&stream).write_all(resp.as_bytes());
+                }
+            }
+        });
+
+        let err = bind_with_stale_cleanup(&sock).expect_err(
+            "eviction of an unsignalable stale pid must fail loudly, not silently bind",
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("could not evict daemon"),
+            "expected an eviction-failure error, got: {msg}"
+        );
+        // Dropping both listener fds unblocks/ends the acceptor thread.
+        drop(listener);
+        let _ = handle;
+    }
+
+    /// The `status` probe must round-trip `build_version` + `pid` from a daemon
+    /// that answers, and yield `None`/defaults from a socket that says nothing.
+    #[tokio::test]
+    async fn probe_listening_daemon_reads_version_and_pid() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("daemon.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&sock).expect("seed bind");
+        let handle = std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader, Write};
+            if let Ok((stream, _)) = listener.accept() {
+                let mut reader = BufReader::new(&stream);
+                let mut line = String::new();
+                let _ = reader.read_line(&mut line);
+                let resp = serde_json::json!({
+                    "ok": true,
+                    "data": { "build_version": "9.9.9+abc", "pid": 4242u32 },
+                })
+                .to_string();
+                let _ = (&stream).write_all(format!("{resp}\n").as_bytes());
+            }
+        });
+
+        let probed = probe_listening_daemon(&sock).expect("probe should connect");
+        assert_eq!(probed.build_version.as_deref(), Some("9.9.9+abc"));
+        assert_eq!(probed.pid, Some(4242));
+        handle.join().ok();
     }
 
     #[tokio::test]
@@ -5094,6 +6426,86 @@ mod tests {
         }
     }
 
+    /// Fix-1 (NFKC span-mask leak): when the preview contains full-width or
+    /// ligature chars that NFKC normalises to narrower forms, the returned
+    /// `preview` string must be the NORMALISED form so that the returned char
+    /// offsets (`sensitive_spans`) correctly index into it.
+    ///
+    /// Concretely: full-width "ＡＫＩＡ" (4 chars × 3 bytes each in the original)
+    /// normalises to ASCII "AKIA" (4 chars × 1 byte each).  The detector sees
+    /// "AKIA…" and reports a span at, say, chars [0..20].  If the daemon returned
+    /// the ORIGINAL (full-width) preview, the UI would apply [0..20] to a string
+    /// where char 0 is a 3-byte full-width 'Ａ' — the mask would cover the WRONG
+    /// characters and might expose part of the secret.  The fix: always return the
+    /// normalised preview so offsets and string share one basis.
+    #[tokio::test]
+    async fn history_page_spans_index_into_returned_preview_not_raw() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("span_basis.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // Full-width prefix: each char is 3 UTF-8 bytes in the original,
+        // but only 1 byte after NFKC.  The detector runs on NFKC form and
+        // produces a span anchored at byte offset 0 of the normalised string.
+        // If the daemon returns the raw (non-normalised) preview, char offset 0
+        // in that string still maps to the full-width Ａ — the span basis is wrong.
+        let plaintext = "ＡＫＩＡ0123456789ABCDEF trailing text";
+        {
+            let guard = db.lock().await;
+            let item = copypaste_core::ClipboardItem::new_text(vec![0xCD], vec![0u8; 24], 1);
+            copypaste_core::insert_item_with_fts(&guard, &item, plaintext).unwrap();
+        }
+
+        let resp = call_one(
+            &sock,
+            r#"{"id":"basis","method":"history_page","params":{"limit":10,"offset":0}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "history_page: {resp}");
+        let items = resp["data"]["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+
+        let preview = items[0]["preview"].as_str().unwrap();
+        let spans = items[0]["sensitive_spans"].as_array().unwrap();
+
+        // The detector must have flagged something (the normalised form is
+        // "AKIA0123456789ABCDEF…" which contains an AWS-key-like pattern).
+        assert!(
+            !spans.is_empty(),
+            "detector should flag the AKIA... pattern in the preview"
+        );
+
+        // KEY ASSERTION: every span must start with ASCII 'A' in the returned
+        // preview.  If the preview is the RAW full-width string the first char
+        // would be 'Ａ' (U+FF21), not 'A' (U+0041) — proving the span basis is
+        // wrong.  After the fix the preview is normalised and spans[0][0] == 0
+        // means preview.chars().nth(0) == 'A'.
+        for span in spans {
+            let pair = span.as_array().unwrap();
+            let start = pair[0].as_u64().unwrap() as usize;
+            let end = pair[1].as_u64().unwrap() as usize;
+            // Span must be within the returned preview's char length.
+            let char_len = preview.chars().count();
+            assert!(
+                end <= char_len,
+                "span [{}..{}] out of range for preview (len={}): {:?}",
+                start,
+                end,
+                char_len,
+                preview
+            );
+            // Each char in the spanned range must be ASCII (normalised).
+            // Full-width chars are 3 bytes wide; after NFKC they become ASCII.
+            let span_chars: String = preview.chars().skip(start).take(end - start).collect();
+            assert!(
+                span_chars.is_ascii(),
+                "span [{start}..{end}] covers non-ASCII chars in preview — \
+                 preview is NOT normalised (raw full-width form leaked): {:?}",
+                span_chars
+            );
+        }
+    }
+
     /// `byte_to_char_offset` clamps out-of-range and mid-codepoint byte indices
     /// to a valid char boundary and never panics.
     #[test]
@@ -5557,8 +6969,16 @@ mod tests {
         // redirect HOME (e.g. revoke_all_peers_revokes_every_peer) don't pick
         // up peers.json entries written by this test's servers. `EnvGuard`
         // holds ENV_LOCK for the duration, serialising env mutations.
+        //
+        // `COPYPASTE_CONFIG_DIR` is set first because `peers_file_path` checks
+        // it ahead of `dirs::config_dir()`; pinning it to this tempdir keeps the
+        // test hermetic even when the host/CI environment already exports a
+        // `COPYPASTE_CONFIG_DIR` that points at a dir which may not exist.
         let cfg_home = dir.path().join("cfg");
-        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
 
         // Use two server instances to simulate two separate daemons.
         let sock_a = dir.path().join("test-pake-rt-a.sock");
@@ -5676,7 +7096,14 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let cfg_home = dir.path().join("cfg");
-        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        // Set COPYPASTE_CONFIG_DIR *first* — `peers_file_path` checks it ahead
+        // of dirs::config_dir(), so peers.json goes into cfg_home regardless of
+        // whether dirs::config_dir() is affected by HOME/XDG_CONFIG_HOME (macOS
+        // ignores HOME for Application Support).
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
 
         let sock_a = dir.path().join("test-qr-a.sock");
         let sock_b = dir.path().join("test-qr-b.sock");
@@ -5757,7 +7184,12 @@ mod tests {
         use base64::Engine as _;
         let dir = tempdir().unwrap();
         let cfg_home = dir.path().join("cfg");
-        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        // Include COPYPASTE_CONFIG_DIR so peers_file_path() points at cfg_home
+        // on macOS (where dirs::config_dir() ignores HOME).
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
         let sock = dir.path().join("test-qr-notoken.sock");
         start_test_server(&sock).await;
 
@@ -5784,6 +7216,21 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let sock = dir.path().join("test-revoke.sock");
+
+        // Redirect the config dir to this test's own tempdir so the
+        // `revoke_peer` handler's `save_peers` never writes to (and never
+        // depends on the existence of) the machine's real config dir. Under
+        // parallel CI execution the platform `dirs::config_dir()` may not
+        // exist, which previously made `save_peers` fail with ENOENT. Setting
+        // `COPYPASTE_CONFIG_DIR` (checked first by `peers_file_path`) plus the
+        // HOME/XDG fallbacks makes the test fully hermetic. `EnvGuard` holds
+        // the process-wide `TEST_ENV_LOCK` for its lifetime, so this does not
+        // race the other env-mutating tests in the workspace.
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
 
         // Build the server manually so we can reach the shared Database
         // handle for assertions after the call.
@@ -6249,11 +7696,16 @@ mod tests {
         let dir = tempdir().unwrap();
         let sock = dir.path().join("revoke_all_empty.sock");
         // Isolate the config dir so this test never touches the developer's
-        // real peers.json. `dirs::config_dir()` reads XDG_CONFIG_HOME on
-        // Linux/BSD and $HOME (→ Library/Application Support) on macOS, so set
-        // both. Held until end of test (RAII restore).
+        // real peers.json.  `peers_file_path()` checks COPYPASTE_CONFIG_DIR
+        // first (before dirs::config_dir()), which is necessary on macOS
+        // because dirs::config_dir() ignores $HOME and always resolves to
+        // ~/Library/Application Support — so setting only HOME/XDG_CONFIG_HOME
+        // was insufficient and the test leaked to the real peers.json.
         let cfg_home = dir.path().join("cfg");
-        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
         start_test_server(&sock).await;
         let resp = call_one(
             &sock,
@@ -6278,17 +7730,21 @@ mod tests {
         // written for each (atomic batch via revoke_devices).
         let dir = tempdir().unwrap();
         let sock = dir.path().join("revoke_all_n.sock");
-        // Redirect the config dir (both Linux XDG and macOS HOME) to a temp
-        // path so we read/write an isolated peers.json, never the real one.
+        // Pin COPYPASTE_CONFIG_DIR first — peers_file_path() checks it before
+        // dirs::config_dir(), so the handler reads/writes cfg_home regardless
+        // of whether dirs::config_dir() is affected by HOME (macOS ignores HOME
+        // for Application Support). Without this pin the test accidentally
+        // reads/writes the developer's real peers.json on macOS.
         let cfg_home = dir.path().join("cfg");
-        let _env = EnvGuard::set_all(&["HOME", "XDG_CONFIG_HOME"], &cfg_home);
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
 
-        // Resolve the actual peers.json location the same way the daemon does
-        // (`dirs::config_dir()/copypaste/peers.json`) so the seed lands exactly
-        // where the handler will read it, on whatever platform we run.
-        let peers_dir = dirs::config_dir()
-            .expect("config_dir resolvable under redirected HOME/XDG_CONFIG_HOME")
-            .join("copypaste");
+        // Seed peers.json exactly where peers_file_path() will look:
+        // cfg_home itself (COPYPASTE_CONFIG_DIR is the direct config dir, not a
+        // base — paths::config_dir() returns it as-is).
+        let peers_dir = cfg_home.clone();
         std::fs::create_dir_all(&peers_dir).unwrap();
         let peers_json = peers_dir.join("peers.json");
         // Use realistic (non-placeholder) fingerprints — the daemon filters out
@@ -6379,6 +7835,429 @@ mod tests {
         assert_eq!(
             data2["signed_in"], true,
             "signed_in must track the real auth flag once set true: {data2}"
+        );
+    }
+
+    // ── Fix #1: set_config MERGE preserves redacted secrets ─────────────────
+
+    /// `merge_config` must preserve an existing secret when the incoming config
+    /// omits it (the redacted read-modify-write shape deserialises the secret
+    /// fields to `None`). A blind overwrite would null the stored credentials.
+    #[test]
+    fn merge_config_preserves_omitted_secrets() {
+        let existing = AppConfig {
+            p2p_enabled: Some(true),
+            supabase_url: Some("https://proj.supabase.co".into()),
+            supabase_anon_key: Some("anon-123".into()),
+            supabase_email: Some("user@example.com".into()),
+            supabase_password: Some("super-secret".into()),
+            ..Default::default()
+        };
+        // Incoming mirrors what the UI sends back after `get_config` redaction:
+        // secrets absent (None), only the toggle + publishable fields present.
+        let incoming = AppConfig {
+            p2p_enabled: Some(false),
+            supabase_url: Some("https://proj.supabase.co".into()),
+            supabase_anon_key: Some("anon-123".into()),
+            supabase_email: None,
+            supabase_password: None,
+            ..Default::default()
+        };
+        let merged = merge_config(existing, incoming);
+        assert_eq!(
+            merged.supabase_password.as_deref(),
+            Some("super-secret"),
+            "omitted password must be preserved from the persisted config"
+        );
+        assert_eq!(
+            merged.supabase_email.as_deref(),
+            Some("user@example.com"),
+            "omitted email must be preserved"
+        );
+        // Non-secret authoritative field still takes the incoming value.
+        assert_eq!(
+            merged.p2p_enabled,
+            Some(false),
+            "p2p_enabled incoming value wins"
+        );
+    }
+
+    /// A provided secret in `set_config` overwrites the stored one (so the CLI
+    /// `cloud setup` can rotate credentials).
+    #[test]
+    fn merge_config_incoming_secret_overrides() {
+        let existing = AppConfig {
+            p2p_enabled: Some(false),
+            supabase_url: None,
+            supabase_anon_key: None,
+            supabase_email: Some("old@example.com".into()),
+            supabase_password: Some("old-pw".into()),
+            ..Default::default()
+        };
+        let incoming = AppConfig {
+            p2p_enabled: Some(false),
+            supabase_url: None,
+            supabase_anon_key: None,
+            supabase_email: Some("new@example.com".into()),
+            supabase_password: Some("new-pw".into()),
+            ..Default::default()
+        };
+        let merged = merge_config(existing, incoming);
+        assert_eq!(merged.supabase_password.as_deref(), Some("new-pw"));
+        assert_eq!(merged.supabase_email.as_deref(), Some("new@example.com"));
+    }
+
+    /// End-to-end: seed a config with a password, then run a `set_config` whose
+    /// params carry the REDACTED shape (`supabase_password_set: true`, no real
+    /// password). The stored password must survive — proving the
+    /// read-modify-write data-loss bug is fixed at the IPC boundary.
+    #[tokio::test]
+    async fn set_config_with_redacted_shape_preserves_stored_password() {
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+
+        // Seed: persist a config carrying a real password.
+        let seeded = AppConfig {
+            p2p_enabled: Some(false),
+            supabase_url: Some("https://proj.supabase.co".into()),
+            supabase_anon_key: Some("anon-xyz".into()),
+            supabase_email: Some("seed@example.com".into()),
+            supabase_password: Some("do-not-wipe-me".into()),
+            ..Default::default()
+        };
+        write_config(&seeded).expect("seed write_config");
+
+        // Confirm get_config redacts the secret to a presence flag.
+        let server = bare_server();
+        let get_resp = server
+            .dispatch(r#"{"id":"g1","method":"get_config","params":{}}"#)
+            .await;
+        let got = get_resp.data.expect("get_config data");
+        assert_eq!(got["supabase_password_set"], true);
+        assert!(
+            got.get("supabase_password").is_none(),
+            "raw password must never leave the daemon: {got}"
+        );
+
+        // The UI/CLI sends this redacted shape straight back via set_config.
+        let set_body = format!(
+            r#"{{"id":"s1","method":"set_config","params":{}}}"#,
+            serde_json::to_string(&got).unwrap()
+        );
+        let set_resp = server.dispatch(&set_body).await;
+        assert_eq!(
+            set_resp.data.as_ref().map(|d| d["saved"].clone()),
+            Some(serde_json::json!(true)),
+            "set_config must succeed: {set_resp:?}"
+        );
+
+        // The persisted password must be intact. The daemon stores it in the
+        // Keychain first (stripping it from config.json) and only falls back to
+        // config.json when the Keychain is unavailable — exactly how the cloud
+        // path retrieves it (cloud.rs: keychain-first, config fallback). Assert
+        // that *effective* value so the test is robust whether or not the real
+        // Keychain is reachable (CI runs with COPYPASTE_EPHEMERAL_KEY, so the
+        // password stays in config.json; a signed build stores it in Keychain).
+        let persisted = read_config();
+        let effective_pw = crate::keychain::read_supabase_password_from_keychain()
+            .or_else(|| persisted.supabase_password.clone());
+        assert_eq!(
+            effective_pw.as_deref(),
+            Some("do-not-wipe-me"),
+            "set_config with the redacted shape must NOT wipe the stored password"
+        );
+        assert_eq!(
+            persisted.supabase_email.as_deref(),
+            Some("seed@example.com"),
+            "email must also survive"
+        );
+    }
+
+    // ── export: limit param ──────────────────────────────────────────────────
+
+    /// When `limit` > 0 the export handler must return at most `limit` items,
+    /// selecting the most-recent ones (DESC LIMIT subquery) and re-ordering
+    /// them oldest-first for deterministic import. When `limit` == 0 or is
+    /// absent all items are returned.
+    #[tokio::test]
+    async fn export_limit_returns_most_recent_n_oldest_first() {
+        use copypaste_core::{
+            build_item_aad_v2, derive_v2, encrypt_item_with_aad, AAD_SCHEMA_VERSION_V4,
+        };
+
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("export_limit.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // The test server uses a zero v1 key. Derive v2 the same way the
+        // handler does so we can produce decrypt-able ciphertext.
+        let v1_key = [0u8; 32];
+        let v2_key = derive_v2(&v1_key);
+
+        // Seed 5 text items with distinct, monotonically increasing wall_time
+        // values so we can verify ordering and limit selection.
+        const TOTAL: usize = 5;
+        let mut item_ids: Vec<String> = Vec::new();
+        {
+            let guard = db.lock().await;
+            for i in 0..TOTAL {
+                let plaintext = format!("item-{i}").into_bytes();
+                let item_id = uuid::Uuid::new_v4().to_string();
+                let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+                let (nonce, ciphertext) = encrypt_item_with_aad(&plaintext, &v2_key, &aad).unwrap();
+                // Use a distinct wall_time per item (base 1000 + i ms).
+                let wall_time = 1_000_000i64 + i as i64;
+                guard
+                    .conn()
+                    .execute(
+                        "INSERT INTO clipboard_items \
+                         (id, item_id, content_type, content, content_nonce, \
+                          is_sensitive, is_synced, lamport_ts, wall_time, key_version) \
+                         VALUES (?1, ?2, 'text', ?3, ?4, 0, 0, ?5, ?6, 2)",
+                        rusqlite::params![
+                            uuid::Uuid::new_v4().to_string(),
+                            item_id,
+                            ciphertext,
+                            nonce.as_slice(),
+                            i as i64 + 1,
+                            wall_time,
+                        ],
+                    )
+                    .unwrap();
+                item_ids.push(format!("item-{i}"));
+            }
+        }
+
+        // ── limit=3: must return the 3 most-recent items (item-2, item-3, item-4)
+        //    serialised oldest-first (item-2, item-3, item-4 in that order).
+        let resp = call_one(
+            &sock,
+            r#"{"id":"el1","method":"export","params":{"limit":3}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "export with limit=3 must succeed: {resp}");
+        let items = resp["data"]["items"].as_array().expect("items array");
+        assert_eq!(
+            items.len(),
+            3,
+            "limit=3 must return exactly 3 items, got {}: {resp}",
+            items.len()
+        );
+        // Verify chronological (ASC) ordering: wall_time must be non-decreasing.
+        let wall_times: Vec<i64> = items
+            .iter()
+            .map(|it| it["wall_time"].as_i64().unwrap())
+            .collect();
+        assert!(
+            wall_times.windows(2).all(|w| w[0] <= w[1]),
+            "items must be ordered oldest-first: {wall_times:?}"
+        );
+        // The 3 most-recent items have wall_times 1_000_002, 1_000_003, 1_000_004.
+        assert_eq!(
+            wall_times[0], 1_000_002,
+            "first exported item should be 3rd oldest"
+        );
+        assert_eq!(
+            wall_times[2], 1_000_004,
+            "last exported item should be newest"
+        );
+
+        // ── limit=0: must return ALL items (unlimited).
+        let resp = call_one(
+            &sock,
+            r#"{"id":"el2","method":"export","params":{"limit":0}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "export with limit=0 must succeed: {resp}");
+        let all_items = resp["data"]["items"].as_array().expect("items array");
+        assert_eq!(
+            all_items.len(),
+            TOTAL,
+            "limit=0 must return all {TOTAL} items, got {}",
+            all_items.len()
+        );
+
+        // ── limit absent: must also return ALL items.
+        let resp = call_one(&sock, r#"{"id":"el3","method":"export","params":{}}"#).await;
+        assert_eq!(
+            resp["ok"], true,
+            "export with no limit must succeed: {resp}"
+        );
+        let no_limit_items = resp["data"]["items"].as_array().expect("items array");
+        assert_eq!(
+            no_limit_items.len(),
+            TOTAL,
+            "absent limit must return all {TOTAL} items, got {}",
+            no_limit_items.len()
+        );
+    }
+
+    // ── Fix #2: config.json honours COPYPASTE_CONFIG_DIR ────────────────────
+
+    /// `COPYPASTE_CONFIG_DIR` must redirect `config.json` (not just
+    /// `peers.json`), and the two files must co-locate under the same
+    /// `copypaste/` subdir.
+    #[test]
+    fn config_dir_override_redirects_config_json() {
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("override-root");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+
+        let config = config_path().expect("config_path under override");
+        let peers = peers_file_path();
+
+        // config.json lands under the override, not the platform default.
+        assert!(
+            config.starts_with(&cfg_home),
+            "config.json must live under COPYPASTE_CONFIG_DIR: {}",
+            config.display()
+        );
+        // config.json ends with "config.json"; the parent dir name is
+        // platform-dependent (CopyPaste on macOS/Windows, copypaste on Linux)
+        // but in all cases the file must live under the override root.
+        assert!(
+            config.ends_with("config.json"),
+            "config path must end with config.json: {}",
+            config.display()
+        );
+
+        // Both files share the SAME directory so a config write and a peers
+        // write can never diverge under the override.
+        assert_eq!(
+            config.parent(),
+            peers.parent(),
+            "config.json and peers.json must co-locate: {} vs {}",
+            config.display(),
+            peers.display()
+        );
+
+        // And a real round-trip write/read works through the redirected path.
+        let cfg = AppConfig {
+            p2p_enabled: Some(true),
+            ..Default::default()
+        };
+        write_config(&cfg).expect("write under override");
+        assert!(
+            config.is_file(),
+            "config.json must be written at {}",
+            config.display()
+        );
+        assert_eq!(
+            read_config().p2p_enabled,
+            Some(true),
+            "round-trip read under override"
+        );
+    }
+
+    // ── Fix-2: write_config must create config.json atomically at mode 0600 ──
+
+    /// `write_config` must produce a `config.json` with mode `0600` and must
+    /// not leave any orphaned `.tmp.*` file behind after a successful write.
+    /// The config may carry `supabase_password` / `supabase_anon_key`; it must
+    /// never be momentarily world-readable between create and chmod.
+    #[cfg(unix)]
+    #[test]
+    fn write_config_creates_file_with_mode_0600_and_no_tmp_orphan() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::set_all(
+            &["HOME", "XDG_CONFIG_HOME", "COPYPASTE_CONFIG_DIR"],
+            dir.path(),
+        );
+
+        let cfg = AppConfig {
+            p2p_enabled: Some(true),
+            supabase_password: Some("secret".into()),
+            ..Default::default()
+        };
+        write_config(&cfg).expect("write_config must succeed");
+
+        // Find the written config.json under the temp home.
+        let config = config_path().expect("config_path under override");
+        assert!(config.exists(), "config.json must be written");
+
+        let mode = std::fs::metadata(&config).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "config.json must be owner-only (0600), got {:o}",
+            mode & 0o777
+        );
+
+        // No orphaned temp file in the config dir.
+        let config_dir = config.parent().unwrap();
+        let orphans: Vec<_> = std::fs::read_dir(config_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with(".config.json.tmp.")
+            })
+            .collect();
+        assert!(
+            orphans.is_empty(),
+            "atomic write must not leave temp files behind: {:?}",
+            orphans
+        );
+    }
+
+    // ── Fix-5: p2p_enabled must be Option<bool> so omitting it preserves existing ──
+
+    /// A `set_config` request that omits `p2p_enabled` (the field is absent from
+    /// JSON or deserialises as `null`) must NOT flip the stored value to `false`.
+    /// Previously `p2p_enabled: bool` with `#[serde(default)]` meant any
+    /// deserialization that did not include the field produced `false`, silently
+    /// disabling P2P for every caller that only sends a subset of fields.
+    #[test]
+    fn p2p_enabled_option_none_preserves_existing() {
+        // When p2p_enabled is absent from JSON it must deserialise as None.
+        let json_without = r#"{"supabase_url": "https://x.supabase.co"}"#;
+        let cfg: AppConfig = serde_json::from_str(json_without).expect("deserialize");
+        assert!(
+            cfg.p2p_enabled.is_none(),
+            "absent p2p_enabled must deserialise as None, got {:?}",
+            cfg.p2p_enabled
+        );
+
+        // merge_config: when incoming has None, existing value must be preserved.
+        let existing = AppConfig {
+            p2p_enabled: Some(true),
+            ..Default::default()
+        };
+        let merged = merge_config(existing, cfg);
+        assert_eq!(
+            merged.p2p_enabled,
+            Some(true),
+            "merge_config must preserve existing p2p_enabled when incoming is None"
+        );
+    }
+
+    /// When `p2p_enabled: false` is explicitly sent, merge_config must take the
+    /// incoming value (the toggle is authoritative when present).
+    #[test]
+    fn p2p_enabled_option_some_false_wins() {
+        let existing = AppConfig {
+            p2p_enabled: Some(true),
+            ..Default::default()
+        };
+        let incoming = AppConfig {
+            p2p_enabled: Some(false),
+            ..Default::default()
+        };
+        let merged = merge_config(existing, incoming);
+        assert_eq!(
+            merged.p2p_enabled,
+            Some(false),
+            "explicit p2p_enabled=false must override existing true"
         );
     }
 }

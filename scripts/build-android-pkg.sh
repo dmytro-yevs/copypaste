@@ -92,9 +92,11 @@ fi
 OUT_DIR="$OUT_BASE/android-${ABI}"
 mkdir -p "$OUT_DIR"
 
-echo "  -> cargo ndk -t ${ABI} build --release -p copypaste-android"
+# V-20: use --profile release-size (opt-level="z", LTO=thin, strip=symbols)
+# instead of plain --release so the APK ships the smallest possible .so.
+echo "  -> cargo ndk -t ${ABI} build --profile release-size -p copypaste-android"
 cargo ndk -t "$ABI" -o "$OUT_DIR" \
-  build --release \
+  build --profile release-size \
   --manifest-path "$CRATE_DIR/Cargo.toml"
 
 # cargo-ndk -o lays out as $OUT_DIR/$ABI/lib*.so; normalize to flat $OUT_DIR/.

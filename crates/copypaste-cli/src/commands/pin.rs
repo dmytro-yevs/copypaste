@@ -44,8 +44,11 @@ fn validate_uuid(id: &str) -> Result<()> {
 pub fn run_pin(socket_path: &Path, id: &str) -> Result<()> {
     validate_uuid(id)?;
     let mut client = IpcClient::connect(socket_path)?;
-    let req =
-        serde_json::json!({"id": "1", "method": "pin_item", "params": {"id": id, "pinned": true}});
+    let req = IpcClient::build_request(
+        "1",
+        "pin_item",
+        serde_json::json!({"id": id, "pinned": true}),
+    );
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
@@ -56,8 +59,11 @@ pub fn run_pin(socket_path: &Path, id: &str) -> Result<()> {
 pub fn run_unpin(socket_path: &Path, id: &str) -> Result<()> {
     validate_uuid(id)?;
     let mut client = IpcClient::connect(socket_path)?;
-    let req =
-        serde_json::json!({"id": "1", "method": "pin_item", "params": {"id": id, "pinned": false}});
+    let req = IpcClient::build_request(
+        "1",
+        "pin_item",
+        serde_json::json!({"id": id, "pinned": false}),
+    );
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 

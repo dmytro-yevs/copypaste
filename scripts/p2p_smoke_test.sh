@@ -197,8 +197,11 @@ spawn_daemon 2; pass_step "C up (pid ${PIDS[2]}) socket ${SOCKS[2]} [unpaired co
 
 SOCK_A="${SOCKS[0]}"; SOCK_B="${SOCKS[1]}"; SOCK_C="${SOCKS[2]}"
 CFG_A="${ROOTS[0]}/config"; CFG_B="${ROOTS[1]}/config"
-PEERS_A="$CFG_A/copypaste/peers.json"
-PEERS_B="$CFG_B/copypaste/peers.json"
+# peers.json co-locates flat under $COPYPASTE_CONFIG_DIR (the unified config-dir
+# resolver returns the override verbatim, no `copypaste/` subdir). This matches
+# the real macOS layout where config.json/peers.json/DB share one directory.
+PEERS_A="$CFG_A/peers.json"
+PEERS_B="$CFG_B/peers.json"
 
 # ---------------------------------------------------------------------------
 # STEP 3 — Sanity: both expose an mTLS cert fingerprint (P2P actually enabled)

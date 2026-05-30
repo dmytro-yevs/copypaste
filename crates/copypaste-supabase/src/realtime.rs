@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, RwLock};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -88,6 +88,19 @@ pub struct RealtimeConfig {
 
     /// Set to `false` to disable the Realtime client entirely (feature flag).
     pub enabled: bool,
+
+    /// The current user JWT used as `Authorization: Bearer` in the channel join
+    /// payload.  Wrapped in `Arc<RwLock<…>>` so the daemon can push a refreshed
+    /// token without restarting the client — each reconnect's `run_session` call
+    /// reads the lock to get the most-recent bearer before sending `phx_join`.
+    ///
+    /// An empty string means no per-user RLS (anon-key-only access).
+    ///
+    /// **Contract for the daemon agent:** call
+    /// [`RealtimeClient::update_jwt`] with the new access token whenever the
+    /// GoTrue session is refreshed.  The next WebSocket reconnect (or explicit
+    /// disconnect + reconnect) will use the updated token.
+    pub user_jwt: Arc<RwLock<String>>,
 }
 
 impl RealtimeConfig {
@@ -109,8 +122,12 @@ impl RealtimeConfig {
         let anon_key = std::env::var("SUPABASE_ANON_KEY")
             .map_err(|_| RealtimeError::Config("SUPABASE_ANON_KEY env var not set".into()))?;
 
+        // Disabled iff the var is set to a truthy value. The old check
+        // (`v != "1"`) inverted this: `=true`/`=yes`/`=TRUE` all silently
+        // ENABLED realtime. Treat any of "1"/"true"/"yes" (trimmed,
+        // case-insensitive) as a request to disable; everything else enables.
         let enabled = std::env::var("SUPABASE_REALTIME_DISABLED")
-            .map(|v| v != "1")
+            .map(|v| !is_truthy(&v))
             .unwrap_or(true);
 
         let topic = std::env::var("SUPABASE_REALTIME_TOPIC")
@@ -119,11 +136,26 @@ impl RealtimeConfig {
         Ok(Self::new(supabase_url, anon_key, topic, enabled))
     }
 
-    /// Construct config programmatically.
+    /// Construct config programmatically (no user JWT — anon scope).
     pub fn new(
         supabase_url: impl Into<String>,
         anon_key: impl Into<String>,
         topic: impl Into<String>,
+        enabled: bool,
+    ) -> Self {
+        Self::with_jwt(supabase_url, anon_key, topic, None, enabled)
+    }
+
+    /// Construct config with an explicit user JWT for RLS-aware subscriptions.
+    ///
+    /// The `user_jwt` is sent as `params.user_token` in the `phx_join` payload
+    /// so Supabase Realtime applies the authenticated user's RLS policies when
+    /// filtering `postgres_changes` events.  Pass `None` to use anon scope.
+    pub fn with_jwt(
+        supabase_url: impl Into<String>,
+        anon_key: impl Into<String>,
+        topic: impl Into<String>,
+        user_jwt: Option<String>,
         enabled: bool,
     ) -> Self {
         let supabase_url = supabase_url.into();
@@ -143,8 +175,76 @@ impl RealtimeConfig {
             max_backoff: Duration::from_secs(60),
             channel_capacity: 256,
             enabled,
+            user_jwt: Arc::new(RwLock::new(user_jwt.unwrap_or_default())),
         }
     }
+}
+
+/// Whether an env-var string represents a truthy/enabled flag value.
+///
+/// Accepts `1`, `true`, `yes` (trimmed, case-insensitive). Used to interpret
+/// `SUPABASE_REALTIME_DISABLED` so that e.g. `=TRUE` disables realtime instead
+/// of silently enabling it.
+fn is_truthy(value: &str) -> bool {
+    matches!(value.trim().to_lowercase().as_str(), "1" | "true" | "yes")
+}
+
+/// Strip the query string from a WebSocket URL so it is safe to log.
+///
+/// The `ws_url` embeds `?apikey=<anon-key>&vsn=...`; logging the raw URL would
+/// expose the anon key in the daemon log file.  This function returns only the
+/// scheme + authority + path, dropping everything from `?` onward.
+///
+/// # Examples
+/// ```
+/// # use copypaste_supabase::realtime::scrub_ws_url;
+/// let u = "wss://abc.supabase.co/realtime/v1/websocket?apikey=secret&vsn=1.0.0";
+/// assert_eq!(scrub_ws_url(u), "wss://abc.supabase.co/realtime/v1/websocket");
+/// ```
+pub fn scrub_ws_url(url: &str) -> &str {
+    // Everything before the first `?` is the safe portion.
+    match url.find('?') {
+        Some(pos) => &url[..pos],
+        None => url,
+    }
+}
+
+/// Build the Phoenix Channel join payload for a Supabase Realtime subscription.
+///
+/// # Bearer token
+/// The `user_jwt` is placed under `config.access_token` so Supabase Realtime
+/// authenticates the channel with the caller's RLS identity.  An empty string
+/// disables per-user RLS (anonymous / anon-key-only access).
+///
+/// # Event filter
+/// Registers `event: "*"` so INSERT, UPDATE **and** DELETE changes are all
+/// delivered to this device.  Using `event: "INSERT"` only would mean that
+/// cross-device UPDATE/DELETE operations are silently dropped.
+///
+/// The payload shape matches Supabase Realtime v2 (`vsn=1.0.0`):
+/// ```json
+/// {
+///   "config": {
+///     "access_token": "<jwt>",
+///     "postgres_changes": [
+///       { "event": "*", "schema": "public", "table": "clipboard_items" }
+///     ]
+///   }
+/// }
+/// ```
+pub(crate) fn build_join_payload(user_jwt: &str) -> serde_json::Value {
+    serde_json::json!({
+        "config": {
+            "access_token": user_jwt,
+            "postgres_changes": [
+                {
+                    "event": "*",
+                    "schema": "public",
+                    "table": "clipboard_items"
+                }
+            ]
+        }
+    })
 }
 
 /// Convert a Supabase REST URL to the Realtime WebSocket URL.
@@ -212,6 +312,30 @@ impl RealtimeClient {
             },
             rx,
         )
+    }
+
+    /// Replace the user JWT that is sent as `Authorization: Bearer` in the
+    /// Phoenix Channel join payload on every (re)connect.
+    ///
+    /// # When to call this
+    /// Call this from the daemon's GoTrue auto-refresh callback whenever a new
+    /// access token is obtained.  The next WebSocket session (existing or after
+    /// reconnect) will use the updated token, preventing RLS returning zero rows
+    /// after the ~1 h JWT expiry.
+    ///
+    /// # Thread safety
+    /// This method acquires a write lock on the shared `Arc<RwLock<String>>`.
+    /// It is async so it can be called from any Tokio task.
+    pub async fn update_jwt(&self, jwt: String) {
+        *self.config.user_jwt.write().await = jwt;
+    }
+
+    /// Return a snapshot of the current JWT (empty string if none set).
+    ///
+    /// Primarily useful for tests and diagnostics; the live value read inside
+    /// `run_session` is the authoritative one used for actual connections.
+    pub async fn current_jwt(&self) -> String {
+        self.config.user_jwt.read().await.clone()
     }
 
     /// Start the background connection loop.
@@ -309,18 +433,34 @@ async fn connection_loop(
             break;
         }
 
-        tracing::info!(url = %config.ws_url, "Connecting to Supabase Realtime");
+        // Fix HIGH #1: strip ?apikey=... so the anon key never appears in logs.
+        tracing::info!(url = %scrub_ws_url(&config.ws_url), "Connecting to Supabase Realtime");
 
         match run_session(&config, &tx, &shutdown).await {
             SessionResult::Shutdown => {
                 tracing::info!("Supabase Realtime client: shutdown requested");
                 break;
             }
-            SessionResult::Disconnected => {
-                tracing::warn!(
-                    backoff_secs = backoff.as_secs_f64(),
-                    "Supabase Realtime disconnected; reconnecting after backoff"
-                );
+            SessionResult::Disconnected(session_age) => {
+                // Reset backoff to initial when the session was "stable" — i.e.
+                // it ran longer than `max_backoff`. A long session implies the
+                // server is healthy and the disconnect is a transient blip, not
+                // a systematic connection failure. Only applying backoff for
+                // pre-message disconnects (ConnectError) or very short sessions
+                // avoids penalising recoveries from brief network interruptions.
+                if session_age >= config.max_backoff {
+                    tracing::info!(
+                        session_secs = session_age.as_secs_f64(),
+                        "Supabase Realtime: long session ended; resetting backoff to initial"
+                    );
+                    backoff = config.initial_backoff;
+                } else {
+                    tracing::warn!(
+                        backoff_secs = backoff.as_secs_f64(),
+                        session_secs = session_age.as_secs_f64(),
+                        "Supabase Realtime disconnected; reconnecting after backoff"
+                    );
+                }
             }
             SessionResult::ConnectError(e) => {
                 tracing::error!(error = %e, "Supabase Realtime connect error");
@@ -336,7 +476,8 @@ async fn connection_loop(
             }
         }
 
-        // Exponential backoff with cap.
+        // Exponential backoff with cap (only increments for short/failed sessions;
+        // long sessions already reset backoff above).
         backoff = (backoff * 2).min(config.max_backoff);
     }
 
@@ -350,9 +491,11 @@ async fn connection_loop(
 enum SessionResult {
     /// Graceful shutdown was requested.
     Shutdown,
-    /// Connection was lost unexpectedly.
-    Disconnected,
-    /// Could not establish the connection.
+    /// Connection was lost unexpectedly after being established.
+    /// Carries how long the session ran so the caller can reset backoff when
+    /// the session was "stable" (ran longer than `max_backoff`).
+    Disconnected(Duration),
+    /// Could not establish the connection (pre-join failure).
     ConnectError(String),
 }
 
@@ -379,10 +522,27 @@ async fn run_session(
 
     tracing::info!("WebSocket connected to Supabase Realtime");
 
+    // Track how long this session runs so the caller can reset backoff when
+    // the session was long enough to be considered "stable".
+    let session_started = std::time::Instant::now();
+
     let (mut sink, mut stream) = ws_stream.split();
 
-    // Send phx_join for the clipboard_items channel.
-    let join_msg = PhoenixMessage::join("1", "1", &config.topic);
+    // Fix HIGH #2: read the CURRENT bearer token for this reconnect so that a
+    // refreshed JWT (pushed via `RealtimeClient::update_jwt`) is always used
+    // rather than the stale value captured at client creation time.
+    //
+    // Fix MED #3: build_join_payload registers event:"*" (INSERT + UPDATE +
+    // DELETE) instead of INSERT-only, so cross-device UPDATE/DELETE are delivered.
+    let current_jwt = config.user_jwt.read().await.clone();
+    let join_payload = build_join_payload(&current_jwt);
+    let join_msg = PhoenixMessage {
+        join_ref: Some("1".to_owned()),
+        msg_ref: Some("1".to_owned()),
+        topic: config.topic.clone(),
+        event: PhoenixEvent::JOIN.to_owned(),
+        payload: join_payload,
+    };
     let join_wire = match join_msg.to_wire() {
         Ok(w) => w,
         Err(e) => return SessionResult::ConnectError(format!("join serialise: {e}")),
@@ -435,17 +595,24 @@ async fn run_session(
                     None => {
                         // Stream ended.
                         let _ = hb_stop_tx.send(());
-                        return SessionResult::Disconnected;
+                        return SessionResult::Disconnected(session_started.elapsed());
                     }
                     Some(Err(e)) => {
                         tracing::warn!(error = %e, "WebSocket receive error");
                         let _ = hb_stop_tx.send(());
-                        return SessionResult::Disconnected;
+                        return SessionResult::Disconnected(session_started.elapsed());
                     }
                     Some(Ok(msg)) => {
                         if let Some(result) = handle_message(msg, tx, &config.topic).await {
                             let _ = hb_stop_tx.send(());
-                            return result;
+                            // For Disconnected results from handle_message, replace
+                            // the placeholder duration with the actual session age.
+                            return match result {
+                                SessionResult::Disconnected(_) => {
+                                    SessionResult::Disconnected(session_started.elapsed())
+                                }
+                                other => other,
+                            };
                         }
                     }
                 }
@@ -454,10 +621,27 @@ async fn run_session(
             // Heartbeat payload ready to send.
             Some(payload) = hb_payload_rx.recv() => {
                 tracing::debug!("sending heartbeat");
-                if let Err(e) = sink.send(Message::Text(payload)).await {
-                    tracing::warn!(error = %e, "heartbeat send failed");
-                    let _ = hb_stop_tx.send(());
-                    return SessionResult::Disconnected;
+                // Bound the write: on a half-open socket `send` can stall
+                // indefinitely, silently starving heartbeats until the ~60s
+                // server timeout kills us. Treat a write that doesn't complete
+                // within one heartbeat interval as a disconnect and reconnect.
+                match tokio::time::timeout(
+                    heartbeat_interval,
+                    sink.send(Message::Text(payload)),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        tracing::warn!(error = %e, "heartbeat send failed");
+                        let _ = hb_stop_tx.send(());
+                        return SessionResult::Disconnected(session_started.elapsed());
+                    }
+                    Err(_) => {
+                        tracing::warn!("heartbeat send timed out; treating as disconnect");
+                        let _ = hb_stop_tx.send(());
+                        return SessionResult::Disconnected(session_started.elapsed());
+                    }
                 }
             }
 
@@ -531,7 +715,9 @@ async fn handle_message(
         Message::Pong(_) => None,
         Message::Close(_) => {
             tracing::info!("received WebSocket Close frame");
-            Some(SessionResult::Disconnected)
+            // Duration::ZERO is a placeholder; run_session replaces it with the
+            // actual elapsed time before returning to connection_loop.
+            Some(SessionResult::Disconnected(Duration::ZERO))
         }
         Message::Frame(_) => None,
     }
@@ -621,6 +807,53 @@ mod tests {
             url,
             "wss://abc.supabase.co/realtime/v1/websocket?apikey=k&vsn=1.0.0"
         );
+    }
+
+    // ── Disable-flag parsing (truthy detection) ───────────────────────────────
+
+    #[test]
+    fn is_truthy_recognises_enabled_values() {
+        for v in [
+            "1", "true", "TRUE", "True", "yes", "YES", " true ", "\tyes\n",
+        ] {
+            assert!(is_truthy(v), "{v:?} should be truthy (disable realtime)");
+        }
+    }
+
+    #[test]
+    fn is_truthy_rejects_other_values() {
+        for v in ["0", "false", "no", "", "off", "2", "disabled", "enable"] {
+            assert!(!is_truthy(v), "{v:?} should NOT be truthy");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn disabled_flag_truthy_values_disable_realtime() {
+        std::env::set_var("SUPABASE_URL", "https://test.supabase.co");
+        std::env::set_var("SUPABASE_ANON_KEY", "k");
+        for v in ["1", "true", "TRUE", "yes"] {
+            std::env::set_var("SUPABASE_REALTIME_DISABLED", v);
+            let cfg = RealtimeConfig::from_env().expect("config builds");
+            assert!(
+                !cfg.enabled,
+                "SUPABASE_REALTIME_DISABLED={v} must DISABLE realtime"
+            );
+        }
+        // Unset / falsey → enabled.
+        std::env::remove_var("SUPABASE_REALTIME_DISABLED");
+        assert!(
+            RealtimeConfig::from_env().expect("config builds").enabled,
+            "unset disable flag should leave realtime enabled"
+        );
+        std::env::set_var("SUPABASE_REALTIME_DISABLED", "false");
+        assert!(
+            RealtimeConfig::from_env().expect("config builds").enabled,
+            "SUPABASE_REALTIME_DISABLED=false should leave realtime enabled"
+        );
+        std::env::remove_var("SUPABASE_REALTIME_DISABLED");
+        std::env::remove_var("SUPABASE_URL");
+        std::env::remove_var("SUPABASE_ANON_KEY");
     }
 
     // ── RealtimeConfig ────────────────────────────────────────────────────────
@@ -842,6 +1075,89 @@ mod tests {
             r.contains("len=3"),
             "tiny string payload should be 3 bytes; got: {r}"
         );
+    }
+
+    // ── scrub_ws_url ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn scrub_ws_url_strips_query_string() {
+        let url = "wss://abc.supabase.co/realtime/v1/websocket?apikey=secret-key&vsn=1.0.0";
+        let scrubbed = scrub_ws_url(url);
+        assert!(
+            !scrubbed.contains("apikey"),
+            "scrubbed URL must not contain 'apikey', got: {scrubbed}"
+        );
+        assert!(
+            !scrubbed.contains("secret-key"),
+            "scrubbed URL must not contain the key value, got: {scrubbed}"
+        );
+        assert!(
+            scrubbed.contains("wss://abc.supabase.co"),
+            "scrubbed URL must still contain the host, got: {scrubbed}"
+        );
+    }
+
+    #[test]
+    fn scrub_ws_url_no_query_unchanged() {
+        let url = "wss://abc.supabase.co/realtime/v1/websocket";
+        let scrubbed = scrub_ws_url(url);
+        assert_eq!(scrubbed, url);
+    }
+
+    // ── build_join_payload ────────────────────────────────────────────────────
+
+    #[test]
+    fn build_join_payload_includes_bearer_token() {
+        let jwt = "my.jwt.token";
+        let payload = build_join_payload(jwt);
+        // The JWT must appear under config.access_token (Supabase Realtime v2 shape).
+        let token_in_payload = payload
+            .pointer("/config/access_token")
+            .and_then(|v| v.as_str())
+            == Some(jwt);
+        assert!(
+            token_in_payload,
+            "join payload must include JWT under /config/access_token, got: {}",
+            serde_json::to_string(&payload).unwrap()
+        );
+    }
+
+    #[test]
+    fn build_join_payload_registers_all_events() {
+        let payload = build_join_payload("tok");
+        let payload_str = serde_json::to_string(&payload).unwrap();
+        // event:"*" means INSERT + UPDATE + DELETE are all delivered.
+        assert!(
+            payload_str.contains("\"*\""),
+            "join payload must register event:\"*\", got: {payload_str}"
+        );
+        assert!(
+            !payload_str.contains("\"INSERT\""),
+            "join payload must NOT limit to INSERT-only, got: {payload_str}"
+        );
+    }
+
+    // ── update_jwt ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn update_jwt_changes_jwt_seen_by_next_session() {
+        // Create a config with an initial JWT.
+        let config = RealtimeConfig::new(
+            "https://abc.supabase.co",
+            "anon-key",
+            RealtimeConfig::DEFAULT_TOPIC,
+            false, // disabled so no real network
+        );
+        let (client, _rx) = RealtimeClient::new(config);
+
+        // The initial JWT should be empty (no JWT provided).
+        let initial = client.current_jwt().await;
+        assert_eq!(initial, "", "initial JWT should be empty");
+
+        // Update the JWT and verify it is visible.
+        client.update_jwt("fresh.token.abc".to_owned()).await;
+        let updated = client.current_jwt().await;
+        assert_eq!(updated, "fresh.token.abc", "updated JWT should be visible");
     }
 
     // ── Disabled client ───────────────────────────────────────────────────────

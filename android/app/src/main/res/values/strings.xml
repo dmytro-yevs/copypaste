@@ -13,8 +13,12 @@
     <string name="title_pair">Pair Device</string>
     <string name="title_settings">Settings</string>
 
-    <!-- History screen -->
-    <string name="empty_history">No clipboard items yet. Copy something to get started.</string>
+    <!-- History screen — §9 empty states + search filter -->
+    <string name="empty_history">Nothing copied yet</string>
+    <string name="empty_history_subtitle">Copy something and it will appear here.</string>
+    <string name="empty_search_title">No results for \"%1$s\"</string>
+    <string name="empty_search_subtitle">Try a different search term.</string>
+    <string name="history_filter_placeholder">Filter…</string>
 
     <!-- Pair screen -->
     <string name="pair_instructions">Tap the button below to start pairing. On the other device, scan the QR code or paste the token.</string>
@@ -25,26 +29,114 @@
     <string name="pair_token_expired">Token expired — request a new one.</string>
     <string name="pair_request_new_token">Request new token</string>
 
-    <!-- Settings -->
+    <!-- Settings — section headers -->
+    <string name="section_general">General</string>
+    <string name="section_display">Display</string>
+    <string name="section_storage_limits">Storage / Limits</string>
+    <string name="section_sync">Sync</string>
+    <string name="section_supabase_config">Supabase Configuration</string>
+    <string name="section_supabase_account">Supabase Account (optional)</string>
+    <string name="section_relay_config">Relay Configuration</string>
+    <string name="section_notifications">Notifications</string>
+
+    <!-- Settings — General -->
+    <string name="setting_capture_enabled_title">Pause capture / Private mode</string>
+    <string name="setting_capture_enabled_subtitle">When off, the clipboard monitor stops recording new items. Also togglable from the notification.</string>
     <string name="setting_sync_enabled_title">Enable Clipboard Sync</string>
     <string name="setting_sync_enabled_subtitle">Sync clipboard items with paired devices via the relay.</string>
+
+    <!-- Settings — Display -->
     <string name="setting_sensitive_warnings_title">Warn on Sensitive Data</string>
     <string name="setting_sensitive_warnings_subtitle">Show a toast when card numbers or tokens are skipped.</string>
     <string name="setting_mask_sensitive_title">Mask Sensitive Content</string>
     <string name="setting_mask_sensitive_subtitle">Hide preview text for items flagged as sensitive. Tap an item to reveal for 5 seconds.</string>
+    <string name="setting_translucency_title">Transparency</string>
+    <string name="setting_translucency_subtitle">Use semi-transparent backgrounds on surfaces. Disable for fully solid backgrounds.</string>
+    <string name="setting_image_max_height_label">Image max height (dp)</string>
+    <string name="setting_image_max_height_hint">1–200 dp (default 40)</string>
+    <string name="setting_preview_delay_label">Action-row auto-close delay (ms)</string>
+    <string name="setting_preview_delay_hint">200–100000 ms (default 1500)</string>
+
+    <!-- Settings — Storage / Limits (no item-count cap — size only) -->
+    <string name="setting_max_text_size_label">Max text item size (MB)</string>
+    <string name="setting_max_text_size_hint">1–100 MB (default 15)</string>
+    <string name="setting_max_image_size_label">Max image item size (MB)</string>
+    <string name="setting_max_image_size_hint">1–512 MB (default 64)</string>
+    <string name="setting_storage_quota_label">Local storage limit (MB)</string>
+    <string name="setting_storage_quota_hint">50–20480 MB (default 10240)</string>
+
+    <!-- Settings — Sync -->
+    <string name="setting_sync_wifi_only_title">Sync on Wi-Fi only</string>
+    <string name="setting_sync_wifi_only_subtitle">Restrict sync uploads and downloads to Wi-Fi connections. Mobile data is not used when enabled.</string>
+    <string name="setting_use_supabase_title">Use Supabase Cloud Sync</string>
+    <string name="setting_use_supabase_subtitle">Cross-device sync via Supabase (end-to-end encrypted). Off = relay mode.</string>
+    <string name="setting_supabase_url_label">Supabase URL</string>
+    <string name="setting_supabase_anon_key_label">Anon Key</string>
+    <string name="setting_sync_passphrase_label">Sync Passphrase</string>
+    <string name="setting_sync_passphrase_hint">Shared passphrase (same on all devices)</string>
+    <string name="setting_supabase_email_label">Email</string>
+    <string name="setting_supabase_password_label">Password</string>
+    <string name="setting_supabase_account_note">If left blank, the anon key is used as bearer. Sign-in enables Row Level Security policies.</string>
     <string name="setting_relay_url_label">Relay URL</string>
     <string name="setting_device_id_label">Device ID</string>
     <string name="setting_permissions_title">Permissions</string>
     <string name="setting_permissions_subtitle">Review and re-request permissions</string>
 
+    <!-- Settings — Notifications -->
+    <string name="setting_notify_on_copy_title">Notify on copy</string>
+    <string name="setting_notify_on_copy_subtitle">Show a brief notification each time a clipboard item is captured.</string>
+    <string name="setting_sound_on_copy_title">Sound on copy</string>
+    <string name="setting_sound_on_copy_subtitle">Play a subtle click sound each time a clipboard item is captured.</string>
+
     <!-- Permissions screen -->
     <string name="title_permissions">Permissions</string>
     <string name="permissions_intro">Review the status of each permission CopyPaste uses. Tap a button to re-open its request or settings screen at any time.</string>
+
+    <!-- Background Capture Setup screen -->
+    <string name="title_bg_capture_setup">Background Capture Setup</string>
+    <string name="setting_bg_capture_title">Background Capture Setup</string>
+    <string name="setting_bg_capture_subtitle">Grant overlay + battery exemption for reliable background clipboard reads</string>
+    <string name="bg_capture_intro">Android 10+ blocks clipboard reads from background apps. Enable the three steps below to unlock reliable capture — the same combination ClipCascade uses.</string>
+
+    <!-- Step 1: SYSTEM_ALERT_WINDOW -->
+    <string name="bg_capture_overlay_title">Draw Over Other Apps (Overlay)</string>
+    <string name="bg_capture_overlay_desc">Grants the app a minimal invisible overlay window. When the overlay is active the system considers the process focused, lifting Android 10+\'s background clipboard restriction — the same mechanism used by ClipCascade.</string>
+    <string name="bg_capture_overlay_grant">Grant Overlay Permission</string>
+    <string name="bg_capture_overlay_granted">Open Overlay Settings</string>
+
+    <!-- Step 2: Battery Optimization exemption -->
+    <string name="bg_capture_battery_title">Disable Battery Optimization</string>
+    <string name="bg_capture_battery_desc">Prevents Android\'s Doze and App Standby modes from killing the clipboard-monitoring foreground service when the screen is off. Required for consistent background capture.</string>
+    <string name="bg_capture_battery_grant">Request Exemption</string>
+    <string name="bg_capture_battery_granted">Open Battery Settings</string>
+
+    <!-- Step 3: OEM autostart -->
+    <string name="bg_capture_oem_title">OEM Autostart / Power Manager</string>
+    <string name="bg_capture_oem_desc_base">Many manufacturers (Xiaomi, Huawei, Oppo, Vivo, Samsung, OnePlus, etc.) add an extra battery-saver layer that kills background apps regardless of Android\'s own battery optimisation. Whitelist CopyPaste in your phone\'s autostart or protected-apps screen.</string>
+    <string name="bg_capture_oem_desc_this_device">On this device: %1$s</string>
+    <string name="bg_capture_oem_button">Open OEM Power Settings</string>
+    <string name="bg_capture_oem_not_needed">Not needed on this device — no OEM power-manager layer detected. Stock Android battery exemption (step 2) is sufficient.</string>
+
+    <!-- Step 4: Final instruction -->
+    <string name="bg_capture_restart_title">Last Step — Force-Stop Once</string>
+    <string name="bg_capture_restart_desc">After completing the steps above, go to Settings › Apps › CopyPaste and tap Force Stop, then reopen the app. This lets the overlay window initialise on first launch so background capture activates immediately.</string>
+
+    <!-- Shared status labels (also used by PermissionsSettingsActivity) -->
+    <string name="status_granted">Granted</string>
+    <string name="status_not_granted">Not granted</string>
+    <string name="label_required">required</string>
 
     <!-- History — sensitive marker -->
     <string name="sensitive_preview_mask">••••••</string>
     <string name="sensitive_badge_label">Sensitive</string>
     <string name="cd_sensitive_item">Sensitive content — preview hidden</string>
+    <string name="sensitive_tap_hint">Sensitive — use Copy action</string>
+
+    <!-- Per-copy event notification channel -->
+    <string name="notif_channel_copy_event_name">Copy Events</string>
+    <string name="notif_channel_copy_event_description">Silent badge notification each time a clipboard item is captured.</string>
+    <string name="notif_copy_event_title">Item copied</string>
+    <string name="notif_copy_event_content">Clipboard item saved to history.</string>
 
     <!-- Foreground service notification -->
     <string name="notif_channel_service_name">Clipboard Monitoring</string>
@@ -56,6 +148,14 @@
     <string name="notif_action_pause">Pause</string>
     <string name="notif_action_resume">Resume</string>
     <string name="notif_action_open">Open</string>
+
+    <!-- One-time accessibility-required warning notification (Android 10+ background restriction) -->
+    <string name="notif_channel_a11y_warn_name">Setup Required</string>
+    <string name="notif_channel_a11y_warn_description">One-time notifications when a setup step is needed for full clipboard capture.</string>
+    <string name="notif_a11y_warn_title">Background clipboard capture disabled</string>
+    <string name="notif_a11y_warn_content">Android 10+ blocks clipboard reads in background. Enable Accessibility to capture clips from other apps.</string>
+    <string name="notif_a11y_warn_content_long">Android 10+ (API 29) restricts background clipboard access. CopyPaste can only read clipboard content from other apps when its Accessibility Service is enabled.\n\nTap to open setup and enable it — it reads no screen content and intercepts no input.</string>
+    <string name="notif_a11y_warn_action">Enable Accessibility</string>
 
     <!-- Accessibility service -->
     <string name="accessibility_service_description">Monitors clipboard changes in the background so CopyPaste can sync items even when the app is not in the foreground. Does not read screen content or intercept inputs.</string>
@@ -69,8 +169,66 @@
     <!-- Content descriptions -->
     <string name="cd_back">Back</string>
     <string name="cd_refresh">Refresh</string>
+    <string name="cd_copy">Copy</string>
     <string name="cd_delete">Delete item</string>
     <string name="cd_sensitive_icon">Sensitive content marker</string>
+    <string name="cd_image_item">Image clipboard item</string>
+    <string name="cd_image_thumbnail">Image thumbnail</string>
+    <string name="cd_pin_item">Pin item</string>
+    <string name="cd_unpin_item">Unpin item</string>
+    <string name="cd_select_all">Select all</string>
+    <string name="cd_close_selection">Close selection mode</string>
+
+    <!-- History — bulk / pin actions -->
+    <string name="action_pin">Pin</string>
+    <string name="action_unpin">Unpin</string>
+    <string name="action_clear_all">Clear All</string>
+    <string name="action_clear_unpinned">Clear Unpinned</string>
+    <string name="action_delete_selected">Delete selected</string>
+    <string name="action_pin_selected">Pin selected</string>
+    <string name="action_unpin_selected">Unpin selected</string>
+    <string name="selection_count">%1$d selected</string>
+
+    <!-- Confirmation dialogs -->
+    <string name="dialog_clear_all_title">Clear All History</string>
+    <string name="dialog_clear_all_message">This will permanently delete all %1$d clipboard items. This cannot be undone.</string>
+    <string name="dialog_clear_unpinned_title">Clear Unpinned Items</string>
+    <string name="dialog_clear_unpinned_message">This will permanently delete all unpinned clipboard items. Pinned items will be kept.</string>
+    <string name="dialog_delete_selected_title">Delete Selected</string>
+    <string name="dialog_delete_selected_message">This will permanently delete %1$d selected items. This cannot be undone.</string>
+    <string name="dialog_confirm">Delete</string>
+    <string name="dialog_cancel">Cancel</string>
+
+    <!-- Log viewer (in-app) -->
+    <string name="log_viewer_button">View Logs</string>
+    <string name="log_viewer_description">Browse diagnostic logs inside the app.</string>
+
+    <!-- Diagnostics section (Settings) -->
+    <string name="section_diagnostics">Diagnostics</string>
+
+    <!-- Log export -->
+    <string name="log_export_button">Export Logs</string>
+    <string name="log_export_description">Share diagnostic logs with the developer to help investigate issues.\nLogs are also adb-pullable without root:\nadb pull /sdcard/Android/data/com.copypaste.android/files/logs/</string>
+    <string name="log_export_chooser_title">Share logs via…</string>
+    <string name="log_export_empty">No log files found yet.</string>
+    <string name="log_export_failed">Could not prepare log archive. Try adb pull instead.</string>
+
+    <!-- Crash detection (OnboardingActivity / next-launch prompt) -->
+    <string name="crash_detected_title">App crashed last time</string>
+    <string name="crash_detected_message">A crash was detected on the previous run. Export logs to help diagnose the issue?</string>
+    <string name="crash_detected_export">Export Logs</string>
+    <string name="crash_detected_dismiss">Dismiss</string>
+
+    <!-- adb READ_LOGS logcat capture (Settings › Diagnostics) -->
+    <string name="setting_logcat_capture_title">adb logcat background capture</string>
+    <string name="setting_logcat_capture_subtitle">Power-user fallback: reads clipboard-change events from logcat when AccessibilityService is unavailable. Requires READ_LOGS granted via adb (see below).</string>
+    <string name="logcat_status_not_granted">Status: READ_LOGS not granted</string>
+    <string name="logcat_status_disabled">Status: disabled (toggle on to activate)</string>
+    <string name="logcat_status_not_working">Status: granted but not working — Android 11+ may scope system logs. Enable AccessibilityService instead.</string>
+    <string name="logcat_status_working">Status: working — clips are being captured via logcat</string>
+    <string name="logcat_adb_grant_command">adb shell pm grant com.copypaste.android android.permission.READ_LOGS</string>
+    <string name="logcat_adb_revoke_command">adb shell pm revoke com.copypaste.android android.permission.READ_LOGS</string>
+    <string name="logcat_adb_label">Grant command (run once):</string>
 
     <!-- Error / status -->
     <string name="error_generic">Failed: %1$s</string>
@@ -78,6 +236,9 @@
     <string name="error_delete_item">Failed to delete item: %1$s</string>
     <string name="error_pairing">Pairing failed: %1$s</string>
     <string name="error_settings_save">Could not save setting: %1$s</string>
+    <string name="error_clear_all">Failed to clear history: %1$s</string>
+    <string name="error_set_pinned">Failed to update pin: %1$s</string>
+    <string name="error_delete_items">Failed to delete items: %1$s</string>
     <string name="status_pairing">Generating pairing token…</string>
     <string name="snackbar_dismiss">Dismiss</string>
 </resources>

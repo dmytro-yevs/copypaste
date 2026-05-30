@@ -13,6 +13,31 @@ use crate::store::{InMemoryStore, SessionStore};
 // How many seconds before expiry we proactively refresh the token.
 const REFRESH_MARGIN_SECS: u64 = 60;
 
+// Floor on the auto-refresh sleep interval. Without it, a short-lived token
+// (`expires_in <= REFRESH_MARGIN_SECS`) yields a sleep of 0, producing an
+// unthrottled refresh loop that hammers GoTrue. Never sleep below this.
+const MIN_REFRESH_INTERVAL_SECS: u64 = 5;
+
+/// Which GoTrue token grant a request used. A `400`/`422` means different
+/// things per grant — bad password vs. bad refresh token — and the OAuth
+/// `invalid_grant` code is shared by both, so the grant is the reliable
+/// disambiguator, not the error body.
+#[derive(Clone, Copy)]
+enum GrantKind {
+    Password,
+    Refresh,
+}
+
+/// Compute the next auto-refresh sleep (in seconds) after a successful refresh,
+/// given the freshly-issued token's `expires_in`. Refreshes `REFRESH_MARGIN_SECS`
+/// before expiry but never sleeps below [`MIN_REFRESH_INTERVAL_SECS`], so a
+/// short-lived token cannot spin the loop.
+fn next_refresh_sleep_secs(expires_in: u64) -> u64 {
+    expires_in
+        .saturating_sub(REFRESH_MARGIN_SECS)
+        .max(MIN_REFRESH_INTERVAL_SECS)
+}
+
 /// Redact an account email for logging. The email is PII and must never appear
 /// verbatim in logs. Keeps the first character of the local part plus the
 /// domain (`alice@example.com` → `a***@example.com`); inputs without a usable
@@ -97,7 +122,7 @@ impl AuthClient {
         let url = format!("{}/auth/v1/token?grant_type=password", self.base_url);
         let body = PasswordGrantRequest { email, password };
 
-        let raw: GoTrueTokenResponse = self.post_json(&url, &body).await?;
+        let raw: GoTrueTokenResponse = self.post_json(&url, &body, GrantKind::Password).await?;
         let session = self.build_session(raw);
         self.store.save(&session);
         info!(
@@ -116,7 +141,7 @@ impl AuthClient {
         let url = format!("{}/auth/v1/token?grant_type=refresh_token", self.base_url);
         let body = RefreshGrantRequest { refresh_token };
 
-        let raw: GoTrueTokenResponse = self.post_json(&url, &body).await?;
+        let raw: GoTrueTokenResponse = self.post_json(&url, &body, GrantKind::Refresh).await?;
         let session = self.build_session(raw);
         self.store.save(&session);
         info!("session refreshed (expires_at={})", session.expires_at);
@@ -144,15 +169,10 @@ impl AuthClient {
         }
 
         let code = status.as_u16();
-        let body: GoTrueErrorBody = resp.json().await.unwrap_or(GoTrueErrorBody {
-            error: Some("sign-out failed".into()),
-            error_description: None,
-            msg: None,
-            message: None,
-        });
+        let message = Self::decode_error_body(resp, "sign-out failed").await;
         Err(AuthError::GoTrue {
             status: code,
-            message: body.message(),
+            message,
         })
     }
 
@@ -176,15 +196,10 @@ impl AuthClient {
         }
 
         let code = status.as_u16();
-        let body: GoTrueErrorBody = resp.json().await.unwrap_or(GoTrueErrorBody {
-            error: Some("get_user failed".into()),
-            error_description: None,
-            msg: None,
-            message: None,
-        });
+        let message = Self::decode_error_body(resp, "get_user failed").await;
         Err(AuthError::GoTrue {
             status: code,
-            message: body.message(),
+            message,
         })
     }
 
@@ -221,8 +236,9 @@ impl AuthClient {
                             match self.refresh_session(&session.refresh_token).await {
                                 Ok(new) => {
                                     info!("auto-refresh: new expiry = {}", new.expires_at);
-                                    // Next check in expires_in - margin.
-                                    new.expires_in.saturating_sub(REFRESH_MARGIN_SECS)
+                                    // Next check in expires_in - margin, floored so a
+                                    // short-lived token can't spin the refresh loop.
+                                    next_refresh_sleep_secs(new.expires_in)
                                 }
                                 Err(e) => {
                                     warn!("auto-refresh failed: {e}");
@@ -247,7 +263,12 @@ impl AuthClient {
 
     /// POST `body` as JSON, parse the success response as `T`, or map GoTrue
     /// error bodies to [`AuthError`].
-    async fn post_json<B, T>(&self, url: &str, body: &B) -> AuthResult<T>
+    ///
+    /// `grant` disambiguates a `400`/`422`: the OAuth `invalid_grant` code is
+    /// emitted for *both* a bad password (password grant) and a bad refresh
+    /// token (refresh grant), so the grant kind — not the error body — decides
+    /// which [`AuthError`] variant we return.
+    async fn post_json<B, T>(&self, url: &str, body: &B, grant: GrantKind) -> AuthResult<T>
     where
         B: serde::Serialize,
         T: serde::de::DeserializeOwned,
@@ -266,28 +287,54 @@ impl AuthClient {
             return Ok(data);
         }
 
-        // Try to decode a GoTrue error envelope.
+        // Try to decode a GoTrue error envelope; preserve raw body on JSON
+        // parse failure so callers see the actual failure reason.
         let code = status.as_u16();
-        let body: GoTrueErrorBody = resp.json().await.unwrap_or(GoTrueErrorBody {
-            error: Some("unknown".into()),
-            error_description: None,
-            msg: None,
-            message: None,
-        });
-        let message = body.message();
+        let message = Self::decode_error_body(resp, "unknown").await;
 
         if code == 400 || code == 422 {
-            // Check for refresh-token errors specifically.
-            if message.to_lowercase().contains("refresh_token") {
-                return Err(AuthError::InvalidRefreshToken(message));
-            }
-            return Err(AuthError::InvalidCredentials(message));
+            return Err(match grant {
+                // The grant kind is authoritative: a refresh grant that 400s
+                // means the refresh token is bad/expired; a password grant that
+                // 400s means bad credentials. The OAuth `invalid_grant` code is
+                // shared by both, so we must NOT guess from the body here.
+                GrantKind::Refresh => AuthError::InvalidRefreshToken(message),
+                GrantKind::Password => AuthError::InvalidCredentials(message),
+            });
         }
 
         Err(AuthError::GoTrue {
             status: code,
             message,
         })
+    }
+
+    /// Decode a GoTrue error response body into a human-readable message.
+    ///
+    /// Reads the raw response text first so that if JSON parsing fails the
+    /// caller still sees a truncated snippet of the actual body (e.g. an HTML
+    /// gateway error page) rather than a generic "unknown error".  The raw text
+    /// is truncated to 200 bytes to keep log lines manageable.
+    async fn decode_error_body(resp: reqwest::Response, fallback: &str) -> String {
+        let raw = match resp.text().await {
+            Ok(t) => t,
+            Err(_) => return fallback.to_owned(),
+        };
+        // Try structured GoTrue JSON first.
+        if let Ok(body) = serde_json::from_str::<GoTrueErrorBody>(&raw) {
+            let msg = body.message();
+            if msg != "unknown error" {
+                return msg;
+            }
+        }
+        // Fall back to a truncated raw snippet so callers can diagnose the
+        // actual failure (e.g. "502 Bad Gateway" HTML, misconfigured proxy, etc.).
+        let snippet: String = raw.chars().take(200).collect();
+        if snippet.is_empty() {
+            fallback.to_owned()
+        } else {
+            snippet
+        }
     }
 
     /// Build a [`Session`] from a raw GoTrue token response, computing
@@ -301,7 +348,10 @@ impl AuthClient {
             access_token: raw.access_token,
             refresh_token: raw.refresh_token,
             expires_in: raw.expires_in,
-            expires_at: now + raw.expires_in,
+            // Saturating add: a hostile/large `expires_in` must not overflow
+            // (panic in debug, wrap in release). A wrap would make the token
+            // look already-expired and stall auth forever.
+            expires_at: now.saturating_add(raw.expires_in),
             token_type: raw.token_type,
             user: raw.user,
         }
@@ -311,6 +361,56 @@ impl AuthClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn next_refresh_sleep_is_floored() {
+        // Long-lived token: sleep is expires_in - margin.
+        assert_eq!(
+            next_refresh_sleep_secs(3600),
+            3600 - REFRESH_MARGIN_SECS,
+            "long-lived token should refresh margin-seconds before expiry"
+        );
+        // Exactly at the margin → would be 0; must be floored.
+        assert_eq!(
+            next_refresh_sleep_secs(REFRESH_MARGIN_SECS),
+            MIN_REFRESH_INTERVAL_SECS,
+            "expires_in == margin must not yield a zero sleep"
+        );
+        // Short-lived / hostile tiny token → saturates to 0 then floored.
+        assert_eq!(next_refresh_sleep_secs(10), MIN_REFRESH_INTERVAL_SECS);
+        assert_eq!(next_refresh_sleep_secs(0), MIN_REFRESH_INTERVAL_SECS);
+        // Never below the floor.
+        for expires_in in 0..=REFRESH_MARGIN_SECS + MIN_REFRESH_INTERVAL_SECS {
+            assert!(
+                next_refresh_sleep_secs(expires_in) >= MIN_REFRESH_INTERVAL_SECS,
+                "sleep dropped below floor for expires_in={expires_in}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_session_expires_at_saturates_on_overflow() {
+        // A hostile expires_in near u64::MAX must not overflow expires_at;
+        // it should saturate rather than wrap (which would look expired).
+        let client = AuthClient::new("https://example.com", "anon");
+        let raw = GoTrueTokenResponse {
+            access_token: "a".into(),
+            refresh_token: "r".into(),
+            expires_in: u64::MAX,
+            token_type: "bearer".into(),
+            user: User {
+                id: "u".into(),
+                email: None,
+                role: None,
+                created_at: None,
+                updated_at: None,
+            },
+        };
+        let session = client.build_session(raw);
+        assert_eq!(session.expires_at, u64::MAX, "expires_at must saturate");
+        // Saturated expiry is far in the future, not already-expired.
+        assert!(!session.is_expired_with_margin(REFRESH_MARGIN_SECS));
+    }
 
     #[test]
     fn redact_email_masks_pii() {
@@ -354,5 +454,56 @@ mod tests {
         );
         // Non-secret fields are still visible for debugging.
         assert!(dbg.contains("9999"), "expires_at should be visible: {dbg}");
+    }
+
+    // ── error-body raw-text preservation ──────────────────────────────────────
+
+    /// When the GoTrue error body cannot be decoded as JSON, the raw response
+    /// text (truncated) must appear in the error message so the caller can
+    /// diagnose the real failure rather than seeing a generic "unknown error".
+    ///
+    /// This test uses mockito 0.31 (module-level API) to return a non-JSON body
+    /// with a 400 status.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn post_json_preserves_raw_body_on_json_decode_failure() {
+        let _mock = mockito::mock("POST", "/auth/v1/token?grant_type=password")
+            .with_status(400)
+            .with_header("content-type", "text/plain")
+            .with_body("This is not JSON at all: unexpected gateway response")
+            .create();
+
+        let client = AuthClient::new(mockito::server_url(), "anon-key");
+        let result = client.sign_in("user@example.com", "bad-password").await;
+
+        let err = result.expect_err("should fail with a 400");
+        let err_str = err.to_string();
+        assert!(
+            err_str.contains("unexpected gateway response") || err_str.contains("This is not JSON"),
+            "error message should include raw body snippet, got: {err_str}"
+        );
+    }
+
+    /// When the GoTrue error body IS valid JSON, the structured message is used.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn post_json_uses_json_message_when_valid() {
+        let _mock = mockito::mock("POST", "/auth/v1/token?grant_type=password")
+            .with_status(400)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"error":"invalid_grant","error_description":"Invalid login credentials"}"#,
+            )
+            .create();
+
+        let client = AuthClient::new(mockito::server_url(), "anon-key");
+        let result = client.sign_in("user@example.com", "bad-password").await;
+
+        let err = result.expect_err("should fail with a 400");
+        let err_str = err.to_string();
+        assert!(
+            err_str.contains("Invalid login credentials"),
+            "structured error_description should appear in error, got: {err_str}"
+        );
     }
 }

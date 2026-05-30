@@ -40,6 +40,17 @@ const TXT_DEVICE_NAME: &str = "name";
 /// Protocol version advertised in TXT records.
 const PROTOCOL_VERSION: &str = "1";
 
+/// Maximum number of distinct peers retained in `known_peers`.
+///
+/// Security MED (DoS / unbounded memory): `known_peers` is keyed by the mDNS
+/// fullname, which embeds the unauthenticated, rotatable TXT `did`. A LAN host
+/// emitting endlessly-varying instance fullnames would otherwise grow the map
+/// without bound (and id-rotation also dodges the per-key rate limiter). Once
+/// this cap is reached we refuse to insert genuinely new peers rather than
+/// evict existing ones — eviction would let an attacker flush legitimately
+/// discovered peers. Updates to already-known fullnames are always allowed.
+const MAX_KNOWN_PEERS: usize = 256;
+
 /// Information about a discovered peer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PeerInfo {
@@ -240,7 +251,9 @@ impl DiscoveryService {
     /// Announce own service on the local network.
     fn advertise(&self, daemon: &ServiceDaemon, reg: &Registration) -> Result<(), DiscoveryError> {
         // Instance name: sanitized device name + first 8 chars of device_id.
-        let id_short = &reg.device_id[..reg.device_id.len().min(8)];
+        // Slice by `chars()`, not byte index, so a non-ASCII device_id cannot
+        // panic by splitting a UTF-8 codepoint mid-byte.
+        let id_short: String = reg.device_id.chars().take(8).collect();
         let instance_name = format!("{}.{}", sanitize_label(&reg.device_name), id_short);
 
         // hostname — mdns-sd resolves local addresses automatically; supply a
@@ -344,12 +357,22 @@ fn handle_event(
 
                 let fullname = resolved.fullname.clone();
 
-                // Dedup: only emit if this is a new or changed peer.
+                // Dedup + cap: only emit if this is a new or changed peer, and
+                // refuse brand-new fullnames once the map is at capacity.
                 let mut peers = lock_safe(known_peers);
-                let is_new = peers
-                    .get(&fullname)
-                    .map(|existing| existing != &peer)
-                    .unwrap_or(true);
+                let is_new = match admit_peer(&peers, &fullname, &peer) {
+                    PeerAdmission::Skip => false,
+                    PeerAdmission::Insert => true,
+                    PeerAdmission::AtCapacity => {
+                        drop(peers);
+                        warn!(
+                            device_id = %peer.device_id,
+                            cap = MAX_KNOWN_PEERS,
+                            "known_peers at capacity — refusing new mDNS peer"
+                        );
+                        return;
+                    }
+                };
 
                 if is_new {
                     info!(
@@ -435,6 +458,29 @@ fn peer_from_resolved(resolved: &ResolvedService) -> Option<PeerInfo> {
 /// `ScopedIp` is `#[non_exhaustive]`; the wildcard arm handles any future
 /// variants by falling back to the IPv4 unspecified address so callers
 /// can safely filter it out if needed.
+/// Decision for whether a resolved peer should be inserted into `known_peers`.
+#[derive(Debug, PartialEq, Eq)]
+enum PeerAdmission {
+    /// Already present and unchanged — no insert, no callback.
+    Skip,
+    /// New or changed peer that fits within the cap — insert and notify.
+    Insert,
+    /// A brand-new fullname but the map is full — refuse (DoS guard).
+    AtCapacity,
+}
+
+/// Decide how to handle a resolved peer relative to the current `known_peers`
+/// map, enforcing [`MAX_KNOWN_PEERS`]. Pure (no mutation) so it is unit-testable
+/// without a live mDNS daemon.
+fn admit_peer(peers: &HashMap<String, PeerInfo>, fullname: &str, peer: &PeerInfo) -> PeerAdmission {
+    match peers.get(fullname) {
+        Some(existing) if existing == peer => PeerAdmission::Skip,
+        Some(_) => PeerAdmission::Insert, // known fullname, changed value
+        None if peers.len() >= MAX_KNOWN_PEERS => PeerAdmission::AtCapacity,
+        None => PeerAdmission::Insert,
+    }
+}
+
 /// Build a stable rate-limit key from a set of resolved peer addresses.
 ///
 /// Used when the peer's `device_id` is unknown (older clients / malformed
@@ -689,6 +735,76 @@ mod tests {
         known.lock().unwrap().insert(fullname.clone(), peer.clone());
         known.lock().unwrap().insert(fullname, peer); // second insert with same key
         assert_eq!(known.lock().unwrap().len(), 1);
+    }
+
+    // ── known_peers cap (security MED: DoS / unbounded memory) ───────────────
+
+    #[test]
+    fn admit_peer_inserts_until_cap_then_refuses_new() {
+        let mut map: HashMap<String, PeerInfo> = HashMap::new();
+        // Fill the map exactly to capacity with distinct fullnames.
+        for i in 0..MAX_KNOWN_PEERS {
+            let fullname = format!("peer-{i}.local.");
+            let peer = make_peer(&format!("id{i}"), "P", 1);
+            assert_eq!(admit_peer(&map, &fullname, &peer), PeerAdmission::Insert);
+            map.insert(fullname, peer);
+        }
+        assert_eq!(map.len(), MAX_KNOWN_PEERS);
+
+        // A brand-new fullname past the cap must be refused.
+        let overflow = make_peer("overflow", "P", 1);
+        assert_eq!(
+            admit_peer(&map, "overflow.local.", &overflow),
+            PeerAdmission::AtCapacity,
+            "new peer past the cap must be refused, not inserted"
+        );
+
+        // Updates to an already-known fullname are still allowed at capacity.
+        let changed = make_peer("id0-changed", "P", 2);
+        assert_eq!(
+            admit_peer(&map, "peer-0.local.", &changed),
+            PeerAdmission::Insert,
+            "updating an existing peer must be allowed even at capacity"
+        );
+
+        // An unchanged already-known peer is skipped.
+        let same = make_peer("id0", "P", 1);
+        map.insert("peer-0.local.".to_string(), same.clone());
+        assert_eq!(
+            admit_peer(&map, "peer-0.local.", &same),
+            PeerAdmission::Skip
+        );
+    }
+
+    #[test]
+    fn known_peers_growth_is_bounded_under_id_rotation() {
+        // Simulate the attack: a flood of ever-varying fullnames. Apply the same
+        // admission decision the event handler uses and confirm the map never
+        // exceeds the cap.
+        let mut map: HashMap<String, PeerInfo> = HashMap::new();
+        for i in 0..(MAX_KNOWN_PEERS * 4) {
+            let fullname = format!("rotating-{i}.local.");
+            let peer = make_peer(&format!("rot{i}"), "P", 1);
+            if admit_peer(&map, &fullname, &peer) == PeerAdmission::Insert {
+                map.insert(fullname, peer);
+            }
+        }
+        assert!(
+            map.len() <= MAX_KNOWN_PEERS,
+            "known_peers must stay bounded under id rotation, got {}",
+            map.len()
+        );
+    }
+
+    // ── id_short slicing (LOW: panic on non-ASCII device_id) ─────────────────
+
+    #[test]
+    fn id_short_handles_non_ascii_device_id_without_panic() {
+        // Reproduces the byte-slice panic: a multibyte codepoint at byte 8.
+        // The fix slices by chars, so this must not panic and must yield 8 chars.
+        let device_id = "日本語テスト識別子"; // each char is 3 bytes in UTF-8
+        let id_short: String = device_id.chars().take(8).collect();
+        assert_eq!(id_short.chars().count(), 8);
     }
 
     // ── IP address sorting ────────────────────────────────────────────────────

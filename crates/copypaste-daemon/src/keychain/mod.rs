@@ -19,6 +19,64 @@ pub(crate) const ACCOUNT: &str = "device-secret-key";
 /// Stored under the same service as the device key but a distinct account
 /// so they are never confused.
 pub(crate) const CLOUD_SYNC_ACCOUNT: &str = "cloud-sync-key";
+/// Keychain account key for the Supabase GoTrue account password.
+/// Stored under `SERVICE` so all CopyPaste secrets live in one service.
+/// Migration: if absent from Keychain, callers fall back to config.json.
+pub(crate) const SUPABASE_PASSWORD_ACCOUNT: &str = "supabase-password";
+
+/// Read the Supabase GoTrue password from the macOS Keychain.
+///
+/// Returns `Some(password)` if a non-empty entry is present.
+/// Returns `None` when the entry is absent (first run / pre-migration) or
+/// when the Keychain is unavailable (non-macOS, ephemeral-key env, locked).
+/// Callers should fall back to `config.json` on `None`.
+pub fn read_supabase_password_from_keychain() -> Option<String> {
+    // Dev/test bypass: never read the real Keychain in ephemeral mode.
+    if keychain_bypassed() {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        match get_generic_password(SERVICE, SUPABASE_PASSWORD_ACCOUNT) {
+            Ok(bytes) => {
+                let s = String::from_utf8(bytes).ok()?;
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
+            }
+            // Any error (not-found, locked, denied) → treat as absent; caller
+            // falls back to config.json for the migration path.
+            Err(_) => None,
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// Store the Supabase GoTrue password in the macOS Keychain.
+///
+/// Silently succeeds on non-macOS and in ephemeral-key mode so call sites
+/// do not need to be conditional. On macOS a failure is logged at warn
+/// level and bubbled to the caller as `Err` so the caller can decide
+/// whether to fall back to config.json persistence.
+pub fn store_supabase_password_to_keychain(password: &str) -> Result<(), KeychainError> {
+    if keychain_bypassed() {
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use security_framework::passwords::set_generic_password;
+        set_generic_password(SERVICE, SUPABASE_PASSWORD_ACCOUNT, password.as_bytes())
+            .map_err(KeychainError::from)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = password;
+        Err(KeychainError::Unsupported)
+    }
+}
 
 /// Dev/test escape hatch: when `COPYPASTE_EPHEMERAL_KEY` is set in the
 /// environment, every keychain entry point in this module short-circuits
@@ -74,6 +132,16 @@ pub enum KeychainError {
     #[cfg(target_os = "macos")]
     #[error("Filesystem I/O: {0}")]
     Io(#[from] std::io::Error),
+    /// The Keychain item exists (or its existence cannot be determined) but
+    /// could not be read because the Keychain is locked, access was denied, an
+    /// interactive prompt is disallowed, or the read timed out. Distinct from a
+    /// genuine `errSecItemNotFound` so the caller can DEGRADE (leave the
+    /// encrypted DB untouched) instead of silently minting an ephemeral key that
+    /// would mismatch the existing DB key. Carries the originating OSStatus for
+    /// diagnostics.
+    #[cfg(target_os = "macos")]
+    #[error("Keychain locked or access denied (OSStatus {0}); cannot read device key")]
+    Locked(i32),
 }
 
 /// Load device keypair from Keychain, or generate and store a new one.
@@ -162,7 +230,94 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
                 }
                 Ok(DeviceKeypair::from_secret_bytes(&arr)?)
             }
+            // ONLY a genuine `errSecItemNotFound` means "no entry yet → create
+            // a fresh key". The OLD code matched `Err(_)` and treated EVERY
+            // failure (locked keychain, denied access, disallowed interaction,
+            // timeout) as absent, minting an ephemeral key that bypasses the
+            // clean degraded path and — if an encrypted DB already exists —
+            // mismatches its SQLCipher key (SQLITE_NOTADB). Classify the
+            // OSStatus: not-found → generate; anything else → propagate
+            // `Locked` so `daemon::load_local_key_material` degrades with an
+            // accurate reason (`DEGRADED_REASON_KEYCHAIN_LOCKED`) and leaves the
+            // encrypted data untouched.
+            Err(e) if classify_read_failure(e.code()) != ReadFailureClass::NotFound => {
+                tracing::warn!(
+                    code = e.code(),
+                    "device key read failed with a non-not-found Keychain status \
+                     (locked / access denied / interaction disallowed). Refusing to \
+                     mint an ephemeral key over a possibly-existing entry; \
+                     propagating a locked error so startup degrades cleanly."
+                );
+                Err(KeychainError::Locked(e.code()))
+            }
             Err(_) => {
+                // errSecItemNotFound: primary entry absent. Before minting a
+                // brand-new key, check whether a crash mid-ACL-rotation left a
+                // surviving copy under ACCOUNT_ROTATE_BACKUP. If so, PROMOTE
+                // that backup to primary so the existing encrypted DB stays
+                // openable. Only mint a fresh key when the backup slot is also
+                // absent (or unusable).
+                //
+                // ACL-rotation orphan-key fix (HIGH data-loss): without this
+                // check, a kill/power-loss between Step 2 (primary deleted) and
+                // Step 3 (primary recreated) in rotate_acl_to_current_install
+                // caused load_or_create to see ItemNotFound and generate a NEW
+                // random key, permanently orphaning the existing SQLCipher DB.
+                match get_generic_password(SERVICE, acl::ACCOUNT_ROTATE_BACKUP) {
+                    Ok(backup_bytes) if backup_bytes.len() == 32 => {
+                        let backup = zeroize::Zeroizing::new(backup_bytes);
+                        let arr: [u8; 32] = (&**backup)
+                            .try_into()
+                            .map_err(|_| KeychainError::InvalidLength(backup.len()))?;
+                        tracing::warn!(
+                            "load_or_create: primary key absent but rotation backup found — \
+                             promoting backup to primary to recover from a mid-rotation crash"
+                        );
+                        // Re-create the primary entry with the recovered secret
+                        // and an up-to-date ACL. If this fails we propagate the
+                        // error — better to surface the problem than silently use
+                        // the wrong key.
+                        let trusted = acl::trusted_binary_paths()?;
+                        acl::store_with_acl(&arr, &trusted)?;
+                        // Best-effort: clean up the backup now that primary is
+                        // restored. A lingering backup is harmless (rotate_acl
+                        // clears it at the top of the next rotation) but we
+                        // prefer not to leave stale entries around.
+                        let _ = delete_generic_password(SERVICE, acl::ACCOUNT_ROTATE_BACKUP);
+                        tracing::info!(
+                            "load_or_create: rotation backup promoted to primary; \
+                             backup entry cleaned up"
+                        );
+                        return Ok(DeviceKeypair::from_secret_bytes(&arr)?);
+                    }
+                    Ok(backup_bytes) => {
+                        // Backup present but wrong length — corrupted; ignore and
+                        // fall through to generate a fresh key.
+                        tracing::warn!(
+                            "load_or_create: rotation backup has wrong length {} (expected 32); \
+                             ignoring and generating a fresh key",
+                            backup_bytes.len()
+                        );
+                        let _ = delete_generic_password(SERVICE, acl::ACCOUNT_ROTATE_BACKUP);
+                    }
+                    Err(e) if e.code() == acl::ERR_SEC_ITEM_NOT_FOUND => {
+                        // No backup either — this is a genuine first run.
+                    }
+                    Err(e) => {
+                        // Backup read failed for a non-not-found reason (locked
+                        // keychain, access denied). Propagate as Locked so the
+                        // daemon degrades rather than silently minting a new key
+                        // that may conflict with an existing DB.
+                        tracing::warn!(
+                            code = e.code(),
+                            "load_or_create: rotation backup read failed (non-not-found); \
+                             propagating locked error to avoid orphaning existing DB"
+                        );
+                        return Err(KeychainError::Locked(e.code()));
+                    }
+                }
+
+                // No primary, no usable backup → genuine first run. Mint a new key.
                 let kp = DeviceKeypair::generate();
                 // Beta-merge audit MED #3 + #4: pull the secret via the
                 // zeroizing accessor so the buffer handed to the Keychain
@@ -322,12 +477,47 @@ fn set_generic_password_locked_down(
 #[cfg(target_os = "macos")]
 const ERR_SEC_MISSING_ENTITLEMENT: i32 = -34018;
 
+/// macOS `errSecItemNotFound` ("The specified item could not be found in the
+/// keychain"). This is the ONLY status that means "no entry exists yet" and so
+/// the only one that justifies generating + storing a fresh device key. Every
+/// other read failure (locked keychain, denied access, disallowed interaction,
+/// timeout, I/O) means the entry's status is unknown — we must NOT mint a fresh
+/// key over a possibly-existing one. Pinned from `<Security/SecBase.h>`.
+#[cfg(target_os = "macos")]
+const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+
 /// True iff `e` is the keychain `errSecMissingEntitlement` failure. Used to
 /// downgrade the `ThisDeviceOnly` migration failure from a per-launch WARN to
 /// a one-line DEBUG on builds that can never carry the entitlement.
 #[cfg(target_os = "macos")]
 fn is_missing_entitlement(e: &KeychainError) -> bool {
     matches!(e, KeychainError::Keychain(sf) if sf.code() == ERR_SEC_MISSING_ENTITLEMENT)
+}
+
+/// Outcome of classifying a `get_generic_password` read failure in
+/// `load_or_create`. Pure + hermetically testable (no Keychain syscall).
+#[cfg(target_os = "macos")]
+#[derive(Debug, PartialEq, Eq)]
+enum ReadFailureClass {
+    /// `errSecItemNotFound` — no entry exists yet; safe to generate + store a
+    /// fresh device key.
+    NotFound,
+    /// Any other status (locked / access denied / interaction disallowed /
+    /// timeout / I/O). The entry's status is unknown, so we must NOT mint a
+    /// fresh key over a possibly-existing one — propagate `Locked` and degrade.
+    Locked(i32),
+}
+
+/// Classify a Keychain read-failure OSStatus into "create a fresh key" vs
+/// "degrade because the keychain is unavailable". Only `errSecItemNotFound`
+/// authorises key creation; everything else is treated as locked/denied.
+#[cfg(target_os = "macos")]
+fn classify_read_failure(code: i32) -> ReadFailureClass {
+    if code == ERR_SEC_ITEM_NOT_FOUND {
+        ReadFailureClass::NotFound
+    } else {
+        ReadFailureClass::Locked(code)
+    }
 }
 
 /// Re-write the existing device-key entry under the locked-down ACL.
@@ -362,6 +552,41 @@ mod tests {
 
         // A non-keychain variant must not match either.
         assert!(!is_missing_entitlement(&KeychainError::InvalidLength(7)));
+    }
+
+    /// Fix #4: only `errSecItemNotFound` authorises minting a fresh device key.
+    /// Every other OSStatus (locked, auth-failed, interaction-not-allowed, …)
+    /// must classify as `Locked` so `load_or_create` propagates a distinct
+    /// error and the daemon degrades instead of overwriting a possibly-existing
+    /// entry with an ephemeral key.
+    ///
+    /// Note: the full `load_or_create` read path calls the real
+    /// `get_generic_password` syscall and cannot be exercised hermetically
+    /// without an interactive Keychain, so we test the pure classifier that
+    /// `load_or_create` delegates the decision to (same code path).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn classify_read_failure_only_not_found_creates() {
+        assert_eq!(
+            classify_read_failure(ERR_SEC_ITEM_NOT_FOUND),
+            ReadFailureClass::NotFound,
+            "errSecItemNotFound must authorise key creation"
+        );
+        // errSecInteractionNotAllowed (-25308): keychain locked / no UI.
+        assert_eq!(
+            classify_read_failure(-25308),
+            ReadFailureClass::Locked(-25308)
+        );
+        // errSecAuthFailed (-25293): access denied.
+        assert_eq!(
+            classify_read_failure(-25293),
+            ReadFailureClass::Locked(-25293)
+        );
+        // errSecMissingEntitlement (-34018): not a not-found either.
+        assert_eq!(
+            classify_read_failure(ERR_SEC_MISSING_ENTITLEMENT),
+            ReadFailureClass::Locked(ERR_SEC_MISSING_ENTITLEMENT)
+        );
     }
 
     #[test]
