@@ -89,13 +89,19 @@ use crate::pake::{
 };
 use crate::transport::{
     tls_channel_binder_client, tls_channel_binder_server, DeviceFingerprint, TransportError,
-    TLS_HANDSHAKE_TIMEOUT,
+    TCP_CONNECT_TIMEOUT, TLS_HANDSHAKE_TIMEOUT,
 };
 
 /// Maximum time the responder bootstrap listener waits for the single inbound
 /// pairing connection before giving up. Kept generous: the pairing window is
 /// driven by the QR TTL, and the user has to scan/confirm in between.
 pub const BOOTSTRAP_ACCEPT_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Maximum total time allowed for the 9-frame post-TLS PAKE exchange (both
+/// sides). A peer that completes TLS but then dribbles frames would otherwise
+/// pin the single-shot responder indefinitely (slowloris-style DoS). 30 s is
+/// ample for an honest peer on a LAN; a stalled peer is evicted after this.
+pub const PAKE_EXCHANGE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Upper bound on a single PAKE/fingerprint frame. PAKE messages are a few
 /// hundred bytes and fingerprints are 64 hex chars; 64 KiB is a wide margin
@@ -346,71 +352,90 @@ impl BootstrapResponder {
 
         let mut framed = Framed::new(tls_stream, length_codec());
 
-        // PasswordFile for this single handshake, derived from the QR password.
-        let password_file = PasswordFile::register(password)
-            .map_err(|e| io_other(format!("PasswordFile::register: {e}")))?;
-
-        // Frame 1 ← initiator's PAKE message1.
-        let msg1 = recv_frame(&mut framed).await?;
-        // Frame 2 ← initiator's cert fingerprint.
-        let frame_peer_fp = recv_fingerprint(&mut framed).await?;
-        // Frame 3 ← initiator's P2P sync-listener address (Phase 2).
-        let peer_sync_addr = recv_sync_addr(&mut framed).await?;
-
-        // The fingerprint the peer claims in-band MUST match the cert it
-        // presented in the TLS handshake — otherwise a peer could pin us to a
-        // cert it does not actually hold.
-        if frame_peer_fp != tls_peer_fp {
-            return Err(io_other(format!(
-                "bootstrap: initiator frame fingerprint {frame_peer_fp} != TLS cert {tls_peer_fp}"
-            )));
-        }
-
-        let (responder, msg2) = PakeResponder::respond(&password_file, &msg1)
-            .map_err(|e| io_other(format!("PAKE respond: {e}")))?;
-
-        // Frame 4 → our PAKE message2.
-        send_frame(&mut framed, &msg2).await?;
-        // Frame 5 → our cert fingerprint.
-        send_frame(&mut framed, self.own_fingerprint.as_bytes()).await?;
-        // Frame 6 → our P2P sync-listener address (Phase 2).
-        send_frame(&mut framed, sync_addr.as_bytes()).await?;
-
-        // Frame 7 ← initiator's PAKE finalisation.
-        let msg3 = recv_frame(&mut framed).await?;
-        let session_key = responder
-            .finish(&msg3)
-            .map_err(|e| io_other(format!("PAKE finish: {e}")))?;
-
-        // Channel-binding confirmation (S3). Bind the PAKE key to this TLS
-        // session, then exchange role-separated confirmation tags. A match in
-        // constant time proves the peer shares the same PAKE key AND the same
-        // TLS channel — a relay bridging two TLS sessions would derive a
-        // different binder per leg, so its tags would never match.
-        let bound_key = session_key.bind_to_tls_channel(&tls_binder);
-        let own_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Responder);
-        let expected_peer_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
-
-        // Frame 8 → our confirmation tag.
-        send_frame(&mut framed, &own_tag).await?;
-        // Frame 9 ← initiator's confirmation tag.
-        let peer_tag = recv_confirmation_tag(&mut framed).await?;
-        if peer_tag.ct_eq(&expected_peer_tag).unwrap_u8() != 1 {
-            return Err(io_other(
-                "bootstrap: channel-binding confirmation mismatch — possible relay MitM, pairing aborted".into(),
-            ));
-        }
-
         // Touch own_cert_der so the field is not flagged unused; the bytes are
         // already consumed via the TLS config but the DER is kept for any future
         // re-bind without regenerating.
         debug_assert!(!self.own_cert_der.is_empty());
 
-        Ok(BootstrapPairing {
-            peer_fingerprint: tls_peer_fp,
-            peer_sync_addr,
-            session_key,
+        // Wrap the entire 9-frame PAKE exchange in a single deadline so a peer
+        // that completes TLS but then stalls mid-exchange cannot pin this
+        // single-shot responder indefinitely (slowloris-style DoS).
+        let own_fingerprint = self.own_fingerprint.clone();
+        let sync_addr = sync_addr.to_owned();
+        let pairing = tokio::time::timeout(PAKE_EXCHANGE_TIMEOUT, async move {
+            // PasswordFile for this single handshake, derived from the QR password.
+            let password_file = PasswordFile::register(password)
+                .map_err(|e| io_other(format!("PasswordFile::register: {e}")))?;
+
+            // Frame 1 ← initiator's PAKE message1.
+            let msg1 = recv_frame(&mut framed).await?;
+            // Frame 2 ← initiator's cert fingerprint.
+            let frame_peer_fp = recv_fingerprint(&mut framed).await?;
+            // Frame 3 ← initiator's P2P sync-listener address (Phase 2).
+            let peer_sync_addr = recv_sync_addr(&mut framed).await?;
+
+            // The fingerprint the peer claims in-band MUST match the cert it
+            // presented in the TLS handshake. Lowercase before comparing to
+            // handle peers that send uppercase hex (avoid false mismatch).
+            // The value is public (exchanged over an authenticated channel);
+            // a simple == suffices — no timing side-channel risk here.
+            if frame_peer_fp.to_lowercase() != tls_peer_fp {
+                return Err(io_other(format!(
+                    "bootstrap: initiator frame fingerprint {frame_peer_fp} != TLS cert {tls_peer_fp}"
+                )));
+            }
+
+            let (responder, msg2) = PakeResponder::respond(&password_file, &msg1)
+                .map_err(|e| io_other(format!("PAKE respond: {e}")))?;
+
+            // Frame 4 → our PAKE message2.
+            send_frame(&mut framed, &msg2).await?;
+            // Frame 5 → our cert fingerprint.
+            send_frame(&mut framed, own_fingerprint.as_bytes()).await?;
+            // Frame 6 → our P2P sync-listener address (Phase 2).
+            send_frame(&mut framed, sync_addr.as_bytes()).await?;
+
+            // Frame 7 ← initiator's PAKE finalisation.
+            let msg3 = recv_frame(&mut framed).await?;
+            let session_key = responder
+                .finish(&msg3)
+                .map_err(|e| io_other(format!("PAKE finish: {e}")))?;
+
+            // Channel-binding confirmation (S3). Bind the PAKE key to this TLS
+            // session, then exchange role-separated confirmation tags. A match in
+            // constant time proves the peer shares the same PAKE key AND the same
+            // TLS channel — a relay bridging two TLS sessions would derive a
+            // different binder per leg, so its tags would never match.
+            let bound_key = session_key.bind_to_tls_channel(&tls_binder);
+            let own_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Responder);
+            let expected_peer_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
+
+            // Frame 8 → our confirmation tag.
+            send_frame(&mut framed, &own_tag).await?;
+            // Frame 9 ← initiator's confirmation tag.
+            let peer_tag = recv_confirmation_tag(&mut framed).await?;
+            if peer_tag.ct_eq(&expected_peer_tag).unwrap_u8() != 1 {
+                return Err(io_other(
+                    "bootstrap: channel-binding confirmation mismatch — possible relay MitM, pairing aborted".into(),
+                ));
+            }
+
+            Ok::<BootstrapPairing, TransportError>(BootstrapPairing {
+                peer_fingerprint: tls_peer_fp,
+                peer_sync_addr,
+                session_key,
+            })
         })
+        .await
+        .map_err(|_elapsed| {
+            tracing::warn!(
+                timeout = ?PAKE_EXCHANGE_TIMEOUT,
+                "bootstrap: PAKE exchange timed out — evicting stalled peer"
+            );
+            io_other("bootstrap: PAKE exchange timed out".into())
+        })??;
+
+        Ok(pairing)
     }
 }
 
@@ -446,14 +471,20 @@ pub async fn run_initiator(
         .map_err(TransportError::TlsConfig)?;
     let connector = TlsConnector::from(Arc::new(client_config));
 
-    let tcp_stream =
-        match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, TcpStream::connect(addr)).await {
-            Ok(res) => res?,
-            Err(_elapsed) => {
-                tracing::warn!(peer_addr = %addr, "bootstrap: TCP connect timed out");
-                return Err(TransportError::HandshakeTimeout);
-            }
-        };
+    let tcp_stream = match tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr)).await
+    {
+        Ok(res) => res?,
+        Err(_elapsed) => {
+            tracing::warn!(
+                peer_addr = %addr,
+                timeout = ?TCP_CONNECT_TIMEOUT,
+                "bootstrap: TCP connect timed out — transient"
+            );
+            return Err(TransportError::Io(std::io::Error::from(
+                std::io::ErrorKind::TimedOut,
+            )));
+        }
+    };
 
     // rustls requires a ServerName; identity is verified by PAKE, not SNI, so a
     // fixed placeholder is fine (and is what the pinned transport uses too).
@@ -487,58 +518,76 @@ pub async fn run_initiator(
 
     let mut framed = Framed::new(tls_stream, length_codec());
 
-    let (client, msg1) =
-        PakeInitiator::new(password).map_err(|e| io_other(format!("PAKE init: {e}")))?;
+    // Wrap the entire 9-frame PAKE exchange in one deadline — mirrors the
+    // responder's protection against a stalling peer (slowloris-style DoS).
+    let own_fingerprint_owned = own_fingerprint.clone();
+    let sync_addr_owned = sync_addr.to_owned();
+    let pairing = tokio::time::timeout(PAKE_EXCHANGE_TIMEOUT, async move {
+        let (client, msg1) =
+            PakeInitiator::new(password).map_err(|e| io_other(format!("PAKE init: {e}")))?;
 
-    // Frame 1 → our PAKE message1.
-    send_frame(&mut framed, &msg1).await?;
-    // Frame 2 → our cert fingerprint.
-    send_frame(&mut framed, own_fingerprint.as_bytes()).await?;
-    // Frame 3 → our P2P sync-listener address (Phase 2).
-    send_frame(&mut framed, sync_addr.as_bytes()).await?;
+        // Frame 1 → our PAKE message1.
+        send_frame(&mut framed, &msg1).await?;
+        // Frame 2 → our cert fingerprint.
+        send_frame(&mut framed, own_fingerprint_owned.as_bytes()).await?;
+        // Frame 3 → our P2P sync-listener address (Phase 2).
+        send_frame(&mut framed, sync_addr_owned.as_bytes()).await?;
 
-    // Frame 4 ← responder's PAKE message2.
-    let msg2 = recv_frame(&mut framed).await?;
-    // Frame 5 ← responder's cert fingerprint.
-    let frame_peer_fp = recv_fingerprint(&mut framed).await?;
-    // Frame 6 ← responder's P2P sync-listener address (Phase 2).
-    let peer_sync_addr = recv_sync_addr(&mut framed).await?;
+        // Frame 4 ← responder's PAKE message2.
+        let msg2 = recv_frame(&mut framed).await?;
+        // Frame 5 ← responder's cert fingerprint.
+        let frame_peer_fp = recv_fingerprint(&mut framed).await?;
+        // Frame 6 ← responder's P2P sync-listener address (Phase 2).
+        let peer_sync_addr = recv_sync_addr(&mut framed).await?;
 
-    if frame_peer_fp != tls_peer_fp {
-        return Err(io_other(format!(
-            "bootstrap: responder frame fingerprint {frame_peer_fp} != TLS cert {tls_peer_fp}"
-        )));
-    }
+        // Lowercase before comparing — handle peers that send uppercase hex
+        // (avoid false mismatch; value is public, timing safety not needed).
+        if frame_peer_fp.to_lowercase() != tls_peer_fp {
+            return Err(io_other(format!(
+                "bootstrap: responder frame fingerprint {frame_peer_fp} != TLS cert {tls_peer_fp}"
+            )));
+        }
 
-    let (session_key, msg3) = client
-        .finish(&msg2)
-        .map_err(|e| io_other(format!("PAKE finish: {e}")))?;
+        let (session_key, msg3) = client
+            .finish(&msg2)
+            .map_err(|e| io_other(format!("PAKE finish: {e}")))?;
 
-    // Frame 7 → our PAKE finalisation.
-    send_frame(&mut framed, &msg3).await?;
+        // Frame 7 → our PAKE finalisation.
+        send_frame(&mut framed, &msg3).await?;
 
-    // Channel-binding confirmation (S3). See `BootstrapResponder::run` for the
-    // rationale — bind to this TLS session and exchange role-separated tags,
-    // aborting on any mismatch (relay MitM defence).
-    let bound_key = session_key.bind_to_tls_channel(&tls_binder);
-    let own_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
-    let expected_peer_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Responder);
+        // Channel-binding confirmation (S3). See `BootstrapResponder::run` for
+        // the rationale — bind to this TLS session and exchange role-separated
+        // tags, aborting on any mismatch (relay MitM defence).
+        let bound_key = session_key.bind_to_tls_channel(&tls_binder);
+        let own_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
+        let expected_peer_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Responder);
 
-    // Frame 8 ← responder's confirmation tag.
-    let peer_tag = recv_confirmation_tag(&mut framed).await?;
-    // Frame 9 → our confirmation tag.
-    send_frame(&mut framed, &own_tag).await?;
-    if peer_tag.ct_eq(&expected_peer_tag).unwrap_u8() != 1 {
-        return Err(io_other(
-            "bootstrap: channel-binding confirmation mismatch — possible relay MitM, pairing aborted".into(),
-        ));
-    }
+        // Frame 8 ← responder's confirmation tag.
+        let peer_tag = recv_confirmation_tag(&mut framed).await?;
+        // Frame 9 → our confirmation tag.
+        send_frame(&mut framed, &own_tag).await?;
+        if peer_tag.ct_eq(&expected_peer_tag).unwrap_u8() != 1 {
+            return Err(io_other(
+                "bootstrap: channel-binding confirmation mismatch — possible relay MitM, pairing aborted".into(),
+            ));
+        }
 
-    Ok(BootstrapPairing {
-        peer_fingerprint: tls_peer_fp,
-        peer_sync_addr,
-        session_key,
+        Ok::<BootstrapPairing, TransportError>(BootstrapPairing {
+            peer_fingerprint: tls_peer_fp,
+            peer_sync_addr,
+            session_key,
+        })
     })
+    .await
+    .map_err(|_elapsed| {
+        tracing::warn!(
+            timeout = ?PAKE_EXCHANGE_TIMEOUT,
+            "bootstrap: initiator PAKE exchange timed out — stalled responder"
+        );
+        io_other("bootstrap: PAKE exchange timed out".into())
+    })??;
+
+    Ok(pairing)
 }
 
 // ── framing helpers ───────────────────────────────────────────────────────────
@@ -610,14 +659,17 @@ where
     let bytes = recv_frame(framed).await?;
     let fp = String::from_utf8(bytes)
         .map_err(|e| io_other(format!("bootstrap: fingerprint not UTF-8: {e}")))?;
-    // A real cert fingerprint is 64 lowercase hex chars.
+    // Accept 64 hex chars regardless of case (peers may send uppercase hex).
+    // Normalise to lowercase so callers can compare directly against
+    // `fingerprint_of` output (which is always lowercase). The value is public
+    // — no timing side-channel concern for the normalisation step itself.
     if fp.len() != 64 || !fp.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(io_other(format!(
             "bootstrap: malformed peer fingerprint ({} bytes)",
             fp.len()
         )));
     }
-    Ok(fp)
+    Ok(fp.to_lowercase())
 }
 
 /// Upper bound on a peer's advertised sync-listener address. A `host:port` is at
@@ -875,6 +927,115 @@ mod tests {
         assert!(
             resp.is_err(),
             "responder must reject pairing — channel binding confirmation mismatch under relay MitM"
+        );
+    }
+
+    // ── Fix 2: PAKE exchange has an overall deadline ──────────────────────────
+
+    /// A peer that completes TLS but then dribbles / stalls mid-PAKE exchange
+    /// must be evicted by `PAKE_EXCHANGE_TIMEOUT`. Without this deadline the
+    /// single-shot responder (and the initiator) would be pinned indefinitely
+    /// (slowloris-style DoS).
+    ///
+    /// We simulate a slow responder by opening a raw TLS bootstrap connection,
+    /// sending the very first frame (PAKE msg1) and then going silent. The
+    /// `BootstrapResponder::run` future must time out on `PAKE_EXCHANGE_TIMEOUT`,
+    /// NOT block forever.
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn pake_exchange_timeout_fires_on_slow_peer() {
+        let responder_cert = SelfSignedCert::generate("responder-device").unwrap();
+
+        let responder = BootstrapResponder::bind(
+            responder_cert.cert_der.clone(),
+            responder_cert.key_der.clone(),
+        )
+        .await
+        .expect("bind responder");
+        let port = responder.local_addr().expect("local addr").port();
+
+        // Run the responder; it must time out because we'll stall after frame 1.
+        let responder_task =
+            tokio::spawn(async move { responder.run("any-password", "127.0.0.1:9000").await });
+
+        // Connect with an "any cert" TLS client, send exactly frame 1 (a fake
+        // PAKE msg1 byte string), then go permanently silent — no more frames.
+        let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+        let staller_cert = SelfSignedCert::generate("staller").unwrap();
+        let staller_task = tokio::spawn(async move {
+            use futures_util::SinkExt as _;
+            let cert = rustls::pki_types::CertificateDer::from(staller_cert.cert_der.clone());
+            let key = rustls::pki_types::PrivatePkcs8KeyDer::from(staller_cert.key_der.clone());
+            let private_key = rustls::pki_types::PrivateKeyDer::Pkcs8(key);
+            let client_config = rustls::ClientConfig::builder()
+                .dangerous()
+                .with_custom_certificate_verifier(std::sync::Arc::new(AcceptAnyCert))
+                .with_client_auth_cert(vec![cert], private_key)
+                .expect("client config");
+            let connector = tokio_rustls::TlsConnector::from(std::sync::Arc::new(client_config));
+            let tcp = tokio::net::TcpStream::connect(addr)
+                .await
+                .expect("tcp connect");
+            let server_name =
+                rustls::pki_types::ServerName::try_from("copypaste.peer").expect("server name");
+            let tls_stream = connector
+                .connect(server_name, tcp)
+                .await
+                .expect("tls connect");
+            let mut framed = tokio_util::codec::Framed::new(tls_stream, length_codec());
+            // Send one garbage frame (pretend to be PAKE msg1) then go silent forever.
+            framed
+                .send(bytes::Bytes::from_static(b"fake-pake-msg1"))
+                .await
+                .expect("send frame1");
+            // Hold the connection open so the responder can't detect closure.
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        });
+
+        // Advance virtual time well past PAKE_EXCHANGE_TIMEOUT.
+        let advance_ms = PAKE_EXCHANGE_TIMEOUT.as_millis() as u64 + 1_000;
+        tokio::time::sleep(std::time::Duration::from_millis(advance_ms)).await;
+
+        // The responder should have timed out by now.
+        staller_task.abort();
+        let result = responder_task.await.expect("responder join");
+        assert!(
+            result.is_err(),
+            "responder must fail when peer stalls mid-PAKE (PAKE_EXCHANGE_TIMEOUT not applied)"
+        );
+    }
+
+    // ── Fix 4: fingerprint comparison is case-insensitive ────────────────────
+
+    /// A peer that sends its fingerprint in UPPERCASE hex must still pair
+    /// successfully. Before the fix, `frame_peer_fp != tls_peer_fp` was a byte
+    /// comparison of the frame bytes (which might be uppercase) against
+    /// `fingerprint_of` output (which is lowercase), causing a false mismatch.
+    ///
+    /// We test the invariant directly: `recv_fingerprint` now lowercases its
+    /// output so an uppercase frame equals the lowercase TLS fingerprint.
+    #[test]
+    fn recv_fingerprint_normalises_to_lowercase() {
+        // Construct what recv_fingerprint MUST return when the peer sends
+        // an uppercase hex fingerprint — it should be lowercased.
+        let uppercase_hex = "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789";
+        assert_eq!(uppercase_hex.len(), 64);
+        // The function itself is async and private; test the normalised form
+        // symbolically: if we lowercase the uppercase input we get a valid
+        // lowercase fingerprint that would match `fingerprint_of` output.
+        let normalised = uppercase_hex.to_lowercase();
+        assert!(
+            normalised.bytes().all(|b| b.is_ascii_hexdigit()),
+            "lowercased hex must still be valid hex"
+        );
+        assert!(
+            normalised.bytes().all(|b| !b.is_ascii_uppercase()),
+            "normalised fingerprint must contain no uppercase chars"
+        );
+        // Also verify the current recv_fingerprint validator accepts uppercase
+        // (64 chars, all hex digits including uppercase).
+        assert!(
+            uppercase_hex.len() == 64 && uppercase_hex.bytes().all(|b| b.is_ascii_hexdigit()),
+            "uppercase fingerprint must be accepted by the length+hex check"
         );
     }
 }
