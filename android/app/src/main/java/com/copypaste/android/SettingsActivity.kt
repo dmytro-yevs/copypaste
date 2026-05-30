@@ -467,6 +467,18 @@ fun SettingsScreen(
             // ── DIAGNOSTICS ───────────────────────────────────────────────────
             SectionLabel(stringResource(R.string.section_diagnostics))
 
+            // Feature 0: In-app log viewer
+            SettingsNavRow(
+                title = stringResource(R.string.log_viewer_button),
+                subtitle = stringResource(R.string.log_viewer_description),
+                onClick = {
+                    ctx.startActivity(
+                        android.content.Intent(ctx, LogViewerActivity::class.java)
+                    )
+                }
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
             // Feature 1: In-app log export
             DiagnosticsNavRow(
                 title = stringResource(R.string.log_export_button),
