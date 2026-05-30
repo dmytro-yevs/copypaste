@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -34,13 +35,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeBorder
+import com.copypaste.android.ui.theme.IdeDanger
+import com.copypaste.android.ui.theme.IdeDim
+import com.copypaste.android.ui.theme.IdeSuccess
+import com.copypaste.android.ui.theme.IdeWarning
 import com.copypaste.android.ui.theme.SectionLabel
 
 /**
@@ -93,6 +100,12 @@ fun SettingsScreen(
     }
     var storageQuotaMb by remember {
         mutableStateOf((settings.storageQuotaBytes / (1024L * 1024L)).toString())
+    }
+
+    // ── Diagnostics ──
+    var logcatEnabled by remember { mutableStateOf(settings.logcatCaptureEnabled) }
+    var logcatStatus by remember {
+        mutableStateOf(LogcatCaptureService.status(ctx, settings))
     }
 
     // ── Sync ──
@@ -445,6 +458,73 @@ fun SettingsScreen(
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
+            // ── DIAGNOSTICS ───────────────────────────────────────────────────
+            SectionLabel(stringResource(R.string.section_diagnostics))
+
+            // Feature 1: In-app log export
+            DiagnosticsNavRow(
+                title = stringResource(R.string.log_export_button),
+                subtitle = stringResource(R.string.log_export_description),
+                buttonLabel = stringResource(R.string.log_export_button),
+                onClick = { LogExportHelper.shareLogsZip(ctx) }
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+            // Feature 2: adb READ_LOGS logcat capture toggle
+            SettingsRow(
+                title = stringResource(R.string.setting_logcat_capture_title),
+                subtitle = stringResource(R.string.setting_logcat_capture_subtitle),
+                checked = logcatEnabled,
+                onCheckedChange = { enabled ->
+                    val prev = logcatEnabled
+                    logcatEnabled = enabled
+                    try {
+                        settings.logcatCaptureEnabled = enabled
+                        LogcatCaptureService.syncState(ctx, settings)
+                        logcatStatus = LogcatCaptureService.status(ctx, settings)
+                    } catch (e: Exception) {
+                        logcatEnabled = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                }
+            )
+
+            // Status indicator for READ_LOGS / logcat capture
+            val (statusText, statusColor) = when (logcatStatus) {
+                LogcatCaptureStatus.NOT_GRANTED ->
+                    stringResource(R.string.logcat_status_not_granted) to IdeDanger
+                LogcatCaptureStatus.DISABLED ->
+                    stringResource(R.string.logcat_status_disabled) to IdeDim
+                LogcatCaptureStatus.GRANTED_NOT_WORKING ->
+                    stringResource(R.string.logcat_status_not_working) to IdeWarning
+                LogcatCaptureStatus.WORKING ->
+                    stringResource(R.string.logcat_status_working) to IdeSuccess
+            }
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.bodySmall,
+                color = statusColor,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+            )
+
+            // Show the adb grant command when not yet granted
+            if (logcatStatus == LogcatCaptureStatus.NOT_GRANTED) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    Text(
+                        text = stringResource(R.string.logcat_adb_label),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = IdeDim,
+                    )
+                    Text(
+                        text = stringResource(R.string.logcat_adb_grant_command),
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        color = IdeAccent,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
             // ── Device ID (read-only) ──────────────────────────────────────────
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text(
@@ -543,6 +623,42 @@ private fun SettingsNavRow(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+}
+
+/**
+ * A row with a description and an action button — used in the Diagnostics
+ * section for log export and similar non-toggle actions.
+ */
+@Composable
+private fun DiagnosticsNavRow(
+    title: String,
+    subtitle: String,
+    buttonLabel: String,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 10.dp)
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+        )
+        OutlinedButton(
+            onClick = onClick,
+            modifier = Modifier.align(Alignment.End),
+        ) {
+            Text(buttonLabel)
         }
     }
 }

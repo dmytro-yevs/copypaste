@@ -170,6 +170,31 @@
     <string name="crash_detected_export">Export Logs</string>
     <string name="crash_detected_dismiss">Dismiss</string>
 
+    <!-- Log export (in-app, from Settings) -->
+    <string name="section_diagnostics">Diagnostics</string>
+    <string name="log_export_button">Export Logs</string>
+    <string name="log_export_description">Share diagnostic logs with the developer to help investigate issues.\nLogs are also adb-pullable without root:\nadb pull /sdcard/Android/data/com.copypaste.android/files/logs/</string>
+    <string name="log_export_chooser_title">Share logs via…</string>
+    <string name="log_export_empty">No log files found yet.</string>
+    <string name="log_export_failed">Could not prepare log archive. Try adb pull instead.</string>
+
+    <!-- Crash detection (OnboardingActivity / next-launch prompt) -->
+    <string name="crash_detected_title">App crashed last time</string>
+    <string name="crash_detected_message">A crash was detected on the previous run. Export logs to help diagnose the issue?</string>
+    <string name="crash_detected_export">Export Logs</string>
+    <string name="crash_detected_dismiss">Dismiss</string>
+
+    <!-- adb READ_LOGS logcat capture (Settings › Diagnostics) -->
+    <string name="setting_logcat_capture_title">adb logcat background capture</string>
+    <string name="setting_logcat_capture_subtitle">Power-user fallback: reads clipboard-change events from logcat when AccessibilityService is unavailable. Requires READ_LOGS granted via adb (see below).</string>
+    <string name="logcat_status_not_granted">Status: READ_LOGS not granted</string>
+    <string name="logcat_status_disabled">Status: disabled (toggle on to activate)</string>
+    <string name="logcat_status_not_working">Status: granted but not working — Android 11+ may scope system logs. Enable AccessibilityService instead.</string>
+    <string name="logcat_status_working">Status: working — clips are being captured via logcat</string>
+    <string name="logcat_adb_grant_command">adb shell pm grant com.copypaste.android android.permission.READ_LOGS</string>
+    <string name="logcat_adb_revoke_command">adb shell pm revoke com.copypaste.android android.permission.READ_LOGS</string>
+    <string name="logcat_adb_label">Grant command (run once):</string>
+
     <!-- Error / status -->
     <string name="error_generic">Failed: %1$s</string>
     <string name="error_load_history">Failed to load history: %1$s</string>

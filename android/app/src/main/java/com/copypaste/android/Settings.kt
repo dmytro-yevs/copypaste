@@ -468,6 +468,36 @@ class Settings(context: Context) {
                 .apply()
         }
 
+    // ── Logcat capture (adb READ_LOGS fallback) ────────────────────────────
+
+    /**
+     * Whether the optional adb READ_LOGS logcat capture path is enabled.
+     *
+     * This setting only takes effect if `android.permission.READ_LOGS` has been
+     * granted via adb (`adb shell pm grant com.copypaste.android android.permission.READ_LOGS`).
+     * Without that grant the service refuses to start regardless of this flag.
+     *
+     * Default: false (opt-in power-user feature).
+     */
+    var logcatCaptureEnabled: Boolean
+        get() = prefs.getBoolean("logcat_capture_enabled", false)
+        set(v) = prefs.edit().putBoolean("logcat_capture_enabled", v).apply()
+
+    /**
+     * Runtime flag set by [LogcatCaptureService] to track whether it has
+     * successfully read at least one clipboard item via logcat.
+     *
+     * false → either not yet tried, or Android 11+ scoped-logcat is blocking
+     *          system-process log lines, or API 29+ clipboard background
+     *          restriction is still preventing getPrimaryClip from returning a value.
+     * true  → at least one text clip was captured and routed through the pipeline.
+     *
+     * Reset to false when the service is stopped.
+     */
+    var logcatCaptureWorking: Boolean
+        get() = prefs.getBoolean("logcat_capture_working", false)
+        set(v) = prefs.edit().putBoolean("logcat_capture_working", v).apply()
+
     fun clear() {
         // H4: drop the cached master key so a re-created key after clear() is
         // not shadowed by a stale RAM copy.
