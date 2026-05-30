@@ -260,10 +260,12 @@ function PopupRow({ item, selected, itemHeight, maskSensitive, onMouseEnter, onC
   return (
     <li
       className={[
-        "popup-row flex items-center gap-2 px-3 cursor-pointer transition-colors duration-75 select-none",
+        // image-row omits the CSS height/max-height cap so the inline minHeight wins.
+        isImage ? "popup-row-image" : "popup-row",
+        "flex items-center gap-2 px-3 cursor-pointer transition-colors duration-75 select-none",
         selected ? "bg-white/10" : "hover:bg-white/5",
       ].join(" ")}
-      style={{ minHeight: itemHeight }}
+      style={{ minHeight: isImage ? Math.max(itemHeight, 50) : itemHeight }}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     >

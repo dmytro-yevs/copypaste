@@ -56,10 +56,16 @@ textarea {
   background: transparent;
 }
 
-/* Popup: compact single-line rows (Maccy-style) */
+/* Popup: compact single-line rows (Maccy-style).
+   Only min-height here — image rows need extra height driven by inline minHeight
+   (e.g. imageMaxHeight + 10px). Omitting height/max-height lets the inline style
+   win without being overridden by a hard CSS cap. */
 .popup-row {
-  height: 28px;
   min-height: 28px;
-  max-height: 28px;
+  line-height: 28px;
+}
+
+/* Image rows: no height cap so the inline minHeight (imageMaxHeight+10) drives size. */
+.popup-row-image {
   line-height: 28px;
 }
