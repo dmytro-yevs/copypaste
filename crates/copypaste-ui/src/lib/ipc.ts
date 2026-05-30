@@ -231,7 +231,8 @@ export const api = {
   setConfig: (settings: AppSettings) =>
     ipcCall("set_config", settings as unknown as Record<string, unknown>),
   getPrivateMode: () => ipcCall<{ private_mode: boolean }>("get_private_mode", {}),
-  setPrivateMode: (enabled: boolean) => ipcCall("set_private_mode", { enabled }),
+  setPrivateMode: (enabled: boolean) =>
+    ipcCall<{ private_mode: boolean }>("set_private_mode", { enabled }),
 
   setSyncPassphrase: (passphrase: string) =>
     ipcCall("set_sync_passphrase", { passphrase }),
