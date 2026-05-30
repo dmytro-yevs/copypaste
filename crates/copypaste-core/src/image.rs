@@ -119,16 +119,27 @@ pub fn encode_as_png(img: &DynamicImage) -> Result<Vec<u8>, ImageError> {
 /// Full encode pipeline:
 ///   raw clipboard bytes → decode → PNG → split into chunks → encrypt
 ///
+/// `max_bytes` is the configured raw-byte ceiling (the daemon threads
+/// `AppConfig::max_image_size_bytes` here). Passing `0` falls back to the
+/// library default [`MAX_IMAGE_BYTES`] so callers without config still get a
+/// sane bound.
+///
 /// Returns `(ImageMeta, Vec<EncryptedChunk>)`.
 pub fn encode_image(
     raw: &[u8],
     key: &[u8; 32],
     file_id: &[u8; 16],
+    max_bytes: usize,
 ) -> Result<(ImageMeta, Vec<EncryptedChunk>), ImageError> {
-    if raw.len() > MAX_IMAGE_BYTES {
+    let max = if max_bytes == 0 {
+        MAX_IMAGE_BYTES
+    } else {
+        max_bytes
+    };
+    if raw.len() > max {
         return Err(ImageError::TooLarge {
             actual: raw.len(),
-            max: MAX_IMAGE_BYTES,
+            max,
         });
     }
 
@@ -310,7 +321,7 @@ mod tests {
         let key = test_key();
         let file_id = test_file_id();
 
-        let (meta, chunks) = encode_image(&png, &key, &file_id).expect("encode should succeed");
+        let (meta, chunks) = encode_image(&png, &key, &file_id, 0).expect("encode should succeed");
         assert_eq!(meta.width, 2);
         assert_eq!(meta.height, 2);
         assert_eq!(meta.original_size, png.len() as u64);
@@ -328,7 +339,7 @@ mod tests {
         let png = minimal_png();
         let key = test_key();
         let file_id = test_file_id();
-        let (meta, chunks) = encode_image(&png, &key, &file_id).unwrap();
+        let (meta, chunks) = encode_image(&png, &key, &file_id, 0).unwrap();
         // A tiny image should fit in one chunk
         assert_eq!(chunks.len(), 1);
         assert_eq!(meta.chunk_count, 1);
@@ -354,8 +365,35 @@ mod tests {
         let huge = vec![0u8; MAX_IMAGE_BYTES + 1];
         let key = test_key();
         let file_id = test_file_id();
-        let err = encode_image(&huge, &key, &file_id).unwrap_err();
+        // max_bytes = 0 falls back to the library default MAX_IMAGE_BYTES.
+        let err = encode_image(&huge, &key, &file_id, 0).unwrap_err();
         assert!(matches!(err, ImageError::TooLarge { .. }));
+    }
+
+    #[test]
+    fn configured_cap_above_default_admits_larger_raw() {
+        // Regression: a raw payload between the library default (10 MB) and the
+        // user-configured cap (e.g. 25 MB default) must NOT be rejected when the
+        // configured cap is threaded in. We can't feed 11 MB of decodable PNG
+        // cheaply, so we assert the size gate itself: with a cap above the raw
+        // length the gate passes (decode then fails on garbage with a *different*
+        // error), whereas with the default cap it is rejected as TooLarge.
+        let key = test_key();
+        let file_id = test_file_id();
+        let raw = vec![0u8; MAX_IMAGE_BYTES + 1]; // > 10 MB default, < 25 MB cap
+        let configured_cap = 25 * 1024 * 1024;
+
+        // Default cap (0 → MAX_IMAGE_BYTES): rejected by the size gate.
+        let err = encode_image(&raw, &key, &file_id, 0).unwrap_err();
+        assert!(matches!(err, ImageError::TooLarge { .. }));
+
+        // Higher configured cap: the size gate is cleared, so the error (if any)
+        // comes from decode/format, never TooLarge.
+        let err = encode_image(&raw, &key, &file_id, configured_cap).unwrap_err();
+        assert!(
+            !matches!(err, ImageError::TooLarge { .. }),
+            "raw under the configured cap must pass the size gate, got {err:?}"
+        );
     }
 
     #[test]
@@ -436,7 +474,7 @@ mod tests {
         let bad_key = [0xFFu8; 32];
         let file_id = test_file_id();
         let png = minimal_png();
-        let (_, chunks) = encode_image(&png, &key, &file_id).unwrap();
+        let (_, chunks) = encode_image(&png, &key, &file_id, 0).unwrap();
         let err = decode_image(&chunks, &bad_key, &file_id).unwrap_err();
         assert!(matches!(err, ImageError::Chunk(_)));
     }
@@ -503,7 +541,7 @@ mod tests {
         let file_id = test_file_id();
         let bad_file_id = [0x00u8; 16];
         let png = minimal_png();
-        let (_, chunks) = encode_image(&png, &key, &file_id).unwrap();
+        let (_, chunks) = encode_image(&png, &key, &file_id, 0).unwrap();
         let err = decode_image(&chunks, &key, &bad_file_id).unwrap_err();
         assert!(matches!(err, ImageError::Chunk(_)));
     }

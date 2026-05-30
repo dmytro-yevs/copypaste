@@ -1269,7 +1269,12 @@ async fn handle_image(
         // dedup naturally (Wave 2.1 security LOW #19).
         let file_id = crate::clipboard::image_content_hash(&raw_bytes);
 
-        match encode_image(&raw_bytes, &local_key, &file_id) {
+        // Honour the user-configured raw-image cap (default 25 MB) instead of
+        // the library's hard 10 MB floor, which silently rejected 10–25 MB
+        // images the config permitted. `usize::MAX` saturation keeps 32-bit
+        // targets safe.
+        let max_image_bytes = usize::try_from(config.max_image_size_bytes).unwrap_or(usize::MAX);
+        match encode_image(&raw_bytes, &local_key, &file_id, max_image_bytes) {
             Ok((meta, chunks)) => {
                 let blob = chunks_to_blob(&chunks);
                 let meta_json = format!(

@@ -12,6 +12,21 @@ pub enum ItemsError {
     /// A write was attempted while the v4 migration sweep is in progress.
     #[error("v4 key-version migration sweep is in progress; write rejected")]
     MigrationInProgress,
+    /// An item carried a `key_version` outside the supported HKDF family set {1, 2}.
+    #[error("unsupported key_version {0}; expected 1 or 2")]
+    UnsupportedKeyVersion(u8),
+}
+
+/// Validate that an item's `key_version` is a known HKDF family before it is
+/// persisted. Rows are written verbatim from `item.key_version`, so an
+/// out-of-range value would later be undecryptable. We reject rather than
+/// clamp so the caller learns the value was wrong instead of silently
+/// mislabelling the ciphertext's key family.
+fn validate_key_version(key_version: u8) -> Result<i64, ItemsError> {
+    match key_version {
+        1 | 2 => Ok(key_version as i64),
+        other => Err(ItemsError::UnsupportedKeyVersion(other)),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -127,6 +142,7 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
     if matches!(db.migration_state()?, MigrationState::InProgress { .. }) {
         return Err(ItemsError::MigrationInProgress);
     }
+    let key_version = validate_key_version(item.key_version)?;
     db.conn().execute(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
@@ -148,7 +164,7 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
             item.app_bundle_id,
             item.content_hash,
             item.origin_device_id,
-            ITEM_KEY_VERSION_CURRENT,
+            key_version,
             item.pinned as i64,
         ],
     )?;
@@ -200,6 +216,7 @@ pub fn insert_item_with_fts(
     if matches!(db.migration_state()?, MigrationState::InProgress { .. }) {
         return Err(ItemsError::MigrationInProgress);
     }
+    let key_version = validate_key_version(item.key_version)?;
     let conn = db.conn();
     let tx = conn.unchecked_transaction()?;
     let insert_res = tx.execute(
@@ -223,7 +240,7 @@ pub fn insert_item_with_fts(
             item.app_bundle_id,
             item.content_hash,
             item.origin_device_id,
-            ITEM_KEY_VERSION_CURRENT,
+            key_version,
             item.pinned as i64,
         ],
     );
@@ -472,7 +489,11 @@ pub fn delete_sensitive_expired(
 ) -> Result<usize, ItemsError> {
     let threshold = now_ms - sensitive_ttl_ms;
     let changed = db.conn().execute(
-        "DELETE FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1",
+        // `AND pinned = 0` mirrors `delete_expired`: pinned items are exempt from
+        // every TTL prune (see ClipboardItem::pinned docs). Without this guard a
+        // pinned+sensitive item is silently wiped after the sensitive TTL,
+        // violating the pin contract.
+        "DELETE FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1 AND pinned = 0",
         params![threshold],
     )?;
     Ok(changed)
@@ -1006,6 +1027,36 @@ mod tests {
     }
 
     #[test]
+    fn delete_sensitive_expired_keeps_pinned_items() {
+        // Regression: a pinned + sensitive item past the sensitive cutoff must
+        // NOT be auto-wiped — pinned rows are exempt from every TTL prune.
+        let db = Database::open_in_memory().unwrap();
+
+        // Pinned + sensitive + old wall_time → must survive the prune.
+        let mut pinned_sensitive = make_item(1);
+        pinned_sensitive.is_sensitive = true;
+        pinned_sensitive.pinned = true;
+        pinned_sensitive.wall_time = 1_000; // well past the cutoff below
+        let pinned_id = pinned_sensitive.id.clone();
+        insert_item(&db, &pinned_sensitive).unwrap();
+
+        // Unpinned + sensitive + old wall_time → control row, must be deleted.
+        let mut unpinned_sensitive = make_item(2);
+        unpinned_sensitive.is_sensitive = true;
+        unpinned_sensitive.pinned = false;
+        unpinned_sensitive.wall_time = 1_000;
+        insert_item(&db, &unpinned_sensitive).unwrap();
+
+        // now_ms=200_000, ttl=30_000 → threshold=170_000; both wall_times qualify.
+        let removed = delete_sensitive_expired(&db, 200_000, 30_000).unwrap();
+        assert_eq!(removed, 1, "only the unpinned sensitive row is wiped");
+        assert!(
+            get_item_by_id(&db, &pinned_id).unwrap().is_some(),
+            "pinned+sensitive item must survive the sensitive TTL prune"
+        );
+    }
+
+    #[test]
     fn pin_item_removes_expiry() {
         let db = Database::open_in_memory().unwrap();
         let mut item = make_item(1);
@@ -1030,6 +1081,41 @@ mod tests {
             "insert_item must stamp the current key_version on new rows"
         );
         assert_eq!(ITEM_KEY_VERSION_CURRENT, 2);
+    }
+
+    #[test]
+    fn insert_persists_item_key_version_not_constant() {
+        // Regression: insert must bind `item.key_version`, not the
+        // ITEM_KEY_VERSION_CURRENT constant. A v1 item must persist as 1.
+        let db = Database::open_in_memory().unwrap();
+        let mut item = make_item(1);
+        item.key_version = 1;
+        insert_item(&db, &item).unwrap();
+        assert_eq!(
+            get_key_version(&db, &item.id).unwrap(),
+            Some(1),
+            "insert_item must persist item.key_version verbatim"
+        );
+
+        // Same contract for the FTS path.
+        let mut item2 = make_item(2);
+        item2.key_version = 1;
+        let id2 = insert_item_with_fts(&db, &item2, "indexed text").unwrap();
+        assert_eq!(get_key_version(&db, &id2).unwrap(), Some(1));
+    }
+
+    #[test]
+    fn insert_rejects_out_of_range_key_version() {
+        let db = Database::open_in_memory().unwrap();
+        let mut item = make_item(1);
+        item.key_version = 3; // outside the supported {1, 2} set
+        let err = insert_item(&db, &item).unwrap_err();
+        assert!(
+            matches!(err, ItemsError::UnsupportedKeyVersion(3)),
+            "out-of-range key_version must be rejected, not silently written: {err:?}"
+        );
+        // Nothing should have been persisted.
+        assert_eq!(count_items(&db).unwrap(), 0);
     }
 
     #[test]

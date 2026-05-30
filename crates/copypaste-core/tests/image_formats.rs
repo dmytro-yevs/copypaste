@@ -181,7 +181,7 @@ fn corrupted_header_returns_error_not_panic() {
 fn max_dimension_clamp() {
     // Path A: huge raw byte payload is rejected before decode allocates.
     let huge = vec![0u8; MAX_IMAGE_BYTES + 1];
-    let err = copypaste_core::image::encode_image(&huge, &[0u8; 32], &[0u8; 16])
+    let err = copypaste_core::image::encode_image(&huge, &[0u8; 32], &[0u8; 16], 0)
         .expect_err("oversize must err");
     assert!(matches!(err, ImageError::TooLarge { .. }));
 
