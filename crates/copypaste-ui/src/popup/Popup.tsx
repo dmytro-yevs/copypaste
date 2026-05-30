@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
-import { api, HistoryEntry, IpcError } from "../lib/ipc";
+import { api, HistoryEntry, IpcError, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
 import { useUI } from "../store";
+import { AppIcon } from "../components/AppIcon";
 
 const DEFAULT_ITEM_HEIGHT = 28; // px — default compact single-line row height
 const MAX_ITEMS = 50;
@@ -279,6 +280,24 @@ function PopupRow({ item, selected, itemHeight, maskSensitive, onMouseEnter, onC
       >
         {label}
       </span>
+      {/* Source-app icon + label chip — subtle, right of preview text */}
+      {item.app_bundle_id && (() => {
+        const appLabel = sourceAppLabel(item.app_bundle_id);
+        return appLabel ? (
+          <span
+            className="flex shrink-0 items-center gap-1 text-[10px] leading-none px-1 py-0.5 rounded"
+            style={{
+              color: "rgba(255,255,255,0.28)",
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+            title={item.app_bundle_id ?? undefined}
+          >
+            <AppIcon bundleId={item.app_bundle_id} size={12} />
+            {appLabel}
+          </span>
+        ) : null;
+      })()}
       {item.pinned && (
         <span className="text-[10px] text-yellow-400/70 shrink-0">⚑</span>
       )}

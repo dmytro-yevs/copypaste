@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ViewShell } from "../components/ViewShell";
-import { api, formatWallTime, IpcError, type HistoryEntry } from "../lib/ipc";
+import { api, formatWallTime, IpcError, sourceAppLabel, type HistoryEntry } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
 import { useUI } from "../store";
+import { AppIcon } from "../components/AppIcon";
 
 // ---------------------------------------------------------------------------
 // Image thumbnail cache — keyed by item id, value is the data URI (or null
@@ -304,6 +305,20 @@ function HistoryRow({ entry, selected, previewLines, previewSize, maskSensitive,
       >
         {isImage && !entry.is_sensitive ? `[Image] ${entry.preview}`.trim() : preview}
       </span>
+
+      {/* Source-app icon + label — only when bundle id is known; subtle, doesn't shift layout */}
+      {entry.app_bundle_id && (() => {
+        const appLabel = sourceAppLabel(entry.app_bundle_id);
+        return appLabel ? (
+          <span
+            className="flex shrink-0 items-center gap-1 text-[10px] text-ide-faint px-1 py-0.5 rounded border border-ide-divider/60 bg-ide-elevated/50 leading-none"
+            title={entry.app_bundle_id ?? undefined}
+          >
+            <AppIcon bundleId={entry.app_bundle_id} size={14} />
+            {appLabel}
+          </span>
+        ) : null;
+      })()}
 
       {/* Time — hidden while action buttons are visible */}
       <span className="shrink-0 text-[11px] text-ide-faint group-hover:hidden">

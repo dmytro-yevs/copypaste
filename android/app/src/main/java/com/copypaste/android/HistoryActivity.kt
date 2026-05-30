@@ -2,7 +2,9 @@
 
 package com.copypaste.android
 
+import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -44,18 +46,24 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -358,6 +366,52 @@ private fun HistoryRow(
             )
 
             Spacer(Modifier.width(8.dp))
+
+            // Source-app icon + label — only when sourceApp is known.
+            // Icon is decoded off the main thread via produceState; AppIconHelper
+            // caches results so repeat rows are cheap.
+            val ctx = LocalContext.current
+            sourceAppLabel(item.sourceApp)?.let { appLabel ->
+                val iconBitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+                    initialValue = null,
+                    key1 = item.sourceApp,
+                ) {
+                    value = item.sourceApp?.let { pkg ->
+                        withContext(Dispatchers.Default) {
+                            runCatching {
+                                AppIconHelper.getAppIconBase64(ctx, pkg)
+                                    ?.let { b64 ->
+                                        val bytes = Base64.decode(b64, Base64.DEFAULT)
+                                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                            ?.asImageBitmap()
+                                    }
+                            }.getOrNull()
+                        }
+                    }
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(end = 4.dp),
+                ) {
+                    iconBitmap?.let { bmp ->
+                        Image(
+                            bitmap = bmp,
+                            contentDescription = null,
+                            contentScale = ContentScale.Fit,
+                            modifier = Modifier
+                                .size(14.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                        )
+                        Spacer(Modifier.width(3.dp))
+                    }
+                    Text(
+                        text = appLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = IdeFaint.copy(alpha = 0.65f),
+                        maxLines = 1,
+                    )
+                }
+            }
 
             // Timestamp — right-aligned, faint (matches macOS group-hover:hidden)
             if (!expanded) {
