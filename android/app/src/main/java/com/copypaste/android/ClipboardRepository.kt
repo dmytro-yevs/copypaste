@@ -183,9 +183,12 @@ class ClipboardRepository(context: Context) {
     fun deleteItems(ids: List<String>) {
         if (ids.isEmpty()) return
         val toDelete = ids.toSet()
+        var deletedCount = 0
         synchronized(idsWriteLock) {
             val storedList = storedIds().toMutableList()
+            val before = storedList.size
             storedList.removeAll(toDelete)
+            deletedCount = before - storedList.size
             val pinnedSet = storedPinnedIds().toMutableSet()
             val pinnedChanged = pinnedSet.removeAll(toDelete)
             val editor = prefs.edit()
@@ -199,7 +202,10 @@ class ClipboardRepository(context: Context) {
             }
             editor.apply()
         }
-        Log.d(TAG, "deleteItems: removed ${toDelete.size} items")
+        if (deletedCount > 0) {
+            ClipboardService.onItemsDeleted(appContext, deletedCount)
+        }
+        Log.d(TAG, "deleteItems: removed $deletedCount items")
     }
 
     /**
@@ -207,8 +213,10 @@ class ClipboardRepository(context: Context) {
      * set). This is an explicit user action — even pinned items are removed.
      */
     fun clearAll() {
+        var totalDeleted = 0
         synchronized(idsWriteLock) {
             val ids = storedIds()
+            totalDeleted = ids.size
             val editor = prefs.edit()
             for (id in ids) {
                 editor.remove("item_$id")
@@ -220,6 +228,12 @@ class ClipboardRepository(context: Context) {
                 .remove(KEY_PINNED_IDS)
                 .apply()
         }
+        // Reset cross-listener dedup state so a re-copy after a full clear stores
+        // a fresh row instead of being silently skipped as a duplicate.
+        resetDedupState()
+        if (totalDeleted > 0) {
+            ClipboardService.onItemsDeleted(appContext, totalDeleted)
+        }
         Log.d(TAG, "clearAll: all items deleted")
     }
 
@@ -228,6 +242,7 @@ class ClipboardRepository(context: Context) {
      * The synced-source-id set is also cleared (re-syncing pinned items is fine).
      */
     fun clearUnpinned() {
+        var deletedCount = 0
         synchronized(idsWriteLock) {
             val pinnedSet = storedPinnedIds()
             val ids = storedIds()
@@ -240,10 +255,14 @@ class ClipboardRepository(context: Context) {
             }
             // Retain only pinned ids in the index; clear source-id seen-set.
             val remaining = ids.filter { it in pinnedSet }
+            deletedCount = ids.size - remaining.size
             editor
                 .putString(KEY_ITEM_IDS, remaining.joinToString(","))
                 .remove(KEY_SYNCED_SOURCE_IDS)
                 .apply()
+        }
+        if (deletedCount > 0) {
+            ClipboardService.onItemsDeleted(appContext, deletedCount)
         }
         Log.d(TAG, "clearUnpinned: all unpinned items deleted")
     }
@@ -424,7 +443,7 @@ class ClipboardRepository(context: Context) {
                 Log.w(TAG, "LWW replace: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
                 localAesEncrypt(plaintextBytes, key)
             }
-            val encoded = encodeItem(blob, plaintext.length, lamportTs = incomingLamportTs)
+            val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs)
             prefs.edit().putString("item_$existingStorageId", encoded).apply()
             Log.d(TAG, "LWW replaced item_id=$itemId storageId=$existingStorageId (lamport $storedTs→$incomingLamportTs)")
             true  // replaced successfully
@@ -446,7 +465,7 @@ class ClipboardRepository(context: Context) {
             Log.w(TAG, "storeItemWithLww: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
             localAesEncrypt(plaintextBytes, key)
         }
-        val encoded = encodeItem(blob, plaintext.length, lamportTs = incomingLamportTs)
+        val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs)
 
         synchronized(idsWriteLock) {
             val ids = storedIds().toMutableList().also { it.add(storageId) }
@@ -473,6 +492,29 @@ class ClipboardRepository(context: Context) {
      */
     fun lastStoredId(): String? = storedIds().lastOrNull()
 
+    /**
+     * Decrypt and return the FULL plaintext for item [id], or null when the item
+     * does not exist or cannot be decrypted.
+     *
+     * Used by the copy-to-clipboard path in [HistoryActivity] to ensure the user
+     * copies the complete original text, not the 140-char [ClipboardItem.snippet].
+     */
+    suspend fun loadFullPlaintext(id: String, key: ByteArray): String? =
+        withContext(Dispatchers.IO) {
+            val raw = prefs.getString("item_$id", null) ?: return@withContext null
+            val parts = raw.split("|")
+            val nonceB64 = parts.getOrNull(3) ?: return@withContext null
+            val ctB64 = parts.getOrNull(4) ?: return@withContext null
+            return@withContext try {
+                val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
+                val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
+                decryptForPreview(id, ciphertext, nonce, key)
+            } catch (e: Exception) {
+                Log.w(TAG, "loadFullPlaintext: decrypt failed for $id: ${e.message}")
+                null
+            }
+        }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     /**
@@ -486,6 +528,7 @@ class ClipboardRepository(context: Context) {
      */
     private fun pruneToLimits() {
         val quotaBytes = settings.storageQuotaBytes.coerceAtLeast(0L)
+        var evictedCount = 0
 
         synchronized(idsWriteLock) {
             val pinnedSet = storedPinnedIds()
@@ -514,12 +557,17 @@ class ClipboardRepository(context: Context) {
                 editor.remove("item_$evictId")
                 editor.remove("item_img_$evictId")
                 didEvict = true
+                evictedCount++
                 Log.d(TAG, "pruneToLimits: evicted $evictId (blob ${sz}B, totalNow=${totalBytes}B)")
             }
 
             if (didEvict) {
                 editor.putString(KEY_ITEM_IDS, ids.joinToString(",")).apply()
             }
+        }
+
+        if (evictedCount > 0) {
+            ClipboardService.onItemsDeleted(appContext, evictedCount)
         }
     }
 
@@ -656,6 +704,28 @@ class ClipboardRepository(context: Context) {
         const val MAX_SEEN_SOURCE_IDS = 1_000
 
         private const val DEDUP_WINDOW_MS = 2_000L
+
+        /**
+         * Process-wide dedup state shared across all [ClipboardRepository] instances.
+         * Multiple listener owners (FGS, a11y service, activity) each build their own
+         * instance; per-instance state lets the same physical copy slip past all three
+         * guards independently. All accesses must be under [dedupLock].
+         */
+        @Volatile var lastStoredHash: Int = 0
+        @Volatile var lastStoredAtMs: Long = 0L
+        val dedupLock = Any()
+
+        /**
+         * Zero the cross-listener dedup window. Call after [clearAll] so a re-copy
+         * of the same text immediately after a clear is stored as a fresh row rather
+         * than silently skipped as a recent duplicate.
+         */
+        fun resetDedupState() {
+            synchronized(dedupLock) {
+                lastStoredHash = 0
+                lastStoredAtMs = 0L
+            }
+        }
 
         fun isNewSourceId(sourceId: String, seen: Set<String>): Boolean =
             sourceId !in seen

@@ -577,6 +577,9 @@ private fun HistoryList(
     val maskSensitive = remember { settings.maskSensitiveContent }
     val imageMaxHeightDp = remember { settings.imageMaxHeight }
     val previewDelayMs = remember { settings.previewDelay }
+    // Repository and key used to load FULL plaintext on copy — not the 140-char snippet.
+    val repository = remember { ClipboardRepository(ctx) }
+    val scope = rememberCoroutineScope()
 
     LazyColumn(
         modifier = Modifier
@@ -596,9 +599,17 @@ private fun HistoryList(
                 isSelected = selectedIds.contains(item.id),
                 onDelete = onDelete,
                 onSetPinned = onSetPinned,
-                onCopy = { snippet ->
-                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", snippet))
+                onCopy = {
+                    // Load the FULL decrypted plaintext before writing to the
+                    // system clipboard — item.snippet is capped at 140 chars and
+                    // would truncate the user's actual content.
+                    scope.launch {
+                        val key = settings.encryptionKey
+                        val fullText = repository.loadFullPlaintext(item.id, key)
+                            ?: item.snippet  // fallback to snippet if decrypt fails
+                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
+                    }
                 },
                 onLongPress = { onLongPress(item.id) },
                 onCheckboxTap = { onCheckboxTap(item.id) },
@@ -636,7 +647,7 @@ private fun HistoryRow(
     isSelected: Boolean,
     onDelete: (String) -> Unit,
     onSetPinned: (String, Boolean) -> Unit,
-    onCopy: (String) -> Unit = {},
+    onCopy: () -> Unit = {},
     onLongPress: () -> Unit,
     onCheckboxTap: () -> Unit,
     onSensitiveTap: () -> Unit = {},
@@ -693,7 +704,7 @@ private fun HistoryRow(
                     } else if (detectedSensitive) {
                         onSensitiveTap()
                     } else {
-                        onCopy(item.snippet)
+                        onCopy()
                     }
                 },
                 onLongClick = {
