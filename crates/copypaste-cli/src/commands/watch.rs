@@ -1,3 +1,4 @@
+use crate::commands::common::format_unix_ms;
 use crate::ipc::IpcClient;
 use anyhow::Result;
 use std::collections::{HashSet, VecDeque};
@@ -79,7 +80,11 @@ pub fn run(socket_path: &Path, interval_ms: u64) -> Result<()> {
 
 fn poll_once(socket_path: &Path, seen_ids: &mut SeenIds, silent_first: bool) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({"id": "1", "method": "list", "params": {"limit": LIST_LIMIT, "offset": 0}});
+    let req = IpcClient::build_request(
+        "1",
+        "list",
+        serde_json::json!({"limit": LIST_LIMIT, "offset": 0}),
+    );
     let resp = client.call(&req)?;
 
     if !resp.ok {
@@ -106,34 +111,19 @@ fn poll_once(socket_path: &Path, seen_ids: &mut SeenIds, silent_first: bool) -> 
         let wall_time = item["wall_time"].as_i64().unwrap_or(0);
         let sensitive = item["is_sensitive"].as_bool().unwrap_or(false);
         let sens = if sensitive { " [sensitive]" } else { "" };
-        let ts = format_ts(wall_time);
+        let ts = format_unix_ms(wall_time);
         println!("+ {ts}  {content_type:<6}  {id}{sens}");
     }
     Ok(())
 }
 
-fn format_ts(ms: i64) -> String {
-    let secs = ms / 1000;
-    let s = secs % 60;
-    let m = (secs / 60) % 60;
-    let h = (secs / 3600) % 24;
-    format!("{h:02}:{m:02}:{s:02}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn run_signature_compiles() {
         let _: fn(&Path, u64) -> Result<()> = run;
-    }
-    #[test]
-    fn format_ts_midnight() {
-        assert_eq!(format_ts(0), "00:00:00");
-    }
-    #[test]
-    fn format_ts_noon() {
-        assert_eq!(format_ts(43_200_000), "12:00:00");
     }
 
     #[test]

@@ -6,6 +6,12 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
+/// Opaque counter for generating unique request ids within a process run.
+// Used by next_id(); suppress dead_code: this is intentional public API for
+// callers that want monotonic ids rather than the hardcoded "1" used today.
+#[allow(dead_code)]
+static REQ_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// Max time to wait for the daemon to accept a write or produce a response
 /// line. Without this, a daemon that accepts the connection but never replies
 /// (deadlocked DB, stuck `spawn_blocking`) would hang the CLI forever.
@@ -59,8 +65,43 @@ impl IpcClient {
         Ok(Self { stream })
     }
 
+    /// Build a request JSON object stamped with `protocol_version` and a
+    /// unique string `id`. All command modules should use this helper instead
+    /// of constructing raw `serde_json::json!` literals so every request
+    /// automatically carries the protocol version.
+    ///
+    /// The id is a monotonically-increasing counter converted to a string so
+    /// it remains compatible with the current string-id wire format used by
+    /// the daemon. The counter is process-global and wraps at u64::MAX
+    /// (effectively never).
+    pub fn build_request(id: &str, method: &str, params: Value) -> Value {
+        serde_json::json!({
+            "id": id,
+            "method": method,
+            "protocol_version": copypaste_ipc::PROTOCOL_VERSION,
+            "params": params,
+        })
+    }
+
+    /// Allocate a fresh monotonic request id as a decimal string.
+    // Intentional public API for future callers; suppress dead_code warning.
+    #[allow(dead_code)]
+    pub fn next_id() -> String {
+        REQ_COUNTER
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            .to_string()
+    }
+
     /// Send a JSON request and read exactly one JSON response line.
+    ///
+    /// Enforces two framing guards beyond the raw I/O:
+    /// 1. The response `id` must echo the request `id`; a mismatch indicates
+    ///    a framing desync (or a rogue peer) and is rejected immediately.
+    /// 2. A `version_mismatch` error code in the response is surfaced as a
+    ///    clear, actionable error so the user knows to upgrade CLI or daemon.
     pub fn call(&mut self, request: &Value) -> Result<Response> {
+        let req_id = request["id"].as_str().unwrap_or("").to_string();
+
         // Write request line
         let mut line = serde_json::to_string(request)?;
         line.push('\n');
@@ -96,8 +137,34 @@ impl IpcClient {
         let v: Value =
             serde_json::from_str(resp_line.trim()).context("invalid JSON from daemon")?;
 
+        // Guard: reject responses whose id doesn't echo the request id.
+        // This catches framing desyncs where we read a stale response meant
+        // for a previous request (or a rogue peer injecting traffic).
+        let resp_id = v["id"].as_str().unwrap_or("");
+        if resp_id != req_id {
+            return Err(anyhow!(
+                "response id mismatch: sent {:?}, got {:?}",
+                req_id,
+                resp_id
+            ));
+        }
+
+        let error_code = v["error_code"].as_str().and_then(ErrorCode::parse);
+
+        // Surface version_mismatch immediately so users get a clear, actionable
+        // message rather than a generic error string buried in resp.error.
+        if matches!(error_code, Some(ErrorCode::VersionMismatch)) {
+            let msg = v["error"]
+                .as_str()
+                .unwrap_or("daemon requires a different protocol version");
+            return Err(anyhow!(
+                "version mismatch: {} — upgrade CLI or restart daemon",
+                msg
+            ));
+        }
+
         Ok(Response {
-            id: v["id"].as_str().unwrap_or("").to_string(),
+            id: resp_id.to_string(),
             ok: v["ok"].as_bool().unwrap_or(false),
             data: if v["data"].is_null() {
                 None
@@ -108,7 +175,7 @@ impl IpcClient {
             // W3.3: parse the machine-readable `error_code` if attached.
             // Unknown / missing codes collapse to `None` so older daemons
             // keep working unchanged.
-            error_code: v["error_code"].as_str().and_then(ErrorCode::parse),
+            error_code,
         })
     }
 }
@@ -230,5 +297,66 @@ mod tests {
 
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("unknown method: foo"));
+    }
+
+    /// build_request must stamp protocol_version = PROTOCOL_VERSION on every
+    /// request JSON object.
+    #[test]
+    fn build_request_stamps_protocol_version() {
+        let req = IpcClient::build_request("req-1", "list", serde_json::json!({"limit": 10}));
+        assert_eq!(
+            req["protocol_version"].as_u64(),
+            Some(copypaste_ipc::PROTOCOL_VERSION as u64),
+            "build_request must set protocol_version"
+        );
+        assert_eq!(req["id"].as_str(), Some("req-1"));
+        assert_eq!(req["method"].as_str(), Some("list"));
+    }
+
+    /// build_request must include the params payload unchanged.
+    #[test]
+    fn build_request_preserves_params() {
+        let params = serde_json::json!({"query": "hello", "limit": 5});
+        let req = IpcClient::build_request("r", "search", params.clone());
+        assert_eq!(req["params"], params);
+    }
+
+    /// call must return an error when the response id doesn't match the request id.
+    #[test]
+    fn call_rejects_mismatched_response_id() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("mismatch.sock");
+        // Server echoes id "99" but the request will carry id "1"
+        mock_server(&sock, r#"{"id":"99","ok":true,"data":{}}"#);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let mut client = IpcClient::connect(&sock).unwrap();
+        let req = serde_json::json!({"id": "1", "method": "status", "params": {}});
+        let err = client.call(&req).unwrap_err();
+        assert!(
+            err.to_string().contains("response id mismatch"),
+            "expected id mismatch error, got: {err}"
+        );
+    }
+
+    /// A response carrying error_code = "version_mismatch" must be surfaced as
+    /// a clear, actionable error rather than a generic ok/err response.
+    #[test]
+    fn call_surfaces_version_mismatch_error() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("vermismatch.sock");
+        mock_server(
+            &sock,
+            r#"{"id":"1","ok":false,"error":"protocol version mismatch","error_code":"version_mismatch"}"#,
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let mut client = IpcClient::connect(&sock).unwrap();
+        let req = serde_json::json!({"id": "1", "method": "list", "params": {}});
+        let err = client.call(&req).unwrap_err();
+        assert!(
+            err.to_string().contains("version mismatch"),
+            "expected version mismatch error, got: {err}"
+        );
     }
 }

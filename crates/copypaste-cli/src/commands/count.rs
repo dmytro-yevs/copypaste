@@ -5,7 +5,7 @@ use std::path::Path;
 
 pub fn run(socket_path: &Path) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({"id": "1", "method": "count", "params": {}});
+    let req = IpcClient::build_request("1", "count", serde_json::json!({}));
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 

@@ -5,11 +5,7 @@ use std::path::Path;
 
 pub fn run(socket_path: &Path, limit: u64, output: Option<&str>, force: bool) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({
-        "id": "1",
-        "method": "export",
-        "params": {"limit": limit}
-    });
+    let req = IpcClient::build_request("1", "export", serde_json::json!({"limit": limit}));
     let resp = client.call(&req)?;
 
     // If the daemon does not recognise the `export` method (older daemon or

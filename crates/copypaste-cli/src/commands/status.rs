@@ -161,7 +161,7 @@ fn probe(socket_path: &Path) -> StatusReport {
     //    the backing DB is unavailable. We must surface "degraded" rather than
     //    reporting "running" and exiting 0 — otherwise scripts treat a broken
     //    daemon as healthy.
-    let status_req = serde_json::json!({"id": "status", "method": "status", "params": {}});
+    let status_req = IpcClient::build_request("status", "status", serde_json::json!({}));
     match client.call(&status_req) {
         Ok(resp) if resp.ok => {
             if let Some(data) = &resp.data {
@@ -175,7 +175,7 @@ fn probe(socket_path: &Path) -> StatusReport {
     //    but does NOT downgrade the daemon state.
     //    Each call opens a fresh connection because IpcClient is one-shot.
     if let Ok(mut c2) = IpcClient::connect(socket_path) {
-        let count_req = serde_json::json!({"id": "count", "method": "count", "params": {}});
+        let count_req = IpcClient::build_request("count", "count", serde_json::json!({}));
         if let Ok(resp) = c2.call(&count_req) {
             if resp.ok {
                 if let Some(data) = &resp.data {

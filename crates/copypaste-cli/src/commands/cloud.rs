@@ -107,11 +107,11 @@ pub fn setup(
     }
 
     // Resolve the anon key without leaking it via `ps`: explicit --anon-key
-    // (deprecated) → SUPABASE_ANON_KEY env → interactive prompt.
+    // (deprecated) → SUPABASE_ANON_KEY env → no-echo interactive prompt.
     let anon_key = resolve_secret(
         anon_key,
         "SUPABASE_ANON_KEY",
-        "Supabase anon/public API key (input is visible): ",
+        "Supabase anon/public API key: ",
     )?;
     let anon_key = anon_key.trim();
     if anon_key.is_empty() {
@@ -135,7 +135,7 @@ pub fn setup(
     // Read-merge-write: fetch current config so we don't drop other fields.
     let mut cfg = {
         let mut client = IpcClient::connect(socket_path)?;
-        let req = serde_json::json!({ "id": "1", "method": "get_config", "params": {} });
+        let req = IpcClient::build_request("1", "get_config", serde_json::json!({}));
         let resp = client.call(&req)?;
         exit_on_err(&resp);
         resp.data.unwrap_or_else(|| serde_json::json!({}))
@@ -164,7 +164,7 @@ pub fn setup(
     }
 
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({ "id": "1", "method": "set_config", "params": cfg });
+    let req = IpcClient::build_request("1", "set_config", cfg);
     let resp = client.call(&req)?;
     // `password` (Zeroizing) is dropped and zeroed after the IPC call completes.
     exit_on_err(&resp);
@@ -180,14 +180,16 @@ pub fn setup(
 
 /// Resolve a secret value (anon key or password) without leaking it via the
 /// process list or shell history: explicit value (deprecated argv flag) →
-/// `env_var` → interactive stdin prompt. We never echo it back and never log it.
+/// `env_var` → interactive no-echo prompt.
 ///
-/// When prompting interactively the terminal is put into no-echo mode on
-/// macOS/Linux via the platform `termios` API so the typed characters are
-/// invisible. A "(input hidden)" notice is printed before the prompt and a
-/// newline is printed after the user presses Enter so the next output line
-/// is not on the same line as the invisible input. This avoids a dependency
-/// on the `rpassword` crate while providing equivalent security.
+/// The interactive path uses `rpassword::prompt_password` which disables
+/// terminal echo in-process (via termios on Unix) so the secret is never
+/// visible on-screen or in terminal scroll-back. Echo is always restored by
+/// rpassword even when the user hits Ctrl-C or an error occurs.
+///
+/// Non-TTY path (pipes, CI): `rpassword` falls back to reading stdin without
+/// echo-disabling; callers that truly cannot provide a TTY should set the env
+/// var instead.
 fn resolve_secret(explicit: Option<String>, env_var: &str, prompt: &str) -> Result<String> {
     if let Some(v) = explicit {
         return Ok(v);
@@ -197,54 +199,18 @@ fn resolve_secret(explicit: Option<String>, env_var: &str, prompt: &str) -> Resu
             return Ok(v);
         }
     }
-    read_secret_from_tty(prompt)
-}
-
-/// Read a secret from the terminal with echo disabled.
-///
-/// Uses `stty -echo` / `stty echo` (POSIX, available on macOS and Linux,
-/// no extra crate needed) to suppress terminal echo while reading. Prints
-/// "(input hidden)" before the prompt as a visual cue. On non-Unix or when
-/// `stty` is unavailable falls back to a visible read with a clear warning.
-fn read_secret_from_tty(prompt: &str) -> Result<String> {
-    use std::io::Write;
-    use std::process::Command;
-
-    // Attempt to disable echo via stty. If this fails (non-tty stdin, or
-    // stty not on PATH) we fall through to the visible-input warning path.
-    let echo_off = Command::new("stty").arg("-echo").status();
-    let echo_disabled = matches!(echo_off, Ok(s) if s.success());
-
-    if !echo_disabled {
-        // Echo suppression unavailable — warn loudly.
-        eprintln!(
-            "WARNING: (INPUT VISIBLE) {prompt}: \
-             Use the SUPABASE_PASSWORD env var to avoid echoing the password."
-        );
-        std::io::stderr().flush()?;
-    } else {
-        eprint!("(input hidden) {prompt}: ");
-        std::io::stderr().flush()?;
-    }
-
-    let mut buf = String::new();
-    let read_result = std::io::stdin().read_line(&mut buf);
-
-    // Unconditionally restore echo before propagating errors so the
-    // terminal is never left in a broken no-echo state.
-    if echo_disabled {
-        let _ = Command::new("stty").arg("echo").status();
-        eprintln!(); // move to next line after the invisible input
-    }
-
-    read_result?;
-    Ok(buf.trim_end_matches(['\n', '\r']).to_owned())
+    // rpassword::prompt_password disables terminal echo in-process (termios)
+    // and always restores it on return, even on error. This prevents the secret
+    // from appearing in the terminal or in scroll-back history.
+    let value = rpassword::prompt_password(prompt)
+        .map_err(|e| anyhow::anyhow!("failed to read secret from terminal: {e}"))?;
+    Ok(value)
 }
 
 /// Print the current cloud-sync status reported by the daemon.
 pub fn status(socket_path: &Path) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({ "id": "1", "method": "get_sync_status", "params": {} });
+    let req = IpcClient::build_request("1", "get_sync_status", serde_json::json!({}));
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
@@ -277,7 +243,7 @@ pub fn status(socket_path: &Path) -> Result<()> {
 /// is scriptable (`copypaste cloud test && echo ok`).
 pub fn test(socket_path: &Path) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({ "id": "1", "method": "cloud_test_connection", "params": {} });
+    let req = IpcClient::build_request("1", "cloud_test_connection", serde_json::json!({}));
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 

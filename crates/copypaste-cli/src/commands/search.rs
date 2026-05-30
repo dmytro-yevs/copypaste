@@ -1,15 +1,15 @@
-use crate::commands::common::exit_on_err;
+use crate::commands::common::{exit_on_err, format_unix_ms};
 use crate::ipc::IpcClient;
 use anyhow::Result;
 use std::path::Path;
 
 pub fn run(socket_path: &Path, query: &str, limit: u64) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({
-        "id": "1",
-        "method": "search",
-        "params": {"query": query, "limit": limit}
-    });
+    let req = IpcClient::build_request(
+        "1",
+        "search",
+        serde_json::json!({"query": query, "limit": limit}),
+    );
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
@@ -37,35 +37,6 @@ pub fn run(socket_path: &Path, query: &str, limit: u64) -> Result<()> {
     Ok(())
 }
 
-fn format_unix_ms(ms: i64) -> String {
-    let secs = ms / 1000;
-    let s = secs % 60;
-    let m = (secs / 60) % 60;
-    let h = (secs / 3600) % 24;
-    let days = secs / 86400;
-    let y400 = days / 146097;
-    let mut rem = days % 146097;
-    let y100 = (rem / 36524).min(3);
-    rem -= y100 * 36524;
-    let y4 = rem / 1461;
-    rem %= 1461;
-    let y1 = (rem / 365).min(3);
-    rem -= y1 * 365;
-    let year = y400 * 400 + y100 * 100 + y4 * 4 + y1 + 1970;
-    let leap = (y1 == 3 && !(y100 == 3 && y4 == 0)) as i64;
-    let months = [31i64, 28 + leap, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut month = 1i64;
-    let mut day = rem + 1;
-    for mlen in &months {
-        if day <= *mlen {
-            break;
-        }
-        day -= mlen;
-        month += 1;
-    }
-    format!("{year:04}-{month:02}-{day:02} {h:02}:{m:02}:{s:02}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,11 +44,5 @@ mod tests {
     #[test]
     fn run_signature_compiles() {
         let _: fn(&std::path::Path, &str, u64) -> Result<()> = run;
-    }
-
-    #[test]
-    fn format_unix_ms_epoch() {
-        let s = format_unix_ms(0);
-        assert!(s.starts_with("1970-01-01"));
     }
 }
