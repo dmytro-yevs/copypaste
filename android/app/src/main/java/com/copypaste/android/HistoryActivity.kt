@@ -55,6 +55,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -269,6 +272,10 @@ private fun HistoryList(
                 item = item,
                 maskSensitive = maskSensitive,
                 onDelete = onDelete,
+                onCopy = { snippet ->
+                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", snippet))
+                },
             )
             HorizontalDivider(
                 color = IdeBorder.copy(alpha = 0.5f),
@@ -292,6 +299,7 @@ private fun HistoryRow(
     item: ClipboardItem,
     maskSensitive: Boolean,
     onDelete: (String) -> Unit,
+    onCopy: (String) -> Unit = {},
 ) {
     // Sensitivity is computed in the repository against the FULL decrypted
     // plaintext (see ClipboardRepository.parseItem). The snippet here is a
@@ -325,7 +333,12 @@ private fun HistoryRow(
             .fillMaxWidth()
             .background(rowBg)
             .combinedClickable(
-                onClick = { /* single tap: no-op on the row itself */ },
+                // Single-tap: copy the full snippet back to the system clipboard.
+                // Sensitive items are not copyable via tap — the user must long-press
+                // and use the explicit Copy chip so the intent is unambiguous.
+                onClick = {
+                    if (!detectedSensitive) onCopy(item.snippet)
+                },
                 onLongClick = { expanded = !expanded },
             )
             .padding(horizontal = 12.dp, vertical = 0.dp),
@@ -384,6 +397,10 @@ private fun HistoryRow(
                     style = MaterialTheme.typography.bodyMedium,
                     color = IdeFaint,
                     modifier = Modifier.weight(1f),
+                )
+                ActionChip(
+                    label = stringResource(R.string.cd_copy),
+                    onClick = { onCopy(item.snippet); expanded = false },
                 )
                 ActionChip(
                     label = stringResource(R.string.cd_delete),

@@ -443,6 +443,44 @@ fun PairScreen(
                 Text(text = "Scan a device's QR")
             }
 
+            // ── Paired device display ─────────────────────────────────────
+            // Show the persisted paired peer (fingerprint + sync address) so the
+            // user can confirm which device is paired after navigating away and
+            // returning. Reads directly from Settings each recomposition — the
+            // values are written by runPairAndSync and are stable once set.
+            val pairedFingerprint = settings.pairedPeerFingerprint
+            val pairedAddr = settings.pairedPeerSyncAddr
+            if (pairedFingerprint.isNotBlank()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                    ),
+                    border = BorderStroke(1.dp, IdeBorder),
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Paired device",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = pairedFingerprint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        if (pairedAddr.isNotBlank()) {
+                            Text(
+                                text = pairedAddr,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = IdeDim,
+                            )
+                        }
+                    }
+                }
+            }
+
             scannedInfo?.let { info ->
                 Text(
                     text = "Scanned: $info",
