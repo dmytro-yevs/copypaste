@@ -13,6 +13,22 @@ import {
 } from "../lib/ipc";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
+import {
+  StepSlider,
+  snapToNearest,
+  TEXT_SIZE_STEPS_BYTES,
+  TEXT_SIZE_LABELS,
+  IMAGE_SIZE_STEPS_BYTES,
+  IMAGE_SIZE_LABELS,
+  FILE_SIZE_STEPS_BYTES,
+  FILE_SIZE_LABELS,
+  QUOTA_STEPS_BYTES,
+  QUOTA_LABELS,
+  HISTORY_STEPS,
+  HISTORY_LABELS,
+  SENSITIVE_TTL_STEPS,
+  SENSITIVE_TTL_LABELS,
+} from "../components/StepSlider";
 
 // ---------------------------------------------------------------------------
 // Toggle — iOS-style switch using ide tokens
@@ -200,38 +216,26 @@ function formatLastSync(ms: number | null): string {
   return new Date(ms).toLocaleString();
 }
 
-/** Convert bytes to MB, rounded to one decimal place. */
-function bytesToMb(bytes: number): number {
-  return Math.round((bytes / 1_000_000) * 10) / 10;
-}
-
-/** Convert MB back to bytes (integer). */
-function mbToBytes(mb: number): number {
-  return Math.round(mb * 1_000_000);
-}
-
 // ---------------------------------------------------------------------------
 // Storage / Limits defaults — MUST mirror copypaste-core
-// (crates/copypaste-core/src/config/defaults.rs). The UI previously hardcoded
-// tiny fallbacks (text 1 MB, image 25 MB, ...) which made Settings show wrong
-// values whenever the daemon was momentarily unavailable. These now fall back
-// to the real generous core defaults instead. Defined as named consts so the
-// useState seed and the load-time `??` fallback can never drift apart.
+// (crates/copypaste-core/src/config/defaults.rs). Stepped-slider state is now
+// stored as raw bytes (or item count / seconds) snapped to the nearest step
+// array entry so an existing config always loads cleanly.
 //
-// Core uses binary (MiB/GiB) units. The MB display consts are derived from the
-// byte consts via bytesToMb so the displayed seed equals the fallback display.
-const DEFAULT_MAX_TEXT_BYTES = 15 * 1024 * 1024; // 15 MiB
-const DEFAULT_MAX_IMAGE_BYTES = 64 * 1024 * 1024; // 64 MiB
-const DEFAULT_MAX_FILE_BYTES = 1024 * 1024 * 1024; // 1 GiB
+// Core binary defaults (MiB/GiB):
+//   text 15 MiB, image 64 MiB, file 1 GiB, quota 10 GiB
+// Step arrays in StepSlider.tsx cover or exceed each of these.
+//
+// UNLIMITED_SENTINEL (100_000) = HISTORY_LIMIT in defaults.rs — documented as
+// "intentionally generous: history should feel unbounded to the user"; the
+// daemon's size-only prune still applies independently.
+const DEFAULT_MAX_TEXT_BYTES = 15 * 1024 * 1024;          // 15 MiB
+const DEFAULT_MAX_IMAGE_BYTES = 64 * 1024 * 1024;          // 64 MiB
+const DEFAULT_MAX_FILE_BYTES = 1024 * 1024 * 1024;         // 1 GiB
 const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024; // 10 GiB
 const DEFAULT_IMAGE_QUALITY = 100;
 const DEFAULT_HISTORY_LIMIT = 1000;
 const DEFAULT_SENSITIVE_TTL_SECS = 30;
-
-const DEFAULT_MAX_TEXT_MB = bytesToMb(DEFAULT_MAX_TEXT_BYTES);
-const DEFAULT_MAX_IMAGE_MB = bytesToMb(DEFAULT_MAX_IMAGE_BYTES);
-const DEFAULT_MAX_FILE_MB = bytesToMb(DEFAULT_MAX_FILE_BYTES);
-const DEFAULT_STORAGE_QUOTA_MB = bytesToMb(DEFAULT_STORAGE_QUOTA_BYTES);
 
 // ---------------------------------------------------------------------------
 // ShortcutCapture — focus to record a new key combo
@@ -396,14 +400,26 @@ export function SettingsView() {
   const [shortcutMsg, setShortcutMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const shortcutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Storage / Limits — fields from AppConfig surfaced via get_config / set_config.
-  // MB representations; converted to/from raw bytes before IPC.
-  const [maxTextMb, setMaxTextMb] = useState(DEFAULT_MAX_TEXT_MB);
-  const [maxImageMb, setMaxImageMb] = useState(DEFAULT_MAX_IMAGE_MB);
-  const [maxFileMb, setMaxFileMb] = useState(DEFAULT_MAX_FILE_MB);
-  const [quotaMb, setQuotaMb] = useState(DEFAULT_STORAGE_QUOTA_MB);
-  const [historyLimit, setHistoryLimit] = useState(DEFAULT_HISTORY_LIMIT);
-  const [sensitiveTtlSecs, setSensitiveTtlSecs] = useState(DEFAULT_SENSITIVE_TTL_SECS);
+  // Storage / Limits — stepped slider state stored in raw units (bytes, items, seconds).
+  // Each value is snapped to the nearest step array entry on load and on change.
+  const [maxTextBytes, setMaxTextBytes] = useState(
+    snapToNearest(TEXT_SIZE_STEPS_BYTES as unknown as readonly number[], DEFAULT_MAX_TEXT_BYTES)
+  );
+  const [maxImageBytes, setMaxImageBytes] = useState(
+    snapToNearest(IMAGE_SIZE_STEPS_BYTES as unknown as readonly number[], DEFAULT_MAX_IMAGE_BYTES)
+  );
+  const [maxFileBytes, setMaxFileBytes] = useState(
+    snapToNearest(FILE_SIZE_STEPS_BYTES as unknown as readonly number[], DEFAULT_MAX_FILE_BYTES)
+  );
+  const [quotaBytes, setQuotaBytes] = useState(
+    snapToNearest(QUOTA_STEPS_BYTES as unknown as readonly number[], DEFAULT_STORAGE_QUOTA_BYTES)
+  );
+  const [historyLimit, setHistoryLimit] = useState(
+    snapToNearest(HISTORY_STEPS as unknown as readonly number[], DEFAULT_HISTORY_LIMIT)
+  );
+  const [sensitiveTtlSecs, setSensitiveTtlSecs] = useState(
+    snapToNearest(SENSITIVE_TTL_STEPS as unknown as readonly number[], DEFAULT_SENSITIVE_TTL_SECS)
+  );
   const [imageQuality, setImageQuality] = useState(DEFAULT_IMAGE_QUALITY);
   // Per-field save feedback: key = field name, value = error or "Saved" / null.
   const [limitsMsg, setLimitsMsg] = useState<Record<string, string | null>>({});
@@ -500,13 +516,32 @@ export function SettingsView() {
         setSupabaseKey(rawCfg.supabase_anon_key ?? "");
         setSyncStatus(syncSt);
 
-        // Storage / Limits — convert raw bytes to MB for display.
-        setMaxTextMb(bytesToMb(rawCfg.max_text_size_bytes ?? DEFAULT_MAX_TEXT_BYTES));
-        setMaxImageMb(bytesToMb(rawCfg.max_image_size_bytes ?? DEFAULT_MAX_IMAGE_BYTES));
-        setMaxFileMb(bytesToMb(rawCfg.max_file_size_bytes ?? DEFAULT_MAX_FILE_BYTES));
-        setQuotaMb(bytesToMb(rawCfg.storage_quota_bytes ?? DEFAULT_STORAGE_QUOTA_BYTES));
-        setHistoryLimit(rawCfg.history_limit ?? DEFAULT_HISTORY_LIMIT);
-        setSensitiveTtlSecs(rawCfg.sensitive_ttl_secs ?? DEFAULT_SENSITIVE_TTL_SECS);
+        // Storage / Limits — snap raw bytes to nearest step array entry so an
+        // existing config with an arbitrary value always loads cleanly.
+        setMaxTextBytes(snapToNearest(
+          TEXT_SIZE_STEPS_BYTES as unknown as readonly number[],
+          rawCfg.max_text_size_bytes ?? DEFAULT_MAX_TEXT_BYTES
+        ));
+        setMaxImageBytes(snapToNearest(
+          IMAGE_SIZE_STEPS_BYTES as unknown as readonly number[],
+          rawCfg.max_image_size_bytes ?? DEFAULT_MAX_IMAGE_BYTES
+        ));
+        setMaxFileBytes(snapToNearest(
+          FILE_SIZE_STEPS_BYTES as unknown as readonly number[],
+          rawCfg.max_file_size_bytes ?? DEFAULT_MAX_FILE_BYTES
+        ));
+        setQuotaBytes(snapToNearest(
+          QUOTA_STEPS_BYTES as unknown as readonly number[],
+          rawCfg.storage_quota_bytes ?? DEFAULT_STORAGE_QUOTA_BYTES
+        ));
+        setHistoryLimit(snapToNearest(
+          HISTORY_STEPS as unknown as readonly number[],
+          rawCfg.history_limit ?? DEFAULT_HISTORY_LIMIT
+        ));
+        setSensitiveTtlSecs(snapToNearest(
+          SENSITIVE_TTL_STEPS as unknown as readonly number[],
+          rawCfg.sensitive_ttl_secs ?? DEFAULT_SENSITIVE_TTL_SECS
+        ));
         setImageQuality(rawCfg.image_quality ?? DEFAULT_IMAGE_QUALITY);
 
         // Sync parity
@@ -547,16 +582,16 @@ export function SettingsView() {
   }
 
   // Build the full AppSettings patch for set_config, merging current config
-  // with any updated limits fields. Converts MB back to raw bytes.
+  // with any updated limits fields. Slider values are already raw bytes/counts/secs.
   function buildConfigPatch(overrides: Partial<AppSettings>): AppSettings {
     return {
       p2p_enabled: config.p2p_enabled,
       supabase_url: supabaseUrl.trim() || null,
       supabase_anon_key: supabaseKey.trim() || null,
-      max_text_size_bytes: mbToBytes(maxTextMb),
-      max_image_size_bytes: mbToBytes(maxImageMb),
-      max_file_size_bytes: mbToBytes(maxFileMb),
-      storage_quota_bytes: mbToBytes(quotaMb),
+      max_text_size_bytes: maxTextBytes,
+      max_image_size_bytes: maxImageBytes,
+      max_file_size_bytes: maxFileBytes,
+      storage_quota_bytes: quotaBytes,
       history_limit: historyLimit,
       sensitive_ttl_secs: sensitiveTtlSecs,
       image_quality: imageQuality,
@@ -1168,105 +1203,101 @@ export function SettingsView() {
   }
 
   function renderStorage() {
+    // Helper: render a stepped slider row with inline feedback badge.
+    function LimitSliderRow<T extends number>({
+      label,
+      field,
+      steps,
+      labels,
+      value,
+      onChange,
+      onRelease,
+    }: {
+      label: string;
+      field: string;
+      steps: readonly T[];
+      labels: readonly string[];
+      value: T;
+      onChange: (v: T) => void;
+      onRelease: (v: T) => void;
+    }) {
+      const idx = steps.indexOf(value);
+      const safeIdx = idx < 0 ? 0 : idx;
+      return (
+        <SettingsRow label={label}>
+          <div className="flex items-center gap-2">
+            <StepSlider
+              steps={steps}
+              value={steps[safeIdx]}
+              onChange={onChange}
+              onRelease={onRelease}
+              formatLabel={(v) => labels[steps.indexOf(v as T)] ?? String(v)}
+              ariaLabel={label}
+              disabled={offline}
+            />
+            <LimitsMsg field={field} />
+          </div>
+        </SettingsRow>
+      );
+    }
+
     return (
       <div className="space-y-2">
         <Panel>
-          <SettingsRow label="Max clip text size (MB)">
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={0.1}
-                max={100}
-                step={0.1}
-                value={maxTextMb}
-                onChange={(e) => setMaxTextMb(Math.max(0.1, Number(e.target.value) || 1))}
-                onBlur={() => void saveLimitsField("max_text_size_bytes", { max_text_size_bytes: mbToBytes(maxTextMb) })}
-                className={`${numberInputCls} w-24`}
-                disabled={offline}
-              />
-              <LimitsMsg field="max_text_size_bytes" />
-            </div>
-          </SettingsRow>
-          <SettingsRow label="Max clip image size (MB)">
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={1}
-                max={500}
-                step={1}
-                value={maxImageMb}
-                onChange={(e) => setMaxImageMb(Math.max(1, Number(e.target.value) || 25))}
-                onBlur={() => void saveLimitsField("max_image_size_bytes", { max_image_size_bytes: mbToBytes(maxImageMb) })}
-                className={`${numberInputCls} w-24`}
-                disabled={offline}
-              />
-              <LimitsMsg field="max_image_size_bytes" />
-            </div>
-          </SettingsRow>
-          <SettingsRow label="Max clip file size (MB)">
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={1}
-                max={2000}
-                step={1}
-                value={maxFileMb}
-                onChange={(e) => setMaxFileMb(Math.max(1, Number(e.target.value) || 100))}
-                onBlur={() => void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: mbToBytes(maxFileMb) })}
-                className={`${numberInputCls} w-24`}
-                disabled={offline}
-              />
-              <LimitsMsg field="max_file_size_bytes" />
-            </div>
-          </SettingsRow>
-          <SettingsRow label="Local storage limit (MB)">
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={50}
-                max={50000}
-                step={50}
-                value={quotaMb}
-                onChange={(e) => setQuotaMb(Math.max(50, Number(e.target.value) || 500))}
-                onBlur={() => void saveLimitsField("storage_quota_bytes", { storage_quota_bytes: mbToBytes(quotaMb) })}
-                className={`${numberInputCls} w-24`}
-                disabled={offline}
-              />
-              <LimitsMsg field="storage_quota_bytes" />
-            </div>
-          </SettingsRow>
-          <SettingsRow label="Max stored items">
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={1}
-                max={100000}
-                step={1}
-                value={historyLimit}
-                onChange={(e) => setHistoryLimit(Math.max(1, Number(e.target.value) || 1000))}
-                onBlur={() => void saveLimitsField("history_limit", { history_limit: historyLimit })}
-                className={`${numberInputCls} w-24`}
-                disabled={offline}
-              />
-              <LimitsMsg field="history_limit" />
-            </div>
-          </SettingsRow>
-          <SettingsRow label="Sensitive auto-wipe delay (s)">
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={1}
-                max={86400}
-                step={1}
-                value={sensitiveTtlSecs}
-                onChange={(e) => setSensitiveTtlSecs(Math.max(1, Number(e.target.value) || 30))}
-                onBlur={() => void saveLimitsField("sensitive_ttl_secs", { sensitive_ttl_secs: sensitiveTtlSecs })}
-                className={`${numberInputCls} w-24`}
-                disabled={offline}
-              />
-              <LimitsMsg field="sensitive_ttl_secs" />
-            </div>
-          </SettingsRow>
+          <LimitSliderRow
+            label="Max clip text size"
+            field="max_text_size_bytes"
+            steps={TEXT_SIZE_STEPS_BYTES as unknown as readonly number[]}
+            labels={TEXT_SIZE_LABELS}
+            value={maxTextBytes}
+            onChange={(v) => setMaxTextBytes(v)}
+            onRelease={(v) => void saveLimitsField("max_text_size_bytes", { max_text_size_bytes: v })}
+          />
+          <LimitSliderRow
+            label="Max clip image size"
+            field="max_image_size_bytes"
+            steps={IMAGE_SIZE_STEPS_BYTES as unknown as readonly number[]}
+            labels={IMAGE_SIZE_LABELS}
+            value={maxImageBytes}
+            onChange={(v) => setMaxImageBytes(v)}
+            onRelease={(v) => void saveLimitsField("max_image_size_bytes", { max_image_size_bytes: v })}
+          />
+          <LimitSliderRow
+            label="Max clip file size"
+            field="max_file_size_bytes"
+            steps={FILE_SIZE_STEPS_BYTES as unknown as readonly number[]}
+            labels={FILE_SIZE_LABELS}
+            value={maxFileBytes}
+            onChange={(v) => setMaxFileBytes(v)}
+            onRelease={(v) => void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: v })}
+          />
+          <LimitSliderRow
+            label="Local storage limit"
+            field="storage_quota_bytes"
+            steps={QUOTA_STEPS_BYTES as unknown as readonly number[]}
+            labels={QUOTA_LABELS}
+            value={quotaBytes}
+            onChange={(v) => setQuotaBytes(v)}
+            onRelease={(v) => void saveLimitsField("storage_quota_bytes", { storage_quota_bytes: v })}
+          />
+          <LimitSliderRow
+            label="Max stored items"
+            field="history_limit"
+            steps={HISTORY_STEPS as unknown as readonly number[]}
+            labels={HISTORY_LABELS}
+            value={historyLimit}
+            onChange={(v) => setHistoryLimit(v)}
+            onRelease={(v) => void saveLimitsField("history_limit", { history_limit: v })}
+          />
+          <LimitSliderRow
+            label="Sensitive auto-wipe"
+            field="sensitive_ttl_secs"
+            steps={SENSITIVE_TTL_STEPS as unknown as readonly number[]}
+            labels={SENSITIVE_TTL_LABELS}
+            value={sensitiveTtlSecs}
+            onChange={(v) => setSensitiveTtlSecs(v)}
+            onRelease={(v) => void saveLimitsField("sensitive_ttl_secs", { sensitive_ttl_secs: v })}
+          />
           <SettingsRow label="Image quality (1–100)">
             <div className="flex items-center gap-2">
               <SliderRow
@@ -1280,7 +1311,7 @@ export function SettingsView() {
               <LimitsMsg field="image_quality" />
             </div>
           </SettingsRow>
-          {/* Save button for image quality (slider — no onBlur like inputs) */}
+          {/* Save button for image quality (continuous slider — save on button click) */}
           <div className="flex justify-end border-t border-ide-divider px-3 py-2">
             <button
               type="button"
