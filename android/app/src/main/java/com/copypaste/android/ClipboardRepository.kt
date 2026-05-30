@@ -209,12 +209,16 @@ class ClipboardRepository(context: Context) {
         val blob = try {
             encryptText(id, plaintext.toByteArray(Charsets.UTF_8), key)
         } catch (e: IllegalStateException) {
-            Log.d(TAG, "UniFFI unavailable (${e.message}) — using local AES-GCM fallback")
+            // WARN: AES-GCM fallback is only safe during development/testing.
+            // In production, the native .so MUST be present so items use
+            // XChaCha20-Poly1305 (compatible with the macOS daemon). A local
+            // AES-GCM-encrypted item CANNOT be synced to or from the desktop.
+            Log.w(TAG, "UniFFI unavailable (${e.message}) — using local AES-GCM fallback (NOT sync-compatible)")
             localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
         } catch (_: UnsatisfiedLinkError) {
             // Defensive — the bindings throw IllegalStateException, but a
             // future change could surface UnsatisfiedLinkError directly.
-            Log.d(TAG, "UniFFI unavailable (UnsatisfiedLinkError) — using local AES-GCM fallback")
+            Log.w(TAG, "UniFFI unavailable (UnsatisfiedLinkError) — using local AES-GCM fallback (NOT sync-compatible)")
             localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
         }
 
@@ -236,16 +240,111 @@ class ClipboardRepository(context: Context) {
                 repeat(dropCount) {
                     val droppedId = ids.removeAt(0)
                     editor.remove("item_$droppedId")
+                    // Also remove the reverse-lookup entry for evicted items.
+                    editor.remove("item_id_ref_$droppedId")
                 }
             }
             editor
                 .putString("item_$id", encoded)
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
+                // Reverse-lookup: item_id → storage_id for LWW cloud sync.
+                // For locally-captured items the storage id IS the item_id.
+                .putString("item_id_ref_$id", id)
                 .apply()
         }
 
         Log.d(TAG, "Stored item $id (${plaintext.length} chars)")
         id
+    }
+
+    /**
+     * Store a cloud-synced item with Last-Writer-Wins semantics (Task 5).
+     *
+     * [itemId] is the stable UUID from the `item_id` column (same across devices).
+     * [incomingLamportTs] is the lamport_ts from the cloud row (Unix-ms on both
+     * sides, so the compare is valid cross-platform).
+     *
+     * Behaviour:
+     * - If [itemId] is not yet stored locally → store as a new item (same as
+     *   [storeItem]).
+     * - If [itemId] already exists locally AND [incomingLamportTs] is strictly
+     *   greater than the stored lamport_ts → replace the stored row in-place
+     *   (re-encrypt with [key], keep the same storage id in the index).
+     * - Otherwise (equal or older lamport_ts) → skip as a dup.
+     *
+     * Returns true when a new row was inserted or an existing row was replaced.
+     */
+    suspend fun storeItemWithLww(
+        plaintext: String,
+        key: ByteArray,
+        itemId: String,
+        incomingLamportTs: Long,
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (plaintext.isBlank()) return@withContext false
+
+        val sensitive = try { isSensitive(plaintext) } catch (_: UnsatisfiedLinkError) { false }
+        if (sensitive) return@withContext false
+
+        // Look up whether this item_id already has a storage entry.
+        // The reverse-lookup key is "item_id_ref_<itemId>" → storageId.
+        val existingStorageId = prefs.getString("item_id_ref_$itemId", null)
+
+        if (existingStorageId != null) {
+            // LWW: only replace when incoming lamport_ts is strictly newer.
+            val storedTs = storedLamportTs(existingStorageId)
+            if (incomingLamportTs <= storedTs) {
+                Log.d(TAG, "LWW: skipping dup item_id=$itemId (stored=$storedTs, incoming=$incomingLamportTs)")
+                return@withContext false
+            }
+            // Replace in-place: re-encrypt and overwrite the stored value.
+            val blob = try {
+                encryptText(existingStorageId, plaintext.toByteArray(Charsets.UTF_8), key)
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "LWW replace: UniFFI unavailable — using local AES-GCM fallback (NOT sync-compatible)")
+                ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+            } catch (_: UnsatisfiedLinkError) {
+                Log.w(TAG, "LWW replace: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
+                ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+            }
+            val encoded = encodeItem(blob, plaintext.length, incomingLamportTs)
+            prefs.edit().putString("item_$existingStorageId", encoded).apply()
+            Log.d(TAG, "LWW replaced item_id=$itemId storageId=$existingStorageId (lamport $storedTs→$incomingLamportTs)")
+            return@withContext true
+        }
+
+        // New item: generate a fresh storage id and store normally.
+        val storageId = itemId // Use the stable item_id as the storage key for easy lookup.
+        val blob = try {
+            encryptText(storageId, plaintext.toByteArray(Charsets.UTF_8), key)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "storeItemWithLww: UniFFI unavailable — using local AES-GCM fallback (NOT sync-compatible)")
+            ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+        } catch (_: UnsatisfiedLinkError) {
+            Log.w(TAG, "storeItemWithLww: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
+            ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
+        }
+        val encoded = encodeItem(blob, plaintext.length, incomingLamportTs)
+
+        synchronized(idsWriteLock) {
+            val ids = storedIds().toMutableList().also { it.add(storageId) }
+            val editor = prefs.edit()
+            val maxItems = settings.maxHistoryItems.coerceAtLeast(1)
+            if (ids.size > maxItems) {
+                val dropCount = ids.size - maxItems
+                repeat(dropCount) {
+                    val droppedId = ids.removeAt(0)
+                    editor.remove("item_$droppedId")
+                    editor.remove("item_id_ref_$droppedId")
+                }
+            }
+            editor
+                .putString("item_$storageId", encoded)
+                .putString("item_ids", ids.joinToString(","))
+                .putString("item_id_ref_$storageId", storageId)
+                .apply()
+        }
+        Log.d(TAG, "storeItemWithLww: stored new item_id=$itemId as storageId=$storageId")
+        true
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -285,14 +384,18 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Encode a stored item as a pipe-delimited string:
-     * <wallTimeMs>|<contentType>|<snippetLen>|<nonceB64>|<ciphertextB64>
+     * Encode a stored item as a pipe-delimited string (v2 format, 6 fields):
+     * <wallTimeMs>|<contentType>|<snippetLen>|<nonceB64>|<ciphertextB64>|<lamportTs>
+     *
+     * The lamportTs field (index 5) was added for LWW cloud sync. Legacy rows
+     * (only 5 fields) are read back with lamportTs=0, meaning they will be
+     * replaced by any incoming cloud row with a positive lamport_ts.
      */
-    private fun encodeItem(blob: EncryptedBlob, plaintextLen: Int): String {
+    private fun encodeItem(blob: EncryptedBlob, plaintextLen: Int, lamportTs: Long = 0L): String {
         val nonce64 = Base64.encodeToString(blob.nonce, Base64.NO_WRAP)
         val ct64 = Base64.encodeToString(blob.ciphertext, Base64.NO_WRAP)
         val ts = System.currentTimeMillis()
-        return "$ts|text/plain|$plaintextLen|$nonce64|$ct64"
+        return "$ts|text/plain|$plaintextLen|$nonce64|$ct64|$lamportTs"
     }
 
     private fun parseItem(id: String, raw: String, key: ByteArray): ClipboardItem? {
@@ -368,6 +471,20 @@ class ClipboardRepository(context: Context) {
             localAesDecrypt(ciphertext, nonce, key)
         }
         return String(bytes, Charsets.UTF_8)
+    }
+
+    /**
+     * Read the stored lamport_ts for the item at [storageId].
+     * Returns 0 when the item does not exist or has no lamport_ts (legacy format).
+     */
+    private fun storedLamportTs(storageId: String): Long {
+        val raw = prefs.getString("item_$storageId", null) ?: return 0L
+        return try {
+            val parts = raw.split("|")
+            if (parts.size >= 6) parts[5].toLong() else 0L
+        } catch (_: Exception) {
+            0L
+        }
     }
 
     companion object {

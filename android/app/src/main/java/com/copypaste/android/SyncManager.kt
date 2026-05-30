@@ -185,36 +185,42 @@ class SyncManager(
     }
 
     /**
-     * Poll Supabase for new items from other devices and return the decrypted
-     * plaintexts.
+     * Poll Supabase for rows since the compound keyset cursor and return raw rows
+     * plus the sync key so callers can apply LWW and advance the cursor for every
+     * row (including self-echo and blank rows) before filtering.
      *
-     * Filters by [sinceWallTime] (exclusive, Unix ms). Pass `0` to get the
-     * most recent [SupabaseClient.POLL_LIMIT] items regardless of age.
-     * Callers should pass the wall_time of the last successfully processed item
-     * to avoid re-processing duplicates (deduplication by `id` is also
-     * recommended at the storage layer).
+     * Returns a [SupabasePollBatch] containing:
+     *   - [SupabasePollBatch.rows]       — all raw [SupabaseClient.CloudRow] in
+     *                                      ascending wall_time,id order
+     *   - [SupabasePollBatch.syncKey]    — the derived sync key for decryption
+     *   - [SupabasePollBatch.client]     — the [SupabaseClient] (for decryptRow)
      *
-     * Returns list of [(id, itemId, plaintext)] tuples. The `id` can be used
-     * for local dedup checks before storing. Returns empty list on any error.
+     * Callers MUST iterate rows front-to-back, advance the cursor for EVERY row
+     * before any `continue`, then decrypt and apply LWW logic only for rows that
+     * pass the self-echo / blank / dup filters.
+     *
+     * Returns null on configuration error or key-derivation failure.
      */
     suspend fun pollFromSupabase(
         sinceWallTime: Long = 0L,
-    ): List<SupabaseClient.DecryptedItem> = withContext(Dispatchers.IO) {
+        sinceId: String = "",
+    ): SupabasePollBatch? = withContext(Dispatchers.IO) {
         val s = settings ?: run {
             Log.w(TAG, "pollFromSupabase: no Settings instance provided")
-            return@withContext emptyList()
+            return@withContext null
         }
         if (!s.isSupabaseConfigured) {
             Log.w(TAG, "pollFromSupabase: Supabase not configured")
-            return@withContext emptyList()
+            return@withContext null
         }
 
         val client = SupabaseClient(s.supabaseUrl, s.supabaseAnonKey)
 
-        // M8: cached Argon2id-derived sync key (re-derived only on passphrase change).
+        // M8: cached Argon2id-derived sync key (re-derived only on passphrase
+        // change). Returns null on derivation failure → abort the poll.
         val syncKeyBytes = derivedSyncKey(s.cloudSyncPassphrase) ?: run {
             Log.w(TAG, "pollFromSupabase: key derivation failed")
-            return@withContext emptyList()
+            return@withContext null
         }
 
         // M8: see pushToSupabase — a sign-in failure must NOT fall back to the
@@ -222,16 +228,25 @@ class SyncManager(
         val bearer = if (s.hasSupabaseCredentials) {
             client.signIn(s.supabaseEmail, s.supabasePassword) ?: run {
                 Log.w(TAG, "pollFromSupabase: sign-in failed — aborting (no anon-key RLS bypass)")
-                return@withContext emptyList()
+                return@withContext null
             }
         } else {
             s.supabaseAnonKey
         }
 
-        client.poll(
+        val rows = client.pollRaw(
             bearerToken = bearer,
-            syncKeyBytes = syncKeyBytes,
             sinceWallTime = sinceWallTime,
+            sinceId = sinceId,
         )
+        SupabasePollBatch(rows = rows, syncKey = syncKeyBytes, client = client, bearer = bearer)
     }
+
+    /** Holds the result of a raw Supabase poll for the caller to process. */
+    data class SupabasePollBatch(
+        val rows: List<SupabaseClient.CloudRow>,
+        val syncKey: ByteArray,
+        val client: SupabaseClient,
+        val bearer: String,
+    )
 }

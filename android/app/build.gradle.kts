@@ -175,11 +175,17 @@ dependencies {
     debugImplementation(libs.compose.ui.tooling)
 
     // UniFFI generated Kotlin bindings use JNA for native interop.
-    // Plain coordinate (no @aar): Gradle resolves JAR via POM for kotlinc compile
-    // classpath + AAR .so resources at runtime. @aar bypasses POM resolution and
-    // puts only the AAR on the classpath (dex-time only), causing "Unresolved
-    // reference: Structure/Library/Native" in compileDebugKotlin.
+    // We need TWO entries for JNA in the main app:
+    //   1. Plain coordinate: Gradle resolves the JAR via POM so kotlinc has
+    //      Structure/Library/Native on its compile classpath. @aar alone bypasses
+    //      POM resolution and causes "Unresolved reference" in compileDebugKotlin.
+    //   2. @aar: packages libjnidispatch.so (arm64-v8a / armeabi-v7a / x86_64)
+    //      into the main APK so UniFFI's Native.load("copypaste_android") finds
+    //      the JNA dispatch library at runtime.  Without this the main production
+    //      app crashes with UnsatisfiedLinkError on first FFI call even when
+    //      libcopypaste_android.so is present.
     implementation("net.java.dev.jna:jna:5.14.0")
+    implementation("net.java.dev.jna:jna:5.14.0@aar")
 
     // UniFFI Kotlin bindings are compiled as source (CopypasteBindings.kt).
     // Uncomment the line below only when using a separately-packaged bindings jar

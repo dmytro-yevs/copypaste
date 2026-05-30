@@ -136,12 +136,31 @@ class Settings(context: Context) {
         get() = supabaseEmail.isNotBlank() && supabasePassword.isNotBlank()
 
     /**
-     * Wall-time (Unix ms) of the most recently processed Supabase poll item.
-     * [SupabasePollWorker] reads this to avoid re-processing already-seen rows.
+     * Compound keyset cursor for the Supabase ascending poll.
+     *
+     * Both fields are advanced together for EVERY row in a batch (including
+     * self-echo and blank rows) BEFORE any `continue`, so a batch that
+     * contains only own-device rows still advances the cursor and does not
+     * re-fetch the same window on the next poll.
+     *
+     * Mirror of the `(last_wall_time, last_id)` cursor in the macOS daemon's
+     * cloud.rs `build_poll_url`. PostgREST keyset filter:
+     *   or=(wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))
+     * with order=wall_time.asc,id.asc.
      */
     var lastSupabasePollWallTime: Long
         get() = prefs.getLong("supabase_last_poll_wall_time", 0L)
         set(v) = prefs.edit().putLong("supabase_last_poll_wall_time", v).apply()
+
+    /**
+     * Row `id` (UUID string) of the last processed Supabase poll row.
+     * Combined with [lastSupabasePollWallTime] to form the compound keyset
+     * cursor — prevents burst-loss when >20 rows share the same wall_time.
+     * Empty string means "no rows seen yet" (initial state).
+     */
+    var lastSupabasePollId: String
+        get() = prefs.getString("supabase_last_poll_id", "") ?: ""
+        set(v) = prefs.edit().putString("supabase_last_poll_id", v).apply()
 
     val deviceId: String
         get() {
