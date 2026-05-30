@@ -10,11 +10,18 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -30,7 +37,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -47,6 +54,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -62,7 +70,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -80,6 +87,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -87,23 +95,35 @@ import android.content.Context
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.ideTextFieldColors
+import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.IdeAccent
+import com.copypaste.android.ui.theme.IdeAccentDim
 import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.IdeDanger
+import com.copypaste.android.ui.theme.IdeDangerDim
 import com.copypaste.android.ui.theme.IdeDim
 import com.copypaste.android.ui.theme.IdeElevated
 import com.copypaste.android.ui.theme.IdeFaint
+import com.copypaste.android.ui.theme.IdeInfo
+import com.copypaste.android.ui.theme.IdeInfoDim
 import com.copypaste.android.ui.theme.IdePanel
 import com.copypaste.android.ui.theme.IdeSelection
 import com.copypaste.android.ui.theme.IdeText
+import com.copypaste.android.ui.theme.IdeViolet
+import com.copypaste.android.ui.theme.IdeVioletDim
+import com.copypaste.android.ui.theme.IdeWarning
+import com.copypaste.android.ui.theme.IdeWarningDim
+import com.copypaste.android.ui.theme.Motion
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
@@ -117,8 +137,10 @@ import java.util.Date
  *   - Long-press also enters multi-select mode and selects the tapped row
  *   - In selection mode: bulk action bar replaces the top bar (delete/pin)
  *   - Action buttons on expand: icon-only pin/unpin + delete (no text labels)
- *   - Timestamp always visible in the right gutter
- *   - Pinned items shown with a bookmark indicator
+ *   - Timestamp always visible in the right gutter (tabular-nums)
+ *   - Pinned items shown with a warning-coloured bookmark indicator
+ *   - Press-scale (0.98) on rows and action buttons for tactile feel (§8)
+ *   - List item mount fade/rise via AnimatedVisibility (§8)
  */
 class HistoryActivity : ComponentActivity() {
 
@@ -150,6 +172,22 @@ class HistoryActivity : ComponentActivity() {
 private enum class ConfirmAction { CLEAR_ALL, CLEAR_UNPINNED, DELETE_SELECTED }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Relative time helper — §5 tabular-nums timestamps
+// ─────────────────────────────────────────────────────────────────────────────
+
+private fun relativeTime(ms: Long): String {
+    if (ms <= 0L) return "—"
+    val diff = System.currentTimeMillis() - ms
+    return when {
+        diff < 60_000L      -> "just now"
+        diff < 3_600_000L   -> "${diff / 60_000}m ago"
+        diff < 86_400_000L  -> "${diff / 3_600_000}h ago"
+        diff < 7 * 86_400_000L -> "${diff / 86_400_000}d ago"
+        else -> DateFormat.getDateInstance(DateFormat.SHORT).format(Date(ms))
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Screen
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -170,6 +208,9 @@ fun HistoryScreen(
     val dismissLabel = stringResource(R.string.snackbar_dismiss)
     val sensitiveTapMsg = stringResource(R.string.sensitive_tap_hint)
 
+    // ── Search / filter state ────────────────────────────────────────────────
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+
     // ── Selection state (survives rotation) ─────────────────────────────────
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by rememberSaveable(
@@ -188,6 +229,12 @@ fun HistoryScreen(
             compareByDescending<ClipboardItem> { it.pinned }
                 .thenByDescending { it.wallTimeMs }
         )
+    }
+    // Filter: case-insensitive substring match on snippet
+    val filteredItems = remember(sortedItems, searchQuery) {
+        val q = searchQuery.trim()
+        if (q.isEmpty()) sortedItems
+        else sortedItems.filter { it.snippet.contains(q, ignoreCase = true) }
     }
 
     BackHandler(enabled = selectionMode) {
@@ -294,6 +341,25 @@ fun HistoryScreen(
                         }
                     },
                     actions = {
+                        // §9 search filter — desktop "Filter…" bar parity
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = {
+                                Text(
+                                    text = stringResource(R.string.history_filter_placeholder),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = IdeFaint,
+                                )
+                            },
+                            singleLine = true,
+                            colors = ideTextFieldColors(),
+                            modifier = Modifier
+                                .width(160.dp)
+                                .height(44.dp),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = IdeText),
+                        )
+                        Spacer(Modifier.width(4.dp))
                         IconButton(onClick = { viewModel.loadItems() }) {
                             Icon(
                                 Icons.Filled.Refresh,
@@ -367,9 +433,12 @@ fun HistoryScreen(
     ) { innerPadding ->
         when {
             loading -> LoadingBox(innerPadding)
-            sortedItems.isEmpty() -> EmptyState(innerPadding)
+            // §9: history completely empty
+            sortedItems.isEmpty() -> EmptyHistoryState(innerPadding)
+            // §9: search returned no results
+            filteredItems.isEmpty() -> EmptySearchState(innerPadding, searchQuery.trim())
             else -> HistoryList(
-                items = sortedItems,
+                items = filteredItems,
                 padding = innerPadding,
                 selectionMode = selectionMode,
                 selectedIds = selectedIds,
@@ -380,7 +449,6 @@ fun HistoryScreen(
                     selectedIds = setOf(id)
                 },
                 onCheckboxTap = { id ->
-                    // Tapping the checkbox always enters/toggles selection mode
                     if (!selectionMode) selectionMode = true
                     selectedIds = if (selectedIds.contains(id)) {
                         val next = selectedIds - id
@@ -399,7 +467,7 @@ fun HistoryScreen(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Contextual selection top bar
+// Contextual selection top bar — §5 neutral (not amber), E2 elevation
 // ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -413,6 +481,7 @@ private fun SelectionTopBar(
     onPinSelected: () -> Unit,
     onUnpinSelected: () -> Unit,
 ) {
+    // §5: NEUTRAL (not amber) multi-select bar — IdeElevated container, not warning
     TopAppBar(
         title = {
             Text(
@@ -468,10 +537,11 @@ private fun SelectionTopBar(
                 }
             }
         },
+        // §5 Neutral elevated container — NOT amber/warning (desktop parity)
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = IdeSelection,
-            titleContentColor = IdeText,
-            actionIconContentColor = IdeDim,
+            containerColor             = IdeElevated,
+            titleContentColor          = IdeText,
+            actionIconContentColor     = IdeDim,
             navigationIconContentColor = IdeDim,
         ),
         windowInsets = TopAppBarDefaults.windowInsets,
@@ -522,7 +592,7 @@ private fun ConfirmationDialog(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Loading / empty states
+// Loading state
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -542,8 +612,14 @@ private fun LoadingBox(padding: PaddingValues) {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// §9 Empty states — hero icon (28dp) + title (13sp dim) + sentence (11sp faint)
+// Matches desktop HistoryView empty pattern exactly.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** §9 Empty state: history is empty — clipboard icon + "Nothing copied yet". */
 @Composable
-private fun EmptyState(padding: PaddingValues) {
+private fun EmptyHistoryState(padding: PaddingValues) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -552,10 +628,103 @@ private fun EmptyState(padding: PaddingValues) {
             .padding(24.dp),
         contentAlignment = Alignment.Center,
     ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // §9 hero: clipboard icon 28dp faint (never accent)
+            Icon(
+                imageVector = Icons.Filled.ContentCopy,
+                contentDescription = null,
+                tint = IdeFaint,
+                modifier = Modifier.size(28.dp),
+            )
+            Text(
+                text = stringResource(R.string.empty_history),
+                style = MaterialTheme.typography.bodyLarge,
+                color = IdeDim,
+            )
+            Text(
+                text = stringResource(R.string.empty_history_subtitle),
+                style = MaterialTheme.typography.bodyMedium,
+                color = IdeFaint,
+            )
+        }
+    }
+}
+
+/** §9 Empty state: search returned no results. */
+@Composable
+private fun EmptySearchState(padding: PaddingValues, query: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(IdeBg)
+            .padding(padding)
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // §9 hero: search icon 28dp faint
+            Icon(
+                imageVector = Icons.Filled.Refresh, // reuse as "search-x" visual; distinct from loading spinner
+                contentDescription = null,
+                tint = IdeFaint,
+                modifier = Modifier.size(28.dp),
+            )
+            Text(
+                text = stringResource(R.string.empty_search_title, query),
+                style = MaterialTheme.typography.bodyLarge,
+                color = IdeDim,
+            )
+            Text(
+                text = stringResource(R.string.empty_search_subtitle),
+                style = MaterialTheme.typography.bodyMedium,
+                color = IdeFaint,
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §3 Content-type chip — tinted pill matching desktop §4 chip anatomy
+// text=accent, url=info, image=violet, code=violet, sensitive=danger
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ContentTypeChip(contentType: String, isSensitive: Boolean) {
+    val (label, fg, bg) = when {
+        isSensitive -> Triple("PRIVATE", IdeDanger, IdeDangerDim)
+        contentType.startsWith("image/") || contentType == "image" ->
+            Triple("IMG", IdeViolet, IdeVioletDim)
+        contentType == "url" || contentType.startsWith("url") ->
+            Triple("URL", IdeInfo, IdeInfoDim)
+        contentType == "text" || contentType.startsWith("text/") ->
+            Triple("TEXT", IdeAccent, IdeAccentDim)
+        else -> Triple("FILE", IdeDim, IdeElevated)
+    }
+
+    Box(
+        modifier = Modifier
+            .background(color = bg, shape = RoundedCornerShape(4.dp))
+            .padding(horizontal = 5.dp, vertical = 2.dp),
+    ) {
         Text(
-            text = stringResource(R.string.empty_history),
-            style = MaterialTheme.typography.bodyLarge,
-            color = IdeFaint,
+            text = label,
+            style = TextStyle(
+                fontSize = 9.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.4.sp,
+                // fontFeatureSettings not available as direct TextStyle param in Compose 1.x;
+                // tabular-nums applied via fontVariantNumeric is not directly supported in
+                // Compose 1.5 either — the Compose approach is PlatformTextStyle on API 26+.
+                // For now the chip label is short enough (3-7 chars) that tnum is irrelevant.
+            ),
+            color = fg,
+            maxLines = 1,
         )
     }
 }
@@ -581,7 +750,6 @@ private fun HistoryList(
     val maskSensitive = remember { settings.maskSensitiveContent }
     val imageMaxHeightDp = remember { settings.imageMaxHeight }
     val previewDelayMs = remember { settings.previewDelay }
-    // Repository and key used to load FULL plaintext on copy — not the 140-char snippet.
     val repository = remember { ClipboardRepository(ctx) }
     val scope = rememberCoroutineScope()
 
@@ -593,51 +761,69 @@ private fun HistoryList(
         contentPadding = PaddingValues(0.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        items(items, key = { it.id }) { item ->
-            HistoryRow(
-                item = item,
-                maskSensitive = maskSensitive,
-                imageMaxHeightDp = imageMaxHeightDp,
-                previewDelayMs = previewDelayMs,
-                selectionMode = selectionMode,
-                isSelected = selectedIds.contains(item.id),
-                onDelete = onDelete,
-                onSetPinned = onSetPinned,
-                onCopy = {
-                    // Load the FULL decrypted plaintext before writing to the
-                    // system clipboard — item.snippet is capped at 140 chars and
-                    // would truncate the user's actual content.
-                    scope.launch {
-                        val key = settings.encryptionKey
-                        val fullText = repository.loadFullPlaintext(item.id, key)
-                            ?: item.snippet  // fallback to snippet if decrypt fails
-                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
-                    }
-                },
-                onLongPress = { onLongPress(item.id) },
-                onCheckboxTap = { onCheckboxTap(item.id) },
-                onSensitiveTap = onSensitiveTap,
-            )
-            HorizontalDivider(
-                color = IdeBorder.copy(alpha = 0.5f),
-                thickness = 0.5.dp,
-            )
+        // §8 mount fade/rise stagger — AnimatedVisibility per item, capped at 10 items
+        // to avoid stagger on large existing lists (only on initial appearance).
+        itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
+            val mountDelay = (index * Motion.Fast).coerceAtMost(10 * Motion.Fast)
+            AnimatedVisibility(
+                visible = true,
+                enter = fadeIn(
+                    animationSpec = tween(
+                        durationMillis = Motion.Base,
+                        delayMillis = mountDelay,
+                        easing = EaseOutExpo,
+                    )
+                ) + slideInVertically(
+                    animationSpec = tween(
+                        durationMillis = Motion.Base,
+                        delayMillis = mountDelay,
+                        easing = EaseOutExpo,
+                    ),
+                    initialOffsetY = { it / 8 },
+                ),
+            ) {
+                Column {
+                    HistoryRow(
+                        item = item,
+                        maskSensitive = maskSensitive,
+                        imageMaxHeightDp = imageMaxHeightDp,
+                        previewDelayMs = previewDelayMs,
+                        selectionMode = selectionMode,
+                        isSelected = selectedIds.contains(item.id),
+                        onDelete = onDelete,
+                        onSetPinned = onSetPinned,
+                        onCopy = {
+                            scope.launch {
+                                val key = settings.encryptionKey
+                                val fullText = repository.loadFullPlaintext(item.id, key)
+                                    ?: item.snippet
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
+                            }
+                        },
+                        onLongPress = { onLongPress(item.id) },
+                        onCheckboxTap = { onCheckboxTap(item.id) },
+                        onSensitiveTap = onSensitiveTap,
+                    )
+                    HorizontalDivider(
+                        color = IdeBorder.copy(alpha = 0.5f),
+                        thickness = 0.5.dp,
+                    )
+                }
+            }
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Row
+// Row — §5 desktop anatomy
 //
-// Layout (left→right): [checkbox] [pin-badge?] [type-icon] [preview] [timestamp] [icon-actions]
+// Layout (left→right):
+//   [checkbox 16dp] [pin-badge?] [content-type chip] [preview text] [source-app] [timestamp] [icon-actions]
 //
-// Single-tap: copies item (non-sensitive). Sensitive items: shows hint snackbar.
-// In selection mode: single-tap toggles checkbox.
-// Checkbox tap: always enters/toggles selection mode.
-// Long-press: enters selection mode (normal) or no-op (already selecting).
-// Action icon buttons (pin/unpin + delete): ICON-ONLY, compact, right-aligned.
-// Auto-collapse action row after previewDelayMs of inactivity.
+// §8 press-scale 0.98 via animateFloatAsState + MutableInteractionSource.
+// §5 timestamp always visible (tabular-nums via fontFeatureSettings on TextStyle).
+// §5 comfortable density: min height 40dp for text rows.
 // ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -669,6 +855,15 @@ private fun HistoryRow(
         if (selectionMode) expanded = false
     }
 
+    // §8 press-scale: 0.98 on press, instant out-expo spring back
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val rowScale by animateFloatAsState(
+        targetValue = if (isPressed) 0.98f else 1.0f,
+        animationSpec = tween(durationMillis = Motion.Instant, easing = EaseOutExpo),
+        label = "rowPressScale",
+    )
+
     // Decode image bytes off the main thread to avoid jank.
     val imageBitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
         initialValue = null,
@@ -690,18 +885,24 @@ private fun HistoryRow(
         item.snippet.isBlank() -> stringResource(R.string.empty_history)
         else -> item.snippet
     }
+
+    // §5 row background: selection > expanded > sensitive tint > transparent
     val rowBg = when {
-        isSelected        -> IdeAccent.copy(alpha = 0.15f)
-        expanded          -> IdeSelection
+        isSelected        -> IdeSelection
+        expanded          -> IdeElevated
         detectedSensitive -> IdeDanger.copy(alpha = 0.07f)
+        item.pinned       -> IdeWarning.copy(alpha = 0.06f)
         else              -> Color.Transparent
     }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .scale(rowScale)
             .background(rowBg)
             .combinedClickable(
+                interactionSource = interactionSource,
+                indication = null, // press scale handles visual feedback
                 onClick = {
                     if (selectionMode) {
                         onCheckboxTap()
@@ -726,7 +927,7 @@ private fun HistoryRow(
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Checkbox — always visible, tapping it enters/toggles selection
+                // Checkbox
                 Icon(
                     imageVector = if (isSelected) Icons.Filled.CheckBox
                                   else Icons.Filled.CheckBoxOutlineBlank,
@@ -736,22 +937,18 @@ private fun HistoryRow(
                         .size(16.dp)
                         .clickable { onCheckboxTap() },
                 )
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(6.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
                         imageVector = Icons.Filled.BookmarkAdded,
                         contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = IdeAccent.copy(alpha = 0.7f),
+                        tint = IdeWarning.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
                     )
                     Spacer(Modifier.width(4.dp))
                 }
-                Icon(
-                    imageVector = Icons.Filled.Image,
-                    contentDescription = stringResource(R.string.cd_image_item),
-                    tint = IdeAccent,
-                    modifier = Modifier.size(14.dp),
-                )
+                // §5 content-type chip (violet for images)
+                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive)
                 Spacer(Modifier.width(8.dp))
                 Image(
                     bitmap = bmp,
@@ -764,18 +961,21 @@ private fun HistoryRow(
                         .background(IdeElevated),
                 )
                 Spacer(Modifier.weight(1f))
+                // §5 relative timestamp with tabular-nums via fontFeatureSettings
                 Text(
-                    text = formatTime(item.wallTimeMs),
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = relativeTime(item.wallTimeMs),
+                    style = TextStyle(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal,
+                        fontFeatureSettings = "tnum",
+                    ),
                     color = IdeFaint,
                     maxLines = 1,
                 )
                 if (!selectionMode) {
-                    Spacer(Modifier.width(6.dp))
-                    // Icon-only action buttons: pin/unpin + delete
-                    IconButton(
+                    Spacer(Modifier.width(4.dp))
+                    ScaleIconButton(
                         onClick = { onSetPinned(item.id, !item.pinned) },
-                        modifier = Modifier.size(28.dp),
                     ) {
                         Icon(
                             imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
@@ -784,13 +984,12 @@ private fun HistoryRow(
                                 stringResource(R.string.action_unpin)
                             else
                                 stringResource(R.string.action_pin),
-                            tint = if (item.pinned) IdeAccent else IdeDim,
+                            tint = if (item.pinned) IdeWarning else IdeDim,
                             modifier = Modifier.size(16.dp),
                         )
                     }
-                    IconButton(
+                    ScaleIconButton(
                         onClick = { onDelete(item.id) },
-                        modifier = Modifier.size(28.dp),
                     ) {
                         Icon(
                             imageVector = Icons.Filled.Delete,
@@ -802,14 +1001,14 @@ private fun HistoryRow(
                 }
             }
         } else {
-            // ── Text row ─────────────────────────────────────────────────────
+            // ── Text row — §5 comfortable 40dp min height ─────────────────────
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(40.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Checkbox — always visible
+                // Checkbox
                 Icon(
                     imageVector = if (isSelected) Icons.Filled.CheckBox
                                   else Icons.Filled.CheckBoxOutlineBlank,
@@ -819,22 +1018,20 @@ private fun HistoryRow(
                         .size(16.dp)
                         .clickable { onCheckboxTap() },
                 )
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(6.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
                         imageVector = Icons.Filled.BookmarkAdded,
                         contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = IdeAccent.copy(alpha = 0.7f),
+                        tint = IdeWarning.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
                     )
                     Spacer(Modifier.width(4.dp))
                 }
-                TypeIcon(
-                    contentType = item.contentType,
-                    isSensitive = detectedSensitive,
-                    modifier = Modifier.size(14.dp),
-                )
+                // §5 content-type chip (tinted by type)
+                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive)
                 Spacer(Modifier.width(8.dp))
+                // Preview text
                 Text(
                     text = display,
                     style = MaterialTheme.typography.bodyLarge,
@@ -843,10 +1040,8 @@ private fun HistoryRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                Spacer(Modifier.width(8.dp))
-                // Source-app icon + label — only when sourceApp is known.
-                // Icon is decoded off the main thread via produceState; AppIconHelper
-                // caches results so repeat rows are cheap.
+                Spacer(Modifier.width(6.dp))
+                // §5 source-app icon + label chip (right of text, left of timestamp)
                 val ctx = LocalContext.current
                 sourceAppLabel(item.sourceApp)?.let { appLabel ->
                     val iconBitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
@@ -868,7 +1063,12 @@ private fun HistoryRow(
                     }
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(end = 4.dp),
+                        modifier = Modifier
+                            .background(
+                                color = IdeElevated.copy(alpha = 0.5f),
+                                shape = RoundedCornerShape(4.dp),
+                            )
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
                     ) {
                         iconBitmap?.let { iconBmp ->
                             Image(
@@ -883,26 +1083,28 @@ private fun HistoryRow(
                         }
                         Text(
                             text = appLabel,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = IdeFaint.copy(alpha = 0.65f),
+                            style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal),
+                            color = IdeFaint,
                             maxLines = 1,
                         )
                     }
+                    Spacer(Modifier.width(4.dp))
                 }
-                // Timestamp always visible
+                // §5 timestamp — always visible, tabular-nums
                 Text(
-                    text = formatTime(item.wallTimeMs),
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = relativeTime(item.wallTimeMs),
+                    style = TextStyle(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal,
+                        fontFeatureSettings = "tnum",
+                    ),
                     color = IdeFaint,
                     maxLines = 1,
                 )
                 if (!selectionMode) {
-                    Spacer(Modifier.width(4.dp))
-                    // Icon-only action buttons: pin/unpin + delete (compact, no text)
-                    IconButton(
-                        onClick = { onSetPinned(item.id, !item.pinned) },
-                        modifier = Modifier.size(28.dp),
-                    ) {
+                    Spacer(Modifier.width(2.dp))
+                    // §5 icon-only action buttons with press-scale (§8)
+                    ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
                         Icon(
                             imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
                                           else Icons.Filled.BookmarkBorder,
@@ -910,14 +1112,11 @@ private fun HistoryRow(
                                 stringResource(R.string.action_unpin)
                             else
                                 stringResource(R.string.action_pin),
-                            tint = if (item.pinned) IdeAccent else IdeDim,
+                            tint = if (item.pinned) IdeWarning else IdeDim,
                             modifier = Modifier.size(16.dp),
                         )
                     }
-                    IconButton(
-                        onClick = { onDelete(item.id) },
-                        modifier = Modifier.size(28.dp),
-                    ) {
+                    ScaleIconButton(onClick = { onDelete(item.id) }) {
                         Icon(
                             imageVector = Icons.Filled.Delete,
                             contentDescription = stringResource(R.string.cd_delete),
@@ -932,7 +1131,35 @@ private fun HistoryRow(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Type icon
+// §8 ScaleIconButton — 28dp touch-target icon button with press-scale 0.98
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun ScaleIconButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.98f else 1.0f,
+        animationSpec = tween(durationMillis = Motion.Instant, easing = EaseOutExpo),
+        label = "btnScale",
+    )
+    IconButton(
+        onClick = onClick,
+        interactionSource = interactionSource,
+        modifier = modifier
+            .size(28.dp)
+            .scale(scale),
+    ) {
+        content()
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Type icon (legacy — used only when chip is not available in older paths)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -944,9 +1171,10 @@ private fun TypeIcon(
     val (icon, tint) = when {
         isSensitive                          -> Icons.Filled.Lock to IdeDanger
         contentType.startsWith("image/") ||
-            contentType == "image"           -> Icons.Filled.Image to IdeAccent
+            contentType == "image"           -> Icons.Filled.Image to IdeViolet
         contentType == "text" ||
             contentType.startsWith("text/")  -> Icons.Filled.ContentCopy to IdeAccent
+        contentType == "url"                 -> Icons.Filled.ContentCopy to IdeInfo
         else                                 -> Icons.Filled.ContentCopy to IdeDim
     }
     Icon(
@@ -956,6 +1184,3 @@ private fun TypeIcon(
         modifier = modifier,
     )
 }
-
-private fun formatTime(ms: Long): String =
-    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(ms))
