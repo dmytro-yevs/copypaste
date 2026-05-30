@@ -53,11 +53,11 @@
 
     <!-- Settings — Storage / Limits (no item-count cap — size only) -->
     <string name="setting_max_text_size_label">Max text item size (MB)</string>
-    <string name="setting_max_text_size_hint">1–50 MB (default 1)</string>
+    <string name="setting_max_text_size_hint">1–100 MB (default 15)</string>
     <string name="setting_max_image_size_label">Max image item size (MB)</string>
-    <string name="setting_max_image_size_hint">1–200 MB (default 25)</string>
+    <string name="setting_max_image_size_hint">1–512 MB (default 64)</string>
     <string name="setting_storage_quota_label">Local storage limit (MB)</string>
-    <string name="setting_storage_quota_hint">50–10000 MB (default 500)</string>
+    <string name="setting_storage_quota_hint">50–20480 MB (default 10240)</string>
 
     <!-- Settings — Sync -->
     <string name="setting_sync_wifi_only_title">Sync on Wi-Fi only</string>
