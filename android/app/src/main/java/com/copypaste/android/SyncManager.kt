@@ -82,6 +82,9 @@ class SyncManager(
                     // mismatched value fails decryption (v0.3 schema).
                     val plainBytes = decryptText(item.itemId, ciphertext, nonce, encryptionKey)
                     lastLamportTs = maxOf(lastLamportTs, item.lamportTs)
+                    // Advance the persistent logical clock so any subsequent local
+                    // tick() produces a value causally after this remote item.
+                    settings?.lamportClock?.observe(item.lamportTs)
                     plainBytes.toString(Charsets.UTF_8)
                 } catch (e: Exception) {
                     null
@@ -168,7 +171,12 @@ class SyncManager(
         }
 
         val id = overrideId ?: UUID.randomUUID().toString()
-        val lamportTs = System.currentTimeMillis()
+        // Use a logical Lamport counter (not wall-millis) so LWW tiebreaks on
+        // the Rust/macOS daemon side compare causally-ordered integers, not huge
+        // wall-millis values that always win regardless of copy order.
+        // wall_time stays as wall-millis — it is the keyset cursor, not LWW.
+        val lamportTs = s.lamportClock.tick()
+        val wallTime = System.currentTimeMillis()
 
         val ok = client.push(
             bearerToken = bearer,
@@ -178,7 +186,7 @@ class SyncManager(
             plaintext = plaintext,
             contentType = contentType,
             lamportTs = lamportTs,
-            wallTime = lamportTs,
+            wallTime = wallTime,
             deviceId = deviceId,
         )
         if (ok) id else null
@@ -228,10 +236,18 @@ class SyncManager(
             s.supabaseAnonKey
         }
 
-        client.poll(
+        val items = client.poll(
             bearerToken = bearer,
             syncKeyBytes = syncKeyBytes,
             sinceWallTime = sinceWallTime,
         )
+        // Advance the persistent logical clock past every remote lamport_ts so
+        // the next local tick() produces a value causally after all received items.
+        // This is the Lamport "observe" rule: local = max(local, incoming) + 1.
+        val clock = s.lamportClock
+        for (item in items) {
+            clock.observe(item.lamportTs)
+        }
+        items
     }
 }
