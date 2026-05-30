@@ -355,10 +355,10 @@ fun cloud_decrypt(itemId: String, blob: ByteArray, syncKeyBytes: ByteArray): Byt
 }
 
 // ── AES-GCM fallback (rare path) ──────────────────────────────────────────────
-// Kept for ClipboardRepository.localAesEncrypt which is called only when the
-// native .so is genuinely absent at runtime. A WARN is logged when hit so
-// operators notice stub-mode behaviour in production logs.
-// See ClipboardRepository for the call site.
+// The AES-256-GCM fallback implementation lives in ClipboardRepository
+// (ClipboardRepository.localAesEncrypt). It is invoked only when the native
+// .so is genuinely absent at runtime; a WARN is logged each time so operators
+// notice stub-mode behaviour in production logs.
 
 // ── QR device pairing ─────────────────────────────────────────────────────────
 
