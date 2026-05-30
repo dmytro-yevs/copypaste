@@ -40,8 +40,8 @@ use tokio::sync::{Mutex, RwLock};
 
 use copypaste_core::{
     build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2, encrypt_for_cloud,
-    encrypt_item_with_aad, exists_item_by_item_id, get_item_by_item_id, insert_item, ClipboardItem,
-    Database, SyncKey, AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
+    encrypt_item_with_aad, exists_item_by_item_id, get_item_by_item_id, insert_item, prune_to_cap,
+    AppConfig, ClipboardItem, Database, SyncKey, AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
 };
 
 // Beta W2.3 (arch-1): canonical auth client lives in copypaste-supabase. The
@@ -441,6 +441,7 @@ pub async fn start_cloud(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
+    app_config: AppConfig,
 ) -> anyhow::Result<CloudHandle> {
     // Defence-in-depth: re-validate the URL even though CloudConfig::new should
     // have rejected it already. Cheap, and protects callers that constructed
@@ -531,6 +532,11 @@ pub async fn start_cloud(
     let poll_last_sync_ms = last_sync_ms.clone();
     let poll_signed_in = cloud_signed_in.clone();
     let poll_auth = auth_client.clone();
+    // Pass retention limits so the poll loop can prune after each ingest batch,
+    // preventing a long-offline device from materialising thousands of cloud rows
+    // unbounded on reconnect.
+    let poll_history_limit = app_config.history_limit;
+    let poll_quota_bytes = app_config.storage_quota_bytes;
     tokio::spawn(realtime_loop(
         poll_config,
         poll_bearer,
@@ -541,6 +547,8 @@ pub async fn start_cloud(
         poll_last_sync_ms,
         poll_signed_in,
         poll_auth,
+        poll_history_limit,
+        poll_quota_bytes,
     ));
 
     tracing::info!("cloud-sync started (url={})", config.supabase_url);
@@ -1428,6 +1436,11 @@ async fn realtime_loop(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
     auth: Arc<AuthClient>,
+    /// `history_limit` and `storage_quota_bytes` from `AppConfig`. Passed
+    /// explicitly so the polling loop can enforce the local retention cap
+    /// after each cloud-ingest batch without re-reading config from disk.
+    history_limit: usize,
+    storage_quota_bytes: u64,
 ) {
     let client = reqwest::Client::new();
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
@@ -1518,6 +1531,8 @@ async fn realtime_loop(
                     &auth,
                     &key_bytes,
                     cursor,
+                    history_limit,
+                    storage_quota_bytes,
                 )
                 .await;
             }
@@ -1558,6 +1573,10 @@ async fn poll_once(
     auth: &AuthClient,
     key_bytes: &[u8],
     cursor: PollCursor,
+    /// Retention limits threaded from `AppConfig` so a long-offline device
+    /// converges to the cap after backfill instead of materialising unbounded rows.
+    history_limit: usize,
+    storage_quota_bytes: u64,
 ) -> PollCursor {
     let poll_url = build_poll_url(&config.supabase_url, cursor.wall, &cursor.id);
 
@@ -1755,6 +1774,30 @@ async fn poll_once(
         }
         // Zero the snapshot key bytes before the closure exits.
         key_arr.iter_mut().for_each(|b| *b = 0);
+        // ── Backfill safety: enforce local retention cap after ingest ─────────
+        //
+        // After writing all rows from this batch, prune oldest UNPINNED items so
+        // the local DB stays within the configured count and byte caps. This
+        // prevents a long-offline device from materialising thousands of cloud
+        // rows unbounded on reconnect (each poll tick adds up to 20 rows).
+        //
+        // The cloud watermark (persisted below) tracks the highest cloud row
+        // seen and is stored in the `settings` table — completely independent of
+        // the `clipboard_items` rows we are pruning here. Evicting old local rows
+        // does NOT move the watermark backwards: next tick the cursor still
+        // advances from the cloud side. Cloud still holds the older items; only
+        // the local cache is capped.
+        if synced > 0 {
+            match prune_to_cap(&db_guard, history_limit, storage_quota_bytes) {
+                Ok(0) => {}
+                Ok(n) => tracing::debug!(
+                    "cloud-sync poll_once: pruned {n} rows after batch ingest \
+                     (history_limit={history_limit} quota_bytes={storage_quota_bytes})"
+                ),
+                Err(e) => tracing::warn!("cloud-sync poll_once: prune_to_cap failed: {e}"),
+            }
+        }
+
         // Persist the advanced wall watermark inside the same DB lock so it
         // survives a restart. Return the full `(wall, id)` cursor the async loop
         // should use going forward.
