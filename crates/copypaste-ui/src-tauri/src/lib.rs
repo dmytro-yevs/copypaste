@@ -88,6 +88,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ipc::ipc_call,
             ipc::pairing_qr_svg,
+            ipc::reset_database,
             get_popup_shortcut,
             set_popup_shortcut,
             check_accessibility_permission,

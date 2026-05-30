@@ -526,7 +526,14 @@ pub struct IpcServer {
     /// `IPC_NOT_READY`; this field tells the client *why* and that recovery is
     /// possible (re-grant Keychain access, then relaunch). See the
     /// [`DEGRADED_REASON_KEYCHAIN_LOCKED`] constant for the canonical value.
-    degraded_reason: Option<String>,
+    ///
+    /// Interior-mutable (`Arc<Mutex<…>>`) because the `reset_database` recovery
+    /// handler clears it in-place — after wiping and recreating a fresh empty DB
+    /// it brings the daemon OUT of degraded mode (sets `ready = true`, clears
+    /// this reason) without a process restart. A `std::sync::Mutex` (not tokio's)
+    /// is used because every critical section is a trivial read/write with no
+    /// `.await`.
+    degraded_reason: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 /// Canonical `status.degraded_reason` value for the keychain-locked /
@@ -562,7 +569,7 @@ impl IpcServer {
             #[cfg(feature = "cloud-sync")]
             cloud_signed_in: Arc::new(AtomicBool::new(false)),
             new_item_tx: None,
-            degraded_reason: None,
+            degraded_reason: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -570,8 +577,13 @@ impl IpcServer {
     /// db-unavailable). The reason is echoed in the `status` response so the UI
     /// can show a recovery banner. Pair this with `new_with_ready(.., false)`
     /// so DB-touching methods return `IPC_NOT_READY`.
-    pub fn with_degraded_reason(mut self, reason: impl Into<String>) -> Self {
-        self.degraded_reason = Some(reason.into());
+    pub fn with_degraded_reason(self, reason: impl Into<String>) -> Self {
+        // Poisoned mutex (a prior panic while holding the lock) is recovered:
+        // the slot holds only a non-secret reason string.
+        *self
+            .degraded_reason
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(reason.into());
         self
     }
 
@@ -712,7 +724,7 @@ impl IpcServer {
             #[cfg(feature = "cloud-sync")]
             cloud_signed_in: Arc::new(AtomicBool::new(false)),
             new_item_tx: None,
-            degraded_reason: None,
+            degraded_reason: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -2217,7 +2229,12 @@ impl IpcServer {
                 // socket as "everything is fine". When healthy, `ready` is true
                 // and `degraded_reason` is absent — unchanged shape for clients
                 // that only read `status`/`private_mode`.
-                match self.degraded_reason.as_deref() {
+                let reason = self
+                    .degraded_reason
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone();
+                match reason {
                     Some(reason) => Response::ok(
                         req.id,
                         serde_json::json!({
@@ -2236,6 +2253,162 @@ impl IpcServer {
                             "ready": self.ready.load(Ordering::Relaxed),
                             "degraded": false,
                         }),
+                    ),
+                }
+            }
+
+            // ------------------------------------------------------------------
+            // Destructive recovery: wipe + recreate the clipboard database.
+            //
+            // This is the explicit escape hatch for a daemon stuck in DEGRADED
+            // mode because `clipboard.db` cannot be decrypted (key mismatch /
+            // "file is not a database"). UNLIKE every other DB-touching method,
+            // this one is NOT gated behind the `ready` flag — recovering FROM
+            // degraded mode is its entire reason to exist, so it must run while
+            // `ready = false`. It therefore appears BEFORE the readiness gate in
+            // spirit (the gate's `requires_db` allow-list deliberately omits it).
+            // ------------------------------------------------------------------
+            "reset_database" => {
+                // Guard #1: an explicit confirm flag is mandatory so a stray or
+                // replayed call can never erase the user's history by accident.
+                let confirm = req
+                    .params
+                    .get("confirm")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                if !confirm {
+                    tracing::warn!(
+                        "reset_database rejected: missing confirm=true — refusing \
+                         to wipe the clipboard database without explicit confirmation"
+                    );
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "reset_database requires confirm=true",
+                    );
+                }
+
+                let db_path = crate::paths::db_path();
+                tracing::warn!(
+                    db_path = %db_path.display(),
+                    "reset_database INVOKED: WIPING and RECREATING the clipboard \
+                     database. All local clipboard history will be PERMANENTLY \
+                     DELETED. This is the user-confirmed recovery escape hatch for \
+                     a daemon stuck in degraded mode (undecryptable DB)."
+                );
+
+                // Resolve the key for the FRESH database. Prefer the real
+                // device key from the Keychain (so the new DB re-opens normally
+                // on the next restart); if that is unreachable (the very reason
+                // we may be degraded), fall back to the key this server already
+                // holds. Either way the fresh empty DB is self-consistent and
+                // immediately usable this session.
+                let fresh_key: zeroize::Zeroizing<[u8; 32]> = {
+                    #[cfg(target_os = "macos")]
+                    {
+                        match crate::keychain::load_or_create() {
+                            Ok(kp) => {
+                                tracing::info!(
+                                    "reset_database: using the device Keychain key for the \
+                                     fresh database"
+                                );
+                                kp.local_enc_key()
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    "reset_database: Keychain key unavailable; recreating the \
+                                     fresh database with the daemon's current in-memory key"
+                                );
+                                zeroize::Zeroizing::new(**self.local_key)
+                            }
+                        }
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        zeroize::Zeroizing::new(**self.local_key)
+                    }
+                };
+
+                // Do the destructive filesystem work + reopen on a blocking
+                // thread (rusqlite is sync). We hold the DB mutex for the whole
+                // operation so no other request can touch the handle mid-swap.
+                let db_arc = self.db.clone();
+                let path_for_task = db_path.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let mut guard = db_arc.blocking_lock();
+
+                    // 1. Close the current connection. Swapping in a throwaway
+                    //    in-memory DB drops the old `Database` (and its open
+                    //    file handles / WAL) so the files can be removed cleanly.
+                    *guard = Database::open_in_memory()
+                        .map_err(|e| format!("failed to open transient in-memory DB: {e}"))?;
+
+                    // 2. Delete clipboard.db and its WAL/SHM siblings. A missing
+                    //    file is fine (NotFound is not an error here).
+                    for suffix in ["", "-wal", "-shm"] {
+                        let mut p = path_for_task.clone().into_os_string();
+                        p.push(suffix);
+                        let p = std::path::PathBuf::from(p);
+                        match std::fs::remove_file(&p) {
+                            Ok(()) => {
+                                tracing::warn!(file = %p.display(), "reset_database: deleted")
+                            }
+                            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                            Err(e) => {
+                                return Err(format!("failed to delete {}: {e}", p.display()));
+                            }
+                        }
+                    }
+
+                    // 3. Recreate a fresh empty encrypted DB with the chosen key
+                    //    using the SAME open/migrate path a clean install uses.
+                    let fresh = Database::open(&path_for_task, &fresh_key)
+                        .map_err(|e| format!("failed to create fresh database: {e}"))?;
+
+                    // 4. Ensure the additive audit table the IPC layer relies on
+                    //    exists, matching the normal `serve()` startup path.
+                    if let Err(e) = ensure_revoked_devices_table(fresh.conn()) {
+                        tracing::warn!("reset_database: ensure_revoked_devices_table failed: {e}");
+                    }
+
+                    // 5. Install the fresh DB as the live handle.
+                    *guard = fresh;
+                    Ok::<(), String>(())
+                })
+                .await;
+
+                match join {
+                    Ok(Ok(())) => {
+                        // Bring the daemon OUT of degraded mode IN-PLACE: the new
+                        // empty DB is live, so flip readiness on and clear the
+                        // degraded reason. Subsequent history_page / status calls
+                        // now succeed without a process restart.
+                        self.ready.store(true, Ordering::Relaxed);
+                        *self
+                            .degraded_reason
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner()) = None;
+                        tracing::warn!(
+                            db_path = %db_path.display(),
+                            "reset_database COMPLETE: fresh empty database created, daemon \
+                             recovered in-place (no longer degraded, ready=true)"
+                        );
+                        Response::ok(req.id, serde_json::json!({ "reset": true, "ready": true }))
+                    }
+                    Ok(Err(msg)) => {
+                        tracing::error!(
+                            db_path = %db_path.display(),
+                            error = %msg,
+                            "reset_database FAILED: the clipboard database could not be \
+                             wiped/recreated. The daemon remains in its prior state."
+                        );
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, msg)
+                    }
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("reset_database blocking task failed: {e}"),
                     ),
                 }
             }
