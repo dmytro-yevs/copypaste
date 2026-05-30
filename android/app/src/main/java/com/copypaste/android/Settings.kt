@@ -207,11 +207,18 @@ class Settings(context: Context) {
 
     val deviceId: String
         get() {
-            val stored = prefs.getString("device_id", null)
-            if (stored != null) return stored
-            val new = UUID.randomUUID().toString()
-            prefs.edit().putString("device_id", new).apply()
-            return new
+            // Fast path: key already exists — SharedPreferences reads are process-local
+            // and safe without a lock.
+            prefs.getString("device_id", null)?.let { return it }
+            // Slow path: first call (or concurrent callers on two threads). Hold a lock
+            // so only one UUID is generated and persisted; the loser re-reads the winner's
+            // value after acquiring the monitor.
+            synchronized(deviceIdLock) {
+                prefs.getString("device_id", null)?.let { return it }
+                val new = UUID.randomUUID().toString()
+                prefs.edit().putString("device_id", new).apply()
+                return new
+            }
         }
 
     var showSensitiveWarnings: Boolean
@@ -561,6 +568,9 @@ class Settings(context: Context) {
         private var cachedKey: ByteArray? = null
 
         private val keyCacheLock = Any()
+
+        /** Guards the read-or-generate-UUID critical section in [deviceId]. */
+        private val deviceIdLock = Any()
 
         private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
         private const val KEK_ALIAS = "copypaste_master_kek_v1"

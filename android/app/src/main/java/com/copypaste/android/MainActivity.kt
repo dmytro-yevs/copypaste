@@ -152,14 +152,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private suspend fun handleClipboardChange(text: String) {
-        if (text.isBlank()) return
-        val sensitive = try { isSensitive(text) } catch (_: UnsatisfiedLinkError) { false }
-        if (sensitive) return
-        val storedId = repository.storeItem(text, settings.encryptionKey)
-        if (storedId.isNotEmpty()) {
-            Log.d(TAG, "MainActivity stored clip")
-            viewModel.loadItems() // refresh the Clips tab
-        }
+        // Route through the shared capture pipeline so foreground-captured clips
+        // are counted in the notification, trigger copy sound/notification, and
+        // sync — exactly like ClipboardService and ClipboardAccessibilityService.
+        // Previously this called repository.storeItem directly, skipping all of
+        // bumpTodayCounter / postCopyNotification / playCopySound / notifySyncManager.
+        ClipboardService.captureClip(this, text, settings, repository, syncManager)
+        // Refresh the Clips tab regardless of whether the item was new (captureClip
+        // deduplicates internally; a no-op store is silent and cheap here).
+        viewModel.loadItems()
     }
 
     companion object {
