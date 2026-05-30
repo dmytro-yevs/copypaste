@@ -15,6 +15,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use std::fmt::Write as FmtWrite;
 use std::path::Path;
 use thiserror::Error;
+use zeroize::Zeroizing;
 
 /// A pool of SQLCipher-encrypted SQLite connections.
 pub type SqlitePool = Pool<SqliteConnectionManager>;
@@ -27,12 +28,15 @@ pub enum PoolError {
 
 /// Format a 32-byte key as the hex string SQLCipher expects in a `PRAGMA key`
 /// statement: `x'<64 hex chars>'`.
-fn key_hex(key: &[u8; 32]) -> String {
+///
+/// Returns a [`Zeroizing<String>`] so the hex key material is scrubbed from
+/// the heap on drop (mirrors `db::key_pragma`).
+fn key_hex(key: &[u8; 32]) -> Zeroizing<String> {
     let mut hex = String::with_capacity(64);
     for b in key {
         write!(hex, "{:02x}", b).unwrap();
     }
-    hex
+    Zeroizing::new(hex)
 }
 
 /// Open (or create) an r2d2 pool of SQLCipher connections at `path`.
@@ -61,6 +65,17 @@ fn key_hex(key: &[u8; 32]) -> String {
 /// or call the schema module directly on a borrowed connection.
 pub fn open_pool(path: &Path, key: &[u8; 32], max_size: u32) -> Result<SqlitePool, PoolError> {
     let key_hex = key_hex(key);
+    // Build the full PRAGMA string inside a Zeroizing buffer so the key hex
+    // material in the PRAGMA string is also scrubbed from the heap on drop.
+    let pragma_str: Zeroizing<String> = Zeroizing::new(format!(
+        "PRAGMA key = \"x'{}'\";\n\
+         PRAGMA journal_mode = WAL;\n\
+         PRAGMA busy_timeout = 5000;\n\
+         PRAGMA synchronous = NORMAL;\n\
+         PRAGMA foreign_keys = ON;\n\
+         PRAGMA temp_store = MEMORY;",
+        key_hex.as_str()
+    ));
     let manager = SqliteConnectionManager::file(path).with_init(move |conn| {
         // SQLCipher requirement: key pragma MUST be the very first statement
         // executed on a fresh connection. WAL mode applies to the database
@@ -71,14 +86,7 @@ pub fn open_pool(path: &Path, key: &[u8; 32], max_size: u32) -> Result<SqlitePoo
         // connection — otherwise UI reader / daemon writer races surface as
         // silent `SQLITE_BUSY` and foreign-key checks silently no-op.
         // Kept in sync with `db::CONNECTION_PRAGMAS`.
-        conn.execute_batch(&format!(
-            "PRAGMA key = \"x'{key_hex}'\";\n\
-             PRAGMA journal_mode = WAL;\n\
-             PRAGMA busy_timeout = 5000;\n\
-             PRAGMA synchronous = NORMAL;\n\
-             PRAGMA foreign_keys = ON;\n\
-             PRAGMA temp_store = MEMORY;"
-        ))
+        conn.execute_batch(pragma_str.as_str())
     });
 
     let pool = Pool::builder()
@@ -101,6 +109,22 @@ mod tests {
     fn bootstrap_db(path: &Path, key: &[u8; 32]) {
         let _db = Database::open(path, key).expect("bootstrap open");
         // dropped here; file persists with schema + encryption
+    }
+
+    /// Fix 2: `key_hex` must return a `Zeroizing<String>` so the hex key
+    /// material is scrubbed from heap on drop. This test asserts the return
+    /// type is `Zeroizing<String>` (compile-time check) and that the content
+    /// is the expected hex string (runtime check).
+    #[test]
+    fn key_hex_returns_zeroizing_string() {
+        let key = [0xABu8; 32];
+        let hex: zeroize::Zeroizing<String> = key_hex(&key);
+        assert_eq!(hex.len(), 64, "key_hex must produce 64 hex chars");
+        assert!(
+            hex.chars().all(|c| c.is_ascii_hexdigit()),
+            "key_hex output must be all hex digits"
+        );
+        assert_eq!(&hex[..4], "abab", "first bytes must be lower-case hex 'ab'");
     }
 
     #[test]

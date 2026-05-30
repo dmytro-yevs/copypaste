@@ -832,16 +832,19 @@ impl Database {
     /// (the FTS `id` mirrors `clipboard_items.id`). Returns the number of rows
     /// deleted from `clipboard_items`.
     pub fn purge_dead_v1_rows(&self) -> Result<usize, DbError> {
-        // Remove the matching FTS entries first (no ON DELETE CASCADE wires the
-        // external-content FTS table to clipboard_items), then the rows.
-        self.conn.execute(
+        // Wrap both DELETEs in a single transaction so a crash between the two
+        // cannot leave clipboard_items rows without their FTS counterparts
+        // (mirrors the atomic FTS+row writes in items::insert_item_and_fts).
+        // The external-content FTS5 table has no ON DELETE CASCADE, so we must
+        // delete the FTS entries explicitly before removing the source rows.
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
             "DELETE FROM clipboard_fts \
              WHERE id IN (SELECT id FROM clipboard_items WHERE key_version = 1)",
             [],
         )?;
-        let deleted = self
-            .conn
-            .execute("DELETE FROM clipboard_items WHERE key_version = 1", [])?;
+        let deleted = tx.execute("DELETE FROM clipboard_items WHERE key_version = 1", [])?;
+        tx.commit()?;
         if deleted > 0 {
             tracing::warn!(
                 deleted,
@@ -1149,6 +1152,56 @@ mod tests {
 
         // Purge is idempotent — a second run deletes nothing.
         assert_eq!(db.purge_dead_v1_rows().unwrap(), 0);
+    }
+
+    /// Fix 1: `purge_dead_v1_rows` must wrap both DELETEs in a single
+    /// transaction so a crash between the two cannot leave items rows without
+    /// their FTS counterparts. This test verifies that after a successful call
+    /// the database is consistent: clipboard_items and clipboard_fts agree.
+    #[test]
+    fn purge_dead_v1_rows_is_atomic_fts_and_items_consistent() {
+        let db = Database::open_in_memory().unwrap();
+        let foreign = [0xABu8; 32];
+
+        // Seed 3 dead v1 rows, each with a matching FTS entry.
+        for _ in 0..3 {
+            seed_unrotatable_v1_text_row(&db, &foreign);
+        }
+        let dead_ids: Vec<String> = db
+            .conn()
+            .prepare("SELECT id FROM clipboard_items WHERE key_version = 1")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        for id in &dead_ids {
+            db.conn()
+                .execute(
+                    "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, 'dead text')",
+                    rusqlite::params![id],
+                )
+                .unwrap();
+        }
+
+        // After purge: clipboard_items and clipboard_fts must both be empty
+        // for the purged ids (no orphan rows in either direction).
+        let deleted = db.purge_dead_v1_rows().unwrap();
+        assert_eq!(deleted, 3, "all 3 v1 rows must be deleted");
+
+        let fts_count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_fts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            fts_count, 0,
+            "FTS must be empty after purge — no orphan rows"
+        );
+        let items_count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(items_count, 0, "clipboard_items must be empty after purge");
     }
 
     #[test]
