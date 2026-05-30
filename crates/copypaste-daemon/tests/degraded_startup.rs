@@ -10,8 +10,8 @@
 //! Both outcomes left no daemon and a blank UI. The fix makes startup ALWAYS
 //! reach a defined state in bounded time and, when the key cannot open an
 //! existing encrypted DB, come up DEGRADED: socket bound, `status` reports
-//! `status="degraded"` + `degraded_reason="keychain_locked"`, DB-touching
-//! methods return `IPC_NOT_READY`, and the existing DB file is left untouched.
+//! `status="degraded"` + an accurate `degraded_reason`, DB-touching methods
+//! return `IPC_NOT_READY`, and the existing DB file is left untouched.
 //!
 //! How this test forces the degraded path deterministically WITHOUT a real
 //! Keychain: it runs the daemon with `COPYPASTE_EPHEMERAL_KEY=1` (so the key is
@@ -19,6 +19,9 @@
 //! that is not a valid SQLCipher database under that key. `Database::open` then
 //! fails with SQLITE_NOTADB — exactly the "wrong key vs existing encrypted DB"
 //! shape — and the daemon takes the degraded safety-net path instead of exiting.
+//! Because the key WAS obtained (it is just the wrong one), the accurate reason
+//! here is `db_key_mismatch`, NOT `keychain_locked` (which is reserved for the
+//! key-UNREACHABLE case — a locked/denied Keychain read).
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -138,7 +141,7 @@ fn spawn_degraded() -> DegradedDaemon {
 /// the key cannot open an existing encrypted DB — it binds the socket and
 /// serves a degraded status in bounded time.
 #[test]
-fn degraded_startup_binds_socket_and_reports_keychain_locked() {
+fn degraded_startup_binds_socket_and_reports_db_key_mismatch() {
     let daemon = spawn_degraded();
 
     assert!(
@@ -158,8 +161,9 @@ fn degraded_startup_binds_socket_and_reports_keychain_locked() {
         "status must be 'degraded', got: {resp}"
     );
     assert_eq!(
-        resp["data"]["degraded_reason"], "keychain_locked",
-        "degraded_reason must be the canonical 'keychain_locked', got: {resp}"
+        resp["data"]["degraded_reason"], "db_key_mismatch",
+        "degraded_reason must be the canonical 'db_key_mismatch' (key present but \
+         wrong — NOT 'keychain_locked', which is for an unreachable key), got: {resp}"
     );
     assert_eq!(
         resp["data"]["degraded"], true,

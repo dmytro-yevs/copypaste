@@ -171,7 +171,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                      intact on disk and recoverable once the matching key is \
                      restored."
                 );
-                return run_degraded(crate::ipc::DEGRADED_REASON_KEYCHAIN_LOCKED, quit_flag).await;
+                // The key WAS obtained (we are on the `Open`/`OpenEphemeral`
+                // path) but it does not match this database, so the accurate
+                // reason is a key MISMATCH — not a locked/unreachable Keychain.
+                // Reporting `keychain_locked` here would wrongly tell the user
+                // to re-grant the Keychain prompt, which cannot fix a wrong key.
+                return run_degraded(crate::ipc::DEGRADED_REASON_DB_KEY_MISMATCH, quit_flag).await;
             }
         },
     ));

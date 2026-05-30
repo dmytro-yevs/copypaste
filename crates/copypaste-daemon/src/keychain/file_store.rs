@@ -105,6 +105,20 @@ pub fn load_cloud_sync_key() -> Result<Option<[u8; 32]>, KeychainError> {
 /// Load the device keypair from the `0600` key file, creating + persisting a
 /// fresh one on first run. Never touches the Keychain, so it can never raise a
 /// password prompt — this is the path used on ad-hoc / unsigned installs.
+///
+/// ## Upgrade migration (v0.5.1 → v0.5.2+)
+///
+/// v0.5.1 and earlier had NO file store: the local SQLCipher device key was
+/// stored in the macOS Keychain under `(SERVICE, ACCOUNT)`
+/// (`com.copypaste.daemon` / `device-secret-key`). v0.5.2 introduced this file
+/// store and routes ad-hoc / unsigned builds here. On the FIRST launch after
+/// that upgrade the key file is absent — but the real DB key is still sitting in
+/// the Keychain. If we just generated a fresh key we would orphan the existing
+/// SQLCipher database (`file is not a database` → DEGRADED). So when the file is
+/// absent we first attempt to ADOPT the legacy Keychain key (a plain read — no
+/// ACL rotation, no prompt-inducing write) and persist it into the file store.
+/// Only when neither the file NOR a legacy Keychain key exists do we generate a
+/// brand-new key. An existing key file is NEVER overwritten.
 pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
     let path = key_file_path()?;
     match read_secret(&path)? {
@@ -114,6 +128,20 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
             Ok(kp)
         }
         None => {
+            // No file yet. Before minting a fresh key, try to adopt a legacy
+            // Keychain-stored key from a pre-file-store build (v0.5.1 and
+            // earlier) so we don't orphan an existing encrypted DB.
+            if let Some(secret) = read_legacy_keychain_key() {
+                let kp = DeviceKeypair::from_secret_bytes(&secret)?;
+                write_secret_atomic_to(&path, KEY_FILE_NAME, &secret)?;
+                tracing::info!(
+                    path = %path.display(),
+                    "migrated legacy Keychain device key (com.copypaste.daemon / \
+                     device-secret-key) into the 0600 file store — preserves the \
+                     existing encrypted database across the v0.5.1→v0.5.2 upgrade"
+                );
+                return Ok(kp);
+            }
             let kp = DeviceKeypair::generate();
             let secret = kp.secret_key_bytes_zeroizing();
             write_secret_atomic_to(&path, KEY_FILE_NAME, &secret)?;
@@ -125,6 +153,58 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
             Ok(kp)
         }
     }
+}
+
+/// Best-effort read of the legacy local DB key from the macOS Keychain.
+///
+/// Pre-v0.5.2 builds stored the X25519 device secret in the login Keychain under
+/// [`super::SERVICE`] / [`super::ACCOUNT`]. This is a plain `get_generic_password`
+/// read — it performs NO ACL rotation and NO write, so on the benign
+/// install-moved case (ACL still trusts the binary, or the user grants the
+/// prompt once) it returns the legacy key; otherwise it returns `None` and the
+/// caller mints a fresh key (the database, if any, then surfaces as a genuine
+/// `db_key_mismatch` upstream rather than being clobbered).
+///
+/// Returns `None` (never an error) on every failure path: the dev/test
+/// ephemeral bypass, a missing item, a denied/locked Keychain, or a
+/// wrong-length blob. Migration is opportunistic — a failure here must never
+/// abort the file-store load.
+#[cfg(target_os = "macos")]
+fn read_legacy_keychain_key() -> Option<[u8; 32]> {
+    // Honour the central dev/test bypass: never touch the real Keychain (and
+    // never prompt) when ephemeral keys are in force.
+    if super::keychain_bypassed() {
+        return None;
+    }
+    match security_framework::passwords::get_generic_password(super::SERVICE, super::ACCOUNT) {
+        Ok(bytes) => {
+            let bytes = zeroize::Zeroizing::new(bytes);
+            if bytes.len() != 32 {
+                tracing::warn!(
+                    len = bytes.len(),
+                    "legacy Keychain device key has unexpected length; ignoring for migration"
+                );
+                return None;
+            }
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            Some(arr)
+        }
+        Err(e) => {
+            tracing::debug!(
+                error = %e,
+                "no adoptable legacy Keychain device key (item absent or access denied); \
+                 will not migrate"
+            );
+            None
+        }
+    }
+}
+
+/// Non-macOS: there is no Keychain to migrate from.
+#[cfg(not(target_os = "macos"))]
+fn read_legacy_keychain_key() -> Option<[u8; 32]> {
+    None
 }
 
 /// Delete the persisted key file (factory reset / test cleanup). Missing file
@@ -233,10 +313,18 @@ mod tests {
     /// RAII guard pointing `COPYPASTE_KEY_FILE_PATH` at a per-test file under a
     /// `tempfile::TempDir`. Serialised via the shared `TEST_ENV_LOCK` so the
     /// env mutation cannot race other env-touching daemon tests.
+    ///
+    /// It also forces `COPYPASTE_EPHEMERAL_KEY` ON for the duration of the test
+    /// so the new legacy-Keychain migration read in `load_or_create` is bypassed
+    /// (`read_legacy_keychain_key` honours that env). This keeps every file-store
+    /// test fully hermetic — no real Keychain item is ever read and no macOS
+    /// login-password prompt can be raised on a developer machine that happens to
+    /// hold a real `(SERVICE, ACCOUNT)` entry.
     struct KeyFileEnv {
         _dir: tempfile::TempDir,
         path: PathBuf,
         original: Option<std::ffi::OsString>,
+        original_ephemeral: Option<std::ffi::OsString>,
         _guard: std::sync::MutexGuard<'static, ()>,
     }
 
@@ -248,12 +336,17 @@ mod tests {
             let dir = tempfile::tempdir().expect("tempdir");
             let path = dir.path().join("device_secret.key");
             let original = std::env::var_os("COPYPASTE_KEY_FILE_PATH");
+            let original_ephemeral = std::env::var_os("COPYPASTE_EPHEMERAL_KEY");
             // SAFETY: serialised via TEST_ENV_LOCK.
-            unsafe { std::env::set_var("COPYPASTE_KEY_FILE_PATH", &path) };
+            unsafe {
+                std::env::set_var("COPYPASTE_KEY_FILE_PATH", &path);
+                std::env::set_var("COPYPASTE_EPHEMERAL_KEY", "1");
+            }
             Self {
                 _dir: dir,
                 path,
                 original,
+                original_ephemeral,
                 _guard: guard,
             }
         }
@@ -266,6 +359,10 @@ mod tests {
                 match self.original.take() {
                     Some(v) => std::env::set_var("COPYPASTE_KEY_FILE_PATH", v),
                     None => std::env::remove_var("COPYPASTE_KEY_FILE_PATH"),
+                }
+                match self.original_ephemeral.take() {
+                    Some(v) => std::env::set_var("COPYPASTE_EPHEMERAL_KEY", v),
+                    None => std::env::remove_var("COPYPASTE_EPHEMERAL_KEY"),
                 }
             }
         }
@@ -340,5 +437,69 @@ mod tests {
             Err(KeychainError::InvalidLength(9)) => {}
             Err(other) => panic!("expected InvalidLength(9), got {other:?}"),
         }
+    }
+
+    /// Upgrade-bug regression (v0.5.1 → v0.5.2): an EXISTING device-key file must
+    /// NEVER be clobbered — not by a re-load, and not by the new legacy-Keychain
+    /// migration path. This is the no-clobber invariant: once a key file exists,
+    /// `load_or_create` reads it verbatim and the on-disk bytes are byte-for-byte
+    /// unchanged across reloads, so the SQLCipher key that encrypted the DB is
+    /// preserved. (Migration only runs when the file is ABSENT.)
+    #[test]
+    fn existing_key_file_is_never_clobbered_on_reload() {
+        let env = KeyFileEnv::new();
+
+        // Seed a known 32-byte key file directly (simulates an already-migrated
+        // or previously-created install).
+        let original_secret = [0x5Au8; 32];
+        write_secret_atomic_to(&env.path, KEY_FILE_NAME, &original_secret).expect("seed key file");
+        let on_disk_before = std::fs::read(&env.path).expect("read seeded key");
+        assert_eq!(on_disk_before.len(), 32, "seeded key must be 32 bytes");
+
+        // Two reloads must both return the SAME key and must NOT rewrite the file.
+        let kp1 = load_or_create().expect("reload existing key #1");
+        let kp2 = load_or_create().expect("reload existing key #2");
+        assert_eq!(
+            kp1.public_key_bytes(),
+            kp2.public_key_bytes(),
+            "reloads must return the identical device key"
+        );
+
+        let on_disk_after = std::fs::read(&env.path).expect("read key after reloads");
+        assert_eq!(
+            on_disk_before, on_disk_after,
+            "an existing device-key file must be byte-for-byte unchanged after \
+             reload — it must NEVER be clobbered (that would orphan the encrypted DB)"
+        );
+        // And the bytes must be exactly what we seeded.
+        assert_eq!(
+            &on_disk_after[..],
+            &original_secret[..],
+            "the persisted key must still equal the originally-seeded secret"
+        );
+    }
+
+    /// When the key file is ABSENT and no legacy Keychain key is adoptable (the
+    /// ephemeral bypass guarantees the migration read is skipped here), a fresh
+    /// key is minted and persisted exactly once. The hermetic stand-in for "no
+    /// legacy key" is `COPYPASTE_EPHEMERAL_KEY=1`, which `KeyFileEnv` sets.
+    #[test]
+    fn absent_file_with_no_legacy_key_mints_fresh_and_persists() {
+        let env = KeyFileEnv::new();
+        assert!(!env.path.exists(), "fresh tempdir should have no key file");
+
+        let kp = load_or_create().expect("mint fresh key when nothing to migrate");
+        assert!(
+            env.path.exists(),
+            "fresh key must be persisted to the file store"
+        );
+
+        // Re-load must return the SAME minted key from the file (no second mint).
+        let kp_again = load_or_create().expect("reload minted key");
+        assert_eq!(
+            kp.public_key_bytes(),
+            kp_again.public_key_bytes(),
+            "the minted key must be the one persisted and reloaded"
+        );
     }
 }
