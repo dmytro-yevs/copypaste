@@ -21,10 +21,15 @@ pub enum MergeOutcome {
 
 /// Compare a locally-stored item against a remote version of the same item.
 ///
-/// `local.id` and `remote.id` must be equal (same logical item).
+/// `local.item_id` and `remote.item_id` must be equal (same logical item).
+/// Identity is the cross-device `item_id`, NOT the per-row `id` (which is a
+/// fresh `Uuid::new_v4()` on every device and so differs for the same item).
 /// Returns `TakeRemote` if the remote version should win, `KeepLocal` otherwise.
 pub fn resolve(local: &ClipboardItem, remote: &WireItem) -> MergeOutcome {
-    debug_assert_eq!(local.id, remote.id, "resolve called on different items");
+    debug_assert_eq!(
+        local.item_id, remote.item_id,
+        "resolve called on different items (item_id mismatch)"
+    );
 
     match remote.lamport_ts.cmp(&local.lamport_ts) {
         std::cmp::Ordering::Greater => MergeOutcome::TakeRemote,

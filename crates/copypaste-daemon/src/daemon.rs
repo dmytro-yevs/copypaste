@@ -1277,6 +1277,17 @@ async fn handle_image(
                     meta.width, meta.height, meta.original_size, meta.chunk_count, meta.file_id
                 );
                 let mut item = ClipboardItem::new_image(blob, meta_json, 0);
+                // Stable cross-device item identity (mirror handle_text, which
+                // sets `item.item_id` once at capture). `new_image` seeds a fresh
+                // random `item_id`; that would give the SAME image a different
+                // identity on each device, so the sync/merge/dedup layer (which
+                // keys on `item_id`) would never converge them and duplicate rows
+                // would accumulate. Derive the `item_id` deterministically from
+                // the content-hash `file_id` so identical images share one
+                // identity across devices and LWW can fire. (The image AEAD AAD
+                // is bound to `file_id`, not `item_id`, so this does not affect
+                // chunk encryption.)
+                item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
                 // Stamp stable device identity (same fix as handle_text).
                 item.origin_device_id = local_device_id;
                 tracing::debug!(

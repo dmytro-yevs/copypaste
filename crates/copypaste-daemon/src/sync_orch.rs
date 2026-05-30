@@ -235,32 +235,43 @@ pub async fn merge_incoming_with_crypto(
 
     let mut upserted = 0usize;
     for wire in items {
-        // M3: look up the specific row by id rather than snapshotting a capped
-        // page. A `get_page(.., 10_000, 0)` snapshot misses rows past row 10k,
-        // so an incoming update for such an item would be treated as new and
-        // then lost on the PK conflict at insert time.
-        let existing = match copypaste_core::get_item_by_id(&db_guard, &wire.id) {
+        // CRDT identity: resolve the existing local row by the **cross-device**
+        // `item_id`, NOT the per-row `id`. The peer assigns its own random `id`
+        // to each row, so the same logical item has a different `id` on every
+        // device; looking up by `id` would never find the local copy, LWW would
+        // never fire, and a duplicate row would accumulate on each sync. The
+        // stable `item_id` (UNIQUE-indexed, AAD-bound) is the identity both
+        // devices agree on.
+        //
+        // (Still a direct UNIQUE-index lookup, not a capped page snapshot, so
+        // rows past the old 10k page window are still resolved — the M3 fix.)
+        let existing = match copypaste_core::get_item_by_item_id(&db_guard, &wire.item_id) {
             Ok(row) => row,
             Err(e) => {
-                warn!(item_id = %wire.id, "sync_orch: get_item_by_id failed: {e}");
+                warn!(item_id = %wire.item_id, "sync_orch: get_item_by_item_id failed: {e}");
                 continue;
             }
         };
         let exists = existing.is_some();
+        // Preserve the existing local row's primary key across a TakeRemote so
+        // FTS rows, `copy_item`, and pins (all keyed on `id`) keep pointing at
+        // the same row. We must NOT adopt the peer's `wire.id` — that would
+        // orphan the FTS/pin state and break id-based IPC verbs.
+        let preserved_pk: Option<String> = existing.as_ref().map(|local| local.id.clone());
         let take_remote = match existing.as_ref() {
             Some(local) => matches!(resolve(local, &wire), MergeOutcome::TakeRemote),
             None => true,
         };
 
         if !take_remote {
-            debug!(item_id = %wire.id, "sync_orch: LWW kept local");
+            debug!(item_id = %wire.item_id, "sync_orch: LWW kept local");
             continue;
         }
 
         // P2P Phase 3: unwrap the shared-key payload into a row encrypted under
         // this device's own local key, recovering the plaintext for FTS. Returns
         // the row to insert plus the decrypted plaintext (when text) to index.
-        let (to_insert, fts_plaintext) = match crypto {
+        let (mut to_insert, fts_plaintext) = match crypto {
             Some(c) => match rekey_inbound(c, wire) {
                 Ok(pair) => pair,
                 Err(w) => {
@@ -270,6 +281,12 @@ pub async fn merge_incoming_with_crypto(
             },
             None => (wire_to_local(wire), None),
         };
+
+        // Adopt the preserved local PK (when the item already existed) so the
+        // replaced row keeps its identity for FTS/copy_item/pins.
+        if let Some(pk) = preserved_pk {
+            to_insert.id = pk;
+        }
 
         // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
         // ran `delete_item` then a separate `insert_item`; if the insert failed
@@ -281,10 +298,10 @@ pub async fn merge_incoming_with_crypto(
         let fts_text = fts_plaintext.and_then(|pt| String::from_utf8(pt).ok());
         match replace_item_atomic(&db_guard, exists, &to_insert, fts_text.as_deref()) {
             Ok(()) => {
-                debug!(item_id = %to_insert.id, "sync_orch: upserted incoming item");
+                debug!(item_id = %to_insert.item_id, "sync_orch: upserted incoming item");
                 upserted += 1;
             }
-            Err(e) => warn!(item_id = %to_insert.id, "sync_orch: atomic replace failed: {e}"),
+            Err(e) => warn!(item_id = %to_insert.item_id, "sync_orch: atomic replace failed: {e}"),
         }
     }
     Ok(upserted)
@@ -297,7 +314,10 @@ pub async fn merge_incoming_with_crypto(
 /// `unchecked_transaction`, so a failed insert rolls the whole thing back and
 /// the prior row survives intact. Unlike `insert_item` / `insert_item_with_fts`
 /// in core (plain INSERT, dedup-on-conflict), this path is a true replace keyed
-/// on the primary key `id`, which is what LWW `TakeRemote` requires.
+/// on the cross-device `item_id` (the CRDT identity), which is what LWW
+/// `TakeRemote` requires. The caller preserves the existing local row's primary
+/// key on `item.id`, so the DELETE-by-item_id + INSERT keeps the same `id` and
+/// the FTS rewrite below (keyed on `item.id`) stays consistent.
 ///
 /// `fts_text` is the already-decrypted plaintext to index; `None`/empty skips
 /// FTS (e.g. verbatim or image rows). The stored `key_version` mirrors what the
@@ -319,9 +339,13 @@ fn replace_item_atomic(
 
     let tx = db.conn().unchecked_transaction()?;
     if existed {
+        // Delete the prior version by its cross-device `item_id` (the row's
+        // local PK is preserved on `item.id`, so the subsequent INSERT reuses
+        // the same `id`). Deleting by `item_id` also defends the UNIQUE
+        // `idx_clipboard_item_id` index from a conflict on re-insert.
         tx.execute(
-            "DELETE FROM clipboard_items WHERE id = ?1",
-            params![item.id],
+            "DELETE FROM clipboard_items WHERE item_id = ?1",
+            params![item.item_id],
         )?;
     }
     tx.execute(
@@ -778,18 +802,23 @@ mod tests {
     }
 
     /// LWW: a stale wire item (lower lamport) must NOT overwrite the local row.
+    /// Identity is matched on the cross-device `item_id`, so the local row and
+    /// the wire item share `item_id = "shared-iid"` (the local `id` is distinct,
+    /// as it always is across devices).
     #[tokio::test]
     async fn merge_incoming_keeps_local_on_older_remote() {
         let db = make_db();
-        // Pre-insert a local row with a higher lamport clock.
+        // Pre-insert a local row with a higher lamport clock. Its `item_id`
+        // matches the incoming wire's so they are recognised as the SAME item.
         let mut local = ClipboardItem::new_text(vec![0x11], vec![0u8; 24], 50);
         local.id = "shared".to_string();
+        local.item_id = "shared-iid".to_string();
         {
             let g = db.lock().await;
             insert_item(&g, &local).unwrap();
         }
 
-        let wire = make_wire("shared", 5, 0xFF); // older
+        let wire = make_wire("shared", 5, 0xFF); // older; item_id = "shared-iid"
         let upserted = merge_incoming(&db, vec![wire]).await.unwrap();
         assert_eq!(upserted, 0, "older remote must lose LWW");
 
@@ -797,5 +826,52 @@ mod tests {
         let rows = copypaste_core::get_page(&g, 10, 0).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].content, Some(vec![0x11]), "local payload preserved");
+    }
+
+    /// CRDT identity + local-PK preservation: a TakeRemote (newer lamport) for
+    /// an item already present locally under a DIFFERENT row `id` must replace
+    /// the content in place while preserving the local primary key — so FTS,
+    /// `copy_item`, and pins (all keyed on `id`) keep pointing at the same row.
+    #[tokio::test]
+    async fn merge_incoming_replaces_by_item_id_preserving_local_pk() {
+        let db = make_db();
+        // Local row: PK "local-pk", item_id "X", lamport 5.
+        let mut local = ClipboardItem::new_text(vec![0x11], vec![0u8; 24], 5);
+        local.id = "local-pk".to_string();
+        local.item_id = "X".to_string();
+        {
+            let g = db.lock().await;
+            insert_item(&g, &local).unwrap();
+        }
+
+        // Incoming wire: peer's own PK "peer-pk", SAME item_id "X", newer
+        // lamport 9, different content.
+        let mut wire = make_wire("peer-pk", 9, 0xFF);
+        wire.item_id = "X".to_string();
+
+        let upserted = merge_incoming(&db, vec![wire]).await.unwrap();
+        assert_eq!(upserted, 1, "newer remote must win LWW");
+
+        let g = db.lock().await;
+        let rows = copypaste_core::get_page(&g, 10, 0).unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "must remain ONE row (replace, not duplicate)"
+        );
+        assert_eq!(
+            rows[0].id, "local-pk",
+            "local primary key must be preserved"
+        );
+        assert_eq!(rows[0].item_id, "X");
+        assert_eq!(rows[0].lamport_ts, 9, "remote (newer) lamport stored");
+        assert_eq!(rows[0].content, Some(vec![0xFF]), "remote content stored");
+        // The peer's row id must NOT have been adopted.
+        assert!(
+            copypaste_core::get_item_by_id(&g, "peer-pk")
+                .unwrap()
+                .is_none(),
+            "peer's row id must not leak into local storage"
+        );
     }
 }

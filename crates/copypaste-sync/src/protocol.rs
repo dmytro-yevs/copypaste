@@ -86,22 +86,26 @@ pub enum Message {
         item_count: u64,
     },
 
-    /// Sender announces the IDs and Lamport clocks of all items it currently holds.
+    /// Sender announces the cross-device `item_id`s and Lamport clocks of all
+    /// items it currently holds.
     ///
-    /// Each entry is `(item_id, lamport_ts)`. The receiver uses the Lamport
-    /// timestamps to decide whether to request an update even for items it
-    /// already has locally (conflict detection / LWW comparison).
+    /// Each entry is `(item_id, lamport_ts)` — the stable cross-device
+    /// identity, NOT the per-row primary key `id` (which differs on every
+    /// device). The receiver uses the Lamport timestamps to decide whether to
+    /// request an update even for items it already has locally (conflict
+    /// detection / LWW comparison).
     Have {
-        /// `(id, lamport_ts)` pairs for all items the sender holds.
+        /// `(item_id, lamport_ts)` pairs for all items the sender holds.
         items: Vec<(String, i64)>,
     },
 
-    /// Sender requests the listed items from its peer.
+    /// Sender requests the listed items from its peer, identified by their
+    /// cross-device `item_id`s.
     ///
     /// Includes items the sender doesn't have *at all*, plus items where the
     /// peer's Lamport clock is higher than the sender's local copy.
     Want {
-        /// IDs the sender wants to receive (new or potentially outdated).
+        /// `item_id`s the sender wants to receive (new or potentially outdated).
         item_ids: Vec<String>,
     },
 

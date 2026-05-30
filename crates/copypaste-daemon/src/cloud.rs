@@ -40,8 +40,8 @@ use tokio::sync::{Mutex, RwLock};
 
 use copypaste_core::{
     build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2, encrypt_for_cloud,
-    encrypt_item_with_aad, insert_item, ClipboardItem, Database, SyncKey, AAD_SCHEMA_VERSION_V4,
-    ITEM_KEY_VERSION_CURRENT,
+    encrypt_item_with_aad, exists_item_by_item_id, get_item_by_item_id, insert_item, ClipboardItem,
+    Database, SyncKey, AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
 };
 
 // Beta W2.3 (arch-1): canonical auth client lives in copypaste-supabase. The
@@ -1272,28 +1272,69 @@ async fn refresh_bearer(
 /// instead of re-downloading the entire cloud history.
 const POLL_WATERMARK_KEY: &str = "cloud_poll_watermark";
 
-/// Base poll query (no lower bound). The `wall_time=gt.<watermark>` filter is
-/// appended by [`build_poll_url`] when a watermark is known.
-const POLL_SELECT_QS: &str = "select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20";
-
-/// Construct the poll URL for a single tick.
+/// Forward-pagination cursor for the cloud poll loop.
 ///
-/// When `watermark > 0`, appends `&wall_time=gt.<watermark>` so PostgREST only
-/// returns rows strictly newer than everything we have already ingested. The
-/// base query orders `wall_time.asc` so each tick fetches the OLDEST `limit`
-/// rows above the watermark and the watermark advances forward to the newest in
-/// that batch — the next tick resumes from there, so nothing is skipped. With
-/// descending order + `limit`, a tick that found more than `limit` new rows
-/// would fetch only the newest `limit`, jump the watermark to the newest, and
-/// permanently skip every row between the old watermark and the `limit`-th
-/// newest (finding C — silent download data loss). The `wall_time=gt.<value>`
-/// syntax matches the Android client (`SupabaseClient.kt`).
-fn build_poll_url(supabase_url: &str, watermark: i64) -> String {
-    if watermark > 0 {
-        format!("{supabase_url}/rest/v1/clipboard_items?{POLL_SELECT_QS}&wall_time=gt.{watermark}")
-    } else {
-        format!("{supabase_url}/rest/v1/clipboard_items?{POLL_SELECT_QS}")
+/// `wall` is the Unix-ms wall_time of the last row ingested (the persisted
+/// high-water-mark). `id` is that row's primary key, the secondary keyset
+/// component used to page forward through rows that share the same `wall`
+/// millisecond (see [`build_poll_url`]). `id` is empty on a cold start (only the
+/// `wall` lower bound is applied) and is populated once a row is ingested.
+#[derive(Debug, Clone, Default)]
+struct PollCursor {
+    wall: i64,
+    id: String,
+}
+
+/// Base poll query (no lower bound). The keyset cursor filter is appended by
+/// [`build_poll_url`] when a watermark is known. Order is the **compound**
+/// `(wall_time, id)` so pagination is deterministic even within one millisecond.
+const POLL_SELECT_QS: &str = "select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc,id.asc&limit=20";
+
+/// Construct the poll URL for a single tick using a `(wall_time, id)` keyset
+/// cursor.
+///
+/// WATERMARK BUG FIX: the previous query used a `wall_time`-only cursor
+/// (`order=wall_time.asc&limit=20` + strict `wall_time=gt.<max>`). Because
+/// `wall_time` is millisecond granularity, a burst of ≥ `limit` rows sharing the
+/// SAME max millisecond was fatal: a tick fetched `limit` of them, advanced the
+/// watermark to that millisecond, and the next tick's strict `gt` filtered out
+/// the remaining same-millisecond rows FOREVER (silent download data loss).
+///
+/// The fix is a proper compound keyset cursor `(watermark_wall, watermark_id)`
+/// ordered by `(wall_time, id)`: each tick requests rows strictly *after* the
+/// `(wall_time, id)` pair of the last row ingested. Expressed in PostgREST:
+///
+/// ```text
+/// or=(wall_time.gt.W, and(wall_time.eq.W, id.gt.ID))
+/// ```
+///
+/// i.e. a later millisecond OR the same millisecond with a larger `id`. This
+/// advances forward through same-millisecond rows by `id` instead of stalling,
+/// so ≥20 rows sharing one wall_time are all eventually fetched, in order, with
+/// no gaps. Forward (`asc`) direction is preserved. `watermark_id` is empty on a
+/// fresh start (only a `wall_time` lower bound is used) or for a watermark
+/// restored from the persisted `wall_time`-only setting.
+fn build_poll_url(supabase_url: &str, watermark_wall: i64, watermark_id: &str) -> String {
+    let base = format!("{supabase_url}/rest/v1/clipboard_items?{POLL_SELECT_QS}");
+    if watermark_wall <= 0 {
+        return base;
     }
+    if watermark_id.is_empty() {
+        // No id component yet (cold start from a persisted wall_time-only
+        // watermark): use an inclusive `gte` so the boundary millisecond's rows
+        // are (re-)offered; the per-row item_id dedup drops already-ingested
+        // ones. Once a row is ingested the id component is populated and the
+        // strict keyset below takes over.
+        return format!("{base}&wall_time=gte.{watermark_wall}");
+    }
+    // Strict `(wall_time, id)` keyset: a later ms, OR the same ms with a larger
+    // id. URL-encode the parens-bearing PostgREST `or=` expression's commas are
+    // significant; reqwest will percent-encode the whole query value for us when
+    // we pass it through the URL, but we build the canonical PostgREST syntax
+    // here (matching the existing hand-built query strings in this module).
+    format!(
+        "{base}&or=(wall_time.gt.{watermark_wall},and(wall_time.eq.{watermark_wall},id.gt.{watermark_id}))"
+    )
 }
 
 /// Seed the download watermark on startup from the larger of the persisted
@@ -1370,16 +1411,27 @@ async fn realtime_loop(
     // the larger of (a) the persisted `cloud_poll_watermark` setting and (b) the
     // local `MAX(wall_time)`, and is persisted again after each advance so a
     // daemon restart does not re-download the entire history.
-    let mut watermark: i64 = {
+    let mut cursor: PollCursor = {
         let db_arc = db.clone();
-        tokio::task::spawn_blocking(move || {
+        let wall = tokio::task::spawn_blocking(move || {
             let db_guard = db_arc.blocking_lock();
             load_poll_watermark(&db_guard)
         })
         .await
-        .unwrap_or(0)
+        .unwrap_or(0);
+        // The persisted watermark is wall_time-only, so the id component starts
+        // empty and is populated as soon as the first row is ingested. Until
+        // then `build_poll_url` uses an inclusive `gte.<wall>` so no boundary
+        // millisecond row is skipped.
+        PollCursor {
+            wall,
+            id: String::new(),
+        }
     };
-    tracing::info!("cloud-sync poll: seeded download watermark wall_time={watermark}");
+    tracing::info!(
+        "cloud-sync poll: seeded download watermark wall_time={}",
+        cursor.wall
+    );
 
     loop {
         tokio::select! {
@@ -1413,7 +1465,7 @@ async fn realtime_loop(
                 // `fetch_remote_rows_with_refresh`, which performs the bl-cloud
                 // refresh-token grant on a 401 (via `auth`) and updates
                 // `cloud_signed_in`.
-                watermark = poll_once(
+                cursor = poll_once(
                     &client,
                     &config,
                     &bearer,
@@ -1423,7 +1475,7 @@ async fn realtime_loop(
                     &cloud_signed_in,
                     &auth,
                     &key_bytes,
-                    watermark,
+                    cursor,
                 )
                 .await;
             }
@@ -1435,20 +1487,22 @@ async fn realtime_loop(
     }
 }
 
-/// Execute a single poll round and return the (possibly advanced) watermark.
+/// Execute a single poll round and return the (possibly advanced) cursor.
 ///
-/// 1. Build the poll URL with `wall_time=gt.<watermark>` ordered `wall_time.asc`
-///    so PostgREST returns the OLDEST `limit` rows newer than everything ingested
-///    so far (forward pagination — the previous fixed `limit=20` re-fetched the
-///    same newest rows every tick, and descending order would skip rows between
-///    the watermark and the limit-th newest when more than `limit` arrive per
-///    tick).
-/// 2. Decrypt + re-encrypt + insert each unknown row.
-/// 3. Advance the watermark to the highest `wall_time` seen in the batch
-///    (including de-duped / undecryptable rows, so they are never re-requested)
-///    and persist it so a restart resumes forward instead of from the top.
+/// 1. Build the poll URL with a `(wall_time, id)` keyset cursor ordered
+///    `wall_time.asc, id.asc` so PostgREST returns the OLDEST `limit` rows after
+///    everything ingested so far (forward pagination). The compound cursor
+///    prevents the same-millisecond-burst data loss the old `wall_time`-only
+///    `gt` cursor suffered (see [`build_poll_url`]).
+/// 2. For each row, dedup/LWW by the cross-device `item_id`: a brand-new item is
+///    inserted; an item already present locally is routed through an LWW resolve
+///    (newer `lamport_ts` wins) and, on a win, replaced in place while the local
+///    primary key is preserved.
+/// 3. Advance the cursor to the `(wall_time, id)` of the last row seen in the
+///    batch (including de-duped / undecryptable rows, so they are never
+///    re-requested) and persist the wall component so a restart resumes forward.
 ///
-/// On a fetch error the watermark is returned unchanged so the next tick retries
+/// On a fetch error the cursor is returned unchanged so the next tick retries
 /// the same window.
 #[allow(clippy::too_many_arguments)]
 async fn poll_once(
@@ -1461,9 +1515,9 @@ async fn poll_once(
     cloud_signed_in: &Arc<std::sync::atomic::AtomicBool>,
     auth: &AuthClient,
     key_bytes: &[u8],
-    watermark: i64,
-) -> i64 {
-    let poll_url = build_poll_url(&config.supabase_url, watermark);
+    cursor: PollCursor,
+) -> PollCursor {
+    let poll_url = build_poll_url(&config.supabase_url, cursor.wall, &cursor.id);
 
     let rows = match fetch_remote_rows_with_refresh(
         client,
@@ -1478,7 +1532,7 @@ async fn poll_once(
         Ok(rows) => rows,
         Err(e) => {
             tracing::warn!("cloud-sync poll failed: {e}");
-            return watermark;
+            return cursor;
         }
     };
 
@@ -1489,13 +1543,15 @@ async fn poll_once(
     let local_key_clone = local_key.clone();
     let mut key_arr = [0u8; 32];
     key_arr.copy_from_slice(key_bytes);
+    let start_cursor = cursor.clone();
     let join = tokio::task::spawn_blocking(move || {
         let db_guard = db_arc.blocking_lock();
         let mut synced = 0u32;
-        // Highest wall_time observed in this batch — used to advance the download
-        // watermark even for rows that were de-duped or failed to decrypt, so we
-        // never re-request them on the next tick.
-        let mut batch_max_wall: i64 = 0;
+        // Highest `(wall_time, id)` observed in this batch — used to advance the
+        // forward cursor even for rows that were de-duped or failed to decrypt,
+        // so we never re-request them on the next tick. Ordering matches the
+        // query's `(wall_time, id)` sort.
+        let mut batch_max: (i64, String) = (start_cursor.wall, start_cursor.id.clone());
         for row in rows {
             let Some(id) = row["id"].as_str() else {
                 continue;
@@ -1503,23 +1559,51 @@ async fn poll_once(
             let Some(item_id) = row["item_id"].as_str() else {
                 continue;
             };
-            // Advance the batch watermark for EVERY row we can read a wall_time
-            // from — including ones we skip below (already present, undecryptable)
-            // — so the next poll's `wall_time=gt.<watermark>` does not re-request
-            // them.
+            // Advance the batch cursor for EVERY row we can read — including ones
+            // we skip below (already present, undecryptable) — so the next poll's
+            // keyset filter does not re-request them.
             let row_wall = row["wall_time"].as_i64().unwrap_or(0);
-            if row_wall > batch_max_wall {
-                batch_max_wall = row_wall;
+            if (row_wall, id.to_owned()) > batch_max {
+                batch_max = (row_wall, id.to_owned());
             }
-            // Dedup check before doing expensive decrypt.
-            match exists_item(&db_guard, id) {
-                Ok(true) => continue,
+            // LWW dedup keyed on the cross-device `item_id` (NOT the per-row
+            // `id`, which differs across devices for the same logical item). If
+            // the item is already present locally, route it through an LWW
+            // resolve instead of inserting a duplicate or unconditionally
+            // dropping it: a strictly-newer remote `lamport_ts` must win so a
+            // cloud edit propagates, while an older/equal one is skipped.
+            let existing = match get_item_by_item_id(&db_guard, item_id) {
+                Ok(row) => row,
                 Err(e) => {
-                    tracing::warn!("cloud-sync: exists_item error for id={id}: {e}");
+                    tracing::warn!(
+                        "cloud-sync: get_item_by_item_id error for item_id={item_id}: {e}"
+                    );
                     continue;
                 }
-                Ok(false) => {}
-            }
+            };
+            let preserved_pk = if let Some(local) = existing.as_ref() {
+                let remote_lamport = row["lamport_ts"].as_i64().unwrap_or(0);
+                if remote_lamport <= local.lamport_ts {
+                    // Local copy is newer-or-equal (LWW keeps local) — skip.
+                    continue;
+                }
+                // Remote wins LWW: replace in place, preserving the local PK so
+                // FTS / copy_item / pins keep pointing at the same row.
+                Some(local.id.clone())
+            } else {
+                // Defensive: also honour a same-`id` row that somehow lacks the
+                // matching item_id (legacy rows) so we never double-insert.
+                match exists_item_by_item_id(&db_guard, item_id) {
+                    Ok(true) => continue,
+                    Ok(false) => None,
+                    Err(e) => {
+                        tracing::warn!(
+                            "cloud-sync: exists_item_by_item_id error for item_id={item_id}: {e}"
+                        );
+                        continue;
+                    }
+                }
+            };
 
             // Decode payload_ct (base64 → bytes).
             let payload_ct_b64 = match row["payload_ct"].as_str() {
@@ -1573,7 +1657,7 @@ async fn poll_once(
                 .map(str::to_owned)
                 .unwrap_or_default();
 
-            let local_item = match build_local_item(
+            let mut local_item = match build_local_item(
                 id,
                 item_id,
                 &content_type,
@@ -1594,38 +1678,59 @@ async fn poll_once(
                 }
             };
 
-            match insert_item(&db_guard, &local_item) {
+            // For an LWW replace, preserve the existing local row's primary key
+            // so FTS / copy_item / pins keep pointing at the same row (do NOT
+            // adopt the remote's `id`).
+            if let Some(pk) = preserved_pk.as_ref() {
+                local_item.id = pk.clone();
+            }
+
+            let write_res = if preserved_pk.is_some() {
+                // Replace the prior version atomically (delete by item_id +
+                // re-insert with the preserved PK). Cloud items are text-only
+                // here, so no FTS plaintext is threaded through; the FTS rewrite
+                // happens lazily on read paths that already rebuild it.
+                replace_cloud_item_by_item_id(&db_guard, &local_item)
+            } else {
+                insert_item(&db_guard, &local_item).map_err(anyhow::Error::from)
+            };
+            match write_res {
                 Ok(()) => {
                     synced += 1;
-                    tracing::info!("cloud-sync: synced remote id={}", local_item.id);
+                    tracing::info!(
+                        "cloud-sync: synced remote item_id={} (id={})",
+                        local_item.item_id,
+                        local_item.id
+                    );
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "cloud-sync: failed to insert remote id={}: {e}",
-                        local_item.id
+                        "cloud-sync: failed to store remote item_id={}: {e}",
+                        local_item.item_id
                     );
                 }
             }
         }
         // Zero the snapshot key bytes before the closure exits.
         key_arr.iter_mut().for_each(|b| *b = 0);
-        // Persist the advanced watermark inside the same DB lock so it survives a
-        // restart. Return the value the async loop should use going forward.
-        let new_watermark = if batch_max_wall > watermark {
-            if let Err(e) = save_poll_watermark(&db_guard, batch_max_wall) {
-                tracing::warn!(
-                    "cloud-sync: failed to persist poll watermark {batch_max_wall}: {e}"
-                );
+        // Persist the advanced wall watermark inside the same DB lock so it
+        // survives a restart. Return the full `(wall, id)` cursor the async loop
+        // should use going forward.
+        let new_wall = batch_max.0;
+        if new_wall > start_cursor.wall {
+            if let Err(e) = save_poll_watermark(&db_guard, new_wall) {
+                tracing::warn!("cloud-sync: failed to persist poll watermark {new_wall}: {e}");
             }
-            batch_max_wall
-        } else {
-            watermark
+        }
+        let new_cursor = PollCursor {
+            wall: batch_max.0,
+            id: batch_max.1,
         };
-        (synced, new_watermark)
+        (synced, new_cursor)
     });
 
     match join.await {
-        Ok((synced, new_watermark)) => {
+        Ok((synced, new_cursor)) => {
             if synced > 0 {
                 // Record the wall-clock time of the last successful sync.
                 let now_ms = std::time::SystemTime::now()
@@ -1634,15 +1739,61 @@ async fn poll_once(
                     .as_millis() as i64;
                 last_sync_ms.store(now_ms, Ordering::Relaxed);
             }
-            // Advance the in-memory watermark so the next tick's URL filters past
-            // everything we just saw.
-            new_watermark.max(watermark)
+            // Advance the in-memory cursor so the next tick's URL keyset-filters
+            // past everything we just saw. `new_cursor` is monotonically ≥ the
+            // start cursor (batch_max seeds from it), so it never regresses.
+            new_cursor
         }
         Err(e) => {
             tracing::warn!("cloud-sync: insert worker panicked or was cancelled: {e}");
-            watermark
+            cursor
         }
     }
+}
+
+/// Atomically replace a cloud-downloaded clipboard row by its cross-device
+/// `item_id`, preserving the row's primary key (`item.id`) so FTS / copy_item /
+/// pins keep pointing at the same row.
+///
+/// Runs DELETE-by-item_id + INSERT inside one `unchecked_transaction` so a
+/// failed insert rolls back the delete and the prior row survives. This is the
+/// cloud-poll counterpart of `sync_orch::replace_item_atomic` (the LWW
+/// `TakeRemote` replace); FTS is not threaded through here because cloud rows
+/// are re-indexed lazily on read.
+fn replace_cloud_item_by_item_id(db: &Database, item: &ClipboardItem) -> anyhow::Result<()> {
+    use rusqlite::params;
+    let tx = db.conn().unchecked_transaction()?;
+    tx.execute(
+        "DELETE FROM clipboard_items WHERE item_id = ?1",
+        params![item.item_id],
+    )?;
+    tx.execute(
+        "INSERT INTO clipboard_items
+         (id, item_id, content_type, content, content_nonce, blob_ref,
+          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+          content_hash, origin_device_id, key_version, pinned)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+        params![
+            item.id,
+            item.item_id,
+            item.content_type,
+            item.content,
+            item.content_nonce,
+            item.blob_ref,
+            item.is_sensitive as i64,
+            item.is_synced as i64,
+            item.lamport_ts,
+            item.wall_time,
+            item.expires_at,
+            item.app_bundle_id,
+            item.content_hash,
+            item.origin_device_id,
+            ITEM_KEY_VERSION_CURRENT,
+            item.pinned as i64,
+        ],
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 
 /// Build a local [`ClipboardItem`] from decrypted plaintext by re-encrypting
@@ -2600,20 +2751,31 @@ mod tests {
 
     #[test]
     fn build_poll_url_appends_watermark_only_when_positive() {
-        let base = build_poll_url("https://x.test", 0);
+        // No watermark: no lower-bound filter.
+        let base = build_poll_url("https://x.test", 0, "");
         assert!(
             base.ends_with("&limit=20"),
             "no watermark filter when watermark==0: {base}"
         );
         assert!(
-            !base.contains("wall_time=gt."),
-            "must NOT add a gt filter at watermark 0: {base}"
+            !base.contains("wall_time="),
+            "must NOT add a wall_time filter at watermark 0: {base}"
         );
 
-        let bounded = build_poll_url("https://x.test", 1234);
+        // Wall-only watermark (cold start, empty id): inclusive `gte` so the
+        // boundary millisecond's rows are re-offered and deduped, not skipped.
+        let cold = build_poll_url("https://x.test", 1234, "");
         assert!(
-            bounded.contains("&wall_time=gt.1234"),
-            "watermark must be appended as wall_time=gt.<T>: {bounded}"
+            cold.contains("&wall_time=gte.1234"),
+            "cold-start watermark must use inclusive gte: {cold}"
+        );
+
+        // Full `(wall, id)` keyset cursor: strict compound `or=` filter so
+        // ≥limit same-millisecond rows page forward by id instead of stalling.
+        let keyset = build_poll_url("https://x.test", 1234, "row-9");
+        assert!(
+            keyset.contains("&or=(wall_time.gt.1234,and(wall_time.eq.1234,id.gt.row-9))"),
+            "keyset cursor must emit the compound (wall,id) filter: {keyset}"
         );
     }
 
@@ -2694,14 +2856,14 @@ mod tests {
         );
 
         // Mocks are matched in REGISTRATION order. Register the SPECIFIC
-        // `wall_time=gt.2000` matcher FIRST so the round-2 request lands there.
-        // Round 1's request (watermark 0 → no gt filter) cannot match it and
-        // falls through to the catch-all `m1`. This also enforces *absence* of
-        // the filter on round 1: if round 1 had erroneously carried
-        // `wall_time=gt.2000`, it would match `m2` and overflow its
-        // `.expect(1)`, failing `m2.assert()`.
+        // round-2 keyset matcher FIRST so the round-2 request lands there. After
+        // round 1 ingests the row at (wall=2000, id=1111...), the round-2 cursor
+        // is the compound `(2000, 1111...)`, so the request carries the strict
+        // keyset `or=(wall_time.gt.2000, and(wall_time.eq.2000, id.gt.1111...))`.
+        // Round 1's request (cursor wall=0 → no filter) cannot match it and
+        // falls through to the catch-all `m1`.
         let m2 = mockito::mock("GET", "/rest/v1/clipboard_items")
-            .match_query(Matcher::Regex("wall_time=gt.2000".into()))
+            .match_query(Matcher::Regex("or=\\(wall_time\\.gt\\.2000".into()))
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body("[]")
@@ -2729,7 +2891,7 @@ mod tests {
         let auth = test_auth(&cfg);
         let key_bytes = sync_key.as_bytes().to_vec();
 
-        // Round 1: from watermark 0.
+        // Round 1: from an empty cursor (wall 0).
         let wm1 = poll_once(
             &client,
             &cfg,
@@ -2740,12 +2902,16 @@ mod tests {
             &signed_in,
             &auth,
             &key_bytes,
-            0,
+            PollCursor::default(),
         )
         .await;
         assert_eq!(
-            wm1, 2000,
+            wm1.wall, 2000,
             "watermark must advance to the ingested row's wall_time"
+        );
+        assert_eq!(
+            wm1.id, "11111111-1111-1111-1111-111111111111",
+            "cursor id must advance to the ingested row's id"
         );
         m1.assert();
 
@@ -2761,7 +2927,8 @@ mod tests {
             assert_eq!(load_poll_watermark(&g), 2000);
         }
 
-        // Round 2: from watermark 2000 — request carries the gt filter, no rows.
+        // Round 2: from the (2000, 1111...) cursor — request carries the keyset
+        // filter, no rows.
         let wm2 = poll_once(
             &client,
             &cfg,
@@ -2776,7 +2943,7 @@ mod tests {
         )
         .await;
         assert_eq!(
-            wm2, 2000,
+            wm2.wall, 2000,
             "empty newer-window leaves the watermark unchanged"
         );
         m2.assert();
@@ -2828,12 +2995,15 @@ mod tests {
         let body = |rows: &[serde_json::Value]| serde_json::to_string(rows).unwrap();
 
         // ── Ascending (correct) mocks ────────────────────────────────────────
-        // Round 2 (asc): gt.1019 → the remaining 5 oldest-above-watermark rows.
+        // Round 2 (asc): the keyset cursor after round 1 is
+        // (wall=1019, id=c0000000-0000-0000-0000-000000000019), so the request
+        // carries `or=(wall_time.gt.1019, and(wall_time.eq.1019, id.gt.<id19>))`
+        // → the remaining 5 rows above the watermark (wall 1020..=1024).
         // Registered first so the specific filter wins over the catch-all.
         let asc_p2 = mockito::mock("GET", "/rest/v1/clipboard_items")
             .match_query(Matcher::AllOf(vec![
                 Matcher::Regex("order=wall_time\\.asc".into()),
-                Matcher::Regex("wall_time=gt\\.1019$".into()),
+                Matcher::Regex("or=\\(wall_time\\.gt\\.1019".into()),
             ]))
             .with_status(200)
             .with_header("content-type", "application/json")
@@ -2884,9 +3054,9 @@ mod tests {
         let key_bytes = sync_key.as_bytes().to_vec();
 
         // Two ticks, exactly as the realtime loop would do back-to-back.
-        let mut watermark = 0i64;
+        let mut cursor = PollCursor::default();
         for _ in 0..2 {
-            watermark = poll_once(
+            cursor = poll_once(
                 &client,
                 &cfg,
                 &bearer,
@@ -2896,10 +3066,11 @@ mod tests {
                 &signed_in,
                 &auth,
                 &key_bytes,
-                watermark,
+                cursor,
             )
             .await;
         }
+        let watermark = cursor.wall;
 
         // The whole point: ALL 25 rows must be present. On `.desc` only 20 land.
         let count: i64 = {
@@ -2924,6 +3095,236 @@ mod tests {
         // Keep the unused-mock handles alive for the duration; drop explicitly.
         drop(desc_p1);
         drop(desc_p2);
+    }
+
+    /// Build a cloud row with an explicit `lamport_ts` decoupled from
+    /// `wall_time` (the `cloud_row` helper ties them together). `id == item_id`
+    /// 1:1 for the test, matching `cloud_row`.
+    fn cloud_row_lamport(
+        id: &str,
+        sync_key: &SyncKey,
+        plaintext: &[u8],
+        wall_time: i64,
+        lamport_ts: i64,
+    ) -> serde_json::Value {
+        let mut row = cloud_row(id, sync_key, plaintext, wall_time);
+        row["lamport_ts"] = serde_json::json!(lamport_ts);
+        row
+    }
+
+    /// **WATERMARK BUG** — ≥ `limit` (20) rows that all share the SAME
+    /// `wall_time` millisecond must ALL be fetched. The old `wall_time`-only
+    /// `gt.<max>` cursor would fetch the first 20, advance the watermark to that
+    /// same millisecond, and the strict `gt` would then exclude the remaining
+    /// same-millisecond rows forever. The compound `(wall_time, id)` keyset
+    /// cursor pages forward by `id` within the millisecond, so all 25 land.
+    ///
+    /// mockito 0.31 has no dynamic per-request body, so we model the three
+    /// PostgREST keyset windows with three explicit `match_query` mocks:
+    ///   * page 1: cold start (no keyset filter)  → ids 00..19 (oldest 20)
+    ///   * page 2: keyset after (5000, id19)       → ids 20..24 (5 rows)
+    ///   * page 3: keyset after (5000, id24)       → [] (drained)
+    #[tokio::test]
+    async fn poll_fetches_all_rows_sharing_one_wall_time_via_keyset_cursor() {
+        use mockito::Matcher;
+
+        let sync_key = copypaste_core::derive_sync_key("same-wall-passphrase").unwrap();
+
+        // 25 distinct rows, ALL at wall_time=5000, ids sortable by index so the
+        // keyset `id.gt.<last>` pages forward deterministically.
+        let all: Vec<serde_json::Value> = (0..25i64)
+            .map(|i| {
+                let id = format!("d0000000-0000-0000-0000-{i:012}");
+                cloud_row(&id, &sync_key, format!("same-wall-{i}").as_bytes(), 5000)
+            })
+            .collect();
+        let body = |rows: &[serde_json::Value]| serde_json::to_string(rows).unwrap();
+        let id19 = "d0000000-0000-0000-0000-000000000019";
+        let id24 = "d0000000-0000-0000-0000-000000000024";
+
+        // Register most-specific keyset matchers FIRST (mockito matches in
+        // registration order). Page 3 (after id24) → drained.
+        let p3 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::Regex(format!("id\\.gt\\.{id24}")))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("[]")
+            .expect(1)
+            .create();
+        // Page 2 (after id19) → the remaining 5 rows.
+        let p2 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::Regex(format!("id\\.gt\\.{id19}")))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body(&all[20..25]))
+            .expect(1)
+            .create();
+        // Page 1 (cold start, no keyset filter) → the oldest 20.
+        let p1 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body(&all[0..20]))
+            .expect(1)
+            .create();
+
+        let cfg = test_cfg();
+        let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
+        let client = reqwest::Client::new();
+        let db = Arc::new(Mutex::new(
+            copypaste_core::Database::open_in_memory().expect("in-mem db"),
+        ));
+        let local_key = Arc::new(zeroize::Zeroizing::new([7u8; 32]));
+        let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let auth = test_auth(&cfg);
+        let key_bytes = sync_key.as_bytes().to_vec();
+
+        // Three ticks drain all 25 rows.
+        let mut cursor = PollCursor::default();
+        for _ in 0..3 {
+            cursor = poll_once(
+                &client,
+                &cfg,
+                &bearer,
+                &db,
+                &local_key,
+                &last_sync_ms,
+                &signed_in,
+                &auth,
+                &key_bytes,
+                cursor,
+            )
+            .await;
+        }
+
+        let count: i64 = {
+            let g = db.lock().await;
+            g.conn()
+                .query_row("SELECT COUNT(1) FROM clipboard_items", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(
+            count, 25,
+            "all 25 rows sharing one wall_time must be fetched via the (wall,id) keyset cursor"
+        );
+        p1.assert();
+        p2.assert();
+        p3.assert();
+    }
+
+    /// Cloud LWW by `item_id`: a poll row for an item ALREADY present locally
+    /// (under a DIFFERENT row `id`, as it would be on another device) with a
+    /// strictly-newer `lamport_ts` must REPLACE the local row in place —
+    /// preserving the local primary key — instead of inserting a duplicate or
+    /// being dropped by a plain id-dedup.
+    #[tokio::test]
+    async fn poll_lww_replaces_existing_item_id_preserving_local_pk() {
+        let sync_key = copypaste_core::derive_sync_key("cloud-lww-passphrase").unwrap();
+        let local_key = Arc::new(zeroize::Zeroizing::new([7u8; 32]));
+
+        let db = Arc::new(Mutex::new(
+            copypaste_core::Database::open_in_memory().expect("in-mem db"),
+        ));
+
+        // Seed a local row: PK "local-pk", item_id "shared-iid", lamport 5,
+        // re-encrypted under the local key exactly as the download path stores
+        // rows (so a later read could decrypt it).
+        {
+            let g = db.lock().await;
+            let seeded = build_local_item(
+                "local-pk",
+                "shared-iid",
+                "text",
+                b"old-local-content",
+                5,    // lamport
+                1000, // wall_time
+                None,
+                None,
+                "device-local".to_owned(),
+                &local_key,
+            )
+            .expect("seed build");
+            copypaste_core::insert_item(&g, &seeded).expect("seed insert");
+        }
+
+        // Remote poll row: peer's own PK "peer-pk", SAME item_id "shared-iid",
+        // NEWER lamport 9, newer wall_time, different content.
+        let row = {
+            // Build the row, then override item_id (cloud_row uses id==item_id).
+            // `cloud_row` encrypts the payload with AAD bound to its `id` arg
+            // (it sets item_id == id), so build it under "shared-iid" first so
+            // the blob's AAD matches the item_id the receiver decrypts with,
+            // then override the row PK to the peer's distinct "peer-pk".
+            let mut r = cloud_row_lamport("shared-iid", &sync_key, b"new-remote-content", 2000, 9);
+            r["id"] = serde_json::json!("peer-pk");
+            r
+        };
+
+        let cfg = test_cfg();
+        let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
+        let client = reqwest::Client::new();
+        let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let auth = test_auth(&cfg);
+        let key_bytes = sync_key.as_bytes().to_vec();
+
+        let _m = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&vec![row]).unwrap())
+            .expect_at_least(1)
+            .create();
+
+        poll_once(
+            &client,
+            &cfg,
+            &bearer,
+            &db,
+            &local_key,
+            &last_sync_ms,
+            &signed_in,
+            &auth,
+            &key_bytes,
+            PollCursor::default(),
+        )
+        .await;
+
+        let g = db.lock().await;
+        let count: i64 = g
+            .conn()
+            .query_row("SELECT COUNT(1) FROM clipboard_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1, "LWW replace must NOT create a duplicate row");
+
+        let row = copypaste_core::get_item_by_item_id(&g, "shared-iid")
+            .unwrap()
+            .expect("item must still exist");
+        assert_eq!(row.id, "local-pk", "local primary key must be preserved");
+        assert_eq!(row.lamport_ts, 9, "newer remote lamport stored");
+        // The peer's row id must not have leaked in.
+        assert!(
+            copypaste_core::get_item_by_id(&g, "peer-pk")
+                .unwrap()
+                .is_none(),
+            "peer's row id must not be adopted"
+        );
+        // The stored content must decrypt to the newer remote plaintext.
+        let v1 = **local_key;
+        let v2 = copypaste_core::derive_v2(&v1);
+        let nonce_vec = row.content_nonce.clone().expect("nonce");
+        let nonce: [u8; 24] = nonce_vec.as_slice().try_into().expect("24-byte nonce");
+        let pt = copypaste_core::decrypt_item_by_version(
+            row.key_version,
+            &v1,
+            &v2,
+            &row.item_id,
+            &nonce,
+            row.content.as_ref().expect("content"),
+        )
+        .expect("decrypt stored row");
+        assert_eq!(pt, b"new-remote-content", "remote content won LWW");
     }
 
     // ── BUG 2 — real signed_in auth state ─────────────────────────────────────
