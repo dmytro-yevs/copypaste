@@ -55,10 +55,21 @@ pub async fn push(
     BearerToken(token): BearerToken,
     Json(body): Json<PushRequest>,
 ) -> Result<(StatusCode, Json<PushResponse>), RelayError> {
-    // Per-tier item-size quota — checked before taking the store mutex so an
-    // oversized payload never contends for the lock. We decode `content_b64`
-    // once here to measure the true ciphertext size; `push_item` re-validates
-    // the base64 (and the operator body cap) under the lock.
+    // Auth FIRST — verify the bearer token before doing any CPU/alloc work on
+    // the request body. Previously the base64 decode (up to ~13 MiB) happened
+    // before auth, letting unauthenticated callers trigger full decode work
+    // (pre-auth CPU/alloc amplification). Authenticating first makes
+    // unauthenticated pushes fail fast at the lock with a cheap map lookup.
+    {
+        // Short critical section: auth only, no decode under the lock.
+        let store = state.lock().unwrap_or_else(|e| e.into_inner());
+        store.verify_token(&device_id, &token)?;
+    }
+
+    // Per-tier item-size quota — checked after auth but before re-taking the
+    // store mutex for the actual insert. We decode `content_b64` once here to
+    // measure the true ciphertext size; `push_item` re-validates the base64
+    // (and the operator body cap) under the lock.
     let decoded_len = B64
         .decode(&body.content_b64)
         .map_err(|_| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?
@@ -75,9 +86,6 @@ pub async fn push(
 
     // Survive mutex poisoning (security HIGH #1).
     let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
-
-    // Auth: verify token belongs to this device.
-    store.verify_token(&device_id, &token)?;
 
     // Honor the operator-configured RELAY_MAX_ITEM_BYTES rather than the
     // hardcoded default (security HIGH #2) — previously
