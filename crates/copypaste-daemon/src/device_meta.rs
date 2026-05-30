@@ -9,6 +9,10 @@
 //! The collected values are intentionally non-secret (hostname, model, OS
 //! version, LAN IP) and mirror what mDNS service records already broadcast on
 //! the local network.
+//!
+//! **Blocking note:** `DeviceMeta::collect` spawns short-lived child processes
+//! (`scutil`, `sysctl`, `sw_vers`) that may take up to 2 s to complete.
+//! Call it via `tokio::task::spawn_blocking` in async contexts.
 
 use std::net::IpAddr;
 use tracing::debug;
@@ -43,6 +47,9 @@ pub struct DeviceMeta {
 impl DeviceMeta {
     /// Collect metadata for the current device.  Never panics; all sub-calls
     /// are fallible and their errors are logged then discarded.
+    ///
+    /// **This is a blocking function** (spawns child processes).  In an async
+    /// context wrap it with `tokio::task::spawn_blocking(|| DeviceMeta::collect(ver))`.
     pub fn collect(app_version: &str) -> Self {
         Self {
             device_name: collect_device_name(),

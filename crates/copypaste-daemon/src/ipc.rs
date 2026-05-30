@@ -762,10 +762,10 @@ pub struct IpcServer {
     /// `.await`.
     degraded_reason: Arc<std::sync::Mutex<Option<String>>>,
     /// Shared live core config (`config.toml`). The `set_config` IPC handler
-    /// writes new limit values here after persisting to disk so the clipboard
-    /// monitor and prune path pick them up on the next tick without a restart.
-    /// `None` when the daemon did not wire in a core config (degraded mode /
-    /// tests that don't need hot-reload).
+    /// writes new limit/feature values here after persisting to disk so the
+    /// clipboard monitor, paste path, and prune code pick them up on the next
+    /// tick without a daemon restart.
+    /// `None` when not wired in (degraded mode / tests that don't need hot-reload).
     pub core_config: Option<Arc<std::sync::RwLock<copypaste_core::AppConfig>>>,
 }
 
@@ -975,9 +975,9 @@ impl IpcServer {
 
     /// Attach the shared live core config (`config.toml`) for hot-reload.
     ///
-    /// The `set_config` IPC handler writes updated limit values into this Arc
-    /// after persisting to disk, so the clipboard monitor and prune path pick
-    /// them up on the next tick without a daemon restart.
+    /// The `set_config` IPC handler writes updated limit/feature values into this
+    /// Arc after persisting to disk, so the clipboard monitor, paste path, and
+    /// prune code pick them up on the next tick without a daemon restart.
     pub fn with_core_config(
         mut self,
         core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
@@ -2763,10 +2763,25 @@ impl IpcServer {
             // The fingerprint field is omitted when P2P is disabled — callers
             // must gracefully handle a `null` fingerprint (same contract as
             // `get_own_fingerprint`).
+            //
+            // DeviceMeta::collect spawns child processes (scutil, sysctl,
+            // sw_vers) that can block up to 2 s each.  We run them on a
+            // dedicated blocking thread so the async IPC worker is never
+            // stalled.
             // ----------------------------------------------------------------
             "get_own_device_info" => {
-                let meta = crate::device_meta::DeviceMeta::collect(env!("CARGO_PKG_VERSION"));
-                let fingerprint_val = self.cert_fingerprint.as_deref();
+                let fingerprint_val = self.cert_fingerprint.clone();
+                let meta = tokio::task::spawn_blocking(|| {
+                    crate::device_meta::DeviceMeta::collect(env!("CARGO_PKG_VERSION"))
+                })
+                .await
+                .unwrap_or_else(|_| crate::device_meta::DeviceMeta {
+                    device_name: None,
+                    device_model: None,
+                    os_version: None,
+                    app_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    local_ip: None,
+                });
                 Response::ok(
                     req.id,
                     serde_json::json!({
@@ -4396,11 +4411,35 @@ impl IpcServer {
                     let text = std::str::from_utf8(&plaintext_bytes).map_err(|e| {
                         PasteboardError::decrypt(format!("decrypted content is not UTF-8: {e}"))
                     })?;
+
+                    // paste_as_plain_text: read the live config flag. When true,
+                    // write only `public.utf8-plain-text` (strips RTF/HTML/attributed
+                    // strings from the pasteboard so the receiving app gets bare text).
+                    // When false (default), use NSPasteboardTypeString which is the
+                    // standard "general string" UTI that most apps expect.
+                    let plain_only = self
+                        .core_config
+                        .as_ref()
+                        .and_then(|arc| arc.read().ok())
+                        .map(|cfg| cfg.paste_as_plain_text)
+                        .unwrap_or(false);
+
                     unsafe {
                         let pb = NSPasteboard::generalPasteboard();
                         pb.clearContents();
                         let ns_str = NSString::from_str(text);
-                        let ok = pb.setString_forType(&ns_str, NSPasteboardTypeString);
+                        // `public.utf8-plain-text` is the "bare UTF-8" UTI that
+                        // explicitly strips rich formatting (RTF, HTML, etc.) on
+                        // paste. NSPasteboardTypeString is also `public.utf8-plain-text`
+                        // on modern macOS, but using the explicit UTI literal when
+                        // paste_as_plain_text=true makes the intent unambiguous and
+                        // avoids any implicit coercion bridges the system type may carry.
+                        let ok = if plain_only {
+                            let plain_uti = NSString::from_str("public.utf8-plain-text");
+                            pb.setString_forType(&ns_str, &plain_uti)
+                        } else {
+                            pb.setString_forType(&ns_str, NSPasteboardTypeString)
+                        };
                         if !ok {
                             return Err(PasteboardError::other(
                                 "NSPasteboard setString:forType: returned false",

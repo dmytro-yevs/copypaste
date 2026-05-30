@@ -36,6 +36,15 @@ pub struct AppConfig {
     pub sync_on_wifi_only: bool,
     pub max_bandwidth_kbps: u32,
     pub max_decoded_image_mb: u32,
+    /// Bundle IDs of apps whose clipboard copies are silently skipped (macOS).
+    /// Empty by default — no apps are excluded.  Example:
+    /// `["com.1password.1password", "com.agilebits.onepassword"]`
+    #[serde(default)]
+    pub excluded_app_bundle_ids: Vec<String>,
+    /// When `true`, paste-back writes only `public.utf8-plain-text`, stripping
+    /// all rich types (RTF, HTML, attributed strings).  Default: `false`.
+    #[serde(default)]
+    pub paste_as_plain_text: bool,
 }
 
 impl Default for AppConfig {
@@ -58,6 +67,8 @@ impl Default for AppConfig {
             sync_on_wifi_only: false,
             max_bandwidth_kbps: MAX_BANDWIDTH_KBPS,
             max_decoded_image_mb: MAX_DECODED_IMAGE_MB,
+            excluded_app_bundle_ids: Vec::new(),
+            paste_as_plain_text: false,
         }
     }
 }
