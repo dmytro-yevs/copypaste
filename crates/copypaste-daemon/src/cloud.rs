@@ -441,6 +441,10 @@ pub async fn start_cloud(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
+    // Shared live core config. The push/poll loops read `sync_on_wifi_only`
+    // on every tick so a runtime change via `set_config` takes effect without
+    // a daemon restart (hot-reload — bug fix A-SET-2).
+    core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) -> anyhow::Result<CloudHandle> {
     // Defence-in-depth: re-validate the URL even though CloudConfig::new should
     // have rejected it already. Cheap, and protects callers that constructed
@@ -509,6 +513,7 @@ pub async fn start_cloud(
     let push_last_sync_ms = last_sync_ms.clone();
     let push_signed_in = cloud_signed_in.clone();
     let push_auth = auth_client.clone();
+    let push_core_config = core_config.clone();
     tokio::spawn(push_loop(
         push_config,
         push_bearer,
@@ -520,6 +525,7 @@ pub async fn start_cloud(
         push_last_sync_ms,
         push_signed_in,
         push_auth,
+        push_core_config,
     ));
 
     // Task B: poll Supabase REST for remote items and insert unknown ones locally.
@@ -531,6 +537,7 @@ pub async fn start_cloud(
     let poll_last_sync_ms = last_sync_ms.clone();
     let poll_signed_in = cloud_signed_in.clone();
     let poll_auth = auth_client.clone();
+    let poll_core_config = core_config;
     tokio::spawn(realtime_loop(
         poll_config,
         poll_bearer,
@@ -541,6 +548,7 @@ pub async fn start_cloud(
         poll_last_sync_ms,
         poll_signed_in,
         poll_auth,
+        poll_core_config,
     ));
 
     tracing::info!("cloud-sync started (url={})", config.supabase_url);
@@ -652,6 +660,8 @@ async fn push_loop(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
     auth: Arc<AuthClient>,
+    // Live core config for hot-reload of sync_on_wifi_only (A-SET-2).
+    core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) {
     let client = reqwest::Client::new();
     let rest_url = format!("{}/rest/v1/clipboard_items", config.supabase_url);
@@ -788,6 +798,29 @@ async fn push_loop(
     // between dequeue and push the item is visible in the retry-queue log and
     // not silently dropped.
     loop {
+        // A-SET-2 hot-reload: read sync_on_wifi_only from the live config on
+        // every iteration so a runtime change via set_config takes effect
+        // immediately without a daemon restart.
+        let sync_on_wifi_only = core_config
+            .read()
+            .map(|g| g.sync_on_wifi_only)
+            .unwrap_or(false);
+        if sync_on_wifi_only
+            && !tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+                .await
+                .unwrap_or(true)
+        {
+            tracing::debug!(
+                "cloud-sync push_loop: sync_on_wifi_only=true and not on Wi-Fi; \
+                 sleeping 10s before retry"
+            );
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {}
+                _ = shutdown.notified() => { break; }
+            }
+            continue;
+        }
+
         // Drain the retry queue first — if we made progress on backlog before
         // touching new items, recovery is observable and old items are not
         // perpetually starved by a steady stream of new work.
@@ -1345,6 +1378,8 @@ async fn realtime_loop(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
     auth: Arc<AuthClient>,
+    // Live core config for hot-reload of sync_on_wifi_only (A-SET-2).
+    core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) {
     let client = reqwest::Client::new();
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
@@ -1384,6 +1419,24 @@ async fn realtime_loop(
     loop {
         tokio::select! {
             _ = interval.tick() => {
+                // A-SET-2 hot-reload: read sync_on_wifi_only live so a
+                // runtime set_config change takes effect without a restart.
+                let sync_on_wifi_only = core_config
+                    .read()
+                    .map(|g| g.sync_on_wifi_only)
+                    .unwrap_or(false);
+                if sync_on_wifi_only
+                    && !tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+                        .await
+                        .unwrap_or(true)
+                {
+                    tracing::debug!(
+                        "cloud-sync poll: sync_on_wifi_only=true and not on Wi-Fi; \
+                         skipping this tick"
+                    );
+                    continue;
+                }
+
                 // If no sync key is set, skip with a one-time warning.
                 let key_snapshot: Option<Vec<u8>> = {
                     let guard = sync_key.lock().await;
@@ -2959,6 +3012,7 @@ mod tests {
             last_sync_ms,
             local_key,
             signed_in.clone(),
+            Arc::new(std::sync::RwLock::new(copypaste_core::AppConfig::default())),
         )
         .await;
 

@@ -54,6 +54,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         config.poll_interval_ms,
         config.history_limit
     );
+    // Shared live core config — written by `set_config` IPC handler so limit/feature
+    // changes (e.g. paste_as_plain_text, excluded_app_bundle_ids, sync_on_wifi_only)
+    // hot-reload into the tick loop and paste path without a daemon restart.
+    let core_config_arc: Arc<std::sync::RwLock<AppConfig>> =
+        Arc::new(std::sync::RwLock::new(config.clone()));
 
     // v0.3 (THREAT-MODEL OI-4): upgrade the Keychain entry's ACL on first
     // launch after install/upgrade.  Idempotent + best-effort — a failure
@@ -418,7 +423,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             local_key_arc.clone(),
             device_public_key_arc.clone(),
         )
-        .with_new_item_tx(new_item_tx.clone());
+        .with_new_item_tx(new_item_tx.clone())
+        .with_core_config(core_config_arc.clone());
         if let Some(peers) = p2p_peers.clone() {
             server = server.with_p2p_peers(peers);
         }
@@ -642,6 +648,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 cloud_last_sync_ms.clone(),
                 local_key_arc.clone(),
                 cloud_signed_in.clone(),
+                core_config_arc.clone(),
             )
             .await
             {
@@ -672,13 +679,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let mut cleanup_ticks: u64 = 0;
     // Sensitive TTL cleanup runs every 5 seconds; track elapsed ticks separately.
     let mut sensitive_cleanup_ticks: u64 = 0;
-    let sensitive_ttl_ms = config.sensitive_ttl_secs as i64 * 1000;
 
     tracing::info!("clipboard monitor started");
     tracing::info!(
-        "sensitive auto-wipe TTL: {}s ({}ms), checked every 5s",
+        "sensitive auto-wipe TTL: {}s, checked every 5s",
         config.sensitive_ttl_secs,
-        sensitive_ttl_ms,
     );
 
     #[cfg(target_os = "macos")]
@@ -696,7 +701,16 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx, &local_device_id).await;
+                    // Hot-reload: snapshot the current live config on every tick
+                    // so limit/feature changes from set_config take effect without
+                    // a daemon restart (excluded_app_bundle_ids, paste_as_plain_text,
+                    // sensitive_ttl_secs, etc.).
+                    let live_config = core_config_arc
+                        .read()
+                        .map(|g| g.clone())
+                        .unwrap_or_else(|_| config.clone());
+                    let sensitive_ttl_ms = live_config.sensitive_ttl_secs as i64 * 1000;
+                    handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -752,7 +766,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    handle_tick(&mut monitor, &db, &local_key_arc, &config, &private_mode, &new_item_tx, &local_device_id).await;
+                    let live_config = core_config_arc
+                        .read()
+                        .map(|g| g.clone())
+                        .unwrap_or_else(|_| config.clone());
+                    let sensitive_ttl_ms = live_config.sensitive_ttl_secs as i64 * 1000;
+                    handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -998,6 +1017,45 @@ async fn handle_tick(
         let _ = monitor.poll();
         tracing::debug!("private mode active: skipping clipboard recording");
         return;
+    }
+
+    // EXCLUDE APPS: if the frontmost app's bundle ID is in the exclusion list,
+    // advance the change-count but do not store the item.  cfg(macos) because
+    // `lsappinfo front` is a macOS-only tool.
+    #[cfg(target_os = "macos")]
+    if !config.excluded_app_bundle_ids.is_empty() {
+        // `lsappinfo front` prints a record for the frontmost process.
+        // We extract the bundleID field from lines like:
+        //   "bundleID" = "com.1password.1password"
+        let frontmost_bundle_id: Option<String> = std::process::Command::new("lsappinfo")
+            .args(["front"])
+            .output()
+            .ok()
+            .and_then(|out| {
+                let text = String::from_utf8_lossy(&out.stdout);
+                for line in text.lines() {
+                    let trimmed = line.trim();
+                    // Match: "bundleID" = "com.example.app"
+                    if let Some(rest) = trimmed.strip_prefix("\"bundleID\" = \"") {
+                        if let Some(bid) = rest.strip_suffix('"') {
+                            return Some(bid.to_owned());
+                        }
+                    }
+                }
+                None
+            });
+        if let Some(ref bid) = frontmost_bundle_id {
+            if config.excluded_app_bundle_ids.iter().any(|ex| ex == bid) {
+                // Advance the change-count so this item is not re-offered on
+                // the next tick (same pattern as private-mode).
+                let _ = monitor.poll();
+                tracing::debug!(
+                    bundle_id = %bid,
+                    "clipboard: skipping capture — app is in excluded_app_bundle_ids"
+                );
+                return;
+            }
+        }
     }
 
     match monitor.poll() {
