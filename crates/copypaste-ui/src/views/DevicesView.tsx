@@ -507,42 +507,55 @@ export function DevicesView() {
   if (loadState === "offline") {
     return (
       <ViewShell title="Devices" actions={actions}>
-        <div className="flex items-center gap-3">
-          <p className="text-[13px] text-ide-dim">Daemon not running.</p>
-          <RestartDaemonButton onRestarted={() => void loadPeers()} />
+        <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <p className="text-[13px] text-ide-dim">Clipboard service offline</p>
+          <p className="text-[11px] text-ide-faint">The daemon is not running.</p>
+          <div className="mt-1">
+            <RestartDaemonButton onRestarted={() => void loadPeers()} />
+          </div>
         </div>
       </ViewShell>
     );
   }
 
   // --- Degraded state (daemon up, DB unavailable) ---
-  // Previously fell through silently; now surfaces a message and restart
-  // button so the user can recover without knowing the internals (V-14).
   if (loadState === "degraded") {
     return (
       <ViewShell title="Devices" actions={actions}>
-        <div className="flex items-center gap-3">
-          <p className="text-[13px] text-ide-warning">
-            Database degraded — device list unavailable. Reset the database in
-            History to recover.
-          </p>
-          <RestartDaemonButton onRestarted={() => void loadPeers()} />
+        <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-warning">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <p className="text-[13px] text-ide-dim">Database degraded</p>
+          <p className="text-[11px] text-ide-faint">Device list unavailable. Reset the database in History to recover.</p>
+          <div className="mt-1">
+            <RestartDaemonButton onRestarted={() => void loadPeers()} />
+          </div>
         </div>
       </ViewShell>
     );
   }
 
   // --- Generic error state ---
-  // Previously had no early-return branch; render an explicit message and
-  // restart button so the user is never left staring at a blank view (V-14).
   if (loadState === "error") {
     return (
       <ViewShell title="Devices" actions={actions}>
-        <div className="flex items-center gap-3">
-          <p className="text-[13px] text-ide-danger">
-            Failed to load devices. Try restarting the daemon.
-          </p>
-          <RestartDaemonButton onRestarted={() => void loadPeers()} />
+        <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <p className="text-[13px] text-ide-dim">Failed to load devices</p>
+          <p className="text-[11px] text-ide-faint">Try restarting the daemon.</p>
+          <div className="mt-1">
+            <RestartDaemonButton onRestarted={() => void loadPeers()} />
+          </div>
         </div>
       </ViewShell>
     );
@@ -589,7 +602,11 @@ export function DevicesView() {
           </div>
         )}
         {loadState === "ready" && peers.length === 0 && (
-          <div className="px-3 py-2.5">
+          <div className="px-3 py-3 flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint shrink-0">
+              <rect x="2" y="7" width="20" height="14" rx="2" />
+              <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
+            </svg>
             <p className="text-[13px] text-ide-dim">No paired devices yet.</p>
           </div>
         )}

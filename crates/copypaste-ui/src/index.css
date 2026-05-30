@@ -2,42 +2,73 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── v0.5.3 JetBrains "New UI" token foundation ─────────────────────────────
+/* ── Design System v2 "Quiet Precision" — token foundation ──────────────────
+   §0  Canonical palette (reconciled web/Android to ONE ramp)
+   §3  Semantic colours + elevation + interaction state tokens
+   §8  Motion tokens
    All component files use ide-* tailwind tokens from tailwind.config.js.
    This file adds:
-     • dark color-scheme declaration
+     • dark color-scheme + CSS custom properties (JS/inline consumption)
      • global body/font baseline
-     • form-control base styles (input, select, checkbox, range) so every
-       instance looks identical without per-component overrides
-     • .ide-translucent vibrancy helper
+     • form-control base styles (input, select, checkbox, range)
+     • .surface-glass / .surface-solid translucency pair
+     • .focus-ring layered focus indicator
      • thin IDE-style scrollbars
-     • 120ms ease transitions on interactive elements
-     • popup-row size class
+     • popup-row size class + entrance animation
 ──────────────────────────────────────────────────────────────────────────── */
 
 :root {
   color-scheme: dark;
-  /* Expose palette as CSS custom properties so JS / inline styles can consume
-     them without duplicating hex values. */
-  --ide-bg:           #16171a;
-  --ide-panel:        #1e2024;
-  --ide-elevated:     #26282d;
-  --ide-raised:       #2d2f34;
-  --ide-border:       #383b42;
-  --ide-divider:      #2e3035;
-  --ide-selection:    #1e3d72;
-  --ide-hover:        #22252a;
-  --ide-text:         #dfe1e5;
+
+  /* ── §0 Canonical surface palette ────────────────────────────────────── */
+  --ide-bg:           #13141A;   /* root window / darkest layer            */
+  --ide-panel:        #1B1C22;   /* primary surface: sidebar, list bg       */
+  --ide-elevated:     #23252D;   /* cards, inputs                           */
+  --ide-raised:       #2d2f34;   /* hover / pressed on elevated             */
+  --ide-border:       #383b42;   /* outline borders                         */
+  --ide-divider:      #2e3035;   /* row separators, subtler than border     */
+
+  /* ── §3 Interaction state tokens (kill bg-white/10 magic) ───────────── */
+  --ide-hover:        rgba(255,255,255,0.045);
+  --ide-pressed:      rgba(255,255,255,0.07);
+  --ide-selection:    rgba(61,139,255,0.16);
+  --ide-multi-sel:    rgba(61,139,255,0.20);
+
+  /* ── §0 Text hierarchy ───────────────────────────────────────────────── */
+  --ide-text:         #E8EAED;
   --ide-dim:          #9da0a8;
   --ide-faint:        #6b6f78;
-  --ide-accent:       #3592ff;
+
+  /* ── §0 Brand ────────────────────────────────────────────────────────── */
+  --ide-accent:       #3D8BFF;
   --ide-accent-hover: #5aacff;
-  --ide-accent-dim:   #1a3661;
-  --ide-danger:       #f07171;
-  --ide-success:      #63c174;
-  --ide-warning:      #e5a93a;
-  /* Focus ring — 2 px glow, accent @ 40 % */
-  --ide-focus-ring: 0 0 0 2px rgba(53, 146, 255, 0.4);
+  --ide-accent-dim:   rgba(61,139,255,0.12);
+
+  /* ── §3 Semantic colours (base / container) ──────────────────────────── */
+  --ide-danger:       #E05C5C;   --ide-danger-dim:   rgba(224,92,92,0.10);
+  --ide-success:      #5FAD65;   --ide-success-dim:  rgba(95,173,101,0.10);
+  --ide-warning:      #D9A343;   --ide-warning-dim:  rgba(217,163,67,0.10);
+  --ide-info:         #56B6C2;   --ide-info-dim:     rgba(86,182,194,0.12);
+  --ide-violet:       #C678DD;   --ide-violet-dim:   rgba(198,120,221,0.12);
+
+  /* ── §3 Elevation (E0-E3 exact shadows) ──────────────────────────────── */
+  --ide-e0: none;
+  --ide-e1: 0 1px 2px rgba(0,0,0,.40), inset 0 0 0 1px rgba(255,255,255,.04);
+  --ide-e2: 0 2px 8px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.35);
+  --ide-e3: 0 12px 40px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.40),
+            inset 0 1px 0 rgba(255,255,255,.06);
+
+  /* ── §3 Focus ring (:focus-visible only — layered) ───────────────────── */
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(61,139,255,.45);
+
+  /* ── §8 Motion tokens ────────────────────────────────────────────────── */
+  --motion-instant: 90ms;
+  --motion-fast:    130ms;
+  --motion-base:    180ms;
+  --motion-slow:    240ms;
+  --ease-out-expo:  cubic-bezier(.16,1,.3,1);
+  --ease-standard:  cubic-bezier(.2,0,0,1);
+  --ease-in:        cubic-bezier(.4,0,1,1);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -54,7 +85,7 @@ body {
   /* Transparent so the native macOS vibrancy (NSVisualEffectView) shows through. */
   background: transparent;
   color: var(--ide-text);
-  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter var", "Inter", system-ui, sans-serif;
   font-size: 13px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
@@ -66,14 +97,41 @@ body {
   display: flex;
 }
 
-/* ── Text inputs & textareas ─────────────────────────────────────────────── */
+/* ── §3 Translucency surface pair ─────────────────────────────────────────
+   Toggled by prefs.translucency (ON = default).
+   Use .surface-glass on any floating/panel element; .surface-solid as fallback.
+   The old .ide-translucent class is kept as alias so existing uses don't break. */
 
+.surface-glass,
+.ide-translucent {
+  background: rgba(19, 20, 26, 0.72);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+}
+
+.surface-solid {
+  background: var(--ide-panel);
+}
+
+/* ── §3 Focus ring ────────────────────────────────────────────────────────
+   Apply .focus-ring to any interactive element. Only shows on keyboard nav. */
+
+.focus-ring:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[role="option"]:focus-visible,
+[role="tab"]:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: var(--ide-focus-ring);
+}
+
+/* ── Text inputs & textareas ─────────────────────────────────────────────── */
 
 input,
 textarea {
   user-select: text;
-  /* Apply consistent base so Tailwind utility classes only override what
-     differs per instance, not repeat everything from scratch. */
   background: var(--ide-elevated);
   color: var(--ide-text);
   border: 1px solid var(--ide-border);
@@ -82,13 +140,14 @@ textarea {
   font-family: inherit;
   font-size: 13px;
   line-height: 1.4;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: border-color var(--motion-fast) var(--ease-standard),
+              box-shadow   var(--motion-fast) var(--ease-standard);
 }
 
 input:focus,
 textarea:focus {
   border-color: var(--ide-accent);
-  box-shadow: 0 0 0 2px var(--ide-accent-dim);
+  box-shadow: var(--ide-focus-ring);
 }
 
 input::placeholder,
@@ -102,8 +161,7 @@ textarea:disabled {
   opacity: 0.40;
 }
 
-/* Search inputs — reset the native cancel/search decoration so it doesn't
-   fight with our custom placeholder. */
+/* Search inputs — reset the native cancel/search decoration */
 input[type="search"]::-webkit-search-cancel-button,
 input[type="search"]::-webkit-search-decoration {
   -webkit-appearance: none;
@@ -122,16 +180,16 @@ select {
   font-size: 13px;
   cursor: pointer;
   outline: none;
-  /* Custom chevron glyph as an inline SVG data-URI, tinted to ide-faint. */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b6f78' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: border-color var(--motion-fast) var(--ease-standard),
+              box-shadow   var(--motion-fast) var(--ease-standard);
 }
 
 select:focus {
   border-color: var(--ide-accent);
-  box-shadow: 0 0 0 2px var(--ide-accent-dim);
+  box-shadow: var(--ide-focus-ring);
 }
 
 select:disabled {
@@ -154,7 +212,9 @@ input[type="checkbox"] {
   justify-content: center;
   padding: 0;
   flex-shrink: 0;
-  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  transition: background var(--motion-fast) var(--ease-standard),
+              border-color var(--motion-fast) var(--ease-standard),
+              box-shadow   var(--motion-fast) var(--ease-standard);
   position: relative;
 }
 
@@ -175,8 +235,8 @@ input[type="checkbox"]:checked::after {
   margin-top: -2px;
 }
 
-input[type="checkbox"]:focus {
-  box-shadow: 0 0 0 2px var(--ide-accent-dim);
+input[type="checkbox"]:focus-visible {
+  box-shadow: var(--ide-focus-ring);
 }
 
 input[type="checkbox"]:disabled {
@@ -207,31 +267,25 @@ input[type="range"]::-webkit-slider-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: var(--ide-accent);
+  background: white;
   margin-top: -5px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
-  transition: background 120ms ease, transform 120ms ease;
+  box-shadow: var(--ide-e2);
+  transition: transform var(--motion-instant) var(--ease-standard);
 }
 
 input[type="range"]::-webkit-slider-thumb:hover {
-  background: var(--ide-accent-hover);
   transform: scale(1.15);
 }
 
-input[type="range"]:focus {
+input[type="range"]:focus-visible {
   outline: none;
-  box-shadow: none;
 }
 
-/* ── .ide-translucent — vibrancy overlay for panels that should float ────── */
-
-.ide-translucent {
-  background: rgba(22, 23, 26, 0.80);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: var(--ide-focus-ring), var(--ide-e2);
 }
 
-/* ── Interactive elements — 120ms transitions ────────────────────────────── */
+/* ── Interactive elements — §8 hover 130ms standard ─────────────────────── */
 
 button,
 [role="button"],
@@ -239,8 +293,8 @@ button,
 [role="tab"],
 [role="switch"] {
   transition-property: background-color, color, border-color, box-shadow, opacity, transform;
-  transition-duration: 120ms;
-  transition-timing-function: ease;
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--ease-standard);
 }
 
 /* ── Thin IDE-style scrollbars ───────────────────────────────────────────── */
@@ -255,7 +309,7 @@ button,
   border: 2px solid transparent;
   border-radius: 6px;
   background-clip: padding-box;
-  transition: background 120ms ease;
+  transition: background var(--motion-fast) var(--ease-standard);
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -271,20 +325,43 @@ button,
   background: transparent;
 }
 
-/* ── Popup: compact single-line rows (Maccy-style) ───────────────────────── */
-
+/* ── Popup: compact single-line rows ─────────────────────────────────────── */
 
 .popup-row {
-  min-height: 28px;
-  line-height: 28px;
+  min-height: 34px;
+  line-height: 34px;
 }
 
 /* Image rows: no height cap so the inline minHeight (imageMaxHeight+10) drives size. */
 .popup-row-image {
-  line-height: 28px;
+  line-height: 34px;
 }
 
 /* ── Keyframe animations ─────────────────────────────────────────────────── */
+
+/* Popup entrance §4 */
+@keyframes popupEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Toast slide-up §8 */
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
 
 @keyframes fadeIn {
   from {
@@ -295,4 +372,79 @@ button,
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* Reduced-motion: honour the OS preference */
+@media (prefers-reduced-motion: reduce) {
+  .popup-enter {
+    animation: none !important;
+  }
+  * {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+  }
+}
+
+/* ── Popup entrance animation class ─────────────────────────────────────── */
+.popup-enter {
+  animation: popupEnter 160ms cubic-bezier(.16,1,.3,1) both;
+}
+
+/* ── Toast animation class ───────────────────────────────────────────────── */
+.toast-in {
+  animation: toastIn 180ms cubic-bezier(.16,1,.3,1) both;
+}
+
+/* ── Content-type chip (shared across popup + history) ───────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 2px 5px;
+  flex-shrink: 0;
+}
+
+/* ── Keycap pill (⌘1-9 shortcuts) ─────────────────────────────────────────
+   Fixed width so showing/hiding never shifts adjacent content. */
+.keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  color: var(--ide-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.keycap-selected {
+  border-color: rgba(61,139,255,0.40);
+  background: rgba(61,139,255,0.18);
+  color: var(--ide-accent);
+}
+
+/* ── Selected row: 2px accent left-bar ──────────────────────────────────── */
+.row-selected-bar {
+  position: relative;
+}
+.row-selected-bar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ide-accent);
+  border-radius: 0 2px 2px 0;
 }
