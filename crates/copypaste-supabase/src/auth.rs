@@ -169,16 +169,10 @@ impl AuthClient {
         }
 
         let code = status.as_u16();
-        let body: GoTrueErrorBody = resp.json().await.unwrap_or(GoTrueErrorBody {
-            error: Some("sign-out failed".into()),
-            error_description: None,
-            error_code: None,
-            msg: None,
-            message: None,
-        });
+        let message = Self::decode_error_body(resp, "sign-out failed").await;
         Err(AuthError::GoTrue {
             status: code,
-            message: body.message(),
+            message,
         })
     }
 
@@ -202,16 +196,10 @@ impl AuthClient {
         }
 
         let code = status.as_u16();
-        let body: GoTrueErrorBody = resp.json().await.unwrap_or(GoTrueErrorBody {
-            error: Some("get_user failed".into()),
-            error_description: None,
-            error_code: None,
-            msg: None,
-            message: None,
-        });
+        let message = Self::decode_error_body(resp, "get_user failed").await;
         Err(AuthError::GoTrue {
             status: code,
-            message: body.message(),
+            message,
         })
     }
 
@@ -299,16 +287,10 @@ impl AuthClient {
             return Ok(data);
         }
 
-        // Try to decode a GoTrue error envelope.
+        // Try to decode a GoTrue error envelope; preserve raw body on JSON
+        // parse failure so callers see the actual failure reason.
         let code = status.as_u16();
-        let body: GoTrueErrorBody = resp.json().await.unwrap_or(GoTrueErrorBody {
-            error: Some("unknown".into()),
-            error_description: None,
-            error_code: None,
-            msg: None,
-            message: None,
-        });
-        let message = body.message();
+        let message = Self::decode_error_body(resp, "unknown").await;
 
         if code == 400 || code == 422 {
             return Err(match grant {
@@ -325,6 +307,34 @@ impl AuthClient {
             status: code,
             message,
         })
+    }
+
+    /// Decode a GoTrue error response body into a human-readable message.
+    ///
+    /// Reads the raw response text first so that if JSON parsing fails the
+    /// caller still sees a truncated snippet of the actual body (e.g. an HTML
+    /// gateway error page) rather than a generic "unknown error".  The raw text
+    /// is truncated to 200 bytes to keep log lines manageable.
+    async fn decode_error_body(resp: reqwest::Response, fallback: &str) -> String {
+        let raw = match resp.text().await {
+            Ok(t) => t,
+            Err(_) => return fallback.to_owned(),
+        };
+        // Try structured GoTrue JSON first.
+        if let Ok(body) = serde_json::from_str::<GoTrueErrorBody>(&raw) {
+            let msg = body.message();
+            if msg != "unknown error" {
+                return msg;
+            }
+        }
+        // Fall back to a truncated raw snippet so callers can diagnose the
+        // actual failure (e.g. "502 Bad Gateway" HTML, misconfigured proxy, etc.).
+        let snippet: String = raw.chars().take(200).collect();
+        if snippet.is_empty() {
+            fallback.to_owned()
+        } else {
+            snippet
+        }
     }
 
     /// Build a [`Session`] from a raw GoTrue token response, computing
@@ -444,5 +454,56 @@ mod tests {
         );
         // Non-secret fields are still visible for debugging.
         assert!(dbg.contains("9999"), "expires_at should be visible: {dbg}");
+    }
+
+    // ── error-body raw-text preservation ──────────────────────────────────────
+
+    /// When the GoTrue error body cannot be decoded as JSON, the raw response
+    /// text (truncated) must appear in the error message so the caller can
+    /// diagnose the real failure rather than seeing a generic "unknown error".
+    ///
+    /// This test uses mockito 0.31 (module-level API) to return a non-JSON body
+    /// with a 400 status.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn post_json_preserves_raw_body_on_json_decode_failure() {
+        let _mock = mockito::mock("POST", "/auth/v1/token?grant_type=password")
+            .with_status(400)
+            .with_header("content-type", "text/plain")
+            .with_body("This is not JSON at all: unexpected gateway response")
+            .create();
+
+        let client = AuthClient::new(mockito::server_url(), "anon-key");
+        let result = client.sign_in("user@example.com", "bad-password").await;
+
+        let err = result.expect_err("should fail with a 400");
+        let err_str = err.to_string();
+        assert!(
+            err_str.contains("unexpected gateway response") || err_str.contains("This is not JSON"),
+            "error message should include raw body snippet, got: {err_str}"
+        );
+    }
+
+    /// When the GoTrue error body IS valid JSON, the structured message is used.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn post_json_uses_json_message_when_valid() {
+        let _mock = mockito::mock("POST", "/auth/v1/token?grant_type=password")
+            .with_status(400)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"error":"invalid_grant","error_description":"Invalid login credentials"}"#,
+            )
+            .create();
+
+        let client = AuthClient::new(mockito::server_url(), "anon-key");
+        let result = client.sign_in("user@example.com", "bad-password").await;
+
+        let err = result.expect_err("should fail with a 400");
+        let err_str = err.to_string();
+        assert!(
+            err_str.contains("Invalid login credentials"),
+            "structured error_description should appear in error, got: {err_str}"
+        );
     }
 }

@@ -53,7 +53,9 @@ impl Session {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        now + margin_secs >= self.expires_at
+        // saturating_add prevents u64 overflow when margin_secs is very large
+        // (e.g. u64::MAX in tests or a misconfigured caller).
+        now.saturating_add(margin_secs) >= self.expires_at
     }
 }
 
@@ -141,5 +143,82 @@ mod tests {
         // Nothing usable.
         let b = parse(r#"{}"#);
         assert_eq!(b.message(), "unknown error");
+    }
+
+    // ── is_expired_with_margin ─────────────────────────────────────────────────
+
+    /// u64::MAX + any margin_secs must not panic (saturating_add, not wrapping add).
+    #[test]
+    fn is_expired_with_margin_does_not_overflow_on_max_margin() {
+        // A session that expires far in the future (max u64) should not panic
+        // even when called with margin_secs = u64::MAX.
+        let session = Session {
+            access_token: "tok".into(),
+            refresh_token: "ref".into(),
+            expires_in: 3600,
+            expires_at: u64::MAX,
+            token_type: "bearer".into(),
+            user: User {
+                id: "u".into(),
+                email: None,
+                role: None,
+                created_at: None,
+                updated_at: None,
+            },
+        };
+        // Must not panic — saturating_add prevents overflow.
+        let result = session.is_expired_with_margin(u64::MAX);
+        // now (real time) << u64::MAX, so (now).saturating_add(u64::MAX) == u64::MAX == expires_at
+        // so the result is "expired" (>= boundary). The important thing is it doesn't panic.
+        let _ = result; // panic-free is the assertion
+    }
+
+    /// A session expiring exactly at now+margin should be considered expired.
+    #[test]
+    fn is_expired_with_margin_zero_margin_expired_in_past() {
+        let session = Session {
+            access_token: "tok".into(),
+            refresh_token: "ref".into(),
+            expires_in: 0,
+            // expires_at = 0 means it expired at the Unix epoch — definitely expired
+            expires_at: 0,
+            token_type: "bearer".into(),
+            user: User {
+                id: "u".into(),
+                email: None,
+                role: None,
+                created_at: None,
+                updated_at: None,
+            },
+        };
+        assert!(
+            session.is_expired_with_margin(0),
+            "session expiring at epoch should always be expired"
+        );
+    }
+
+    /// A session expiring far in the future should NOT be considered expired.
+    #[test]
+    fn is_expired_with_margin_future_session_not_expired() {
+        let session = Session {
+            access_token: "tok".into(),
+            refresh_token: "ref".into(),
+            expires_in: 3600,
+            // Year 2100 in Unix seconds — well in the future
+            expires_at: 4_102_444_800,
+            token_type: "bearer".into(),
+            user: User {
+                id: "u".into(),
+                email: None,
+                role: None,
+                created_at: None,
+                updated_at: None,
+            },
+        };
+        // With a 60-second margin, a session expiring in 2100 is not expired.
+        assert!(
+            !session.is_expired_with_margin(60),
+            "session expiring in 2100 should not be expired"
+        );
     }
 }

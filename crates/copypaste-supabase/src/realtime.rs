@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 use tokio::sync::mpsc;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, RwLock};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -71,20 +71,6 @@ pub struct RealtimeConfig {
     /// Supabase anonymous API key.
     pub anon_key: String,
 
-    /// JWT bearer token for the `user_token` field of the channel join payload.
-    ///
-    /// Supabase Realtime enforces RLS by inspecting the `user_token` in the
-    /// `phx_join` payload — if absent the server treats the connection as anon
-    /// and filters rows by the `anon` role's policies, which typically returns
-    /// nothing for user-specific tables.
-    ///
-    /// When `Some`, this value is sent as `params.user_token` in the join payload.
-    /// When `None`, the `anon_key` is used instead.
-    ///
-    /// **Security**: the JWT is a bearer secret.  It is NEVER logged; the join
-    /// payload is not included in any log line (see [`build_join_payload`]).
-    pub user_jwt: Option<String>,
-
     /// Channel topic to subscribe to (default: `"realtime:clipboard_items"`).
     pub topic: String,
 
@@ -102,6 +88,19 @@ pub struct RealtimeConfig {
 
     /// Set to `false` to disable the Realtime client entirely (feature flag).
     pub enabled: bool,
+
+    /// The current user JWT used as `Authorization: Bearer` in the channel join
+    /// payload.  Wrapped in `Arc<RwLock<…>>` so the daemon can push a refreshed
+    /// token without restarting the client — each reconnect's `run_session` call
+    /// reads the lock to get the most-recent bearer before sending `phx_join`.
+    ///
+    /// An empty string means no per-user RLS (anon-key-only access).
+    ///
+    /// **Contract for the daemon agent:** call
+    /// [`RealtimeClient::update_jwt`] with the new access token whenever the
+    /// GoTrue session is refreshed.  The next WebSocket reconnect (or explicit
+    /// disconnect + reconnect) will use the updated token.
+    pub user_jwt: Arc<RwLock<String>>,
 }
 
 impl RealtimeConfig {
@@ -170,13 +169,13 @@ impl RealtimeConfig {
             ws_url,
             supabase_url,
             anon_key,
-            user_jwt,
             topic,
             heartbeat_interval: Duration::from_secs(30),
             initial_backoff: Duration::from_secs(1),
             max_backoff: Duration::from_secs(60),
             channel_capacity: 256,
             enabled,
+            user_jwt: Arc::new(RwLock::new(user_jwt.unwrap_or_default())),
         }
     }
 }
@@ -188,6 +187,64 @@ impl RealtimeConfig {
 /// of silently enabling it.
 fn is_truthy(value: &str) -> bool {
     matches!(value.trim().to_lowercase().as_str(), "1" | "true" | "yes")
+}
+
+/// Strip the query string from a WebSocket URL so it is safe to log.
+///
+/// The `ws_url` embeds `?apikey=<anon-key>&vsn=...`; logging the raw URL would
+/// expose the anon key in the daemon log file.  This function returns only the
+/// scheme + authority + path, dropping everything from `?` onward.
+///
+/// # Examples
+/// ```
+/// # use copypaste_supabase::realtime::scrub_ws_url;
+/// let u = "wss://abc.supabase.co/realtime/v1/websocket?apikey=secret&vsn=1.0.0";
+/// assert_eq!(scrub_ws_url(u), "wss://abc.supabase.co/realtime/v1/websocket");
+/// ```
+pub fn scrub_ws_url(url: &str) -> &str {
+    // Everything before the first `?` is the safe portion.
+    match url.find('?') {
+        Some(pos) => &url[..pos],
+        None => url,
+    }
+}
+
+/// Build the Phoenix Channel join payload for a Supabase Realtime subscription.
+///
+/// # Bearer token
+/// The `user_jwt` is placed under `config.access_token` so Supabase Realtime
+/// authenticates the channel with the caller's RLS identity.  An empty string
+/// disables per-user RLS (anonymous / anon-key-only access).
+///
+/// # Event filter
+/// Registers `event: "*"` so INSERT, UPDATE **and** DELETE changes are all
+/// delivered to this device.  Using `event: "INSERT"` only would mean that
+/// cross-device UPDATE/DELETE operations are silently dropped.
+///
+/// The payload shape matches Supabase Realtime v2 (`vsn=1.0.0`):
+/// ```json
+/// {
+///   "config": {
+///     "access_token": "<jwt>",
+///     "postgres_changes": [
+///       { "event": "*", "schema": "public", "table": "clipboard_items" }
+///     ]
+///   }
+/// }
+/// ```
+pub(crate) fn build_join_payload(user_jwt: &str) -> serde_json::Value {
+    serde_json::json!({
+        "config": {
+            "access_token": user_jwt,
+            "postgres_changes": [
+                {
+                    "event": "*",
+                    "schema": "public",
+                    "table": "clipboard_items"
+                }
+            ]
+        }
+    })
 }
 
 /// Convert a Supabase REST URL to the Realtime WebSocket URL.
@@ -255,6 +312,30 @@ impl RealtimeClient {
             },
             rx,
         )
+    }
+
+    /// Replace the user JWT that is sent as `Authorization: Bearer` in the
+    /// Phoenix Channel join payload on every (re)connect.
+    ///
+    /// # When to call this
+    /// Call this from the daemon's GoTrue auto-refresh callback whenever a new
+    /// access token is obtained.  The next WebSocket session (existing or after
+    /// reconnect) will use the updated token, preventing RLS returning zero rows
+    /// after the ~1 h JWT expiry.
+    ///
+    /// # Thread safety
+    /// This method acquires a write lock on the shared `Arc<RwLock<String>>`.
+    /// It is async so it can be called from any Tokio task.
+    pub async fn update_jwt(&self, jwt: String) {
+        *self.config.user_jwt.write().await = jwt;
+    }
+
+    /// Return a snapshot of the current JWT (empty string if none set).
+    ///
+    /// Primarily useful for tests and diagnostics; the live value read inside
+    /// `run_session` is the authoritative one used for actual connections.
+    pub async fn current_jwt(&self) -> String {
+        self.config.user_jwt.read().await.clone()
     }
 
     /// Start the background connection loop.
@@ -352,7 +433,8 @@ async fn connection_loop(
             break;
         }
 
-        tracing::info!(url = %config.ws_url, "Connecting to Supabase Realtime");
+        // Fix HIGH #1: strip ?apikey=... so the anon key never appears in logs.
+        tracing::info!(url = %scrub_ws_url(&config.ws_url), "Connecting to Supabase Realtime");
 
         match run_session(&config, &tx, &shutdown).await {
             SessionResult::Shutdown => {
@@ -417,40 +499,6 @@ enum SessionResult {
     ConnectError(String),
 }
 
-/// Build the `phx_join` payload for subscribing to `postgres_changes` events
-/// on the `clipboard_items` table.
-///
-/// Supabase Realtime v2 requires the join payload to include:
-/// - `config.postgres_changes` — array of change-filter objects specifying
-///   the event type, schema, and table to watch.
-/// - `params.user_token` — the authenticated user's JWT so the server can
-///   apply RLS and restrict events to the user's own rows.  Falls back to
-///   the `anon_key` when no user JWT is available.
-///
-/// **Security**: the JWT (either `user_jwt` or `anon_key`) is placed in the
-/// payload but NEVER included in log output.  The caller must not log the
-/// wire string this payload is serialised into.
-fn build_join_payload(config: &RealtimeConfig) -> serde_json::Value {
-    // Use the authenticated JWT when available; fall back to the anon key.
-    // Either way, never log the value — it is a bearer secret.
-    let token = config.user_jwt.as_deref().unwrap_or(&config.anon_key);
-
-    serde_json::json!({
-        "config": {
-            "broadcast": { "self": false },
-            "presence": { "key": "" },
-            "postgres_changes": [
-                {
-                    "event": "INSERT",
-                    "schema": "public",
-                    "table": "clipboard_items"
-                }
-            ]
-        },
-        "access_token": token
-    })
-}
-
 /// Run a single WebSocket session: connect → join channel → heartbeat + receive loop.
 async fn run_session(
     config: &RealtimeConfig,
@@ -480,14 +528,14 @@ async fn run_session(
 
     let (mut sink, mut stream) = ws_stream.split();
 
-    // Send phx_join for the clipboard_items channel.
+    // Fix HIGH #2: read the CURRENT bearer token for this reconnect so that a
+    // refreshed JWT (pushed via `RealtimeClient::update_jwt`) is always used
+    // rather than the stale value captured at client creation time.
     //
-    // The join payload carries:
-    //   - postgres_changes filter (INSERT on clipboard_items)
-    //   - access_token for RLS-aware filtering
-    //
-    // We do NOT log the join payload — it contains the bearer JWT.
-    let join_payload = build_join_payload(config);
+    // Fix MED #3: build_join_payload registers event:"*" (INSERT + UPDATE +
+    // DELETE) instead of INSERT-only, so cross-device UPDATE/DELETE are delivered.
+    let current_jwt = config.user_jwt.read().await.clone();
+    let join_payload = build_join_payload(&current_jwt);
     let join_msg = PhoenixMessage {
         join_ref: Some("1".to_owned()),
         msg_ref: Some("1".to_owned()),
@@ -1029,6 +1077,89 @@ mod tests {
         );
     }
 
+    // ── scrub_ws_url ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn scrub_ws_url_strips_query_string() {
+        let url = "wss://abc.supabase.co/realtime/v1/websocket?apikey=secret-key&vsn=1.0.0";
+        let scrubbed = scrub_ws_url(url);
+        assert!(
+            !scrubbed.contains("apikey"),
+            "scrubbed URL must not contain 'apikey', got: {scrubbed}"
+        );
+        assert!(
+            !scrubbed.contains("secret-key"),
+            "scrubbed URL must not contain the key value, got: {scrubbed}"
+        );
+        assert!(
+            scrubbed.contains("wss://abc.supabase.co"),
+            "scrubbed URL must still contain the host, got: {scrubbed}"
+        );
+    }
+
+    #[test]
+    fn scrub_ws_url_no_query_unchanged() {
+        let url = "wss://abc.supabase.co/realtime/v1/websocket";
+        let scrubbed = scrub_ws_url(url);
+        assert_eq!(scrubbed, url);
+    }
+
+    // ── build_join_payload ────────────────────────────────────────────────────
+
+    #[test]
+    fn build_join_payload_includes_bearer_token() {
+        let jwt = "my.jwt.token";
+        let payload = build_join_payload(jwt);
+        // The JWT must appear under config.access_token (Supabase Realtime v2 shape).
+        let token_in_payload = payload
+            .pointer("/config/access_token")
+            .and_then(|v| v.as_str())
+            == Some(jwt);
+        assert!(
+            token_in_payload,
+            "join payload must include JWT under /config/access_token, got: {}",
+            serde_json::to_string(&payload).unwrap()
+        );
+    }
+
+    #[test]
+    fn build_join_payload_registers_all_events() {
+        let payload = build_join_payload("tok");
+        let payload_str = serde_json::to_string(&payload).unwrap();
+        // event:"*" means INSERT + UPDATE + DELETE are all delivered.
+        assert!(
+            payload_str.contains("\"*\""),
+            "join payload must register event:\"*\", got: {payload_str}"
+        );
+        assert!(
+            !payload_str.contains("\"INSERT\""),
+            "join payload must NOT limit to INSERT-only, got: {payload_str}"
+        );
+    }
+
+    // ── update_jwt ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn update_jwt_changes_jwt_seen_by_next_session() {
+        // Create a config with an initial JWT.
+        let config = RealtimeConfig::new(
+            "https://abc.supabase.co",
+            "anon-key",
+            RealtimeConfig::DEFAULT_TOPIC,
+            false, // disabled so no real network
+        );
+        let (client, _rx) = RealtimeClient::new(config);
+
+        // The initial JWT should be empty (no JWT provided).
+        let initial = client.current_jwt().await;
+        assert_eq!(initial, "", "initial JWT should be empty");
+
+        // Update the JWT and verify it is visible.
+        client.update_jwt("fresh.token.abc".to_owned()).await;
+        let updated = client.current_jwt().await;
+        assert_eq!(updated, "fresh.token.abc", "updated JWT should be visible");
+    }
+
     // ── Disabled client ───────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -1049,93 +1180,6 @@ mod tests {
         assert!(
             !handle.is_running(),
             "disabled client should not be running"
-        );
-    }
-
-    // ── build_join_payload ────────────────────────────────────────────────────
-
-    /// The join payload MUST include a `postgres_changes` config array so
-    /// Supabase Realtime v2 actually delivers INSERT events. Without it the
-    /// server accepts the join but sends zero events.
-    #[test]
-    fn join_payload_includes_postgres_changes_filter() {
-        let config = RealtimeConfig::new(
-            "https://abc.supabase.co",
-            "anon-key",
-            RealtimeConfig::DEFAULT_TOPIC,
-            true,
-        );
-        let payload = build_join_payload(&config);
-        let changes = &payload["config"]["postgres_changes"];
-        assert!(
-            changes.is_array(),
-            "join payload must have config.postgres_changes array"
-        );
-        let first = &changes[0];
-        assert_eq!(first["event"], "INSERT");
-        assert_eq!(first["schema"], "public");
-        assert_eq!(first["table"], "clipboard_items");
-    }
-
-    /// When no `user_jwt` is set the join payload must use the `anon_key` as
-    /// the `access_token` (anonymous scope fallback).
-    #[test]
-    fn join_payload_uses_anon_key_when_no_jwt() {
-        let config = RealtimeConfig::new(
-            "https://abc.supabase.co",
-            "my-anon-key",
-            RealtimeConfig::DEFAULT_TOPIC,
-            true,
-        );
-        let payload = build_join_payload(&config);
-        assert_eq!(
-            payload["access_token"].as_str(),
-            Some("my-anon-key"),
-            "access_token must fall back to anon_key when user_jwt is None"
-        );
-    }
-
-    /// When a `user_jwt` is set it takes precedence over the `anon_key`.
-    #[test]
-    fn join_payload_uses_user_jwt_when_set() {
-        let config = RealtimeConfig::with_jwt(
-            "https://abc.supabase.co",
-            "anon-key",
-            RealtimeConfig::DEFAULT_TOPIC,
-            Some("my-user-jwt".to_owned()),
-            true,
-        );
-        let payload = build_join_payload(&config);
-        assert_eq!(
-            payload["access_token"].as_str(),
-            Some("my-user-jwt"),
-            "access_token must use user_jwt when present"
-        );
-    }
-
-    /// The join payload must NOT contain the raw JWT value anywhere in the
-    /// key names — only in the designated `access_token` field. This is a
-    /// structural check, not a log-redaction check, but validates the payload
-    /// shape is correct for Supabase Realtime v2.
-    #[test]
-    fn join_payload_shape_matches_supabase_realtime_v2() {
-        let config = RealtimeConfig::new(
-            "https://abc.supabase.co",
-            "anon-key",
-            RealtimeConfig::DEFAULT_TOPIC,
-            true,
-        );
-        let payload = build_join_payload(&config);
-        // Required top-level keys.
-        assert!(payload["config"].is_object(), "must have 'config' object");
-        assert!(
-            payload["access_token"].is_string(),
-            "must have 'access_token' string"
-        );
-        // config sub-keys.
-        assert!(
-            payload["config"]["postgres_changes"].is_array(),
-            "config.postgres_changes must be an array"
         );
     }
 }
