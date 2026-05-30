@@ -291,32 +291,9 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      - name: Pre-generate debug keystore (CI robust)
-        # Belt-and-suspenders fix for validateSigningDebug failures.
-        # Root cause: Gradle resolves the debug keystore via ANDROID_USER_HOME
-        # which may fall back to $HOME/.config/.android (XDG path) on Linux runners,
-        # and then fails because (a) the directory is not writable or (b) the keystore
-        # FILE itself does not exist and Gradle cannot create it.
-        # Fix:
-        #   1. mkdir both canonical paths with explicit perms.
-        #   2. Pre-generate the debug.keystore file with keytool (always present with JDK).
-        #   3. Point ANDROID_USER_HOME explicitly so Gradle never falls back to XDG.
-        run: |
-          # $HOME/.config may already exist with restrictive perms (system-managed).
-          # mkdir is fine; chmod on system-owned XDG dirs throws "Operation not permitted".
-          # Use `|| true` on the XDG path; the canonical ~/.android is what Gradle uses.
-          mkdir -p "$HOME/.android" "$HOME/.config/.android" 2>/dev/null || true
-          chmod 755 "$HOME/.android" || true
-          chmod 755 "$HOME/.config/.android" 2>/dev/null || true
-          keytool -genkey -v \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android \
-            -alias androiddebugkey \
-            -keypass android \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US" \
-            2>/dev/null || true
-          echo "ANDROID_USER_HOME=$HOME/.android" >> "$GITHUB_ENV"
+      # Note: no "Pre-generate debug keystore" step needed — android/app/debug.keystore
+      # is committed to the repo and referenced by signingConfigs.debug in build.gradle.kts.
+      # Generating a fresh keystore each run was the root cause of INSTALL_FAILED_UPDATE_INCOMPATIBLE.
 
       - name: Build debug APK
         working-directory: android

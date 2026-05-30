@@ -84,19 +84,9 @@ jobs:
           test -f android/app/src/main/jniLibs/arm64-v8a/libcopypaste_android.so || \
             { echo "ERROR: arm64-v8a .so missing"; exit 1; }
 
-      - name: Pre-generate debug keystore
-        run: |
-          # XDG path may be system-managed; ignore chmod errors there.
-          mkdir -p "$HOME/.android" "$HOME/.config/.android" 2>/dev/null || true
-          chmod 755 "$HOME/.android" || true
-          chmod 755 "$HOME/.config/.android" 2>/dev/null || true
-          keytool -genkey -v \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android -alias androiddebugkey \
-            -keypass android -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US" \
-            2>/dev/null || true
-          echo "ANDROID_USER_HOME=$HOME/.android" >> "$GITHUB_ENV"
+      # Note: no "Pre-generate debug keystore" step needed — android/app/debug.keystore
+      # is committed to the repo and referenced by signingConfigs.debug in build.gradle.kts.
+      # Generating a fresh keystore each run was the root cause of INSTALL_FAILED_UPDATE_INCOMPATIBLE.
 
       - name: Gradle assembleDebug
         working-directory: android
