@@ -57,12 +57,43 @@ const ERR_IPC_NOT_READY: &str = "IPC_NOT_READY";
 
 /// Persistent application configuration stored at
 /// `dirs::config_dir()/copypaste/config.json`.
+///
+/// # X5 Canonical cloud-config field set
+///
+/// These are the **authoritative** field names used by every platform. The macOS
+/// daemon owns this struct; Android's `Settings.kt` mirrors the same names via
+/// `SharedPreferences` keys. Any naming deviation on the Android side should be
+/// aligned to these names, not the reverse.
+///
+/// | Field               | `get_config` IPC shape                  | Notes                                          |
+/// |---------------------|-----------------------------------------|------------------------------------------------|
+/// | `supabase_url`      | verbatim `String \| null`               | HTTPS required; trailing `/` stripped on write |
+/// | `supabase_anon_key` | verbatim `String \| null`               | Publishable JWT; safe to surface in UI         |
+/// | `supabase_email`    | **omitted**; `supabase_email_set: bool`    | GoTrue account email; redacted on read         |
+/// | `supabase_password` | **omitted**; `supabase_password_set: bool` | GoTrue account password; redacted on read      |
+///
+/// The sync passphrase is **not** stored here. It is set via the
+/// `set_sync_passphrase` IPC method and held in the macOS Keychain (or the
+/// file-store fallback on unsigned builds). Android stores it under
+/// `cloud_sync_passphrase` in `SharedPreferences` — that name deviates; the
+/// Android side should be updated to call the FFI layer's `set_sync_passphrase`
+/// instead of storing it locally, to match macOS semantics.
+///
+/// `get_config` never returns `supabase_email` or `supabase_password` in plain
+/// text: it replaces them with `supabase_email_set: bool` and
+/// `supabase_password_set: bool`. `set_config` accepts plain-text values and
+/// persists them; `null` / absent means "preserve existing" — the merge policy
+/// in [`merge_config`] prevents a UI round-trip from wiping stored credentials.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub p2p_enabled: bool,
+    /// Supabase project URL (e.g. `https://xxxx.supabase.co`). See X5 table
+    /// above. Env override: `SUPABASE_URL`.
     #[serde(default)]
     pub supabase_url: Option<String>,
+    /// Supabase publishable anon/public JWT. Safe to surface in UI. Env
+    /// override: `SUPABASE_ANON_KEY`.
     #[serde(default)]
     pub supabase_anon_key: Option<String>,
     /// GoTrue account email for the `authenticated` scope sign-in. Persisted
@@ -70,11 +101,15 @@ pub struct AppConfig {
     /// daemon that authenticates and passes the `authenticated`-only RLS
     /// policies — anon-key-only requests are rejected by RLS and sync silently
     /// fails. Stored in the same `0600` `config.json` as `supabase_anon_key`.
+    /// Redacted to `supabase_email_set: bool` by `get_config`. Env override:
+    /// `SUPABASE_EMAIL`.
     #[serde(default)]
     pub supabase_email: Option<String>,
     /// GoTrue account password. See [`Self::supabase_email`]. Never logged; the
     /// `Debug` derive is acceptable because the daemon does not debug-print the
     /// whole config (only individual non-secret fields are surfaced over IPC).
+    /// Redacted to `supabase_password_set: bool` by `get_config`. Env override:
+    /// `SUPABASE_PASSWORD`.
     #[serde(default)]
     pub supabase_password: Option<String>,
 }
