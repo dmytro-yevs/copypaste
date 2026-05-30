@@ -184,7 +184,11 @@ dependencies {
     //      the JNA dispatch library at runtime.  Without this the main production
     //      app crashes with UnsatisfiedLinkError on first FFI call even when
     //      libcopypaste_android.so is present.
-    implementation("net.java.dev.jna:jna:5.14.0")
+    // JNA @aar ONLY: the Android aar bundles the JNA classes (for the kotlinc
+    // compile classpath) AND the per-ABI libjnidispatch.so (packaged into the
+    // APK so UniFFI's Native.load resolves at runtime). Do NOT also depend on
+    // the plain `jna:5.14.0` jar — having both puts the same com.sun.jna.*
+    // classes on the classpath twice and D8 fails with "Duplicate class".
     implementation("net.java.dev.jna:jna:5.14.0@aar")
 
     // UniFFI Kotlin bindings are compiled as source (CopypasteBindings.kt).
