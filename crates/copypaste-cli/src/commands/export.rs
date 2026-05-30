@@ -1,4 +1,3 @@
-use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 use anyhow::{anyhow, Result};
 use std::io::Write;
@@ -7,13 +6,47 @@ use std::path::Path;
 pub fn run(socket_path: &Path, limit: u64, output: Option<&str>, force: bool) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
     let req = serde_json::json!({
-        "id": "1", "method": "list",
-        "params": {"limit": limit, "offset": 0}
+        "id": "1",
+        "method": "export",
+        "params": {"limit": limit}
     });
     let resp = client.call(&req)?;
-    exit_on_err(&resp);
 
-    let json = serde_json::to_string_pretty(&resp.data)?;
+    // If the daemon does not recognise the `export` method (older daemon or
+    // daemon not yet updated), it returns ok=false with an "unknown method"
+    // error.  Emit a clear, actionable message rather than silently writing an
+    // empty / incomplete file — a contentless backup is worse than no file.
+    if !resp.ok {
+        let msg = resp.error.as_deref().unwrap_or("unknown error");
+        if msg.contains("unknown method") || msg.contains("not found") {
+            return Err(anyhow!(
+                "daemon does not support the 'export' method — \
+                 please upgrade the daemon to a version that includes \
+                 export/import support (error: {msg})"
+            ));
+        }
+        return Err(anyhow!("daemon returned error: {msg}"));
+    }
+
+    // The daemon returns {"items": [...]} in the `data` field.  Each item
+    // carries `content_bytes_b64` + `created_at_ms` which are exactly the
+    // fields that `import` requires, so we can round-trip without any
+    // transformation.
+    let data = resp
+        .data
+        .ok_or_else(|| anyhow!("daemon returned ok with no data for 'export'"))?;
+
+    // Sanity-check: the payload must contain an `items` array.  An export
+    // file with a missing `items` key is silently unusable on re-import, so
+    // we fail loudly here instead.
+    if data.get("items").and_then(|v| v.as_array()).is_none() {
+        return Err(anyhow!(
+            "daemon 'export' response is missing the 'items' array — \
+             daemon may be partially updated; try restarting it"
+        ));
+    }
+
+    let json = serde_json::to_string_pretty(&data)?;
 
     match output {
         Some(path) => {

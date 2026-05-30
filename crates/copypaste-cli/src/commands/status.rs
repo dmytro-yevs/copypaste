@@ -25,16 +25,22 @@ use std::time::SystemTime;
 /// don't have to special-case them.
 #[derive(Debug, Serialize, PartialEq)]
 pub struct StatusReport {
-    /// "running" when the daemon answered, "not running" when the socket
-    /// could not be reached. Anything else is reserved for future states.
+    /// "running" when the daemon answered normally, "degraded" when it
+    /// answered but reported a degraded startup (e.g. keychain/DB issue),
+    /// or "not running" when the socket could not be reached.
     pub daemon: String,
     /// Filesystem path of the UNIX socket we probed. Always present so users
     /// can confirm we tried the right place when "not running" is printed.
     pub socket: String,
-    /// Daemon-reported semver (from the `stats` IPC call). `None` when the
-    /// daemon is offline or the field is missing from the response.
+    /// Daemon build version string (`<semver>+<git-sha>`) from the `status`
+    /// IPC call. Preferred over the schema-version string from `stats`.
+    /// `None` when the daemon is offline or the field is missing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// PID of the running daemon process, from the `status` IPC call.
+    /// `None` when the daemon is offline or the field is missing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
     /// Total number of stored clipboard items (from the `count` IPC call).
     /// `None` when the daemon is offline or the call failed.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -48,6 +54,10 @@ pub struct StatusReport {
     /// `None` when the daemon is offline.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub private_mode: Option<bool>,
+    /// Human-readable reason when the daemon is in degraded mode.
+    /// `None` when running normally or offline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub degraded_reason: Option<String>,
 }
 
 impl StatusReport {
@@ -56,9 +66,11 @@ impl StatusReport {
             daemon: "not running".to_string(),
             socket: socket.display().to_string(),
             version: None,
+            pid: None,
             history: None,
             uptime_secs: None,
             private_mode: None,
+            degraded_reason: None,
         }
     }
 }
@@ -74,13 +86,19 @@ impl StatusReport {
 pub fn run(socket_path: &Path, json: bool) -> Result<()> {
     let report = probe(socket_path);
     print_report(&report, json);
-    if report.daemon == "running" {
-        Ok(())
-    } else {
-        // Use `bail!`-style error so main.rs exits with non-zero status.
-        // The message is intentionally short; the full report already went
-        // to stdout above.
-        Err(anyhow::anyhow!("daemon not running"))
+    match report.daemon.as_str() {
+        "running" => Ok(()),
+        "degraded" => {
+            // The daemon is alive but impaired — exit non-zero so scripts
+            // that rely on `copypaste status` can detect the problem.
+            Err(anyhow::anyhow!("daemon degraded"))
+        }
+        _ => {
+            // Use `bail!`-style error so main.rs exits with non-zero status.
+            // The message is intentionally short; the full report already went
+            // to stdout above.
+            Err(anyhow::anyhow!("daemon not running"))
+        }
     }
 }
 
@@ -99,44 +117,44 @@ fn probe(socket_path: &Path) -> StatusReport {
         daemon: "running".to_string(),
         socket: socket_path.display().to_string(),
         version: None,
+        pid: None,
         history: None,
         uptime_secs: socket_uptime_secs(socket_path),
         private_mode: None,
+        degraded_reason: None,
     };
 
-    // 2. status — confirms the daemon is alive and yields private_mode.
+    // 2. status — confirms the daemon is alive. Yields `build_version`,
+    //    `pid`, `private_mode`, and (when impaired) `degraded`/`degraded_reason`.
     //    Failure here flips us back to "not running" since the socket
     //    accepted us but the daemon can't respond to a basic health check.
     let status_req = serde_json::json!({"id": "status", "method": "status", "params": {}});
     match client.call(&status_req) {
         Ok(resp) if resp.ok => {
             if let Some(data) = &resp.data {
+                // build_version is preferred over the schema string from stats.
+                report.version = data["build_version"].as_str().map(|s| s.to_string());
+                report.pid = data["pid"].as_u64().and_then(|p| u32::try_from(p).ok());
                 report.private_mode = data["private_mode"].as_bool();
+
+                // Degraded daemons report status="degraded" and degraded=true.
+                // Surface this distinctly so scripts see exit code 1.
+                if data["degraded"].as_bool().unwrap_or(false) {
+                    report.daemon = "degraded".to_string();
+                    report.degraded_reason =
+                        data["degraded_reason"].as_str().map(|s| s.to_string());
+                }
             }
         }
         _ => return StatusReport::offline(socket_path),
     }
 
-    // 3. stats — pulls the daemon-reported version string. Best-effort:
-    //    a failure here leaves `version = None` but does NOT downgrade
-    //    "running" to "not running" (daemon is clearly alive at this point).
-    //    Each call opens a fresh connection because IpcClient is one-shot
-    //    (it consumes the connection on response).
+    // 3. count — total history items. Best-effort: failure leaves `history = None`
+    //    but does NOT downgrade the daemon state.
+    //    Each call opens a fresh connection because IpcClient is one-shot.
     if let Ok(mut c2) = IpcClient::connect(socket_path) {
-        let stats_req = serde_json::json!({"id": "stats", "method": "stats", "params": {}});
-        if let Ok(resp) = c2.call(&stats_req) {
-            if resp.ok {
-                if let Some(data) = &resp.data {
-                    report.version = data["version"].as_str().map(|s| s.to_string());
-                }
-            }
-        }
-    }
-
-    // 4. count — total history items. Same best-effort policy as stats.
-    if let Ok(mut c3) = IpcClient::connect(socket_path) {
         let count_req = serde_json::json!({"id": "count", "method": "count", "params": {}});
-        if let Ok(resp) = c3.call(&count_req) {
+        if let Ok(resp) = c2.call(&count_req) {
             if resp.ok {
                 if let Some(data) = &resp.data {
                     report.history = data["count"].as_i64();
@@ -196,6 +214,9 @@ fn print_report(r: &StatusReport, json: bool) {
     if let Some(v) = &r.version {
         println!("Version:   {v}");
     }
+    if let Some(pid) = r.pid {
+        println!("PID:       {pid}");
+    }
     if let Some(u) = r.uptime_secs {
         println!("Uptime:    {}", format_uptime(u));
     }
@@ -204,6 +225,9 @@ fn print_report(r: &StatusReport, json: bool) {
     }
     if let Some(p) = r.private_mode {
         println!("Private:   {}", if p { "on" } else { "off" });
+    }
+    if let Some(reason) = &r.degraded_reason {
+        println!("Degraded:  {reason}");
     }
 }
 
@@ -217,10 +241,12 @@ mod tests {
         StatusReport {
             daemon: "running".to_string(),
             socket: "/tmp/test.sock".to_string(),
-            version: Some("0.2.0-beta.0".to_string()),
+            version: Some("0.4.1+abc1234".to_string()),
+            pid: Some(12345),
             history: Some(1234),
             uptime_secs: Some(5025), // 1h23m45s
             private_mode: Some(false),
+            degraded_reason: None,
         }
     }
 
@@ -237,6 +263,7 @@ mod tests {
             format!("Daemon:    {}", r.daemon),
             format!("Socket:    {}", r.socket),
             format!("Version:   {}", r.version.as_deref().unwrap()),
+            format!("PID:       {}", r.pid.unwrap()),
             format!("Uptime:    {}", format_uptime(r.uptime_secs.unwrap())),
             format!("History:   {} items", r.history.unwrap()),
             format!(
@@ -246,10 +273,11 @@ mod tests {
         ];
         assert_eq!(lines[0], "Daemon:    running");
         assert_eq!(lines[1], "Socket:    /tmp/test.sock");
-        assert_eq!(lines[2], "Version:   0.2.0-beta.0");
-        assert_eq!(lines[3], "Uptime:    1h23m");
-        assert_eq!(lines[4], "History:   1234 items");
-        assert_eq!(lines[5], "Private:   off");
+        assert_eq!(lines[2], "Version:   0.4.1+abc1234");
+        assert_eq!(lines[3], "PID:       12345");
+        assert_eq!(lines[4], "Uptime:    1h23m");
+        assert_eq!(lines[5], "History:   1234 items");
+        assert_eq!(lines[6], "Private:   off");
     }
 
     /// `--json` must serialize EVERY populated field. `None` fields are
@@ -261,10 +289,15 @@ mod tests {
 
         assert_eq!(json["daemon"], "running");
         assert_eq!(json["socket"], "/tmp/test.sock");
-        assert_eq!(json["version"], "0.2.0-beta.0");
+        assert_eq!(json["version"], "0.4.1+abc1234");
+        assert_eq!(json["pid"], 12345);
         assert_eq!(json["history"], 1234);
         assert_eq!(json["uptime_secs"], 5025);
         assert_eq!(json["private_mode"], false);
+        assert!(
+            json.get("degraded_reason").is_none(),
+            "degraded_reason must be omitted when None"
+        );
 
         // Offline report must omit nullable fields (no "version": null noise).
         let off = StatusReport::offline(&PathBuf::from("/tmp/x.sock"));
@@ -274,6 +307,10 @@ mod tests {
         assert!(
             off_json.get("version").is_none(),
             "version must be omitted when None"
+        );
+        assert!(
+            off_json.get("pid").is_none(),
+            "pid must be omitted when None"
         );
         assert!(
             off_json.get("history").is_none(),
@@ -289,6 +326,24 @@ mod tests {
         );
     }
 
+    /// Degraded daemon: status="degraded" + non-zero exit code.
+    #[test]
+    fn format_status_degraded_report() {
+        let r = StatusReport {
+            daemon: "degraded".to_string(),
+            socket: "/tmp/test.sock".to_string(),
+            version: Some("0.4.1+abc1234".to_string()),
+            pid: Some(99),
+            history: None,
+            uptime_secs: Some(10),
+            private_mode: None,
+            degraded_reason: Some("keychain locked; DB unavailable".to_string()),
+        };
+        let json = serde_json::to_value(&r).expect("serialize");
+        assert_eq!(json["daemon"], "degraded");
+        assert_eq!(json["degraded_reason"], "keychain locked; DB unavailable");
+    }
+
     /// When the socket does not exist, `probe` must produce a clean offline
     /// report without panicking. This is the ConnectionRefused path that
     /// shell scripts rely on (`copypaste status || start_daemon`).
@@ -301,9 +356,11 @@ mod tests {
         assert_eq!(report.daemon, "not running");
         assert_eq!(report.socket, socket.display().to_string());
         assert!(report.version.is_none());
+        assert!(report.pid.is_none());
         assert!(report.history.is_none());
         assert!(report.uptime_secs.is_none());
         assert!(report.private_mode.is_none());
+        assert!(report.degraded_reason.is_none());
     }
 
     /// Uptime formatter spot-checks across the day/hour/min/sec boundaries.

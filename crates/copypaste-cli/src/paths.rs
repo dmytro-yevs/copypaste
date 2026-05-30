@@ -1,3 +1,11 @@
+//! Platform paths for the CopyPaste CLI.
+//!
+//! Only macOS is supported (ADR-012: Windows frozen/Homebrew-only).
+//! A named-pipe variant (`\\.\pipe\copypaste-daemon`) was considered for
+//! Windows but is aspirational and unused — `ipc.rs` uses `UnixStream` which
+//! does not compile on Windows.  If Windows support is ever unfrozen, both
+//! this file and `ipc.rs` will need platform-specific transports.
+
 use std::path::PathBuf;
 
 pub fn socket_path() -> PathBuf {
