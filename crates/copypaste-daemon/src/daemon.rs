@@ -5,9 +5,10 @@ use crate::{
     p2p, paths,
 };
 use copypaste_core::{
-    build_item_aad_v2, bump_item_recency, chunks_to_blob, derive_v2, detect, encode_image,
-    encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts, prune_to_cap,
-    AppConfig, ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION_V4,
+    build_item_aad_v2, bump_item_recency, chunks_to_blob, derive_v2, encode_image_with_limit,
+    encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts,
+    is_sensitive_for_autowipe, prune_to_cap, AppConfig, ClipboardItem, Database, DeviceKeypair,
+    AAD_SCHEMA_VERSION_V4,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -326,7 +327,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let p2p_enabled = match std::env::var("COPYPASTE_P2P").as_deref() {
         Ok("1") => true,
         Ok("0") => false,
-        _ => crate::ipc::read_config().p2p_enabled,
+        // Item 6: single source of truth — delegate to the public accessor so
+        // daemon.rs and any future caller always agree on the read path.
+        _ => crate::ipc::p2p_enabled_from_config(),
     };
     let p2p_peers: Option<copypaste_p2p::transport::PairedPeers> = if p2p_enabled {
         Some(copypaste_p2p::transport::PairedPeers::new())
@@ -1179,7 +1182,11 @@ async fn handle_text(
     // `insert_item` / `insert_item_with_fts` (ItemsError::MigrationInProgress).
     // The call-site guard that used to live here has been removed.
 
-    let is_sensitive = detect(&text).is_some();
+    // Item 2: use confidence-gated autowipe check (floor 0.70) so low-signal
+    // patterns (phone numbers, order-ids) no longer trigger the 30s TTL wipe.
+    // The old `detect(&text).is_some()` fired on any match regardless of
+    // confidence; `is_sensitive_for_autowipe` requires confidence >= 0.70.
+    let is_sensitive = is_sensitive_for_autowipe(&text);
 
     // Compute SHA-256 content hash of the PLAINTEXT bytes.
     // This is used for deduplication: if an identical item already exists in
@@ -1380,7 +1387,16 @@ async fn handle_image(
         // images the config permitted. `usize::MAX` saturation keeps 32-bit
         // targets safe.
         let max_image_bytes = usize::try_from(config.max_image_size_bytes).unwrap_or(usize::MAX);
-        match encode_image(&raw_bytes, &local_key, &file_id, max_image_bytes) {
+        // Item 3: pass config.max_decoded_image_mb so the decode-bomb budget
+        // comes from the live AppConfig rather than the compile-time default
+        // baked into the `encode_image` wrapper.
+        match encode_image_with_limit(
+            &raw_bytes,
+            &local_key,
+            &file_id,
+            max_image_bytes,
+            config.max_decoded_image_mb,
+        ) {
             Ok((meta, chunks)) => {
                 let blob = chunks_to_blob(&chunks);
                 let meta_json = format!(
@@ -1480,10 +1496,12 @@ fn prune_history(db: &Database, config: &AppConfig) {
 /// matched what real v1 rows were encrypted under, so every legacy
 /// `key_version = 1` row failed with an auth-tag mismatch and was never
 /// rotated.
-fn sweep_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+fn sweep_keys(seed: &[u8; 32]) -> ([u8; 32], zeroize::Zeroizing<[u8; 32]>) {
     // v1_key: the seed itself, used directly — exactly as the read path uses
     //         `**self.local_key` for `key_version = 1` rows.
     // v2_key: `derive_v2(seed)`, matching the read path's `derive_v2(&v1_key)`.
+    // Item 5: derive_v2 now returns Zeroizing<[u8;32]>; propagate the wrapper
+    // so the key bytes are scrubbed when the caller drops the tuple.
     (*seed, derive_v2(seed))
 }
 

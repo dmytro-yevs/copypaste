@@ -31,12 +31,12 @@ pub use crypto::{
 };
 pub use image::{
     chunks_from_blob, chunks_to_blob, decode_clipboard_image, decode_clipboard_image_limited,
-    decode_image, encode_as_png, encode_image, thumbnail, ImageError, ImageMeta, IMAGE_CHUNK_SIZE,
-    MAX_IMAGE_BYTES,
+    decode_image, encode_as_png, encode_image, encode_image_with_limit, thumbnail, ImageError,
+    ImageMeta, IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES,
 };
 pub use sensitive::{
-    detect, is_sensitive_app, luhn_valid, redact, PatternMatch, SensitiveCategory,
-    SensitiveDetector, SensitiveKind,
+    detect, is_sensitive_app, is_sensitive_for_autowipe, luhn_valid, redact, PatternMatch,
+    SensitiveCategory, SensitiveDetector, SensitiveKind,
 };
 pub use storage::devices::{
     ensure_revoked_devices_table, list_revoked_devices, revoke_device, revoke_devices,

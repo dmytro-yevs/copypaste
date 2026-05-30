@@ -19,6 +19,64 @@ pub(crate) const ACCOUNT: &str = "device-secret-key";
 /// Stored under the same service as the device key but a distinct account
 /// so they are never confused.
 pub(crate) const CLOUD_SYNC_ACCOUNT: &str = "cloud-sync-key";
+/// Keychain account key for the Supabase GoTrue account password.
+/// Stored under `SERVICE` so all CopyPaste secrets live in one service.
+/// Migration: if absent from Keychain, callers fall back to config.json.
+pub(crate) const SUPABASE_PASSWORD_ACCOUNT: &str = "supabase-password";
+
+/// Read the Supabase GoTrue password from the macOS Keychain.
+///
+/// Returns `Some(password)` if a non-empty entry is present.
+/// Returns `None` when the entry is absent (first run / pre-migration) or
+/// when the Keychain is unavailable (non-macOS, ephemeral-key env, locked).
+/// Callers should fall back to `config.json` on `None`.
+pub fn read_supabase_password_from_keychain() -> Option<String> {
+    // Dev/test bypass: never read the real Keychain in ephemeral mode.
+    if keychain_bypassed() {
+        return None;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        match get_generic_password(SERVICE, SUPABASE_PASSWORD_ACCOUNT) {
+            Ok(bytes) => {
+                let s = String::from_utf8(bytes).ok()?;
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
+            }
+            // Any error (not-found, locked, denied) → treat as absent; caller
+            // falls back to config.json for the migration path.
+            Err(_) => None,
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// Store the Supabase GoTrue password in the macOS Keychain.
+///
+/// Silently succeeds on non-macOS and in ephemeral-key mode so call sites
+/// do not need to be conditional. On macOS a failure is logged at warn
+/// level and bubbled to the caller as `Err` so the caller can decide
+/// whether to fall back to config.json persistence.
+pub fn store_supabase_password_to_keychain(password: &str) -> Result<(), KeychainError> {
+    if keychain_bypassed() {
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use security_framework::passwords::set_generic_password;
+        set_generic_password(SERVICE, SUPABASE_PASSWORD_ACCOUNT, password.as_bytes())
+            .map_err(KeychainError::from)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = password;
+        Err(KeychainError::Unsupported)
+    }
+}
 
 /// Dev/test escape hatch: when `COPYPASTE_EPHEMERAL_KEY` is set in the
 /// environment, every keychain entry point in this module short-circuits

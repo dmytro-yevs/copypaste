@@ -23,7 +23,8 @@ use rusqlite::params;
 /// Derive the v2 storage key from the raw seed — mirrors what the daemon does
 /// via `derive_v2(seed)`.
 fn v2_key_from_seed(seed: &[u8; 32]) -> [u8; 32] {
-    copypaste_core::derive_v2(seed)
+    // derive_v2 now returns Zeroizing<[u8;32]>; deref to get the raw array.
+    *copypaste_core::derive_v2(seed)
 }
 
 /// Construct a minimal `ClipboardItem` encrypted with the given key/nonce pair.

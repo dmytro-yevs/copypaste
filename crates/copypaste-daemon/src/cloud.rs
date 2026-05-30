@@ -172,9 +172,13 @@ impl CloudConfig {
             .ok()
             .and_then(nonempty)
             .or_else(|| app_cfg.supabase_email.clone().and_then(nonempty));
+        // Password resolution (item 1): env var → Keychain → config.json fallback
+        // (migration: old installs that still have the password in config.json are
+        // served until the next set_config call migrates it to the Keychain).
         let password = std::env::var("SUPABASE_PASSWORD")
             .ok()
             .and_then(nonempty)
+            .or_else(|| crate::keychain::read_supabase_password_from_keychain().and_then(nonempty))
             .or_else(|| app_cfg.supabase_password.clone().and_then(nonempty));
 
         // Priority 1: environment variables for URL + anon key.
