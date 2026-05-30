@@ -39,9 +39,10 @@ use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
 use copypaste_core::{
-    build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2, encrypt_for_cloud,
-    encrypt_item_with_aad, exists_item_by_item_id, get_item_by_item_id, insert_item, prune_to_cap,
-    AppConfig, ClipboardItem, Database, SyncKey, AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
+    build_item_aad_v2, count_items, decrypt_from_cloud, decrypt_item_by_version, derive_v2,
+    encrypt_for_cloud, encrypt_item_with_aad, exists_item_by_item_id, get_item_by_item_id,
+    insert_item, prune_to_cap, AppConfig, ClipboardItem, Database, SyncKey, AAD_SCHEMA_VERSION_V4,
+    ITEM_KEY_VERSION_CURRENT,
 };
 
 // Beta W2.3 (arch-1): canonical auth client lives in copypaste-supabase. The
@@ -1436,9 +1437,9 @@ async fn realtime_loop(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
     auth: Arc<AuthClient>,
-    /// `history_limit` and `storage_quota_bytes` from `AppConfig`. Passed
-    /// explicitly so the polling loop can enforce the local retention cap
-    /// after each cloud-ingest batch without re-reading config from disk.
+    // `history_limit` and `storage_quota_bytes` from `AppConfig`. Passed
+    // explicitly so the polling loop can enforce the local retention cap
+    // after each cloud-ingest batch without re-reading config from disk.
     history_limit: usize,
     storage_quota_bytes: u64,
 ) {
@@ -1573,8 +1574,8 @@ async fn poll_once(
     auth: &AuthClient,
     key_bytes: &[u8],
     cursor: PollCursor,
-    /// Retention limits threaded from `AppConfig` so a long-offline device
-    /// converges to the cap after backfill instead of materialising unbounded rows.
+    // Retention limits threaded from `AppConfig` so a long-offline device
+    // converges to the cap after backfill instead of materialising unbounded rows.
     history_limit: usize,
     storage_quota_bytes: u64,
 ) -> PollCursor {
@@ -1788,11 +1789,37 @@ async fn poll_once(
         // advances from the cloud side. Cloud still holds the older items; only
         // the local cache is capped.
         if synced > 0 {
-            match prune_to_cap(&db_guard, history_limit, storage_quota_bytes) {
+            // Count cap: mirrors daemon.rs `prune_history` — bulk DELETE oldest
+            // unpinned rows when the total exceeds `history_limit`.
+            let total = count_items(&db_guard).unwrap_or(0) as usize;
+            if total > history_limit {
+                let excess = total - history_limit;
+                let res = db_guard.conn().execute(
+                    "DELETE FROM clipboard_items WHERE id IN (
+                        SELECT id FROM clipboard_items
+                        WHERE pinned = 0
+                        ORDER BY wall_time ASC
+                        LIMIT ?1
+                    )",
+                    rusqlite::params![excess as i64],
+                );
+                match res {
+                    Ok(n) => tracing::debug!(
+                        "cloud-sync poll_once: count-pruned {n} rows \
+                         (history_limit={history_limit})"
+                    ),
+                    Err(e) => tracing::warn!("cloud-sync poll_once: count-prune failed: {e}"),
+                }
+            }
+            // Byte cap: window-function prune via core API (takes i64 max_bytes).
+            // `storage_quota_bytes` is u64 from AppConfig; saturating cast to i64
+            // keeps the value in range (i64::MAX ≈ 9.2 EB, far beyond any real quota).
+            let max_bytes = storage_quota_bytes.min(i64::MAX as u64) as i64;
+            match prune_to_cap(&db_guard, max_bytes) {
                 Ok(0) => {}
                 Ok(n) => tracing::debug!(
-                    "cloud-sync poll_once: pruned {n} rows after batch ingest \
-                     (history_limit={history_limit} quota_bytes={storage_quota_bytes})"
+                    "cloud-sync poll_once: byte-pruned {n} rows after batch ingest \
+                     (quota_bytes={storage_quota_bytes})"
                 ),
                 Err(e) => tracing::warn!("cloud-sync poll_once: prune_to_cap failed: {e}"),
             }
