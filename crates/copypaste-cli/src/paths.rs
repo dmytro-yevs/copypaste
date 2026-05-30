@@ -8,9 +8,12 @@
 //! Resolution mirrors the daemon exactly:
 //!   - `COPYPASTE_SOCKET` / `COPYPASTE_DB` env overrides win first.
 //!   - macOS:   `~/Library/Application Support/CopyPaste`
-//!   - Windows: socket is the named pipe `\\.\pipe\copypaste-daemon`; data dir
-//!     is `%APPDATA%\CopyPaste` (or `~/AppData/Roaming/CopyPaste`).
 //!   - Linux/other: `$XDG_DATA_HOME/copypaste` or `~/.local/share/copypaste`.
+//!
+//! Windows note (ADR-012: frozen/Homebrew-only): the named-pipe variant
+//! `\\.\pipe\copypaste-daemon` referenced below is ASPIRATIONAL and unused —
+//! `ipc.rs` uses `UnixStream`, which does not compile on Windows. If Windows is
+//! ever unfrozen, both this file and `ipc.rs` need platform-specific transports.
 
 use std::path::PathBuf;
 

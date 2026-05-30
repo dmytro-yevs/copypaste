@@ -62,19 +62,17 @@ fn spawn_mock_daemon(socket_path: &Path, response_json: &'static str) {
     });
 }
 
-/// Build a canned `list` response containing `n` synthetic items. The shape
-/// mirrors what `commands::list` returns from the daemon: a `{"items": [...]}`
-/// object wrapped in the standard envelope.
+/// Build a canned `export` IPC response containing 3 synthetic items.
 ///
-/// We hard-code 3 items rather than parameterise, because the &'static lifetime
-/// of `spawn_mock_daemon`'s payload would otherwise force an awkward leak.
-fn canned_list_response_3_items() -> &'static str {
-    // 3 items, each with a stable content_hash so the (future) dedup test
-    // can reuse this fixture. Plain-text content keeps the JSON readable.
-    //
-    // MUST be single-line: the CLI reads daemon responses via `BufReader::read_line`,
-    // which would otherwise truncate the payload at the first embedded `\n`.
-    r#"{"id":"1","ok":true,"data":{"items":[{"id":"00000000-0000-0000-0000-000000000001","content":"alpha","content_hash":"hash-a","timestamp":1000,"kind":"text"},{"id":"00000000-0000-0000-0000-000000000002","content":"beta","content_hash":"hash-b","timestamp":2000,"kind":"text"},{"id":"00000000-0000-0000-0000-000000000003","content":"gamma","content_hash":"hash-c","timestamp":3000,"kind":"text"}]}}"#
+/// The shape mirrors what the daemon's new `export` method returns: each item
+/// carries `content_bytes_b64` + `created_at_ms`, which are exactly the fields
+/// that `import` requires — so the round-trip works without transformation.
+/// `content_bytes_b64` values are base64("alpha"), base64("beta"),
+/// base64("gamma") respectively.
+///
+/// MUST be single-line: the CLI reads responses via `BufReader::read_line`.
+fn canned_export_response_3_items() -> &'static str {
+    r#"{"id":"1","ok":true,"data":{"items":[{"id":"00000000-0000-0000-0000-000000000001","item_id":"00000000-0000-0000-0000-000000000001","content_type":"text","content_bytes_b64":"YWxwaGE=","created_at_ms":1000,"wall_time":1000,"lamport_ts":1,"is_sensitive":false},{"id":"00000000-0000-0000-0000-000000000002","item_id":"00000000-0000-0000-0000-000000000002","content_type":"text","content_bytes_b64":"YmV0YQ==","created_at_ms":2000,"wall_time":2000,"lamport_ts":2,"is_sensitive":false},{"id":"00000000-0000-0000-0000-000000000003","item_id":"00000000-0000-0000-0000-000000000003","content_type":"text","content_bytes_b64":"Z2FtbWE=","created_at_ms":3000,"wall_time":3000,"lamport_ts":3,"is_sensitive":false}]}}"#
 }
 
 /// Run `copypaste <args>` against the given socket path. Returns
@@ -103,7 +101,7 @@ fn export_json_writes_valid_array_of_history_items() {
     let sock = dir.path().join("daemon.sock");
     let out_file = dir.path().join("export.json");
 
-    spawn_mock_daemon(&sock, canned_list_response_3_items());
+    spawn_mock_daemon(&sock, canned_export_response_3_items());
     // Tiny delay only to win the race in CI containers where thread::spawn
     // can lag the listener.accept() loop by a few ms. The UnixListener is
     // already bound (bind() above is synchronous), so this is paranoia.
@@ -118,9 +116,8 @@ fn export_json_writes_valid_array_of_history_items() {
         serde_json::from_str(&written).expect("export output must be valid JSON");
 
     // Contract: export writes the daemon's `data` payload — a `{"items": [...]}`
-    // object. The items field MUST be an array. We don't pin the exact count
-    // to the canned 3 because future export.rs revisions may wrap or filter,
-    // but the array-of-objects shape is the load-bearing invariant.
+    // object.  Each item must carry the fields that `import` requires:
+    // `content_type`, `content_bytes_b64`, and `created_at_ms`.
     let items = parsed
         .get("items")
         .and_then(|v| v.as_array())
@@ -131,30 +128,30 @@ fn export_json_writes_valid_array_of_history_items() {
     );
     for (i, item) in items.iter().enumerate() {
         assert!(
-            item.get("id").is_some(),
-            "item[{i}] missing `id` field: {item}"
+            item.get("content_type").is_some(),
+            "item[{i}] missing `content_type` field: {item}"
         );
         assert!(
-            item.get("content").is_some(),
-            "item[{i}] missing `content` field: {item}"
+            item.get("content_bytes_b64").is_some(),
+            "item[{i}] missing `content_bytes_b64` field: {item}"
+        );
+        assert!(
+            item.get("created_at_ms").is_some(),
+            "item[{i}] missing `created_at_ms` field: {item}"
         );
     }
 }
 
-/// DESIRED contract: exporting over an existing file must refuse unless
-/// `--force` is passed. Current `export.rs` calls `std::fs::write`
-/// unconditionally, so this test is `#[ignore]`d until the flag is wired up.
-/// Flip the `#[ignore]` once `--force` lands and the test will guard against
-/// accidental data loss regressions.
+/// Exporting over an existing file must refuse unless `--force` is passed.
+/// The `--force` flag is implemented; this test guards against regressions.
 #[test]
-#[ignore = "export.rs lacks --force flag; std::fs::write clobbers unconditionally (see import.rs:14 comment about Phase 4)"]
 fn export_to_existing_file_refuses_without_force() {
     let dir = tempdir().expect("tempdir");
     let sock = dir.path().join("daemon.sock");
     let out_file = dir.path().join("existing.json");
     std::fs::write(&out_file, r#"{"sentinel": "do not overwrite"}"#).unwrap();
 
-    spawn_mock_daemon(&sock, canned_list_response_3_items());
+    spawn_mock_daemon(&sock, canned_export_response_3_items());
     thread::sleep(Duration::from_millis(20));
 
     let (ok, _stdout, stderr) = run_cli(&sock, &["export", "--output", out_file.to_str().unwrap()]);
@@ -196,7 +193,7 @@ fn import_json_roundtrip_count_matches() {
     let export_file = dir.path().join("dump.json");
 
     // 1) Export via mock daemon.
-    spawn_mock_daemon(&sock, canned_list_response_3_items());
+    spawn_mock_daemon(&sock, canned_export_response_3_items());
     thread::sleep(Duration::from_millis(20));
     let (ok_e, _, stderr_e) = run_cli(
         &sock,
@@ -300,7 +297,7 @@ fn import_dedupes_against_existing_db() {
 
     // First export+import populates the DB. Second import of the same file
     // should be a no-op (every content_hash already known).
-    spawn_mock_daemon(&sock, canned_list_response_3_items());
+    spawn_mock_daemon(&sock, canned_export_response_3_items());
     thread::sleep(Duration::from_millis(20));
     let (ok_e, _, _) = run_cli(&sock, &["export", "--output", dump.to_str().unwrap()]);
     assert!(ok_e);
