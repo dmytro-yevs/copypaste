@@ -19,7 +19,19 @@ const VIEWS: Record<ViewId, { Component: ComponentType; label: string }> = {
 
 export default function App() {
   const view = useUI((s) => s.view);
+  const translucency = useUI((s) => s.prefs.translucency);
   const { Component: View, label } = VIEWS[view];
+
+  // Apply/remove the no-translucency root class whenever the pref changes.
+  // When translucency is OFF we add "no-translucency" on <html> so the CSS
+  // can key off it to swap transparent/blur surfaces for solid ones.
+  useEffect(() => {
+    if (translucency) {
+      document.documentElement.classList.remove("no-translucency");
+    } else {
+      document.documentElement.classList.add("no-translucency");
+    }
+  }, [translucency]);
 
   // ---------------------------------------------------------------------------
   // Daemon spawn error banner (non-dismissible, installation-incomplete)

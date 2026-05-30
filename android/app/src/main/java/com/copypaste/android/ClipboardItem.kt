@@ -25,6 +25,13 @@ data class ClipboardItem(
      * (same pattern as synced_source_ids). Populated by [ClipboardRepository.getItems].
      */
     val pinned: Boolean = false,
+    /**
+     * Source application package name or macOS bundle id that produced this
+     * clipboard item, e.g. "com.android.chrome" or "com.google.Chrome".
+     * Null when unknown (older items, synced items from another device, etc.).
+     * Display via [sourceAppLabel] to get a short human-readable name.
+     */
+    val sourceApp: String? = null,
 ) {
     /** True when this item carries an image payload that can be rendered as a thumbnail. */
     val isImage: Boolean get() = contentType.startsWith("image/") || contentType == "image"
@@ -39,7 +46,8 @@ data class ClipboardItem(
             wallTimeMs == other.wallTimeMs &&
             snippet == other.snippet &&
             imagePng.contentEquals(other.imagePng) &&
-            pinned == other.pinned
+            pinned == other.pinned &&
+            sourceApp == other.sourceApp
     }
 
     override fun hashCode(): Int {
@@ -50,8 +58,20 @@ data class ClipboardItem(
         result = 31 * result + snippet.hashCode()
         result = 31 * result + (imagePng?.contentHashCode() ?: 0)
         result = 31 * result + pinned.hashCode()
+        result = 31 * result + (sourceApp?.hashCode() ?: 0)
         return result
     }
+}
+
+/**
+ * Derive a short human-readable label from a bundle/package id.
+ * "com.google.chrome" → "Chrome", "com.apple.Safari" → "Safari".
+ * Returns null when the id is null or blank.
+ */
+fun sourceAppLabel(bundleId: String?): String? {
+    if (bundleId.isNullOrBlank()) return null
+    val last = bundleId.split(".").lastOrNull() ?: return null
+    return last.replaceFirstChar { it.uppercaseChar() }
 }
 
 /** Returns null-safe contentEquals for nullable ByteArrays. */

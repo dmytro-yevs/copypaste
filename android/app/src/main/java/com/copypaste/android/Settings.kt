@@ -250,6 +250,20 @@ class Settings(context: Context) {
     // ── Display settings (Maccy-parity) ────────────────────────────────────────
 
     /**
+     * When true (default), surfaces use translucent/semi-transparent backgrounds
+     * where the theme supports it. When false, all surfaces use fully opaque
+     * solid backgrounds — useful for accessibility or low-end devices.
+     *
+     * NOTE: Android Compose surfaces do not have native vibrancy (no
+     * NSVisualEffectView equivalent). This flag controls whether container
+     * alpha is reduced for a "glass-like" feel. On most devices the visual
+     * effect is subtle; it primarily mirrors the macOS translucency pref.
+     */
+    var translucency: Boolean
+        get() = prefs.getBoolean("translucency", true)
+        set(v) = prefs.edit().putBoolean("translucency", v).apply()
+
+    /**
      * Maximum height (in dp) for image thumbnails in the history list.
      *
      * Matches Maccy's `imageMaxHeight` preference. The thumbnail is scaled into

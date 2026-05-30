@@ -840,6 +840,16 @@ private fun HistoryRow(
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(8.dp))
+                // Source-app chip — only when bundle id is known
+                sourceAppLabel(item.sourceApp)?.let { appLabel ->
+                    Text(
+                        text = appLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = IdeFaint.copy(alpha = 0.65f),
+                        maxLines = 1,
+                        modifier = Modifier.padding(end = 4.dp),
+                    )
+                }
                 // Timestamp always visible
                 Text(
                     text = formatTime(item.wallTimeMs),

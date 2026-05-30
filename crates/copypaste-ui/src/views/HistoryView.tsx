@@ -5,6 +5,7 @@ import {
   formatWallTime,
   IpcError,
   resetDatabase,
+  sourceAppLabel,
   type HistoryEntry,
 } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
@@ -394,7 +395,7 @@ function HistoryRow({
         </span>
       )}
 
-      {/* Right-side slot: timestamp (always visible) + icon action buttons (on hover).
+      {/* Right-side slot: source-app chip + timestamp (always visible) + icon action buttons (on hover).
           Both live in the same fixed-width flex container so showing/hiding the
           buttons never shifts the layout — the slot width is constant. */}
       <div
@@ -402,6 +403,18 @@ function HistoryRow({
         style={{ minWidth: "4.5rem" }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Source-app label — small muted chip; only rendered when present */}
+        {(() => {
+          const appLabel = sourceAppLabel(entry.app_bundle_id);
+          return appLabel ? (
+            <span
+              className="text-[10px] text-ide-faint px-1 py-0.5 rounded border border-ide-divider/60 bg-ide-elevated/50 leading-none"
+              title={entry.app_bundle_id ?? undefined}
+            >
+              {appLabel}
+            </span>
+          ) : null;
+        })()}
         {/* Timestamp — always shown; sits before the buttons */}
         <span className="text-[11px] text-ide-faint">
           {relativeTime(entry.wall_time)}

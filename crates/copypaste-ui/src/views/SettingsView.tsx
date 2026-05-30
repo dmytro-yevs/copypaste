@@ -967,6 +967,21 @@ export function SettingsView() {
             </div>
           </SettingsRow>
         </Panel>
+
+        <SubsectionHeader label="Window" hint="Visual style of the application window." />
+        <Panel>
+          <SettingsRow label="Translucency / vibrancy">
+            <div className="flex flex-col items-end gap-0.5">
+              <Toggle
+                checked={prefs.translucency ?? true}
+                onChange={(v) => setPrefs({ translucency: v })}
+              />
+              <span className="text-[11px] text-ide-faint">
+                Blur + transparency behind surfaces. Disable for solid backgrounds.
+              </span>
+            </div>
+          </SettingsRow>
+        </Panel>
       </div>
     );
   }

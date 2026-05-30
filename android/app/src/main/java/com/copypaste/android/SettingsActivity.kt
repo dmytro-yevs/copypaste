@@ -99,6 +99,7 @@ fun SettingsScreen(
     // ── Display ──
     var showWarnings by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
+    var translucency by remember { mutableStateOf(settings.translucency) }
     var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.toString()) }
     var previewDelay by remember { mutableStateOf(settings.previewDelay.toString()) }
 
@@ -239,6 +240,19 @@ fun SettingsScreen(
                     val prev = maskSensitive; maskSensitive = it
                     try { settings.maskSensitiveContent = it } catch (e: Exception) {
                         maskSensitive = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
+                    }
+                }
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+            SettingsRow(
+                title = stringResource(R.string.setting_translucency_title),
+                subtitle = stringResource(R.string.setting_translucency_subtitle),
+                checked = translucency,
+                onCheckedChange = {
+                    val prev = translucency; translucency = it
+                    try { settings.translucency = it } catch (e: Exception) {
+                        translucency = prev
                         settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
