@@ -12,13 +12,115 @@ import { ImageThumb } from "../components/ImageThumb";
 const MAX_ITEMS = 50;
 
 // Default text row height when previewSize hasn't been set yet.
-const DEFAULT_TEXT_ROW_H = 28;
+const DEFAULT_TEXT_ROW_H = 34;
 
-// Maccy parity: image rows in the popup use imageMaxHeight + 10 px padding,
-// matching the same formula as HistoryView's rowHeightFor.
+// Maccy parity: image rows in the popup use imageMaxHeight + 10 px padding.
 function popupRowHeight(isImage: boolean, textH: number, imageMaxH: number): number {
   return isImage ? Math.max(imageMaxH + 10, 34) : Math.max(textH, 22);
 }
+
+// ── Content-type chip ────────────────────────────────────────────────────────
+// Shared inline SVG glyphs with tinted chip background.
+
+function ContentChip({ type }: { type: string }) {
+  if (type === "text" || type === "text/plain") {
+    return (
+      <span className="chip" style={{ background: "rgba(61,139,255,0.14)", color: "#3D8BFF" }}>
+        T
+      </span>
+    );
+  }
+  if (type === "url") {
+    return (
+      <span className="chip" style={{ background: "rgba(86,182,194,0.14)", color: "#56B6C2" }}>
+        ↗
+      </span>
+    );
+  }
+  if (type === "image" || type.startsWith("image/")) {
+    return (
+      <span className="chip" style={{ background: "rgba(198,120,221,0.14)", color: "#C678DD" }}>
+        {/* mini image frame */}
+        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
+          <circle cx="5.5" cy="6" r="1.1" fill="currentColor" stroke="none" />
+          <path d="m1.5 11 3.5-3.5 2.5 2.5 2-2 4 4" />
+        </svg>
+      </span>
+    );
+  }
+  if (type === "code" || type.startsWith("text/x-") || type.startsWith("application/")) {
+    return (
+      <span className="chip" style={{ background: "rgba(198,120,221,0.14)", color: "#C678DD" }}>
+        {"</>"}
+      </span>
+    );
+  }
+  // Fallback: faint dot
+  return (
+    <span className="chip" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.35)" }}>
+      •
+    </span>
+  );
+}
+
+// ── Empty state hero ─────────────────────────────────────────────────────────
+
+function EmptyState({ icon, title, body, action }: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center flex-1 gap-2 px-6 py-8 text-center">
+      <span style={{ color: "rgba(255,255,255,0.20)", fontSize: 28, lineHeight: 1 }}>{icon}</span>
+      <p className="text-[13px]" style={{ color: "rgba(255,255,255,0.45)" }}>{title}</p>
+      <p className="text-[11px]" style={{ color: "rgba(255,255,255,0.28)" }}>{body}</p>
+      {action}
+    </div>
+  );
+}
+
+// ── Highlighted text ──────────────────────────────────────────────────────────
+// Fuzzy-matched chars wrapped in accent colour+bg. DROP bold weight (causes width-shift).
+
+function HighlightedText({ text, positions }: { text: string; positions: number[] }): React.ReactElement {
+  if (positions.length === 0) {
+    return <>{text}</>;
+  }
+  const posSet = new Set(positions);
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
+  while (i < text.length) {
+    if (posSet.has(i)) {
+      let j = i;
+      while (j < text.length && posSet.has(j)) j++;
+      nodes.push(
+        <span
+          key={i}
+          style={{
+            color: "#3D8BFF",
+            background: "rgba(61,139,255,0.16)",
+            borderRadius: 2,
+            // Deliberately NO fontWeight change — prevents width-shift on highlight
+          }}
+        >
+          {text.slice(i, j)}
+        </span>
+      );
+      i = j;
+    } else {
+      let j = i;
+      while (j < text.length && !posSet.has(j)) j++;
+      nodes.push(text.slice(i, j));
+      i = j;
+    }
+  }
+  return <>{nodes}</>;
+}
+
+// ── Main Popup ────────────────────────────────────────────────────────────────
 
 export function Popup() {
   const {
@@ -47,7 +149,7 @@ export function Popup() {
       setSelectedIdx(0);
     } catch (e) {
       if (e instanceof IpcError) {
-        setError(e.code === "daemon_offline" ? "Daemon offline" : (e.message ?? "Error"));
+        setError(e.code === "daemon_offline" ? "daemon_offline" : (e.message ?? "Error"));
       } else {
         setError("Failed to load history");
       }
@@ -62,7 +164,6 @@ export function Popup() {
       if (focused) {
         setQuery("");
         refresh();
-        // Auto-focus the search input when the popup becomes visible.
         setTimeout(() => inputRef.current?.focus(), 50);
       }
     });
@@ -74,12 +175,10 @@ export function Popup() {
   // Initial load.
   useEffect(() => {
     refresh();
-    // Focus the input immediately on mount.
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [refresh]);
 
-  // Fuzzy-filtered and scored items. When the query is empty, preserve the
-  // original recency order from the daemon. When searching, sort best-first.
+  // Fuzzy-filtered and scored items.
   const filtered = useMemo<Array<{ item: HistoryEntry; positions: number[] }>>(() => {
     const q = query.trim();
     if (!q) {
@@ -99,7 +198,7 @@ export function Popup() {
   // Keep the selected index in bounds when filter changes.
   useEffect(() => {
     setSelectedIdx((prev) => (filtered.length === 0 ? 0 : Math.min(prev, filtered.length - 1)));
-  }, [filtered.length]); // filtered.length is stable reference-wise when unchanged
+  }, [filtered.length]);
 
   // Scroll the selected item into view.
   useEffect(() => {
@@ -111,19 +210,15 @@ export function Popup() {
     }
   }, [selectedIdx]);
 
-  // V-10/V-11 fix: always use invoke("hide_popup") instead of win.hide() so
-  // the Rust side runs the prior-app activation before hiding.  Calling
-  // win.hide() directly from JS bypasses that logic and causes macOS to surface
-  // the main window (on toggle-close) or leave focus in limbo (no prior app).
-  // V-12 fix: guard with a ref so concurrent blur + row-click don't both call
-  // hide_popup → double activation → focus flicker.
+  // V-10/V-11 fix: always use invoke("hide_popup") — the Rust side runs the
+  // prior-app activation before hiding. win.hide() from JS bypasses that logic.
+  // V-12 fix: guard with isHidingRef so concurrent blur + row-click don't both
+  // call hide_popup → double activation → focus flicker.
+  // CRITICAL: hide fires IMMEDIATELY — no exit animation (preserves fix).
   const isHidingRef = useRef(false);
   const hide = useCallback(async () => {
     if (isHidingRef.current) return;
     isHidingRef.current = true;
-    // Reset scroll + selection so the next show always starts at the top.
-    // Manual wheel-scroll moves scrollTop without changing selectedIdx, so the
-    // scrollIntoView effect alone won't reset it on re-show — reset here on hide.
     if (listRef.current) listRef.current.scrollTop = 0;
     setSelectedIdx(0);
     try {
@@ -131,46 +226,24 @@ export function Popup() {
     } catch (e) {
       console.error("popup hide failed", e);
     } finally {
-      // Reset after a tick so a rapid re-show doesn't get stuck.
       setTimeout(() => { isHidingRef.current = false; }, 100);
     }
   }, []);
 
-  // Fix #2/#3: hide popup first (awaited), then copy + paste. Errors here used
-  // to be silently swallowed (`catch {}`), masking real failures (daemon
-  // offline, missing Accessibility permission). Surface them to the console and
-  // the error strip so the failure isn't invisible.
-  //
-  // W4-6: after a successful copy, fire the optional sound and/or notification
-  // based on the persisted UIPrefs. Both are best-effort — failures are swallowed
-  // inside playCopySound/showCopyNotification so they never disrupt the flow.
-  // The Esc / auto-hide path calls `hide()` directly and does NOT reach this
-  // function, so sound/notify only fire on an actual copy action (Enter or click).
   const copyAndPaste = useCallback(
     async (id: string, _preview: string) => {
       await hide();
       try {
         const copied = await api.copyItem(id);
-        // V-18: Show a macOS notification with the item preview.  The Rust
-        // command sanitises the preview (strips control chars, quotes,
-        // backslashes) before embedding it in the AppleScript literal.
-        // best-effort — never surface an error to the user for this.
         const preview =
           typeof copied === "object" && copied !== null && "preview" in copied
             ? String((copied as { preview: string }).preview)
             : "";
-        // (unconditional show_copy_notification removed — the pref-gated path
-        //  below is the single notification source; firing it here caused a
-        //  double notification even when notifyOnCopy was OFF.)
-        // Synthesise Cmd+V into the previously-focused app.
         await invoke("paste_to_frontmost");
-        // Fire feedback AFTER paste is triggered so the sound/banner doesn't
-        // interfere with the CGEventTap timing (paste happens on a bg thread).
         if (playSoundOnCopy) {
           void playCopySound();
         }
         if (notifyOnCopy) {
-          // Truncate the preview to a single short line for the banner title.
           const title = preview.replace(/\s+/g, " ").trim().slice(0, 60) || "Copied";
           void showCopyNotification(title);
         }
@@ -191,6 +264,16 @@ export function Popup() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // ⌘1-9: paste Nth item directly
+      if (e.metaKey && !query.trim() && e.key >= "1" && e.key <= "9") {
+        const idx = parseInt(e.key, 10) - 1;
+        const entry = filtered[idx];
+        if (entry) {
+          e.preventDefault();
+          void copyAndPaste(entry.item.id, entry.item.preview);
+        }
+        return;
+      }
       switch (e.key) {
         case "Escape":
           e.preventDefault();
@@ -216,18 +299,23 @@ export function Popup() {
           break;
       }
     },
-    [filtered.length, hide, confirmSelection]
+    [filtered, query, hide, confirmSelection, copyAndPaste]
   );
 
+  const showQuery = query.trim();
+
   return (
-    // v0.5.3: deeper translucent bg, stronger blur, layered shadow, rounded corners.
+    // §4 popup: radius 14, E3 glass; entrance animation on SHOW only.
+    // CRITICAL: no exit animation — hide fires invoke("hide_popup") immediately.
     <div
-      className="flex flex-col h-screen rounded-xl overflow-hidden shadow-ide-popup"
+      className="popup-enter flex flex-col h-screen overflow-hidden"
       style={{
-        background: "rgba(18, 19, 22, 0.90)",
-        backdropFilter: "blur(28px) saturate(1.5)",
-        WebkitBackdropFilter: "blur(28px) saturate(1.5)",
-        border: "1px solid rgba(255,255,255,0.07)",
+        borderRadius: 14,
+        background: "rgba(19, 20, 26, 0.82)",
+        backdropFilter: "blur(30px) saturate(180%)",
+        WebkitBackdropFilter: "blur(30px) saturate(180%)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        boxShadow: "0 12px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.06)",
       }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
@@ -235,21 +323,20 @@ export function Popup() {
         }
       }}
     >
-      {/* Search bar */}
+      {/* ── Search bar §4 — 44px, icon + input + N of M count ─────────── */}
       <div
-        className="flex items-center gap-2 px-3 pt-3 pb-2.5"
-        style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
+        className="flex items-center gap-2 px-3 shrink-0"
+        style={{
+          height: 44,
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
+        }}
       >
-        {/* Search icon */}
+        {/* Search icon (16px) */}
         <svg
-          className="w-[14px] h-[14px] shrink-0"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={1.75}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          viewBox="0 0 24 24"
-          style={{ color: "rgba(255,255,255,0.30)" }}
+          width="16" height="16" viewBox="0 0 24 24"
+          fill="none" stroke="currentColor" strokeWidth="1.75"
+          strokeLinecap="round" strokeLinejoin="round"
+          style={{ color: "rgba(255,255,255,0.28)", flexShrink: 0 }}
         >
           <circle cx="11" cy="11" r="7" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -263,42 +350,86 @@ export function Popup() {
           onKeyDown={handleKeyDown}
           placeholder="Search clipboard…"
           autoFocus
-          // Override global input base — popup input is transparent on the vibrancy
           style={{
             background: "transparent",
             border: "none",
             boxShadow: "none",
             borderRadius: 0,
             color: "rgba(255,255,255,0.90)",
-            fontSize: "13px",
+            fontSize: "15px",
             outline: "none",
             flex: 1,
             padding: 0,
           }}
           className="placeholder:text-white/25"
         />
+
+        {/* Right: N of M result count (right-aligned, tabular-nums) */}
+        {!loading && filtered.length > 0 && (
+          <span
+            className="shrink-0 text-[11px]"
+            style={{ color: "rgba(255,255,255,0.30)", fontVariantNumeric: "tabular-nums" }}
+          >
+            {showQuery ? `${Math.min(selectedIdx + 1, filtered.length)} of ${filtered.length}` : `${filtered.length}`}
+          </span>
+        )}
         {loading && (
           <span className="text-[11px] shrink-0" style={{ color: "rgba(255,255,255,0.25)" }}>
-            Loading…
+            …
           </span>
         )}
       </div>
 
-      {/* Item list */}
+      {/* ── Item list ──────────────────────────────────────────────────── */}
       {error ? (
-        <div
-          className="flex items-center justify-center flex-1 text-[13px]"
-          style={{ color: "rgba(255,255,255,0.35)" }}
-        >
-          {error}
-        </div>
+        error === "daemon_offline" ? (
+          <EmptyState
+            icon={
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+            }
+            title="Clipboard service offline"
+            body="The daemon is not running. Restart it from Settings."
+          />
+        ) : (
+          <EmptyState
+            icon={
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            }
+            title="Error"
+            body={error}
+          />
+        )
       ) : filtered.length === 0 ? (
-        <div
-          className="flex items-center justify-center flex-1 text-[13px]"
-          style={{ color: "rgba(255,255,255,0.35)" }}
-        >
-          {query ? "No matches" : "No clipboard items"}
-        </div>
+        showQuery ? (
+          <EmptyState
+            icon={
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="7" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                <line x1="8" y1="11" x2="14" y2="11" />
+              </svg>
+            }
+            title={`No matches for "${showQuery}"`}
+            body="Try a different search term."
+          />
+        ) : (
+          <EmptyState
+            icon={
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+              </svg>
+            }
+            title="Nothing copied yet"
+            body="Copy something and it will appear here."
+          />
+        )
       ) : (
         <ul
           ref={listRef}
@@ -309,11 +440,13 @@ export function Popup() {
             <PopupRow
               key={item.id}
               item={item}
+              index={idx}
               selected={idx === selectedIdx}
               textRowHeight={previewSize}
               imageMaxHeight={imageMaxHeight}
               maskSensitive={maskSensitive}
               matchPositions={positions}
+              showKeycap={!showQuery && idx < 9}
               onMouseEnter={() => setSelectedIdx(idx)}
               onClick={() => void copyAndPaste(item.id, item.preview)}
             />
@@ -321,95 +454,53 @@ export function Popup() {
         </ul>
       )}
 
-      {/* Footer hint */}
+      {/* ── Footer keycap pills ─────────────────────────────────────────── */}
       <div
-        className="flex items-center justify-between px-3 py-1.5 text-[10px]"
+        className="flex items-center justify-between px-3 py-1.5 shrink-0"
         style={{
           borderTop: "1px solid rgba(255,255,255,0.07)",
           color: "rgba(255,255,255,0.22)",
         }}
       >
-        <span>↑↓ navigate</span>
-        <span>⏎ paste · Esc close</span>
+        <span className="text-[10.5px]">↑↓ navigate</span>
+        <span className="text-[10.5px]">⏎ paste · Esc close</span>
       </div>
     </div>
   );
 }
 
+// ── PopupRow ──────────────────────────────────────────────────────────────────
+
 interface PopupRowProps {
   item: HistoryEntry;
+  index: number;
   selected: boolean;
   textRowHeight: number;
   imageMaxHeight: number;
   maskSensitive: boolean;
-  /** Character positions in the preview that matched the fuzzy query. Empty when no active query. */
   matchPositions: number[];
+  showKeycap: boolean;
   onMouseEnter: () => void;
   onClick: () => void;
 }
 
-/**
- * Render `text` with characters at `positions` wrapped in an accent highlight
- * span. Runs consecutive matched chars together into a single span for fewer
- * DOM nodes. Returns a plain string when there are no positions to highlight.
- */
-function HighlightedText({
-  text,
-  positions,
-}: {
-  text: string;
-  positions: number[];
-}): React.ReactElement {
-  if (positions.length === 0) {
-    return <>{text}</>;
-  }
-
-  const posSet = new Set(positions);
-  const nodes: React.ReactNode[] = [];
-  let i = 0;
-  while (i < text.length) {
-    if (posSet.has(i)) {
-      // Collect a contiguous run of matched characters.
-      let j = i;
-      while (j < text.length && posSet.has(j)) j++;
-      nodes.push(
-        <span
-          key={i}
-          className="text-ide-accent font-medium bg-ide-accent/20 rounded-[2px]"
-        >
-          {text.slice(i, j)}
-        </span>
-      );
-      i = j;
-    } else {
-      // Collect a contiguous run of unmatched characters.
-      let j = i;
-      while (j < text.length && !posSet.has(j)) j++;
-      nodes.push(text.slice(i, j));
-      i = j;
-    }
-  }
-  return <>{nodes}</>;
-}
-
 function PopupRow({
   item,
+  index,
   selected,
   textRowHeight,
   imageMaxHeight,
   maskSensitive,
   matchPositions,
+  showKeycap,
   onMouseEnter,
   onClick,
 }: PopupRowProps) {
-  // Bare "image" (legacy daemon) or "image/*" MIME-typed rows.
   const isImage = item.content_type === "image" || item.content_type.startsWith("image/");
   const isSensitive = item.is_sensitive;
 
   const rowH = popupRowHeight(isImage, textRowHeight, imageMaxHeight);
 
-  // Build the text label. For images, show a placeholder (thumbnail rendered separately).
-  // When sensitive or masked, skip highlight — the label is redacted.
   let label: string;
   let canHighlight = false;
   if (isImage) {
@@ -426,54 +517,37 @@ function PopupRow({
     canHighlight = true;
   }
 
+  // Relative time (tabular-nums)
+  const relTime = relativeTimeShort(item.wall_time);
+
   return (
     <li
       className={[
-        // image-row omits the CSS height/max-height cap so the inline minHeight wins.
         isImage ? "popup-row-image" : "popup-row",
-        "flex items-center gap-2 px-3 cursor-pointer select-none",
-        // v0.5.3: accent-tinted selection bg
+        "flex items-center gap-2 px-3 cursor-pointer select-none relative",
+        selected ? "row-selected-bar" : "",
       ].join(" ")}
       style={{
         minHeight: isImage ? Math.max(rowH, 50) : rowH,
         background: selected
-          ? "rgba(53, 146, 255, 0.18)"
+          ? "rgba(61,139,255,0.16)"
           : "transparent",
-        transition: "background 80ms ease",
+        transition: `background ${selected ? "0ms" : "80ms"} ease`,
       }}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     >
-      {/* Type / sensitive indicator */}
-      {isSensitive && (
-        <span
-          className="text-[11px] shrink-0 font-mono"
-          style={{ color: "rgba(240, 113, 113, 0.70)" }}
-          aria-hidden
-        >
-          ●
-        </span>
-      )}
-      {isImage && !isSensitive && (
-        <span
-          className="text-[11px] shrink-0"
-          style={{ color: "rgba(255,255,255,0.28)" }}
-          aria-hidden
-        >
-          ▤
-        </span>
-      )}
+      {/* Content-type chip */}
+      <ContentChip type={isImage ? "image" : item.content_type} />
 
+      {/* Primary label / image thumb */}
       {isImage ? (
-        // Maccy parity: image rows render ONLY the thumbnail — no text title.
-        // ImageThumb fetches via IPC on first render and caches the result in
-        // the shared LRU cache (shared with HistoryView).
         <ImageThumb id={item.id} maxHeight={imageMaxHeight} />
       ) : (
         <span
           className="flex-1 min-w-0 text-[13px]"
           style={{
-            color: isSensitive ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.88)",
+            color: isSensitive ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.88)",
             whiteSpace: "nowrap",
             overflow: "hidden",
             textOverflow: "ellipsis",
@@ -487,15 +561,41 @@ function PopupRow({
         </span>
       )}
 
-      {/* Pin indicator */}
-      {item.pinned && (
+      {/* Right cluster — fixed-width so layout never shifts */}
+      <div
+        className="flex items-center gap-1.5 shrink-0"
+        style={{ minWidth: "5rem", justifyContent: "flex-end" }}
+      >
+        {/* Relative time (tabular-nums, 11px) */}
         <span
-          className="shrink-0 text-[10px]"
-          style={{ color: "rgba(229, 169, 58, 0.70)" }}
+          className="text-[11px]"
+          style={{ color: "rgba(255,255,255,0.30)", fontVariantNumeric: "tabular-nums" }}
         >
-          ⚑
+          {relTime}
         </span>
-      )}
+
+        {/* Pin indicator */}
+        {item.pinned && (
+          <span style={{ color: "#D9A343", fontSize: 10 }}>⚑</span>
+        )}
+
+        {/* ⌘1-9 keycap (first 9 rows, no active query) */}
+        {showKeycap && (
+          <span className={selected ? "keycap keycap-selected" : "keycap"}>
+            ⌘{index + 1}
+          </span>
+        )}
+      </div>
     </li>
   );
+}
+
+/** Very short relative time for the popup right cluster (tabular-nums). */
+function relativeTimeShort(ms: number): string {
+  if (!ms || ms <= 0) return "";
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return "now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
+  return `${Math.floor(diff / 86_400_000)}d`;
 }

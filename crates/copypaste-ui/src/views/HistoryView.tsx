@@ -13,7 +13,7 @@ import { useUI } from "../store";
 import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 
 // ---------------------------------------------------------------------------
-// Toast — ephemeral one-liner feedback strip
+// Toast — §8 slide-up, neutral panel + 6px semantic dot, one at a time
 // ---------------------------------------------------------------------------
 
 type ToastKind = "success" | "error";
@@ -21,15 +21,37 @@ type ToastKind = "success" | "error";
 function Toast({ message, kind }: { message: string; kind: ToastKind }) {
   return (
     <div
-      className={[
-        "fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-ide border px-4 py-1.5",
-        "text-[12px] shadow-ide-md pointer-events-none animate-fade-in",
-        kind === "error"
-          ? "border-ide-danger/30 bg-ide-elevated text-ide-danger"
-          : "border-ide-success/30 bg-ide-elevated text-ide-success",
-      ].join(" ")}
+      className="toast-in fixed bottom-3 left-1/2 z-50 pointer-events-none"
+      style={{
+        // translate is baked into the toast-in animation start; keep it in
+        // final state so the element stays centred after the animation settles.
+        transform: "translateX(-50%)",
+        borderRadius: 10,
+        border: "1px solid rgba(255,255,255,0.10)",
+        background: "rgba(35,37,45,0.92)",
+        backdropFilter: "blur(20px) saturate(160%)",
+        WebkitBackdropFilter: "blur(20px) saturate(160%)",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.35)",
+        padding: "6px 14px 6px 10px",
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        whiteSpace: "nowrap",
+      }}
     >
-      {message}
+      {/* 6px semantic dot */}
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          flexShrink: 0,
+          background: kind === "error" ? "var(--ide-danger)" : "var(--ide-success)",
+        }}
+      />
+      <span className="text-[12px]" style={{ color: "rgba(255,255,255,0.82)" }}>
+        {message}
+      </span>
     </div>
   );
 }
@@ -471,12 +493,12 @@ function BulkActionBar({
   return (
     <div
       className={[
-        "flex items-center gap-2 border-b border-ide-warning/30 bg-ide-warning/10 px-3 py-1.5",
+        "flex items-center gap-2 border-b border-ide-border/60 bg-ide-elevated px-3 py-1.5",
         "text-[12px] text-ide-text",
       ].join(" ")}
     >
-      {/* Selection count */}
-      <span className="shrink-0 font-medium text-ide-warning">
+      {/* Selection count — neutral text, no amber */}
+      <span className="shrink-0 font-medium text-ide-dim">
         {count} selected
       </span>
 
@@ -1234,9 +1256,16 @@ export function HistoryView() {
     );
   } else if (loadState === "offline") {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-[13px] text-ide-dim">
-        <span>Daemon not running.</span>
-        <RestartDaemonButton onRestarted={() => void load()} />
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+        {/* §9 hero icon — plug/zap 28px faint */}
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
+          <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+        </svg>
+        <p className="text-[13px] text-ide-dim">Clipboard service offline</p>
+        <p className="text-[11px] text-ide-faint">The daemon is not running.</p>
+        <div className="mt-1">
+          <RestartDaemonButton onRestarted={() => void load()} />
+        </div>
       </div>
     );
   } else if (loadState === "error") {
@@ -1290,14 +1319,27 @@ export function HistoryView() {
     );
   } else if (filtered.length === 0 && items.length === 0) {
     body = (
-      <div className="flex h-full items-center justify-center text-[13px] text-ide-dim">
-        No clipboard history yet.
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+        {/* §9 clipboard hero icon 28px faint */}
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+        </svg>
+        <p className="text-[13px] text-ide-dim">Nothing copied yet</p>
+        <p className="text-[11px] text-ide-faint">Copy something and it will appear here.</p>
       </div>
     );
   } else if (filtered.length === 0) {
     body = (
-      <div className="flex h-full items-center justify-center text-[13px] text-ide-dim">
-        No results for &ldquo;{search}&rdquo;.
+      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+        {/* §9 search-x hero icon 28px faint */}
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
+          <circle cx="11" cy="11" r="7" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          <line x1="8" y1="11" x2="14" y2="11" />
+        </svg>
+        <p className="text-[13px] text-ide-dim">No results for &ldquo;{search}&rdquo;</p>
+        <p className="text-[11px] text-ide-faint">Try a different search term.</p>
       </div>
     );
   } else {
