@@ -131,11 +131,12 @@ impl Daemon {
         &self.socket_path
     }
 
-    /// Path to this daemon's `peers.json`. The daemon honours
-    /// `COPYPASTE_CONFIG_DIR` for the peers file, writing it directly under that
-    /// dir, so the test reads it from the same isolated location.
+    /// Path to this daemon's `peers.json`. The daemon writes peers.json
+    /// directly under `COPYPASTE_CONFIG_DIR` (when set), with no extra
+    /// subdirectory — `peers_file_path()` delegates to `paths::config_dir()`
+    /// which returns the override value as-is.
     pub fn peers_json_path(&self) -> PathBuf {
-        self.config_dir.join("copypaste").join("peers.json")
+        self.config_dir.join("peers.json")
     }
 
     /// Read and parse this daemon's `peers.json`, returning an empty array if it

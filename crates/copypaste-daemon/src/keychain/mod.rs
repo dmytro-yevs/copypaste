@@ -193,7 +193,73 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
                 Err(KeychainError::Locked(e.code()))
             }
             Err(_) => {
-                // errSecItemNotFound: genuinely no stored key — create one.
+                // errSecItemNotFound: primary entry absent. Before minting a
+                // brand-new key, check whether a crash mid-ACL-rotation left a
+                // surviving copy under ACCOUNT_ROTATE_BACKUP. If so, PROMOTE
+                // that backup to primary so the existing encrypted DB stays
+                // openable. Only mint a fresh key when the backup slot is also
+                // absent (or unusable).
+                //
+                // ACL-rotation orphan-key fix (HIGH data-loss): without this
+                // check, a kill/power-loss between Step 2 (primary deleted) and
+                // Step 3 (primary recreated) in rotate_acl_to_current_install
+                // caused load_or_create to see ItemNotFound and generate a NEW
+                // random key, permanently orphaning the existing SQLCipher DB.
+                match get_generic_password(SERVICE, acl::ACCOUNT_ROTATE_BACKUP) {
+                    Ok(backup_bytes) if backup_bytes.len() == 32 => {
+                        let backup = zeroize::Zeroizing::new(backup_bytes);
+                        let arr: [u8; 32] = (&**backup)
+                            .try_into()
+                            .map_err(|_| KeychainError::InvalidLength(backup.len()))?;
+                        tracing::warn!(
+                            "load_or_create: primary key absent but rotation backup found — \
+                             promoting backup to primary to recover from a mid-rotation crash"
+                        );
+                        // Re-create the primary entry with the recovered secret
+                        // and an up-to-date ACL. If this fails we propagate the
+                        // error — better to surface the problem than silently use
+                        // the wrong key.
+                        let trusted = acl::trusted_binary_paths()?;
+                        acl::store_with_acl(&arr, &trusted)?;
+                        // Best-effort: clean up the backup now that primary is
+                        // restored. A lingering backup is harmless (rotate_acl
+                        // clears it at the top of the next rotation) but we
+                        // prefer not to leave stale entries around.
+                        let _ = delete_generic_password(SERVICE, acl::ACCOUNT_ROTATE_BACKUP);
+                        tracing::info!(
+                            "load_or_create: rotation backup promoted to primary; \
+                             backup entry cleaned up"
+                        );
+                        return Ok(DeviceKeypair::from_secret_bytes(&arr)?);
+                    }
+                    Ok(backup_bytes) => {
+                        // Backup present but wrong length — corrupted; ignore and
+                        // fall through to generate a fresh key.
+                        tracing::warn!(
+                            "load_or_create: rotation backup has wrong length {} (expected 32); \
+                             ignoring and generating a fresh key",
+                            backup_bytes.len()
+                        );
+                        let _ = delete_generic_password(SERVICE, acl::ACCOUNT_ROTATE_BACKUP);
+                    }
+                    Err(e) if e.code() == acl::ERR_SEC_ITEM_NOT_FOUND => {
+                        // No backup either — this is a genuine first run.
+                    }
+                    Err(e) => {
+                        // Backup read failed for a non-not-found reason (locked
+                        // keychain, access denied). Propagate as Locked so the
+                        // daemon degrades rather than silently minting a new key
+                        // that may conflict with an existing DB.
+                        tracing::warn!(
+                            code = e.code(),
+                            "load_or_create: rotation backup read failed (non-not-found); \
+                             propagating locked error to avoid orphaning existing DB"
+                        );
+                        return Err(KeychainError::Locked(e.code()));
+                    }
+                }
+
+                // No primary, no usable backup → genuine first run. Mint a new key.
                 let kp = DeviceKeypair::generate();
                 // Beta-merge audit MED #3 + #4: pull the secret via the
                 // zeroizing accessor so the buffer handed to the Keychain
