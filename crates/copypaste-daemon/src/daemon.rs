@@ -627,6 +627,10 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     } else {
         None
     };
+    // Pass the configured quota so the P2P merge path prunes to the same cap
+    // as the cloud path (Fix HIGH-3). Saturating cast: values above i64::MAX
+    // (>9 EB) are unreachable in practice.
+    let sync_quota_bytes = config.storage_quota_bytes.min(i64::MAX as u64) as i64;
     let sync_handle = tokio::spawn(async move {
         if let Err(e) = sync_orch::run(
             sync_db,
@@ -635,6 +639,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             sync_outbound_tx,
             sync_device_id,
             sync_crypto,
+            sync_quota_bytes,
             sync_shutdown,
         )
         .await
@@ -1290,11 +1295,33 @@ async fn handle_text(
         match insert_item_with_fts(&db_guard, &item, &text) {
             Ok(stored_id) => {
                 if stored_id != item.id {
+                    // Fix MED #4: `insert_item_with_fts` deduped `item` against
+                    // an existing row identified by `stored_id`. Broadcasting
+                    // `item` (which carries the REJECTED new uuid) would cause
+                    // subscribers (P2P, sync) to look up a nonexistent row.
+                    // Fetch the ACTUAL stored row and broadcast that instead, so
+                    // all consumers observe a valid, persisted item. If the fetch
+                    // fails (extreme race), produce no broadcast for this poll.
                     tracing::debug!(
                         requested = %item.id,
                         existing = %stored_id,
-                        "text item deduped against existing row (UNIQUE index race)"
+                        "text item deduped against existing row (UNIQUE index race) — broadcasting stored row"
                     );
+                    prune_history(&db_guard, &config);
+                    match get_item_by_id(&db_guard, &stored_id) {
+                        Ok(Some(stored_item)) => Some(stored_item),
+                        Ok(None) => {
+                            tracing::debug!(
+                                id = %stored_id,
+                                "text dedup: stored row disappeared before fetch (deleted concurrently)"
+                            );
+                            None
+                        }
+                        Err(e) => {
+                            tracing::warn!("text dedup: failed to fetch stored row for broadcast: {e}");
+                            None
+                        }
+                    }
                 } else {
                     tracing::info!(
                         id = %item.id,
@@ -1303,9 +1330,9 @@ async fn handle_text(
                         item.id,
                         is_sensitive
                     );
+                    prune_history(&db_guard, &config);
+                    Some(item)
                 }
-                prune_history(&db_guard, &config);
-                Some(item)
             }
             Err(e) => {
                 tracing::warn!("failed to store text item: {e}");

@@ -315,15 +315,22 @@ impl ClipboardMonitor {
 
             if delta >= SKIPPED_BATCH_THRESHOLD {
                 let missed = (delta - 1) as usize;
+                // CRITICAL fix: do NOT return SkippedBatch here and discard the
+                // already-read content. The old code called:
+                //   self.last_change_count = count   (line above)
+                //   return Ok(Some(SkippedBatch))    ← early return
+                // This caused the NEXT poll to see count == last_change_count → None,
+                // permanently losing the most-recent clipboard item. Instead we log
+                // the burst as a telemetry side-channel and fall through so the
+                // content path below captures the current pasteboard value.
                 tracing::info!(
                     delta,
                     missed,
-                    "clipboard: rapid changes detected — {} intermediate updates lost",
+                    "clipboard: rapid changes detected — {} intermediate updates lost \
+                     (most-recent item still captured)",
                     missed
                 );
-                // Surface as its own event; the caller will poll again to
-                // pick up the latest content immediately.
-                return Ok(Some(ClipboardContent::SkippedBatch(missed)));
+                // Intentional fall-through: do not return here.
             }
 
             if had_image_alongside_text {
