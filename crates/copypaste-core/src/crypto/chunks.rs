@@ -36,6 +36,15 @@ pub enum ChunkError {
     /// an oversized `chunk_size` can never abort the process.
     #[error("Chunk {index} encryption failed")]
     EncryptFailed { index: u32 },
+    /// `chunk_size == 0` would cause `slice::chunks(0)` to panic. Callers
+    /// must pass a chunk_size of at least 1.
+    #[error("chunk_size must be at least 1")]
+    InvalidChunkSize,
+    /// The plaintext is so large that the chunk count exceeds u32::MAX.
+    /// XChaCha20-Poly1305 chunk indices are encoded as u32 in the wire
+    /// format, so streams longer than ~4 billion chunks are unsupported.
+    #[error("too many chunks: stream length exceeds u32::MAX")]
+    TooManyChunks,
 }
 
 /// Build AAD: `"CHUNK_FORMAT_V1\0"[16] || file_id[16] || chunk_index[4:BE] || total_chunks[4:BE] || is_final[1]`
@@ -77,18 +86,26 @@ pub fn encrypt_chunks(
     file_id: &[u8; 16],
     chunk_size: usize,
 ) -> Result<Vec<EncryptedChunk>, ChunkError> {
+    // Fix [HIGH]: chunk_size == 0 would cause slice::chunks(0) to panic.
+    if chunk_size == 0 {
+        return Err(ChunkError::InvalidChunkSize);
+    }
+
     let cipher = XChaCha20Poly1305::new(key.into());
     let chunks_raw: Vec<&[u8]> = if plaintext.is_empty() {
         vec![&[]]
     } else {
         plaintext.chunks(chunk_size).collect()
     };
-    let total = chunks_raw.len() as u32;
+    // Fix [MED]: use try_from to avoid silent truncation when chunk count
+    // exceeds u32::MAX (would wrap on 32-bit targets or very large inputs).
+    let total = u32::try_from(chunks_raw.len()).map_err(|_| ChunkError::TooManyChunks)?;
 
     chunks_raw
         .iter()
         .enumerate()
         .map(|(i, chunk)| {
+            // Safe: i < chunks_raw.len() <= u32::MAX (guarded above).
             let idx = i as u32;
             let is_final = idx == total - 1;
             let aad = build_aad(file_id, idx, total, is_final);
@@ -126,7 +143,8 @@ pub fn decrypt_chunks(
         return Err(ChunkError::Empty);
     }
     let cipher = XChaCha20Poly1305::new(key.into());
-    let total = chunks.len() as u32;
+    // Fix [MED]: use try_from to avoid silent truncation on pathological inputs.
+    let total = u32::try_from(chunks.len()).map_err(|_| ChunkError::TooManyChunks)?;
 
     // SAFETY: guarded by the `chunks.is_empty()` early-return above; `last()`
     // cannot return `None` when `chunks` is non-empty.
@@ -318,5 +336,32 @@ mod tests {
             }
             other => panic!("expected MissingChunk, got {other:?}"),
         }
+    }
+
+    /// Fix [HIGH]: `chunk_size == 0` must return `InvalidChunkSize` instead of
+    /// panicking via `slice::chunks(0)`.
+    #[test]
+    fn zero_chunk_size_returns_invalid_chunk_size_error() {
+        let key = test_key();
+        let file_id = test_file_id();
+        let result = encrypt_chunks(b"some data", &key, &file_id, 0);
+        assert!(
+            matches!(result, Err(ChunkError::InvalidChunkSize)),
+            "chunk_size=0 must produce InvalidChunkSize, got {:?}",
+            result
+        );
+        assert_eq!(
+            ChunkError::InvalidChunkSize.to_string(),
+            "chunk_size must be at least 1"
+        );
+    }
+
+    /// Fix [MED]: passphrase minimum length error message is correct.
+    #[test]
+    fn too_many_chunks_error_message() {
+        assert_eq!(
+            ChunkError::TooManyChunks.to_string(),
+            "too many chunks: stream length exceeds u32::MAX"
+        );
     }
 }
