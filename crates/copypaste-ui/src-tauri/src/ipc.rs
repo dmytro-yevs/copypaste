@@ -115,6 +115,30 @@ pub async fn ipc_call(method: String, params: Option<Value>) -> Result<IpcReply,
         .map_err(|e| format!("ipc_call task join error: {e}"))?
 }
 
+/// Wipe and recreate the daemon's clipboard database (destructive recovery).
+///
+/// This is the backend for the desktop UI's "Reset database" button — the
+/// explicit escape hatch the user invokes when the daemon is stuck in DEGRADED
+/// mode because the existing database cannot be decrypted. It sends the daemon's
+/// [`reset_database`](copypaste_ipc::METHOD_RESET_DATABASE) IPC method with
+/// `confirm = true` (the daemon refuses the call without it) and returns the
+/// parsed reply. The daemon recovers IN-PLACE on success, so the caller should
+/// re-fetch `status` / `history_page` afterwards — no daemon restart is needed.
+///
+/// Like [`ipc_call`], the underlying socket IO is blocking and is therefore
+/// offloaded to a blocking thread to avoid stalling the async runtime.
+#[tauri::command]
+pub async fn reset_database() -> Result<IpcReply, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        call(
+            copypaste_ipc::METHOD_RESET_DATABASE,
+            serde_json::json!({ "confirm": true }),
+        )
+    })
+    .await
+    .map_err(|e| format!("reset_database task join error: {e}"))?
+}
+
 /// Result of [`pairing_qr_svg`]: an inline SVG of the pairing QR plus metadata.
 #[derive(serde::Serialize)]
 pub struct PairingQr {

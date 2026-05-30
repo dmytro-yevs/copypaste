@@ -218,3 +218,34 @@ export async function pairingQrSvg(): Promise<PairingQr> {
     throw new Error(String(e));
   }
 }
+
+/** Reply from the daemon's `reset_database` recovery method. */
+export interface ResetDatabaseResult {
+  /** Always true on success. */
+  reset: boolean;
+  /** True when the daemon recovered in-place (no restart needed). */
+  ready: boolean;
+}
+
+/**
+ * Wipe and recreate the daemon's clipboard database (DESTRUCTIVE recovery).
+ *
+ * This is the escape hatch for a daemon stuck in degraded mode because its
+ * database cannot be decrypted. It erases all local clipboard history and
+ * creates a fresh empty database; the daemon recovers in-place. The Tauri
+ * backend always sends `confirm = true`. Throws a plain `Error` on failure
+ * (daemon offline, reset failed) so the caller can surface the real error.
+ */
+export async function resetDatabase(): Promise<ResetDatabaseResult> {
+  let reply: IpcReply;
+  try {
+    reply = await invoke<IpcReply>("reset_database");
+  } catch (e) {
+    throw new Error(String(e));
+  }
+  if (!reply.ok) {
+    throw new IpcError(reply.error ?? "reset_database failed", reply.error_code);
+  }
+  const data = (reply.data ?? {}) as Partial<ResetDatabaseResult>;
+  return { reset: data.reset ?? true, ready: data.ready ?? true };
+}

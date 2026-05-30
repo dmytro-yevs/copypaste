@@ -27,10 +27,12 @@
 #![deny(rust_2018_idioms)]
 
 pub mod error;
+pub mod methods;
 pub mod request;
 pub mod response;
 
 pub use error::ErrorCode;
+pub use methods::{ResetDatabaseRequest, ResetDatabaseResponse, METHOD_RESET_DATABASE};
 pub use request::Request;
 pub use response::{
     Response, ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR, ERR_CODE_INVALID_ARGUMENT,
