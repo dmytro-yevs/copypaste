@@ -99,6 +99,19 @@ impl AppConfig {
             .clamp(POLL_INTERVAL_MIN_MS, POLL_INTERVAL_MAX_MS);
         self.image_quality = self.image_quality.clamp(1, 100);
         self.encryption_chunk_kb = self.encryption_chunk_kb.clamp(16, 4096);
+
+        // Fix 7: floor values that must never be 0 to prevent wipe-all / divide-by-zero.
+        // history_limit = 0 would silently return no history rows from every page query.
+        self.history_limit = self.history_limit.max(1);
+        // Size limits of 0 would accept nothing (max_text/image/file) or keep nothing (quota).
+        self.max_text_size_bytes = self.max_text_size_bytes.max(1);
+        self.max_image_size_bytes = self.max_image_size_bytes.max(1);
+        self.max_file_size_bytes = self.max_file_size_bytes.max(1);
+        self.storage_quota_bytes = self.storage_quota_bytes.max(1);
+        // max_decoded_image_mb = 0 would produce a 0-byte image decode limit (reject all images).
+        self.max_decoded_image_mb = self.max_decoded_image_mb.max(1);
+        // sensitive_ttl_secs = 0 would wipe all sensitive items immediately on every cleanup tick.
+        self.sensitive_ttl_secs = self.sensitive_ttl_secs.max(1);
     }
 }
 

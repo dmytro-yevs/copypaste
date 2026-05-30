@@ -55,9 +55,11 @@ pub struct ClipboardItem {
 
 impl ClipboardItem {
     pub fn new_text(encrypted_content: Vec<u8>, nonce: Vec<u8>, lamport_ts: i64) -> Self {
+        // Fix 3: use unwrap_or_default() to avoid panic if system clock is before UNIX epoch
+        // (e.g. misconfigured VM or unit-test environment with a zeroed clock).
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as i64;
         Self {
             id: Uuid::new_v4().to_string(),
@@ -86,9 +88,10 @@ impl ClipboardItem {
     /// The `content_nonce` field is left `None` because XChaCha20 nonces are stored
     /// per-chunk inside the blob itself (no single item-level nonce needed).
     pub fn new_image(encrypted_blob: Vec<u8>, image_meta_json: String, lamport_ts: i64) -> Self {
+        // Fix 3: use unwrap_or_default() to avoid panic if system clock is before UNIX epoch.
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as i64;
         Self {
             id: Uuid::new_v4().to_string(),
@@ -340,6 +343,10 @@ pub fn get_page(
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>, ItemsError> {
+    // Fix 6: clamp before cast — a usize > i64::MAX would wrap negative, turning
+    // LIMIT into "no limit" in SQLite (negative LIMIT means unlimited rows).
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    let offset_i64 = offset.min(i64::MAX as usize) as i64;
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
@@ -347,7 +354,7 @@ pub fn get_page(
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
-        .query_map(params![limit as i64, offset as i64], row_to_item)?
+        .query_map(params![limit_i64, offset_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(items)
 }
@@ -367,6 +374,9 @@ pub fn get_page_pinned_first(
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>, ItemsError> {
+    // Fix 6: clamp before cast to avoid negative LIMIT/OFFSET in SQLite.
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    let offset_i64 = offset.min(i64::MAX as usize) as i64;
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
@@ -374,7 +384,7 @@ pub fn get_page_pinned_first(
          FROM clipboard_items ORDER BY pinned DESC, wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
-        .query_map(params![limit as i64, offset as i64], row_to_item)?
+        .query_map(params![limit_i64, offset_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(items)
 }
@@ -421,6 +431,9 @@ pub fn get_page_meta(
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>, ItemsError> {
+    // Fix 6: clamp before cast to avoid negative LIMIT/OFFSET in SQLite.
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    let offset_i64 = offset.min(i64::MAX as usize) as i64;
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, NULL AS content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
@@ -428,7 +441,7 @@ pub fn get_page_meta(
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
-        .query_map(params![limit as i64, offset as i64], row_to_item)?
+        .query_map(params![limit_i64, offset_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(items)
 }
@@ -456,25 +469,62 @@ pub fn get_item_by_id(db: &Database, id: &str) -> Result<Option<ClipboardItem>, 
 }
 
 pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
-    let changed = db.conn().execute(
+    // Fix 4: delete matching FTS rows in the same transaction so no orphan FTS
+    // entries accumulate when items are TTL-pruned.
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+    // Collect ids before deleting so we can prune FTS in the same tx.
+    let mut stmt = tx.prepare(
+        "SELECT id FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1 AND pinned = 0",
+    )?;
+    let ids: Vec<String> = stmt
+        .query_map(params![now_ms], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    drop(stmt);
+    let changed = tx.execute(
         "DELETE FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1 AND pinned = 0",
         params![now_ms],
     )?;
+    for id in &ids {
+        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    }
+    tx.commit()?;
     Ok(changed)
 }
 
 /// Delete sensitive items whose `wall_time` is older than `sensitive_ttl_ms` milliseconds ago.
 /// This enforces a local auto-wipe TTL for items marked `is_sensitive = 1`.
+///
+/// Pinned items are excluded (Fix 1). Threshold uses saturating_sub to avoid
+/// underflow when sensitive_ttl_ms > now_ms (Fix 2). FTS rows are pruned in
+/// the same transaction to avoid orphan FTS entries (Fix 4).
 pub fn delete_sensitive_expired(
     db: &Database,
     now_ms: i64,
     sensitive_ttl_ms: i64,
 ) -> Result<usize, ItemsError> {
-    let threshold = now_ms - sensitive_ttl_ms;
-    let changed = db.conn().execute(
-        "DELETE FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1",
+    // Fix 2: saturating_sub prevents underflow when ttl > now (e.g. in tests or
+    // on a clock that has not advanced far past epoch).
+    let threshold = now_ms.saturating_sub(sensitive_ttl_ms);
+    // Fix 4: collect ids first, then delete items + FTS in one transaction.
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+    let mut stmt = tx.prepare(
+        // Fix 1: add AND pinned = 0 so pinned sensitive items survive auto-wipe.
+        "SELECT id FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1 AND pinned = 0",
+    )?;
+    let ids: Vec<String> = stmt
+        .query_map(params![threshold], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    drop(stmt);
+    let changed = tx.execute(
+        "DELETE FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1 AND pinned = 0",
         params![threshold],
     )?;
+    for id in &ids {
+        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    }
+    tx.commit()?;
     Ok(changed)
 }
 
@@ -483,10 +533,15 @@ pub fn delete_sensitive_expired(
 /// Returns the number of rows actually removed (`0` when no row matched).
 /// Callers can use this to distinguish a real deletion from a no-op against a
 /// non-existent id.
+///
+/// Fix 4: also removes the matching `clipboard_fts` row in the same transaction
+/// so callers (daemon prune-by-id paths) don't need to call `delete_fts` separately.
 pub fn delete_item(db: &Database, id: &str) -> Result<usize, ItemsError> {
-    let removed = db
-        .conn()
-        .execute("DELETE FROM clipboard_items WHERE id=?1", params![id])?;
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+    let removed = tx.execute("DELETE FROM clipboard_items WHERE id=?1", params![id])?;
+    tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    tx.commit()?;
     Ok(removed)
 }
 
@@ -627,6 +682,21 @@ fn sanitize_fts5_query(raw: &str) -> Option<String> {
         return None;
     }
 
+    // Fix 5: count double-quotes; if the count is odd the phrase is unclosed and
+    // FTS5 will return a syntax error.  Strip all double-quotes in that case so
+    // the query degrades to a plain token search rather than an SQL error.
+    let quote_count = trimmed.chars().filter(|&c| c == '"').count();
+    let balanced = if quote_count % 2 == 0 {
+        trimmed.to_string()
+    } else {
+        // Odd number of quotes — remove all quotes to avoid an unclosed FTS5 phrase.
+        trimmed.chars().filter(|&c| c != '"').collect()
+    };
+    let trimmed = balanced.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
     // Pass through quoted phrases and explicit prefix queries unchanged.
     // A quoted phrase looks like `"foo bar"` — starts and ends with a double-quote.
     if (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() > 1)
@@ -692,8 +762,10 @@ pub fn search_items(
          LIMIT ?2",
     )?;
 
+    // Fix 6: clamp before cast to avoid negative LIMIT in SQLite.
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
     let rows: Vec<ClipboardItem> = stmt
-        .query_map(params![safe_query, limit as i64], row_to_item)?
+        .query_map(params![safe_query, limit_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(rows)
@@ -715,7 +787,10 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
         app_bundle_id: row.get(11)?,
         content_hash: row.get(12)?,
         origin_device_id: row.get(13)?,
-        key_version: row.get::<_, i64>(14)? as u8,
+        // Fix 6: use try_from to detect out-of-range values instead of silently truncating.
+        // key_version is a u8 field; values > 255 would silently truncate with `as u8`.
+        // On error (unexpected DB value) fall back to 0 so the caller can handle it gracefully.
+        key_version: u8::try_from(row.get::<_, i64>(14)?).unwrap_or(0),
         pinned: row.get::<_, i64>(15)? != 0,
     })
 }

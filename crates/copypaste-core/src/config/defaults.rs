@@ -12,8 +12,16 @@ pub const SENSITIVE_TTL_RELAY_SECS: u64 = 1_800;
 pub const SENSITIVE_TTL_LOCAL_SECS: u64 = 1_800;
 pub const SENSITIVE_TTL_SECS: u64 = 30;
 pub const IMAGE_QUALITY: u8 = 80;
+// FIXWAVE: sqlite_cache_mb is stored in AppConfig and exposed to users, but the
+// actual SQLite cache size is hardcoded to 8 MB in schema.rs (`PRAGMA cache_size`).
+// To wire this up: read AppConfig in db.rs open() and apply
+// `PRAGMA cache_size = -<sqlite_cache_mb * 1024>` after schema init.
+// Owned by the schema/db agent — do not change schema.rs here.
 pub const SQLITE_CACHE_MB: u32 = 8;
 pub const ENCRYPTION_CHUNK_KB: u32 = 64;
 pub const MAX_DECODED_IMAGE_MB: u32 = 50;
 pub const MAX_BANDWIDTH_KBPS: u32 = 0;
+// FIXWAVE: INLINE_THRESHOLD_BYTES is defined here but never read by any production
+// code path (grep shows zero callsites outside this file). Either wire it into the
+// daemon's image-inlining decision or remove it to avoid dead-const confusion.
 pub const INLINE_THRESHOLD_BYTES: u64 = 512_000;
