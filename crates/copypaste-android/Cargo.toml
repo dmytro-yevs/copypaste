@@ -42,6 +42,9 @@ copypaste-sync = { path = "../copypaste-sync" }
 tokio = { workspace = true }
 uniffi = { version = "0.27", features = ["bindgen", "cli"] }
 thiserror = "1"
+# Stack-local key copies are wrapped in Zeroizing so they are scrubbed on
+# scope exit, matching the project's "no lingering key material" convention.
+zeroize.workspace = true
 # v0.3: needed by `add_clipboard_item` to pre-generate the item_id that's
 # bound into the AEAD AAD before encryption (legacy empty-AAD fallback was
 # removed in 1c55e57).
