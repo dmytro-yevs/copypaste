@@ -133,7 +133,9 @@ async fn happy_path_hello_have_want_items_done() {
         match have {
             Message::Have { items } => {
                 assert_eq!(items.len(), 1);
-                assert_eq!(items[0].0, "item-engine");
+                // HAVE carries the cross-device `item_id` (= "item-engine-item"
+                // for this row), NOT the per-row `id`.
+                assert_eq!(items[0].0, "item-engine-item");
             }
             other => panic!("expected HAVE, got {other:?}"),
         }
@@ -145,11 +147,11 @@ async fn happy_path_hello_have_want_items_done() {
             Message::Want { item_ids } => assert!(item_ids.is_empty()),
             other => panic!("expected WANT, got {other:?}"),
         }
-        // Tell engine we want item-engine.
+        // Tell engine we want the item by its cross-device item_id.
         peer_send(
             &mut peer_side,
             &Message::Want {
-                item_ids: vec!["item-engine".to_string()],
+                item_ids: vec!["item-engine-item".to_string()],
             },
         )
         .await;
@@ -219,10 +221,12 @@ async fn both_sides_have_identical_state_yields_done_immediately() {
 
         // HAVE — peer declares the SAME item with the SAME lamport.
         let _engine_have = peer_recv(&mut peer_side).await;
+        // HAVE keys on the cross-device item_id so the engine recognises the
+        // shared item as identical (matching its own local item_id).
         peer_send(
             &mut peer_side,
             &Message::Have {
-                items: vec![(shared_for_peer.id.clone(), shared_for_peer.lamport_ts)],
+                items: vec![(shared_for_peer.item_id.clone(), shared_for_peer.lamport_ts)],
             },
         )
         .await;
@@ -301,24 +305,25 @@ async fn one_side_has_more_items_other_requests_via_want_then_receives_items() {
             Message::Have { items } => assert!(items.is_empty()),
             other => panic!("expected empty HAVE, got {other:?}"),
         }
+        // HAVE keys on item_id (= "item-from-peer-item").
         peer_send(
             &mut peer_side,
             &Message::Have {
                 items: vec![(
-                    peer_item_for_clone.id.clone(),
+                    peer_item_for_clone.item_id.clone(),
                     peer_item_for_clone.lamport_ts,
                 )],
             },
         )
         .await;
 
-        // WANT — engine MUST request item-from-peer.
+        // WANT — engine MUST request the item by its item_id.
         let engine_want = peer_recv(&mut peer_side).await;
         match engine_want {
             Message::Want { item_ids } => {
-                assert_eq!(item_ids, vec!["item-from-peer".to_string()]);
+                assert_eq!(item_ids, vec!["item-from-peer-item".to_string()]);
             }
-            other => panic!("expected WANT['item-from-peer'], got {other:?}"),
+            other => panic!("expected WANT['item-from-peer-item'], got {other:?}"),
         }
         // Peer WANTs nothing.
         peer_send(&mut peer_side, &Message::Want { item_ids: vec![] }).await;

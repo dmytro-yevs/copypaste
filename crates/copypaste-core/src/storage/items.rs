@@ -69,6 +69,18 @@ pub struct ClipboardItem {
 }
 
 impl ClipboardItem {
+    /// Create a brand-new text item.
+    ///
+    /// NOTE: `item_id` is the **cross-device identity** of the logical item. It
+    /// is bound into the AEAD AAD and carries a UNIQUE index
+    /// (`idx_clipboard_item_id`, schema v5), and the sync/merge layer keys
+    /// HAVE/WANT/LWW/dedup on it — NOT on `id`, which is a fresh per-row primary
+    /// key. The constructor seeds `item_id` with a fresh UUID for a genuinely
+    /// new capture, but when **reconstructing a known item** (cloud/P2P
+    /// download, sync replay) the caller MUST overwrite `item_id` with the
+    /// originating device's value and MUST NEVER regenerate it — otherwise the
+    /// same logical item lands under a different identity on each device, LWW
+    /// never fires, and duplicate rows accumulate.
     pub fn new_text(encrypted_content: Vec<u8>, nonce: Vec<u8>, lamport_ts: i64) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -100,6 +112,14 @@ impl ClipboardItem {
     /// `image_meta_json` stores width/height/chunk_count/file_id as JSON in `blob_ref`.
     /// The `content_nonce` field is left `None` because XChaCha20 nonces are stored
     /// per-chunk inside the blob itself (no single item-level nonce needed).
+    ///
+    /// NOTE: like [`new_text`](Self::new_text), `item_id` is the cross-device
+    /// identity the sync/merge/dedup layer keys on. The constructor seeds it
+    /// with a fresh UUID, but a capture pipeline that can derive a stable
+    /// content identity (e.g. from the image `file_id`) SHOULD overwrite
+    /// `item_id` once at capture so the same image converges to one row across
+    /// devices, and a reconstructed item MUST preserve the originating
+    /// `item_id` rather than regenerate it.
     pub fn new_image(encrypted_blob: Vec<u8>, image_meta_json: String, lamport_ts: i64) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -470,6 +490,45 @@ pub fn get_item_by_id(db: &Database, id: &str) -> Result<Option<ClipboardItem>, 
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(ItemsError::Sqlite(e)),
     }
+}
+
+/// Fetch a single clipboard item by its **cross-device** `item_id`.
+///
+/// `item_id` is the stable logical identity of an item across devices (it is
+/// bound into the AEAD AAD and carries the `idx_clipboard_item_id` UNIQUE
+/// index). The sync/merge layer resolves an incoming peer item against the
+/// local row by `item_id` — NOT by the per-row primary key `id`, which is a
+/// fresh `Uuid::new_v4()` on every device and so differs for the same logical
+/// item. Returns `Ok(None)` when no row matches.
+pub fn get_item_by_item_id(
+    db: &Database,
+    item_id: &str,
+) -> Result<Option<ClipboardItem>, ItemsError> {
+    let result = db.conn().query_row(
+        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+                content_hash, origin_device_id, key_version, pinned
+         FROM clipboard_items WHERE item_id = ?1",
+        params![item_id],
+        row_to_item,
+    );
+    match result {
+        Ok(item) => Ok(Some(item)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(ItemsError::Sqlite(e)),
+    }
+}
+
+/// Return `true` when a row with the given cross-device `item_id` already
+/// exists locally. Used by the sync/cloud dedup path to decide between an
+/// LWW resolve+replace (item already known) and a fresh insert.
+pub fn exists_item_by_item_id(db: &Database, item_id: &str) -> Result<bool, ItemsError> {
+    let count: i64 = db.conn().query_row(
+        "SELECT COUNT(1) FROM clipboard_items WHERE item_id = ?1",
+        params![item_id],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
 }
 
 pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {

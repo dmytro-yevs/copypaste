@@ -189,23 +189,29 @@ impl SyncEngine {
         self.clock.observe(peer_clock);
 
         // --- HAVE exchange ---
-        // Build a map of id → lamport_ts for local items (for conflict detection).
+        // Build a map of item_id → lamport_ts for local items (for conflict
+        // detection). We key on the cross-device `item_id`, NOT the per-row
+        // primary key `id`: `id` is a fresh `Uuid::new_v4()` on every device,
+        // so the same logical item has a different `id` on each side and HAVE/
+        // WANT/LWW would never match — duplicate rows would accumulate. The
+        // stable `item_id` (bound into the AEAD AAD, UNIQUE-indexed) is the
+        // identity every device agrees on.
         let local_clock_map: HashMap<String, i64> = local_items
             .iter()
-            .map(|i| (i.id.clone(), i.lamport_ts))
+            .map(|i| (i.item_id.clone(), i.lamport_ts))
             .collect();
         let local_ids: HashSet<&String> = local_clock_map.keys().collect();
 
         let my_have = Message::Have {
             items: local_items
                 .iter()
-                .map(|i| (i.id.clone(), i.lamport_ts))
+                .map(|i| (i.item_id.clone(), i.lamport_ts))
                 .collect(),
         };
         send_message(stream, &my_have).await?;
 
         let peer_have = recv_message(stream).await?;
-        // peer_clock_map: id → lamport_ts from the remote side.
+        // peer_clock_map: item_id → lamport_ts from the remote side.
         let peer_clock_map: HashMap<String, i64> = match peer_have {
             Message::Have { items } => items.into_iter().collect(),
             other => {
@@ -287,9 +293,11 @@ impl SyncEngine {
         };
 
         // --- ITEMS exchange: we send what peer wants first ---
+        // `items_peer_wants` is a list of `item_id`s (the WANT/HAVE wire lists
+        // carry item_ids), so filter on `item.item_id`, not the per-row `id`.
         let items_to_send: Vec<WireItem> = local_items
             .iter()
-            .filter(|item| items_peer_wants.contains(&item.id))
+            .filter(|item| items_peer_wants.contains(&item.item_id))
             .map(|item| local_to_wire(item, &self.device_id))
             .collect();
 
@@ -315,9 +323,14 @@ impl SyncEngine {
             }
         };
 
-        // Build a local index for fast lookup during merge.
-        let local_by_id: HashMap<&str, &ClipboardItem> =
-            local_items.iter().map(|i| (i.id.as_str(), i)).collect();
+        // Build a local index for fast lookup during merge, keyed on the
+        // cross-device `item_id` so an incoming wire item resolves against the
+        // local row that represents the SAME logical item (its per-row `id`
+        // differs across devices).
+        let local_by_item_id: HashMap<&str, &ClipboardItem> = local_items
+            .iter()
+            .map(|i| (i.item_id.as_str(), i))
+            .collect();
 
         let mut to_upsert: Vec<ClipboardItem> = Vec::new();
 
@@ -341,22 +354,22 @@ impl SyncEngine {
             // observe() uses saturating_add internally (edge-cases LOW #34).
             self.clock.observe(wire.lamport_ts as u64);
 
-            if let Some(existing) = local_by_id.get(wire.id.as_str()) {
-                // Item exists locally — apply LWW merge.
+            if let Some(existing) = local_by_item_id.get(wire.item_id.as_str()) {
+                // Item exists locally (same cross-device item_id) — apply LWW.
                 match resolve(existing, &wire) {
                     MergeOutcome::TakeRemote => {
-                        debug!("LWW: take remote for item {}", wire.id);
+                        debug!("LWW: take remote for item_id {}", wire.item_id);
                         to_upsert.push(wire_to_local(wire));
                         result.items_received += 1;
                     }
                     MergeOutcome::KeepLocal => {
-                        debug!("LWW: keep local for item {}", wire.id);
+                        debug!("LWW: keep local for item_id {}", wire.item_id);
                         result.items_skipped += 1;
                     }
                 }
             } else {
-                // New item — accept unconditionally.
-                debug!("accepting new item {} from peer", wire.id);
+                // New item (item_id not seen locally) — accept unconditionally.
+                debug!("accepting new item_id {} from peer", wire.item_id);
                 to_upsert.push(wire_to_local(wire));
                 result.items_received += 1;
             }
@@ -737,5 +750,97 @@ mod tests {
 
         assert!(res_a.is_ok());
         assert!(res_b.is_ok());
+    }
+
+    /// CRDT stable-identity regression: the SAME logical item captured on two
+    /// devices has DIFFERENT per-row `id`s (each device runs `Uuid::new_v4()`)
+    /// but the SAME cross-device `item_id`. HAVE/WANT/LWW must key on `item_id`
+    /// so the two converge to ONE item — the higher-lamport version winning —
+    /// instead of each device treating the other's copy as a brand-new item and
+    /// accumulating a duplicate.
+    #[tokio::test]
+    async fn same_item_id_different_row_id_converges_to_one_row() {
+        // Device A: row id A1, item_id X, lamport 5.
+        let mut a = make_item("A1", 5);
+        a.item_id = "X".to_string();
+        a.content = Some(vec![0xAA]);
+        // Device B: row id B9 (different!), item_id X (same logical item),
+        // lamport 7, different content → B's version must win LWW.
+        let mut b = make_item("B9", 7);
+        b.item_id = "X".to_string();
+        b.content = Some(vec![0xBB]);
+
+        let mut engine_a = SyncEngine::new("device-A");
+        let mut engine_b = SyncEngine::new("device-B");
+        let (mut sa, mut sb) = make_duplex();
+        let items_a = [a];
+        let items_b = [b];
+        let (res_a, res_b) = tokio::join!(
+            engine_a.run_session(&mut sa, &items_a),
+            engine_b.run_session(&mut sb, &items_b),
+        );
+        let (result_a, upsert_a) = res_a.expect("engine A ok");
+        let (result_b, upsert_b) = res_b.expect("engine B ok");
+
+        // A must accept B's newer version of item_id X (LWW: lamport 7 > 5).
+        assert_eq!(upsert_a.len(), 1, "A converges to the single shared item");
+        assert_eq!(upsert_a[0].item_id, "X");
+        assert_eq!(upsert_a[0].lamport_ts, 7, "higher-lamport version wins");
+        assert_eq!(upsert_a[0].content, Some(vec![0xBB]), "B's content wins");
+        assert_eq!(result_a.items_received, 1);
+
+        // B already holds the winning (higher-lamport) version of item_id X. The
+        // HAVE/WANT exchange — now keyed on item_id — recognises A's copy as the
+        // SAME item, so B never even requests A's older version: nothing is
+        // transferred to B and nothing is upserted. This is the convergence
+        // guarantee: B keeps its winner, A adopts it, ONE row results. (Pre-fix,
+        // A's differently-`id`'d copy looked like a brand-new item to B and would
+        // have been ingested as a duplicate.)
+        assert!(
+            upsert_b.is_empty(),
+            "B must not ingest A's older same-item_id copy as a new row"
+        );
+        assert_eq!(
+            result_b.items_received, 0,
+            "B receives nothing — A's copy is the same logical item, not new"
+        );
+        assert_eq!(
+            result_b.items_sent, 1,
+            "B sends its winning version of item_id X to A"
+        );
+    }
+
+    /// The inverse guarantee: two items with the SAME content but DISTINCT
+    /// `item_id`s (X1 / X2) are INTENTIONALLY-different captures and must BOTH
+    /// survive a sync. Identity is `item_id`, never the content hash — keying on
+    /// content would wrongly collapse deliberate duplicate captures.
+    #[tokio::test]
+    async fn intentional_duplicate_captures_stay_distinct() {
+        // A holds item_id X1; B holds item_id X2 — identical content, distinct
+        // logical items.
+        let mut a = make_item("rowA", 3);
+        a.item_id = "X1".to_string();
+        a.content = Some(vec![0xEE]);
+        let mut b = make_item("rowB", 3);
+        b.item_id = "X2".to_string();
+        b.content = Some(vec![0xEE]); // SAME content as A
+
+        let mut engine_a = SyncEngine::new("device-A");
+        let mut engine_b = SyncEngine::new("device-B");
+        let (mut sa, mut sb) = make_duplex();
+        let items_a = [a];
+        let items_b = [b];
+        let (res_a, res_b) = tokio::join!(
+            engine_a.run_session(&mut sa, &items_a),
+            engine_b.run_session(&mut sb, &items_b),
+        );
+        let (_ra, upsert_a) = res_a.expect("engine A ok");
+        let (_rb, upsert_b) = res_b.expect("engine B ok");
+
+        // Each side learns the OTHER's distinct item_id — both survive.
+        assert_eq!(upsert_a.len(), 1, "A must receive X2");
+        assert_eq!(upsert_a[0].item_id, "X2");
+        assert_eq!(upsert_b.len(), 1, "B must receive X1");
+        assert_eq!(upsert_b[0].item_id, "X1");
     }
 }
