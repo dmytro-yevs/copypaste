@@ -631,8 +631,14 @@ class ClipboardRepository(context: Context) {
 
             // Build ordered list of (id, blobBytes) for ALL items, oldest-first.
             // We need total bytes to decide whether to evict even when count is ok.
+            // Image bytes live under "item_img_$id" (Base64-encoded PNG) and MUST be
+            // included in the per-item size so the quota is meaningful for image-heavy DBs.
             val blobSizes: Map<String, Int> = ids.associate { id ->
-                id to (prefs.getString("item_$id", null)?.toByteArray(Charsets.UTF_8)?.size ?: 0)
+                val textBytes = prefs.getString("item_$id", null)?.toByteArray(Charsets.UTF_8)?.size ?: 0
+                // Base64 string length ≈ ceil(rawBytes / 3) * 4; using stored length as
+                // an upper-bound avoids decoding the entire blob just for a byte count.
+                val imgBytes = prefs.getString("item_img_$id", null)?.length ?: 0
+                id to (textBytes + imgBytes)
             }
 
             var totalBytes = blobSizes.values.sumOf { it.toLong() }

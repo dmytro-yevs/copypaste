@@ -66,9 +66,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -161,13 +167,22 @@ fun HistoryScreen(
     val loading by viewModel.loading.observeAsState(false)
     val error by viewModel.errors.observeAsState(null)
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     val loadErrorTemplate = stringResource(R.string.error_load_history)
     val dismissLabel = stringResource(R.string.snackbar_dismiss)
+    val sensitiveTapMsg = stringResource(R.string.sensitive_tap_hint)
 
     // ── Selection state ──────────────────────────────────────────────────────
-    // rememberSaveable so it survives recomposition but resets on back-stack pop.
+    // Both survive config changes (rotation) via rememberSaveable.
+    // selectedIds uses a listSaver to round-trip Set<String> through a List<String>
+    // (List is a supported saveable type; Set is not directly saveable).
     var selectionMode by rememberSaveable { mutableStateOf(false) }
-    var selectedIds by remember { mutableStateOf(setOf<String>()) }
+    var selectedIds by rememberSaveable(
+        stateSaver = listSaver(
+            save    = { it.toList() },
+            restore = { it.toSet() },
+        )
+    ) { mutableStateOf(setOf<String>()) }
 
     // ── Confirmation dialog state ────────────────────────────────────────────
     var pendingConfirm by remember { mutableStateOf<ConfirmAction?>(null) }
@@ -408,6 +423,11 @@ fun HistoryScreen(
                         selectionMode = false
                     }
                 },
+                onSensitiveTap = {
+                    scope.launch {
+                        snackbarHostState.showSnackbar(sensitiveTapMsg)
+                    }
+                },
             )
         }
     }
@@ -599,6 +619,7 @@ private fun HistoryList(
     onSetPinned: (String, Boolean) -> Unit,
     onLongPress: (String) -> Unit,
     onToggleSelect: (String) -> Unit,
+    onSensitiveTap: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -635,6 +656,7 @@ private fun HistoryList(
                 },
                 onLongPress = { onLongPress(item.id) },
                 onToggleSelect = { onToggleSelect(item.id) },
+                onSensitiveTap = onSensitiveTap,
             )
             HorizontalDivider(
                 color = IdeBorder.copy(alpha = 0.5f),
@@ -671,6 +693,7 @@ private fun HistoryRow(
     onCopy: (String) -> Unit = {},
     onLongPress: () -> Unit,
     onToggleSelect: () -> Unit,
+    onSensitiveTap: () -> Unit = {},
 ) {
     // Sensitivity flag is set at load time against the full plaintext — trust it.
     val detectedSensitive = item.isSensitive
@@ -688,15 +711,20 @@ private fun HistoryRow(
         if (selectionMode) expanded = false
     }
 
-    // Attempt to decode image bytes into an ImageBitmap for thumbnail rendering.
-    // BitmapFactory.decodeByteArray is CPU-bound but fast for thumbnails; it
-    // runs synchronously on the composition thread, which is acceptable because
-    // the bytes are small (thumbnail-scaled at capture time). If decoding fails
-    // (malformed bytes, OOM, or bytes == null) we fall back to the text preview.
-    val imageBitmap = remember(item.id, item.imagePng) {
-        item.imagePng?.let { bytes ->
-            runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
-                .getOrNull()
+    // Decode image bytes off the main thread to avoid jank while scrolling.
+    // produceState re-runs whenever item.id or item.imagePng changes; null while
+    // decoding (shows nothing / text fallback) and after any decode failure.
+    val imageBitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+        initialValue = null,
+        key1 = item.id,
+        key2 = item.imagePng,
+    ) {
+        value = item.imagePng?.let { bytes ->
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                }.getOrNull()
+            }
         }
     }
 
@@ -719,10 +747,14 @@ private fun HistoryRow(
             .background(rowBg)
             .combinedClickable(
                 // Single-tap: toggle selection in selection mode; copy non-sensitive in normal mode.
+                // Sensitive items in normal mode: fire onSensitiveTap so the caller can surface
+                // brief feedback ("Sensitive — use Copy action") rather than silently no-oping.
                 onClick = {
                     if (selectionMode) {
                         onToggleSelect()
-                    } else if (!detectedSensitive) {
+                    } else if (detectedSensitive) {
+                        onSensitiveTap()
+                    } else {
                         onCopy(item.snippet)
                     }
                 },

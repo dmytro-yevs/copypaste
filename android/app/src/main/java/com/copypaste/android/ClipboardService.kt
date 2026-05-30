@@ -412,8 +412,10 @@ class ClipboardService : Service() {
                 context.contentResolver.openInputStream(uri)?.use { stream ->
                     BitmapFactory.decodeStream(stream, null, decodeOpts)
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "captureImageClip: failed to decode image from $uri: ${e.message}")
+            } catch (t: Throwable) {
+                // Catch Throwable (not just Exception) to handle OutOfMemoryError on
+                // large images — OOM is an Error subclass and escapes catch(Exception).
+                Log.w(TAG, "captureImageClip: failed to decode image from $uri: ${t.message}")
                 return
             }
 
@@ -430,8 +432,10 @@ class ClipboardService : Service() {
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
                     baos.toByteArray()
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "captureImageClip: PNG encode failed: ${e.message}")
+            } catch (t: Throwable) {
+                // Catch Throwable so OutOfMemoryError during PNG compression doesn't
+                // crash the service — bitmap.recycle() still runs via finally.
+                Log.w(TAG, "captureImageClip: PNG encode failed: ${t.message}")
                 null
             } finally {
                 bitmap.recycle()

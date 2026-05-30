@@ -525,40 +525,6 @@ private fun SettingsTextField(
     )
 }
 
-/**
- * Number-input field for integer/long display settings (imageMaxHeight, historySize,
- * previewDelay). Uses a numeric keyboard and commits on every keystroke so the
- * setting takes effect without requiring an explicit "Save" tap, matching the
- * pattern used by [SettingsTextField] for string fields above.
- *
- * [onCommit] is only called when [value] parses to a valid number; invalid
- * intermediate input (e.g. an empty string while the user is typing) is silently
- * ignored so the setting retains its previous value rather than being zeroed.
- */
-@Composable
-private fun SettingsNumberField(
-    label: String,
-    hint: String,
-    value: String,
-    onValueChange: (String) -> Unit,
-    onCommit: () -> Unit,
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = {
-            onValueChange(it)
-            onCommit()
-        },
-        label = { Text(label) },
-        placeholder = { Text(hint, style = MaterialTheme.typography.bodySmall) },
-        singleLine = true,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-    )
-}
-
 @Composable
 private fun SettingsNavRow(
     title: String,
