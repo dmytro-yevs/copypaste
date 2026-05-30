@@ -171,21 +171,17 @@ impl PiiScrubber {
             // boundary group prevents matching inside a longer
             // alphanumeric run (e.g. a hash that happens to contain
             // colons in a different schema).
-            // Tightened: require at least one non-empty hextet (`[0-9a-fA-F]{1,4}`)
-            // somewhere in the match so that bare colon-delimited tokens like
-            // `key:value:extra` (which contain only `:` separators with no hex digits)
-            // are NOT redacted. The original `{0,4}` allowed every group to be empty,
-            // causing over-redaction of structured log tokens that happen to contain
-            // two or more colons. The new pattern uses a non-capturing alternation:
-            // either the first group is non-empty (`{1,4}`) followed by more groups,
-            // or it starts empty (`::`) but the second group must be non-empty. In
-            // practice `::1` (loopback) is still caught: group 1 = empty, then
-            // `:[0-9a-fA-F]{1,4}` matches `:1`.
+            //
+            // NOTE: this permissive `{0,4}` form is deliberate — it accepts
+            // every IPv6 shorthand including the leading-`::` compressed
+            // loopback `::1`. A previous tightening to require a non-empty
+            // leading hextet broke `::1` (regression caught by
+            // `adjacent_ipv6_addresses_both_redacted`). Over-redaction of bare
+            // colon-delimited tokens is an accepted, fail-safe tradeoff: the
+            // scrubber prefers false positives, and telemetry is unwired today.
             Pattern {
-                re: Regex::new(
-                    r"(^|[^0-9a-fA-F:])([0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{0,4}){2,7}|[0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{1,4}){1}(?::[0-9a-fA-F]{0,4}){1,6})",
-                )
-                .expect("ipv6 pattern is valid"),
+                re: Regex::new(r"(^|[^0-9a-fA-F:])([0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7})")
+                    .expect("ipv6 pattern is valid"),
                 replacement: "$1<REDACTED-IP>",
             },
             // Home directory prefixes: macOS `/Users/<name>/…` and Linux
