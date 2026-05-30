@@ -28,19 +28,4 @@ object P2pDialerGate {
         peerSyncAddr.isNotBlank() &&
             peerFingerprint.isNotBlank() &&
             sessionKey.isNotEmpty()
-
-    /**
-     * Next delay before the following dial tick.
-     *
-     * - After a failure (or any tick where the gate was closed) we slow down to
-     *   [errorBackoffMs] to avoid hammering an unreachable peer / churning the
-     *   battery while unpaired.
-     * - After a tick where dialing was attempted and did not error we use the
-     *   normal [normalIntervalMs] cadence.
-     */
-    fun nextDelayMs(
-        attemptedAndSucceeded: Boolean,
-        normalIntervalMs: Long,
-        errorBackoffMs: Long,
-    ): Long = if (attemptedAndSucceeded) normalIntervalMs else errorBackoffMs
 }
