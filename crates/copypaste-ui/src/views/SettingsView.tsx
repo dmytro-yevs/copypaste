@@ -576,7 +576,7 @@ export function SettingsView() {
             </SettingsRow>
           </Panel>
 
-          {/* Display — Fix #5, #6, #7 */}
+          {/* Display */}
           <SectionHeader label="Display" />
           <Panel>
             <SettingsRow label="Preview lines">
@@ -605,6 +605,81 @@ export function SettingsView() {
                   className="w-28 accent-ide-accent"
                 />
                 <span className="w-8 text-center text-[13px] text-ide-text">{prefs.previewSize}px</span>
+              </div>
+            </SettingsRow>
+            {/* Maccy parity: image thumbnail height cap */}
+            <SettingsRow label="Image thumbnail height">
+              <div className="flex flex-col items-end gap-0.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min={1}
+                    max={200}
+                    step={1}
+                    value={prefs.imageMaxHeight}
+                    onChange={(e) => setPrefs({ imageMaxHeight: Number(e.target.value) })}
+                    className="w-28 accent-ide-accent"
+                  />
+                  <span className="w-10 text-center text-[13px] text-ide-text">
+                    {prefs.imageMaxHeight}px
+                  </span>
+                </div>
+                <span className="text-[11px] text-ide-faint">
+                  Max height of image previews (1–200 px). Width is always ≤ 340 px.
+                </span>
+              </div>
+            </SettingsRow>
+            {/* Maccy parity: history size cap */}
+            <SettingsRow label="History size">
+              <div className="flex flex-col items-end gap-0.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={999}
+                    step={1}
+                    value={prefs.historySize}
+                    onChange={(e) => {
+                      const v = Math.max(1, Math.min(999, Number(e.target.value) || 1));
+                      setPrefs({ historySize: v });
+                    }}
+                    className={[
+                      "w-20 rounded-ide border border-ide-border bg-ide-bg px-2 py-1",
+                      "text-[13px] text-ide-text outline-none focus:border-ide-accent",
+                    ].join(" ")}
+                  />
+                  <span className="text-[13px] text-ide-dim">items</span>
+                </div>
+                <span className="text-[11px] text-ide-faint">
+                  Maximum clipboard items shown (1–999).
+                </span>
+              </div>
+            </SettingsRow>
+            {/* Maccy parity: hover-preview delay */}
+            <SettingsRow label="Preview delay">
+              <div className="flex flex-col items-end gap-0.5">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={200}
+                    max={100000}
+                    step={100}
+                    value={prefs.previewDelay}
+                    onChange={(e) => {
+                      const v = Math.max(200, Math.min(100000, Number(e.target.value) || 1500));
+                      setPrefs({ previewDelay: v });
+                    }}
+                    className={[
+                      "w-24 rounded-ide border border-ide-border bg-ide-bg px-2 py-1",
+                      "text-[13px] text-ide-text outline-none focus:border-ide-accent",
+                    ].join(" ")}
+                  />
+                  <span className="text-[13px] text-ide-dim">ms</span>
+                </div>
+                <span className="text-[11px] text-ide-faint">
+                  Hover delay before large preview appears (200–100 000 ms).
+                  {/* TODO: wire to hover-preview panel when implemented */}
+                </span>
               </div>
             </SettingsRow>
             <SettingsRow label="Mask sensitive data">

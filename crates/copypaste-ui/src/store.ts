@@ -15,12 +15,34 @@ export interface UIPrefs {
   previewSize: number;
   /** When true, redact sensitive_spans ranges in clip previews. */
   maskSensitive: boolean;
+  /**
+   * Max height (px) of the image thumbnail bounding box — Maccy parity.
+   * The image is scaled to fit within 340 × imageMaxHeight, aspect-preserving,
+   * never upscaled. Default 40, range 1–200.
+   */
+  imageMaxHeight: number;
+  /**
+   * Maximum number of clipboard items to display. Default 200, range 1–999.
+   * Used as the `limit` parameter of history_page so HistoryView never shows
+   * more than this many items.
+   */
+  historySize: number;
+  /**
+   * Delay in milliseconds before showing a large hover-preview of an item.
+   * Default 1500 ms, range 200–100 000. Persisted for future use when a
+   * hover-preview panel is implemented.
+   * TODO: wire this to a hover-preview component when one is built.
+   */
+  previewDelay: number;
 }
 
 const DEFAULT_PREFS: UIPrefs = {
   previewLines: 1,
   previewSize: 28,
   maskSensitive: true,
+  imageMaxHeight: 40,
+  historySize: 200,
+  previewDelay: 1500,
 };
 
 function loadPrefs(): UIPrefs {

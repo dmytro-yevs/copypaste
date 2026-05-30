@@ -4,12 +4,28 @@ import { invoke } from "@tauri-apps/api/core";
 import { api, HistoryEntry, IpcError } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
 import { useUI } from "../store";
+import { ImageThumb } from "../components/ImageThumb";
 
-const DEFAULT_ITEM_HEIGHT = 28; // px — default compact single-line row height
+// Max items fetched for the popup list. Intentionally compact — the popup is a
+// quick-access surface, not a full history browser.
 const MAX_ITEMS = 50;
 
+// Default text row height when previewSize hasn't been set yet.
+const DEFAULT_TEXT_ROW_H = 28;
+
+// Maccy parity: image rows in the popup use imageMaxHeight + 10 px padding,
+// matching the same formula as HistoryView's rowHeightFor.
+function popupRowHeight(isImage: boolean, textH: number, imageMaxH: number): number {
+  return isImage ? Math.max(imageMaxH + 10, 34) : Math.max(textH, 22);
+}
+
 export function Popup() {
-  const { maskSensitive, previewSize = DEFAULT_ITEM_HEIGHT } = useUI((s) => s.prefs);
+  const {
+    maskSensitive,
+    previewSize = DEFAULT_TEXT_ROW_H,
+    imageMaxHeight = 40,
+  } = useUI((s) => s.prefs);
+
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -69,7 +85,9 @@ export function Popup() {
 
   // Keep the selected index in bounds when filter changes.
   useEffect(() => {
-    setSelectedIdx((prev) => (filtered.length === 0 ? 0 : Math.min(prev, filtered.length - 1)));
+    setSelectedIdx((prev) =>
+      filtered.length === 0 ? 0 : Math.min(prev, filtered.length - 1)
+    );
   }, [filtered.length]);
 
   // Scroll the selected item into view.
@@ -82,10 +100,9 @@ export function Popup() {
     }
   }, [selectedIdx]);
 
-  // Fix #3: hide is async (win.hide() returns a promise). Await it so the
-  // window is actually hidden before we restore focus to the prior app and
-  // synthesise the paste — otherwise our popup can still be frontmost when the
-  // Cmd+V fires (blur race), pasting into the popup instead of the target app.
+  // hide is async: await so the window is actually hidden before we synthesise
+  // the paste — avoids the blur race where Cmd+V fires while popup is still
+  // frontmost, pasting into the popup itself instead of the target app.
   const hide = useCallback(async () => {
     try {
       await win.hide();
@@ -95,10 +112,8 @@ export function Popup() {
     }
   }, [win]);
 
-  // Fix #2/#3: hide popup first (awaited), then copy + paste. Errors here used
-  // to be silently swallowed (`catch {}`), masking real failures (daemon
-  // offline, missing Accessibility permission). Surface them to the console and
-  // the error strip so the failure isn't invisible.
+  // Hide first (awaited), then copy + paste. Errors are surfaced to the console
+  // and the error strip so failures aren't invisible.
   const copyAndPaste = useCallback(
     async (id: string) => {
       await hide();
@@ -130,7 +145,9 @@ export function Popup() {
           break;
         case "ArrowDown":
           e.preventDefault();
-          setSelectedIdx((i) => (filtered.length === 0 ? 0 : (i + 1) % filtered.length));
+          setSelectedIdx((i) =>
+            filtered.length === 0 ? 0 : (i + 1) % filtered.length
+          );
           break;
         case "ArrowUp":
           e.preventDefault();
@@ -140,7 +157,7 @@ export function Popup() {
           break;
         case "Enter":
           e.preventDefault();
-          confirmSelection();
+          void confirmSelection();
           break;
         default:
           break;
@@ -154,8 +171,6 @@ export function Popup() {
     <div
       className="flex flex-col h-screen rounded-xl overflow-hidden"
       style={{ background: "rgba(30,32,36,0.88)", backdropFilter: "blur(24px)" }}
-      // Hide when the user clicks outside (window blur event handles most cases,
-      // but this catches clicks within the webview that land on the overlay).
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
           void hide();
@@ -212,7 +227,8 @@ export function Popup() {
               key={item.id}
               item={item}
               selected={idx === selectedIdx}
-              itemHeight={previewSize}
+              textRowHeight={previewSize}
+              imageMaxHeight={imageMaxHeight}
               maskSensitive={maskSensitive}
               onMouseEnter={() => setSelectedIdx(idx)}
               onClick={() => void copyAndPaste(item.id)}
@@ -233,28 +249,41 @@ export function Popup() {
 interface PopupRowProps {
   item: HistoryEntry;
   selected: boolean;
-  itemHeight: number;
+  textRowHeight: number;
+  imageMaxHeight: number;
   maskSensitive: boolean;
   onMouseEnter: () => void;
   onClick: () => void;
 }
 
-function PopupRow({ item, selected, itemHeight, maskSensitive, onMouseEnter, onClick }: PopupRowProps) {
-  // Fix #1: bare "image" content_type stored by daemon
+function PopupRow({
+  item,
+  selected,
+  textRowHeight,
+  imageMaxHeight,
+  maskSensitive,
+  onMouseEnter,
+  onClick,
+}: PopupRowProps) {
+  // Bare "image" (legacy daemon) or "image/*" MIME-typed rows.
   const isImage = item.content_type === "image" || item.content_type.startsWith("image/");
   const isSensitive = item.is_sensitive;
 
-  // For images, show a compact "[Image]" label instead of a thumbnail.
-  // Fix #7: apply span masking when enabled and sensitive_spans are provided.
-  let label: string;
-  if (isImage) {
-    label = "[Image]";
-  } else if (isSensitive) {
-    label = "••••••••";
-  } else if (maskSensitive && item.sensitive_spans && item.sensitive_spans.length > 0) {
-    label = applySpanMasking(item.preview, item.sensitive_spans).replace(/\s+/g, " ").trim() || "(empty)";
-  } else {
-    label = item.preview.replace(/\s+/g, " ").trim() || "(empty)";
+  const rowH = popupRowHeight(isImage, textRowHeight, imageMaxHeight);
+
+  // Build the text label for non-image rows (images show a thumbnail instead).
+  let label = "";
+  if (!isImage) {
+    if (isSensitive) {
+      label = "••••••••";
+    } else if (maskSensitive && item.sensitive_spans && item.sensitive_spans.length > 0) {
+      label =
+        applySpanMasking(item.preview, item.sensitive_spans)
+          .replace(/\s+/g, " ")
+          .trim() || "(empty)";
+    } else {
+      label = item.preview.replace(/\s+/g, " ").trim() || "(empty)";
+    }
   }
 
   return (
@@ -263,26 +292,37 @@ function PopupRow({ item, selected, itemHeight, maskSensitive, onMouseEnter, onC
         "popup-row flex items-center gap-2 px-3 cursor-pointer transition-colors duration-75 select-none",
         selected ? "bg-white/10" : "hover:bg-white/5",
       ].join(" ")}
-      style={{ minHeight: itemHeight }}
+      style={{ minHeight: rowH }}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     >
-      {isSensitive && (
+      {/* Type icon — shown for all rows */}
+      {isImage ? (
+        <span className="text-[10px] text-purple-400/60 shrink-0" aria-hidden>
+          {/* small image glyph */}
+          ▣
+        </span>
+      ) : isSensitive ? (
         <span className="text-[10px] text-white/30 shrink-0" aria-hidden>🔒</span>
+      ) : null}
+
+      {isImage ? (
+        // Maccy parity: image rows render ONLY the thumbnail — no text title.
+        // ImageThumb fetches via IPC on first render and caches the result in
+        // the shared LRU cache (shared with HistoryView).
+        <ImageThumb id={item.id} maxHeight={imageMaxHeight} />
+      ) : (
+        <span
+          className="flex-1 min-w-0 text-sm text-white/90"
+          style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+        >
+          {label}
+        </span>
       )}
-      {isImage && (
-        <span className="text-[10px] text-white/30 shrink-0" aria-hidden>⬜</span>
-      )}
-      <span
-        className="flex-1 min-w-0 text-sm text-white/90"
-        style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
-      >
-        {label}
-      </span>
+
       {item.pinned && (
         <span className="text-[10px] text-yellow-400/70 shrink-0">⚑</span>
       )}
     </li>
   );
 }
-
