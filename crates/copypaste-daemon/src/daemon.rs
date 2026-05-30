@@ -6,8 +6,8 @@ use crate::{
 };
 use copypaste_core::{
     build_item_aad_v2, bump_item_recency, chunks_to_blob, derive_v2, detect, encode_image,
-    encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts, AppConfig,
-    ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION_V4,
+    encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts, prune_to_cap,
+    AppConfig, ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION_V4,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -642,6 +642,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 cloud_last_sync_ms.clone(),
                 local_key_arc.clone(),
                 cloud_signed_in.clone(),
+                config.clone(),
             )
             .await
             {
@@ -1327,36 +1328,23 @@ async fn handle_image(
     }
 }
 
+/// Enforce both the count cap (`history_limit`) and the byte-quota cap
+/// (`storage_quota_bytes`) after each local insert or cloud-sync batch write.
+///
+/// Delegates to [`prune_to_cap`] which performs efficient bulk DELETEs via
+/// keyset subqueries — no per-row loop. PINNED items are never evicted.
+/// The cloud watermark (stored in `settings`) is unaffected; see
+/// [`prune_to_cap`] for the sync-cursor-safety guarantee.
 fn prune_history(db: &Database, config: &AppConfig) {
-    let total = copypaste_core::count_items(db).unwrap_or(0) as usize;
-    if total > config.history_limit {
-        let excess = total - config.history_limit;
-        // Direct SQL DELETE ordered by `wall_time ASC` — bulk-removes the
-        // oldest rows in a single statement (audit HIGH #4). The previous
-        // implementation went through `get_page` + per-row `delete_item`,
-        // which was both N+1 and risked pruning the wrong page if the
-        // pagination math drifted.
-        //
-        // `pinned = 0` excludes explicitly pinned items so they are never
-        // deleted by the history-limit prune (schema v7, see `pin_item`).
-        let res = db.conn().execute(
-            "DELETE FROM clipboard_items WHERE id IN (
-                SELECT id FROM clipboard_items
-                WHERE pinned = 0
-                ORDER BY wall_time ASC
-                LIMIT ?1
-            )",
-            rusqlite::params![excess as i64],
-        );
-        match res {
-            Ok(n) => tracing::debug!(
-                "pruned {} of {} requested items over history_limit={}",
-                n,
-                excess,
-                config.history_limit
-            ),
-            Err(e) => tracing::warn!("prune_history failed: {e}"),
-        }
+    match prune_to_cap(db, config.history_limit, config.storage_quota_bytes) {
+        Ok(0) => {}
+        Ok(n) => tracing::debug!(
+            "prune_history: removed {n} rows \
+             (history_limit={} storage_quota_bytes={})",
+            config.history_limit,
+            config.storage_quota_bytes,
+        ),
+        Err(e) => tracing::warn!("prune_history failed: {e}"),
     }
 }
 
