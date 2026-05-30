@@ -1302,6 +1302,7 @@ public object FfiConverterTypeEncryptedBlob: FfiConverterRustBuffer<EncryptedBlo
 
 data class LocalItem (
     var `id`: kotlin.String, 
+    var `itemId`: kotlin.String, 
     var `wallTimeMs`: kotlin.Long, 
     var `contentType`: kotlin.String, 
     var `plaintext`: List<kotlin.UByte>
@@ -1314,6 +1315,7 @@ public object FfiConverterTypeLocalItem: FfiConverterRustBuffer<LocalItem> {
     override fun read(buf: ByteBuffer): LocalItem {
         return LocalItem(
             FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
             FfiConverterLong.read(buf),
             FfiConverterString.read(buf),
             FfiConverterSequenceUByte.read(buf),
@@ -1322,6 +1324,7 @@ public object FfiConverterTypeLocalItem: FfiConverterRustBuffer<LocalItem> {
 
     override fun allocationSize(value: LocalItem) = (
             FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`itemId`) +
             FfiConverterLong.allocationSize(value.`wallTimeMs`) +
             FfiConverterString.allocationSize(value.`contentType`) +
             FfiConverterSequenceUByte.allocationSize(value.`plaintext`)
@@ -1329,6 +1332,7 @@ public object FfiConverterTypeLocalItem: FfiConverterRustBuffer<LocalItem> {
 
     override fun write(value: LocalItem, buf: ByteBuffer) {
             FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`itemId`, buf)
             FfiConverterLong.write(value.`wallTimeMs`, buf)
             FfiConverterString.write(value.`contentType`, buf)
             FfiConverterSequenceUByte.write(value.`plaintext`, buf)
@@ -1446,6 +1450,7 @@ public object FfiConverterTypeScannedPairing: FfiConverterRustBuffer<ScannedPair
 
 data class SyncedItem (
     var `id`: kotlin.String, 
+    var `itemId`: kotlin.String, 
     var `contentType`: kotlin.String, 
     var `plaintext`: List<kotlin.UByte>, 
     var `wallTimeMs`: kotlin.Long
@@ -1459,6 +1464,7 @@ public object FfiConverterTypeSyncedItem: FfiConverterRustBuffer<SyncedItem> {
         return SyncedItem(
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
             FfiConverterSequenceUByte.read(buf),
             FfiConverterLong.read(buf),
         )
@@ -1466,6 +1472,7 @@ public object FfiConverterTypeSyncedItem: FfiConverterRustBuffer<SyncedItem> {
 
     override fun allocationSize(value: SyncedItem) = (
             FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`itemId`) +
             FfiConverterString.allocationSize(value.`contentType`) +
             FfiConverterSequenceUByte.allocationSize(value.`plaintext`) +
             FfiConverterLong.allocationSize(value.`wallTimeMs`)
@@ -1473,6 +1480,7 @@ public object FfiConverterTypeSyncedItem: FfiConverterRustBuffer<SyncedItem> {
 
     override fun write(value: SyncedItem, buf: ByteBuffer) {
             FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`itemId`, buf)
             FfiConverterString.write(value.`contentType`, buf)
             FfiConverterSequenceUByte.write(value.`plaintext`, buf)
             FfiConverterLong.write(value.`wallTimeMs`, buf)

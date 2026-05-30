@@ -124,46 +124,59 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Encrypt [plaintext] with [key] and persist. Returns false when the text
-     * is sensitive (checked via UniFFI or skipped when unavailable), already a
-     * recent local duplicate, or — for synced items — already stored under the
-     * same [sourceId].
+     * Encrypt [plaintext] with [key] and persist, returning the STABLE row id of
+     * the stored item — or an empty string when nothing was stored (blank text,
+     * sensitive content, a recent local duplicate, or — for synced items —
+     * already stored under the same [sourceId]).
      *
-     * The new UUID is generated BEFORE encryption so it can be bound into the
-     * AEAD AAD on the v0.3 schema (see [encryptText]). The same id is also
-     * used as the SharedPreferences storage key.
+     * The id is the stable cross-device `item_id` for this clip: it is minted
+     * ONCE here (or carried in via [overrideId] for an incoming synced item),
+     * persisted as the SharedPreferences storage key, bound into the local AEAD
+     * AAD (see [encryptText]), and reused verbatim on every later Supabase push
+     * and P2P sync. It must NEVER be re-minted per push — re-minting made the
+     * desktop see each logical clip as a brand-new item (duplicates + broken
+     * LWW). See [localItemsForSync], which sets `LocalItem.item_id = id`.
      *
-     * [sourceId] is the STABLE remote identifier of an incoming synced item —
-     * the Supabase `item_id` (the per-clip UUID bound into the cloud AEAD AAD)
-     * or the P2P [uniffi.copypaste_android.SyncedItem.id]. For locally captured
-     * clips it is null. See LOW-2: [FgsSyncLoop.poll] and
-     * [SupabasePollWorker.doWork] share the `lastSupabasePollWallTime` cursor,
-     * so the same remote row can be fetched by both within the same wall-time
-     * bucket. The 2 s content [DEDUP_WINDOW_MS] only catches near-simultaneous
-     * stores; rows fetched > 2 s apart slipped through and produced a duplicate
-     * history row under a fresh UUID. Recording the source id closes that gap
+     * [overrideId] is the stable cross-device `item_id` of an INCOMING synced
+     * item (Supabase `item_id` / P2P `SyncedItem.item_id`). Persisting the row
+     * under that id means a later re-sync of the same clip reuses it instead of
+     * minting a fresh local UUID — so the item is not resurfaced as a duplicate
+     * on the originating device. For locally captured clips it is null and a
+     * fresh UUID is minted. When supplied it is also the de-facto source id.
+     *
+     * [sourceId] is the STABLE remote identifier of an incoming synced item used
+     * for cross-poll dedup (defaults to [overrideId] when that is set). See
+     * LOW-2: [FgsSyncLoop.poll] and [SupabasePollWorker.doWork] share the
+     * `lastSupabasePollWallTime` cursor, so the same remote row can be fetched by
+     * both within the same wall-time bucket. The 2 s content [DEDUP_WINDOW_MS]
+     * only catches near-simultaneous stores; rows fetched > 2 s apart slipped
+     * through and produced a duplicate. Recording the source id closes that gap
      * regardless of timing.
      */
     suspend fun storeItem(
         plaintext: String,
         key: ByteArray,
         sourceId: String? = null,
-    ): Boolean = withContext(Dispatchers.IO) {
-        if (plaintext.isBlank()) return@withContext false
+        overrideId: String? = null,
+    ): String = withContext(Dispatchers.IO) {
+        if (plaintext.isBlank()) return@withContext ""
+
+        // The id that dedup keys on: an explicit [sourceId] wins; otherwise the
+        // incoming [overrideId] (which IS the stable remote id) is the source id.
+        val dedupSourceId = sourceId ?: overrideId
 
         // ── LOW-2: source-id dedup for incoming synced items. Both poll callers
-        // can fetch the same remote row (shared wall-time cursor), and each call
-        // mints a FRESH local UUID, so content/time dedup alone misses copies
-        // fetched > DEDUP_WINDOW_MS apart. Skip when this remote source id was
-        // already stored; record it atomically otherwise.
-        if (sourceId != null) {
+        // can fetch the same remote row (shared wall-time cursor), so content/
+        // time dedup alone misses copies fetched > DEDUP_WINDOW_MS apart. Skip
+        // when this remote source id was already stored; record it atomically.
+        if (dedupSourceId != null) {
             synchronized(seenSourceIdsLock) {
                 val seen = storedSourceIds()
-                if (!isNewSourceId(sourceId, seen)) {
-                    Log.d(TAG, "Synced item $sourceId already stored — skipping")
-                    return@withContext false
+                if (!isNewSourceId(dedupSourceId, seen)) {
+                    Log.d(TAG, "Synced item $dedupSourceId already stored — skipping")
+                    return@withContext ""
                 }
-                recordSourceId(sourceId, seen)
+                recordSourceId(dedupSourceId, seen)
             }
         }
 
@@ -176,7 +189,7 @@ class ClipboardRepository(context: Context) {
             val now = System.currentTimeMillis()
             if (hash == lastStoredHash && now - lastStoredAtMs < DEDUP_WINDOW_MS) {
                 Log.d(TAG, "Duplicate clip within ${DEDUP_WINDOW_MS}ms — skipping")
-                return@withContext false
+                return@withContext ""
             }
             lastStoredHash = hash
             lastStoredAtMs = now
@@ -187,9 +200,12 @@ class ClipboardRepository(context: Context) {
         } catch (_: UnsatisfiedLinkError) {
             false
         }
-        if (sensitive) return@withContext false
+        if (sensitive) return@withContext ""
 
-        val id = UUID.randomUUID().toString()
+        // STABLE identity: reuse an incoming item's stable id verbatim; mint a
+        // fresh UUID only for a locally-captured clip. This is the value bound
+        // into the AEAD AAD and reused on every later push/sync.
+        val id = overrideId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
         val blob = try {
             encryptText(id, plaintext.toByteArray(Charsets.UTF_8), key)
         } catch (e: IllegalStateException) {
@@ -229,7 +245,7 @@ class ClipboardRepository(context: Context) {
         }
 
         Log.d(TAG, "Stored item $id (${plaintext.length} chars)")
-        true
+        id
     }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
@@ -497,6 +513,11 @@ class ClipboardRepository(context: Context) {
                 val plain = decryptText(id, ciphertext, nonce, key)
                 uniffi.copypaste_android.LocalItem(
                     id = id,
+                    // STABLE cross-device identity. The row id is minted ONCE at
+                    // capture (or carried from an incoming item) and persisted,
+                    // so reusing it as item_id lets the daemon dedup/LWW-merge
+                    // this clip instead of seeing a fresh item on every dial.
+                    itemId = id,
                     wallTimeMs = wallTimeMs,
                     contentType = contentType,
                     plaintext = plain.map { it.toUByte() },

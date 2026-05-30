@@ -34,7 +34,14 @@
 /// `copypaste-core` QR pairing payload (a transport for the existing PAKE
 /// material — no new crypto). Kotlin generated against ABI 4 lacks these
 /// symbols and must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 5;
+///
+/// **ABI 6 (stable item_id):** The `LocalItem` and `SyncedItem` records each
+/// gained a `item_id: String` field carrying the STABLE cross-device identity
+/// (minted once at capture, reused on every push/sync) so the daemon keys
+/// merge/dedup/LWW on it instead of treating each re-sync as a new item. This
+/// changes both records' serialized FFI layout, so Kotlin generated against
+/// ABI 5 reads them with the wrong shape and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 6;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

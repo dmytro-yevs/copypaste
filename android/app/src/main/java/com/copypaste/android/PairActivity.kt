@@ -267,7 +267,14 @@ fun PairScreen(
                             ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
                             Charsets.UTF_8,
                         )
-                        if (repository.storeItem(plaintext, key)) stored += 1
+                        // Persist under the peer's STABLE item_id so a later
+                        // re-sync of this clip reuses it (no duplicate on the
+                        // originating device). itemId doubles as the dedup key.
+                        if (repository.storeItem(plaintext, key, overrideId = item.itemId)
+                                .isNotEmpty()
+                        ) {
+                            stored += 1
+                        }
                     }
                     // Persist the peer for future syncs. The session key is
                     // stored securely (KEK-wrapped) so the background dialer in

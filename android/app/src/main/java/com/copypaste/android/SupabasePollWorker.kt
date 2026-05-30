@@ -64,10 +64,17 @@ class SupabasePollWorker(
             for (item in items) {
                 val text = item.plaintext.toString(Charsets.UTF_8)
                 if (text.isBlank()) continue
-                // LOW-2: pass the stable Supabase source id so a row also fetched
-                // by the FGS loop (shared wall-time cursor) is not duplicated.
-                val stored = repository.storeItem(text, settings.encryptionKey, sourceId = item.itemId)
-                if (stored) newCount++
+                // Persist under the stable Supabase item_id (overrideId): it is
+                // both the LOW-2 cross-poll dedup key (a row also fetched by the
+                // FGS loop sharing the wall-time cursor is not duplicated) AND
+                // the cross-device id a later re-sync reuses instead of minting a
+                // fresh local UUID.
+                val stored = repository.storeItem(
+                    text,
+                    settings.encryptionKey,
+                    overrideId = item.itemId,
+                )
+                if (stored.isNotEmpty()) newCount++
                 if (item.wallTime > latestWallTime) latestWallTime = item.wallTime
             }
 
