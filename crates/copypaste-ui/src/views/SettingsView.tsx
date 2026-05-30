@@ -59,7 +59,6 @@ function Toggle({
 
 function SectionHeader({ label }: { label: string }) {
   return (
-    // Fix #9: more vertical breathing room between sections
     <div className="mb-2 mt-8 first:mt-0 px-0 text-[11px] uppercase tracking-wide text-ide-faint">
       {label}
     </div>
@@ -75,7 +74,8 @@ function SettingsRow({
 }) {
   return (
     <div className="flex min-h-[34px] items-center justify-between border-b border-ide-divider px-3 py-1.5 last:border-b-0">
-      <span className="text-[13px] text-ide-dim">{label}</span>
+      {/* W4-3: fixed min-width on label column prevents wrapping on narrow labels */}
+      <span className="min-w-[160px] shrink-0 text-[13px] text-ide-dim">{label}</span>
       <div className="flex items-center gap-2">{children}</div>
     </div>
   );
@@ -101,6 +101,47 @@ function StatusRow({ label, ok }: { label: string; ok: boolean }) {
 }
 
 // ---------------------------------------------------------------------------
+// W4-2: Slider row — consistent grid: [slider (flex)] [fixed-width value]
+// Both sliders in the Display section use this component so columns align.
+// ---------------------------------------------------------------------------
+
+function SliderRow({
+  min,
+  max,
+  step,
+  value,
+  onChange,
+  formatValue,
+}: {
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  onChange: (v: number) => void;
+  /** Format the numeric value for the right-hand value label. */
+  formatValue: (v: number) => string;
+}) {
+  return (
+    // Grid: slider expands to fill, value label is fixed 52px right-aligned.
+    <div className="flex items-center gap-2">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-28 accent-ide-accent"
+      />
+      {/* Fixed width + text-right keeps all value labels in the same column. */}
+      <span className="w-[52px] text-right text-[13px] text-ide-text">
+        {formatValue(value)}
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -111,6 +152,16 @@ function formatLastSync(ms: number | null): string {
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
   return new Date(ms).toLocaleString();
+}
+
+/** Convert bytes to MB, rounded to one decimal place. */
+function bytesToMb(bytes: number): number {
+  return Math.round((bytes / 1_000_000) * 10) / 10;
+}
+
+/** Convert MB back to bytes (integer). */
+function mbToBytes(mb: number): number {
+  return Math.round(mb * 1_000_000);
 }
 
 // ---------------------------------------------------------------------------
@@ -129,24 +180,20 @@ function eventToAccelerator(e: React.KeyboardEvent<HTMLInputElement>): string | 
   if (e.altKey) parts.push("Alt");
   if (e.shiftKey) parts.push("Shift");
 
-  // Normalize the key name to what Tauri/tao expects.
-  // Always derive the key from the PHYSICAL key (e.code), never e.key, so the
-  // shortcut is keyboard-layout-independent: the physical Q key records "Q"
-  // whether the active layout is English, Ukrainian, etc. e.key would yield the
-  // localized character (Cyrillic "й") or, with Option, a composed glyph ("Œ").
+  // Always derive from the PHYSICAL key (e.code), not e.key, so the shortcut
+  // is keyboard-layout-independent (e.g. Cyrillic layouts still record "Q").
   let key: string;
   if (e.code.startsWith("Key")) {
     key = e.code.slice(3); // "KeyQ" → "Q"
   } else if (e.code.startsWith("Digit")) {
     key = e.code.slice(5); // "Digit1" → "1"
   } else {
-    key = e.code || e.key; // "Space", "Enter", "ArrowUp", "F5", ...
+    key = e.code || e.key;
   }
 
   if (key.length === 1) {
     key = key.toUpperCase();
   } else {
-    // Map browser key names to Tauri accelerator key names.
     const keyMap: Record<string, string> = {
       ArrowUp: "Up",
       ArrowDown: "Down",
@@ -246,18 +293,16 @@ type LoadState = "loading" | "ready" | "offline" | "degraded";
 
 export function SettingsView() {
   // Display prefs (localStorage-persisted, no daemon needed).
-  // Select each field with its own selector returning a STABLE reference.
-  // Returning a fresh object literal `(s) => ({ prefs, setPrefs })` from a
-  // single selector makes the store snapshot unstable on every render, which
-  // under Zustand v5 + React's useSyncExternalStore throws/loops — that throw,
-  // with no error boundary, was blanking the whole window when opening Settings.
+  // Each field has its own selector returning a STABLE reference — a single
+  // selector returning `{ prefs, setPrefs }` creates an unstable snapshot under
+  // Zustand v5 + useSyncExternalStore, which blanked the window on open.
   const prefs = useUI((s) => s.prefs);
   const setPrefs = useUI((s) => s.setPrefs);
 
   // General
   const [privateMode, setPrivateMode] = useState(false);
 
-  // Sync
+  // Sync / cloud config
   const [config, setConfig] = useState<AppSettings>({
     p2p_enabled: false,
     supabase_url: null,
@@ -266,10 +311,7 @@ export function SettingsView() {
   const [supabaseUrl, setSupabaseUrl] = useState("");
   const [supabaseKey, setSupabaseKey] = useState("");
   const [savedMsg, setSavedMsg] = useState(false);
-  // Cloud connection test result (null = not yet run / cleared).
-  const [testMsg, setTestMsg] = useState<{ text: string; ok: boolean } | null>(
-    null,
-  );
+  const [testMsg, setTestMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [testing, setTesting] = useState(false);
 
   // Cloud sync passphrase
@@ -283,29 +325,34 @@ export function SettingsView() {
   const [shortcutMsg, setShortcutMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const shortcutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Storage / Limits — fields from AppConfig surfaced via get_config / set_config.
+  // MB representations; converted to/from raw bytes before IPC.
+  const [maxTextMb, setMaxTextMb] = useState(1);
+  const [maxImageMb, setMaxImageMb] = useState(25);
+  const [maxFileMb, setMaxFileMb] = useState(100);
+  const [quotaMb, setQuotaMb] = useState(500);
+  const [historyLimit, setHistoryLimit] = useState(1000);
+  const [sensitiveTtlSecs, setSensitiveTtlSecs] = useState(30);
+  const [imageQuality, setImageQuality] = useState(80);
+  // Per-field save feedback: key = field name, value = error or "Saved" / null.
+  const [limitsMsg, setLimitsMsg] = useState<Record<string, string | null>>({});
+  const limitsMsgTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  // Sync parity — p2p toggle + wifi-only (supabase_email/password not in AppConfig → deferred)
+  const [syncOnWifiOnly, setSyncOnWifiOnly] = useState(false);
+
   // Data
   const [deleteMsg, setDeleteMsg] = useState<{ text: string; isError: boolean } | null>(null);
-  // Fix #7: inline confirm state replaces window.confirm, which is unreliable /
-  // blocked in the Tauri (WRY) webview and matches the pattern already used in
-  // HistoryView's "Clear all".
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   // Global state
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  // Degraded reason from the daemon's `status` probe — the ONLY method that
-  // reports degraded state. Non-null ⇒ daemon is up but its DB is unavailable.
-  // (The empty string means "degraded but no machine-readable reason given".)
   const [degradedReason, setDegradedReason] = useState<string | null>(null);
-  // Bumped by the Retry / Restart buttons to re-run the load effect.
   const [reloadKey, setReloadKey] = useState(0);
-  // Non-null when an OLD daemon survived an upgrade and is still serving old
-  // code: holds the stale daemon's build (or "unknown" if it reported none).
   const [staleDaemon, setStaleDaemon] = useState<string | null>(null);
-  // The running daemon's reported build_version (for display in the Daemon
-  // section); null when offline or not yet known.
   const [daemonVersion, setDaemonVersion] = useState<string | null>(null);
 
-  // Save-config error (separate from the success "Saved")
+  // Save-config error
   const [saveError, setSaveError] = useState<string | null>(null);
   const saveErrTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -326,8 +373,7 @@ export function SettingsView() {
 
     async function load() {
       setLoadState("loading");
-      // Load the popup shortcut independently — it's a Tauri-direct command,
-      // not a daemon IPC call, so it works even when the daemon is offline.
+      // Popup shortcut is Tauri-direct — works even when daemon is offline.
       getPopupShortcut()
         .then((s) => {
           if (cancelled) return;
@@ -335,19 +381,12 @@ export function SettingsView() {
           setPendingShortcut(s);
         })
         .catch(() => {
-          // Keep default if the Tauri command fails (shouldn't happen in normal operation).
+          // Keep default if Tauri command fails (shouldn't happen in normal operation).
         });
 
       try {
-        // Each call is individually fault-tolerant: a single rejecting method
-        // must not blank the screen. The outer try/catch is a backstop only.
-        //
-        // api.status() is fetched ONCE here and reused for:
-        //   (a) the degraded/ready probe (via probeStatus logic inline)
-        //   (b) build_version display in the Daemon section
-        //   (c) stale-daemon detection (detectStaleDaemonFromStatus)
-        // This replaces the previous 3× api.status() pattern (load effect +
-        // stale-check effect + detectStaleDaemon's own fetch).
+        // api.status() is fetched once and reused for: degraded probe, build_version
+        // display, and stale-daemon detection — avoids three separate round-trips.
         const [pmResult, cfg, syncSt, daemonSt, myAppVer] = await Promise.all([
           api.getPrivateMode().catch(() => null),
           api.getConfig().catch(() => null),
@@ -357,55 +396,54 @@ export function SettingsView() {
         ]);
         if (cancelled) return;
 
-        // Derive the status probe result from the single status fetch.
         const probe = daemonSt
           ? (daemonSt.degraded === true || daemonSt.ready === false
               ? { kind: "degraded" as const, reason: daemonSt.degraded_reason ?? null }
               : { kind: "ok" as const })
           : { kind: "offline" as const };
 
-        // Record degraded state up front so the banner is correct regardless of
-        // which branch we take below (a degraded daemon's DB-gated calls fail,
-        // which would otherwise look identical to fully offline).
-        setDegradedReason(
-          probe.kind === "degraded" ? (probe.reason ?? "") : null,
-        );
-
-        // Stale-daemon detection reusing the already-fetched status (no extra round-trip).
+        setDegradedReason(probe.kind === "degraded" ? (probe.reason ?? "") : null);
         setDaemonVersion(daemonSt?.build_version ?? null);
         if (myAppVer !== null) {
           setStaleDaemon(detectStaleDaemonFromStatus(daemonSt, myAppVer));
         }
 
-        // If the daemon is unreachable for the core calls, show the offline
-        // state — UNLESS the status probe says the daemon is actually up but
-        // degraded, in which case the dedicated degraded banner is shown instead.
-        // (get_sync_status is optional and may be absent on older builds.)
         if (pmResult === null && cfg === null) {
           setLoadState(probe.kind === "degraded" ? "degraded" : "offline");
           setSyncStatus(syncSt);
           return;
         }
 
-        // Guard every field with a safe default — never assume the daemon
-        // returned a well-formed, fully-populated object.
         setPrivateMode(pmResult?.private_mode ?? false);
+
+        // Hydrate all AppConfig-backed fields from get_config response.
+        const rawCfg = cfg ?? ({} as Partial<AppSettings>);
         setConfig({
-          p2p_enabled: cfg?.p2p_enabled ?? false,
-          supabase_url: cfg?.supabase_url ?? null,
-          supabase_anon_key: cfg?.supabase_anon_key ?? null,
+          p2p_enabled: rawCfg.p2p_enabled ?? false,
+          supabase_url: rawCfg.supabase_url ?? null,
+          supabase_anon_key: rawCfg.supabase_anon_key ?? null,
         });
-        // Prefill Supabase URL: prefer the stored config value, but fall back to
-        // the value reported by get_sync_status (may be set via env variable).
-        const urlFromStatus = syncSt?.supabase_url ?? null;
-        setSupabaseUrl(cfg?.supabase_url ?? urlFromStatus ?? "");
-        setSupabaseKey(cfg?.supabase_anon_key ?? "");
+
+        // Prefill Supabase URL — prefer stored config, fall back to sync_status.
+        setSupabaseUrl(rawCfg.supabase_url ?? syncSt?.supabase_url ?? "");
+        setSupabaseKey(rawCfg.supabase_anon_key ?? "");
         setSyncStatus(syncSt);
+
+        // Storage / Limits — convert raw bytes to MB for display.
+        setMaxTextMb(bytesToMb(rawCfg.max_text_size_bytes ?? 1_000_000));
+        setMaxImageMb(bytesToMb(rawCfg.max_image_size_bytes ?? 25_000_000));
+        setMaxFileMb(bytesToMb(rawCfg.max_file_size_bytes ?? 100_000_000));
+        setQuotaMb(bytesToMb(rawCfg.storage_quota_bytes ?? 500_000_000));
+        setHistoryLimit(rawCfg.history_limit ?? 1000);
+        setSensitiveTtlSecs(rawCfg.sensitive_ttl_secs ?? 30);
+        setImageQuality(rawCfg.image_quality ?? 80);
+
+        // Sync parity
+        setSyncOnWifiOnly(rawCfg.sync_on_wifi_only ?? false);
+
         setLoadState("ready");
       } catch (err) {
         if (cancelled) return;
-        // Any unexpected error (including a non-IpcError throw): degrade to the
-        // offline state rather than letting it propagate and blank the window.
         void err;
         setLoadState("offline");
       }
@@ -418,12 +456,55 @@ export function SettingsView() {
   }, [reloadKey]);
 
   const offline = loadState !== "ready";
-  // Degraded = daemon up but its database is unavailable. Driven by the `status`
-  // probe in load() (the only method that reports it). The previous derivation
-  // keyed off syncStatus.keychain_locked / db_unavailable, which get_sync_status
-  // NEVER emits — dead code that meant a degraded daemon was silently mislabeled
-  // "offline".
   const degraded = loadState === "degraded";
+
+  // -------------------------------------------------------------------------
+  // Helpers — per-field limits save with feedback
+  // -------------------------------------------------------------------------
+
+  function showLimitsMsg(field: string, msg: string | null, durationMs: number) {
+    if (limitsMsgTimers.current[field] !== undefined) {
+      clearTimeout(limitsMsgTimers.current[field]);
+    }
+    setLimitsMsg((prev) => ({ ...prev, [field]: msg }));
+    if (msg !== null) {
+      limitsMsgTimers.current[field] = setTimeout(
+        () => setLimitsMsg((prev) => ({ ...prev, [field]: null })),
+        durationMs
+      );
+    }
+  }
+
+  // Build the full AppSettings patch for set_config, merging current config
+  // with any updated limits fields. Converts MB back to raw bytes.
+  function buildConfigPatch(overrides: Partial<AppSettings>): AppSettings {
+    return {
+      p2p_enabled: config.p2p_enabled,
+      supabase_url: supabaseUrl.trim() || null,
+      supabase_anon_key: supabaseKey.trim() || null,
+      max_text_size_bytes: mbToBytes(maxTextMb),
+      max_image_size_bytes: mbToBytes(maxImageMb),
+      max_file_size_bytes: mbToBytes(maxFileMb),
+      storage_quota_bytes: mbToBytes(quotaMb),
+      history_limit: historyLimit,
+      sensitive_ttl_secs: sensitiveTtlSecs,
+      image_quality: imageQuality,
+      sync_on_wifi_only: syncOnWifiOnly,
+      ...overrides,
+    };
+  }
+
+  async function saveLimitsField(field: string, patch: Partial<AppSettings>) {
+    try {
+      await api.setConfig(buildConfigPatch(patch) as unknown as Parameters<typeof api.setConfig>[0]);
+      showLimitsMsg(field, "Saved", 2000);
+    } catch (err) {
+      const msg = err instanceof IpcError ? err.message : "Save failed";
+      showLimitsMsg(field, msg, 4000);
+      // Revert local state to what the daemon had before.
+      setReloadKey((k) => k + 1);
+    }
+  }
 
   // -------------------------------------------------------------------------
   // General — Private mode
@@ -436,7 +517,6 @@ export function SettingsView() {
       try {
         await api.setPrivateMode(val);
       } catch (err) {
-        // Revert on failure and show error
         setPrivateMode(!val);
         const msg = err instanceof IpcError ? err.message : "Failed to update private mode";
         setPrivateModeError(msg);
@@ -448,7 +528,7 @@ export function SettingsView() {
   );
 
   // -------------------------------------------------------------------------
-  // Sync — Save config
+  // Sync — Save config (URL + anon key + p2p_enabled)
   // -------------------------------------------------------------------------
 
   const handleSaveConfig = useCallback(async () => {
@@ -472,9 +552,6 @@ export function SettingsView() {
     }
   }, [config.p2p_enabled, supabaseUrl, supabaseKey, saveErrTimer]);
 
-  // Run the daemon-side end-to-end Supabase probe and surface a precise,
-  // actionable diagnostic instead of leaving the user to guess why sync is
-  // silent. Saves the current credentials first so the test reflects the form.
   const handleTestConnection = useCallback(async () => {
     setTesting(true);
     setTestMsg(null);
@@ -494,6 +571,42 @@ export function SettingsView() {
   }, [handleSaveConfig]);
 
   // -------------------------------------------------------------------------
+  // Sync parity — p2p toggle + wifi-only
+  // -------------------------------------------------------------------------
+
+  const handleP2pToggle = useCallback(
+    async (val: boolean) => {
+      const prev = config.p2p_enabled;
+      setConfig((c) => ({ ...c, p2p_enabled: val }));
+      try {
+        await api.setConfig({ ...config, p2p_enabled: val });
+      } catch (err) {
+        // Revert on failure
+        setConfig((c) => ({ ...c, p2p_enabled: prev }));
+        const msg = err instanceof IpcError ? err.message : "Failed to update P2P setting";
+        showLimitsMsg("p2p_enabled", msg, 4000);
+      }
+    },
+    [config]
+  );
+
+  const handleWifiOnlyToggle = useCallback(
+    async (val: boolean) => {
+      const prev = syncOnWifiOnly;
+      setSyncOnWifiOnly(val);
+      try {
+        await saveLimitsField("sync_on_wifi_only", { sync_on_wifi_only: val });
+      } catch {
+        // saveLimitsField already handles revert + error display
+        setSyncOnWifiOnly(prev);
+      }
+    },
+    // saveLimitsField is stable (defined inline) — only syncOnWifiOnly matters
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [syncOnWifiOnly]
+  );
+
+  // -------------------------------------------------------------------------
   // Shortcuts — Save popup shortcut
   // -------------------------------------------------------------------------
 
@@ -508,7 +621,7 @@ export function SettingsView() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to set shortcut";
       setShortcutMsg({ text: msg, isError: true });
-      setPendingShortcut(currentShortcut); // revert capture display
+      setPendingShortcut(currentShortcut);
       if (shortcutTimerRef.current !== null) clearTimeout(shortcutTimerRef.current);
       shortcutTimerRef.current = setTimeout(() => setShortcutMsg(null), 4000);
     }
@@ -523,7 +636,6 @@ export function SettingsView() {
     if (!trimmed) return;
     try {
       await api.setSyncPassphrase(trimmed);
-      // Refresh sync status after setting
       const status = await api.getSyncStatus().catch(() => null);
       setSyncStatus(status);
       setPassphrase("");
@@ -561,7 +673,7 @@ export function SettingsView() {
   }, [deleteTimerRef]);
 
   // -------------------------------------------------------------------------
-  // Render
+  // Render helpers
   // -------------------------------------------------------------------------
 
   const inputCls = [
@@ -570,10 +682,31 @@ export function SettingsView() {
     "disabled:cursor-not-allowed disabled:opacity-40",
   ].join(" ");
 
+  const numberInputCls = [
+    "w-20 rounded-ide border border-ide-border bg-ide-bg px-2 py-1",
+    "text-[13px] text-ide-text outline-none focus:border-ide-accent",
+    "disabled:cursor-not-allowed disabled:opacity-40",
+  ].join(" ");
+
+  // Inline feedback badge for a limits field.
+  function LimitsMsg({ field }: { field: string }) {
+    const msg = limitsMsg[field];
+    if (!msg) return null;
+    const isError = msg !== "Saved";
+    return (
+      <span className={`text-[11px] ${isError ? "text-ide-danger" : "text-ide-success"}`}>
+        {msg}
+      </span>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
+
   return (
     <ViewShell title="Settings">
-      {/* Stale-daemon banner — an OLD daemon survived an upgrade and is still
-          serving old code. Offer a one-click restart to the fresh binary. */}
+      {/* Stale-daemon banner */}
       {staleDaemon !== null && (
         <div className="mb-4 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
           <span>
@@ -608,10 +741,7 @@ export function SettingsView() {
         </div>
       )}
 
-      {/* Degraded banner — daemon is UP but its database is unavailable (e.g. the
-          SQLCipher key no longer matches). Driven by the `status` probe; the old
-          syncStatus.keychain_locked/db_unavailable fields were never emitted. A
-          restart can additionally recover a daemon wedged on a transient error. */}
+      {/* Degraded banner */}
       {degraded && (
         <div className="mb-4 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
           <span>
@@ -644,7 +774,8 @@ export function SettingsView() {
 
       {loadState !== "loading" && (
         <div className="mx-auto max-w-xl space-y-2">
-          {/* General */}
+
+          {/* ── General ──────────────────────────────────────────────────── */}
           <SectionHeader label="General" />
           <Panel>
             <SettingsRow label="Private mode">
@@ -661,8 +792,7 @@ export function SettingsView() {
             </SettingsRow>
           </Panel>
 
-          {/* Daemon — version + manual restart (forces the running daemon to
-              the freshly-installed binary after an upgrade). */}
+          {/* ── Daemon ───────────────────────────────────────────────────── */}
           <SectionHeader label="Daemon" />
           <Panel>
             <SettingsRow label="Version">
@@ -675,60 +805,45 @@ export function SettingsView() {
             </SettingsRow>
           </Panel>
 
-          {/* Display */}
+          {/* ── Display ──────────────────────────────────────────────────── */}
           <SectionHeader label="Display" />
           <Panel>
+            {/* W4-2: both slider rows use SliderRow for aligned label/slider/value grid */}
             <SettingsRow label="Preview lines">
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={1}
-                  max={6}
-                  step={1}
-                  value={prefs.previewLines}
-                  onChange={(e) => setPrefs({ previewLines: Number(e.target.value) })}
-                  className="w-28 accent-ide-accent"
-                />
-                <span className="w-4 text-center text-[13px] text-ide-text">{prefs.previewLines}</span>
-              </div>
+              <SliderRow
+                min={1}
+                max={6}
+                step={1}
+                value={prefs.previewLines}
+                onChange={(v) => setPrefs({ previewLines: v })}
+                formatValue={(v) => String(v)}
+              />
             </SettingsRow>
             <SettingsRow label="Row height">
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min={24}
-                  max={64}
-                  step={4}
-                  value={prefs.previewSize}
-                  onChange={(e) => setPrefs({ previewSize: Number(e.target.value) })}
-                  className="w-28 accent-ide-accent"
-                />
-                <span className="w-8 text-center text-[13px] text-ide-text">{prefs.previewSize}px</span>
-              </div>
+              <SliderRow
+                min={24}
+                max={64}
+                step={4}
+                value={prefs.previewSize}
+                onChange={(v) => setPrefs({ previewSize: v })}
+                formatValue={(v) => `${v}px`}
+              />
             </SettingsRow>
-            {/* Maccy parity: image thumbnail height cap */}
             <SettingsRow label="Image thumbnail height">
               <div className="flex flex-col items-end gap-0.5">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min={1}
-                    max={200}
-                    step={1}
-                    value={prefs.imageMaxHeight}
-                    onChange={(e) => setPrefs({ imageMaxHeight: Number(e.target.value) })}
-                    className="w-28 accent-ide-accent"
-                  />
-                  <span className="w-10 text-center text-[13px] text-ide-text">
-                    {prefs.imageMaxHeight}px
-                  </span>
-                </div>
+                <SliderRow
+                  min={1}
+                  max={200}
+                  step={1}
+                  value={prefs.imageMaxHeight}
+                  onChange={(v) => setPrefs({ imageMaxHeight: v })}
+                  formatValue={(v) => `${v}px`}
+                />
                 <span className="text-[11px] text-ide-faint">
-                  Max height of image previews (1–200 px). Width is always ≤ 340 px.
+                  Max image preview height (1–200 px).
                 </span>
               </div>
             </SettingsRow>
-            {/* Maccy parity: history size cap */}
             <SettingsRow label="History size">
               <div className="flex flex-col items-end gap-0.5">
                 <div className="flex items-center gap-2">
@@ -742,19 +857,15 @@ export function SettingsView() {
                       const v = Math.max(1, Math.min(999, Number(e.target.value) || 1));
                       setPrefs({ historySize: v });
                     }}
-                    className={[
-                      "w-20 rounded-ide border border-ide-border bg-ide-bg px-2 py-1",
-                      "text-[13px] text-ide-text outline-none focus:border-ide-accent",
-                    ].join(" ")}
+                    className={numberInputCls}
                   />
                   <span className="text-[13px] text-ide-dim">items</span>
                 </div>
                 <span className="text-[11px] text-ide-faint">
-                  Maximum clipboard items shown (1–999).
+                  Items displayed (1–999).
                 </span>
               </div>
             </SettingsRow>
-            {/* Maccy parity: hover-preview delay */}
             <SettingsRow label="Preview delay">
               <div className="flex flex-col items-end gap-0.5">
                 <div className="flex items-center gap-2">
@@ -768,16 +879,12 @@ export function SettingsView() {
                       const v = Math.max(200, Math.min(100000, Number(e.target.value) || 1500));
                       setPrefs({ previewDelay: v });
                     }}
-                    className={[
-                      "w-24 rounded-ide border border-ide-border bg-ide-bg px-2 py-1",
-                      "text-[13px] text-ide-text outline-none focus:border-ide-accent",
-                    ].join(" ")}
+                    className={`${numberInputCls} w-24`}
                   />
                   <span className="text-[13px] text-ide-dim">ms</span>
                 </div>
                 <span className="text-[11px] text-ide-faint">
-                  Hover delay before large preview appears (200–100 000 ms).
-                  {/* TODO: wire to hover-preview panel when implemented */}
+                  Hover delay before large preview (200–100 000 ms).
                 </span>
               </div>
             </SettingsRow>
@@ -789,7 +896,9 @@ export function SettingsView() {
             </SettingsRow>
           </Panel>
 
-          {/* Shortcuts */}
+          {/* ── Shortcuts ────────────────────────────────────────────────── */}
+          {/* W4-3: SettingsRow now has min-w-[160px] on the label so "Open popup"
+              never wraps; all label columns align with other rows. */}
           <SectionHeader label="Shortcuts" />
           <Panel>
             <SettingsRow label="Open popup">
@@ -821,17 +930,16 @@ export function SettingsView() {
                     {shortcutMsg.text}
                   </span>
                 )}
+                {/* W4-1: shortened help text */}
                 <span className="text-[11px] text-ide-faint">
-                  Click the field and press a key combo. OS-reserved combos (e.g.
-                  Cmd+Space, Cmd+Tab) cannot be overridden.
+                  Click then press a combo. OS-reserved keys (Cmd+Space etc.) cannot be overridden.
                 </span>
               </div>
             </SettingsRow>
           </Panel>
 
-          {/* Sync */}
+          {/* ── Sync ─────────────────────────────────────────────────────── */}
           <SectionHeader label="Sync" />
-          {/* Connection status banner — shown when Supabase is configured */}
           {syncStatus !== null && syncStatus.supabase_configured && (
             <div className="mb-1 rounded-ide border border-ide-success/30 bg-ide-success/5 px-3 py-2 text-[12px] text-ide-success">
               Connected ✓
@@ -843,10 +951,6 @@ export function SettingsView() {
               {syncStatus.passphrase_set ? " — passphrase set ✓" : ""}
             </div>
           )}
-          {/* Account identity note — only when signed in with a known email.
-              Supabase RLS isolates rows by auth.uid(): two devices on different
-              accounts silently see zero shared rows. Surface the account here so
-              the user can spot a mismatch themselves. */}
           {syncStatus !== null &&
             syncStatus.supabase_configured &&
             syncStatus.signed_in &&
@@ -856,12 +960,33 @@ export function SettingsView() {
                   Signed in as {syncStatus.email}
                 </span>
                 <span className="ml-1">
-                  — All your devices must use this same account to sync.
-                  Different accounts cannot see each other&apos;s clips.
+                  — All devices must use this same account to sync.
                 </span>
               </div>
             )}
           <Panel>
+            {/* Sync parity: P2P toggle (Android already has this) */}
+            <SettingsRow label="Enable P2P (LAN) sync">
+              <div className="flex items-center gap-2">
+                <LimitsMsg field="p2p_enabled" />
+                <Toggle
+                  checked={config.p2p_enabled}
+                  onChange={(v) => void handleP2pToggle(v)}
+                  disabled={offline}
+                />
+              </div>
+            </SettingsRow>
+            {/* Sync parity: wifi-only toggle */}
+            <SettingsRow label="Sync on Wi-Fi only">
+              <div className="flex items-center gap-2">
+                <LimitsMsg field="sync_on_wifi_only" />
+                <Toggle
+                  checked={syncOnWifiOnly}
+                  onChange={(v) => void handleWifiOnlyToggle(v)}
+                  disabled={offline}
+                />
+              </div>
+            </SettingsRow>
             <SettingsRow label="Supabase URL">
               <input
                 type="url"
@@ -938,7 +1063,7 @@ export function SettingsView() {
             </div>
           </Panel>
 
-          {/* Cloud Sync */}
+          {/* ── Cloud Sync ───────────────────────────────────────────────── */}
           <SectionHeader label="Cloud Sync" />
           <Panel>
             <SettingsRow label="Sync passphrase">
@@ -982,11 +1107,10 @@ export function SettingsView() {
                   </span>
                 )}
                 <span className="text-[11px] text-ide-faint">
-                  Enter the same passphrase on every device to sync.
+                  Same passphrase on every device to sync.
                 </span>
               </div>
             </SettingsRow>
-            {/* Sync status block */}
             <div className="border-t border-ide-divider px-3 py-2 space-y-1">
               <div className="text-[11px] uppercase tracking-wide text-ide-faint mb-1">
                 Status
@@ -999,14 +1123,8 @@ export function SettingsView() {
                 </div>
               ) : (
                 <div className="space-y-0.5">
-                  <StatusRow
-                    label="Passphrase set"
-                    ok={syncStatus.passphrase_set}
-                  />
-                  <StatusRow
-                    label="Supabase configured"
-                    ok={syncStatus.supabase_configured}
-                  />
+                  <StatusRow label="Passphrase set" ok={syncStatus.passphrase_set} />
+                  <StatusRow label="Supabase configured" ok={syncStatus.supabase_configured} />
                   <StatusRow label="Signed in" ok={syncStatus.signed_in} />
                   <div className="flex items-center gap-2 text-[13px] text-ide-dim pt-0.5">
                     <span className="w-[140px] shrink-0">Last sync</span>
@@ -1019,7 +1137,138 @@ export function SettingsView() {
             </div>
           </Panel>
 
-          {/* Data */}
+          {/* ── Storage / Limits ─────────────────────────────────────────── */}
+          {/* All fields read from get_config and written via set_config on commit.
+              Byte fields are displayed in MB; converted back to raw bytes before
+              sending to the daemon. */}
+          <SectionHeader label="Storage / Limits" />
+          <Panel>
+            <SettingsRow label="Max clip text size (MB)">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={0.1}
+                  max={100}
+                  step={0.1}
+                  value={maxTextMb}
+                  onChange={(e) => setMaxTextMb(Math.max(0.1, Number(e.target.value) || 1))}
+                  onBlur={() => void saveLimitsField("max_text_size_bytes", { max_text_size_bytes: mbToBytes(maxTextMb) })}
+                  className={`${numberInputCls} w-24`}
+                  disabled={offline}
+                />
+                <LimitsMsg field="max_text_size_bytes" />
+              </div>
+            </SettingsRow>
+            <SettingsRow label="Max clip image size (MB)">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  step={1}
+                  value={maxImageMb}
+                  onChange={(e) => setMaxImageMb(Math.max(1, Number(e.target.value) || 25))}
+                  onBlur={() => void saveLimitsField("max_image_size_bytes", { max_image_size_bytes: mbToBytes(maxImageMb) })}
+                  className={`${numberInputCls} w-24`}
+                  disabled={offline}
+                />
+                <LimitsMsg field="max_image_size_bytes" />
+              </div>
+            </SettingsRow>
+            <SettingsRow label="Max clip file size (MB)">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={2000}
+                  step={1}
+                  value={maxFileMb}
+                  onChange={(e) => setMaxFileMb(Math.max(1, Number(e.target.value) || 100))}
+                  onBlur={() => void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: mbToBytes(maxFileMb) })}
+                  className={`${numberInputCls} w-24`}
+                  disabled={offline}
+                />
+                <LimitsMsg field="max_file_size_bytes" />
+              </div>
+            </SettingsRow>
+            <SettingsRow label="Local storage limit (MB)">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={50}
+                  max={50000}
+                  step={50}
+                  value={quotaMb}
+                  onChange={(e) => setQuotaMb(Math.max(50, Number(e.target.value) || 500))}
+                  onBlur={() => void saveLimitsField("storage_quota_bytes", { storage_quota_bytes: mbToBytes(quotaMb) })}
+                  className={`${numberInputCls} w-24`}
+                  disabled={offline}
+                />
+                <LimitsMsg field="storage_quota_bytes" />
+              </div>
+            </SettingsRow>
+            <SettingsRow label="Max stored items">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={100000}
+                  step={1}
+                  value={historyLimit}
+                  onChange={(e) => setHistoryLimit(Math.max(1, Number(e.target.value) || 1000))}
+                  onBlur={() => void saveLimitsField("history_limit", { history_limit: historyLimit })}
+                  className={`${numberInputCls} w-24`}
+                  disabled={offline}
+                />
+                <LimitsMsg field="history_limit" />
+              </div>
+            </SettingsRow>
+            <SettingsRow label="Sensitive auto-wipe delay (s)">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={86400}
+                  step={1}
+                  value={sensitiveTtlSecs}
+                  onChange={(e) => setSensitiveTtlSecs(Math.max(1, Number(e.target.value) || 30))}
+                  onBlur={() => void saveLimitsField("sensitive_ttl_secs", { sensitive_ttl_secs: sensitiveTtlSecs })}
+                  className={`${numberInputCls} w-24`}
+                  disabled={offline}
+                />
+                <LimitsMsg field="sensitive_ttl_secs" />
+              </div>
+            </SettingsRow>
+            <SettingsRow label="Image quality (1–100)">
+              <div className="flex items-center gap-2">
+                <SliderRow
+                  min={1}
+                  max={100}
+                  step={1}
+                  value={imageQuality}
+                  onChange={(v) => setImageQuality(v)}
+                  formatValue={(v) => String(v)}
+                />
+                <LimitsMsg field="image_quality" />
+              </div>
+            </SettingsRow>
+            {/* Save button for image quality (slider — no onBlur like inputs) */}
+            <div className="flex justify-end border-t border-ide-divider px-3 py-2">
+              <button
+                type="button"
+                disabled={offline}
+                onClick={() => void saveLimitsField("image_quality", { image_quality: imageQuality })}
+                className={[
+                  "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+                  "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
+                ].join(" ")}
+              >
+                Save image quality
+              </button>
+            </div>
+          </Panel>
+
+          {/* ── Data ─────────────────────────────────────────────────────── */}
           <SectionHeader label="Data" />
           <Panel>
             <SettingsRow label="Clear clipboard history">
