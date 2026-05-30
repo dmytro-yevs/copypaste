@@ -231,13 +231,13 @@ export function DevicesView() {
           <span className="text-ide-dim">Revoke all?</span>
           <button
             onClick={() => void handleRevokeAllConfirmed()}
-            className="rounded-ide border border-ide-danger/50 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover"
+            className="rounded-ide border border-ide-danger/40 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs"
           >
             Yes
           </button>
           <button
             onClick={() => setRevokeAllConfirm(false)}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-hover"
+            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
           >
             No
           </button>
@@ -246,7 +246,7 @@ export function DevicesView() {
         <button
           onClick={() => setRevokeAllConfirm(true)}
           disabled={revokeAllPending || loadState !== "ready" || peers.length === 0}
-          className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-ide border border-ide-danger/35 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
         >
           {revokeAllPending ? "Revoking…" : "Revoke all"}
         </button>
@@ -265,7 +265,7 @@ export function DevicesView() {
     devicesBody = <p className="text-[13px] text-ide-dim">No paired devices.</p>;
   } else {
     devicesBody = (
-      <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">
+      <div className="flex flex-col divide-y divide-ide-divider/60 rounded-ide-lg border border-ide-border bg-ide-elevated shadow-ide-sm">
         {peers.map((peer) => {
           const rs = rowState[peer.fingerprint];
           const isPending = rs?.pending ?? false;
@@ -278,7 +278,7 @@ export function DevicesView() {
           return (
             <div
               key={peer.fingerprint}
-              className="flex items-center justify-between gap-4 px-3 py-2 hover:bg-ide-hover"
+              className="flex items-center justify-between gap-4 px-3 py-2 hover:bg-ide-raised"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
@@ -314,14 +314,14 @@ export function DevicesView() {
                 <button
                   onClick={() => void handleUnpair(peer.fingerprint)}
                   disabled={isPending}
-                  className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isPending ? "…" : "Unpair"}
                 </button>
                 <button
                   onClick={() => void handleRevoke(peer.fingerprint)}
                   disabled={isPending}
-                  className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded-ide border border-ide-danger/35 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isPending ? "…" : "Revoke"}
                 </button>
@@ -347,7 +347,7 @@ export function DevicesView() {
       </p>
 
       <div className="mx-auto max-w-md">
-        <section className="rounded-ide border border-ide-border bg-ide-panel p-4 space-y-2">
+        <section className="rounded-ide-lg border border-ide-border bg-ide-elevated p-4 space-y-2 shadow-ide-sm">
           <p className="text-[11px] font-medium uppercase tracking-wider text-ide-faint">
             Fingerprint
           </p>
@@ -368,7 +368,7 @@ export function DevicesView() {
                 <button
                   type="button"
                   onClick={handleCopy}
-                  className="shrink-0 rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-hover hover:text-ide-text transition-colors"
+                  className="shrink-0 rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-raised hover:text-ide-text transition-colors"
                 >
                   {copied ? "Copied" : "Copy"}
                 </button>
@@ -381,7 +381,7 @@ export function DevicesView() {
         </section>
 
         {/* ── Pair via QR ──────────────────────────────────────── */}
-        <section className="mt-4 rounded-ide border border-ide-border bg-ide-panel p-4 space-y-3">
+        <section className="mt-4 rounded-ide-lg border border-ide-border bg-ide-elevated p-4 space-y-3 shadow-ide-sm">
           <p className="text-[11px] font-medium uppercase tracking-wider text-ide-faint">
             Pair via QR
           </p>
@@ -425,7 +425,7 @@ export function DevicesView() {
             type="button"
             onClick={() => void handleShowQr()}
             disabled={qrState.status === "loading"}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
           >
             {qrState.status === "loading"
               ? "Generating…"

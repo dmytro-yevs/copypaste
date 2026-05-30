@@ -42,6 +42,8 @@ import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.SectionLabel
+import com.copypaste.android.ui.theme.ideSwitchColors
+import com.copypaste.android.ui.theme.ideTextFieldColors
 
 /**
  * Settings screen — toggles and Supabase config fields.
@@ -318,6 +320,7 @@ private fun SettingsTextField(
         label = { Text(label) },
         placeholder = { Text(hint, style = MaterialTheme.typography.bodySmall) },
         singleLine = true,
+        colors = ideTextFieldColors(),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp),
@@ -389,7 +392,8 @@ private fun SettingsRow(
         }
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange
+            onCheckedChange = onCheckedChange,
+            colors = ideSwitchColors(),
         )
     }
 }

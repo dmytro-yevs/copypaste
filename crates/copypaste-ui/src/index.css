@@ -2,8 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── v0.5.3 JetBrains "New UI" token foundation ─────────────────────────────
+   All component files use ide-* tailwind tokens from tailwind.config.js.
+   This file adds:
+     • dark color-scheme declaration
+     • global body/font baseline
+     • form-control base styles (input, select, checkbox, range) so every
+       instance looks identical without per-component overrides
+     • .ide-translucent vibrancy helper
+     • thin IDE-style scrollbars
+     • 120ms ease transitions on interactive elements
+     • popup-row size class
+──────────────────────────────────────────────────────────────────────────── */
+
 :root {
   color-scheme: dark;
+  /* Expose palette as CSS custom properties so JS / inline styles can consume
+     them without duplicating hex values. */
+  --ide-bg:           #16171a;
+  --ide-panel:        #1e2024;
+  --ide-elevated:     #26282d;
+  --ide-raised:       #2d2f34;
+  --ide-border:       #383b42;
+  --ide-divider:      #2e3035;
+  --ide-selection:    #1e3d72;
+  --ide-hover:        #22252a;
+  --ide-text:         #dfe1e5;
+  --ide-dim:          #9da0a8;
+  --ide-faint:        #6b6f78;
+  --ide-accent:       #3592ff;
+  --ide-accent-hover: #5aacff;
+  --ide-accent-dim:   #1a3661;
+  --ide-danger:       #f07171;
+  --ide-success:      #63c174;
+  --ide-warning:      #e5a93a;
 }
 
 html,
@@ -16,7 +48,7 @@ body {
   margin: 0;
   /* Transparent so the native macOS vibrancy (NSVisualEffectView) shows through. */
   background: transparent;
-  color: #dfe1e5;
+  color: var(--ide-text);
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
   font-size: 13px;
   line-height: 1.4;
@@ -29,26 +61,198 @@ body {
   display: flex;
 }
 
+/* ── Text inputs & textareas ─────────────────────────────────────────────── */
+
 input,
 textarea {
   user-select: text;
+  /* Apply consistent base so Tailwind utility classes only override what
+     differs per instance, not repeat everything from scratch. */
+  background: var(--ide-elevated);
+  color: var(--ide-text);
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-/* Thin IDE-style scrollbars. */
+input:focus,
+textarea:focus {
+  border-color: var(--ide-accent);
+  box-shadow: 0 0 0 2px var(--ide-accent-dim);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ide-faint);
+}
+
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.40;
+}
+
+/* Search inputs — reset the native cancel/search decoration so it doesn't
+   fight with our custom placeholder. */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+}
+
+/* ── Select ──────────────────────────────────────────────────────────────── */
+
+select {
+  appearance: none;
+  background: var(--ide-elevated);
+  color: var(--ide-text);
+  border: 1px solid var(--ide-border);
+  border-radius: 6px;
+  padding: 4px 28px 4px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  /* Custom chevron glyph as an inline SVG data-URI, tinted to ide-faint. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b6f78' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+select:focus {
+  border-color: var(--ide-accent);
+  box-shadow: 0 0 0 2px var(--ide-accent-dim);
+}
+
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.40;
+}
+
+/* ── Checkbox ────────────────────────────────────────────────────────────── */
+
+input[type="checkbox"] {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--ide-border);
+  border-radius: 3px;
+  background: var(--ide-elevated);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  position: relative;
+}
+
+input[type="checkbox"]:checked {
+  background: var(--ide-accent);
+  border-color: var(--ide-accent);
+}
+
+input[type="checkbox"]:checked::after {
+  content: "";
+  display: block;
+  width: 4px;
+  height: 8px;
+  border: 1.5px solid white;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg) translate(-1px, -1px);
+  margin-top: -2px;
+}
+
+input[type="checkbox"]:focus {
+  box-shadow: 0 0 0 2px var(--ide-accent-dim);
+}
+
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.40;
+}
+
+/* ── Range slider ────────────────────────────────────────────────────────── */
+
+input[type="range"] {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--ide-elevated);
+  border-radius: 2px;
+  border: 1px solid var(--ide-border);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ide-accent);
+  margin-top: -5px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: var(--ide-accent-hover);
+  transform: scale(1.15);
+}
+
+input[type="range"]:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* ── .ide-translucent — vibrancy overlay for panels that should float ────── */
+
+.ide-translucent {
+  background: rgba(22, 23, 26, 0.80);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+}
+
+/* ── Interactive elements — 120ms transitions ────────────────────────────── */
+
+button,
+[role="button"],
+[role="option"],
+[role="tab"],
+[role="switch"] {
+  transition-property: background-color, color, border-color, box-shadow, opacity, transform;
+  transition-duration: 120ms;
+  transition-timing-function: ease;
+}
+
+/* ── Thin IDE-style scrollbars ───────────────────────────────────────────── */
+
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.12);
   border: 2px solid transparent;
   border-radius: 6px;
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.22);
   background-clip: padding-box;
 }
 
@@ -56,10 +260,24 @@ textarea {
   background: transparent;
 }
 
-/* Popup: compact single-line rows (Maccy-style) */
+/* ── Popup: compact single-line rows (Maccy-style) ───────────────────────── */
+
 .popup-row {
   height: 28px;
   min-height: 28px;
   max-height: 28px;
   line-height: 28px;
+}
+
+/* ── Keyframe animations ─────────────────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
