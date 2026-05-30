@@ -22,6 +22,16 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+/// Build-version string stamped by `build.rs` (`<crate-version>+<git-sha>`, or
+/// just `<crate-version>` when git is unavailable at build time). Surfaced in
+/// the `status`/`stats` IPC replies so a client can detect a STALE daemon left
+/// running after an upgrade (a different value answering the socket means the
+/// on-disk binary changed but the old process is still serving old code).
+pub const BUILD_VERSION: &str = match option_env!("COPYPASTE_BUILD_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 /// Maximum size of a single IPC request line. Clients exceeding this receive
 /// an error response and have their connection closed. Prevents OOM from a
 /// malicious or buggy client sending an unbounded stream without newlines.
@@ -1618,7 +1628,8 @@ impl IpcServer {
                         serde_json::json!({
                             "total_items": total,
                             "sensitive_items": sensitive_count,
-                            "version": "1"
+                            "version": "1",
+                            "build_version": BUILD_VERSION,
                         }),
                     ),
                     Err(e) => Response::err_with_code(
@@ -2298,6 +2309,10 @@ impl IpcServer {
                 // socket as "everything is fine". When healthy, `ready` is true
                 // and `degraded_reason` is absent — unchanged shape for clients
                 // that only read `status`/`private_mode`.
+                // `build_version` + `pid` let a client (or a newer daemon doing
+                // socket takeover) detect and evict a STALE predecessor after an
+                // upgrade. Both are reported even in the degraded branch so the
+                // stale check works without a healthy DB.
                 let reason = self
                     .degraded_reason
                     .lock()
@@ -2312,6 +2327,8 @@ impl IpcServer {
                             "ready": false,
                             "degraded": true,
                             "degraded_reason": reason,
+                            "build_version": BUILD_VERSION,
+                            "pid": std::process::id(),
                         }),
                     ),
                     None => Response::ok(
@@ -2321,6 +2338,8 @@ impl IpcServer {
                             "private_mode": enabled,
                             "ready": self.ready.load(Ordering::Relaxed),
                             "degraded": false,
+                            "build_version": BUILD_VERSION,
+                            "pid": std::process::id(),
                         }),
                     ),
                 }
@@ -4033,7 +4052,93 @@ fn is_socket_live(socket_path: &std::path::Path) -> bool {
     std::os::unix::net::UnixStream::connect(socket_path).is_ok()
 }
 
-/// Bind a [`UnixListener`] at `socket_path`, self-healing a stale socket file.
+/// What the synchronous `status` probe learned about the daemon currently
+/// listening on the socket.
+#[derive(Debug, Default)]
+struct ProbedDaemon {
+    /// The peer's `build_version` (`<crate-version>+<git-sha>`), if it reported
+    /// one. A pre-takeover daemon (older build) will not include this field.
+    build_version: Option<String>,
+    /// The peer's OS process id, if reported. Used to SIGTERM a stale
+    /// predecessor that does not cooperate via IPC.
+    pid: Option<u32>,
+}
+
+/// Synchronously connect to a live socket and ask `status`, returning the
+/// peer's `build_version` + `pid` if it answered. Best-effort: any IO/parse
+/// failure yields `None` (treated as "unknown / probably stale").
+///
+/// This is the blocking, pre-bind sibling of the async `status` dispatch — it
+/// runs in the new daemon's startup path *before* the tokio runtime owns the
+/// socket, so it deliberately uses `std::os::unix::net` with short timeouts.
+fn probe_listening_daemon(socket_path: &std::path::Path) -> Option<ProbedDaemon> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::time::Duration;
+
+    let stream = std::os::unix::net::UnixStream::connect(socket_path).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
+
+    let mut req = serde_json::to_string(
+        &serde_json::json!({"id":"takeover-probe","method":"status","params":{}}),
+    )
+    .ok()?;
+    req.push('\n');
+    (&stream).write_all(req.as_bytes()).ok()?;
+
+    let mut reader = BufReader::new(&stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).ok()?;
+    let v: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    let data = &v["data"];
+    Some(ProbedDaemon {
+        build_version: data["build_version"].as_str().map(str::to_owned),
+        pid: data["pid"].as_u64().and_then(|p| u32::try_from(p).ok()),
+    })
+}
+
+/// Attempt to evict a stale predecessor daemon and free its socket.
+///
+/// Sends `SIGTERM` to `pid` (a clean shutdown — launchd's `KeepAlive` only
+/// respawns on a *crash*, so a SIGTERM exit will not race us back onto the
+/// socket) and polls until the socket stops answering or a short deadline
+/// elapses. Returns `true` once the socket is free.
+#[cfg(unix)]
+fn evict_stale_daemon(socket_path: &std::path::Path, pid: u32) -> bool {
+    use std::time::{Duration, Instant};
+
+    // SAFETY: `kill(2)` with SIGTERM is a thin libc wrapper; the only effect is
+    // delivering a signal to `pid`. We never pass a negative/zero pid (which
+    // would target a process group / every process), and we tolerate ESRCH
+    // (process already gone) as success.
+    let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+    if rc != 0 {
+        let err = std::io::Error::last_os_error();
+        // ESRCH = no such process: the predecessor already exited; treat the
+        // socket as ours to reclaim. Any other error (e.g. EPERM) means we
+        // could not signal it — give up so we don't unlink a live socket.
+        if err.raw_os_error() != Some(libc::ESRCH) {
+            tracing::warn!("failed to SIGTERM stale daemon pid {pid}: {err}");
+            return false;
+        }
+    } else {
+        tracing::warn!(
+            "sent SIGTERM to stale daemon pid {pid}; waiting for it to release the socket"
+        );
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if !is_socket_live(socket_path) {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    !is_socket_live(socket_path)
+}
+
+/// Bind a [`UnixListener`] at `socket_path`, self-healing a stale socket file
+/// and evicting a stale *predecessor* daemon left over from an upgrade.
 ///
 /// macOS / Linux refuse to `bind()` over an existing socket path
 /// (`EADDRINUSE`), so a socket file left behind by a previous daemon would
@@ -4041,19 +4146,64 @@ fn is_socket_live(socket_path: &std::path::Path) -> bool {
 /// socket not reachable" symptom seen after a v0.3.4 → v0.4.0 upgrade where an
 /// old daemon died without cleaning up.
 ///
-/// Policy:
-///   * No file present  → bind directly.
-///   * File present, NO live listener → stale; remove it and bind.
-///   * File present, live listener answers → another healthy daemon already
-///     owns the socket. Do NOT steal it (that would orphan the running
-///     daemon); return an error so the caller logs and exits cleanly.
+/// Policy (newest binary wins on upgrade):
+///   * No file present → bind directly.
+///   * File present, NO live listener → stale file; remove it and bind.
+///   * File present, live listener that reports the SAME `build_version` as us
+///     → a healthy same-version daemon already owns the socket; do NOT steal it
+///     (that would needlessly orphan a running peer) — return an error so the
+///     caller logs and exits cleanly.
+///   * File present, live listener that reports a DIFFERENT `build_version`, or
+///     no version at all (an older build predating this takeover logic) → a
+///     STALE predecessor still serving old code after an upgrade. Evict it
+///     (SIGTERM its reported pid, wait for the socket to free), then remove the
+///     socket file and bind. This is what lets the freshly-installed binary
+///     take over without a manual `kill`.
 fn bind_with_stale_cleanup(socket_path: &std::path::Path) -> anyhow::Result<UnixListener> {
     if socket_path.exists() {
         if is_socket_live(socket_path) {
-            anyhow::bail!(
-                "another daemon is already listening on {} — refusing to steal the socket",
-                socket_path.display()
-            );
+            let probed = probe_listening_daemon(socket_path).unwrap_or_default();
+            match probed.build_version.as_deref() {
+                Some(v) if v == BUILD_VERSION => {
+                    anyhow::bail!(
+                        "another daemon (build {v}) is already listening on {} — \
+                         refusing to steal the socket from a healthy same-version peer",
+                        socket_path.display()
+                    );
+                }
+                other => {
+                    let reported = other.unwrap_or("<none>");
+                    tracing::warn!(
+                        "stale daemon (build {reported}) holds {}; this build is {BUILD_VERSION}. \
+                         Evicting it so the upgraded binary takes over.",
+                        socket_path.display()
+                    );
+                    match probed.pid {
+                        Some(pid) if evict_stale_daemon(socket_path, pid) => {
+                            tracing::info!("stale daemon pid {pid} released the socket");
+                        }
+                        Some(pid) => {
+                            anyhow::bail!(
+                                "could not evict stale daemon pid {pid} holding {} — \
+                                 use the app's \"Restart daemon\" control or \
+                                 `launchctl kickstart -k gui/$UID/com.copypaste.daemon`",
+                                socket_path.display()
+                            );
+                        }
+                        None => {
+                            // Old build reported no pid: we cannot signal it.
+                            // Surface a clear, actionable error rather than
+                            // unlinking a socket a live process still owns.
+                            anyhow::bail!(
+                                "a stale daemon (build {reported}, no pid reported) holds {} and \
+                                 cannot be evicted automatically — use the app's \"Restart daemon\" \
+                                 control or `launchctl kickstart -k gui/$UID/com.copypaste.daemon`",
+                                socket_path.display()
+                            );
+                        }
+                    }
+                }
+            }
         }
         tracing::warn!(
             "removing stale IPC socket at {} (no live listener answered)",
@@ -4497,6 +4647,19 @@ mod tests {
         assert!(!is_socket_live(&sock));
     }
 
+    /// `BUILD_VERSION` must be non-empty and start with the crate's semver so
+    /// clients can compare it against their own version prefix to detect a
+    /// stale daemon after an upgrade.
+    #[test]
+    fn build_version_is_crate_version_prefixed() {
+        assert!(!BUILD_VERSION.is_empty(), "BUILD_VERSION must not be empty");
+        let crate_ver = env!("CARGO_PKG_VERSION");
+        assert!(
+            BUILD_VERSION == crate_ver || BUILD_VERSION.starts_with(&format!("{crate_ver}+")),
+            "BUILD_VERSION {BUILD_VERSION:?} must equal or be `<{crate_ver}>+<sha>`"
+        );
+    }
+
     /// A leftover socket *file* with no process accepting on it is stale:
     /// `bind_with_stale_cleanup` must remove it and successfully rebind,
     /// rather than failing with `EADDRINUSE`. This is the core self-heal for
@@ -4530,10 +4693,13 @@ mod tests {
         drop(listener);
     }
 
-    /// When a *live* daemon already owns the socket, the helper must refuse to
-    /// steal it (returning an error) so the running daemon is not orphaned.
+    /// A live listener that does NOT speak our protocol (never answers
+    /// `status`, so reports no `build_version`/`pid`) cannot be safely evicted:
+    /// the helper must refuse to bind rather than unlink a socket a live
+    /// process still owns. (A real same-version daemon answers `status` and is
+    /// covered by `..._refuses_to_steal_healthy_same_version_daemon` below.)
     #[tokio::test]
-    async fn bind_with_stale_cleanup_refuses_to_steal_live_socket() {
+    async fn bind_with_stale_cleanup_refuses_unidentifiable_live_socket() {
         let dir = tempdir().unwrap();
         let sock = dir.path().join("daemon.sock");
 
@@ -4545,9 +4711,135 @@ mod tests {
             bind_with_stale_cleanup(&sock).expect_err("must refuse to bind over a live socket");
         let msg = err.to_string();
         assert!(
-            msg.contains("already listening"),
-            "expected a 'already listening' refusal, got: {msg}"
+            msg.contains("cannot be evicted automatically"),
+            "expected a 'cannot be evicted' refusal, got: {msg}"
         );
+    }
+
+    /// A live daemon answering `status` with the SAME `build_version` as us is
+    /// a healthy same-version peer — the helper must NOT steal its socket.
+    #[tokio::test]
+    async fn bind_with_stale_cleanup_refuses_to_steal_healthy_same_version_daemon() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("daemon.sock");
+
+        // A minimal acceptor that replies to `status` with OUR build_version
+        // and a bogus pid. It keeps accepting for the whole test (loop on a
+        // cloned fd) so the socket stays live through the probe.
+        let listener = std::os::unix::net::UnixListener::bind(&sock).expect("seed bind");
+        let acceptor = listener.try_clone().expect("clone listener fd");
+        let body = serde_json::json!({
+            "ok": true,
+            "data": { "build_version": BUILD_VERSION, "pid": 999_999u32 },
+        })
+        .to_string();
+        let handle = std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader, Write};
+            loop {
+                let Ok((stream, _)) = acceptor.accept() else {
+                    break;
+                };
+                let mut reader = BufReader::new(&stream);
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_ok() && line.contains("status") {
+                    let mut resp = body.clone();
+                    resp.push('\n');
+                    let _ = (&stream).write_all(resp.as_bytes());
+                }
+            }
+        });
+
+        let err = bind_with_stale_cleanup(&sock)
+            .expect_err("must refuse to steal a healthy same-version daemon's socket");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("healthy same-version peer"),
+            "expected same-version refusal, got: {msg}"
+        );
+        drop(listener); // ends the acceptor thread; tempdir teardown frees the path.
+        let _ = handle;
+    }
+
+    /// A live daemon answering `status` with a DIFFERENT `build_version` is a
+    /// STALE predecessor from before an upgrade. The helper must try to evict
+    /// it (SIGTERM its reported pid). Here the reported pid is unsignalable
+    /// (ESRCH), so the socket is never released and we must surface a clear,
+    /// actionable error rather than silently coexisting / unlinking a live
+    /// socket.
+    #[tokio::test]
+    async fn bind_with_stale_cleanup_attempts_eviction_for_different_version() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("daemon.sock");
+
+        // The seed acceptor keeps the socket live for the WHOLE test (looping on
+        // blocking accept) so eviction genuinely cannot succeed. We hold the
+        // original listener in the test and hand the thread a `try_clone` so the
+        // socket stays bound until the test's tempdir teardown frees the path.
+        let listener = std::os::unix::net::UnixListener::bind(&sock).expect("seed bind");
+        let acceptor = listener.try_clone().expect("clone listener fd");
+        // Report a different build version + a pid that maps to ESRCH (no such
+        // process), so `evict_stale_daemon` SIGTERMs nothing and then times out
+        // observing the socket is still held.
+        let body = serde_json::json!({
+            "ok": true,
+            "data": { "build_version": "0.0.0-stale+deadbeef", "pid": 2_000_000_001u32 },
+        })
+        .to_string();
+        let handle = std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader, Write};
+            loop {
+                let Ok((stream, _)) = acceptor.accept() else {
+                    break;
+                };
+                let mut reader = BufReader::new(&stream);
+                let mut line = String::new();
+                if reader.read_line(&mut line).is_ok() && line.contains("status") {
+                    let mut resp = body.clone();
+                    resp.push('\n');
+                    let _ = (&stream).write_all(resp.as_bytes());
+                }
+            }
+        });
+
+        let err = bind_with_stale_cleanup(&sock).expect_err(
+            "eviction of an unsignalable stale pid must fail loudly, not silently bind",
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("could not evict stale daemon"),
+            "expected an eviction-failure error, got: {msg}"
+        );
+        // Dropping both listener fds unblocks/ends the acceptor thread.
+        drop(listener);
+        let _ = handle;
+    }
+
+    /// The `status` probe must round-trip `build_version` + `pid` from a daemon
+    /// that answers, and yield `None`/defaults from a socket that says nothing.
+    #[tokio::test]
+    async fn probe_listening_daemon_reads_version_and_pid() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("daemon.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&sock).expect("seed bind");
+        let handle = std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader, Write};
+            if let Ok((stream, _)) = listener.accept() {
+                let mut reader = BufReader::new(&stream);
+                let mut line = String::new();
+                let _ = reader.read_line(&mut line);
+                let resp = serde_json::json!({
+                    "ok": true,
+                    "data": { "build_version": "9.9.9+abc", "pid": 4242u32 },
+                })
+                .to_string();
+                let _ = (&stream).write_all(format!("{resp}\n").as_bytes());
+            }
+        });
+
+        let probed = probe_listening_daemon(&sock).expect("probe should connect");
+        assert_eq!(probed.build_version.as_deref(), Some("9.9.9+abc"));
+        assert_eq!(probed.pid, Some(4242));
+        handle.join().ok();
     }
 
     #[tokio::test]

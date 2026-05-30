@@ -901,6 +901,7 @@ dependencies = [
  "hex",
  "home",
  "image",
+ "libc",
  "mdns-sd",
  "mockito",
  "objc2 0.5.2",

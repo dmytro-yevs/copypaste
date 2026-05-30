@@ -6,9 +6,11 @@ import {
   getPopupShortcut,
   setPopupShortcut,
   probeStatus,
+  detectStaleDaemon,
   type AppSettings,
   type SyncStatus,
 } from "../lib/ipc";
+import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
 
 // ---------------------------------------------------------------------------
@@ -293,8 +295,14 @@ export function SettingsView() {
   // reports degraded state. Non-null ⇒ daemon is up but its DB is unavailable.
   // (The empty string means "degraded but no machine-readable reason given".)
   const [degradedReason, setDegradedReason] = useState<string | null>(null);
-  // Bumped by the Retry button to re-run the load effect.
+  // Bumped by the Retry / Restart buttons to re-run the load effect.
   const [reloadKey, setReloadKey] = useState(0);
+  // Non-null when an OLD daemon survived an upgrade and is still serving old
+  // code: holds the stale daemon's build (or "unknown" if it reported none).
+  const [staleDaemon, setStaleDaemon] = useState<string | null>(null);
+  // The running daemon's reported build_version (for display in the Daemon
+  // section); null when offline or not yet known.
+  const [daemonVersion, setDaemonVersion] = useState<string | null>(null);
 
   // Save-config error (separate from the success "Saved")
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -385,6 +393,24 @@ export function SettingsView() {
     }
 
     void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  // Stale-daemon check: compare the running daemon's build to the app's own.
+  // Re-runs whenever the view (re)loads so a successful restart clears it.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const [stale, status] = await Promise.all([
+        detectStaleDaemon(),
+        api.status().catch(() => null),
+      ]);
+      if (cancelled) return;
+      setStaleDaemon(stale);
+      setDaemonVersion(status?.build_version ?? null);
+    })();
     return () => {
       cancelled = true;
     };
@@ -545,43 +571,66 @@ export function SettingsView() {
 
   return (
     <ViewShell title="Settings">
+      {/* Stale-daemon banner — an OLD daemon survived an upgrade and is still
+          serving old code. Offer a one-click restart to the fresh binary. */}
+      {staleDaemon !== null && (
+        <div className="mb-4 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
+          <span>
+            A previous CopyPaste daemon is still running after an update
+            {staleDaemon !== "unknown" ? ` (build ${staleDaemon})` : ""}. Restart
+            it to use the latest version.
+          </span>
+          <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
+        </div>
+      )}
+
       {/* Offline banner */}
       {loadState === "offline" && (
         <div className="mb-4 flex items-center justify-between gap-3 rounded-ide border border-ide-border bg-ide-elevated px-3 py-2 text-[13px] text-ide-dim">
           <span>Daemon not running — clipboard sync paused.</span>
-          <button
-            type="button"
-            onClick={() => setReloadKey((k) => k + 1)}
-            className={[
-              "shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text",
-              "hover:bg-ide-hover",
-            ].join(" ")}
-          >
-            Retry
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <RestartDaemonButton
+              label="Restart daemon"
+              onRestarted={() => setReloadKey((k) => k + 1)}
+            />
+            <button
+              type="button"
+              onClick={() => setReloadKey((k) => k + 1)}
+              className={[
+                "shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text",
+                "hover:bg-ide-hover",
+              ].join(" ")}
+            >
+              Retry
+            </button>
+          </div>
         </div>
       )}
 
       {/* Degraded banner — daemon is UP but its database is unavailable (e.g. the
           SQLCipher key no longer matches). Driven by the `status` probe; the old
-          syncStatus.keychain_locked/db_unavailable fields were never emitted. */}
+          syncStatus.keychain_locked/db_unavailable fields were never emitted. A
+          restart can additionally recover a daemon wedged on a transient error. */}
       {degraded && (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
+        <div className="mb-4 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
           <span>
             Clipboard database unavailable
             {degradedReason ? ` (${degradedReason})` : ""} — its key no longer
             matches. Open History to reset the database and recover.
           </span>
-          <button
-            type="button"
-            onClick={() => setReloadKey((k) => k + 1)}
-            className={[
-              "shrink-0 rounded-ide border border-ide-warning/40 bg-ide-panel px-2.5 py-1 text-[12px] text-ide-warning",
-              "hover:bg-ide-hover",
-            ].join(" ")}
-          >
-            Retry
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setReloadKey((k) => k + 1)}
+              className={[
+                "rounded-ide border border-ide-warning/40 bg-ide-panel px-2.5 py-1 text-[12px] text-ide-warning",
+                "hover:bg-ide-hover",
+              ].join(" ")}
+            >
+              Retry
+            </button>
+            <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
+          </div>
         </div>
       )}
 
@@ -608,6 +657,20 @@ export function SettingsView() {
                   disabled={offline}
                 />
               </div>
+            </SettingsRow>
+          </Panel>
+
+          {/* Daemon — version + manual restart (forces the running daemon to
+              the freshly-installed binary after an upgrade). */}
+          <SectionHeader label="Daemon" />
+          <Panel>
+            <SettingsRow label="Version">
+              <span className="text-[13px] text-ide-text">
+                {offline ? "Not running" : (daemonVersion ?? "unknown")}
+              </span>
+            </SettingsRow>
+            <SettingsRow label="Restart">
+              <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
             </SettingsRow>
           </Panel>
 

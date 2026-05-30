@@ -2,6 +2,7 @@
 //! the daemon over the Unix-socket IPC via the `ipc_call` command (`ipc.rs`).
 //! This crate never links `copypaste-core`; all data access is IPC-only.
 
+mod daemon_lifecycle;
 mod ipc;
 
 #[cfg(target_os = "macos")]
@@ -89,6 +90,8 @@ pub fn run() {
             ipc::ipc_call,
             ipc::pairing_qr_svg,
             ipc::reset_database,
+            daemon_lifecycle::app_version,
+            daemon_lifecycle::restart_daemon,
             get_popup_shortcut,
             set_popup_shortcut,
             check_accessibility_permission,
