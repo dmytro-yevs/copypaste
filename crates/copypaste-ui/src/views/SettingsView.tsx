@@ -3,12 +3,13 @@ import { ViewShell } from "../components/ViewShell";
 import {
   api,
   IpcError,
+  appVersion,
   getPopupShortcut,
   setPopupShortcut,
-  probeStatus,
-  detectStaleDaemon,
+  detectStaleDaemonFromStatus,
   type AppSettings,
   type SyncStatus,
+  type DaemonStatus,
 } from "../lib/ipc";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
@@ -340,16 +341,28 @@ export function SettingsView() {
       try {
         // Each call is individually fault-tolerant: a single rejecting method
         // must not blank the screen. The outer try/catch is a backstop only.
-        // The `status` probe is the ONLY reliable source of degraded state —
-        // get_sync_status NEVER reports it (its keychain_locked/db_unavailable
-        // fields are dead). It never throws (resolves to "offline" on failure).
-        const [pmResult, cfg, status, probe] = await Promise.all([
+        //
+        // api.status() is fetched ONCE here and reused for:
+        //   (a) the degraded/ready probe (via probeStatus logic inline)
+        //   (b) build_version display in the Daemon section
+        //   (c) stale-daemon detection (detectStaleDaemonFromStatus)
+        // This replaces the previous 3× api.status() pattern (load effect +
+        // stale-check effect + detectStaleDaemon's own fetch).
+        const [pmResult, cfg, syncSt, daemonSt, myAppVer] = await Promise.all([
           api.getPrivateMode().catch(() => null),
           api.getConfig().catch(() => null),
           api.getSyncStatus().catch(() => null),
-          probeStatus(),
+          api.status().catch(() => null) as Promise<DaemonStatus | null>,
+          appVersion().catch(() => null),
         ]);
         if (cancelled) return;
+
+        // Derive the status probe result from the single status fetch.
+        const probe = daemonSt
+          ? (daemonSt.degraded === true || daemonSt.ready === false
+              ? { kind: "degraded" as const, reason: daemonSt.degraded_reason ?? null }
+              : { kind: "ok" as const })
+          : { kind: "offline" as const };
 
         // Record degraded state up front so the banner is correct regardless of
         // which branch we take below (a degraded daemon's DB-gated calls fail,
@@ -358,13 +371,19 @@ export function SettingsView() {
           probe.kind === "degraded" ? (probe.reason ?? "") : null,
         );
 
+        // Stale-daemon detection reusing the already-fetched status (no extra round-trip).
+        setDaemonVersion(daemonSt?.build_version ?? null);
+        if (myAppVer !== null) {
+          setStaleDaemon(detectStaleDaemonFromStatus(daemonSt, myAppVer));
+        }
+
         // If the daemon is unreachable for the core calls, show the offline
         // state — UNLESS the status probe says the daemon is actually up but
         // degraded, in which case the dedicated degraded banner is shown instead.
         // (get_sync_status is optional and may be absent on older builds.)
         if (pmResult === null && cfg === null) {
           setLoadState(probe.kind === "degraded" ? "degraded" : "offline");
-          setSyncStatus(status);
+          setSyncStatus(syncSt);
           return;
         }
 
@@ -378,10 +397,10 @@ export function SettingsView() {
         });
         // Prefill Supabase URL: prefer the stored config value, but fall back to
         // the value reported by get_sync_status (may be set via env variable).
-        const urlFromStatus = status?.supabase_url ?? null;
+        const urlFromStatus = syncSt?.supabase_url ?? null;
         setSupabaseUrl(cfg?.supabase_url ?? urlFromStatus ?? "");
         setSupabaseKey(cfg?.supabase_anon_key ?? "");
-        setSyncStatus(status);
+        setSyncStatus(syncSt);
         setLoadState("ready");
       } catch (err) {
         if (cancelled) return;
@@ -393,24 +412,6 @@ export function SettingsView() {
     }
 
     void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadKey]);
-
-  // Stale-daemon check: compare the running daemon's build to the app's own.
-  // Re-runs whenever the view (re)loads so a successful restart clears it.
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const [stale, status] = await Promise.all([
-        detectStaleDaemon(),
-        api.status().catch(() => null),
-      ]);
-      if (cancelled) return;
-      setStaleDaemon(stale);
-      setDaemonVersion(status?.build_version ?? null);
-    })();
     return () => {
       cancelled = true;
     };

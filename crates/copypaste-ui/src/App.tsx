@@ -3,7 +3,7 @@ import { useUI, type ViewId } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RestartDaemonButton } from "./components/RestartDaemonButton";
-import { detectStaleDaemon } from "./lib/ipc";
+import { appVersion, detectStaleDaemonFromStatus, api } from "./lib/ipc";
 import { HistoryView } from "./views/HistoryView";
 import { DevicesView } from "./views/DevicesView";
 import { SettingsView } from "./views/SettingsView";
@@ -22,15 +22,28 @@ export default function App() {
 
   // App-launch stale check: if an OLD daemon survived an upgrade and is still
   // serving old code, show a single dismissible banner offering a restart.
+  // Uses detectStaleDaemonFromStatus (strictly OLDER semver only) so a newer
+  // daemon after a rollback does not trigger the "restart" banner.
   // Minimal + non-annoying: we never auto-kill the daemon, and the banner is
   // dismissible. Best-effort — any error yields no banner.
   const [staleDaemon, setStaleDaemon] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    void detectStaleDaemon().then((stale) => {
-      if (!cancelled) setStaleDaemon(stale);
-    });
+    void (async () => {
+      try {
+        const [myVer, status] = await Promise.all([
+          appVersion().catch(() => null),
+          api.status().catch(() => null),
+        ]);
+        if (cancelled) return;
+        if (myVer !== null) {
+          setStaleDaemon(detectStaleDaemonFromStatus(status, myVer));
+        }
+      } catch {
+        // Best-effort — never show a banner on error.
+      }
+    })();
     return () => {
       cancelled = true;
     };
