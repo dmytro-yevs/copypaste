@@ -35,6 +35,15 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 /// stalls during handshake.
 pub const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Fixed SNI sentinel used for all P2P TLS handshakes.
+///
+/// rustls requires a `ServerName` even though peer identity is established by
+/// certificate-fingerprint pinning, not hostname. The client always sets this
+/// exact value (see [`PeerTransport::connect`]) and the client-side verifier
+/// (`verifier::PeerCertVerifier`) compares the presented SNI against it as
+/// defense-in-depth, rejecting any mismatch.
+pub const P2P_SNI_SENTINEL: &str = "copypaste.peer";
+
 /// Default number of times [`PeerTransport::connect_with_retry`] will retry a
 /// transient network error before propagating it. The first attempt counts —
 /// i.e. `MAX_CONNECT_ATTEMPTS = 4` means 1 initial attempt + 3 retries.
@@ -410,7 +419,7 @@ impl PeerTransport {
         // rustls requires a ServerName even for mutual-TLS peer-to-peer.
         // We use a fixed placeholder since identity is verified by fingerprint.
         let server_name =
-            ServerName::try_from("copypaste.peer").expect("static server name is always valid");
+            ServerName::try_from(P2P_SNI_SENTINEL).expect("static server name is always valid");
 
         let tls_stream = match tokio::time::timeout(
             TLS_HANDSHAKE_TIMEOUT,

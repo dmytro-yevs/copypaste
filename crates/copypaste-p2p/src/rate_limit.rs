@@ -48,10 +48,30 @@ pub const CLEANUP_INTERVAL: Duration = Duration::from_secs(60);
 /// Log a sampled warning every Nth drop to avoid log spam.
 pub const DROP_LOG_SAMPLE_RATE: u64 = 100;
 
+/// Maximum number of distinct per-key buckets retained at once.
+///
+/// Security MED: the per-key bucket map is keyed on the *unauthenticated*,
+/// rotatable TXT `device_id`. A LAN attacker rotating that field would
+/// otherwise mint an unbounded number of fresh buckets, exhausting memory.
+/// Once this cap is reached we refuse to mint new buckets (existing keys keep
+/// working) and rely on the global bucket below to bound aggregate admission.
+pub const MAX_TRACKED_KEYS: usize = 4096;
+
+/// Global (across-all-keys) burst size. Sized well above a legitimate LAN's
+/// peer churn but low enough that id-rotation can't amplify processing cost.
+pub const GLOBAL_BURST_CAPACITY: u32 = 256;
+
+/// Global refill rate in tokens per second, shared across every key.
+pub const GLOBAL_REFILL_RATE_PER_SEC: f64 = 64.0;
+
 #[derive(Debug, Clone, Copy)]
 struct Bucket {
-    /// Fractional tokens currently available (0.0 .. BURST_CAPACITY).
+    /// Fractional tokens currently available (0.0 .. `capacity`).
     tokens: f64,
+    /// Burst capacity / refill ceiling for this bucket.
+    capacity: f64,
+    /// Refill rate in tokens per second.
+    refill_per_sec: f64,
     /// Last time the bucket was refilled or consumed.
     last_refill: Instant,
     /// Last time the bucket was touched at all (used for cleanup).
@@ -60,19 +80,25 @@ struct Bucket {
 
 impl Bucket {
     fn new(now: Instant) -> Self {
+        Self::with_params(now, f64::from(BURST_CAPACITY), REFILL_RATE_PER_SEC)
+    }
+
+    fn with_params(now: Instant, capacity: f64, refill_per_sec: f64) -> Self {
         Self {
-            tokens: f64::from(BURST_CAPACITY),
+            tokens: capacity,
+            capacity,
+            refill_per_sec,
             last_refill: now,
             last_used: now,
         }
     }
 
-    /// Refill the bucket based on elapsed time, capped at `BURST_CAPACITY`.
+    /// Refill the bucket based on elapsed time, capped at `capacity`.
     fn refill(&mut self, now: Instant) {
         let elapsed = now.saturating_duration_since(self.last_refill);
-        let added = elapsed.as_secs_f64() * REFILL_RATE_PER_SEC;
+        let added = elapsed.as_secs_f64() * self.refill_per_sec;
         if added > 0.0 {
-            self.tokens = (self.tokens + added).min(f64::from(BURST_CAPACITY));
+            self.tokens = (self.tokens + added).min(self.capacity);
             self.last_refill = now;
         }
     }
@@ -98,6 +124,11 @@ impl Bucket {
 #[derive(Debug, Default)]
 pub struct MdnsRateLimiter {
     buckets: Mutex<HashMap<String, Bucket>>,
+    /// Global token bucket shared across all keys. Bounds aggregate admission
+    /// so a peer rotating the unauthenticated `device_id` TXT field cannot get
+    /// unlimited fresh per-key budget (security MED). Lazily initialised on
+    /// first admission so the struct stays `Default`-constructible.
+    global: Mutex<Option<Bucket>>,
     /// Last time `cleanup_if_due` performed a sweep. `None` until first call.
     last_cleanup: Mutex<Option<Instant>>,
     /// Monotonic count of dropped events (for sampled logging).
@@ -120,12 +151,48 @@ impl MdnsRateLimiter {
     /// addresses (security MED #11).
     pub fn try_admit_key(&self, key: &str) -> bool {
         let now = Instant::now();
+
+        // Global admission gate first: a single shared bucket caps the
+        // aggregate event rate regardless of how many distinct keys an
+        // attacker rotates through (security MED). If the global budget is
+        // exhausted we drop without even touching the per-key map, which also
+        // means key-rotation cannot be used to grow the map past the gate.
+        let global_ok = {
+            let mut global = self.global.lock().unwrap_or_else(|e| e.into_inner());
+            let bucket = global.get_or_insert_with(|| {
+                Bucket::with_params(
+                    now,
+                    f64::from(GLOBAL_BURST_CAPACITY),
+                    GLOBAL_REFILL_RATE_PER_SEC,
+                )
+            });
+            bucket.try_consume(now)
+        };
+        if !global_ok {
+            self.record_drop(key);
+            self.cleanup_if_due(now);
+            return false;
+        }
+
         let admitted = {
             let mut buckets = self.buckets.lock().unwrap_or_else(|e| e.into_inner());
-            let bucket = buckets
-                .entry(key.to_owned())
-                .or_insert_with(|| Bucket::new(now));
-            bucket.try_consume(now)
+            match buckets.get_mut(key) {
+                Some(bucket) => bucket.try_consume(now),
+                None => {
+                    // Cap the number of distinct buckets. Refuse to mint a new
+                    // one past the cap rather than evicting (eviction here would
+                    // let an attacker flush legitimate peers' buckets). The
+                    // global gate above already bounds aggregate throughput.
+                    if buckets.len() >= MAX_TRACKED_KEYS {
+                        false
+                    } else {
+                        let mut bucket = Bucket::new(now);
+                        let admitted = bucket.try_consume(now);
+                        buckets.insert(key.to_owned(), bucket);
+                        admitted
+                    }
+                }
+            }
         };
         if !admitted {
             self.record_drop(key);
@@ -230,5 +297,48 @@ mod tests {
             assert!(!rl.try_admit(addr));
         }
         assert_eq!(rl.total_drops(), 5);
+    }
+
+    /// Security MED: rotating the (unauthenticated) key must not yield unlimited
+    /// admissions — the global token bucket caps the aggregate at its burst
+    /// capacity even when every request uses a brand-new key.
+    #[tokio::test(start_paused = true)]
+    async fn global_bucket_caps_rotating_keys() {
+        let rl = MdnsRateLimiter::new();
+        // Each fresh key has its own full per-key bucket, so without the global
+        // gate this loop would admit every single request.
+        let mut admitted = 0u32;
+        for i in 0..(GLOBAL_BURST_CAPACITY + 50) {
+            if rl.try_admit_key(&format!("rotating-id-{i}")) {
+                admitted += 1;
+            }
+        }
+        assert_eq!(
+            admitted, GLOBAL_BURST_CAPACITY,
+            "global bucket must cap aggregate admissions at its burst capacity"
+        );
+    }
+
+    /// Security MED: the per-key bucket map must not grow without bound when an
+    /// attacker rotates keys. Pump enough distinct keys (slowly, so the global
+    /// bucket refills and keeps admitting) and confirm the map size is bounded.
+    #[tokio::test(start_paused = true)]
+    async fn tracked_keys_are_bounded() {
+        use tokio::time::{advance, Duration};
+        let rl = MdnsRateLimiter::new();
+        // Far more distinct keys than the cap. Advance time between batches so
+        // the global bucket refills and lets new keys reach the map.
+        for batch in 0..((MAX_TRACKED_KEYS / GLOBAL_BURST_CAPACITY as usize) + 4) {
+            for i in 0..GLOBAL_BURST_CAPACITY {
+                let _ = rl.try_admit_key(&format!("k-{batch}-{i}"));
+            }
+            // Refill the global bucket fully before the next batch.
+            advance(Duration::from_secs(10)).await;
+        }
+        assert!(
+            rl.tracked_ip_count() <= MAX_TRACKED_KEYS,
+            "tracked-key map must stay at or below MAX_TRACKED_KEYS, got {}",
+            rl.tracked_ip_count()
+        );
     }
 }

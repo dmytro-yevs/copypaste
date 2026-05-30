@@ -89,7 +89,7 @@ use crate::pake::{
 };
 use crate::transport::{
     tls_channel_binder_client, tls_channel_binder_server, DeviceFingerprint, TransportError,
-    TLS_HANDSHAKE_TIMEOUT,
+    P2P_SNI_SENTINEL, TLS_HANDSHAKE_TIMEOUT,
 };
 
 /// Maximum time the responder bootstrap listener waits for the single inbound
@@ -458,7 +458,7 @@ pub async fn run_initiator(
     // rustls requires a ServerName; identity is verified by PAKE, not SNI, so a
     // fixed placeholder is fine (and is what the pinned transport uses too).
     let server_name =
-        ServerName::try_from("copypaste.peer").expect("static server name is always valid");
+        ServerName::try_from(P2P_SNI_SENTINEL).expect("static server name is always valid");
 
     let tls_stream = match tokio::time::timeout(
         TLS_HANDSHAKE_TIMEOUT,

@@ -17,7 +17,7 @@ use rustls::{DigitallySignedStruct, DistinguishedName, Error as TlsError, Signat
 use subtle::ConstantTimeEq;
 
 use crate::cert::fingerprint_of;
-use crate::transport::PairedPeers;
+use crate::transport::{PairedPeers, P2P_SNI_SENTINEL};
 
 /// Rustls verifier used on **both** the server side (for client certs) and
 /// the client side (for server certs).
@@ -170,10 +170,11 @@ impl ServerCertVerifier for PeerCertVerifier {
         _ocsp_response: &[u8],
         _now: UnixTime,
     ) -> Result<ServerCertVerified, TlsError> {
-        // S4: Reject an empty SNI server name. In the CopyPaste P2P model the
-        // SNI is always the fixed sentinel "copypaste.peer" (set in
-        // `transport.rs`). An empty or whitespace-only SNI indicates that the
-        // connection was not initiated by our own code — reject it defensively.
+        // S4: Validate the SNI server name. In the CopyPaste P2P model the SNI
+        // is always the fixed sentinel `P2P_SNI_SENTINEL` (set in
+        // `transport.rs`). Anything else indicates the connection was not
+        // initiated by our own code — reject it defensively. The exact-match
+        // check is performed below; here we first narrow to the DNS-name form.
         let sni_str = match server_name {
             ServerName::DnsName(name) => name.as_ref(),
             ServerName::IpAddress(_) => {
@@ -191,8 +192,16 @@ impl ServerCertVerifier for PeerCertVerifier {
                 ));
             }
         };
-        if sni_str.trim().is_empty() {
-            tracing::warn!("peer presented empty SNI hostname — rejecting");
+        // Compare against the fixed sentinel rather than merely checking for
+        // non-emptiness: our own client always sets exactly this value, so any
+        // other SNI means the connection was not initiated by our code. Plain
+        // `==` is fine here — the sentinel is a public, non-secret constant.
+        if sni_str != P2P_SNI_SENTINEL {
+            tracing::warn!(
+                got = %sni_str,
+                expected = %P2P_SNI_SENTINEL,
+                "peer presented unexpected SNI hostname — rejecting"
+            );
             return Err(TlsError::InvalidCertificate(
                 rustls::CertificateError::ApplicationVerificationFailure,
             ));
@@ -281,6 +290,43 @@ mod tests {
         assert!(
             verifier.verify_fingerprint(&der_b).is_err(),
             "wrong cert must be rejected"
+        );
+    }
+
+    /// S4 defense-in-depth: a server cert presented under an SNI other than the
+    /// fixed `P2P_SNI_SENTINEL` must be rejected, even when the cert itself is a
+    /// known, pinned peer. Guards against connections not initiated by our code.
+    #[test]
+    fn wrong_sni_is_rejected() {
+        let cert = SelfSignedCert::generate("device-ok").unwrap();
+        let peers = PairedPeers::new();
+        peers.add(cert.fingerprint(), "device-ok");
+
+        let verifier = PeerCertVerifier::new(Arc::new(peers));
+        let der = CertificateDer::from(cert.cert_der.clone());
+        let wrong_sni = ServerName::try_from("evil.example.com").unwrap();
+        let result = verifier.verify_server_cert(&der, &[], &wrong_sni, &[], UnixTime::now());
+        assert!(
+            result.is_err(),
+            "a cert presented under the wrong SNI must be rejected"
+        );
+    }
+
+    /// Counterpart to `wrong_sni_is_rejected`: the correct sentinel SNI together
+    /// with a known cert must be accepted.
+    #[test]
+    fn correct_sni_is_accepted() {
+        let cert = SelfSignedCert::generate("device-ok").unwrap();
+        let peers = PairedPeers::new();
+        peers.add(cert.fingerprint(), "device-ok");
+
+        let verifier = PeerCertVerifier::new(Arc::new(peers));
+        let der = CertificateDer::from(cert.cert_der.clone());
+        let good_sni = ServerName::try_from(P2P_SNI_SENTINEL).unwrap();
+        let result = verifier.verify_server_cert(&der, &[], &good_sni, &[], UnixTime::now());
+        assert!(
+            result.is_ok(),
+            "correct sentinel SNI + known cert must be accepted"
         );
     }
 
