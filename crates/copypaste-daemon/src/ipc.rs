@@ -47,6 +47,12 @@ const ERR_IPC_NOT_READY: &str = "IPC_NOT_READY";
 
 /// Persistent application configuration stored at
 /// `dirs::config_dir()/copypaste/config.json`.
+///
+/// The limit fields (`max_text_size_bytes`, `max_image_size_bytes`,
+/// `max_file_size_bytes`, `storage_quota_bytes`, `sensitive_ttl_secs`,
+/// `image_quality`, `sync_on_wifi_only`) are mirrored into the core
+/// `config.toml` on `set_config` and read back from it on `get_config`,
+/// so they survive daemon restarts and hot-reload into the running monitor.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
@@ -67,6 +73,31 @@ pub struct AppConfig {
     /// whole config (only individual non-secret fields are surfaced over IPC).
     #[serde(default)]
     pub supabase_password: Option<String>,
+
+    // ── Limit fields — persisted to config.toml via set_config ──────────────
+    // `None` means "use whatever is already in config.toml" (presence-optional
+    // so a UI that only touches p2p_enabled never accidentally resets quotas).
+    /// Maximum size of a single captured text item (bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_text_size_bytes: Option<u64>,
+    /// Maximum size of a captured image (bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_size_bytes: Option<u64>,
+    /// Maximum size of a captured file reference (bytes).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_file_size_bytes: Option<u64>,
+    /// Maximum total byte size of unpinned clipboard items in the local DB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_quota_bytes: Option<u64>,
+    /// Auto-wipe TTL for sensitive items (seconds).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensitive_ttl_secs: Option<u64>,
+    /// Image quality (1–100; 100 = lossless).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_quality: Option<u8>,
+    /// If true, skip cloud/P2P sync when not on Wi-Fi.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_on_wifi_only: Option<bool>,
 }
 
 /// Strip account credentials from a serialised [`AppConfig`] before it leaves
@@ -102,15 +133,46 @@ fn config_path() -> Option<std::path::PathBuf> {
     dirs::config_dir().map(|d| d.join("copypaste").join("config.json"))
 }
 
+/// Load the IPC `AppConfig` (config.json) and overlay the limit fields from the
+/// core `AppConfig` (config.toml) so `get_config` returns a merged view.
+///
+/// Fields that exist only in config.json (Supabase credentials, p2p_enabled)
+/// come from there. Limit fields (max_*_size_bytes, storage_quota_bytes, etc.)
+/// are always read from config.toml so daemon.rs and the UI always agree.
 pub(crate) fn read_config() -> AppConfig {
+    // Load core config (config.toml) — this is the authoritative source for
+    // all limit fields.
+    let core = copypaste_core::AppConfig::load(&crate::paths::config_path()).unwrap_or_default();
+
     let Some(path) = config_path() else {
-        return AppConfig::default();
+        // No config.json yet — return defaults with limits from core.
+        return AppConfig {
+            max_text_size_bytes: Some(core.max_text_size_bytes),
+            max_image_size_bytes: Some(core.max_image_size_bytes),
+            max_file_size_bytes: Some(core.max_file_size_bytes),
+            storage_quota_bytes: Some(core.storage_quota_bytes),
+            sensitive_ttl_secs: Some(core.sensitive_ttl_secs),
+            image_quality: Some(core.image_quality),
+            sync_on_wifi_only: Some(core.sync_on_wifi_only),
+            ..AppConfig::default()
+        };
     };
     let raw = match std::fs::read_to_string(&path) {
         Ok(s) => s,
-        Err(_) => return AppConfig::default(),
+        Err(_) => {
+            return AppConfig {
+                max_text_size_bytes: Some(core.max_text_size_bytes),
+                max_image_size_bytes: Some(core.max_image_size_bytes),
+                max_file_size_bytes: Some(core.max_file_size_bytes),
+                storage_quota_bytes: Some(core.storage_quota_bytes),
+                sensitive_ttl_secs: Some(core.sensitive_ttl_secs),
+                image_quality: Some(core.image_quality),
+                sync_on_wifi_only: Some(core.sync_on_wifi_only),
+                ..AppConfig::default()
+            };
+        }
     };
-    match serde_json::from_str(&raw) {
+    let mut cfg: AppConfig = match serde_json::from_str(&raw) {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(
@@ -119,7 +181,52 @@ pub(crate) fn read_config() -> AppConfig {
             );
             AppConfig::default()
         }
+    };
+    // Always overlay limits from core config.toml so they survive restarts
+    // and so `get_config` returns the values the monitor is actually using.
+    cfg.max_text_size_bytes = Some(core.max_text_size_bytes);
+    cfg.max_image_size_bytes = Some(core.max_image_size_bytes);
+    cfg.max_file_size_bytes = Some(core.max_file_size_bytes);
+    cfg.storage_quota_bytes = Some(core.storage_quota_bytes);
+    cfg.sensitive_ttl_secs = Some(core.sensitive_ttl_secs);
+    cfg.image_quality = Some(core.image_quality);
+    cfg.sync_on_wifi_only = Some(core.sync_on_wifi_only);
+    cfg
+}
+
+/// Persist the limit fields from an IPC `AppConfig` into the core `config.toml`.
+///
+/// Only fields that the caller supplied (Some) are written; None means "preserve
+/// the existing value". Returns Ok(new_core_config) so callers can hot-reload.
+pub(crate) fn update_core_config(
+    incoming: &AppConfig,
+) -> anyhow::Result<copypaste_core::AppConfig> {
+    let toml_path = crate::paths::config_path();
+    let mut core = copypaste_core::AppConfig::load(&toml_path).unwrap_or_default();
+    if let Some(v) = incoming.max_text_size_bytes {
+        core.max_text_size_bytes = v;
     }
+    if let Some(v) = incoming.max_image_size_bytes {
+        core.max_image_size_bytes = v;
+    }
+    if let Some(v) = incoming.max_file_size_bytes {
+        core.max_file_size_bytes = v;
+    }
+    if let Some(v) = incoming.storage_quota_bytes {
+        core.storage_quota_bytes = v;
+    }
+    if let Some(v) = incoming.sensitive_ttl_secs {
+        core.sensitive_ttl_secs = v;
+    }
+    if let Some(v) = incoming.image_quality {
+        core.image_quality = v;
+    }
+    if let Some(v) = incoming.sync_on_wifi_only {
+        core.sync_on_wifi_only = v;
+    }
+    core.save(&toml_path)
+        .map_err(|e| anyhow::anyhow!("failed to save config.toml: {e}"))?;
+    Ok(core)
 }
 
 fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
@@ -527,6 +634,12 @@ pub struct IpcServer {
     /// possible (re-grant Keychain access, then relaunch). See the
     /// [`DEGRADED_REASON_KEYCHAIN_LOCKED`] constant for the canonical value.
     degraded_reason: Option<String>,
+    /// Shared live core config (`config.toml`). The `set_config` IPC handler
+    /// writes new limit values here after persisting to disk so the clipboard
+    /// monitor and prune path pick them up on the next tick without a restart.
+    /// `None` when the daemon did not wire in a core config (degraded mode /
+    /// tests that don't need hot-reload).
+    pub core_config: Option<Arc<std::sync::RwLock<copypaste_core::AppConfig>>>,
 }
 
 /// Canonical `status.degraded_reason` value for the keychain-locked /
@@ -563,6 +676,7 @@ impl IpcServer {
             cloud_signed_in: Arc::new(AtomicBool::new(false)),
             new_item_tx: None,
             degraded_reason: None,
+            core_config: None,
         }
     }
 
@@ -713,7 +827,21 @@ impl IpcServer {
             cloud_signed_in: Arc::new(AtomicBool::new(false)),
             new_item_tx: None,
             degraded_reason: None,
+            core_config: None,
         }
+    }
+
+    /// Attach the shared live core config (`config.toml`) for hot-reload.
+    ///
+    /// The `set_config` IPC handler writes updated limit values into this Arc
+    /// after persisting to disk, so the clipboard monitor and prune path pick
+    /// them up on the next tick without a daemon restart.
+    pub fn with_core_config(
+        mut self,
+        core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+    ) -> Self {
+        self.core_config = Some(core_config);
+        self
     }
 
     /// Insert a PAKE session under `session_id`, first evicting stale and
@@ -2033,8 +2161,21 @@ impl IpcServer {
                     Ok(c) => c,
                     Err(e) => return Response::err(req.id, format!("invalid config: {e}")),
                 };
-                match write_config(&cfg) {
-                    Ok(()) => Response::ok(req.id, serde_json::json!({"saved": true})),
+                // Persist IPC fields (Supabase creds, p2p_enabled) to config.json.
+                if let Err(e) = write_config(&cfg) {
+                    return Response::err(req.id, e.to_string());
+                }
+                // Persist limit fields to config.toml AND hot-reload the live
+                // core config so the monitor/prune picks them up on the next tick.
+                match update_core_config(&cfg) {
+                    Ok(new_core) => {
+                        if let Some(ref arc) = self.core_config {
+                            if let Ok(mut guard) = arc.write() {
+                                *guard = new_core;
+                            }
+                        }
+                        Response::ok(req.id, serde_json::json!({"saved": true}))
+                    }
                     Err(e) => Response::err(req.id, e.to_string()),
                 }
             }

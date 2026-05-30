@@ -699,6 +699,53 @@ pub fn search_items(
     Ok(rows)
 }
 
+/// Prune the oldest unpinned clipboard items so that the total byte size of
+/// all unpinned `content` blobs does not exceed `max_bytes`.
+///
+/// Pinned items (`pinned = 1`) are never evicted. Items are ordered oldest-first
+/// by `(wall_time ASC, id ASC)`. The "tipping" row that brings the running
+/// cumulative total to or past the excess is included in the deletion.
+///
+/// Uses a single-pass SQLite window function (requires SQLite ≥ 3.25, bundled
+/// with rusqlite/SQLCipher so this is always available).
+///
+/// Returns the number of rows deleted (0 when quota is already satisfied).
+pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> {
+    // Fast path: if total unpinned bytes are within the quota nothing to do.
+    let total_unpinned: i64 = db.conn().query_row(
+        "SELECT COALESCE(SUM(LENGTH(COALESCE(content,''))),0) \
+         FROM clipboard_items WHERE pinned = 0",
+        [],
+        |r| r.get(0),
+    )?;
+    if total_unpinned <= max_bytes {
+        return Ok(0);
+    }
+
+    let excess = total_unpinned - max_bytes;
+
+    let deleted = db.conn().execute(
+        "WITH ranked AS (
+             SELECT
+                 id,
+                 LENGTH(COALESCE(content, '')) AS row_bytes,
+                 SUM(LENGTH(COALESCE(content, ''))) OVER (
+                     ORDER BY wall_time ASC, id ASC
+                     ROWS UNBOUNDED PRECEDING
+                 ) AS cum_bytes
+             FROM clipboard_items
+             WHERE pinned = 0
+         )
+         DELETE FROM clipboard_items
+         WHERE id IN (
+             SELECT id FROM ranked
+             WHERE cum_bytes - row_bytes < ?1
+         )",
+        rusqlite::params![excess],
+    )?;
+    Ok(deleted)
+}
+
 fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
     Ok(ClipboardItem {
         id: row.get(0)?,

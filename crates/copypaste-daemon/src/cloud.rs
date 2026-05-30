@@ -441,6 +441,9 @@ pub async fn start_cloud(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
+    // When true, skip both push and poll ticks when not on Wi-Fi (A-SET-2).
+    // Persisted in config.toml via set_config; takes effect on the next restart.
+    sync_on_wifi_only: bool,
 ) -> anyhow::Result<CloudHandle> {
     // Defence-in-depth: re-validate the URL even though CloudConfig::new should
     // have rejected it already. Cheap, and protects callers that constructed
@@ -520,6 +523,7 @@ pub async fn start_cloud(
         push_last_sync_ms,
         push_signed_in,
         push_auth,
+        sync_on_wifi_only,
     ));
 
     // Task B: poll Supabase REST for remote items and insert unknown ones locally.
@@ -541,6 +545,7 @@ pub async fn start_cloud(
         poll_last_sync_ms,
         poll_signed_in,
         poll_auth,
+        sync_on_wifi_only,
     ));
 
     tracing::info!("cloud-sync started (url={})", config.supabase_url);
@@ -652,6 +657,7 @@ async fn push_loop(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
     auth: Arc<AuthClient>,
+    sync_on_wifi_only: bool,
 ) {
     let client = reqwest::Client::new();
     let rest_url = format!("{}/rest/v1/clipboard_items", config.supabase_url);
@@ -788,6 +794,26 @@ async fn push_loop(
     // between dequeue and push the item is visible in the retry-queue log and
     // not silently dropped.
     loop {
+        // A-SET-2: skip all network operations when sync_on_wifi_only is set
+        // and the machine is not on Wi-Fi. Items remain in the retry queue and
+        // new broadcasts continue to accumulate; they'll be pushed once Wi-Fi
+        // is restored (next loop iteration when the check passes again).
+        if sync_on_wifi_only
+            && !tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+                .await
+                .unwrap_or(true)
+        {
+            tracing::debug!(
+                "cloud-sync push_loop: sync_on_wifi_only=true and not on Wi-Fi; \
+                 sleeping 10s before retry"
+            );
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                _ = shutdown.notified() => { break; }
+            }
+            continue;
+        }
+
         // Drain the retry queue first — if we made progress on backlog before
         // touching new items, recovery is observable and old items are not
         // perpetually starved by a steady stream of new work.
@@ -1345,6 +1371,7 @@ async fn realtime_loop(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
     auth: Arc<AuthClient>,
+    sync_on_wifi_only: bool,
 ) {
     let client = reqwest::Client::new();
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
@@ -1384,6 +1411,20 @@ async fn realtime_loop(
     loop {
         tokio::select! {
             _ = interval.tick() => {
+                // A-SET-2: honour sync_on_wifi_only. The check runs on a
+                // blocking thread (networksetup shell invocation) so it
+                // doesn't block the async executor.
+                if sync_on_wifi_only
+                    && !tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+                        .await
+                        .unwrap_or(true)
+                {
+                    tracing::debug!(
+                        "cloud-sync poll: sync_on_wifi_only=true and not on Wi-Fi; \
+                         skipping this tick"
+                    );
+                    continue;
+                }
                 // If no sync key is set, skip with a one-time warning.
                 let key_snapshot: Option<Vec<u8>> = {
                     let guard = sync_key.lock().await;
@@ -2959,6 +3000,7 @@ mod tests {
             last_sync_ms,
             local_key,
             signed_in.clone(),
+            false, // sync_on_wifi_only: off in tests
         )
         .await;
 
