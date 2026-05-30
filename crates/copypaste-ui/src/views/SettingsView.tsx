@@ -768,6 +768,24 @@ export function SettingsView() {
               {syncStatus.passphrase_set ? " — passphrase set ✓" : ""}
             </div>
           )}
+          {/* Account identity note — only when signed in with a known email.
+              Supabase RLS isolates rows by auth.uid(): two devices on different
+              accounts silently see zero shared rows. Surface the account here so
+              the user can spot a mismatch themselves. */}
+          {syncStatus !== null &&
+            syncStatus.supabase_configured &&
+            syncStatus.signed_in &&
+            syncStatus.email && (
+              <div className="mb-1 rounded-ide border border-ide-border bg-ide-elevated px-3 py-2 text-[12px] text-ide-dim">
+                <span className="font-medium text-ide-text">
+                  Signed in as {syncStatus.email}
+                </span>
+                <span className="ml-1">
+                  — All your devices must use this same account to sync.
+                  Different accounts cannot see each other&apos;s clips.
+                </span>
+              </div>
+            )}
           <Panel>
             <SettingsRow label="Supabase URL">
               <input
