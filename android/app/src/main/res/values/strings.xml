@@ -13,8 +13,12 @@
     <string name="title_pair">Pair Device</string>
     <string name="title_settings">Settings</string>
 
-    <!-- History screen -->
-    <string name="empty_history">No clipboard items yet. Copy something to get started.</string>
+    <!-- History screen — §9 empty states + search filter -->
+    <string name="empty_history">Nothing copied yet</string>
+    <string name="empty_history_subtitle">Copy something and it will appear here.</string>
+    <string name="empty_search_title">No results for \"%1$s\"</string>
+    <string name="empty_search_subtitle">Try a different search term.</string>
+    <string name="history_filter_placeholder">Filter…</string>
 
     <!-- Pair screen -->
     <string name="pair_instructions">Tap the button below to start pairing. On the other device, scan the QR code or paste the token.</string>
