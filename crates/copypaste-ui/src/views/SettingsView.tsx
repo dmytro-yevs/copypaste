@@ -5,6 +5,7 @@ import {
   IpcError,
   getPopupShortcut,
   setPopupShortcut,
+  probeStatus,
   type AppSettings,
   type SyncStatus,
 } from "../lib/ipc";
@@ -235,7 +236,10 @@ function ShortcutCapture({
 // Main view
 // ---------------------------------------------------------------------------
 
-type LoadState = "loading" | "ready" | "offline";
+// `degraded` = daemon up but its DB is unavailable (reported only by `status`).
+// Distinct from `offline` so the banner is accurate and the inputs that need a
+// working DB stay disabled.
+type LoadState = "loading" | "ready" | "offline" | "degraded";
 
 export function SettingsView() {
   // Display prefs (localStorage-persisted, no daemon needed).
@@ -285,6 +289,10 @@ export function SettingsView() {
 
   // Global state
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  // Degraded reason from the daemon's `status` probe — the ONLY method that
+  // reports degraded state. Non-null ⇒ daemon is up but its DB is unavailable.
+  // (The empty string means "degraded but no machine-readable reason given".)
+  const [degradedReason, setDegradedReason] = useState<string | null>(null);
   // Bumped by the Retry button to re-run the load effect.
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -324,17 +332,30 @@ export function SettingsView() {
       try {
         // Each call is individually fault-tolerant: a single rejecting method
         // must not blank the screen. The outer try/catch is a backstop only.
-        const [pmResult, cfg, status] = await Promise.all([
+        // The `status` probe is the ONLY reliable source of degraded state —
+        // get_sync_status NEVER reports it (its keychain_locked/db_unavailable
+        // fields are dead). It never throws (resolves to "offline" on failure).
+        const [pmResult, cfg, status, probe] = await Promise.all([
           api.getPrivateMode().catch(() => null),
           api.getConfig().catch(() => null),
           api.getSyncStatus().catch(() => null),
+          probeStatus(),
         ]);
         if (cancelled) return;
 
+        // Record degraded state up front so the banner is correct regardless of
+        // which branch we take below (a degraded daemon's DB-gated calls fail,
+        // which would otherwise look identical to fully offline).
+        setDegradedReason(
+          probe.kind === "degraded" ? (probe.reason ?? "") : null,
+        );
+
         // If the daemon is unreachable for the core calls, show the offline
-        // state. (get_sync_status is optional and may be absent on older builds.)
+        // state — UNLESS the status probe says the daemon is actually up but
+        // degraded, in which case the dedicated degraded banner is shown instead.
+        // (get_sync_status is optional and may be absent on older builds.)
         if (pmResult === null && cfg === null) {
-          setLoadState("offline");
+          setLoadState(probe.kind === "degraded" ? "degraded" : "offline");
           setSyncStatus(status);
           return;
         }
@@ -370,10 +391,12 @@ export function SettingsView() {
   }, [reloadKey]);
 
   const offline = loadState !== "ready";
-  // Optional, best-effort degraded state (daemon up but crypto/storage blocked).
-  const degraded =
-    syncStatus !== null &&
-    (syncStatus.keychain_locked === true || syncStatus.db_unavailable === true);
+  // Degraded = daemon up but its database is unavailable. Driven by the `status`
+  // probe in load() (the only method that reports it). The previous derivation
+  // keyed off syncStatus.keychain_locked / db_unavailable, which get_sync_status
+  // NEVER emits — dead code that meant a degraded daemon was silently mislabeled
+  // "offline".
+  const degraded = loadState === "degraded";
 
   // -------------------------------------------------------------------------
   // General — Private mode
@@ -539,14 +562,26 @@ export function SettingsView() {
         </div>
       )}
 
-      {/* Degraded banner — daemon is up but crypto/storage is blocked. Optional,
-          best-effort: only shown if the daemon reports these flags. */}
+      {/* Degraded banner — daemon is UP but its database is unavailable (e.g. the
+          SQLCipher key no longer matches). Driven by the `status` probe; the old
+          syncStatus.keychain_locked/db_unavailable fields were never emitted. */}
       {degraded && (
-        <div className="mb-4 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
-          {syncStatus?.keychain_locked
-            ? "Keychain locked — unlock your login keychain so CopyPaste can access its encryption key."
-            : "Storage unavailable — the encrypted database could not be opened."}
-          {syncStatus?.degraded_reason ? ` (${syncStatus.degraded_reason})` : ""}
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
+          <span>
+            Clipboard database unavailable
+            {degradedReason ? ` (${degradedReason})` : ""} — its key no longer
+            matches. Open History to reset the database and recover.
+          </span>
+          <button
+            type="button"
+            onClick={() => setReloadKey((k) => k + 1)}
+            className={[
+              "shrink-0 rounded-ide border border-ide-warning/40 bg-ide-panel px-2.5 py-1 text-[12px] text-ide-warning",
+              "hover:bg-ide-hover",
+            ].join(" ")}
+          >
+            Retry
+          </button>
         </div>
       )}
 
