@@ -107,9 +107,50 @@ class ClipboardRepository(context: Context) {
             val ids = storedIds().takeLast(limit)
             ids.mapNotNull { id ->
                 val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
-                parseItem(id, raw, key)
+                val item = parseItem(id, raw, key) ?: return@mapNotNull null
+                // Attach image bytes when available (stored separately to keep the
+                // main index string small). Non-null only for image/* content types.
+                if (item.isImage) item.copy(imagePng = getImageBytes(id)) else item
             }.reversed()
         }
+
+    /**
+     * Return the raw PNG/JPEG bytes stored for image item [id], or null when none
+     * are available (item not found, not an image, or not yet captured).
+     *
+     * Image bytes are persisted under the key "item_img_<id>" as a Base64
+     * NO_WRAP string by [storeImageBytes]. This separation from the main
+     * pipe-delimited blob keeps the item index readable and allows independent
+     * eviction when the item is deleted.
+     */
+    fun getImageBytes(id: String): ByteArray? {
+        val b64 = prefs.getString("item_img_$id", null) ?: return null
+        return try {
+            Base64.decode(b64, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            Log.w(TAG, "getImageBytes: failed to decode image for $id: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Persist raw image bytes for item [id].
+     *
+     * Called from the capture pipeline ([ClipboardService]) when the clipboard
+     * contains an image item. The bytes are stored as Base64 under "item_img_<id>"
+     * alongside the encrypted text blob.
+     *
+     * Storage note: SharedPreferences is not ideal for large blobs. For clipboard
+     * thumbnails (typically <100 KB after thumbnail scaling) this is acceptable.
+     *
+     * @param id      The item id (same as the text blob key).
+     * @param bytes   Raw image bytes (PNG preferred; JPEG accepted).
+     */
+    fun storeImageBytes(id: String, bytes: ByteArray) {
+        val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        prefs.edit().putString("item_img_$id", b64).apply()
+        Log.d(TAG, "storeImageBytes: stored ${bytes.size} bytes for $id")
+    }
 
     suspend fun deleteItem(id: String): Boolean = withContext(Dispatchers.IO) {
         synchronized(idsWriteLock) {
@@ -117,6 +158,7 @@ class ClipboardRepository(context: Context) {
             if (!ids.remove(id)) return@synchronized false
             prefs.edit()
                 .remove("item_$id")
+                .remove("item_img_$id")   // also remove any associated image bytes
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
                 .apply()
             true
@@ -133,6 +175,12 @@ class ClipboardRepository(context: Context) {
      * AEAD AAD on the v0.3 schema (see [encryptText]). The same id is also
      * used as the SharedPreferences storage key.
      *
+     * [contentType] defaults to "text/plain" for all existing text callers. Pass
+     * the actual MIME type (e.g. "image/png") when storing an image item so that
+     * [getItems] can distinguish image rows and attach [ClipboardItem.imagePng].
+     * The caller is responsible for separately calling [storeImageBytes] with the
+     * same returned id when the content type is an image MIME type.
+     *
      * [sourceId] is the STABLE remote identifier of an incoming synced item —
      * the Supabase `item_id` (the per-clip UUID bound into the cloud AEAD AAD)
      * or the P2P [uniffi.copypaste_android.SyncedItem.id]. For locally captured
@@ -148,6 +196,7 @@ class ClipboardRepository(context: Context) {
         plaintext: String,
         key: ByteArray,
         sourceId: String? = null,
+        contentType: String = "text/plain",
     ): Boolean = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext false
 
@@ -202,7 +251,7 @@ class ClipboardRepository(context: Context) {
             localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
         }
 
-        val encoded = encodeItem(blob, plaintext.length)
+        val encoded = encodeItem(blob, plaintext.length, contentType = contentType)
         // ── HIGH-8: synchronize the read-modify-write so concurrent writers
         // cannot clobber each other's entries in the comma-joined index.
         synchronized(idsWriteLock) {
@@ -231,6 +280,18 @@ class ClipboardRepository(context: Context) {
         Log.d(TAG, "Stored item $id (${plaintext.length} chars)")
         true
     }
+
+    /**
+     * Return the id of the most recently stored item, or null when the index is
+     * empty. Used by image capture callers that need the id that [storeItem] just
+     * wrote so they can call [storeImageBytes] under the same key.
+     *
+     * Safe to call immediately after [storeItem] returns true because storeItem
+     * appends the new id at the END of the comma-joined index before returning.
+     * The caller runs on [Dispatchers.IO] and storeItem holds [idsWriteLock] for
+     * the entire append, so by the time storeItem returns the id is visible here.
+     */
+    fun lastStoredId(): String? = storedIds().lastOrNull()
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -271,12 +332,21 @@ class ClipboardRepository(context: Context) {
     /**
      * Encode a stored item as a pipe-delimited string:
      * <wallTimeMs>|<contentType>|<snippetLen>|<nonceB64>|<ciphertextB64>
+     *
+     * [contentType] defaults to "text/plain" for backward compatibility with all
+     * existing text call-sites; image capture passes the actual MIME type (e.g.
+     * "image/png") so [parseItem] can populate [ClipboardItem.contentType] correctly
+     * and [getItems] can attach the stored image bytes.
      */
-    private fun encodeItem(blob: EncryptedBlob, plaintextLen: Int): String {
+    private fun encodeItem(
+        blob: EncryptedBlob,
+        plaintextLen: Int,
+        contentType: String = "text/plain",
+    ): String {
         val nonce64 = Base64.encodeToString(blob.nonce, Base64.NO_WRAP)
         val ct64 = Base64.encodeToString(blob.ciphertext, Base64.NO_WRAP)
         val ts = System.currentTimeMillis()
-        return "$ts|text/plain|$plaintextLen|$nonce64|$ct64"
+        return "$ts|$contentType|$plaintextLen|$nonce64|$ct64"
     }
 
     private fun parseItem(id: String, raw: String, key: ByteArray): ClipboardItem? {
