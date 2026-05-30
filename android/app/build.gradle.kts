@@ -94,7 +94,30 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        // Use a committed, stable debug keystore so every build (local and CI)
+        // is signed with the SAME certificate. Without this, Android rejects
+        // over-the-air updates with INSTALL_FAILED_UPDATE_INCOMPATIBLE because
+        // Gradle auto-generates a fresh debug keystore on each machine/runner.
+        //
+        // THIS IS NOT A PRODUCTION SECRET — it is the standard debug key used
+        // only for sideloaded/debug APKs. Do not use this keystore for Play Store
+        // submissions; create a separate release keystore stored outside the repo.
+        //
+        // Credentials: storePassword=android, keyAlias=androiddebugkey, keyPassword=android
+        // SHA-256: F6:23:D7:B2:FB:23:7D:F5:60:9E:7B:D7:A8:BB:FD:9D:7C:CF:A9:4C:AF:87:E8:D2:1D:3E:99:34:1F:CE:D9:53
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             // R8 keep-rules are REQUIRED here: the UniFFI bindings + JNA bind to
