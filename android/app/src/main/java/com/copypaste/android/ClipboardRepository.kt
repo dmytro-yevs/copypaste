@@ -297,6 +297,11 @@ class ClipboardRepository(context: Context) {
                 return@withContext false
             }
             // Replace in-place: re-encrypt and overwrite the stored value.
+            // idsWriteLock serializes this single-key blob rewrite against a
+            // concurrent deleteItem, which also holds idsWriteLock while it
+            // removes "item_<id>" and rewrites the index. Without the lock a
+            // replace that races a delete can resurrect a deleted item's blob
+            // without its id ever appearing back in the index (ghost entry).
             val blob = try {
                 encryptText(existingStorageId, plaintext.toByteArray(Charsets.UTF_8), key)
             } catch (e: IllegalStateException) {
@@ -307,7 +312,9 @@ class ClipboardRepository(context: Context) {
                 ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
             }
             val encoded = encodeItem(blob, plaintext.length, incomingLamportTs)
-            prefs.edit().putString("item_$existingStorageId", encoded).apply()
+            synchronized(idsWriteLock) {
+                prefs.edit().putString("item_$existingStorageId", encoded).apply()
+            }
             Log.d(TAG, "LWW replaced item_id=$itemId storageId=$existingStorageId (lamport $storedTs→$incomingLamportTs)")
             return@withContext true
         }
@@ -339,7 +346,7 @@ class ClipboardRepository(context: Context) {
             }
             editor
                 .putString("item_$storageId", encoded)
-                .putString("item_ids", ids.joinToString(","))
+                .putString(KEY_ITEM_IDS, ids.joinToString(","))
                 .putString("item_id_ref_$storageId", storageId)
                 .apply()
         }

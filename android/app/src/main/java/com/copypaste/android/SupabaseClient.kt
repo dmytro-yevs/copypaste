@@ -277,9 +277,14 @@ class SupabaseClient(
     /**
      * Fetch raw rows from PostgREST using the ascending compound keyset cursor.
      *
-     * Query mirrors `build_poll_url` in the macOS daemon's cloud.rs:
+     * Query mirrors `build_poll_url` in the macOS daemon's cloud.rs exactly —
+     * three-way branch on (sinceWallTime, sinceId):
+     *   (a) wall==0 && id blank  → no filter (full table scan from the start)
+     *   (b) wall>0  && id blank  → wall_time=gte.W  (inclusive, re-offers
+     *       boundary-ms rows; per-row item_id dedup drops already-ingested ones)
+     *   (c) wall>0  && id present → strict compound keyset:
+     *       or=(wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))
      *   order=wall_time.asc,id.asc
-     *   or=(wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))   ← when cursor is set
      *   limit=POLL_LIMIT
      *
      * Returns rows in ascending wall_time order so the caller can advance the
@@ -296,12 +301,19 @@ class SupabaseClient(
             // Ascending compound keyset: same order as daemon's build_poll_url.
             append("&order=wall_time.asc,id.asc")
             append("&limit=$POLL_LIMIT")
-            // Keyset filter — skip when cursor is at the initial position (0/"").
-            // PostgREST `or` syntax: (wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))
-            if (sinceWallTime > 0 || sinceId.isNotBlank()) {
-                val w = sinceWallTime
-                val id = sinceId.ifBlank { "00000000-0000-0000-0000-000000000000" }
-                append("&or=(wall_time.gt.$w,and(wall_time.eq.$w,id.gt.$id))")
+            // Three-way branch mirroring build_poll_url in cloud.rs:
+            //   (a) wall==0 → no filter (case handled by omitting the block)
+            //   (b) wall>0, id blank → inclusive gte so boundary-ms rows are
+            //       re-offered; dedup by item_id drops already-ingested ones.
+            //   (c) wall>0, id present → strict (wall,id) compound keyset.
+            if (sinceWallTime > 0) {
+                if (sinceId.isBlank()) {
+                    // Case (b): cold-start with a persisted wall-only watermark.
+                    append("&wall_time=gte.$sinceWallTime")
+                } else {
+                    // Case (c): full keyset — a later ms, OR same ms with larger id.
+                    append("&or=(wall_time.gt.$sinceWallTime,and(wall_time.eq.$sinceWallTime,id.gt.$sinceId))")
+                }
             }
         }
         val resp = get(path, bearerToken)
