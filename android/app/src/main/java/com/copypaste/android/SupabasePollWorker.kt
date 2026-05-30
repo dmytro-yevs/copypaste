@@ -23,11 +23,13 @@ import java.util.concurrent.TimeUnit
  * user gets timely updates on mobile data too. Add a Wi-Fi constraint here if
  * battery life becomes a concern.
  *
- * Deduplication: each incoming [SupabaseClient.DecryptedItem] is only stored if
- * its [SupabaseClient.DecryptedItem.id] is not already present locally.
- * [ClipboardRepository.storeItem] idempotently writes by UUID key so duplicate
- * calls are safe but result in extra rows — the [sinceWallTime] cursor in
- * [SyncManager.pollFromSupabase] prevents the majority of duplicates.
+ * Deduplication (LOW-2): each incoming [SupabaseClient.DecryptedItem] is stored
+ * by [ClipboardRepository.storeItem] under a FRESH local UUID, so the
+ * [sinceWallTime] cursor alone does not prevent the same remote row — also
+ * fetched by the FGS [FgsSyncLoop] poll sharing that cursor — from being
+ * inserted twice. We therefore pass the stable [SupabaseClient.DecryptedItem.itemId]
+ * as the dedup source id; the repository records it in a persisted seen-set and
+ * skips a row already stored, regardless of which poller fetched it first.
  */
 class SupabasePollWorker(
     appContext: Context,
@@ -62,7 +64,9 @@ class SupabasePollWorker(
             for (item in items) {
                 val text = item.plaintext.toString(Charsets.UTF_8)
                 if (text.isBlank()) continue
-                val stored = repository.storeItem(text, settings.encryptionKey)
+                // LOW-2: pass the stable Supabase source id so a row also fetched
+                // by the FGS loop (shared wall-time cursor) is not duplicated.
+                val stored = repository.storeItem(text, settings.encryptionKey, sourceId = item.itemId)
                 if (stored) newCount++
                 if (item.wallTime > latestWallTime) latestWallTime = item.wallTime
             }

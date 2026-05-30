@@ -56,6 +56,14 @@ class ClipboardRepository(context: Context) {
     private val dedupLock = Any()
 
     /**
+     * Guard for read-modify-write on the comma-joined "synced_source_ids" set
+     * (LOW-2). Both Supabase poll callers can run concurrently (FGS loop +
+     * WorkManager worker), so the seen-set must be mutated under a lock to avoid
+     * a lost update that would let a duplicate row through.
+     */
+    private val seenSourceIdsLock = Any()
+
+    /**
      * Subscribe to changes in the backing item store. Any write from the
      * foreground service, the accessibility service, or another in-process
      * writer mutates the shared "copypaste_items" prefs and fires [listener].
@@ -117,14 +125,47 @@ class ClipboardRepository(context: Context) {
 
     /**
      * Encrypt [plaintext] with [key] and persist. Returns false when the text
-     * is sensitive (checked via UniFFI or skipped when unavailable).
+     * is sensitive (checked via UniFFI or skipped when unavailable), already a
+     * recent local duplicate, or — for synced items — already stored under the
+     * same [sourceId].
      *
      * The new UUID is generated BEFORE encryption so it can be bound into the
      * AEAD AAD on the v0.3 schema (see [encryptText]). The same id is also
      * used as the SharedPreferences storage key.
+     *
+     * [sourceId] is the STABLE remote identifier of an incoming synced item —
+     * the Supabase `item_id` (the per-clip UUID bound into the cloud AEAD AAD)
+     * or the P2P [uniffi.copypaste_android.SyncedItem.id]. For locally captured
+     * clips it is null. See LOW-2: [FgsSyncLoop.poll] and
+     * [SupabasePollWorker.doWork] share the `lastSupabasePollWallTime` cursor,
+     * so the same remote row can be fetched by both within the same wall-time
+     * bucket. The 2 s content [DEDUP_WINDOW_MS] only catches near-simultaneous
+     * stores; rows fetched > 2 s apart slipped through and produced a duplicate
+     * history row under a fresh UUID. Recording the source id closes that gap
+     * regardless of timing.
      */
-    suspend fun storeItem(plaintext: String, key: ByteArray): Boolean = withContext(Dispatchers.IO) {
+    suspend fun storeItem(
+        plaintext: String,
+        key: ByteArray,
+        sourceId: String? = null,
+    ): Boolean = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext false
+
+        // ── LOW-2: source-id dedup for incoming synced items. Both poll callers
+        // can fetch the same remote row (shared wall-time cursor), and each call
+        // mints a FRESH local UUID, so content/time dedup alone misses copies
+        // fetched > DEDUP_WINDOW_MS apart. Skip when this remote source id was
+        // already stored; record it atomically otherwise.
+        if (sourceId != null) {
+            synchronized(seenSourceIdsLock) {
+                val seen = storedSourceIds()
+                if (!isNewSourceId(sourceId, seen)) {
+                    Log.d(TAG, "Synced item $sourceId already stored — skipping")
+                    return@withContext false
+                }
+                recordSourceId(sourceId, seen)
+            }
+        }
 
         // ── HIGH-3: cross-listener dedup. The same physical copy fires the
         // clip-changed listener in every owner (FGS, a11y service, activity).
@@ -198,6 +239,34 @@ class ClipboardRepository(context: Context) {
             ?.split(",")
             ?.filter { it.isNotBlank() }
             ?: emptyList()
+
+    /**
+     * The set of remote source ids already stored locally (LOW-2). Persisted as
+     * a comma-joined string under [KEY_SYNCED_SOURCE_IDS] so dedup survives
+     * process death — the WorkManager worker runs in a fresh process and must
+     * still see ids stored by an earlier FGS-loop poll.
+     */
+    private fun storedSourceIds(): LinkedHashSet<String> =
+        LinkedHashSet(
+            prefs.getString(KEY_SYNCED_SOURCE_IDS, "")
+                ?.split(",")
+                ?.filter { it.isNotBlank() }
+                ?: emptyList()
+        )
+
+    /**
+     * Append [sourceId] to the persisted seen-set [seen] (already known to lack
+     * it), trimming oldest-first to [MAX_SEEN_SOURCE_IDS] so the prefs string
+     * cannot grow unbounded. Insertion order is preserved by [LinkedHashSet].
+     */
+    private fun recordSourceId(sourceId: String, seen: LinkedHashSet<String>) {
+        seen.add(sourceId)
+        while (seen.size > MAX_SEEN_SOURCE_IDS) {
+            val oldest = seen.iterator().next()
+            seen.remove(oldest)
+        }
+        prefs.edit().putString(KEY_SYNCED_SOURCE_IDS, seen.joinToString(",")).apply()
+    }
 
     /**
      * Encode a stored item as a pipe-delimited string:
@@ -307,8 +376,31 @@ class ClipboardRepository(context: Context) {
          */
         const val KEY_ITEM_IDS = "item_ids"
 
+        /**
+         * SharedPreferences key holding the comma-joined set of remote source
+         * ids (Supabase `item_id` / P2P `SyncedItem.id`) already stored locally,
+         * used for LOW-2 cross-poll dedup of incoming synced items.
+         */
+        const val KEY_SYNCED_SOURCE_IDS = "synced_source_ids"
+
+        /**
+         * Upper bound on the persisted source-id seen-set. Oldest ids are
+         * dropped first once exceeded. Comfortably larger than any realistic
+         * sync backlog, so a re-fetched row is still recognised, while the prefs
+         * string stays bounded.
+         */
+        const val MAX_SEEN_SOURCE_IDS = 1_000
+
         /** Window in which an identical-content store is treated as a duplicate. */
         private const val DEDUP_WINDOW_MS = 2_000L
+
+        /**
+         * Pure LOW-2 dedup predicate: an incoming synced item is new (should be
+         * stored) iff its remote [sourceId] is not already in [seen]. Extracted
+         * with no Android deps so it is unit-testable on the host JVM.
+         */
+        fun isNewSourceId(sourceId: String, seen: Set<String>): Boolean =
+            sourceId !in seen
 
         /** Max characters shown in a history-row preview before ellipsizing. */
         const val PREVIEW_MAX_CHARS = 140
