@@ -109,50 +109,84 @@ fn redact_config_secrets(value: &mut serde_json::Value) {
 }
 
 /// Resolve the base config directory that BOTH `config.json` and `peers.json`
-/// live under. Honours the `COPYPASTE_CONFIG_DIR` override (used by the
-/// isolated integration harness and any deployment that relocates config)
-/// before falling back to the platform `dirs::config_dir()`. The returned path
-/// already includes the `copypaste/` subdirectory so the two files always
-/// co-locate across the override and the default. Returns `None` only when
-/// neither the override nor a platform config dir can be resolved (caller
-/// decides the fallback).
+/// live under.
 ///
-/// Fix (config-dir parity): `config.json` previously went through a raw
-/// `dirs::config_dir()` lookup that IGNORED `COPYPASTE_CONFIG_DIR`, while
-/// `peers_file_path()` honoured it — so under the override the two files
-/// landed in different directories. Routing both through this resolver keeps
-/// them together and preserves the existing macOS default
-/// (`~/Library/Application Support/.../copypaste` via `dirs::config_dir()`)
-/// when the override is unset.
+/// Fix (unified config-dir resolver): previously `config.json` used
+/// `dirs::config_dir()/copypaste` (lowercase subdir) while the DB and socket
+/// lived under `paths::app_support_dir()` (…/CopyPaste, capitalised). This
+/// caused config.json to land in a different directory than the DB on macOS and
+/// made `COPYPASTE_CONFIG_DIR` only partially effective.
+///
+/// Now we delegate to `crate::paths::config_dir()` which:
+///   1. Honours `COPYPASTE_CONFIG_DIR` (same variable, same semantics).
+///   2. Uses `APP_NAME = "CopyPaste"` on macOS/Windows, lowercase on Linux —
+///      matching `app_support_dir()` so config and DB always co-locate.
+///   3. Falls back to `$TMPDIR/CopyPaste/config` when the platform cannot
+///      resolve a home directory, consistent with every other path helper.
+///
+/// The returned path is the directory itself (no trailing filename). Returns
+/// `Some` unconditionally because `paths::config_dir()` is infallible.
 fn config_base_dir() -> Option<std::path::PathBuf> {
-    std::env::var_os("COPYPASTE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(dirs::config_dir)
-        .map(|base| base.join("copypaste"))
+    Some(crate::paths::config_dir())
 }
 
 fn config_path() -> Option<std::path::PathBuf> {
     config_base_dir().map(|d| d.join("config.json"))
 }
 
+/// Legacy config location used before the unified-resolver fix.
+///
+/// The old code used `dirs::config_dir()/copypaste/config.json` (lowercase
+/// subdir). On macOS `dirs::config_dir()` returns `~/Library/Application
+/// Support`, so this resolves to `…/copypaste/config.json` instead of the
+/// correct `…/CopyPaste/config.json`. Kept here only for the one-time
+/// migration in `read_config`.
+fn legacy_config_path() -> Option<std::path::PathBuf> {
+    dirs::config_dir().map(|base| base.join("copypaste").join("config.json"))
+}
+
 pub(crate) fn read_config() -> AppConfig {
     let Some(path) = config_path() else {
         return AppConfig::default();
     };
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(_) => return AppConfig::default(),
-    };
-    match serde_json::from_str(&raw) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "config parse failed at {}: {e}, using defaults",
-                path.display()
-            );
-            AppConfig::default()
+    // Try the canonical (new) path first.
+    if let Ok(raw) = std::fs::read_to_string(&path) {
+        return match serde_json::from_str(&raw) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(
+                    "config parse failed at {}: {e}, using defaults",
+                    path.display()
+                );
+                AppConfig::default()
+            }
+        };
+    }
+    // One-time migration: if the new path is absent, try the old lowercase
+    // location. If found, return the config so the caller (e.g. write_config
+    // on next save) will migrate it to the new path automatically.
+    if let Some(old_path) = legacy_config_path() {
+        if old_path != path {
+            if let Ok(raw) = std::fs::read_to_string(&old_path) {
+                tracing::info!(
+                    "config: migrating from legacy path {} to {}",
+                    old_path.display(),
+                    path.display()
+                );
+                return match serde_json::from_str(&raw) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!(
+                            "config parse failed at legacy {}: {e}, using defaults",
+                            old_path.display()
+                        );
+                        AppConfig::default()
+                    }
+                };
+            }
         }
     }
+    AppConfig::default()
 }
 
 /// Merge an `incoming` config (as received over `set_config`) onto the
@@ -252,9 +286,11 @@ fn format_fingerprint(bytes: &[u8]) -> String {
 /// default.
 pub(crate) fn peers_file_path() -> PathBuf {
     static FALLBACK_WARNED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
-    // Share the override-aware resolver with `config_path` so config.json and
-    // peers.json always co-locate. `config_base_dir` already appends the
-    // `copypaste/` subdir; on the (rare) None case fall back to `./copypaste`.
+    // Share the resolver with `config_path` so config.json and peers.json
+    // always co-locate under the same directory. `config_base_dir` now
+    // delegates to `paths::config_dir()` which is infallible, so the
+    // None case (fallback to `./copypaste`) is only reached if somehow
+    // config_base_dir returns None (currently unreachable).
     config_base_dir()
         .unwrap_or_else(|| {
             FALLBACK_WARNED.get_or_init(|| {
@@ -1164,6 +1200,10 @@ impl IpcServer {
                 | "pin_item"
                 | "history_page"
                 | "import"
+                // export decrypts every row — needs a ready DB.
+                | "export"
+                // get_item_image decrypts image chunks — needs a ready DB.
+                | "get_item_image"
                 | "revoke_peer"
                 | "revoke_all_peers"
         )
@@ -3838,6 +3878,132 @@ impl IpcServer {
                 }
             }
 
+            // ------------------------------------------------------------------
+            // export — return all decrypted items so the CLI backup command
+            // can serialise them for `import`.
+            //
+            // Params: {} (no params required)
+            // Success: {"items": [ {
+            //     "id": "<row-uuid>",
+            //     "item_id": "<item-uuid>",
+            //     "content_type": "text"|...,
+            //     "content_bytes_b64": "<base64 plaintext>",
+            //     "created_at_ms": <i64 unix-ms>,
+            //     "wall_time": <i64>,
+            //     "lamport_ts": <i64>,
+            //     "is_sensitive": <bool>
+            // }, ... ]}
+            //
+            // Non-text items (images, etc.) are skipped — their chunked
+            // ciphertext cannot be trivially re-imported by the CLI `import`
+            // path (which only handles `content_bytes_b64`).
+            //
+            // Gated behind `requires_db` (see above) so it returns
+            // IPC_NOT_READY during degraded/pre-ready startup.
+            // ------------------------------------------------------------------
+            "export" => {
+                use base64::Engine as _;
+                let db_arc = self.db.clone();
+                let local_key_v1: [u8; 32] = **self.local_key;
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let v2_key = derive_v2(&local_key_v1);
+                    // Fetch ALL items, oldest first, so the caller can re-import
+                    // in chronological order.
+                    let mut stmt = db.conn().prepare(
+                        "SELECT id, item_id, content_type, content, content_nonce, \
+                         is_sensitive, is_synced, lamport_ts, wall_time, key_version \
+                         FROM clipboard_items \
+                         ORDER BY wall_time ASC",
+                    )?;
+                    let b64 = base64::engine::general_purpose::STANDARD;
+                    let mut items: Vec<serde_json::Value> = Vec::new();
+                    let rows = stmt.query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,  // id
+                            row.get::<_, String>(1)?,  // item_id
+                            row.get::<_, String>(2)?,  // content_type
+                            row.get::<_, Option<Vec<u8>>>(3)?,  // content
+                            row.get::<_, Option<Vec<u8>>>(4)?,  // content_nonce
+                            row.get::<_, bool>(5)?,    // is_sensitive
+                            row.get::<_, bool>(6)?,    // is_synced
+                            row.get::<_, i64>(7)?,     // lamport_ts
+                            row.get::<_, i64>(8)?,     // wall_time
+                            row.get::<_, i64>(9).unwrap_or(2) as u8, // key_version
+                        ))
+                    })?;
+                    for row_result in rows {
+                        let (id, item_id, content_type, content_opt, nonce_opt,
+                             is_sensitive, _is_synced, lamport_ts, wall_time, key_version)
+                            = row_result?;
+                        // Only export text items — the CLI import path only
+                        // accepts content_bytes_b64 (raw bytes), and images are
+                        // stored as chunked AEAD blobs that require extra context.
+                        if content_type != "text" {
+                            continue;
+                        }
+                        let Some(content) = content_opt else { continue };
+                        let Some(nonce_vec) = nonce_opt else { continue };
+                        let nonce: &[u8; 24] = match nonce_vec.as_slice().try_into() {
+                            Ok(n) => n,
+                            Err(_) => {
+                                tracing::warn!(
+                                    id = %id,
+                                    "export: skipping item with invalid nonce length {}", nonce_vec.len()
+                                );
+                                continue;
+                            }
+                        };
+                        let plaintext = match decrypt_item_by_version(
+                            key_version,
+                            &local_key_v1,
+                            &v2_key,
+                            &item_id,
+                            nonce,
+                            &content,
+                        ) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                tracing::warn!(
+                                    id = %id,
+                                    "export: decrypt failed for item ({e}); skipping"
+                                );
+                                continue;
+                            }
+                        };
+                        items.push(serde_json::json!({
+                            "id": id,
+                            "item_id": item_id,
+                            "content_type": content_type,
+                            "content_bytes_b64": b64.encode(&plaintext),
+                            "created_at_ms": wall_time,
+                            "wall_time": wall_time,
+                            "lamport_ts": lamport_ts,
+                            "is_sensitive": is_sensitive,
+                        }));
+                    }
+                    Ok::<Vec<serde_json::Value>, anyhow::Error>(items)
+                })
+                .await;
+                match join {
+                    Ok(Ok(items)) => {
+                        let count = items.len();
+                        tracing::info!("export: returning {count} text items");
+                        Response::ok(req.id, serde_json::json!({ "items": items }))
+                    }
+                    Ok(Err(e)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("export failed: {e}"),
+                    ),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
+
             other => Response::err(req.id, format!("unknown method: {other}")),
         }
     }
@@ -4062,6 +4228,11 @@ struct ProbedDaemon {
     /// The peer's OS process id, if reported. Used to SIGTERM a stale
     /// predecessor that does not cooperate via IPC.
     pid: Option<u32>,
+    /// True when the peer reported `"degraded": true` in its `status` response.
+    /// A same-version daemon that is degraded (e.g. keychain-locked / DB
+    /// unavailable) should be replaced by a healthy same-version daemon — the
+    /// usual "same version = healthy, do not steal" rule does not apply.
+    degraded: bool,
 }
 
 /// Synchronously connect to a live socket and ask `status`, returning the
@@ -4094,6 +4265,8 @@ fn probe_listening_daemon(socket_path: &std::path::Path) -> Option<ProbedDaemon>
     Some(ProbedDaemon {
         build_version: data["build_version"].as_str().map(str::to_owned),
         pid: data["pid"].as_u64().and_then(|p| u32::try_from(p).ok()),
+        // A peer that does not emit `degraded` is assumed healthy (false).
+        degraded: data["degraded"].as_bool().unwrap_or(false),
     })
 }
 
@@ -4103,14 +4276,32 @@ fn probe_listening_daemon(socket_path: &std::path::Path) -> Option<ProbedDaemon>
 /// respawns on a *crash*, so a SIGTERM exit will not race us back onto the
 /// socket) and polls until the socket stops answering or a short deadline
 /// elapses. Returns `true` once the socket is free.
+///
+/// TOCTOU / pid-recycle guard (LOW):
+/// * pid == 0 or pid == 1 would send SIGTERM to every process in the group /
+///   init respectively — never valid targets.
+/// * pid == std::process::id() would suicide the new daemon before it starts.
+/// * After sending SIGTERM we verify the socket *actually* freed (re-probe) —
+///   if a recycled pid (different process, same number) was signalled but still
+///   held the socket, we surface failure rather than unlinking a live socket.
 #[cfg(unix)]
 fn evict_stale_daemon(socket_path: &std::path::Path, pid: u32) -> bool {
     use std::time::{Duration, Instant};
 
+    // Guard: never signal pid=0 (whole process group), pid=1 (init), or
+    // ourselves. Any of these would be a dangerous misfire from a recycled pid.
+    if pid == 0 || pid == 1 || pid == std::process::id() {
+        tracing::warn!(
+            "evict_stale_daemon: refusing to signal dangerous pid {pid} \
+             (0=process-group, 1=init, self={self_pid})",
+            self_pid = std::process::id()
+        );
+        return false;
+    }
+
     // SAFETY: `kill(2)` with SIGTERM is a thin libc wrapper; the only effect is
-    // delivering a signal to `pid`. We never pass a negative/zero pid (which
-    // would target a process group / every process), and we tolerate ESRCH
-    // (process already gone) as success.
+    // delivering a signal to `pid`. We have already excluded 0, 1, and self
+    // above, so this is safe to call.
     let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
     if rc != 0 {
         let err = std::io::Error::last_os_error();
@@ -4121,12 +4312,19 @@ fn evict_stale_daemon(socket_path: &std::path::Path, pid: u32) -> bool {
             tracing::warn!("failed to SIGTERM stale daemon pid {pid}: {err}");
             return false;
         }
+        // ESRCH: predecessor already gone — check whether the socket freed.
     } else {
         tracing::warn!(
             "sent SIGTERM to stale daemon pid {pid}; waiting for it to release the socket"
         );
     }
 
+    // Poll until the socket stops answering (the peer shut down and closed its
+    // fd) or the deadline expires. We re-probe the socket rather than just
+    // checking for the file, because a pid-recycled process (different process,
+    // same numeric pid) could have received SIGTERM and exited while the
+    // *original* stale daemon still holds the socket — we only declare success
+    // when the socket itself is no longer live.
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
         if !is_socket_live(socket_path) {
@@ -4134,6 +4332,7 @@ fn evict_stale_daemon(socket_path: &std::path::Path, pid: u32) -> bool {
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+    // Final re-probe: success only when the socket is confirmed free.
     !is_socket_live(socket_path)
 }
 
@@ -4163,45 +4362,51 @@ fn bind_with_stale_cleanup(socket_path: &std::path::Path) -> anyhow::Result<Unix
     if socket_path.exists() {
         if is_socket_live(socket_path) {
             let probed = probe_listening_daemon(socket_path).unwrap_or_default();
-            match probed.build_version.as_deref() {
-                Some(v) if v == BUILD_VERSION => {
+            // Decide whether to evict or refuse.
+            //
+            // Same version AND not degraded → healthy peer; do not steal.
+            if probed.build_version.as_deref() == Some(BUILD_VERSION) && !probed.degraded {
+                anyhow::bail!(
+                    "another daemon (build {BUILD_VERSION}) is already listening on {} — \
+                     refusing to steal the socket from a healthy same-version peer",
+                    socket_path.display()
+                );
+            }
+            // All other cases (different version, no version, or same version
+            // but degraded) → attempt to evict so a healthy daemon can take over.
+            let evict_reason = if probed.build_version.as_deref() == Some(BUILD_VERSION) {
+                // Same version, but degraded.
+                format!("same-version daemon (build {BUILD_VERSION}) is DEGRADED")
+            } else {
+                let reported = probed.build_version.as_deref().unwrap_or("<none>");
+                format!("stale daemon (build {reported}); this build is {BUILD_VERSION}")
+            };
+            tracing::warn!(
+                "{evict_reason} holds {}; evicting so the healthy instance can take over.",
+                socket_path.display()
+            );
+            match probed.pid {
+                Some(pid) if evict_stale_daemon(socket_path, pid) => {
+                    tracing::info!("evicted daemon pid {pid} — socket released");
+                }
+                Some(pid) => {
                     anyhow::bail!(
-                        "another daemon (build {v}) is already listening on {} — \
-                         refusing to steal the socket from a healthy same-version peer",
+                        "could not evict daemon pid {pid} holding {} ({evict_reason}) — \
+                         use the app's \"Restart daemon\" control or \
+                         `launchctl kickstart -k gui/$UID/com.copypaste.daemon`",
                         socket_path.display()
                     );
                 }
-                other => {
-                    let reported = other.unwrap_or("<none>");
-                    tracing::warn!(
-                        "stale daemon (build {reported}) holds {}; this build is {BUILD_VERSION}. \
-                         Evicting it so the upgraded binary takes over.",
+                None => {
+                    // Old build reported no pid: we cannot signal it.
+                    // Surface a clear, actionable error rather than
+                    // unlinking a socket a live process still owns.
+                    anyhow::bail!(
+                        "daemon ({evict_reason}, no pid reported) holds {} and \
+                         cannot be evicted automatically — use the app's \"Restart daemon\" \
+                         control or `launchctl kickstart -k gui/$UID/com.copypaste.daemon`",
                         socket_path.display()
                     );
-                    match probed.pid {
-                        Some(pid) if evict_stale_daemon(socket_path, pid) => {
-                            tracing::info!("stale daemon pid {pid} released the socket");
-                        }
-                        Some(pid) => {
-                            anyhow::bail!(
-                                "could not evict stale daemon pid {pid} holding {} — \
-                                 use the app's \"Restart daemon\" control or \
-                                 `launchctl kickstart -k gui/$UID/com.copypaste.daemon`",
-                                socket_path.display()
-                            );
-                        }
-                        None => {
-                            // Old build reported no pid: we cannot signal it.
-                            // Surface a clear, actionable error rather than
-                            // unlinking a socket a live process still owns.
-                            anyhow::bail!(
-                                "a stale daemon (build {reported}, no pid reported) holds {} and \
-                                 cannot be evicted automatically — use the app's \"Restart daemon\" \
-                                 control or `launchctl kickstart -k gui/$UID/com.copypaste.daemon`",
-                                socket_path.display()
-                            );
-                        }
-                    }
                 }
             }
         }
@@ -4806,7 +5011,7 @@ mod tests {
         );
         let msg = err.to_string();
         assert!(
-            msg.contains("could not evict stale daemon"),
+            msg.contains("could not evict daemon"),
             "expected an eviction-failure error, got: {msg}"
         );
         // Dropping both listener fds unblocks/ends the acceptor thread.
@@ -7084,7 +7289,14 @@ mod tests {
             "config.json must live under COPYPASTE_CONFIG_DIR: {}",
             config.display()
         );
-        assert!(config.ends_with("copypaste/config.json"));
+        // config.json ends with "config.json"; the parent dir name is
+        // platform-dependent (CopyPaste on macOS/Windows, copypaste on Linux)
+        // but in all cases the file must live under the override root.
+        assert!(
+            config.ends_with("config.json"),
+            "config path must end with config.json: {}",
+            config.display()
+        );
 
         // Both files share the SAME directory so a config write and a peers
         // write can never diverge under the override.
