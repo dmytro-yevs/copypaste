@@ -185,9 +185,6 @@ function DeviceRow({
 export function DevicesView() {
   // --- Devices state ---
   const [loadState, setLoadState] = useState<LoadState>("loading");
-  // Detail line for the degraded/error states so the failure path is LOUD
-  // (the real reason / message, never a blank or mislabeled screen).
-  const [loadDetail, setLoadDetail] = useState<string | null>(null);
   const [peers, setPeers] = useState<PairedDevice[]>([]);
   const [rowState, setRowState] = useState<Record<string, DeviceRowState>>({});
   const [revokeAllPending, setRevokeAllPending] = useState(false);
@@ -198,8 +195,6 @@ export function DevicesView() {
   // --- Own fingerprint ---
   const [fpState, setFpState] = useState<FingerprintState>({ status: "loading" });
   const [copied, setCopied] = useState(false);
-  // Incrementing this triggers a fingerprint re-fetch (e.g. after restart).
-  const [fpReloadKey, setFpReloadKey] = useState(0);
 
   // --- QR pairing ---
   const [qrState, setQrState] = useState<QrState>({ status: "idle" });
@@ -277,12 +272,12 @@ export function DevicesView() {
         }
         return next;
       });
-      setLoadDetail(null);
+
       setLoadState("ready");
     } catch (e) {
       // A transport failure means the daemon is genuinely unreachable.
       if (e instanceof IpcError && e.code === "daemon_offline") {
-        setLoadDetail(null);
+  
         setLoadState("offline");
         return;
       }
@@ -292,13 +287,11 @@ export function DevicesView() {
       // degraded case was mislabeled "Daemon not running."
       const probe = await probeStatus();
       if (probe.kind === "offline") {
-        setLoadDetail(null);
+  
         setLoadState("offline");
       } else if (probe.kind === "degraded") {
-        setLoadDetail(probe.reason);
         setLoadState("degraded");
       } else {
-        setLoadDetail(e instanceof IpcError ? e.message : String(e));
         setLoadState("error");
       }
     }
@@ -332,9 +325,7 @@ export function DevicesView() {
     return () => {
       cancelled = true;
     };
-  // fpReloadKey lets the RestartDaemonButton trigger a re-fetch after restart.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fpReloadKey]);
+  }, []);
 
   useEffect(() => {
     void loadPeers();
