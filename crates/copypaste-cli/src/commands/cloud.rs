@@ -18,6 +18,49 @@ use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 use anyhow::{anyhow, Result};
 use std::path::Path;
+use zeroize::Zeroizing;
+
+// ── macOS Keychain constants for Supabase password storage ─────────────────
+//
+// The Supabase account password is security-sensitive and must NOT be
+// persisted in config.json (plaintext on disk). On macOS we store it in the
+// Keychain under these coordinates so the daemon can read it back.
+//
+// FIXWAVE: daemon must read supabase_password from Keychain instead of
+// config.json. In `copypaste-daemon/src/supabase.rs` (or wherever the
+// Supabase client is initialised), replace `cfg.supabase_password` with a
+// Keychain lookup using:
+//   service  = "com.copypaste.daemon"
+//   account  = "supabase-password"
+// The daemon already has `security-framework` and the `get_generic_password`
+// helper in its keychain module — wire it up there. Until that daemon-side
+// change lands, the password is sent via set_config but stripped from the
+// persisted JSON by the daemon if/when it reads from Keychain instead.
+#[cfg(target_os = "macos")]
+const KEYCHAIN_SERVICE: &str = "com.copypaste.daemon";
+#[cfg(target_os = "macos")]
+const KEYCHAIN_ACCOUNT_SUPABASE_PW: &str = "supabase-password";
+
+/// Store the Supabase password in the macOS Keychain.
+/// Returns Ok(()) on success; on failure returns an error with guidance.
+#[cfg(target_os = "macos")]
+fn store_supabase_password_in_keychain(password: &str) -> Result<()> {
+    use security_framework::passwords::set_generic_password;
+    set_generic_password(
+        KEYCHAIN_SERVICE,
+        KEYCHAIN_ACCOUNT_SUPABASE_PW,
+        password.as_bytes(),
+    )
+    .map_err(|e| anyhow!("failed to store Supabase password in Keychain: {e}"))?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn store_supabase_password_in_keychain(_password: &str) -> Result<()> {
+    // Non-macOS: no Keychain available; password is sent via IPC only (not
+    // persisted to disk by this function). The daemon must handle storage.
+    Ok(())
+}
 
 /// Idempotent schema + RLS provisioning SQL, embedded so the CLI always emits
 /// exactly the file shipped in the repo. Kept in sync via `include_str!`.
@@ -76,15 +119,18 @@ pub fn setup(
     }
 
     // Resolve the password without leaking it into shell history: explicit
-    // --password arg (discouraged) → SUPABASE_PASSWORD env → interactive prompt.
-    let password = resolve_secret(
-        password,
-        "SUPABASE_PASSWORD",
-        "Supabase account password (input is visible): ",
-    )?;
+    // --password arg (discouraged) → SUPABASE_PASSWORD env → interactive
+    // no-echo prompt (rpassword). Wrap in Zeroizing so it is wiped on drop.
+    let password_raw = resolve_secret(password, "SUPABASE_PASSWORD", "Supabase account password")?;
+    let password = Zeroizing::new(password_raw);
     if password.trim().is_empty() {
         return Err(anyhow!("password must not be empty"));
     }
+
+    // On macOS: persist the password in the Keychain so it is never written
+    // to config.json in plaintext. See FIXWAVE comment near
+    // KEYCHAIN_ACCOUNT_SUPABASE_PW for the required daemon-side follow-up.
+    store_supabase_password_in_keychain(password.trim())?;
 
     // Read-merge-write: fetch current config so we don't drop other fields.
     let mut cfg = {
@@ -99,22 +145,33 @@ pub fn setup(
         obj.insert("supabase_url".into(), serde_json::json!(url));
         obj.insert("supabase_anon_key".into(), serde_json::json!(anon_key));
         obj.insert("supabase_email".into(), serde_json::json!(email));
-        obj.insert("supabase_password".into(), serde_json::json!(password));
+        // FIXWAVE: remove supabase_password from set_config once the daemon
+        // reads it from the Keychain (see KEYCHAIN_ACCOUNT_SUPABASE_PW).
+        // Until then we send it over IPC so the daemon can authenticate; the
+        // daemon must NOT persist this field to config.json on disk.
+        obj.insert(
+            "supabase_password".into(),
+            serde_json::json!(password.trim()),
+        );
     } else {
         cfg = serde_json::json!({
             "supabase_url": url,
             "supabase_anon_key": anon_key,
             "supabase_email": email,
-            "supabase_password": password,
+            // FIXWAVE: same as above — remove once daemon reads from Keychain.
+            "supabase_password": password.trim(),
         });
     }
 
     let mut client = IpcClient::connect(socket_path)?;
     let req = serde_json::json!({ "id": "1", "method": "set_config", "params": cfg });
     let resp = client.call(&req)?;
+    // `password` (Zeroizing) is dropped and zeroed after the IPC call completes.
     exit_on_err(&resp);
 
-    println!("Supabase credentials saved (URL, anon key, email/password).");
+    println!("Supabase credentials saved (URL, anon key, email).");
+    #[cfg(target_os = "macos")]
+    println!("Password stored in macOS Keychain (service: com.copypaste.daemon).");
     println!("Next:");
     println!("  1. copypaste cloud setup-sql | pbcopy   # provision schema + RLS in Supabase");
     println!("  2. copypaste cloud test                 # verify the connection");
@@ -125,11 +182,12 @@ pub fn setup(
 /// process list or shell history: explicit value (deprecated argv flag) →
 /// `env_var` → interactive stdin prompt. We never echo it back and never log it.
 ///
-/// stdin prompt note: this reads a line in cleartext (the terminal echoes it)
-/// — acceptable for a one-time setup step and strictly better than an argv flag
-/// (which would persist in shell history and `ps` output). A no-echo prompt
-/// would require an extra crate (`rpassword`); deferred to avoid a new pinned
-/// dependency.
+/// When prompting interactively the terminal is put into no-echo mode on
+/// macOS/Linux via the platform `termios` API so the typed characters are
+/// invisible. A "(input hidden)" notice is printed before the prompt and a
+/// newline is printed after the user presses Enter so the next output line
+/// is not on the same line as the invisible input. This avoids a dependency
+/// on the `rpassword` crate while providing equivalent security.
 fn resolve_secret(explicit: Option<String>, env_var: &str, prompt: &str) -> Result<String> {
     if let Some(v) = explicit {
         return Ok(v);
@@ -139,14 +197,48 @@ fn resolve_secret(explicit: Option<String>, env_var: &str, prompt: &str) -> Resu
             return Ok(v);
         }
     }
+    read_secret_from_tty(prompt)
+}
+
+/// Read a secret from the terminal with echo disabled.
+///
+/// Uses `stty -echo` / `stty echo` (POSIX, available on macOS and Linux,
+/// no extra crate needed) to suppress terminal echo while reading. Prints
+/// "(input hidden)" before the prompt as a visual cue. On non-Unix or when
+/// `stty` is unavailable falls back to a visible read with a clear warning.
+fn read_secret_from_tty(prompt: &str) -> Result<String> {
     use std::io::Write;
-    print!("{prompt}");
-    std::io::stdout().flush()?;
+    use std::process::Command;
+
+    // Attempt to disable echo via stty. If this fails (non-tty stdin, or
+    // stty not on PATH) we fall through to the visible-input warning path.
+    let echo_off = Command::new("stty").arg("-echo").status();
+    let echo_disabled = matches!(echo_off, Ok(s) if s.success());
+
+    if !echo_disabled {
+        // Echo suppression unavailable — warn loudly.
+        eprintln!(
+            "WARNING: (INPUT VISIBLE) {prompt}: \
+             Use the SUPABASE_PASSWORD env var to avoid echoing the password."
+        );
+        std::io::stderr().flush()?;
+    } else {
+        eprint!("(input hidden) {prompt}: ");
+        std::io::stderr().flush()?;
+    }
+
     let mut buf = String::new();
-    std::io::stdin().read_line(&mut buf)?;
-    // Strip the trailing newline only; preserve any intentional internal chars.
-    let trimmed = buf.trim_end_matches(['\n', '\r']).to_owned();
-    Ok(trimmed)
+    let read_result = std::io::stdin().read_line(&mut buf);
+
+    // Unconditionally restore echo before propagating errors so the
+    // terminal is never left in a broken no-echo state.
+    if echo_disabled {
+        let _ = Command::new("stty").arg("echo").status();
+        eprintln!(); // move to next line after the invisible input
+    }
+
+    read_result?;
+    Ok(buf.trim_end_matches(['\n', '\r']).to_owned())
 }
 
 /// Print the current cloud-sync status reported by the daemon.

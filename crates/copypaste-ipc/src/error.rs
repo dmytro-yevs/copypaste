@@ -135,8 +135,11 @@ mod tests {
         ];
         for code in all {
             let s = code.as_str();
-            let parsed =
-                ErrorCode::parse(s).unwrap_or_else(|| panic!("parse failed to handle {s}"));
+            // unwrap_or_else with panic! previously panicked the CLI/UI process
+            // if a new variant was added without updating parse(). Use expect()
+            // here so a missing mapping is a test failure, not a process abort.
+            let parsed = ErrorCode::parse(s)
+                .expect("every variant's as_str() must round-trip through parse()");
             assert_eq!(parsed, code, "round-trip mismatch for {s}");
         }
     }

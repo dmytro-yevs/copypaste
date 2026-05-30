@@ -134,6 +134,17 @@ pub fn run_restore(
     force: bool,
     dry_run: bool,
 ) -> Result<()> {
+    // Reject paths that look like flags (leading `--`) to prevent accidental
+    // shell-injection or argument confusion when the value is forwarded to
+    // the restore script. A real backup path will never start with `--`.
+    if backup_path.starts_with("--") {
+        return Err(anyhow!(
+            "invalid backup path {:?}: paths must not start with `--` \
+             (did you mean to pass a flag before the path?)",
+            backup_path
+        ));
+    }
+
     if !dry_run && !Path::new(backup_path).is_file() {
         return Err(anyhow!("backup file not found: {backup_path}"));
     }
@@ -315,5 +326,27 @@ mod tests {
     fn run_signatures_compile() {
         let _: fn(&Path, Option<&str>, bool) -> Result<()> = run_backup;
         let _: fn(&Path, &str, bool, bool) -> Result<()> = run_restore;
+    }
+
+    /// `run_restore` must reject a `backup_path` that starts with `--` to
+    /// prevent accidental flag injection into the restore shell script.
+    #[test]
+    fn restore_rejects_flag_like_path() {
+        let sock = Path::new("/tmp/sock");
+        let err = run_restore(sock, "--force", false, false)
+            .expect_err("path starting with -- must be rejected");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("must not start with `--`"),
+            "error should explain the rejection, got: {msg}"
+        );
+
+        // Also reject other -- prefixes, not just known flag names.
+        let err2 = run_restore(sock, "--some-unknown-flag", false, false)
+            .expect_err("any -- prefix must be rejected");
+        assert!(
+            format!("{err2:#}").contains("must not start with `--`"),
+            "got: {err2:#}"
+        );
     }
 }
