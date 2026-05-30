@@ -46,17 +46,18 @@
     <string name="setting_sensitive_warnings_subtitle">Show a toast when card numbers or tokens are skipped.</string>
     <string name="setting_mask_sensitive_title">Mask Sensitive Content</string>
     <string name="setting_mask_sensitive_subtitle">Hide preview text for items flagged as sensitive. Tap an item to reveal for 5 seconds.</string>
+    <string name="setting_image_max_height_label">Image max height (dp)</string>
+    <string name="setting_image_max_height_hint">1–200 dp (default 40)</string>
+    <string name="setting_preview_delay_label">Action-row auto-close delay (ms)</string>
+    <string name="setting_preview_delay_hint">200–100000 ms (default 1500)</string>
 
-    <!-- Settings — Storage / Limits -->
-    <string name="setting_max_history_items_label">Max stored items</string>
-    <string name="setting_max_history_items_hint">1–100 000 items (default 1000)</string>
+    <!-- Settings — Storage / Limits (no item-count cap — size only) -->
     <string name="setting_max_text_size_label">Max text item size (MB)</string>
     <string name="setting_max_text_size_hint">1–50 MB (default 1)</string>
     <string name="setting_max_image_size_label">Max image item size (MB)</string>
     <string name="setting_max_image_size_hint">1–200 MB (default 25)</string>
     <string name="setting_storage_quota_label">Local storage limit (MB)</string>
-    <string name="setting_storage_quota_hint">50–10 000 MB (default 500)</string>
-
+    <string name="setting_storage_quota_hint">50–10000 MB (default 500)</string>
 
     <!-- Settings — Sync -->
     <string name="setting_sync_wifi_only_title">Sync on Wi-Fi only</string>
@@ -75,7 +76,7 @@
     <string name="setting_permissions_title">Permissions</string>
     <string name="setting_permissions_subtitle">Review and re-request permissions</string>
 
-    <!-- Settings — Notifications (copy event parity with macOS Maccy sound/notify) -->
+    <!-- Settings — Notifications -->
     <string name="setting_notify_on_copy_title">Notify on copy</string>
     <string name="setting_notify_on_copy_subtitle">Show a brief notification each time a clipboard item is captured.</string>
     <string name="setting_sound_on_copy_title">Sound on copy</string>

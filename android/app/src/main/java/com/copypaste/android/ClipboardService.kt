@@ -96,23 +96,9 @@ class ClipboardService : Service() {
     }
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
-        // API 29+ (Android 10+) clipboard restriction:
-        // getPrimaryClip() returns null from a background context unless the calling
-        // process holds an enabled AccessibilityService binding. When both this FGS and
-        // ClipboardAccessibilityService are running in the same process AND the a11y
-        // service is enabled, the a11y binding propagates to the whole process and
-        // getPrimaryClip() returns non-null here too. If a11y is NOT enabled, we get
-        // null from background and CANNOT read the clip content via any FGS-only path.
-        //
-        // In that null case we issue a one-time notification prompting the user to
-        // enable the accessibility service so background capture can work. The
-        // ClipboardAccessibilityService (when enabled) handles this same event
-        // independently via its own registered listener, so no double-storage occurs.
         val clip = clipboardManager.primaryClip
         if (clip == null) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // Only warn if the a11y service is not yet enabled — if it IS enabled
-                // then it handled (or will handle) this event through its own listener.
                 if (!ClipboardAccessibilityService.isEnabled(this@ClipboardService)) {
                     maybeNotifyA11yRequired(this@ClipboardService)
                 }
@@ -127,7 +113,6 @@ class ClipboardService : Service() {
             .firstOrNull { it.startsWith("image/") }
 
         if (imageMime != null) {
-            // Image clip: read URI from the first item and dispatch to image path.
             val uri = clip.getItemAt(0)?.uri
             if (uri != null) {
                 scope.launch { captureImageClip(this@ClipboardService, uri, imageMime, settings, repository, syncManager) }
@@ -292,6 +277,22 @@ class ClipboardService : Service() {
         private const val KEY_TODAY_COUNT = "today_count"
 
         /**
+         * Notification channel for per-copy event toasts (A-SET-6 parity).
+         * IMPORTANCE_MIN = no sound, no heads-up, no status-bar icon — just a
+         * silent badge. Auto-cancelled after 2 seconds.
+         */
+        const val CHANNEL_COPY_EVENT = "copypaste_copy_event"
+        private const val NOTIF_ID_COPY_EVENT = 1003
+
+        /**
+         * Debounce guard: if another capture arrives within [COPY_NOTIF_DEBOUNCE_MS],
+         * the notification is refreshed in-place rather than posting a new one.
+         */
+        @Volatile
+        private var lastCopyNotifMs = 0L
+        private const val COPY_NOTIF_DEBOUNCE_MS = 500L
+
+        /**
          * Shared capture pipeline: store + count + sync. HIGH-2.
          *
          * Both the foreground [ClipboardService] and the background
@@ -346,8 +347,6 @@ class ClipboardService : Service() {
             // Persist to the SharedPreferences repository — the single source the
             // UI reads. storeItem performs cross-listener dedup (HIGH-3) so a
             // single copy seen by multiple owners is stored (and counted) once.
-            // The returned id is this clip's STABLE cross-device item_id, minted
-            // once here and reused on every push/sync below.
             val storedId = repository.storeItem(text, key)
             if (storedId.isNotEmpty()) {
                 Log.d(TAG, "Clipboard item stored successfully")
@@ -364,33 +363,10 @@ class ClipboardService : Service() {
         /**
          * Capture an image clipboard item from a content:// [uri].
          *
-         * Pipeline:
-         *  1. Open an InputStream via ContentResolver and decode into a Bitmap.
-         *  2. Downscale to fit within [IMAGE_MAX_PX] on the longest side using
-         *     BitmapFactory.Options.inSampleSize so large images never bloat
-         *     SharedPreferences. The sampling pass also caps memory usage.
-         *  3. Re-encode as PNG (lossless, good for screenshots/text images) into
-         *     a ByteArray and check the [IMAGE_MAX_BYTES] size cap before storing.
-         *  4. Store a placeholder text blob via [ClipboardRepository.storeItem]
-         *     with the real MIME content type so the row appears in the history
-         *     list with the correct icon/thumbnail slot.
-         *  5. Persist the scaled bytes via [ClipboardRepository.storeImageBytes]
-         *     under the same id returned by storeItem.
-         *
-         * Errors are logged with Log.w and never thrown — a failed image capture
-         * must not crash the service or suppress subsequent text captures.
-         *
-         * Android 10+ background restriction: the same API-29+ limitation that
-         * affects text capture applies here. The URI is readable when:
-         *   (a) the app is in the foreground (this FGS + activity listener), or
-         *   (b) [ClipboardAccessibilityService] is enabled (background path).
-         * Without the a11y service, getPrimaryClip() already returned null before
-         * we reach this function — so no special guard is needed here.
+         * Stores the original image at full resolution. OOM is caught explicitly.
+         * The size cap is enforced by [ClipboardRepository.storeImageBytes].
          */
-        // syncManager is accepted for API symmetry with captureClip and future image-sync
-        // wiring; it is not yet used because image sync requires a separate Supabase
-        // upload path (binary blobs) that is not implemented in this version.
-        @Suppress("UNUSED_PARAMETER")
+        @Suppress("UNUSED_PARAMETER") // syncManager reserved for future image-sync wiring
         suspend fun captureImageClip(
             context: Context,
             uri: android.net.Uri,
@@ -404,34 +380,9 @@ class ClipboardService : Service() {
                 return
             }
 
-            // ── Step 1: decode bounds only (no pixel allocation) to compute inSampleSize.
-            val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            try {
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream, null, opts)
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "captureImageClip: failed to read image bounds from $uri: ${e.message}")
-                return
-            }
-
-            val rawW = opts.outWidth
-            val rawH = opts.outHeight
-            if (rawW <= 0 || rawH <= 0) {
-                Log.w(TAG, "captureImageClip: invalid image dimensions ($rawW×$rawH) — skipping")
-                return
-            }
-
-            // ── Step 2: compute inSampleSize so the longest edge fits IMAGE_MAX_PX.
-            val longest = maxOf(rawW, rawH)
-            var sampleSize = 1
-            while (longest / (sampleSize * 2) > IMAGE_MAX_PX) {
-                sampleSize *= 2
-            }
-
-            // ── Step 3: decode the full pixels at the chosen sample size.
+            // Decode at full resolution (inSampleSize=1 = no sub-sampling).
             val decodeOpts = BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
+                inSampleSize = 1
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
             val bitmap: Bitmap? = try {
@@ -439,8 +390,6 @@ class ClipboardService : Service() {
                     BitmapFactory.decodeStream(stream, null, decodeOpts)
                 }
             } catch (t: Throwable) {
-                // Catch Throwable (not just Exception) to handle OutOfMemoryError on
-                // large images — OOM is an Error subclass and escapes catch(Exception).
                 Log.w(TAG, "captureImageClip: failed to decode image from $uri: ${t.message}")
                 return
             }
@@ -450,17 +399,14 @@ class ClipboardService : Service() {
                 return
             }
 
-            // ── Step 4: re-encode as PNG into a ByteArray and check size cap.
-            // bitmap.recycle() is called in both success and failure paths so
-            // native pixel memory is released as soon as we have the byte array.
+            // Re-encode as PNG (lossless). bitmap.recycle() runs in finally so
+            // native pixel memory is released immediately after the byte array is built.
             val pngBytes: ByteArray? = try {
                 ByteArrayOutputStream().use { baos ->
                     bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
                     baos.toByteArray()
                 }
             } catch (t: Throwable) {
-                // Catch Throwable so OutOfMemoryError during PNG compression doesn't
-                // crash the service — bitmap.recycle() still runs via finally.
                 Log.w(TAG, "captureImageClip: PNG encode failed: ${t.message}")
                 null
             } finally {
@@ -469,22 +415,13 @@ class ClipboardService : Service() {
 
             if (pngBytes == null) return
 
-            if (pngBytes.size > IMAGE_MAX_BYTES) {
-                Log.w(
-                    TAG,
-                    "captureImageClip: encoded PNG is ${pngBytes.size} bytes (cap $IMAGE_MAX_BYTES) — skipping"
-                )
-                return
-            }
-
-            // ── Step 5: persist a text-blob placeholder with the image MIME type so
-            // the row appears in history, then attach the image bytes under the same id.
-            // Use the URI string as placeholder text (non-blank, informational, safe).
+            // Persist a placeholder text blob with the image MIME type so the row
+            // appears in history, then attach the image bytes under the same id.
             val placeholder = uri.toString()
             val key = settings.encryptionKey
             val storedId = repository.storeItem(placeholder, key, contentType = mimeType)
             if (storedId.isEmpty()) {
-                Log.d(TAG, "captureImageClip: storeItem returned empty (dedup or sensitive) — not storing bytes")
+                Log.d(TAG, "captureImageClip: storeItem returned empty (dedup/sensitive) — not storing bytes")
                 return
             }
 
@@ -493,23 +430,10 @@ class ClipboardService : Service() {
 
             bumpTodayCounter(context)
             refreshNotification(context)
+            if (settings.notifyOnCopy) postCopyNotification(context)
+            if (settings.soundOnCopy) playCopySound(context)
             // Image sync is not wired in this version — text sync only for now.
         }
-
-        /**
-         * Maximum pixel dimension (longest edge) for stored image thumbnails.
-         * A 1024 px cap keeps PNG size well under [IMAGE_MAX_BYTES] for typical
-         * screenshots while still being large enough to render a useful thumbnail.
-         */
-        private const val IMAGE_MAX_PX = 1024
-
-        /**
-         * Hard cap on stored image bytes (2 MB). SharedPreferences strings are
-         * stored in the app's private XML file; very large values slow down
-         * the prefs commit and inflate memory on load. 2 MB is conservative —
-         * a 1024×1024 PNG is typically 50–300 KB for screenshots.
-         */
-        private const val IMAGE_MAX_BYTES = 2 * 1024 * 1024
 
         /** Path to the app-private encrypted SQLite DB used by the UniFFI live binding. */
         private fun databasePath(context: Context): String =
@@ -678,18 +602,6 @@ class ClipboardService : Service() {
             }
         }
 
-        /**
-         * Issue a one-time notification telling the user that background clipboard
-         * capture is blocked on this device (Android 10+) and guiding them to
-         * enable the Accessibility Service.
-         *
-         * Called from [clipListener] when [ClipboardManager.getPrimaryClip] returns
-         * null in a background context on API 29+ and
-         * [ClipboardAccessibilityService.isEnabled] is false.
-         *
-         * Gated by [KEY_A11Y_WARN_SHOWN] so it fires at most once per install —
-         * nagging the user repeatedly would be harmful and unhelpful.
-         */
         fun maybeNotifyA11yRequired(context: Context) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             if (prefs.getBoolean(KEY_A11Y_WARN_SHOWN, false)) return
@@ -706,8 +618,6 @@ class ClipboardService : Service() {
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
 
             val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            // Deep-link into OnboardingActivity so the user lands directly on the
-            // Accessibility card rather than the full app.
             val onboardingIntent = Intent(context, OnboardingActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
@@ -720,11 +630,7 @@ class ClipboardService : Service() {
                 .setAutoCancel(true)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setContentIntent(onboardingPi)
-                .addAction(
-                    0,
-                    context.getString(R.string.notif_a11y_warn_action),
-                    onboardingPi
-                )
+                .addAction(0, context.getString(R.string.notif_a11y_warn_action), onboardingPi)
                 .setStyle(
                     NotificationCompat.BigTextStyle()
                         .bigText(context.getString(R.string.notif_a11y_warn_content_long))

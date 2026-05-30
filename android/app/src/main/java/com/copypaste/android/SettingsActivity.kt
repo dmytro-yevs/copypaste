@@ -44,11 +44,11 @@ import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.SectionLabel
 
 /**
- * Settings screen — toggles and Supabase config fields.
+ * Settings screen — grouped into clear sections mirroring the macOS settings layout:
+ *   General / Display / Storage / Sync / Notifications
  *
- * Embedded in the bottom-nav shell via [showBackButton]=false. Also usable
- * as a standalone activity (launched from a deep-link or legacy nav) with
- * [showBackButton]=true.
+ * There is NO "max items count" control — only size/byte-based storage limits
+ * (mirrors desktop: bound local DB by SIZE only, pinned excluded).
  */
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -72,20 +72,17 @@ fun SettingsScreen(
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
 
-    // ── General toggles ──
+    // ── General ──
     var captureEnabled by remember { mutableStateOf(settings.captureEnabled) }
     var syncEnabled by remember { mutableStateOf(settings.syncEnabled) }
+
+    // ── Display ──
     var showWarnings by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
-    var notifyOnCopy by remember { mutableStateOf(settings.notifyOnCopy) }
-    var soundOnCopy by remember { mutableStateOf(settings.soundOnCopy) }
+    var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.toString()) }
+    var previewDelay by remember { mutableStateOf(settings.previewDelay.toString()) }
 
-    // ── Sync / network ──
-    var syncBackend by remember { mutableStateOf(settings.syncBackend) }
-    var syncOnWifiOnly by remember { mutableStateOf(settings.syncOnWifiOnly) }
-
-    // ── Storage / limits ──
-    var maxHistoryItems by remember { mutableStateOf(settings.maxHistoryItems.toString()) }
+    // ── Storage ──
     var maxTextSizeMb by remember {
         mutableStateOf((settings.maxTextSizeBytes / 1_000_000L).toString())
     }
@@ -95,6 +92,11 @@ fun SettingsScreen(
     var storageQuotaMb by remember {
         mutableStateOf((settings.storageQuotaBytes / 1_000_000L).toString())
     }
+
+    // ── Sync ──
+    var syncBackend by remember { mutableStateOf(settings.syncBackend) }
+    var syncOnWifiOnly by remember { mutableStateOf(settings.syncOnWifiOnly) }
+
     // ── Supabase fields ──
     var supabaseUrl by remember { mutableStateOf(settings.supabaseUrl) }
     var supabaseAnonKey by remember { mutableStateOf(settings.supabaseAnonKey) }
@@ -102,13 +104,12 @@ fun SettingsScreen(
     var supabaseEmail by remember { mutableStateOf(settings.supabaseEmail) }
     var supabasePassword by remember { mutableStateOf(settings.supabasePassword) }
 
-    // ── Relay field ──
+    // ── Relay ──
     var relayUrl by remember { mutableStateOf(settings.relayUrl) }
 
-    // ── Display settings (Maccy-parity) ──
-    var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.toString()) }
-    var historySize by remember { mutableStateOf(settings.historySize.toString()) }
-    var previewDelay by remember { mutableStateOf(settings.previewDelay.toString()) }
+    // ── Notifications ──
+    var notifyOnCopy by remember { mutableStateOf(settings.notifyOnCopy) }
+    var soundOnCopy by remember { mutableStateOf(settings.soundOnCopy) }
 
     var settingsError by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -144,7 +145,8 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.Top
         ) {
-            // ── General ───────────────────────────────────────────────────────
+
+            // ── GENERAL ──────────────────────────────────────────────────────
             SectionLabel(stringResource(R.string.section_general))
             SettingsRow(
                 title = stringResource(R.string.setting_capture_enabled_title),
@@ -153,7 +155,8 @@ fun SettingsScreen(
                 onCheckedChange = {
                     val prev = captureEnabled; captureEnabled = it
                     try { settings.captureEnabled = it } catch (e: Exception) {
-                        captureEnabled = prev; settingsError = e.message ?: e.javaClass.simpleName
+                        captureEnabled = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
@@ -165,13 +168,12 @@ fun SettingsScreen(
                 onCheckedChange = {
                     val prev = syncEnabled; syncEnabled = it
                     try { settings.syncEnabled = it } catch (e: Exception) {
-                        syncEnabled = prev; settingsError = e.message ?: e.javaClass.simpleName
+                        syncEnabled = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-
-            // ── Permissions review ─────────────────────────────────────────────
             SettingsNavRow(
                 title = stringResource(R.string.setting_permissions_title),
                 subtitle = stringResource(R.string.setting_permissions_subtitle),
@@ -181,7 +183,7 @@ fun SettingsScreen(
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
-            // ── Display ───────────────────────────────────────────────────────
+            // ── DISPLAY ──────────────────────────────────────────────────────
             SectionLabel(stringResource(R.string.section_display))
             SettingsRow(
                 title = stringResource(R.string.setting_sensitive_warnings_title),
@@ -190,7 +192,8 @@ fun SettingsScreen(
                 onCheckedChange = {
                     val prev = showWarnings; showWarnings = it
                     try { settings.showSensitiveWarnings = it } catch (e: Exception) {
-                        showWarnings = prev; settingsError = e.message ?: e.javaClass.simpleName
+                        showWarnings = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
@@ -202,25 +205,39 @@ fun SettingsScreen(
                 onCheckedChange = {
                     val prev = maskSensitive; maskSensitive = it
                     try { settings.maskSensitiveContent = it } catch (e: Exception) {
-                        maskSensitive = prev; settingsError = e.message ?: e.javaClass.simpleName
+                        maskSensitive = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-
-            // ── Storage / Limits ──────────────────────────────────────────────
-            SectionLabel(stringResource(R.string.section_storage_limits))
             SettingsNumberField(
-                label = stringResource(R.string.setting_max_history_items_label),
-                hint = stringResource(R.string.setting_max_history_items_hint),
-                value = maxHistoryItems,
-                onValueChange = { maxHistoryItems = it },
+                label = stringResource(R.string.setting_image_max_height_label),
+                hint = stringResource(R.string.setting_image_max_height_hint),
+                value = imageMaxHeight,
+                onValueChange = { imageMaxHeight = it },
                 onCommit = {
-                    val n = maxHistoryItems.toIntOrNull()?.coerceIn(1, 100_000) ?: return@SettingsNumberField
-                    try { settings.maxHistoryItems = n; maxHistoryItems = n.toString() }
+                    val v = imageMaxHeight.toIntOrNull()?.coerceIn(1, 200) ?: return@SettingsNumberField
+                    try { settings.imageMaxHeight = v; imageMaxHeight = v.toString() }
                     catch (e: Exception) { settingsError = e.message }
                 },
             )
+            SettingsNumberField(
+                label = stringResource(R.string.setting_preview_delay_label),
+                hint = stringResource(R.string.setting_preview_delay_hint),
+                value = previewDelay,
+                onValueChange = { previewDelay = it },
+                onCommit = {
+                    val v = previewDelay.toLongOrNull()?.coerceIn(200L, 100_000L) ?: return@SettingsNumberField
+                    try { settings.previewDelay = v; previewDelay = v.toString() }
+                    catch (e: Exception) { settingsError = e.message }
+                },
+            )
+            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+            // ── STORAGE ──────────────────────────────────────────────────────
+            // NOTE: There is no item-count cap — size-only limits mirror the desktop.
+            SectionLabel(stringResource(R.string.section_storage_limits))
             SettingsNumberField(
                 label = stringResource(R.string.setting_max_text_size_label),
                 hint = stringResource(R.string.setting_max_text_size_hint),
@@ -256,7 +273,7 @@ fun SettingsScreen(
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
-            // ── Sync ──────────────────────────────────────────────────────────
+            // ── SYNC ─────────────────────────────────────────────────────────
             SectionLabel(stringResource(R.string.section_sync))
             SettingsRow(
                 title = stringResource(R.string.setting_sync_wifi_only_title),
@@ -265,7 +282,8 @@ fun SettingsScreen(
                 onCheckedChange = {
                     val prev = syncOnWifiOnly; syncOnWifiOnly = it
                     try { settings.syncOnWifiOnly = it } catch (e: Exception) {
-                        syncOnWifiOnly = prev; settingsError = e.message ?: e.javaClass.simpleName
+                        syncOnWifiOnly = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
@@ -288,7 +306,7 @@ fun SettingsScreen(
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
-            // ── Supabase config (visible only when SUPABASE selected) ──────────
+            // ── SUPABASE CONFIG ───────────────────────────────────────────────
             if (syncBackend == SyncBackend.SUPABASE) {
                 SectionLabel(stringResource(R.string.section_supabase_config))
 
@@ -302,7 +320,6 @@ fun SettingsScreen(
                         catch (e: Exception) { settingsError = e.message }
                     },
                 )
-
                 SettingsTextField(
                     label = stringResource(R.string.setting_supabase_anon_key_label),
                     hint = "eyJhbGci…",
@@ -314,7 +331,6 @@ fun SettingsScreen(
                     },
                     password = true,
                 )
-
                 SettingsTextField(
                     label = stringResource(R.string.setting_sync_passphrase_label),
                     hint = stringResource(R.string.setting_sync_passphrase_hint),
@@ -335,11 +351,7 @@ fun SettingsScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
 
-                // ── Cross-device account warning ───────────────────────────────
-                // Show the signed-in email (or a placeholder) and a prominent
-                // reminder that ALL devices must use the SAME Supabase account.
-                // A mismatch cannot be auto-detected (RLS isolates accounts at
-                // the server side), so we surface this hint preventively.
+                // Show signed-in account + same-account sync warning
                 val accountDisplay = supabaseEmail.ifBlank { "(anon key — no sign-in)" }
                 Column(
                     modifier = Modifier
@@ -370,7 +382,6 @@ fun SettingsScreen(
                         catch (e: Exception) { settingsError = e.message }
                     },
                 )
-
                 SettingsTextField(
                     label = stringResource(R.string.setting_supabase_password_label),
                     hint = "",
@@ -382,11 +393,10 @@ fun SettingsScreen(
                     },
                     password = true,
                 )
-
                 HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
             }
 
-            // ── Relay config (visible only when RELAY selected) ────────────────
+            // ── RELAY CONFIG ──────────────────────────────────────────────────
             if (syncBackend == SyncBackend.RELAY) {
                 SectionLabel(stringResource(R.string.section_relay_config))
                 SettingsTextField(
@@ -402,47 +412,7 @@ fun SettingsScreen(
                 HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
             }
 
-            // ── Display settings (Maccy-parity) ───────────────────────────────
-            SectionLabel("Display")
-            SettingsNumberField(
-                label = "Image max height (dp)",
-                hint = "40",
-                value = imageMaxHeight,
-                onValueChange = { imageMaxHeight = it },
-                onCommit = {
-                    val v = imageMaxHeight.toIntOrNull()?.coerceIn(1, 200) ?: return@SettingsNumberField
-                    try { settings.imageMaxHeight = v } catch (e: Exception) {
-                        settingsError = e.message ?: e.javaClass.simpleName
-                    }
-                },
-            )
-            SettingsNumberField(
-                label = "History size (items)",
-                hint = "200",
-                value = historySize,
-                onValueChange = { historySize = it },
-                onCommit = {
-                    val v = historySize.toIntOrNull()?.coerceIn(1, 999) ?: return@SettingsNumberField
-                    try { settings.historySize = v } catch (e: Exception) {
-                        settingsError = e.message ?: e.javaClass.simpleName
-                    }
-                },
-            )
-            SettingsNumberField(
-                label = "Preview delay (ms)",
-                hint = "1500",
-                value = previewDelay,
-                onValueChange = { previewDelay = it },
-                onCommit = {
-                    val v = previewDelay.toLongOrNull()?.coerceIn(200L, 100_000L) ?: return@SettingsNumberField
-                    try { settings.previewDelay = v } catch (e: Exception) {
-                        settingsError = e.message ?: e.javaClass.simpleName
-                    }
-                },
-            )
-            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-
-            // ── Notifications (copy event parity with macOS) ───────────────────
+            // ── NOTIFICATIONS ─────────────────────────────────────────────────
             SectionLabel(stringResource(R.string.section_notifications))
             SettingsRow(
                 title = stringResource(R.string.setting_notify_on_copy_title),
@@ -451,7 +421,8 @@ fun SettingsScreen(
                 onCheckedChange = {
                     val prev = notifyOnCopy; notifyOnCopy = it
                     try { settings.notifyOnCopy = it } catch (e: Exception) {
-                        notifyOnCopy = prev; settingsError = e.message ?: e.javaClass.simpleName
+                        notifyOnCopy = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
@@ -463,7 +434,8 @@ fun SettingsScreen(
                 onCheckedChange = {
                     val prev = soundOnCopy; soundOnCopy = it
                     try { settings.soundOnCopy = it } catch (e: Exception) {
-                        soundOnCopy = prev; settingsError = e.message ?: e.javaClass.simpleName
+                        soundOnCopy = prev
+                        settingsError = e.message ?: e.javaClass.simpleName
                     }
                 }
             )
@@ -497,7 +469,6 @@ private fun SettingsNumberField(
     OutlinedTextField(
         value = value,
         onValueChange = { raw ->
-            // Allow only digits (and empty string while the user clears the field)
             if (raw.all { it.isDigit() }) {
                 onValueChange(raw)
                 if (raw.isNotEmpty()) onCommit()
@@ -534,8 +505,8 @@ private fun SettingsTextField(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp),
-        visualTransformation = if (password) PasswordVisualTransformation() else
-            androidx.compose.ui.text.input.VisualTransformation.None,
+        visualTransformation = if (password) PasswordVisualTransformation()
+            else androidx.compose.ui.text.input.VisualTransformation.None,
         keyboardOptions = if (password) KeyboardOptions(keyboardType = KeyboardType.Password)
             else KeyboardOptions.Default,
     )

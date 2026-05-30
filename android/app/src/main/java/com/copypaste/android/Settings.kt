@@ -271,13 +271,9 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putInt("history_size", v.coerceIn(1, 999)).apply()
 
     /**
-     * Delay in milliseconds before showing an item preview on long-press.
+     * Delay in milliseconds before auto-collapsing an expanded action row.
      *
-     * Mirrors Maccy's `previewDelay` preference. Currently wired to the
-     * auto-collapse delay in the history row (how long an expanded/action-row
-     * stays open before collapsing). Range 200–100 000 ms. Default 1500 ms.
-     *
-     * TODO: wire to a dedicated long-press preview popover if one is added.
+     * Mirrors Maccy's `previewDelay` preference. Range 200–100 000 ms. Default 1500 ms.
      */
     var previewDelay: Long
         get() = prefs.getLong("preview_delay_ms", 1500L).coerceIn(200L, 100_000L)
@@ -288,10 +284,6 @@ class Settings(context: Context) {
     /**
      * When true, sync operations (both Supabase poll and relay fan-out) should
      * be restricted to Wi-Fi connections. Defaults to false (sync on any network).
-     * Enforcement hook needed: [SupabasePollWorker] and the relay POST/GET paths
-     * in [ClipboardService] / [FgsSyncLoop] must call
-     * `NetworkCapabilities.hasTransport(TRANSPORT_WIFI)` and skip upload/download
-     * when this flag is true and the active network is not Wi-Fi.
      */
     var syncOnWifiOnly: Boolean
         get() = prefs.getBoolean("sync_on_wifi_only", false)
@@ -304,8 +296,6 @@ class Settings(context: Context) {
      * Maximum size in bytes for a text clipboard item. Items larger than this
      * are silently dropped at capture time.
      * Default: 1 000 000 B (1 MB) — matches MAX_TEXT_SIZE_BYTES in defaults.rs.
-     * Enforcement hook needed: [ClipboardService] / [ClipboardRepository.insert]
-     * must check `text.toByteArray(Charsets.UTF_8).size <= settings.maxTextSizeBytes`.
      */
     var maxTextSizeBytes: Long
         get() = prefs.getLong("max_text_size_bytes", 1_000_000L)
@@ -315,8 +305,6 @@ class Settings(context: Context) {
      * Maximum size in bytes for an image clipboard item. Images larger than this
      * are silently dropped at capture time.
      * Default: 25 000 000 B (25 MB) — matches MAX_IMAGE_SIZE_BYTES in defaults.rs.
-     * Enforcement hook needed: [ClipboardService] / [ClipboardRepository.insert]
-     * must check bitmap byte count against this limit before storing.
      */
     var maxImageSizeBytes: Long
         get() = prefs.getLong("max_image_size_bytes", 25_000_000L)
@@ -327,8 +315,6 @@ class Settings(context: Context) {
      * When the database approaches this limit, the oldest non-sensitive items
      * should be pruned by the repository.
      * Default: 500 000 000 B (500 MB) — matches STORAGE_QUOTA_BYTES in defaults.rs.
-     * Enforcement hook needed: [ClipboardRepository] must compare total payload
-     * size against this quota after each insert and prune accordingly.
      */
     var storageQuotaBytes: Long
         get() = prefs.getLong("storage_quota_bytes", 500_000_000L)
