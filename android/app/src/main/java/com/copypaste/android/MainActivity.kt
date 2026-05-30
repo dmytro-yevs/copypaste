@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var clipboardManager: ClipboardManager
     private lateinit var repository: ClipboardRepository
     private lateinit var settings: Settings
+    private lateinit var syncManager: SyncManager
 
     /**
      * L10: whether the onboarding screen has already been forwarded to during
@@ -71,6 +72,22 @@ class MainActivity : ComponentActivity() {
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         val clip = clipboardManager.primaryClip ?: return@OnPrimaryClipChangedListener
+
+        // Image branch: check all MIME types before falling through to text.
+        // M7: lifecycleScope is used here too so the coroutine is cancelled in onDestroy.
+        val imageMime = (0 until clip.description.mimeTypeCount)
+            .map { clip.description.getMimeType(it) }
+            .firstOrNull { it.startsWith("image/") }
+        if (imageMime != null) {
+            val uri = clip.getItemAt(0)?.uri
+            if (uri != null) {
+                lifecycleScope.launch(Dispatchers.IO) {
+                    ClipboardService.captureImageClip(this@MainActivity, uri, imageMime, settings, repository, syncManager)
+                }
+            }
+            return@OnPrimaryClipChangedListener
+        }
+
         val text = clip.getItemAt(0)?.text?.toString() ?: return@OnPrimaryClipChangedListener
         // M7: use the Activity's lifecycleScope so the coroutine is cancelled
         // automatically in onDestroy — the old hand-rolled CoroutineScope was
@@ -89,6 +106,8 @@ class MainActivity : ComponentActivity() {
 
         settings = Settings(this)
         repository = ClipboardRepository(this)
+        val relayClient = RelayClient(settings.relayUrl)
+        syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager.addPrimaryClipChangedListener(clipListener)
 

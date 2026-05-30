@@ -37,6 +37,19 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         val clip = clipboardManager.primaryClip ?: return@OnPrimaryClipChangedListener
+
+        // Image branch: check all MIME types before falling through to text.
+        val imageMime = (0 until clip.description.mimeTypeCount)
+            .map { clip.description.getMimeType(it) }
+            .firstOrNull { it.startsWith("image/") }
+        if (imageMime != null) {
+            val uri = clip.getItemAt(0)?.uri
+            if (uri != null) {
+                scope.launch { ClipboardService.captureImageClip(this@ClipboardAccessibilityService, uri, imageMime, settings, repository, syncManager) }
+            }
+            return@OnPrimaryClipChangedListener
+        }
+
         val text = clip.getItemAt(0)?.text?.toString() ?: return@OnPrimaryClipChangedListener
         if (text.isBlank()) return@OnPrimaryClipChangedListener
         scope.launch { handleClip(text) }
