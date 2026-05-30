@@ -27,8 +27,8 @@ use tracing::{debug, info, warn};
 
 use copypaste_core::{
     build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2, encrypt_for_cloud,
-    encrypt_item_with_aad, ClipboardItem, Database, MigrationState, SyncKey, AAD_SCHEMA_VERSION_V4,
-    ITEM_KEY_VERSION_CURRENT, NONCE_SIZE,
+    encrypt_item_with_aad, prune_to_cap, ClipboardItem, Database, MigrationState, SyncKey,
+    AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT, NONCE_SIZE,
 };
 use copypaste_sync::{
     merge::{local_to_wire, resolve, wire_to_local, MergeOutcome},
@@ -113,6 +113,8 @@ impl SyncCrypto {
 ///   locally-produced items to peers. A closed receiver is logged and
 ///   ignored — peers may simply not be connected.
 /// * `device_id` — UUID stamped as `origin_device_id` on outgoing items.
+/// * `storage_quota_bytes` — byte cap passed to `prune_to_cap` after each
+///   successful P2P merge so the local DB stays bounded (mirrors the cloud path).
 /// * `shutdown` — D2: token cancelled by the daemon on SIGINT/SIGTERM so the
 ///   orchestrator exits promptly instead of waiting for channels to drain.
 ///
@@ -124,6 +126,7 @@ pub async fn run(
     outbound_tx: mpsc::Sender<WireItem>,
     device_id: String,
     crypto: Option<SyncCrypto>,
+    storage_quota_bytes: i64,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
     info!(%device_id, has_crypto = crypto.is_some(), "sync orchestrator started");
@@ -178,7 +181,7 @@ pub async fn run(
             incoming = incoming_rx.recv(), if !incoming_closed => {
                 match incoming {
                     Some(wire) => {
-                        if let Err(e) = merge_incoming_with_crypto(&db, vec![wire], crypto.as_ref()).await {
+                        if let Err(e) = merge_incoming_with_crypto(&db, vec![wire], crypto.as_ref(), storage_quota_bytes).await {
                             warn!("sync_orch: merge_incoming failed: {e}");
                         }
                     }
@@ -206,11 +209,15 @@ pub async fn run(
 /// Returns the number of rows that were actually upserted (i.e. winners
 /// that replaced or supplemented local state). The orchestrator itself
 /// ignores the count — it is exposed for tests and telemetry.
+///
+/// Uses `AppConfig::default().storage_quota_bytes` for the byte cap. Prefer
+/// [`merge_incoming_with_crypto`] when the live quota is available.
 pub async fn merge_incoming(
     db: &Arc<Mutex<Database>>,
     items: Vec<WireItem>,
 ) -> anyhow::Result<usize> {
-    merge_incoming_with_crypto(db, items, None).await
+    let quota = copypaste_core::AppConfig::default().storage_quota_bytes as i64;
+    merge_incoming_with_crypto(db, items, None, quota).await
 }
 
 /// Crypto-aware variant of [`merge_incoming`] (P2P Phase 3).
@@ -222,89 +229,129 @@ pub async fn merge_incoming(
 /// synced row is searchable / previewable. Items that are not sync-key-wrapped
 /// (legacy peers, image chunk blobs) are stored verbatim, exactly as the
 /// pre-Phase-3 path did.
+///
+/// **Fix HIGH-2:** the entire merge body (get_item_by_item_id, resolve,
+/// replace_item_atomic, prune_to_cap) is wrapped in `tokio::task::spawn_blocking`
+/// so the synchronous rusqlite calls and shared_sync_key disk I/O do not block
+/// an async executor worker. The tokio Mutex is acquired INSIDE the blocking
+/// closure using `blocking_lock()`, mirroring `handle_text`/`handle_image`.
+///
+/// **Fix HIGH-3:** after a successful merge `prune_to_cap` is called with
+/// `storage_quota_bytes` so the P2P inbound path enforces the same local DB
+/// size cap the cloud path already enforces.
 pub async fn merge_incoming_with_crypto(
     db: &Arc<Mutex<Database>>,
     items: Vec<WireItem>,
     crypto: Option<&SyncCrypto>,
+    storage_quota_bytes: i64,
 ) -> anyhow::Result<usize> {
     if items.is_empty() {
         return Ok(0);
     }
 
-    let db_guard = db.lock().await;
+    // Clone what the blocking closure needs so it can be moved in:
+    // - `Arc<Mutex<Database>>` is cheap to clone (reference count bump).
+    // - `SyncCrypto` is `Clone` (derives it).
+    let db = db.clone();
+    let crypto_owned: Option<SyncCrypto> = crypto.cloned();
 
-    let mut upserted = 0usize;
-    for wire in items {
-        // B1 FIX: look up by the STABLE cross-device `item_id` (the CRDT
-        // identity), NOT `wire.id` (the peer's per-row primary key which is a
-        // fresh UUID on every device and therefore never matches the local row).
-        // Using `wire.id` caused the lookup to always return None, so the code
-        // treated every incoming item as new and tried to INSERT with the peer's
-        // PK — hitting the `idx_clipboard_item_id` UNIQUE constraint when the
-        // item already existed locally, silently dropping the update.
-        // Mirrors the cloud path (`cloud.rs`: `get_item_by_item_id`).
-        let existing = match copypaste_core::get_item_by_item_id(&db_guard, &wire.item_id) {
-            Ok(row) => row,
-            Err(e) => {
-                warn!(item_id = %wire.item_id, "sync_orch: get_item_by_item_id failed: {e}");
+    let result = tokio::task::spawn_blocking(move || {
+        // Acquire the std-compatible blocking lock INSIDE the blocking closure.
+        // This keeps the tokio executor free while we hold the lock and run
+        // synchronous rusqlite calls (HIGH fix #2).
+        let db_guard = db.blocking_lock();
+
+        let mut upserted = 0usize;
+        for wire in items {
+            // B1 FIX: look up by the STABLE cross-device `item_id` (the CRDT
+            // identity), NOT `wire.id` (the peer's per-row primary key which is a
+            // fresh UUID on every device and therefore never matches the local row).
+            // Using `wire.id` caused the lookup to always return None, so the code
+            // treated every incoming item as new and tried to INSERT with the peer's
+            // PK — hitting the `idx_clipboard_item_id` UNIQUE constraint when the
+            // item already existed locally, silently dropping the update.
+            // Mirrors the cloud path (`cloud.rs`: `get_item_by_item_id`).
+            let existing = match copypaste_core::get_item_by_item_id(&db_guard, &wire.item_id) {
+                Ok(row) => row,
+                Err(e) => {
+                    warn!(item_id = %wire.item_id, "sync_orch: get_item_by_item_id failed: {e}");
+                    continue;
+                }
+            };
+            // Capture the local primary key before moving `existing` into resolve.
+            // On TakeRemote we patch `to_insert.id` so FTS / copy_item / pins that
+            // are keyed on the local `id` keep pointing at the same row — mirroring
+            // the cloud path's `preserved_pk` pattern.
+            let local_pk: Option<String> = existing.as_ref().map(|r| r.id.clone());
+            let exists = existing.is_some();
+            let take_remote = match existing.as_ref() {
+                Some(local) => matches!(resolve(local, &wire), MergeOutcome::TakeRemote),
+                None => true,
+            };
+
+            if !take_remote {
+                debug!(item_id = %wire.item_id, "sync_orch: LWW kept local");
                 continue;
             }
-        };
-        // Capture the local primary key before moving `existing` into resolve.
-        // On TakeRemote we patch `to_insert.id` so FTS / copy_item / pins that
-        // are keyed on the local `id` keep pointing at the same row — mirroring
-        // the cloud path's `preserved_pk` pattern.
-        let local_pk: Option<String> = existing.as_ref().map(|r| r.id.clone());
-        let exists = existing.is_some();
-        let take_remote = match existing.as_ref() {
-            Some(local) => matches!(resolve(local, &wire), MergeOutcome::TakeRemote),
-            None => true,
-        };
 
-        if !take_remote {
-            debug!(item_id = %wire.item_id, "sync_orch: LWW kept local");
-            continue;
-        }
+            // P2P Phase 3: unwrap the shared-key payload into a row encrypted under
+            // this device's own local key, recovering the plaintext for FTS. Returns
+            // the row to insert plus the decrypted plaintext (when text) to index.
+            let (mut to_insert, fts_plaintext) = match crypto_owned.as_ref() {
+                Some(c) => match rekey_inbound(c, wire) {
+                    Ok(pair) => pair,
+                    Err(w) => {
+                        // Not sync-key-wrapped (or undecryptable): store verbatim.
+                        (wire_to_local(*w), None)
+                    }
+                },
+                None => (wire_to_local(wire), None),
+            };
 
-        // P2P Phase 3: unwrap the shared-key payload into a row encrypted under
-        // this device's own local key, recovering the plaintext for FTS. Returns
-        // the row to insert plus the decrypted plaintext (when text) to index.
-        let (mut to_insert, fts_plaintext) = match crypto {
-            Some(c) => match rekey_inbound(c, wire) {
-                Ok(pair) => pair,
-                Err(w) => {
-                    // Not sync-key-wrapped (or undecryptable): store verbatim.
-                    (wire_to_local(*w), None)
-                }
-            },
-            None => (wire_to_local(wire), None),
-        };
-
-        // Preserve the local primary key on replace so FTS / copy_item / pins
-        // (all keyed on `id`) keep pointing at the same row after the update.
-        // `wire_to_local` copies `wire.id` (the peer's PK) into `to_insert.id`;
-        // we overwrite it here with the local row's PK when one exists.
-        if let Some(pk) = local_pk {
-            to_insert.id = pk;
-        }
-
-        // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
-        // ran `delete_item` then a separate `insert_item`; if the insert failed
-        // the row was lost. We wrap delete + insert + FTS in a single
-        // transaction so a failed insert rolls back the delete and leaves the
-        // old row (and its FTS entry) intact. Mirrors `insert_item_with_fts`'s
-        // `unchecked_transaction` approach (we can't reuse it directly because
-        // it does plain INSERT with dedup-on-conflict rather than replace).
-        let fts_text = fts_plaintext.and_then(|pt| String::from_utf8(pt).ok());
-        match replace_item_atomic(&db_guard, exists, &to_insert, fts_text.as_deref()) {
-            Ok(()) => {
-                debug!(item_id = %to_insert.item_id, "sync_orch: upserted incoming item");
-                upserted += 1;
+            // Preserve the local primary key on replace so FTS / copy_item / pins
+            // (all keyed on `id`) keep pointing at the same row after the update.
+            // `wire_to_local` copies `wire.id` (the peer's PK) into `to_insert.id`;
+            // we overwrite it here with the local row's PK when one exists.
+            if let Some(pk) = local_pk {
+                to_insert.id = pk;
             }
-            Err(e) => warn!(item_id = %to_insert.item_id, "sync_orch: atomic replace failed: {e}"),
+
+            // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
+            // ran `delete_item` then a separate `insert_item`; if the insert failed
+            // the row was lost. We wrap delete + insert + FTS in a single
+            // transaction so a failed insert rolls back the delete and leaves the
+            // old row (and its FTS entry) intact. Mirrors `insert_item_with_fts`'s
+            // `unchecked_transaction` approach (we can't reuse it directly because
+            // it does plain INSERT with dedup-on-conflict rather than replace).
+            let fts_text = fts_plaintext.and_then(|pt| String::from_utf8(pt).ok());
+            match replace_item_atomic(&db_guard, exists, &to_insert, fts_text.as_deref()) {
+                Ok(()) => {
+                    debug!(item_id = %to_insert.item_id, "sync_orch: upserted incoming item");
+                    upserted += 1;
+                }
+                Err(e) => {
+                    warn!(item_id = %to_insert.item_id, "sync_orch: atomic replace failed: {e}")
+                }
+            }
         }
-    }
-    Ok(upserted)
+
+        // Fix HIGH-3: enforce storage cap after P2P merge, mirroring the cloud
+        // path (cloud.rs prune_to_cap call after poll_once). Without this the
+        // local DB grew unboundedly when items arrived via P2P.
+        if upserted > 0 {
+            match prune_to_cap(&db_guard, storage_quota_bytes) {
+                Ok(0) => {}
+                Ok(n) => debug!("sync_orch: prune_to_cap removed {n} rows after P2P merge"),
+                Err(e) => warn!("sync_orch: prune_to_cap failed after P2P merge: {e}"),
+            }
+        }
+
+        upserted
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("sync_orch: merge blocking task panicked: {e}"))?;
+
+    Ok(result)
 }
 
 /// Atomically replace (or insert) a clipboard row and its FTS index for the
@@ -724,6 +771,7 @@ mod tests {
                 outbound_tx,
                 "local-device".to_string(),
                 None,
+                500_000_000, // storage_quota_bytes: 500 MB (test default)
                 shutdown,
             )
             .await
@@ -770,6 +818,7 @@ mod tests {
                 outbound_tx,
                 "local-device".to_string(),
                 None,
+                500_000_000, // storage_quota_bytes: 500 MB (test default)
                 shutdown,
             )
             .await
