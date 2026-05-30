@@ -2,30 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   CSS CUSTOM PROPERTIES
-   Mirror the Tailwind ide-* tokens as CSS vars so raw CSS rules below
-   can reference them without duplicating hex values.
-   ══════════════════════════════════════════════════════════════════════════ */
+/* ── v0.5.3 JetBrains "New UI" token foundation ─────────────────────────────
+   All component files use ide-* tailwind tokens from tailwind.config.js.
+   This file adds:
+     • dark color-scheme declaration
+     • global body/font baseline
+     • form-control base styles (input, select, checkbox, range) so every
+       instance looks identical without per-component overrides
+     • .ide-translucent vibrancy helper
+     • thin IDE-style scrollbars
+     • 120ms ease transitions on interactive elements
+     • popup-row size class
+──────────────────────────────────────────────────────────────────────────── */
+
 :root {
   color-scheme: dark;
-
-  --ide-bg:           #13141a;
-  --ide-panel:        #1e1f26;
-  --ide-elevated:     #272930;
-  --ide-border:       #2e2f38;
-  --ide-divider:      #3a3b44;
-  --ide-hover:        #252730;
-  --ide-selection:    #253565;
-  --ide-text:         #e8eaed;
-  --ide-dim:          #9496a1;
-  --ide-faint:        #5c5e6a;
+  /* Expose palette as CSS custom properties so JS / inline styles can consume
+     them without duplicating hex values. */
+  --ide-bg:           #16171a;
+  --ide-panel:        #1e2024;
+  --ide-elevated:     #26282d;
+  --ide-raised:       #2d2f34;
+  --ide-border:       #383b42;
+  --ide-divider:      #2e3035;
+  --ide-selection:    #1e3d72;
+  --ide-hover:        #22252a;
+  --ide-text:         #dfe1e5;
+  --ide-dim:          #9da0a8;
+  --ide-faint:        #6b6f78;
   --ide-accent:       #3592ff;
-  --ide-accent-hover: #5aa8ff;
-  --ide-danger:       #e05c5c;
-  --ide-success:      #5fad65;
-  --ide-warning:      #d9a343;
-
+  --ide-accent-hover: #5aacff;
+  --ide-accent-dim:   #1a3661;
+  --ide-danger:       #f07171;
+  --ide-success:      #63c174;
+  --ide-warning:      #e5a93a;
   /* Focus ring — 2 px glow, accent @ 40 % */
   --ide-focus-ring: 0 0 0 2px rgba(53, 146, 255, 0.4);
 }
@@ -56,63 +66,29 @@ body {
   display: flex;
 }
 
-/* Text nodes that need selection (inputs handled below) */
+/* ── Text inputs & textareas ─────────────────────────────────────────────── */
+
+
 input,
 textarea {
   user-select: text;
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   FORM CONTROLS — unified JetBrains-style look
-   All inputs/selects/checkboxes share the same visual language:
-   elevated bg, hairline border, 6 px radius, accent focus ring.
-   ══════════════════════════════════════════════════════════════════════════ */
-
-/* --- Text inputs, number inputs, textareas -------------------------------- */
-input[type="text"],
-input[type="number"],
-input[type="email"],
-input[type="password"],
-input[type="search"],
-input[type="url"],
-input[type="tel"],
-textarea {
-  background-color: var(--ide-elevated);
+  /* Apply consistent base so Tailwind utility classes only override what
+     differs per instance, not repeat everything from scratch. */
+  background: var(--ide-elevated);
   color: var(--ide-text);
   border: 1px solid var(--ide-border);
   border-radius: 6px;
-  padding: 5px 8px;
-  font-family: inherit;
-  font-size: inherit;
-  line-height: 1.4;
   outline: none;
-  appearance: none;
-  -webkit-appearance: none;
-  /* Smooth focus transition */
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
   transition: border-color 120ms ease, box-shadow 120ms ease;
 }
 
-input[type="text"]:hover,
-input[type="number"]:hover,
-input[type="email"]:hover,
-input[type="password"]:hover,
-input[type="search"]:hover,
-input[type="url"]:hover,
-input[type="tel"]:hover,
-textarea:hover {
-  border-color: var(--ide-divider);
-}
-
-input[type="text"]:focus,
-input[type="number"]:focus,
-input[type="email"]:focus,
-input[type="password"]:focus,
-input[type="search"]:focus,
-input[type="url"]:focus,
-input[type="tel"]:focus,
+input:focus,
 textarea:focus {
   border-color: var(--ide-accent);
-  box-shadow: var(--ide-focus-ring);
+  box-shadow: 0 0 0 2px var(--ide-accent-dim);
 }
 
 input::placeholder,
@@ -120,109 +96,170 @@ textarea::placeholder {
   color: var(--ide-faint);
 }
 
-textarea {
-  resize: vertical;
-  min-height: 72px;
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.40;
 }
 
-/* --- Select dropdowns ----------------------------------------------------- */
+/* Search inputs — reset the native cancel/search decoration so it doesn't
+   fight with our custom placeholder. */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+}
+
+/* ── Select ──────────────────────────────────────────────────────────────── */
+
 select {
-  background-color: var(--ide-elevated);
+  appearance: none;
+  background: var(--ide-elevated);
   color: var(--ide-text);
   border: 1px solid var(--ide-border);
   border-radius: 6px;
-  padding: 5px 28px 5px 8px;
+  padding: 4px 28px 4px 10px;
   font-family: inherit;
-  font-size: inherit;
-  line-height: 1.4;
+  font-size: 13px;
+  cursor: pointer;
   outline: none;
-  appearance: none;
-  -webkit-appearance: none;
-  /* Custom chevron icon (accent-tinted) */
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%239496a1' d='M6 8L1.5 3.5h9z'/%3E%3C/svg%3E");
+  /* Custom chevron glyph as an inline SVG data-URI, tinted to ide-faint. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b6f78' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
-  cursor: pointer;
   transition: border-color 120ms ease, box-shadow 120ms ease;
-}
-
-select:hover {
-  border-color: var(--ide-divider);
 }
 
 select:focus {
   border-color: var(--ide-accent);
-  box-shadow: var(--ide-focus-ring);
+  box-shadow: 0 0 0 2px var(--ide-accent-dim);
 }
 
-select option {
-  background-color: var(--ide-elevated);
-  color: var(--ide-text);
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.40;
 }
 
-/* --- Checkboxes ----------------------------------------------------------- */
+/* ── Checkbox ────────────────────────────────────────────────────────────── */
+
 input[type="checkbox"] {
-  /* Use accent-color as the cheapest cross-browser custom checkbox tint.
-     This paints the check mark and filled-box in the accent blue on modern
-     WebKit/Blink (which Tauri's webview uses). */
-  accent-color: var(--ide-accent);
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--ide-border);
+  border-radius: 3px;
+  background: var(--ide-elevated);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+  position: relative;
+}
+
+input[type="checkbox"]:checked {
+  background: var(--ide-accent);
+  border-color: var(--ide-accent);
+}
+
+input[type="checkbox"]:checked::after {
+  content: "";
+  display: block;
+  width: 4px;
+  height: 8px;
+  border: 1.5px solid white;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg) translate(-1px, -1px);
+  margin-top: -2px;
+}
+
+input[type="checkbox"]:focus {
+  box-shadow: 0 0 0 2px var(--ide-accent-dim);
+}
+
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.40;
+}
+
+/* ── Range slider ────────────────────────────────────────────────────────── */
+
+input[type="range"] {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: var(--ide-elevated);
+  border-radius: 2px;
+  border: 1px solid var(--ide-border);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
   width: 14px;
   height: 14px;
-  border-radius: 3px;
-  cursor: pointer;
-  vertical-align: middle;
-  transition: box-shadow 120ms ease;
+  border-radius: 50%;
+  background: var(--ide-accent);
+  margin-top: -5px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  transition: background 120ms ease, transform 120ms ease;
 }
 
-input[type="checkbox"]:focus-visible {
-  box-shadow: var(--ide-focus-ring);
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: var(--ide-accent-hover);
+  transform: scale(1.15);
+}
+
+input[type="range"]:focus {
   outline: none;
+  box-shadow: none;
 }
 
-/* --- Radio buttons -------------------------------------------------------- */
-input[type="radio"] {
-  accent-color: var(--ide-accent);
-  cursor: pointer;
+/* ── .ide-translucent — vibrancy overlay for panels that should float ────── */
+
+.ide-translucent {
+  background: rgba(22, 23, 26, 0.80);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
 }
 
-/* --- Range sliders -------------------------------------------------------- */
-input[type="range"] {
-  accent-color: var(--ide-accent);
+/* ── Interactive elements — 120ms transitions ────────────────────────────── */
+
+button,
+[role="button"],
+[role="option"],
+[role="tab"],
+[role="switch"] {
+  transition-property: background-color, color, border-color, box-shadow, opacity, transform;
+  transition-duration: 120ms;
+  transition-timing-function: ease;
 }
 
-/* --- Buttons (base — components can override with Tailwind classes) ------- */
-button {
-  font-family: inherit;
-  font-size: inherit;
-  cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease,
-              border-color 120ms ease;
-}
+/* ── Thin IDE-style scrollbars ───────────────────────────────────────────── */
 
-button:focus-visible {
-  outline: none;
-  box-shadow: var(--ide-focus-ring);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   SCROLLBARS — thin IDE-style, accent-tinted thumb
-   ══════════════════════════════════════════════════════════════════════════ */
 ::-webkit-scrollbar {
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-thumb {
-  /* Slightly accent-tinted white for a JetBrains feel */
-  background: rgba(140, 160, 200, 0.22);
-  border: 1px solid transparent;
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid transparent;
+  border-radius: 6px;
   background-clip: padding-box;
   transition: background 120ms ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(140, 160, 200, 0.40);
+  background: rgba(255, 255, 255, 0.22);
   background-clip: padding-box;
 }
 
@@ -234,48 +271,9 @@ button:focus-visible {
   background: transparent;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   DEPTH UTILITIES — helper classes for panels/popups
-   ══════════════════════════════════════════════════════════════════════════ */
+/* ── Popup: compact single-line rows (Maccy-style) ───────────────────────── */
 
-/* Subtle panel shadow (cards, side-panels) */
-.ide-shadow-panel {
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.35);
-}
 
-/* Stronger elevation for modals / floating popups */
-.ide-shadow-popup {
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.65), 0 1px 4px rgba(0, 0, 0, 0.4);
-}
-
-/* Optional: translucency hint class.
-   Apply to a container when the parent has a native NSVisualEffectView behind it.
-   Keeps text readable (88% opacity bg) while letting vibrancy bleed subtly. */
-.ide-translucent {
-  background-color: rgba(19, 20, 26, 0.88) !important;
-  backdrop-filter: blur(12px) saturate(180%);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   INTERACTIVE TRANSITIONS — applied globally to common interactive elements
-   ══════════════════════════════════════════════════════════════════════════ */
-a {
-  color: var(--ide-accent);
-  text-decoration: none;
-  transition: color 120ms ease;
-}
-
-a:hover {
-  color: var(--ide-accent-hover);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   POPUP LAYOUT — compact single-line rows (Maccy-style clipboard list)
-   Only min-height here — image rows need extra height driven by inline minHeight
-   (e.g. imageMaxHeight + 10px). Omitting height/max-height lets the inline style
-   win without being overridden by a hard CSS cap.
-   ══════════════════════════════════════════════════════════════════════════ */
 .popup-row {
   min-height: 28px;
   line-height: 28px;
@@ -284,4 +282,17 @@ a:hover {
 /* Image rows: no height cap so the inline minHeight (imageMaxHeight+10) drives size. */
 .popup-row-image {
   line-height: 28px;
+}
+
+/* ── Keyframe animations ─────────────────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

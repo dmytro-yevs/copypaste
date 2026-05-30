@@ -4,47 +4,37 @@ export default {
   theme: {
     extend: {
       colors: {
-        // JetBrains "New UI" 2023+ — blue-cool near-blacks with deliberate elevation.
-        // Each layer is ~3-4% lighter so depth is visible but not garish.
+        // JetBrains "New UI" v0.5.3 — deeper near-black ramp, #3592ff accent.
+        // Token names are unchanged so no component edits are needed for the
+        // base palette swap — only values change here.
         ide: {
-          // ── Backgrounds (darkest → lightest) ──────────────────────────────
-          // bg:       main window / outermost chrome  (very dark blue-black)
-          // panel:    sidebar, tool-window panels      (classic Darcula base, now blue-tinted)
-          // elevated: cards, inputs, dropdowns         (clearly lifted above panel)
-          bg: "#13141a",
-          panel: "#1e1f26",
-          elevated: "#272930",
+          // Surface hierarchy: bg → panel → elevated → raised
+          bg:        "#16171a",   // root window / darkest layer
+          panel:     "#1e2024",   // primary surface: sidebar, list bg
+          elevated:  "#26282d",   // cards, inputs
+          raised:    "#2d2f34",   // hover / pressed on elevated — new depth tier
 
-          // ── Structural ────────────────────────────────────────────────────
-          // border:   hairline between sibling panels  (low-contrast, barely visible)
-          // divider:  section dividers inside a panel  (slightly stronger)
-          border: "#2e2f38",
-          divider: "#3a3b44",
+          // Borders & dividers — hairline single-pixel style
+          border:    "#383b42",   // outline borders
+          divider:   "#2e3035",   // row separators, subtler than border
 
-          // ── Interactive states ────────────────────────────────────────────
-          // hover:     row/button hover fill (cool dark, slightly lighter than panel)
-          // selection: selected row / active tree node (deep accent-tinted blue)
-          hover: "#252730",
-          selection: "#253565",
+          // Interaction states
+          selection: "#1e3d72",   // selected row — deeper blue tint
+          hover:     "#22252a",   // hover on panel surface
 
-          // ── Typography hierarchy ──────────────────────────────────────────
-          // text:  primary readable content  (~WCAG AA on ide-panel bg)
-          // dim:   secondary labels, placeholders, timestamps
-          // faint: disabled text, watermarks, sub-sub labels
-          text: "#e8eaed",
-          dim: "#9496a1",
-          faint: "#5c5e6a",
+          // Text hierarchy
+          text:  "#dfe1e5",       // primary
+          dim:   "#9da0a8",       // secondary
+          faint: "#6b6f78",       // timestamps, placeholders
 
-          // ── Brand accent (JetBrains blue) ─────────────────────────────────
-          // accent:      default blue — buttons, links, active indicators
-          // accentHover: slightly lighter for hover state
-          accent: "#3592ff",
-          accentHover: "#5aa8ff",
-
-          // ── Semantic ──────────────────────────────────────────────────────
-          danger:  "#e05c5c",
-          success: "#5fad65",
-          warning: "#d9a343"
+          // Brand / semantic
+          accent:      "#3592ff", // v0.5.3 brighter blue
+          accentHover: "#5aacff", // hover state
+          accentDim:   "#1a3661", // accent background tint — for badges, selection bg
+          danger:      "#f07171", // slightly brighter danger
+          success:     "#63c174", // slightly brighter success
+          warning:     "#e5a93a", // amber
+          warningDim:  "#3a2900", // warning surface tint — for pinned rows
         }
       },
       fontFamily: {
@@ -52,19 +42,31 @@ export default {
         mono: ["ui-monospace", "SFMono-Regular", "JetBrains Mono", "Menlo", "monospace"]
       },
       borderRadius: {
-        ide: "6px"
+        ide:    "6px",
+        "ide-lg": "10px",
       },
       boxShadow: {
-        // Subtle panel lift — cards, popovers, dropdowns.
-        "ide-panel": "0 1px 4px rgba(0,0,0,0.45), 0 4px 16px rgba(0,0,0,0.35)",
-        // Stronger elevation for modals / floating windows.
-        "ide-popup":  "0 4px 24px rgba(0,0,0,0.65), 0 1px 4px rgba(0,0,0,0.4)",
-        // Focus ring inset glow around interactive controls.
-        "ide-focus":  "0 0 0 2px rgba(53,146,255,0.4)"
+        // Layered depth shadows — restrained for a productivity tool.
+        "ide-xs":    "0 1px 2px rgba(0,0,0,0.40)",
+        "ide-sm":    "0 2px 6px rgba(0,0,0,0.48), 0 1px 2px rgba(0,0,0,0.32)",
+        "ide-md":    "0 4px 14px rgba(0,0,0,0.55), 0 2px 4px rgba(0,0,0,0.38)",
+        "ide-popup": "0 8px 28px rgba(0,0,0,0.68), 0 2px 6px rgba(0,0,0,0.44)",
       },
       transitionDuration: {
-        fast: "120ms"
-      }
+        ide: "120ms",
+      },
+      transitionTimingFunction: {
+        ide: "ease",
+      },
+      keyframes: {
+        fadeIn: {
+          "0%":   { opacity: "0", transform: "translateY(2px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "fade-in": "fadeIn 120ms ease",
+      },
     }
   },
   plugins: []

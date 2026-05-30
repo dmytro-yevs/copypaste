@@ -23,11 +23,10 @@ function Toast({ message, kind }: { message: string; kind: ToastKind }) {
     <div
       className={[
         "fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-ide border px-4 py-1.5",
-        "text-[12px] shadow-lg pointer-events-none",
-        "animate-[fadeIn_0.15s_ease]",
+        "text-[12px] shadow-ide-md pointer-events-none animate-fade-in",
         kind === "error"
-          ? "border-ide-danger/40 bg-ide-panel text-ide-danger"
-          : "border-ide-success/40 bg-ide-panel text-ide-success",
+          ? "border-ide-danger/30 bg-ide-elevated text-ide-danger"
+          : "border-ide-success/30 bg-ide-elevated text-ide-success",
       ].join(" ")}
     >
       {message}
@@ -300,14 +299,15 @@ function HistoryRow({
       className={[
         "group relative flex cursor-pointer select-none items-center gap-2 px-3 py-1.5",
         "border-b text-[13px]",
-        entry.pinned ? "border-ide-warning/20 bg-ide-warning/5" : "border-ide-divider/40",
+        // v0.5.3: warningDim tint for pinned rows, deeper selection blue
+        entry.pinned ? "border-ide-warning/15 bg-ide-warningDim/40" : "border-ide-divider/50",
         multiSelected
           ? "bg-ide-selection text-ide-text"
           : selected
           ? "bg-ide-selection text-ide-text"
           : entry.pinned
-          ? "text-ide-text hover:bg-ide-warning/10"
-          : "text-ide-text hover:bg-ide-hover",
+          ? "text-ide-text hover:bg-ide-warning/8"
+          : "text-ide-text hover:bg-ide-hover",   // panel surface: hover is ide-hover (darker than panel)
       ].join(" ")}
       onClick={handleRowClick}
     >
@@ -1195,24 +1195,20 @@ export function HistoryView() {
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Filter…"
-        className={[
-          "h-7 w-48 rounded-ide border border-ide-border bg-ide-elevated px-2",
-          "text-[12px] text-ide-text placeholder:text-ide-faint",
-          "focus:border-ide-accent focus:outline-none",
-        ].join(" ")}
+        className="h-7 w-44 rounded-ide px-2 text-[12px]"
       />
       {confirmPending ? (
         <span className="flex items-center gap-1.5 text-[12px]">
           <span className="text-ide-dim">Delete all?</span>
           <button
             onClick={() => void handleClearAllConfirmed()}
-            className="rounded-ide border border-ide-danger/50 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover"
+            className="rounded-ide border border-ide-danger/40 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised shadow-ide-xs"
           >
             Yes
           </button>
           <button
             onClick={() => setConfirmPending(false)}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-hover"
+            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
           >
             No
           </button>
@@ -1220,7 +1216,7 @@ export function HistoryView() {
       ) : (
         <button
           onClick={() => void handleClearAll()}
-          className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover"
+          className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/40 shadow-ide-xs"
         >
           Clear all
         </button>

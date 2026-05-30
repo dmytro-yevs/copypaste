@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,7 +32,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
+import com.copypaste.android.ui.theme.IdeDim
 import com.copypaste.android.ui.theme.IdePanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -196,7 +199,14 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
                         icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label) }
+                        label = { Text(tab.label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor       = IdeAccent,
+                            selectedTextColor       = IdeAccent,
+                            indicatorColor          = IdeAccent.copy(alpha = 0.15f),
+                            unselectedIconColor     = IdeDim,
+                            unselectedTextColor     = IdeDim,
+                        ),
                     )
                 }
             }

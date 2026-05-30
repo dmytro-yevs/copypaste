@@ -12,11 +12,24 @@ export function ViewShell({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-11 shrink-0 items-center justify-between border-b border-ide-border px-4">
-        <h1 className="text-[13px] font-medium tracking-wide text-ide-text">{title}</h1>
+      {/* Header — IDE toolbar style: panel bg, hairline bottom border, depth shadow */}
+      <header
+        className={[
+          "flex h-11 shrink-0 items-center justify-between px-4",
+          "border-b border-ide-border bg-ide-panel",
+          "shadow-ide-xs",
+        ].join(" ")}
+      >
+        <h1 className="text-[13px] font-semibold tracking-wide text-ide-text">
+          {title}
+        </h1>
         <div className="flex items-center gap-2">{actions}</div>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto p-4">{children}</div>
+
+      {/* Content — scrollable, bg matches root */}
+      <div className="min-h-0 flex-1 overflow-auto bg-ide-bg p-4">
+        {children}
+      </div>
     </div>
   );
 }

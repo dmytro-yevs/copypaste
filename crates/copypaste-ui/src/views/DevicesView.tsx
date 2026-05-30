@@ -480,13 +480,13 @@ export function DevicesView() {
           <span className="text-ide-dim">Revoke all?</span>
           <button
             onClick={() => void handleRevokeAllConfirmed()}
-            className="rounded-ide border border-ide-danger/50 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover"
+            className="rounded-ide border border-ide-danger/40 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs"
           >
             Yes
           </button>
           <button
             onClick={() => setRevokeAllConfirm(false)}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-hover"
+            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
           >
             No
           </button>
@@ -495,7 +495,7 @@ export function DevicesView() {
         <button
           onClick={() => setRevokeAllConfirm(true)}
           disabled={revokeAllPending || loadState !== "ready" || peers.length === 0}
-          className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-ide border border-ide-danger/35 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
         >
           {revokeAllPending ? "Revoking…" : "Revoke all"}
         </button>
@@ -613,7 +613,7 @@ export function DevicesView() {
         Pair a new device
       </p>
 
-      <section className="rounded-ide border border-ide-border bg-ide-panel p-4 space-y-3">
+      <section className="rounded-ide-lg border border-ide-border bg-ide-elevated p-4 space-y-3 shadow-ide-sm">
         {/* Already-paired warning: shown when QR is visible and peers exist.
             A device scanning this QR that is already paired will be rejected by
             the daemon ("peer already paired") — surface the context proactively. */}
@@ -678,7 +678,7 @@ export function DevicesView() {
           type="button"
           onClick={() => void generateQr()}
           disabled={qrState.status === "loading"}
-          className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
         >
           {qrState.status === "loading"
             ? "Generating…"

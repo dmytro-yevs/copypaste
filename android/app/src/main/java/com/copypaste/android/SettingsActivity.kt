@@ -49,6 +49,8 @@ import com.copypaste.android.ui.theme.IdeDim
 import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeWarning
 import com.copypaste.android.ui.theme.SectionLabel
+import com.copypaste.android.ui.theme.ideSwitchColors
+import com.copypaste.android.ui.theme.ideTextFieldColors
 
 /**
  * Settings screen — grouped into clear sections mirroring the macOS settings layout:
@@ -586,6 +588,7 @@ private fun SettingsTextField(
         label = { Text(label) },
         placeholder = { Text(hint, style = MaterialTheme.typography.bodySmall) },
         singleLine = true,
+        colors = ideTextFieldColors(),
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp),
@@ -693,7 +696,8 @@ private fun SettingsRow(
         }
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange
+            onCheckedChange = onCheckedChange,
+            colors = ideSwitchColors(),
         )
     }
 }

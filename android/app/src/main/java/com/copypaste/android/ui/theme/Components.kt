@@ -16,31 +16,33 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 // ---------------------------------------------------------------------------
-// Shared design-system components — the single source of truth for chrome that
-// must look identical on every screen. Built to match the macOS desktop UI:
+// Shared design-system components — single source of truth for chrome that
+// must look identical on every screen. v0.5.3 retune: deeper surface colors,
+// accent #3592ff, hairline borders, shadow-equivalent elevation.
 //
-//   • Compact IDE-style header on the #2b2d30 panel surface (NOT the blue
+//   • Compact IDE-style header on the #1e2024 panel surface (NOT the blue
 //     accent header Material defaults to). This is what makes the History,
 //     Settings, Pair, Onboarding and Permissions screens read as siblings.
 //     The status-bar inset is applied via windowInsets (not a fixed height)
 //     so the header is never clipped under a notch or display cutout.
-//   • Rounded 12 dp cards on the #313438 elevated surface, hairline border.
+//   • Rounded 12 dp cards on the #26282d elevated surface, hairline border.
 //   • Subdued section labels in the accent blue.
 //
-// Spacing scale used across screens (4 / 8 / 12 / 16 / 24 dp). Keep new layout
-// padding on this grid.
+// Spacing scale: 4 / 8 / 12 / 16 / 24 dp. Keep new padding on this grid.
 // ---------------------------------------------------------------------------
 
 /**
- * Standard compact header. Dark #2b2d30 panel, 14 sp medium title.
+ * Standard compact header. Dark #1e2024 panel, 14 sp medium title.
  *
  * windowInsets defaults to [TopAppBarDefaults.windowInsets] so the bar
  * automatically pads its content below the status-bar / display-cutout on
@@ -79,7 +81,7 @@ fun CopyPasteTopBar(
         },
         actions = actions,
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor             = IdePanel,
+            containerColor             = IdePanel,      // #1e2024 (v0.5.3 darker)
             titleContentColor          = IdeText,
             actionIconContentColor     = IdeDim,
             navigationIconContentColor = IdeDim,
@@ -98,21 +100,29 @@ fun CopyPasteTopBar(
  * [accent] tints the border (e.g. danger for a missing required permission,
  * success for a granted one) without flooding the whole card with color — this
  * is closer to the restrained macOS look than Material's filled containers.
+ *
+ * v0.5.3: uses IdeElevated (#26282d) container, 12 dp radius.
  */
 @Composable
 fun CopyPasteCard(
     modifier: Modifier = Modifier,
-    accent: androidx.compose.ui.graphics.Color = IdeBorder,
+    accent: Color = IdeBorder,
     content: @Composable (androidx.compose.foundation.layout.ColumnScope.() -> Unit),
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = IdeElevated,
+            containerColor = IdeElevated,   // #26282d
             contentColor   = IdeText,
         ),
         border = androidx.compose.foundation.BorderStroke(1.dp, accent),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation   = 2.dp,
+            pressedElevation   = 4.dp,
+            focusedElevation   = 2.dp,
+            hoveredElevation   = 3.dp,
+        ),
     ) {
         Column(content = content)
     }
@@ -127,7 +137,46 @@ fun SectionLabel(
     Text(
         text = text,
         style = MaterialTheme.typography.titleMedium,
-        color = IdeAccent,
+        color = IdeAccent.copy(alpha = 0.80f),   // slightly subdued, matches macOS
         modifier = modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
     )
 }
+
+/**
+ * IDE-styled OutlinedTextField colors: ide-elevated background, ide-border
+ * outline, ide-accent focus ring, ide-faint placeholder. Call at every
+ * OutlinedTextField call site for consistent appearance.
+ */
+@Composable
+fun ideTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    // Container (fill inside the text field)
+    focusedContainerColor   = IdeElevated,
+    unfocusedContainerColor = IdeElevated,
+    disabledContainerColor  = IdeElevated.copy(alpha = 0.50f),
+
+    // Border
+    focusedBorderColor   = IdeAccent,
+    unfocusedBorderColor = IdeBorder,
+    disabledBorderColor  = IdeBorder.copy(alpha = 0.40f),
+    errorBorderColor     = IdeDanger,
+
+    // Text
+    focusedTextColor   = IdeText,
+    unfocusedTextColor = IdeText,
+    disabledTextColor  = IdeDim,
+    errorTextColor     = IdeDanger,
+
+    // Label (floating)
+    focusedLabelColor   = IdeAccent,
+    unfocusedLabelColor = IdeDim,
+    disabledLabelColor  = IdeFaint,
+    errorLabelColor     = IdeDanger,
+
+    // Placeholder
+    focusedPlaceholderColor   = IdeFaint,
+    unfocusedPlaceholderColor = IdeFaint,
+
+    // Cursor
+    cursorColor      = IdeAccent,
+    errorCursorColor = IdeDanger,
+)

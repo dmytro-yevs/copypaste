@@ -3,6 +3,7 @@ package com.copypaste.android.ui.theme
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -13,7 +14,7 @@ import androidx.core.view.WindowCompat
 
 // ---------------------------------------------------------------------------
 // CopyPaste theme — always dark, matching the macOS JetBrains "New UI" /
-// Darcula palette used in crates/copypaste-ui/tailwind.config.js.
+// Darcula palette (v0.5.3) used in crates/copypaste-ui/tailwind.config.js.
 //
 // Dynamic color (Material You) is intentionally disabled: it would override
 // the precise Darcula palette we need to match the desktop app.
@@ -21,7 +22,7 @@ import androidx.core.view.WindowCompat
 
 private val DarculaColorScheme = darkColorScheme(
     // ── Primary (accent blue) ─────────────────────────────────────────────
-    primary              = DarkPrimary,            // #3574f0 — action blue
+    primary              = DarkPrimary,            // #3592ff — action blue
     onPrimary            = DarkOnPrimary,           // white on blue
     primaryContainer     = DarkPrimaryContainer,    // deep blue tint
     onPrimaryContainer   = DarkOnPrimaryContainer,
@@ -33,24 +34,24 @@ private val DarculaColorScheme = darkColorScheme(
     onSecondaryContainer = DarkOnSecondaryContainer,
 
     // ── Backgrounds / surfaces ────────────────────────────────────────────
-    background           = IdeBg,       // #1e1f22 — outermost bg
-    onBackground         = IdeText,     // #dfe1e5
-    surface              = IdePanel,    // #2b2d30 — primary surface
+    background           = IdeBg,        // #16171a — outermost bg (darker)
+    onBackground         = IdeText,      // #dfe1e5
+    surface              = IdePanel,     // #1e2024 — primary surface
     onSurface            = IdeText,
-    surfaceVariant       = IdeElevated, // #313438 — cards, chips
-    onSurfaceVariant     = IdeDim,      // #9da0a8
+    surfaceVariant       = IdeElevated,  // #26282d — cards, chips, inputs
+    onSurfaceVariant     = IdeDim,       // #9da0a8
 
     // Tonal surface containers — keep every elevation tier inside the Darcula
     // grey ramp instead of Material3's default purple-tinted auto-elevation.
-    surfaceContainerLowest  = IdeBg,       // #1e1f22
-    surfaceContainerLow     = IdePanel,    // #2b2d30
-    surfaceContainer        = IdePanel,    // #2b2d30 — bottom nav / app bar
-    surfaceContainerHigh    = IdeElevated, // #313438 — cards
-    surfaceContainerHighest = IdeHover,    // #34373b — pressed / raised
+    surfaceContainerLowest  = IdeBg,       // #16171a
+    surfaceContainerLow     = IdePanel,    // #1e2024
+    surfaceContainer        = IdePanel,    // #1e2024 — bottom nav / app bar
+    surfaceContainerHigh    = IdeElevated, // #26282d — cards
+    surfaceContainerHighest = IdeRaised,   // #2d2f34 — pressed / raised
 
     // ── Outline / dividers ────────────────────────────────────────────────
-    outline              = IdeBorder,   // #393b40
-    outlineVariant       = IdeDivider,  // #43454a
+    outline              = IdeBorder,    // #383b42
+    outlineVariant       = IdeDivider,   // #2e3035
 
     // ── Error / destructive ───────────────────────────────────────────────
     error                = IdeDanger,
@@ -104,3 +105,26 @@ fun CopyPasteTheme(
         content      = content,
     )
 }
+
+// ---------------------------------------------------------------------------
+// Shared component color overrides — used at call sites to keep all screens
+// consistent without repeating the same color arguments everywhere.
+// ---------------------------------------------------------------------------
+
+/**
+ * IDE-styled Switch colors: accent thumb when checked, ide-elevated track
+ * with ide-border outline when unchecked. Matches the macOS Toggle component.
+ */
+@Composable
+fun ideSwitchColors() = SwitchDefaults.colors(
+    checkedThumbColor        = Color.White,
+    checkedTrackColor        = IdeAccent,
+    checkedBorderColor       = IdeAccent,
+    uncheckedThumbColor      = IdeDim,
+    uncheckedTrackColor      = IdeElevated,
+    uncheckedBorderColor     = IdeBorder,
+    disabledCheckedThumbColor    = Color.White.copy(alpha = 0.38f),
+    disabledCheckedTrackColor    = IdeAccent.copy(alpha = 0.38f),
+    disabledUncheckedThumbColor  = IdeDim.copy(alpha = 0.38f),
+    disabledUncheckedTrackColor  = IdeElevated.copy(alpha = 0.38f),
+)

@@ -35,18 +35,19 @@ function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={[
-        "relative inline-flex h-[18px] w-[32px] shrink-0 cursor-pointer items-center rounded-full",
-        "border transition-colors duration-150 focus:outline-none focus:ring-1 focus:ring-ide-accent focus:ring-offset-1 focus:ring-offset-ide-bg",
+        "relative inline-flex h-[18px] w-[34px] shrink-0 cursor-pointer items-center rounded-full",
+        "border focus:outline-none focus:ring-2 focus:ring-ide-accent/50 focus:ring-offset-1 focus:ring-offset-ide-bg",
         "disabled:cursor-not-allowed disabled:opacity-40",
         checked
-          ? "border-ide-accent bg-ide-accent"
+          ? "border-ide-accent bg-ide-accent shadow-[0_0_6px_rgba(53,146,255,0.30)]"
           : "border-ide-border bg-ide-elevated",
       ].join(" ")}
     >
       <span
         className={[
-          "inline-block h-[12px] w-[12px] rounded-full bg-white shadow-sm transition-transform duration-150",
-          checked ? "translate-x-[16px]" : "translate-x-[2px]",
+          "inline-block h-[12px] w-[12px] rounded-full bg-white shadow-ide-xs",
+          "transition-transform duration-[120ms] ease",
+          checked ? "translate-x-[18px]" : "translate-x-[2px]",
         ].join(" ")}
       />
     </button>
@@ -59,8 +60,8 @@ function Toggle({
 
 function SubsectionHeader({ label, hint }: { label: string; hint?: string }) {
   return (
-    <div className="mb-2 mt-6 first:mt-0">
-      <div className="text-[11px] uppercase tracking-wide text-ide-faint">{label}</div>
+    <div className="mb-1.5 mt-7 first:mt-0">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ide-accent/80">{label}</div>
       {hint && <div className="mt-0.5 text-[11px] text-ide-faint">{hint}</div>}
     </div>
   );
@@ -74,9 +75,9 @@ function SettingsRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-[34px] items-center justify-between border-b border-ide-divider px-3 py-1.5 last:border-b-0">
+    <div className="flex min-h-[36px] items-center justify-between border-b border-ide-divider/70 px-3 py-2 last:border-b-0">
       {/* W4-3: fixed min-width on label column prevents wrapping on narrow labels */}
-      <span className="min-w-[160px] shrink-0 text-[13px] text-ide-dim">{label}</span>
+      <span className="min-w-[160px] shrink-0 text-[13px] text-ide-text">{label}</span>
       <div className="flex items-center gap-2">{children}</div>
     </div>
   );
@@ -84,7 +85,7 @@ function SettingsRow({
 
 function Panel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-ide border border-ide-border bg-ide-panel">
+    <div className="overflow-hidden rounded-ide-lg border border-ide-border bg-ide-elevated shadow-ide-sm">
       {children}
     </div>
   );
@@ -764,9 +765,9 @@ export function SettingsView() {
   // Render helpers
   // -------------------------------------------------------------------------
 
+  // v0.5.3: inputs use global base styles from index.css; only width/padding overrides needed here
   const inputCls = [
-    "w-64 rounded-ide border border-ide-border bg-ide-bg px-2.5 py-1.5 text-[13px] text-ide-text",
-    "outline-none focus:border-ide-accent placeholder:text-ide-faint",
+    "w-64 px-2.5 py-1.5 text-[13px]",
     "disabled:cursor-not-allowed disabled:opacity-40",
   ].join(" ");
 
@@ -1374,7 +1375,7 @@ export function SettingsView() {
 
       {/* Offline banner */}
       {loadState === "offline" && (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-ide border border-ide-border bg-ide-elevated px-3 py-2 text-[13px] text-ide-dim">
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-ide-lg border border-ide-border bg-ide-elevated px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs">
           <span>Daemon not running — clipboard sync paused.</span>
           <div className="flex shrink-0 items-center gap-2">
             <RestartDaemonButton
@@ -1384,10 +1385,7 @@ export function SettingsView() {
             <button
               type="button"
               onClick={() => setReloadKey((k) => k + 1)}
-              className={[
-                "shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text",
-                "hover:bg-ide-hover",
-              ].join(" ")}
+              className="shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
             >
               Retry
             </button>

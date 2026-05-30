@@ -129,7 +129,6 @@ export function Popup() {
     try {
       await invoke("hide_popup");
     } catch (e) {
-      // Hiding can fail if the window was already destroyed; log, don't crash.
       console.error("popup hide failed", e);
     } finally {
       // Reset after a tick so a rapid re-show doesn't get stuck.
@@ -221,26 +220,41 @@ export function Popup() {
   );
 
   return (
-    // Outer wrapper fills the frameless window; rounded with vibrancy bleeding through.
+    // v0.5.3: deeper translucent bg, stronger blur, layered shadow, rounded corners.
     <div
-      className="flex flex-col h-screen rounded-xl overflow-hidden"
-      style={{ background: "rgba(30,32,36,0.88)", backdropFilter: "blur(24px)" }}
+      className="flex flex-col h-screen rounded-xl overflow-hidden shadow-ide-popup"
+      style={{
+        background: "rgba(18, 19, 22, 0.90)",
+        backdropFilter: "blur(28px) saturate(1.5)",
+        WebkitBackdropFilter: "blur(28px) saturate(1.5)",
+        border: "1px solid rgba(255,255,255,0.07)",
+      }}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          void hide();
+        }
+      }}
     >
       {/* Search bar */}
-      <div className="flex items-center gap-2 px-3 pt-3 pb-2 border-b border-white/10">
+      <div
+        className="flex items-center gap-2 px-3 pt-3 pb-2.5"
+        style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}
+      >
+        {/* Search icon */}
         <svg
-          className="w-4 h-4 text-white/40 shrink-0"
+          className="w-[14px] h-[14px] shrink-0"
           fill="none"
           stroke="currentColor"
+          strokeWidth={1.75}
+          strokeLinecap="round"
+          strokeLinejoin="round"
           viewBox="0 0 24 24"
+          style={{ color: "rgba(255,255,255,0.30)" }}
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M21 21l-4.35-4.35M17 11A6 6 0 111 11a6 6 0 0116 0z"
-          />
+          <circle cx="11" cy="11" r="7" />
+          <line x1="21" y1="21" x2="16.65" y2="16.65" />
         </svg>
+
         <input
           ref={inputRef}
           type="text"
@@ -249,20 +263,40 @@ export function Popup() {
           onKeyDown={handleKeyDown}
           placeholder="Search clipboard…"
           autoFocus
-          className="flex-1 bg-transparent outline-none text-sm text-white/90 placeholder:text-white/30"
+          // Override global input base — popup input is transparent on the vibrancy
+          style={{
+            background: "transparent",
+            border: "none",
+            boxShadow: "none",
+            borderRadius: 0,
+            color: "rgba(255,255,255,0.90)",
+            fontSize: "13px",
+            outline: "none",
+            flex: 1,
+            padding: 0,
+          }}
+          className="placeholder:text-white/25"
         />
         {loading && (
-          <span className="text-xs text-white/30 shrink-0">Loading…</span>
+          <span className="text-[11px] shrink-0" style={{ color: "rgba(255,255,255,0.25)" }}>
+            Loading…
+          </span>
         )}
       </div>
 
       {/* Item list */}
       {error ? (
-        <div className="flex items-center justify-center flex-1 text-sm text-white/40">
+        <div
+          className="flex items-center justify-center flex-1 text-[13px]"
+          style={{ color: "rgba(255,255,255,0.35)" }}
+        >
           {error}
         </div>
       ) : filtered.length === 0 ? (
-        <div className="flex items-center justify-center flex-1 text-sm text-white/40">
+        <div
+          className="flex items-center justify-center flex-1 text-[13px]"
+          style={{ color: "rgba(255,255,255,0.35)" }}
+        >
           {query ? "No matches" : "No clipboard items"}
         </div>
       ) : (
@@ -288,7 +322,13 @@ export function Popup() {
       )}
 
       {/* Footer hint */}
-      <div className="flex items-center justify-between px-3 py-1.5 border-t border-white/10 text-[10px] text-white/25">
+      <div
+        className="flex items-center justify-between px-3 py-1.5 text-[10px]"
+        style={{
+          borderTop: "1px solid rgba(255,255,255,0.07)",
+          color: "rgba(255,255,255,0.22)",
+        }}
+      >
         <span>↑↓ navigate</span>
         <span>⏎ paste · Esc close</span>
       </div>
@@ -391,22 +431,38 @@ function PopupRow({
       className={[
         // image-row omits the CSS height/max-height cap so the inline minHeight wins.
         isImage ? "popup-row-image" : "popup-row",
-        "flex items-center gap-2 px-3 cursor-pointer transition-colors duration-75 select-none",
-        selected ? "bg-white/10" : "hover:bg-white/5",
+        "flex items-center gap-2 px-3 cursor-pointer select-none",
+        // v0.5.3: accent-tinted selection bg
       ].join(" ")}
-      style={{ minHeight: isImage ? Math.max(rowH, 50) : rowH }}
+      style={{
+        minHeight: isImage ? Math.max(rowH, 50) : rowH,
+        background: selected
+          ? "rgba(53, 146, 255, 0.18)"
+          : "transparent",
+        transition: "background 80ms ease",
+      }}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     >
-      {/* Type icon — shown for all rows */}
-      {isImage ? (
-        <span className="text-[10px] text-purple-400/60 shrink-0" aria-hidden>
-          {/* small image glyph */}
-          ▣
+      {/* Type / sensitive indicator */}
+      {isSensitive && (
+        <span
+          className="text-[11px] shrink-0 font-mono"
+          style={{ color: "rgba(240, 113, 113, 0.70)" }}
+          aria-hidden
+        >
+          ●
         </span>
-      ) : isSensitive ? (
-        <span className="text-[10px] text-white/30 shrink-0" aria-hidden>🔒</span>
-      ) : null}
+      )}
+      {isImage && !isSensitive && (
+        <span
+          className="text-[11px] shrink-0"
+          style={{ color: "rgba(255,255,255,0.28)" }}
+          aria-hidden
+        >
+          ▤
+        </span>
+      )}
 
       {isImage ? (
         // Maccy parity: image rows render ONLY the thumbnail — no text title.
@@ -415,8 +471,13 @@ function PopupRow({
         <ImageThumb id={item.id} maxHeight={imageMaxHeight} />
       ) : (
         <span
-          className="flex-1 min-w-0 text-sm text-white/90"
-          style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+          className="flex-1 min-w-0 text-[13px]"
+          style={{
+            color: isSensitive ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.88)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
         >
           {canHighlight && matchPositions.length > 0 ? (
             <HighlightedText text={label} positions={matchPositions} />
@@ -425,8 +486,15 @@ function PopupRow({
           )}
         </span>
       )}
+
+      {/* Pin indicator */}
       {item.pinned && (
-        <span className="text-[10px] text-yellow-400/70 shrink-0">⚑</span>
+        <span
+          className="shrink-0 text-[10px]"
+          style={{ color: "rgba(229, 169, 58, 0.70)" }}
+        >
+          ⚑
+        </span>
       )}
     </li>
   );
