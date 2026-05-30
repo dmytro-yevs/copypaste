@@ -678,14 +678,31 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Pull incoming relay items, decrypt each via UniFFI decryptText, and store
-     * non-sensitive plaintext locally. Returns the list of decrypted strings that
-     * were successfully received (storing may still be a no-op until the .so lands).
+     * DEAD CODE — relay incoming sync is disabled.
+     *
+     * This function was the incoming side of the relay cloud backend. It called
+     * [SyncManager.syncIncoming], which fetched items encrypted with the sender's
+     * local per-device AES key — a key no other device holds, making every fetched
+     * payload undecryptable. Additionally, nothing in any active code path ever
+     * called this function; the relay backend was write-only from day one.
+     *
+     * Decision: cloud sync = Supabase only. This function is intentionally never
+     * called. Use [FgsSyncLoop.poll] (via [SyncManager.pollFromSupabase]) for
+     * incoming cloud sync.
+     *
+     * @throws UnsupportedOperationException always — to surface accidental callers.
      */
-    suspend fun syncItems(syncManager: SyncManager, encryptionKey: ByteArray): List<String> =
-        withContext(Dispatchers.IO) {
-            val decrypted = syncManager.syncIncoming(encryptionKey)
-            decrypted.forEach { plaintext -> storeItem(plaintext, encryptionKey) }
-            decrypted
-        }
+    @Deprecated(
+        message = "Relay incoming sync is disabled: items were encrypted with the sender's " +
+            "local per-device key that no other device holds, making every fetched payload " +
+            "undecryptable. Use FgsSyncLoop (Supabase poll) for incoming cloud sync.",
+        replaceWith = ReplaceWith("syncManager.pollFromSupabase()"),
+        level = DeprecationLevel.ERROR,
+    )
+    @Suppress("UnusedParameter") // params kept for binary-compat; function is intentionally dead
+    suspend fun syncItems(syncManager: SyncManager, encryptionKey: ByteArray): List<String> {
+        throw UnsupportedOperationException(
+            "relay cloud backend is disabled — use Supabase for cross-device cloud sync"
+        )
+    }
 }

@@ -101,8 +101,19 @@ class Settings(context: Context) {
      * - [SyncBackend.RELAY]    — custom relay server (original, local-network-friendly)
      * - [SyncBackend.SUPABASE] — Supabase PostgREST (cross-device, cloud-based)
      */
+    /**
+     * Which sync backend to use when [syncEnabled] is true.
+     *
+     * DEFAULT is [SyncBackend.SUPABASE] — the only backend that interoperates
+     * with the macOS daemon via a shared cross-device sync key.
+     *
+     * [SyncBackend.RELAY] is kept for persisted-settings compatibility and
+     * P2P/pairing references but the RELAY *cloud* push path is a disabled
+     * no-op (see [ClipboardService.notifySyncManager]). New installs always
+     * start on Supabase.
+     */
     var syncBackend: SyncBackend
-        get() = when (prefs.getString("sync_backend", SyncBackend.RELAY.name)) {
+        get() = when (prefs.getString("sync_backend", SyncBackend.SUPABASE.name)) {
             SyncBackend.SUPABASE.name -> SyncBackend.SUPABASE
             else -> SyncBackend.RELAY
         }

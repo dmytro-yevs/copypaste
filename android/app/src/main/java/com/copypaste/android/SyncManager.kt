@@ -198,25 +198,36 @@ class SyncManager(
 
     private var lastLamportTs: Long = 0
 
-    // ── Relay backend (original) ──────────────────────────────────────────────
+    // ── Relay backend (disabled) ──────────────────────────────────────────────
 
-    suspend fun syncIncoming(encryptionKey: ByteArray): List<String> =
-        withContext(Dispatchers.IO) {
-            val items = relayClient.pollItems(deviceId, token, lastLamportTs)
-            items.mapNotNull { item ->
-                try {
-                    val ciphertext = Base64.decode(item.ciphertext, Base64.DEFAULT)
-                    val nonce = Base64.decode(item.nonce, Base64.DEFAULT)
-                    // item.itemId is bound into the AEAD AAD on the sender side;
-                    // mismatched value fails decryption (v0.3 schema).
-                    val plainBytes = decryptText(item.itemId, ciphertext, nonce, encryptionKey)
-                    lastLamportTs = maxOf(lastLamportTs, item.lamportTs)
-                    plainBytes.toString(Charsets.UTF_8)
-                } catch (e: Exception) {
-                    null
-                }
-            }
-        }
+    /**
+     * DEAD CODE — relay incoming poll is disabled.
+     *
+     * This function polled the relay server for items encrypted with the
+     * sender's local per-device AES key, which no other device holds.
+     * Every payload it fetched was undecryptable. Additionally, nothing in
+     * any active code path ever called this function — the relay backend
+     * was write-only from day one.
+     *
+     * Decision: cloud sync = Supabase only (see [ClipboardService.notifySyncManager]).
+     * This function is retained only to avoid breaking any external reference
+     * but MUST NOT be called. Use [pollFromSupabase] instead.
+     *
+     * @throws UnsupportedOperationException always — to surface accidental callers.
+     */
+    @Deprecated(
+        message = "Relay incoming poll is disabled: items were encrypted with the local " +
+            "per-device key that no other device holds, making every fetched payload " +
+            "undecryptable. Use pollFromSupabase() for cross-device cloud sync.",
+        replaceWith = ReplaceWith("pollFromSupabase()"),
+        level = DeprecationLevel.ERROR,
+    )
+    @Suppress("UnusedParameter") // params kept for binary-compat; function is intentionally dead
+    suspend fun syncIncoming(encryptionKey: ByteArray): List<String> {
+        throw UnsupportedOperationException(
+            "relay cloud backend is disabled — use Supabase for cross-device cloud sync"
+        )
+    }
 
     /**
      * Upload an already-encrypted item to the relay. [itemId] MUST match the
