@@ -1493,18 +1493,18 @@ sealed class CopypasteException: Exception() {
     
     class DecryptionFailed(
         
-        val `message`: kotlin.String
+        val `reason`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "reason=${ `reason` }"
     }
     
     class DatabaseException(
         
-        val `message`: kotlin.String
+        val `reason`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "reason=${ `reason` }"
     }
     
     class InvalidKeyLength(
@@ -1515,18 +1515,18 @@ sealed class CopypasteException: Exception() {
     
     class P2pException(
         
-        val `message`: kotlin.String
+        val `reason`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "reason=${ `reason` }"
     }
     
     class Panicked(
         
-        val `message`: kotlin.String
+        val `reason`: kotlin.String
         ) : CopypasteException() {
         override val message
-            get() = "message=${ `message` }"
+            get() = "reason=${ `reason` }"
     }
     
 
@@ -1569,12 +1569,12 @@ public object FfiConverterTypeCopypasteError : FfiConverterRustBuffer<CopypasteE
             is CopypasteException.DecryptionFailed -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`reason`)
             )
             is CopypasteException.DatabaseException -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`reason`)
             )
             is CopypasteException.InvalidKeyLength -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
@@ -1583,12 +1583,12 @@ public object FfiConverterTypeCopypasteError : FfiConverterRustBuffer<CopypasteE
             is CopypasteException.P2pException -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`reason`)
             )
             is CopypasteException.Panicked -> (
                 // Add the size for the Int that specifies the variant plus the size needed for all fields
                 4UL
-                + FfiConverterString.allocationSize(value.`message`)
+                + FfiConverterString.allocationSize(value.`reason`)
             )
         }
     }
@@ -1601,12 +1601,12 @@ public object FfiConverterTypeCopypasteError : FfiConverterRustBuffer<CopypasteE
             }
             is CopypasteException.DecryptionFailed -> {
                 buf.putInt(2)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`reason`, buf)
                 Unit
             }
             is CopypasteException.DatabaseException -> {
                 buf.putInt(3)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`reason`, buf)
                 Unit
             }
             is CopypasteException.InvalidKeyLength -> {
@@ -1615,12 +1615,12 @@ public object FfiConverterTypeCopypasteError : FfiConverterRustBuffer<CopypasteE
             }
             is CopypasteException.P2pException -> {
                 buf.putInt(5)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`reason`, buf)
                 Unit
             }
             is CopypasteException.Panicked -> {
                 buf.putInt(6)
-                FfiConverterString.write(value.`message`, buf)
+                FfiConverterString.write(value.`reason`, buf)
                 Unit
             }
         }.let { /* this makes the `when` an expression, which ensures it is exhaustive */ }

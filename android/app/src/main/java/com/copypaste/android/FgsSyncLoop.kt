@@ -265,7 +265,7 @@ class FgsSyncLoop(
                 // dedup against it so a re-dial does not re-insert the same row.
                 if (repository.storeItem(plaintext, key, sourceId = item.id)) stored += 1
             }
-            if (result.itemsReceived > 0 || result.itemsSent > 0) {
+            if (result.itemsReceived > 0uL || result.itemsSent > 0uL) {
                 Log.i(
                     TAG,
                     "P2P dial: received ${result.itemsReceived} (stored $stored), sent ${result.itemsSent}",

@@ -22,30 +22,36 @@ use std::sync::{Mutex, OnceLock};
 pub enum CopypasteError {
     #[error("Encryption failed")]
     EncryptionFailed,
-    #[error("Decryption failed: {message}")]
-    DecryptionFailed { message: String },
-    #[error("Database error: {message}")]
-    DatabaseError { message: String },
+    #[error("Decryption failed: {reason}")]
+    DecryptionFailed { reason: String },
+    #[error("Database error: {reason}")]
+    DatabaseError { reason: String },
     #[error("Invalid key length: expected 32")]
     InvalidKeyLength,
     /// P2P pairing / transport failure surfaced from `copypaste_p2p`
     /// (`TransportError`): TLS, socket, framing, or PAKE handshake errors —
     /// including a wrong pairing password or a channel-binding MitM abort. Also
     /// raised for a malformed `addr_hint` that cannot be parsed into a
-    /// `SocketAddr`. The `message` carries the underlying error's display form.
-    #[error("P2P pairing failed: {message}")]
-    P2pError { message: String },
+    /// `SocketAddr`. The `reason` carries the underlying error's display form.
+    #[error("P2P pairing failed: {reason}")]
+    P2pError { reason: String },
     /// v0.3 (OI-7): a Rust panic was caught at the FFI boundary by
     /// [`panic_boundary::catch_result`]. Carries the panic message so Kotlin
     /// can log/surface it instead of seeing a JVM-killing abort.
-    #[error("Panicked: {message}")]
-    Panicked { message: String },
+    ///
+    /// NOTE: the field is named `reason` (not `message`) on purpose — a UniFFI
+    /// flat-error variant field named `message` collides with the Kotlin
+    /// `Throwable.message` supertype property and produces "conflicting
+    /// declarations" / missing-`override` codegen errors. See the generated
+    /// `CopypasteException` binding.
+    #[error("Panicked: {reason}")]
+    Panicked { reason: String },
 }
 
 impl From<PanicError> for CopypasteError {
     fn from(p: PanicError) -> Self {
         match p {
-            PanicError::Panicked(message) => CopypasteError::Panicked { message },
+            PanicError::Panicked(reason) => CopypasteError::Panicked { reason },
         }
     }
 }
@@ -94,12 +100,12 @@ pub fn decrypt_text(
             nonce
                 .try_into()
                 .map_err(|_| CopypasteError::DecryptionFailed {
-                    message: "wrong nonce length".into(),
+                    reason: "wrong nonce length".into(),
                 })?;
         let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
         decrypt_item_with_aad(ciphertext, &nonce_arr, &key_arr, &aad).map_err(|e| {
             CopypasteError::DecryptionFailed {
-                message: e.to_string(),
+                reason: e.to_string(),
             }
         })
     })
@@ -192,7 +198,7 @@ pub fn cloud_decrypt(
         let sync_key = copypaste_core::SyncKey::from_bytes(key_arr);
         decrypt_from_cloud(&sync_key, &item_id, blob).map_err(|e| {
             CopypasteError::DecryptionFailed {
-                message: e.to_string(),
+                reason: e.to_string(),
             }
         })
     })
@@ -233,7 +239,7 @@ pub fn build_pairing_qr(
         let payload =
             copypaste_core::PairingPayload::new(fingerprint, device_id, device_name, addr_hint)
                 .map_err(|e| CopypasteError::DecryptionFailed {
-                    message: e.to_string(),
+                    reason: e.to_string(),
                 })?;
         let pake_password = payload.token.to_pake_password();
         let qr = payload.encode();
@@ -251,7 +257,7 @@ pub fn parse_pairing_qr(payload: String) -> Result<ScannedPairing, CopypasteErro
     panic_boundary::catch_result(|| {
         let parsed = copypaste_core::PairingPayload::decode(&payload).map_err(|e| {
             CopypasteError::DecryptionFailed {
-                message: e.to_string(),
+                reason: e.to_string(),
             }
         })?;
         let pake_password = parsed.token.to_pake_password();
@@ -326,7 +332,7 @@ pub fn generate_device_cert() -> Result<DeviceCert, CopypasteError> {
         let device_id = uuid::Uuid::new_v4().to_string();
         let cert = copypaste_p2p::SelfSignedCert::generate(&device_id).map_err(|e| {
             CopypasteError::P2pError {
-                message: e.to_string(),
+                reason: e.to_string(),
             }
         })?;
         let fingerprint = copypaste_p2p::fingerprint_of(&cert.cert_der);
@@ -363,7 +369,7 @@ pub fn bootstrap_pair_initiator(
             addr_hint
                 .parse()
                 .map_err(|e: std::net::AddrParseError| CopypasteError::P2pError {
-                    message: format!("invalid addr_hint '{addr_hint}': {e}"),
+                    reason: format!("invalid addr_hint '{addr_hint}': {e}"),
                 })?;
 
         let pairing = runtime()
@@ -375,7 +381,7 @@ pub fn bootstrap_pair_initiator(
                 &sync_addr,
             ))
             .map_err(|e| CopypasteError::P2pError {
-                message: e.to_string(),
+                reason: e.to_string(),
             })?;
 
         Ok(BootstrapResult {
@@ -501,7 +507,7 @@ pub fn sync_with_peer(
             peer_addr
                 .parse()
                 .map_err(|e: std::net::AddrParseError| CopypasteError::P2pError {
-                    message: format!("invalid peer_addr '{peer_addr}': {e}"),
+                    reason: format!("invalid peer_addr '{peer_addr}': {e}"),
                 })?;
 
         let shared = shared_sync_key_from_session(&session_key)?;
@@ -623,7 +629,7 @@ pub fn sync_with_peer(
             })
             .map_err(
                 |e: copypaste_p2p::transport::TransportError| CopypasteError::P2pError {
-                    message: e.to_string(),
+                    reason: e.to_string(),
                 },
             )?;
 
@@ -714,7 +720,7 @@ fn with_cached_db<T>(
         let db =
             copypaste_core::Database::open(std::path::Path::new(db_path), key).map_err(|e| {
                 CopypasteError::DatabaseError {
-                    message: e.to_string(),
+                    reason: e.to_string(),
                 }
             })?;
         map.insert(db_path.to_string(), db);
@@ -734,7 +740,7 @@ pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
         let db =
             copypaste_core::Database::open(std::path::Path::new(&path), &key_arr).map_err(|e| {
                 CopypasteError::DatabaseError {
-                    message: e.to_string(),
+                    reason: e.to_string(),
                 }
             })?;
         let handle = NEXT_HANDLE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -816,7 +822,7 @@ pub fn add_clipboard_item(
         // M5: reuse a cached connection instead of open-per-call.
         with_cached_db(&db_path, &key_arr, |db| {
             copypaste_core::insert_item(db, &item).map_err(|e| CopypasteError::DatabaseError {
-                message: e.to_string(),
+                reason: e.to_string(),
             })
         })?;
 
@@ -852,7 +858,7 @@ pub fn get_history_count(db_path: String, key: &[u8]) -> Result<u64, CopypasteEr
         // M5: reuse a cached connection instead of open-per-call.
         let n = with_cached_db(&db_path, &key_arr, |db| {
             copypaste_core::count_items(db).map_err(|e| CopypasteError::DatabaseError {
-                message: e.to_string(),
+                reason: e.to_string(),
             })
         })?;
         Ok(n.max(0) as u64)
@@ -916,10 +922,10 @@ mod tests {
             panic!("synthetic panic inside FFI body");
         });
         match result {
-            Err(CopypasteError::Panicked { message }) => {
+            Err(CopypasteError::Panicked { reason }) => {
                 assert!(
-                    message.contains("synthetic panic inside FFI body"),
-                    "expected panic message in error, got: {message}"
+                    reason.contains("synthetic panic inside FFI body"),
+                    "expected panic message in error, got: {reason}"
                 );
             }
             other => panic!("expected CopypasteError::Panicked, got {other:?}"),

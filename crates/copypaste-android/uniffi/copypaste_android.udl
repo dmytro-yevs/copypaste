@@ -133,18 +133,21 @@ namespace copypaste_android {
 [Error]
 interface CopypasteError {
   EncryptionFailed();
-  DecryptionFailed(string message);
-  DatabaseError(string message);
+  // Field is named `reason` (not `message`): a UniFFI flat-error variant field
+  // named `message` collides with Kotlin's `Throwable.message` supertype
+  // property and breaks codegen ("conflicting declarations" / missing override).
+  DecryptionFailed(string reason);
+  DatabaseError(string reason);
   InvalidKeyLength();
   // P2P pairing / transport failure from copypaste_p2p (TransportError): TLS,
   // socket, framing, or PAKE handshake errors — including a wrong pairing
   // password or a channel-binding MitM abort — and a malformed addr_hint.
-  P2pError(string message);
+  P2pError(string reason);
   // v0.3 (OI-7): a Rust panic was caught at the FFI boundary by
-  // panic_boundary::catch_result. The message carries the panic payload's
+  // panic_boundary::catch_result. The reason carries the panic payload's
   // string form. Kotlin should log + show a generic error to the user
   // (panics signal a Rust-side bug, not user error).
-  Panicked(string message);
+  Panicked(string reason);
 };
 
 [Error]
