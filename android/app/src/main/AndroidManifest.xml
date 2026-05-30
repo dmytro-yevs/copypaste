@@ -26,6 +26,15 @@
          Declared here; user is prompted at runtime via ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- SYSTEM_ALERT_WINDOW (draw-over-other-apps / overlay):
+         Used by BackgroundCaptureSetupActivity to guide the user through the
+         ClipCascade-style overlay trick that lifts Android 10+'s background
+         clipboard restriction. The permission itself is declared here so the
+         system settings page is reachable; the user grants it manually via
+         Settings.ACTION_MANAGE_OVERLAY_PERMISSION (no auto-grant).
+         On API < 23 this is granted at install time. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
     <!-- WorkManager (Supabase background polling + ServiceRestartWorker) -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
@@ -114,6 +123,14 @@
         <!-- In-app Permissions review screen, launched from Settings -->
         <activity
             android:name=".PermissionsSettingsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.CopyPaste" />
+
+        <!-- Background Capture Setup wizard: overlay + battery + OEM autostart.
+             Implements the ClipCascade-style combo for reliable Android 10+
+             background clipboard reads. Launched from Settings nav row. -->
+        <activity
+            android:name=".BackgroundCaptureSetupActivity"
             android:exported="false"
             android:theme="@style/Theme.CopyPaste" />
 
