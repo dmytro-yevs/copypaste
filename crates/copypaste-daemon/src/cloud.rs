@@ -7,8 +7,9 @@
 //! Two background tasks are spawned:
 //! - **push_loop**: receives new [`ClipboardItem`]s from a broadcast channel and
 //!   POSTs them to `POST /rest/v1/clipboard_items`.
-//! - **realtime_loop**: polls `GET /rest/v1/clipboard_items?order=wall_time.desc&limit=20`
-//!   every 10 seconds and inserts any unknown items into the local DB.
+//! - **realtime_loop**: polls `GET /rest/v1/clipboard_items?order=wall_time.asc&limit=20`
+//!   every 10 seconds (forward pagination from a persisted watermark) and inserts
+//!   any unknown items into the local DB.
 //!   (Full WebSocket realtime requires the separate `copypaste-supabase` crate;
 //!   this implementation uses polling so the daemon compiles without extra deps.)
 //!
@@ -1273,16 +1274,20 @@ const POLL_WATERMARK_KEY: &str = "cloud_poll_watermark";
 
 /// Base poll query (no lower bound). The `wall_time=gt.<watermark>` filter is
 /// appended by [`build_poll_url`] when a watermark is known.
-const POLL_SELECT_QS: &str = "select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.desc&limit=20";
+const POLL_SELECT_QS: &str = "select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20";
 
 /// Construct the poll URL for a single tick.
 ///
 /// When `watermark > 0`, appends `&wall_time=gt.<watermark>` so PostgREST only
-/// returns rows strictly newer than everything we have already ingested. This is
-/// the BUG 1 fix: without the filter the daemon re-fetched the newest 20 rows on
-/// every tick, never paginated into older history, and dropped any surplus
-/// beyond 20 new items between ticks. The `wall_time=gt.<value>` syntax matches
-/// the Android client (`SupabaseClient.kt`).
+/// returns rows strictly newer than everything we have already ingested. The
+/// base query orders `wall_time.asc` so each tick fetches the OLDEST `limit`
+/// rows above the watermark and the watermark advances forward to the newest in
+/// that batch — the next tick resumes from there, so nothing is skipped. With
+/// descending order + `limit`, a tick that found more than `limit` new rows
+/// would fetch only the newest `limit`, jump the watermark to the newest, and
+/// permanently skip every row between the old watermark and the `limit`-th
+/// newest (finding C — silent download data loss). The `wall_time=gt.<value>`
+/// syntax matches the Android client (`SupabaseClient.kt`).
 fn build_poll_url(supabase_url: &str, watermark: i64) -> String {
     if watermark > 0 {
         format!("{supabase_url}/rest/v1/clipboard_items?{POLL_SELECT_QS}&wall_time=gt.{watermark}")
@@ -1356,8 +1361,11 @@ async fn realtime_loop(
     // lower bound, so every tick re-fetched the same newest 20 rows: older
     // history never downloaded, and if more than 20 items arrived between ticks
     // the surplus was lost forever. We now track the maximum `wall_time` we have
-    // ingested and append `&wall_time=gt.<watermark>` so polling paginates
-    // forward (the column/filter syntax is the same one the Android client uses
+    // ingested and append `&wall_time=gt.<watermark>` AND order `wall_time.asc`
+    // so polling paginates strictly FORWARD from the watermark: each tick takes
+    // the oldest `limit` rows above it (descending order would skip rows between
+    // the watermark and the limit-th newest when >limit arrive per tick). The
+    // column/filter syntax is the same one the Android client uses
     // — `wall_time=gt.$sinceWallTime`). The watermark is seeded on startup from
     // the larger of (a) the persisted `cloud_poll_watermark` setting and (b) the
     // local `MAX(wall_time)`, and is persisted again after each advance so a
@@ -1429,10 +1437,12 @@ async fn realtime_loop(
 
 /// Execute a single poll round and return the (possibly advanced) watermark.
 ///
-/// 1. Build the poll URL with `wall_time=gt.<watermark>` so PostgREST only
-///    returns rows newer than everything ingested so far (BUG 1 forward
-///    pagination — the previous fixed `limit=20` re-fetched the same newest
-///    rows every tick and dropped surplus history).
+/// 1. Build the poll URL with `wall_time=gt.<watermark>` ordered `wall_time.asc`
+///    so PostgREST returns the OLDEST `limit` rows newer than everything ingested
+///    so far (forward pagination — the previous fixed `limit=20` re-fetched the
+///    same newest rows every tick, and descending order would skip rows between
+///    the watermark and the limit-th newest when more than `limit` arrive per
+///    tick).
 /// 2. Decrypt + re-encrypt + insert each unknown row.
 /// 3. Advance the watermark to the highest `wall_time` seen in the batch
 ///    (including de-duped / undecryptable rows, so they are never re-requested)
@@ -2783,6 +2793,139 @@ mod tests {
         }
     }
 
+    /// **Finding C** — forward pagination must NOT skip rows when MORE than
+    /// `limit` (20) rows sit above the watermark. This is the data-loss bug:
+    /// with `order=wall_time.desc&limit=20`, a single tick fetches only the
+    /// NEWEST 20 rows above the watermark and then jumps the watermark to the
+    /// newest of them — permanently skipping every row between the old watermark
+    /// and the 20th-newest. With `order=wall_time.asc` the tick fetches the
+    /// OLDEST 20, advances the watermark to the newest of THAT batch, and the
+    /// next tick continues from there — losing nothing.
+    ///
+    /// We model PostgREST faithfully: 25 rows (wall_time 1000..=1024) live on the
+    /// "server". The mocks are matched on the `order=` direction the request
+    /// actually sends, so the SAME test exercises both code paths:
+    ///   * ascending  (correct): page-1 = oldest 20 (1000..=1019), then
+    ///                 `gt.1019` → remaining 5 (1020..=1024). All 25 ingested.
+    ///   * descending (buggy):   page-1 = newest 20 (1005..=1024), watermark
+    ///                 jumps to 1024, then `gt.1024` → empty. Rows 1000..=1004
+    ///                 are lost → final count 20, the `count == 25` assert fails.
+    /// So this test PASSES on `.asc` and FAILS on `.desc` — it has teeth.
+    #[tokio::test]
+    async fn poll_forward_pagination_does_not_skip_when_more_than_limit_arrive() {
+        use mockito::Matcher;
+
+        let sync_key = copypaste_core::derive_sync_key("finding-c-passphrase").unwrap();
+
+        // 25 distinct rows, wall_time 1000..=1024, each a unique UUID/item_id.
+        let all: Vec<serde_json::Value> = (0..25i64)
+            .map(|i| {
+                let id = format!("c0000000-0000-0000-0000-{i:012}");
+                cloud_row(&id, &sync_key, format!("payload-{i}").as_bytes(), 1000 + i)
+            })
+            .collect();
+
+        let body = |rows: &[serde_json::Value]| serde_json::to_string(rows).unwrap();
+
+        // ── Ascending (correct) mocks ────────────────────────────────────────
+        // Round 2 (asc): gt.1019 → the remaining 5 oldest-above-watermark rows.
+        // Registered first so the specific filter wins over the catch-all.
+        let asc_p2 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::Regex("order=wall_time\\.asc".into()),
+                Matcher::Regex("wall_time=gt\\.1019$".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body(&all[20..25])) // wall_time 1020..=1024
+            .expect(1)
+            .create();
+        // Round 1 (asc): no gt filter (watermark 0) → oldest 20 rows.
+        let asc_p1 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::Regex("order=wall_time\\.asc".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body(&all[0..20])) // wall_time 1000..=1019
+            .expect(1)
+            .create();
+
+        // ── Descending (buggy) mocks ─────────────────────────────────────────
+        // Round 2 (desc): gt.1024 → empty (everything below is already "skipped").
+        let desc_p2 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::Regex("order=wall_time\\.desc".into()),
+                Matcher::Regex("wall_time=gt\\.1024$".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("[]")
+            .expect_at_least(0)
+            .create();
+        // Round 1 (desc): no gt filter → newest 20 rows (1005..=1024). Rows
+        // 1000..=1004 fall off the limit and the watermark jumps past them.
+        let desc_p1 = mockito::mock("GET", "/rest/v1/clipboard_items")
+            .match_query(Matcher::Regex("order=wall_time\\.desc".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(body(&all[5..25])) // wall_time 1005..=1024
+            .expect_at_least(0)
+            .create();
+
+        let cfg = test_cfg();
+        let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
+        let client = reqwest::Client::new();
+        let db = Arc::new(Mutex::new(
+            copypaste_core::Database::open_in_memory().expect("in-mem db"),
+        ));
+        let local_key = Arc::new(zeroize::Zeroizing::new([7u8; 32]));
+        let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let auth = test_auth(&cfg);
+        let key_bytes = sync_key.as_bytes().to_vec();
+
+        // Two ticks, exactly as the realtime loop would do back-to-back.
+        let mut watermark = 0i64;
+        for _ in 0..2 {
+            watermark = poll_once(
+                &client,
+                &cfg,
+                &bearer,
+                &db,
+                &local_key,
+                &last_sync_ms,
+                &signed_in,
+                &auth,
+                &key_bytes,
+                watermark,
+            )
+            .await;
+        }
+
+        // The whole point: ALL 25 rows must be present. On `.desc` only 20 land.
+        let count: i64 = {
+            let g = db.lock().await;
+            g.conn()
+                .query_row("SELECT COUNT(1) FROM clipboard_items", [], |r| r.get(0))
+                .unwrap()
+        };
+        assert_eq!(
+            count, 25,
+            "forward pagination must ingest all 25 rows without skipping any \
+             (descending order would lose the 5 oldest above the watermark)"
+        );
+        assert_eq!(
+            watermark, 1024,
+            "watermark must reach the newest row's wall_time after paginating"
+        );
+
+        // Sanity: the ascending mocks were the ones actually hit, not the desc.
+        asc_p1.assert();
+        asc_p2.assert();
+        // Keep the unused-mock handles alive for the duration; drop explicitly.
+        drop(desc_p1);
+        drop(desc_p2);
+    }
+
     // ── BUG 2 — real signed_in auth state ─────────────────────────────────────
 
     /// When bearer resolution fails (email/password set but sign-in errors
@@ -3272,7 +3415,7 @@ mod e2e_live {
         // runs the real decode/decrypt/insert pipeline. Bounded poll: up to 10
         // tries, 1s apart.
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.desc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
         );
         let mut inserted = false;
         let mut last_diag = String::from("(no rows fetched)");
@@ -3705,7 +3848,7 @@ mod bytea_e2e {
 
         // Poll it back through the real GET path and the product decoder.
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.desc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
         );
         let rows = match fetch_remote_rows(&client, &poll_url, &cfg.anon_key, "anon-key-for-tests")
             .await
@@ -3769,7 +3912,7 @@ mod bytea_e2e {
             .await;
 
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.desc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
         );
         let rows = match fetch_remote_rows(&client, &poll_url, &cfg.anon_key, "anon-key-for-tests")
             .await
@@ -3842,7 +3985,7 @@ mod bytea_e2e {
             .await;
 
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.desc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
         );
         let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
         // Session-less auth client: this fake never returns 401, so the refresh
