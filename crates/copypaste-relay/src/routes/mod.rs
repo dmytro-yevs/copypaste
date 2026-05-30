@@ -178,8 +178,12 @@ where
         .merge(exempt)
         .merge(item_routes)
         .merge(device_routes)
+        // Body-limit must be sized against the *encoded* (base64+JSON) payload, not
+        // the decoded ciphertext. Base64 inflates by ~4/3; add 1 KiB for JSON framing
+        // (content_type, wall_time, field names). Without this, an image/file item
+        // near the 10 MiB decoded cap is rejected 413 before the handler even runs.
         .layer(axum::extract::DefaultBodyLimit::max(
-            config.max_item_bytes + 4096,
+            config.max_item_bytes * 4 / 3 + 1024,
         ))
         // Inject the live `RelayConfig` so handlers (e.g. `items::push`)
         // can honor operator-supplied limits like `RELAY_MAX_ITEM_BYTES`

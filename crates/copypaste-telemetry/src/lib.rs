@@ -1,5 +1,15 @@
 //! `copypaste-telemetry` — opt-in, privacy-first error reporting.
 //!
+//! # ⚠ Currently unwired — not an active privacy control
+//!
+//! **This crate is not connected to any caller.** Neither the daemon, CLI, nor
+//! UI routes errors through it. The [`PiiScrubber`] therefore never runs in
+//! production, and [`SentryReporter`] is never constructed outside tests.
+//!
+//! Do NOT rely on this crate for PII protection in its current state. Before
+//! enabling it, wire a call site in the daemon (or wherever errors should be
+//! reported) and confirm consent gating end-to-end on real hardware.
+//!
 //! # Status
 //!
 //! 0.3-dev wires the real Sentry SDK behind [`SentryReporter`]. The default

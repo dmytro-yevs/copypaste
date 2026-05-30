@@ -190,14 +190,23 @@ pub fn pattern_set() -> &'static RegexSet {
 }
 
 pub fn patterns() -> &'static Vec<Regex> {
-    // Same provably-infallible-but-degrade-safe contract as `pattern_set`:
-    // any constant that somehow fails to compile is dropped rather than
-    // panicking, so a malformed pattern can never abort the daemon mid-scan.
+    // Index-alignment guarantee: the individual `Vec<Regex>` MUST have the
+    // same length and order as `RAW_PATTERNS` so that `enumerate()` indices
+    // in `detect_normalised` agree with `pattern_name` / `pattern_category` /
+    // `pattern_confidence`, which index into `RAW_PATTERNS` directly.
+    //
+    // `filter_map(…ok())` would silently drop a failing pattern and shift all
+    // subsequent indices, desyncing the two paths. Instead we degrade the
+    // WHOLE vec to empty on any compile failure (matching the `pattern_set`
+    // empty-fallback contract): a single bad pattern is caught by the
+    // `all_raw_patterns_compile` test, and in production the empty fallback
+    // means "no detection" rather than "wrong detection with mismatched names".
     PATTERNS.get_or_init(|| {
-        RAW_PATTERNS
+        let result: Result<Vec<Regex>, _> = RAW_PATTERNS
             .iter()
-            .filter_map(|(_, p, _, _)| Regex::new(p).ok())
-            .collect()
+            .map(|(_, p, _, _)| Regex::new(p))
+            .collect();
+        result.unwrap_or_default()
     })
 }
 

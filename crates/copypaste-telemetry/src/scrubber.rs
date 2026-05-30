@@ -171,9 +171,21 @@ impl PiiScrubber {
             // boundary group prevents matching inside a longer
             // alphanumeric run (e.g. a hash that happens to contain
             // colons in a different schema).
+            // Tightened: require at least one non-empty hextet (`[0-9a-fA-F]{1,4}`)
+            // somewhere in the match so that bare colon-delimited tokens like
+            // `key:value:extra` (which contain only `:` separators with no hex digits)
+            // are NOT redacted. The original `{0,4}` allowed every group to be empty,
+            // causing over-redaction of structured log tokens that happen to contain
+            // two or more colons. The new pattern uses a non-capturing alternation:
+            // either the first group is non-empty (`{1,4}`) followed by more groups,
+            // or it starts empty (`::`) but the second group must be non-empty. In
+            // practice `::1` (loopback) is still caught: group 1 = empty, then
+            // `:[0-9a-fA-F]{1,4}` matches `:1`.
             Pattern {
-                re: Regex::new(r"(^|[^0-9a-fA-F:])([0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7})")
-                    .expect("ipv6 pattern is valid"),
+                re: Regex::new(
+                    r"(^|[^0-9a-fA-F:])([0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{0,4}){2,7}|[0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{1,4}){1}(?::[0-9a-fA-F]{0,4}){1,6})",
+                )
+                .expect("ipv6 pattern is valid"),
                 replacement: "$1<REDACTED-IP>",
             },
             // Home directory prefixes: macOS `/Users/<name>/…` and Linux

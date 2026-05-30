@@ -82,9 +82,14 @@ impl ClipboardItem {
     /// same logical item lands under a different identity on each device, LWW
     /// never fires, and duplicate rows accumulate.
     pub fn new_text(encrypted_content: Vec<u8>, nonce: Vec<u8>, lamport_ts: i64) -> Self {
+        // `duration_since(UNIX_EPOCH)` can only fail when the system clock is set
+        // before the Unix epoch (1970-01-01). That is pathological on any correctly
+        // configured host. `unwrap_or_default()` degrades to `wall_time = 0` (epoch)
+        // rather than panicking, so a misconfigured clock produces a mis-ordered item
+        // instead of crashing the daemon.
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as i64;
         Self {
             id: Uuid::new_v4().to_string(),
@@ -121,9 +126,12 @@ impl ClipboardItem {
     /// devices, and a reconstructed item MUST preserve the originating
     /// `item_id` rather than regenerate it.
     pub fn new_image(encrypted_blob: Vec<u8>, image_meta_json: String, lamport_ts: i64) -> Self {
+        // Same clock-before-epoch degradation contract as `new_text`: prefer
+        // `unwrap_or_default()` over `unwrap()` so a pathological host clock
+        // yields `wall_time = 0` rather than a daemon panic.
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_millis() as i64;
         Self {
             id: Uuid::new_v4().to_string(),

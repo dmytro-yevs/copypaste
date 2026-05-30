@@ -12,6 +12,14 @@ pub use crypto::encrypt::{
     build_item_aad, build_item_aad_v2, decrypt_item_by_version, decrypt_item_with_aad,
     encrypt_item_with_aad, EncryptError, AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
+// `encrypt_item` / `decrypt_item` are deprecated (empty-AAD, replay-vulnerable)
+// but still re-exported because `copypaste-daemon` and integration tests rely on
+// them for legacy v1-key ciphertext handling during the migration sweep. The
+// `#[allow(deprecated)]` suppresses the lint at the `pub use` site; callers that
+// import these functions from the crate root will still see the deprecation warning
+// and must migrate to `encrypt_item_with_aad` / `decrypt_item_with_aad`. This
+// re-export will be removed once the v4 migration sweep is complete and no
+// callers remain.
 #[allow(deprecated)]
 pub use crypto::encrypt::{decrypt_item, encrypt_item};
 pub use crypto::{

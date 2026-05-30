@@ -1,3 +1,12 @@
+// NOTE: this file is NOT declared as a module in `main.rs` and is therefore
+// dead code — the relay currently uses an in-memory `RelayStore` (see `state.rs`
+// and `store.rs`) rather than a SQLite-backed store. This SQLite schema was
+// designed for a future persistent-relay variant but was never wired up.
+//
+// TODO: either remove this file when the persistent-relay plan is formally
+// abandoned, or declare `mod db;` in `main.rs` when the persistent backend
+// is implemented. Leaving it here without `mod db;` means the compiler never
+// sees it, so it cannot contribute to test coverage or catch API drift.
 use rusqlite::{Connection, Result};
 
 const SCHEMA: &str = "
@@ -81,7 +90,8 @@ mod tests {
         conn.execute(
             "INSERT INTO device_quotas (device_id, created_at, updated_at) VALUES (?1, ?2, ?3)",
             rusqlite::params!["dev-1", 0i64, 0i64],
-        ).expect("insert quota");
+        )
+        .expect("insert quota");
 
         let tier: String = conn
             .query_row(
