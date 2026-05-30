@@ -2320,12 +2320,30 @@ impl IpcServer {
                 let supabase_url_val: Option<String> = std::env::var("SUPABASE_URL")
                     .ok()
                     .or_else(|| app_cfg.supabase_url.clone());
-                // Email: env var first, else the persisted config (written by
-                // `copypaste cloud setup`). We surface only the email — never the
-                // password, anon key, or passphrase.
+                // M3 FIX: mask the email before sending over IPC so arbitrary
+                // same-UID processes cannot harvest the full GoTrue address.
+                // `a***@example.com` preserves the account-indicator the UI
+                // needs (SettingsView shows "Signed in as …") without leaking
+                // the full address. Mirrors `cloud::redact_email` — inlined
+                // here because that helper is private to the cloud module.
                 let email_val: Option<String> = std::env::var("SUPABASE_EMAIL")
                     .ok()
-                    .or_else(|| app_cfg.supabase_email.clone());
+                    .or_else(|| app_cfg.supabase_email.clone())
+                    .map(|e| {
+                        // Show first char + *** + @domain; non-address input →
+                        // "<redacted>" (same contract as cloud::redact_email).
+                        match e.split_once('@') {
+                            Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {
+                                let first = local.chars().next().unwrap_or('*');
+                                if local.chars().count() <= 1 {
+                                    format!("*@{domain}")
+                                } else {
+                                    format!("{first}***@{domain}")
+                                }
+                            }
+                            _ => "<redacted>".to_string(),
+                        }
+                    });
                 Response::ok(
                     req.id,
                     serde_json::json!({

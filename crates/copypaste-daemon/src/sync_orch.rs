@@ -235,17 +235,26 @@ pub async fn merge_incoming_with_crypto(
 
     let mut upserted = 0usize;
     for wire in items {
-        // M3: look up the specific row by id rather than snapshotting a capped
-        // page. A `get_page(.., 10_000, 0)` snapshot misses rows past row 10k,
-        // so an incoming update for such an item would be treated as new and
-        // then lost on the PK conflict at insert time.
-        let existing = match copypaste_core::get_item_by_id(&db_guard, &wire.id) {
+        // B1 FIX: look up by the STABLE cross-device `item_id` (the CRDT
+        // identity), NOT `wire.id` (the peer's per-row primary key which is a
+        // fresh UUID on every device and therefore never matches the local row).
+        // Using `wire.id` caused the lookup to always return None, so the code
+        // treated every incoming item as new and tried to INSERT with the peer's
+        // PK — hitting the `idx_clipboard_item_id` UNIQUE constraint when the
+        // item already existed locally, silently dropping the update.
+        // Mirrors the cloud path (`cloud.rs`: `get_item_by_item_id`).
+        let existing = match copypaste_core::get_item_by_item_id(&db_guard, &wire.item_id) {
             Ok(row) => row,
             Err(e) => {
-                warn!(item_id = %wire.id, "sync_orch: get_item_by_id failed: {e}");
+                warn!(item_id = %wire.item_id, "sync_orch: get_item_by_item_id failed: {e}");
                 continue;
             }
         };
+        // Capture the local primary key before moving `existing` into resolve.
+        // On TakeRemote we patch `to_insert.id` so FTS / copy_item / pins that
+        // are keyed on the local `id` keep pointing at the same row — mirroring
+        // the cloud path's `preserved_pk` pattern.
+        let local_pk: Option<String> = existing.as_ref().map(|r| r.id.clone());
         let exists = existing.is_some();
         let take_remote = match existing.as_ref() {
             Some(local) => matches!(resolve(local, &wire), MergeOutcome::TakeRemote),
@@ -253,14 +262,14 @@ pub async fn merge_incoming_with_crypto(
         };
 
         if !take_remote {
-            debug!(item_id = %wire.id, "sync_orch: LWW kept local");
+            debug!(item_id = %wire.item_id, "sync_orch: LWW kept local");
             continue;
         }
 
         // P2P Phase 3: unwrap the shared-key payload into a row encrypted under
         // this device's own local key, recovering the plaintext for FTS. Returns
         // the row to insert plus the decrypted plaintext (when text) to index.
-        let (to_insert, fts_plaintext) = match crypto {
+        let (mut to_insert, fts_plaintext) = match crypto {
             Some(c) => match rekey_inbound(c, wire) {
                 Ok(pair) => pair,
                 Err(w) => {
@@ -270,6 +279,14 @@ pub async fn merge_incoming_with_crypto(
             },
             None => (wire_to_local(wire), None),
         };
+
+        // Preserve the local primary key on replace so FTS / copy_item / pins
+        // (all keyed on `id`) keep pointing at the same row after the update.
+        // `wire_to_local` copies `wire.id` (the peer's PK) into `to_insert.id`;
+        // we overwrite it here with the local row's PK when one exists.
+        if let Some(pk) = local_pk {
+            to_insert.id = pk;
+        }
 
         // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
         // ran `delete_item` then a separate `insert_item`; if the insert failed

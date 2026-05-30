@@ -3015,6 +3015,8 @@ mod tests {
             &auth,
             &key_bytes,
             PollCursor::default(),
+            1000,        // history_limit: sensible test value
+            500_000_000, // storage_quota_bytes: 500 MB
         )
         .await;
         assert_eq!(
@@ -3052,6 +3054,8 @@ mod tests {
             &auth,
             &key_bytes,
             wm1,
+            1000,        // history_limit
+            500_000_000, // storage_quota_bytes
         )
         .await;
         assert_eq!(
@@ -3179,6 +3183,8 @@ mod tests {
                 &auth,
                 &key_bytes,
                 cursor,
+                1000,        // history_limit
+                500_000_000, // storage_quota_bytes
             )
             .await;
         }
@@ -3306,6 +3312,8 @@ mod tests {
                 &auth,
                 &key_bytes,
                 cursor,
+                1000,        // history_limit
+                500_000_000, // storage_quota_bytes
             )
             .await;
         }
@@ -3400,6 +3408,8 @@ mod tests {
             &auth,
             &key_bytes,
             PollCursor::default(),
+            1000,        // history_limit
+            500_000_000, // storage_quota_bytes
         )
         .await;
 
@@ -3472,6 +3482,7 @@ mod tests {
             last_sync_ms,
             local_key,
             signed_in.clone(),
+            copypaste_core::AppConfig::default(), // B2 fix: new param added to start_cloud
         )
         .await;
 

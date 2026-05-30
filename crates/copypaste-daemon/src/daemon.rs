@@ -6,8 +6,8 @@ use crate::{
 };
 use copypaste_core::{
     build_item_aad_v2, bump_item_recency, chunks_to_blob, derive_v2, detect, encode_image,
-    encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts, AppConfig,
-    ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION_V4,
+    encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts, prune_to_cap,
+    AppConfig, ClipboardItem, Database, DeviceKeypair, AAD_SCHEMA_VERSION_V4,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -1389,6 +1389,18 @@ fn prune_history(db: &Database, config: &AppConfig) {
             ),
             Err(e) => tracing::warn!("prune_history failed: {e}"),
         }
+    }
+    // M1 FIX: enforce the byte quota after the count-cap prune so a local
+    // capture burst (many small items) cannot exhaust disk even when item
+    // count stays under `history_limit`.  The cloud path already calls
+    // `prune_to_cap` inside `poll_once`; this call mirrors it for the local
+    // clipboard-capture path so both paths converge to the same cap.
+    // `storage_quota_bytes` is u64 in AppConfig; saturating cast to i64 is
+    // safe — values above i64::MAX (>9 EB) are unreachable in practice.
+    match prune_to_cap(db, config.storage_quota_bytes as i64) {
+        Ok(0) => {}
+        Ok(n) => tracing::debug!("prune_history: byte-cap pruned {n} rows"),
+        Err(e) => tracing::warn!("prune_history: byte-cap prune failed: {e}"),
     }
 }
 
