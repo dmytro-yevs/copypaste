@@ -6,10 +6,11 @@ use std::path::Path;
 
 pub fn run(socket_path: &Path, limit: u64, output: Option<&str>, force: bool) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({
-        "id": "1", "method": "list",
-        "params": {"limit": limit, "offset": 0}
-    });
+    let req = IpcClient::build_request(
+        "1",
+        "list",
+        serde_json::json!({"limit": limit, "offset": 0}),
+    );
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 

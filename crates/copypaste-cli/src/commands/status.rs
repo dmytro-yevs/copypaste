@@ -107,7 +107,7 @@ fn probe(socket_path: &Path) -> StatusReport {
     // 2. status — confirms the daemon is alive and yields private_mode.
     //    Failure here flips us back to "not running" since the socket
     //    accepted us but the daemon can't respond to a basic health check.
-    let status_req = serde_json::json!({"id": "status", "method": "status", "params": {}});
+    let status_req = IpcClient::build_request("status", "status", serde_json::json!({}));
     match client.call(&status_req) {
         Ok(resp) if resp.ok => {
             if let Some(data) = &resp.data {
@@ -123,7 +123,7 @@ fn probe(socket_path: &Path) -> StatusReport {
     //    Each call opens a fresh connection because IpcClient is one-shot
     //    (it consumes the connection on response).
     if let Ok(mut c2) = IpcClient::connect(socket_path) {
-        let stats_req = serde_json::json!({"id": "stats", "method": "stats", "params": {}});
+        let stats_req = IpcClient::build_request("stats", "stats", serde_json::json!({}));
         if let Ok(resp) = c2.call(&stats_req) {
             if resp.ok {
                 if let Some(data) = &resp.data {
@@ -135,7 +135,7 @@ fn probe(socket_path: &Path) -> StatusReport {
 
     // 4. count — total history items. Same best-effort policy as stats.
     if let Ok(mut c3) = IpcClient::connect(socket_path) {
-        let count_req = serde_json::json!({"id": "count", "method": "count", "params": {}});
+        let count_req = IpcClient::build_request("count", "count", serde_json::json!({}));
         if let Ok(resp) = c3.call(&count_req) {
             if resp.ok {
                 if let Some(data) = &resp.data {

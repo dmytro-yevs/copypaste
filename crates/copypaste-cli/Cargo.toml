@@ -25,6 +25,8 @@ qrcode.workspace = true
 copypaste-core = { path = "../copypaste-core" }
 rusqlite.workspace = true
 zeroize = { workspace = true }
+# In-process no-echo password prompt; handles SIGINT/terminal restore.
+rpassword = "7"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # beta-bonus (vacuum): fetch the device secret key from the macOS Keychain so

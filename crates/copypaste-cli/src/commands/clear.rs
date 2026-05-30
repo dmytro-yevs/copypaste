@@ -16,7 +16,7 @@ pub fn run(socket_path: &Path, force: bool) -> Result<()> {
     }
 
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({"id": "1", "method": "delete_all"});
+    let req = IpcClient::build_request("1", "delete_all", serde_json::json!({}));
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 

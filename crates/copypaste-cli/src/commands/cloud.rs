@@ -64,11 +64,11 @@ pub fn setup(
     }
 
     // Resolve the anon key without leaking it via `ps`: explicit --anon-key
-    // (deprecated) → SUPABASE_ANON_KEY env → interactive prompt.
+    // (deprecated) → SUPABASE_ANON_KEY env → no-echo interactive prompt.
     let anon_key = resolve_secret(
         anon_key,
         "SUPABASE_ANON_KEY",
-        "Supabase anon/public API key (input is visible): ",
+        "Supabase anon/public API key: ",
     )?;
     let anon_key = anon_key.trim();
     if anon_key.is_empty() {
@@ -77,11 +77,7 @@ pub fn setup(
 
     // Resolve the password without leaking it into shell history: explicit
     // --password arg (discouraged) → SUPABASE_PASSWORD env → interactive prompt.
-    let password = resolve_secret(
-        password,
-        "SUPABASE_PASSWORD",
-        "Supabase account password (input is visible): ",
-    )?;
+    let password = resolve_secret(password, "SUPABASE_PASSWORD", "Supabase account password: ")?;
     if password.trim().is_empty() {
         return Err(anyhow!("password must not be empty"));
     }
@@ -89,7 +85,7 @@ pub fn setup(
     // Read-merge-write: fetch current config so we don't drop other fields.
     let mut cfg = {
         let mut client = IpcClient::connect(socket_path)?;
-        let req = serde_json::json!({ "id": "1", "method": "get_config", "params": {} });
+        let req = IpcClient::build_request("1", "get_config", serde_json::json!({}));
         let resp = client.call(&req)?;
         exit_on_err(&resp);
         resp.data.unwrap_or_else(|| serde_json::json!({}))
@@ -110,7 +106,7 @@ pub fn setup(
     }
 
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({ "id": "1", "method": "set_config", "params": cfg });
+    let req = IpcClient::build_request("1", "set_config", cfg);
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
@@ -123,13 +119,16 @@ pub fn setup(
 
 /// Resolve a secret value (anon key or password) without leaking it via the
 /// process list or shell history: explicit value (deprecated argv flag) →
-/// `env_var` → interactive stdin prompt. We never echo it back and never log it.
+/// `env_var` → interactive no-echo prompt.
 ///
-/// stdin prompt note: this reads a line in cleartext (the terminal echoes it)
-/// — acceptable for a one-time setup step and strictly better than an argv flag
-/// (which would persist in shell history and `ps` output). A no-echo prompt
-/// would require an extra crate (`rpassword`); deferred to avoid a new pinned
-/// dependency.
+/// The interactive path uses `rpassword::prompt_password` which disables
+/// terminal echo in-process (via termios on Unix) so the secret is never
+/// visible on-screen or in terminal scroll-back. Echo is always restored by
+/// rpassword even when the user hits Ctrl-C or an error occurs.
+///
+/// Non-TTY path (pipes, CI): `rpassword` falls back to reading stdin without
+/// echo-disabling; callers that truly cannot provide a TTY should set the env
+/// var instead.
 fn resolve_secret(explicit: Option<String>, env_var: &str, prompt: &str) -> Result<String> {
     if let Some(v) = explicit {
         return Ok(v);
@@ -139,20 +138,18 @@ fn resolve_secret(explicit: Option<String>, env_var: &str, prompt: &str) -> Resu
             return Ok(v);
         }
     }
-    use std::io::Write;
-    print!("{prompt}");
-    std::io::stdout().flush()?;
-    let mut buf = String::new();
-    std::io::stdin().read_line(&mut buf)?;
-    // Strip the trailing newline only; preserve any intentional internal chars.
-    let trimmed = buf.trim_end_matches(['\n', '\r']).to_owned();
-    Ok(trimmed)
+    // rpassword::prompt_password disables terminal echo in-process (termios)
+    // and always restores it on return, even on error. This prevents the secret
+    // from appearing in the terminal or in scroll-back history.
+    let value = rpassword::prompt_password(prompt)
+        .map_err(|e| anyhow::anyhow!("failed to read secret from terminal: {e}"))?;
+    Ok(value)
 }
 
 /// Print the current cloud-sync status reported by the daemon.
 pub fn status(socket_path: &Path) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({ "id": "1", "method": "get_sync_status", "params": {} });
+    let req = IpcClient::build_request("1", "get_sync_status", serde_json::json!({}));
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
@@ -185,7 +182,7 @@ pub fn status(socket_path: &Path) -> Result<()> {
 /// is scriptable (`copypaste cloud test && echo ok`).
 pub fn test(socket_path: &Path) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({ "id": "1", "method": "cloud_test_connection", "params": {} });
+    let req = IpcClient::build_request("1", "cloud_test_connection", serde_json::json!({}));
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 

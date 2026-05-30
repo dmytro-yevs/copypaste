@@ -45,12 +45,7 @@ pub fn run(socket_path: &Path, file: &str) -> Result<()> {
     }
 
     let mut client = IpcClient::connect(socket_path)?;
-    let req = serde_json::json!({
-        "id": "1",
-        "method": "import",
-        "protocol_version": 1,
-        "params": { "items": items },
-    });
+    let req = IpcClient::build_request("1", "import", serde_json::json!({ "items": items }));
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
