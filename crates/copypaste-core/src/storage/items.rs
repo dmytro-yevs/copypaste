@@ -513,6 +513,88 @@ pub fn unpin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
     Ok(())
 }
 
+/// Prune the oldest unpinned clipboard items so that the total byte size of
+/// all unpinned `content` blobs does not exceed `max_bytes`.
+///
+/// # Eviction semantics
+///
+/// * **Pinned items are never evicted** — only rows with `pinned = 0` are
+///   considered for deletion or counted towards the quota.
+/// * **Oldest-first ordering** — rows are sorted by `(wall_time ASC, id ASC)`
+///   before eviction. When two items share the same millisecond timestamp,
+///   the lexicographically smaller UUID is evicted first (deterministic).
+/// * **The "tipping" row is evicted** — the first row whose inclusion brings
+///   the running cumulative byte total to or past the excess is deleted, not
+///   kept. After the prune, remaining unpinned bytes ≤ `max_bytes`.
+/// * **Images are counted** — `content` stores the encrypted blob for both
+///   text and image items in the same `clipboard_items` table; `LENGTH(content)`
+///   includes image bytes correctly. There is no separate image store at this
+///   layer, so the quota is byte-accurate across all content types.
+///
+/// # Performance
+///
+/// Uses a single-pass SQLite window function
+/// `SUM(LENGTH(COALESCE(content,''))) OVER (ORDER BY wall_time ASC, id ASC
+/// ROWS UNBOUNDED PRECEDING)` to compute a running cumulative byte total in
+/// O(n log n). The previous correlated-subquery approach (O(n²)) was
+/// prohibitively slow on large databases after a cloud backfill batch.
+///
+/// SQLite ≥ 3.25 is required for window functions. The bundled SQLCipher
+/// version shipping with `rusqlite = "0.32" / bundled-sqlcipher` includes
+/// SQLite ≥ 3.47, which satisfies this requirement.
+///
+/// # Returns
+///
+/// The number of rows deleted (0 when the quota is already satisfied).
+pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> {
+    // Fast path: if total unpinned bytes are within the quota nothing to do.
+    // This avoids constructing the window-function query on every insert when
+    // the DB is well under the cap (the common case).
+    let total_unpinned: i64 = db.conn().query_row(
+        "SELECT COALESCE(SUM(LENGTH(COALESCE(content,''))),0) \
+         FROM clipboard_items WHERE pinned = 0",
+        [],
+        |r| r.get(0),
+    )?;
+    if total_unpinned <= max_bytes {
+        return Ok(0);
+    }
+
+    // Compute excess = bytes that must be freed.
+    // Cast is safe: total_unpinned > max_bytes >= 0, so excess > 0 and fits in i64.
+    let excess = total_unpinned - max_bytes;
+
+    // Single-pass window-function DELETE.
+    //
+    // The CTE `ranked` assigns each unpinned row a running cumulative byte
+    // total ordered oldest-first.  A row belongs to the eviction prefix when
+    // `cum_bytes - row_bytes < excess`: that is, even without this row's bytes
+    // the running total has not yet covered the excess, so this row (and every
+    // row before it) must be removed.  The tipping row—the first one that brings
+    // the running total to or past `excess`—satisfies the predicate too
+    // (cum_bytes[tipping-1] < excess by definition), so it is included.
+    let deleted = db.conn().execute(
+        "WITH ranked AS (
+             SELECT
+                 id,
+                 LENGTH(COALESCE(content, '')) AS row_bytes,
+                 SUM(LENGTH(COALESCE(content, ''))) OVER (
+                     ORDER BY wall_time ASC, id ASC
+                     ROWS UNBOUNDED PRECEDING
+                 ) AS cum_bytes
+             FROM clipboard_items
+             WHERE pinned = 0
+         )
+         DELETE FROM clipboard_items
+         WHERE id IN (
+             SELECT id FROM ranked
+             WHERE cum_bytes - row_bytes < ?1
+         )",
+        params![excess],
+    )?;
+    Ok(deleted)
+}
+
 pub fn count_items(db: &Database) -> Result<i64, ItemsError> {
     Ok(db
         .conn()
@@ -1522,5 +1604,260 @@ mod tests {
             "bumped item must appear first after recency update"
         );
         assert_eq!(page[0].wall_time, now_ms);
+    }
+
+    // ── prune_to_cap tests ────────────────────────────────────────────────────
+
+    /// Build a ClipboardItem whose encrypted content is exactly `size` bytes,
+    /// with a deterministic wall_time so tests can control eviction order.
+    fn make_sized_item(lamport: i64, wall_time_ms: i64, size: usize) -> ClipboardItem {
+        let mut item = make_item(lamport);
+        item.wall_time = wall_time_ms;
+        item.content = Some(vec![0xCC; size]);
+        item
+    }
+
+    /// Under the quota: nothing deleted.
+    #[test]
+    fn prune_to_cap_no_op_when_under_quota() {
+        let db = Database::open_in_memory().unwrap();
+        // 3 items × 10 bytes = 30 bytes; quota = 100.
+        for i in 0..3_i64 {
+            insert_item(&db, &make_sized_item(i, i * 1_000, 10)).unwrap();
+        }
+        let deleted = prune_to_cap(&db, 100).unwrap();
+        assert_eq!(deleted, 0, "no eviction when total < quota");
+        assert_eq!(count_items(&db).unwrap(), 3);
+    }
+
+    /// Exactly at the quota: nothing deleted.
+    #[test]
+    fn prune_to_cap_no_op_when_exactly_at_quota() {
+        let db = Database::open_in_memory().unwrap();
+        // 5 items × 20 bytes = 100 bytes; quota = 100.
+        for i in 0..5_i64 {
+            insert_item(&db, &make_sized_item(i, i * 1_000, 20)).unwrap();
+        }
+        let deleted = prune_to_cap(&db, 100).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(count_items(&db).unwrap(), 5);
+    }
+
+    /// Oldest items are evicted first (wall_time ASC ordering).
+    #[test]
+    fn prune_to_cap_evicts_oldest_first() {
+        let db = Database::open_in_memory().unwrap();
+        // Items ordered by wall_time: 1=oldest … 5=newest, each 20 bytes.
+        // Total = 100, quota = 60 → excess = 40 → must remove 2 oldest (40 bytes).
+        let mut ids = Vec::new();
+        for i in 1..=5_i64 {
+            let item = make_sized_item(i, i * 1_000, 20);
+            ids.push(item.id.clone());
+            insert_item(&db, &item).unwrap();
+        }
+        let deleted = prune_to_cap(&db, 60).unwrap();
+        assert_eq!(deleted, 2, "exactly 2 oldest rows deleted");
+        // Oldest two ids must be gone; newest three must remain.
+        let conn = db.conn();
+        let exists = |id: &str| -> bool {
+            conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE id=?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+                > 0
+        };
+        assert!(!exists(&ids[0]), "oldest must be gone");
+        assert!(!exists(&ids[1]), "second oldest must be gone");
+        assert!(exists(&ids[2]), "third must remain");
+        assert!(exists(&ids[3]), "fourth must remain");
+        assert!(exists(&ids[4]), "newest must remain");
+    }
+
+    /// The "tipping" row that crosses the byte threshold is evicted.
+    #[test]
+    fn prune_to_cap_tipping_row_is_evicted() {
+        let db = Database::open_in_memory().unwrap();
+        // 3 rows: 10 bytes, 10 bytes, 50 bytes (oldest → newest).
+        // Total = 70, quota = 60 → excess = 10.
+        // Row 1 (10 bytes): cum=10, cum-row=0 < 10 → DELETE (tipping).
+        // Row 2 (10 bytes): cum=20, cum-row=10, 10 < 10 is FALSE → KEEP.
+        let item1 = make_sized_item(1, 1_000, 10);
+        let item2 = make_sized_item(2, 2_000, 10);
+        let item3 = make_sized_item(3, 3_000, 50);
+        let id1 = item1.id.clone();
+        let id2 = item2.id.clone();
+        let id3 = item3.id.clone();
+        insert_item(&db, &item1).unwrap();
+        insert_item(&db, &item2).unwrap();
+        insert_item(&db, &item3).unwrap();
+
+        let deleted = prune_to_cap(&db, 60).unwrap();
+        assert_eq!(deleted, 1, "only the tipping row (oldest) deleted");
+        let conn = db.conn();
+        let exists = |id: &str| -> bool {
+            conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE id=?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+                > 0
+        };
+        assert!(!exists(&id1), "tipping row deleted");
+        assert!(exists(&id2), "row 2 kept");
+        assert!(exists(&id3), "row 3 kept");
+    }
+
+    /// Pinned items are never evicted, even when they are the oldest.
+    #[test]
+    fn prune_to_cap_pinned_items_never_evicted() {
+        let db = Database::open_in_memory().unwrap();
+        // Pin the oldest item; its bytes must not count toward the quota.
+        // 3 items × 20 bytes = 60 bytes. Quota = 30.
+        // Unpinned bytes = 40 (rows 2 and 3). Excess = 10. Row 2 is evicted.
+        let item1 = make_sized_item(1, 1_000, 20); // will be pinned
+        let item2 = make_sized_item(2, 2_000, 20);
+        let item3 = make_sized_item(3, 3_000, 20);
+        let id1 = item1.id.clone();
+        let id2 = item2.id.clone();
+        let id3 = item3.id.clone();
+        insert_item(&db, &item1).unwrap();
+        insert_item(&db, &item2).unwrap();
+        insert_item(&db, &item3).unwrap();
+        pin_item(&db, &id1).unwrap();
+
+        let deleted = prune_to_cap(&db, 30).unwrap();
+        assert_eq!(deleted, 1, "one unpinned row evicted");
+        let conn = db.conn();
+        let exists = |id: &str| -> bool {
+            conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE id=?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+                > 0
+        };
+        assert!(exists(&id1), "pinned oldest must not be evicted");
+        assert!(!exists(&id2), "oldest unpinned evicted");
+        assert!(exists(&id3), "newest unpinned kept");
+    }
+
+    /// Empty database: prune is a no-op.
+    #[test]
+    fn prune_to_cap_empty_db_is_noop() {
+        let db = Database::open_in_memory().unwrap();
+        let deleted = prune_to_cap(&db, 1024).unwrap();
+        assert_eq!(deleted, 0);
+    }
+
+    /// Items with NULL content (e.g. blob_ref-only rows) count as 0 bytes.
+    #[test]
+    fn prune_to_cap_null_content_counts_as_zero_bytes() {
+        let db = Database::open_in_memory().unwrap();
+        // One item with NULL content + one with 50 bytes. Total = 50. Quota = 40.
+        // The NULL-content row is oldest; it contributes 0 bytes so cum_bytes
+        // after it is 0, meaning cum-row=0 < 10 (excess) → it gets evicted first.
+        // After evicting it: remaining = 50 bytes which still > 40. Then the
+        // 50-byte row: cum=50, cum-row=0 < 10 → also evicted.
+        // Wait — excess = 50 - 40 = 10. Row1 (0 bytes): cum=0, cum-row=0 < 10 → DELETE.
+        // Row2 (50 bytes): cum=50, cum-row=0 < 10 → DELETE.
+        // So both deleted, 0 remaining.  Let's redesign to make it meaningful:
+        // NULL row (0b) at t=1, 50b at t=2. Total=50. Quota=50 → NO-OP.
+        // NULL row (0b) at t=1, 50b at t=2. Total=50. Quota=49 → excess=1.
+        // Row1: cum=0, 0-0=0 < 1 → DELETE; Row2: cum=50, 50-50=0 < 1 → DELETE.
+        // Hmm — a NULL-content row always has cum-row=0 which is < any positive excess.
+        // Use quota=50 for the no-op assertion:
+        let mut item_null = make_item(1);
+        item_null.wall_time = 1_000;
+        item_null.content = None;
+        let item_big = make_sized_item(2, 2_000, 50);
+        insert_item(&db, &item_null).unwrap();
+        insert_item(&db, &item_big).unwrap();
+        // Quota exactly equals total (50). No prune.
+        let deleted = prune_to_cap(&db, 50).unwrap();
+        assert_eq!(deleted, 0, "no eviction when quota met");
+        assert_eq!(count_items(&db).unwrap(), 2);
+    }
+
+    /// Large dataset (50 rows): window-function rewrite produces identical
+    /// eviction to the reference naive algorithm (compute total, subtract quota,
+    /// delete oldest prefix summing to ≥ excess).
+    #[test]
+    fn prune_to_cap_large_dataset_matches_naive_eviction() {
+        use std::collections::HashSet;
+
+        let db = Database::open_in_memory().unwrap();
+
+        // Insert 50 items with varying sizes (5..=54 bytes) and distinct
+        // wall_times so the ordering is deterministic.
+        let mut items: Vec<ClipboardItem> = (0..50_i64)
+            .map(|i| make_sized_item(i, (i + 1) * 1_000, 5 + i as usize))
+            .collect();
+        for item in &items {
+            insert_item(&db, item).unwrap();
+        }
+
+        // Pin the 3 most-recent items so they survive unconditionally.
+        let pinned_ids: HashSet<String> = items[47..].iter().map(|i| i.id.clone()).collect();
+        for id in &pinned_ids {
+            pin_item(&db, id).unwrap();
+        }
+
+        // Total bytes (items is sorted oldest-first, sizes 5..54 bytes).
+        // Unpinned = items[0..47]; total_unpinned = sum(5..52) = 47*(5+51)/2 = 1316.
+        let total_unpinned: i64 = items[..47]
+            .iter()
+            .map(|it| it.content.as_ref().map_or(0, |c| c.len() as i64))
+            .sum();
+        let quota: i64 = 800;
+        let excess = total_unpinned - quota;
+        assert!(excess > 0, "sanity: quota must be below total");
+
+        // Naive reference: collect oldest-first ids until cumulative bytes >= excess.
+        items[..47].sort_by_key(|it| (it.wall_time, it.id.clone()));
+        let mut cum: i64 = 0;
+        let mut naive_delete: HashSet<String> = HashSet::new();
+        for it in &items[..47] {
+            let row_bytes = it.content.as_ref().map_or(0, |c| c.len() as i64);
+            if cum < excess {
+                naive_delete.insert(it.id.clone());
+                cum += row_bytes;
+            }
+        }
+
+        // Run prune_to_cap.
+        let deleted = prune_to_cap(&db, quota).unwrap();
+        assert_eq!(
+            deleted as usize,
+            naive_delete.len(),
+            "window-fn and naive must delete the same number of rows"
+        );
+
+        // Verify each id matches.
+        let conn = db.conn();
+        for id in &naive_delete {
+            let found: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM clipboard_items WHERE id=?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 0, "naive-evicted row {id} must be gone");
+        }
+        // Pinned items must still be present.
+        for id in &pinned_ids {
+            let found: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM clipboard_items WHERE id=?1",
+                    params![id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 1, "pinned row {id} must remain");
+        }
     }
 }
