@@ -4,13 +4,15 @@ import { restartDaemon } from "../lib/ipc";
 type Phase = "idle" | "restarting" | "ok" | "error";
 
 /**
- * "Restart daemon" control. Calls the Tauri `restart_daemon` command
- * (launchctl kickstart -k, with bootout+bootstrap fallback) so the running
- * daemon is forced to the freshly-installed binary without a reboot.
+ * "Restart daemon" control. Calls the Tauri `restart_daemon` command, which
+ * stops the app-tracked child process (SIGTERM + reap) and spawns the bundled
+ * `copypaste-daemon` binary fresh via `ensure_daemon_running`. No launchctl
+ * involved — the app owns the daemon lifecycle entirely.
  *
- * Works even when the daemon is degraded/unresponsive (it talks to launchctl,
- * not the daemon IPC). Surfaces success/failure loudly via an inline status
- * message so a stale-daemon recovery is never silent.
+ * Works even when the daemon is degraded/unresponsive (it operates on the
+ * tracked child handle directly, not the daemon IPC socket). Surfaces
+ * success/failure loudly via an inline status message so a stale-daemon
+ * recovery is never silent.
  */
 export function RestartDaemonButton({
   label = "Restart daemon",

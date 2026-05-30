@@ -31,6 +31,7 @@
 
 use std::path::PathBuf;
 use std::process::Child;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -57,6 +58,23 @@ pub struct DaemonChild(pub Mutex<Option<Child>>);
 /// `None` means no error (or daemon started successfully).
 #[derive(Default)]
 pub struct DaemonSpawnError(pub Mutex<Option<String>>);
+
+/// Lifecycle generation counter. [`restart_daemon`] increments this (with
+/// `SeqCst`) **before** killing the old child and storing a new one.
+/// [`ensure_daemon_running`] snapshots the counter before its socket-ready poll
+/// loop and rechecks it afterwards; if the generation changed, the child it
+/// spawned has been superseded by a restart, so it skips writing a false error.
+///
+/// ### Why this can't deadlock
+/// The startup thread never holds the `DaemonChild` mutex across the blocking
+/// socket-wait loop — it releases the mutex immediately after storing the child
+/// (line `*guard = Some(child)`).  The generation load/compare is a pure atomic
+/// operation that cannot block or require any mutex.  `restart_daemon` only
+/// holds the `DaemonChild` mutex briefly (inside `stop_tracked_child`) and
+/// releases it before calling `ensure_daemon_running`, so there is no lock
+/// ordering inversion.
+#[derive(Default)]
+pub struct DaemonLifecycleGen(pub AtomicU64);
 
 /// Resolve the daemon socket path. Mirrors
 /// `copypaste-daemon::paths::socket_path` and `ipc::socket_path` so the probe
@@ -290,6 +308,13 @@ fn evict_stray_daemon() {
 /// state) and it became reachable, or an `Err` describing why the app could
 /// not bring it up (surfaced LOUDLY so the degraded UI shows the failure —
 /// never swallowed).
+///
+/// ## Startup-vs-restart race
+/// If [`restart_daemon`] runs concurrently during the socket-ready poll loop,
+/// it increments [`DaemonLifecycleGen`] before killing the child we stored.
+/// We snapshot the generation before the poll loop and recheck it on timeout:
+/// if it changed, our child was superseded and the daemon is healthy under new
+/// ownership — we return `Ok(true)` instead of a false error.
 pub fn ensure_daemon_running(app: &tauri::AppHandle) -> Result<bool, String> {
     // 1. Reconcile the LaunchAgent first: boot out any leftover instance so it
     //    cannot fight the app-owned lifecycle.
@@ -300,7 +325,15 @@ pub fn ensure_daemon_running(app: &tauri::AppHandle) -> Result<bool, String> {
     //    we handle all three cases: reachable, socket-exists-but-silent, no socket.
     evict_stray_daemon();
 
-    // 3. Spawn the fresh bundled daemon.
+    // 3. Snapshot the lifecycle generation BEFORE storing the child so that a
+    //    concurrent restart_daemon (which bumps the generation then takes+kills
+    //    the child) is detectable in step 5 below.
+    let gen_before = app
+        .try_state::<DaemonLifecycleGen>()
+        .map(|s| s.0.load(Ordering::SeqCst))
+        .unwrap_or(0);
+
+    // 4. Spawn the fresh bundled daemon.
     let bin = bundled_daemon_path().ok_or_else(|| {
         "could not locate bundled copypaste-daemon next to the app executable".to_string()
     })?;
@@ -314,11 +347,14 @@ pub fn ensure_daemon_running(app: &tauri::AppHandle) -> Result<bool, String> {
         // be defensive). Dropping the old handle does not kill it.
         // Use unwrap_or_else on poisoned mutex so a panic in a prior thread
         // never blocks app exit or a successful subsequent call.
+        // NOTE: we release the mutex immediately — we do NOT hold it across the
+        // blocking poll loop below (that would deadlock restart_daemon's
+        // stop_tracked_child, which also locks DaemonChild).
         let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
         *guard = Some(child);
     }
 
-    // 4. Wait for the socket to come up. Poll up to SOCKET_READY_TIMEOUT.
+    // 5. Wait for the socket to come up. Poll up to SOCKET_READY_TIMEOUT.
     let deadline = Instant::now() + SOCKET_READY_TIMEOUT;
     while Instant::now() < deadline {
         if daemon_reachable() {
@@ -327,6 +363,22 @@ pub fn ensure_daemon_running(app: &tauri::AppHandle) -> Result<bool, String> {
         }
         std::thread::sleep(SOCKET_POLL_INTERVAL);
     }
+
+    // 6. Timed out. Check whether restart_daemon superseded us while we polled.
+    //    If the generation advanced, our child was killed and replaced — the
+    //    daemon is healthy under new ownership, so this is NOT an error.
+    let gen_after = app
+        .try_state::<DaemonLifecycleGen>()
+        .map(|s| s.0.load(Ordering::SeqCst))
+        .unwrap_or(0);
+    if gen_after != gen_before {
+        tracing::info!(
+            "ensure_daemon_running: startup child superseded by restart \
+             (gen {gen_before} → {gen_after}); not recording a false error"
+        );
+        return Ok(true);
+    }
+
     Err(format!(
         "started daemon at {} but it did not become reachable on {} within {}ms",
         bin.display(),
@@ -448,10 +500,18 @@ pub fn get_daemon_error(app: tauri::AppHandle) -> Option<String> {
 /// surfaces loudly.
 #[tauri::command]
 pub fn restart_daemon(app: tauri::AppHandle) -> Result<(), String> {
-    // Step 1: stop the currently tracked child gracefully.
+    // Step 1: bump the lifecycle generation BEFORE killing the old child.
+    // This lets a concurrent ensure_daemon_running (running in the startup
+    // background thread) detect that its child was superseded and suppress
+    // the false "daemon failed" error it would otherwise emit on timeout.
+    if let Some(gen_state) = app.try_state::<DaemonLifecycleGen>() {
+        gen_state.0.fetch_add(1, Ordering::SeqCst);
+    }
+
+    // Step 2: stop the currently tracked child gracefully.
     stop_tracked_child(&app);
 
-    // Step 2: spawn a fresh one and wait for it to become reachable.
+    // Step 3: spawn a fresh one and wait for it to become reachable.
     ensure_daemon_running(&app).map(|_| ())
 }
 
