@@ -56,16 +56,18 @@ fi
 SIGN_IDENTITY="${MACOS_SIGN_IDENTITY:--}"
 
 echo "==> Signing inner binaries with stable identifiers (identity: $SIGN_IDENTITY)"
-declare -A INNER_IDS=(
-    [copypaste-daemon]="com.copypaste.daemon"
-    [copypaste]="com.copypaste.cli"
-    [copypaste-relay]="com.copypaste.relay"
-)
+# macOS ships bash 3.2 (no associative arrays / `declare -A`); use a case stmt.
 for bin in copypaste-daemon copypaste copypaste-relay; do
     if [[ -f "$APP_DIR/Contents/MacOS/$bin" ]]; then
+        case "$bin" in
+            copypaste-daemon) bin_id="com.copypaste.daemon" ;;
+            copypaste)        bin_id="com.copypaste.cli" ;;
+            copypaste-relay)  bin_id="com.copypaste.relay" ;;
+            *)                bin_id="com.copypaste.$bin" ;;
+        esac
         codesign --force \
             --sign "$SIGN_IDENTITY" \
-            --identifier "${INNER_IDS[$bin]}" \
+            --identifier "$bin_id" \
             --options runtime \
             --timestamp=none \
             "$APP_DIR/Contents/MacOS/$bin"
