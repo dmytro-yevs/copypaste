@@ -441,10 +441,8 @@ impl RelayStore {
     /// evicts on actual inactivity, not on registration age. A device that registers,
     /// drains its inbox, and then stays idle for the threshold will be evicted — but
     /// one that continues to pull (even an empty inbox) will not.
-    // Route handlers (push/pull/delete) should call this after a successful
-    // `verify_token` to keep `last_seen` current. Wired here; the handler
-    // call sites are in `copypaste-daemon` (out of scope for this crate).
-    #[allow(dead_code)]
+    // Called from routes/items.rs after every successful verify_token in the
+    // push, pull, and delete_item handlers.
     pub fn update_last_seen(&mut self, device_id: &str) {
         if let Some(record) = self.devices.get_mut(device_id) {
             record.last_seen = Instant::now();

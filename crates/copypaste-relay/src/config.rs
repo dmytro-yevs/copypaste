@@ -79,6 +79,14 @@ impl RelayConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    /// Shared mutex serialising all tests that mutate `RELAY_*` env vars.
+    /// `cargo test` runs tests in the same process and env-var mutation is not
+    /// thread-safe without coordination.  Taking this lock at the start of any
+    /// test that calls `std::env::set_var` / `remove_var` prevents data races
+    /// with other tests in this module.
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn default_values_are_sane() {
@@ -92,6 +100,7 @@ mod tests {
 
     #[test]
     fn from_env_uses_defaults_when_vars_absent() {
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         // Ensure env vars are not set for this test (they shouldn't be in CI)
         std::env::remove_var("RELAY_PORT");
         std::env::remove_var("RELAY_SYNC_TTL_SECS");
@@ -102,18 +111,27 @@ mod tests {
 
     #[test]
     fn max_item_bytes_capped_at_100mib() {
-        // Task 3: RELAY_MAX_ITEM_BYTES values above 100 MiB must be clamped
-        // so the `*4/3` body-limit math in routes/mod.rs cannot overflow on
-        // a 32-bit host or accept a runaway misconfig.
+        // RELAY_MAX_ITEM_BYTES values above 100 MiB must be clamped by
+        // RelayConfig::from_env so the `*4/3` body-limit math in routes/mod.rs
+        // cannot overflow on a 32-bit host or accept a runaway misconfig.
         //
-        // Tested by directly constructing a config and calling the same `.min()`
-        // that `from_env` applies, so the test is free of env-var races with
-        // parallel tests.
+        // We exercise from_env directly (rather than re-implementing the `.min()`
+        // inline) so a future refactor that removes or changes the clamp will
+        // immediately break this test, catching the regression at the source.
+        //
+        // The env-var is set and cleaned up under ENV_MUTEX so this test cannot
+        // race with other tests that mutate RELAY_MAX_ITEM_BYTES.
         const CAP: usize = 100 * 1024 * 1024;
-        let oversized: usize = CAP + 1;
-        // Simulate what from_env does after parsing the env var value.
-        let clamped = oversized.min(CAP);
-        assert_eq!(clamped, CAP, "values above 100 MiB must clamp to 100 MiB");
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+        std::env::set_var("RELAY_MAX_ITEM_BYTES", format!("{}", CAP + 1));
+        let cfg = RelayConfig::from_env();
+        std::env::remove_var("RELAY_MAX_ITEM_BYTES");
+
+        assert_eq!(
+            cfg.max_item_bytes, CAP,
+            "from_env must clamp RELAY_MAX_ITEM_BYTES values above 100 MiB to exactly 100 MiB"
+        );
 
         // Also verify the default is well under the cap (no silent truncation
         // of the shipped default).
@@ -138,6 +156,7 @@ mod tests {
 
     #[test]
     fn trust_proxy_headers_parses_truthy_values() {
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         // M3: opt-in proxy-header trust. Defaults off; only explicit truthy
         // values flip it on so a stray value can't silently start trusting XFF.
         for (raw, expected) in [
