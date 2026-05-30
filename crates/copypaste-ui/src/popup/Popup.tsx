@@ -133,7 +133,7 @@ export function Popup() {
   // The Esc / auto-hide path calls `hide()` directly and does NOT reach this
   // function, so sound/notify only fire on an actual copy action (Enter or click).
   const copyAndPaste = useCallback(
-    async (id: string, preview: string) => {
+    async (id: string, _preview: string) => {
       await hide();
       try {
         const copied = await api.copyItem(id);
