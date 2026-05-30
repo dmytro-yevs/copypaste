@@ -534,6 +534,16 @@ pub struct IpcServer {
 /// keys its recovery banner off this exact string.
 pub const DEGRADED_REASON_KEYCHAIN_LOCKED: &str = "keychain_locked";
 
+/// Canonical `status.degraded_reason` value for the case where the SQLCipher
+/// key WAS obtained but does NOT match the existing database (SQLITE_NOTADB /
+/// `file is not a database`). Distinct from `keychain_locked` (key unreachable)
+/// because the recovery story differs: the key is present but wrong — e.g. a
+/// re-keyed device, a restored/foreign Keychain entry, or a fresh file-store
+/// key minted over a DB encrypted by a pre-file-store (v0.5.1) Keychain key.
+/// The UI shows a distinct banner so users are not told to "re-grant the
+/// Keychain prompt" when that will not help.
+pub const DEGRADED_REASON_DB_KEY_MISMATCH: &str = "db_key_mismatch";
+
 impl IpcServer {
     pub fn new(
         db: Arc<Mutex<Database>>,
