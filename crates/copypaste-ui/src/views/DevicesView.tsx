@@ -218,11 +218,6 @@ function extractIp(address: string | null | undefined): string | null {
 const QR_TTL_SECS = 120;
 const QR_REFRESH_MARGIN_SECS = 15;
 
-// Pairing token TTL from the daemon (PAKE_SESSION_TTL = 120 s).
-// We refresh 15 s before expiry to ensure a valid code is always on-screen.
-const QR_TTL_SECS = 120;
-const QR_REFRESH_MARGIN_SECS = 15;
-
 // ---------------------------------------------------------------------------
 // Main view
 // ---------------------------------------------------------------------------
