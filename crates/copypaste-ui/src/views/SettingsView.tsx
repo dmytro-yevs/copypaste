@@ -57,10 +57,11 @@ function Toggle({
 // Shared layout primitives
 // ---------------------------------------------------------------------------
 
-function SectionHeader({ label }: { label: string }) {
+function SubsectionHeader({ label, hint }: { label: string; hint?: string }) {
   return (
-    <div className="mb-2 mt-8 first:mt-0 px-0 text-[11px] uppercase tracking-wide text-ide-faint">
-      {label}
+    <div className="mb-2 mt-6 first:mt-0">
+      <div className="text-[11px] uppercase tracking-wide text-ide-faint">{label}</div>
+      {hint && <div className="mt-0.5 text-[11px] text-ide-faint">{hint}</div>}
     </div>
   );
 }
@@ -137,6 +138,50 @@ function SliderRow({
       <span className="w-[52px] text-right text-[13px] text-ide-text">
         {formatValue(value)}
       </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tab bar
+// ---------------------------------------------------------------------------
+
+type TabId = "general" | "display" | "sync" | "shortcuts" | "storage" | "advanced";
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: "general",   label: "General"   },
+  { id: "display",   label: "Display"   },
+  { id: "sync",      label: "Sync"      },
+  { id: "shortcuts", label: "Shortcuts" },
+  { id: "storage",   label: "Storage"   },
+  { id: "advanced",  label: "Advanced"  },
+];
+
+function TabBar({
+  active,
+  onChange,
+}: {
+  active: TabId;
+  onChange: (id: TabId) => void;
+}) {
+  return (
+    <div className="mb-4 flex gap-0.5 border-b border-ide-border pb-0">
+      {TABS.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          onClick={() => onChange(t.id)}
+          className={[
+            "px-3 py-2 text-[13px] transition-colors",
+            "border-b-2 -mb-px",
+            active === t.id
+              ? "border-ide-accent text-ide-text font-medium"
+              : "border-transparent text-ide-dim hover:text-ide-text",
+          ].join(" ")}
+        >
+          {t.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -299,6 +344,8 @@ export function SettingsView() {
   const prefs = useUI((s) => s.prefs);
   const setPrefs = useUI((s) => s.setPrefs);
 
+  const [activeTab, setActiveTab] = useState<TabId>("general");
+
   // General
   const [privateMode, setPrivateMode] = useState(false);
 
@@ -338,7 +385,7 @@ export function SettingsView() {
   const [limitsMsg, setLimitsMsg] = useState<Record<string, string | null>>({});
   const limitsMsgTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  // Sync parity — p2p toggle + wifi-only (supabase_email/password not in AppConfig → deferred)
+  // Sync parity — p2p toggle + wifi-only
   const [syncOnWifiOnly, setSyncOnWifiOnly] = useState(false);
 
   // Data
@@ -701,6 +748,11 @@ export function SettingsView() {
     "disabled:cursor-not-allowed disabled:opacity-40",
   ].join(" ");
 
+  const btnCls = [
+    "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+    "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
+  ].join(" ");
+
   // Inline feedback badge for a limits field.
   function LimitsMsg({ field }: { field: string }) {
     const msg = limitsMsg[field];
@@ -710,6 +762,567 @@ export function SettingsView() {
       <span className={`text-[11px] ${isError ? "text-ide-danger" : "text-ide-success"}`}>
         {msg}
       </span>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Tab content renderers
+  // -------------------------------------------------------------------------
+
+  function renderGeneral() {
+    return (
+      <div className="space-y-2">
+        <Panel>
+          <SettingsRow label="Private mode">
+            <div className="flex items-center gap-2">
+              {privateModeError !== null && (
+                <span className="text-[11px] text-ide-danger">{privateModeError}</span>
+              )}
+              <Toggle
+                checked={privateMode}
+                onChange={(v) => void handlePrivateMode(v)}
+                disabled={offline}
+              />
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Play sound on copy">
+            <Toggle
+              checked={prefs.playSoundOnCopy}
+              onChange={(v) => setPrefs({ playSoundOnCopy: v })}
+            />
+          </SettingsRow>
+          <SettingsRow label="Show notification on copy">
+            <Toggle
+              checked={prefs.notifyOnCopy}
+              onChange={(v) => setPrefs({ notifyOnCopy: v })}
+            />
+          </SettingsRow>
+          <SettingsRow label="Mask sensitive data">
+            <Toggle
+              checked={prefs.maskSensitive}
+              onChange={(v) => setPrefs({ maskSensitive: v })}
+            />
+          </SettingsRow>
+        </Panel>
+
+        <SubsectionHeader label="Daemon" />
+        <Panel>
+          <SettingsRow label="Version">
+            <span className="text-[13px] text-ide-text">
+              {offline ? "Not running" : (daemonVersion ?? "unknown")}
+            </span>
+          </SettingsRow>
+          <SettingsRow label="Restart">
+            <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
+          </SettingsRow>
+        </Panel>
+      </div>
+    );
+  }
+
+  function renderDisplay() {
+    return (
+      <div className="space-y-2">
+        <SubsectionHeader label="History list" />
+        <Panel>
+          <SettingsRow label="Preview lines">
+            <SliderRow
+              min={1}
+              max={6}
+              step={1}
+              value={prefs.previewLines}
+              onChange={(v) => setPrefs({ previewLines: v })}
+              formatValue={(v) => String(v)}
+            />
+          </SettingsRow>
+          <SettingsRow label="Items displayed">
+            <div className="flex flex-col items-end gap-0.5">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={999}
+                  step={1}
+                  value={prefs.historySize}
+                  onChange={(e) => {
+                    const v = Math.max(1, Math.min(999, Number(e.target.value) || 1));
+                    setPrefs({ historySize: v });
+                  }}
+                  className={numberInputCls}
+                />
+                <span className="text-[13px] text-ide-dim">items</span>
+              </div>
+              <span className="text-[11px] text-ide-faint">1–999</span>
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Preview hover delay">
+            <div className="flex flex-col items-end gap-0.5">
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min={200}
+                  max={100000}
+                  step={100}
+                  value={prefs.previewDelay}
+                  onChange={(e) => {
+                    const v = Math.max(200, Math.min(100000, Number(e.target.value) || 1500));
+                    setPrefs({ previewDelay: v });
+                  }}
+                  className={`${numberInputCls} w-24`}
+                />
+                <span className="text-[13px] text-ide-dim">ms</span>
+              </div>
+              <span className="text-[11px] text-ide-faint">200–100 000 ms</span>
+            </div>
+          </SettingsRow>
+        </Panel>
+
+        <SubsectionHeader label="Popup appearance" hint="How the popup looks when triggered." />
+        <Panel>
+          <SettingsRow label="Preview lines">
+            <SliderRow
+              min={1}
+              max={6}
+              step={1}
+              value={prefs.previewLines}
+              onChange={(v) => setPrefs({ previewLines: v })}
+              formatValue={(v) => String(v)}
+            />
+          </SettingsRow>
+          <SettingsRow label="Image preview height">
+            <div className="flex flex-col items-end gap-0.5">
+              <SliderRow
+                min={1}
+                max={200}
+                step={1}
+                value={prefs.imageMaxHeight}
+                onChange={(v) => setPrefs({ imageMaxHeight: v })}
+                formatValue={(v) => `${v}px`}
+              />
+              <span className="text-[11px] text-ide-faint">Max image thumbnail height (1–200 px)</span>
+            </div>
+          </SettingsRow>
+        </Panel>
+      </div>
+    );
+  }
+
+  function renderSync() {
+    return (
+      <div className="space-y-2">
+        {/* Status banner */}
+        {syncStatus !== null && syncStatus.supabase_configured && (
+          <div className="rounded-ide border border-ide-success/30 bg-ide-success/5 px-3 py-2 text-[12px] text-ide-success">
+            Connected ✓
+            {syncStatus.signed_in && syncStatus.email
+              ? ` — signed in as ${syncStatus.email}`
+              : syncStatus.signed_in
+              ? " — signed in"
+              : " — not signed in"}
+            {syncStatus.passphrase_set ? " — passphrase set ✓" : ""}
+          </div>
+        )}
+        {syncStatus !== null &&
+          syncStatus.supabase_configured &&
+          syncStatus.signed_in &&
+          syncStatus.email && (
+            <div className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-2 text-[12px] text-ide-dim">
+              <span className="font-medium text-ide-text">Signed in as {syncStatus.email}</span>
+              <span className="ml-1">— All devices must use this same account to sync.</span>
+            </div>
+          )}
+
+        {/* ── Local sync (P2P) ── */}
+        <SubsectionHeader
+          label="Local sync (P2P)"
+          hint="Same network, no account needed."
+        />
+        <Panel>
+          <SettingsRow label="Enable P2P (LAN) sync">
+            <div className="flex items-center gap-2">
+              <LimitsMsg field="p2p_enabled" />
+              <Toggle
+                checked={config.p2p_enabled}
+                onChange={(v) => void handleP2pToggle(v)}
+                disabled={offline}
+              />
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Sync on Wi-Fi only">
+            <div className="flex items-center gap-2">
+              <LimitsMsg field="sync_on_wifi_only" />
+              <Toggle
+                checked={syncOnWifiOnly}
+                onChange={(v) => void handleWifiOnlyToggle(v)}
+                disabled={offline}
+              />
+            </div>
+          </SettingsRow>
+        </Panel>
+
+        {/* ── Cloud sync (Supabase) ── */}
+        <SubsectionHeader
+          label="Cloud sync (Supabase)"
+          hint="Syncs over the internet via your Supabase project."
+        />
+        <Panel>
+          <SettingsRow label="Supabase URL">
+            <input
+              type="url"
+              className={inputCls}
+              placeholder="https://your-project.supabase.co"
+              value={supabaseUrl}
+              onChange={(e) => setSupabaseUrl(e.target.value)}
+              disabled={offline}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </SettingsRow>
+          <SettingsRow label="Supabase anon key">
+            <div className="flex flex-col items-end gap-0.5">
+              <input
+                type="password"
+                className={inputCls}
+                placeholder={
+                  syncStatus?.supabase_configured && !supabaseKey
+                    ? "set ✓ (leave blank to keep)"
+                    : "eyJ…"
+                }
+                value={supabaseKey}
+                onChange={(e) => setSupabaseKey(e.target.value)}
+                disabled={offline}
+                autoComplete="off"
+                spellCheck={false}
+              />
+              {syncStatus?.supabase_configured && !supabaseKey && (
+                <span className="text-[11px] text-ide-success">set ✓</span>
+              )}
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Sync passphrase">
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-2">
+                <input
+                  type="password"
+                  className={inputCls}
+                  placeholder="Shared passphrase…"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  disabled={offline}
+                  autoComplete="new-password"
+                  spellCheck={false}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleSetPassphrase();
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={offline || passphrase.trim() === ""}
+                  onClick={() => void handleSetPassphrase()}
+                  className={btnCls}
+                >
+                  Set
+                </button>
+              </div>
+              {passphraseSavedMsg !== null && (
+                <span
+                  className={[
+                    "text-[11px]",
+                    passphraseSavedMsg === "Saved" ? "text-ide-success" : "text-ide-danger",
+                  ].join(" ")}
+                >
+                  {passphraseSavedMsg}
+                </span>
+              )}
+              <span className="text-[11px] text-ide-faint">
+                Same passphrase on every device to sync.
+              </span>
+            </div>
+          </SettingsRow>
+          {testMsg !== null && (
+            <div
+              className={[
+                "border-t border-ide-divider px-3 py-2 text-[12px]",
+                testMsg.ok ? "text-ide-success" : "text-ide-danger",
+              ].join(" ")}
+            >
+              {testMsg.ok ? "✓ " : "✗ "}
+              {testMsg.text}
+            </div>
+          )}
+          <div className="flex items-center justify-end gap-3 border-t border-ide-divider px-3 py-2">
+            {saveError !== null && (
+              <span className="text-[13px] text-ide-danger">{saveError}</span>
+            )}
+            {savedMsg && !saveError && (
+              <span className="text-[13px] text-ide-success">Saved</span>
+            )}
+            <button
+              type="button"
+              disabled={offline || testing}
+              onClick={() => void handleTestConnection()}
+              className={btnCls}
+            >
+              {testing ? "Testing…" : "Test connection"}
+            </button>
+            <button
+              type="button"
+              disabled={offline}
+              onClick={() => void handleSaveConfig()}
+              className={btnCls}
+            >
+              Save
+            </button>
+          </div>
+        </Panel>
+
+        {/* Sync status detail */}
+        {syncStatus !== null && (
+          <>
+            <SubsectionHeader label="Status" />
+            <Panel>
+              <div className="px-3 py-2 space-y-1">
+                <StatusRow label="Passphrase set" ok={syncStatus.passphrase_set} />
+                <StatusRow label="Supabase configured" ok={syncStatus.supabase_configured} />
+                <StatusRow label="Signed in" ok={syncStatus.signed_in} />
+                <div className="flex items-center gap-2 text-[13px] text-ide-dim pt-0.5">
+                  <span className="w-[140px] shrink-0">Last sync</span>
+                  <span className="text-ide-text">{formatLastSync(syncStatus.last_sync_ms)}</span>
+                </div>
+              </div>
+            </Panel>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function renderShortcuts() {
+    return (
+      <div className="space-y-2">
+        <Panel>
+          <SettingsRow label="Open popup">
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-2">
+                <ShortcutCapture
+                  value={pendingShortcut}
+                  onChange={setPendingShortcut}
+                />
+                <button
+                  type="button"
+                  disabled={pendingShortcut === currentShortcut}
+                  onClick={() => void handleSaveShortcut()}
+                  className={btnCls}
+                >
+                  Save
+                </button>
+              </div>
+              {shortcutMsg !== null && (
+                <span
+                  className={[
+                    "text-[11px]",
+                    shortcutMsg.isError ? "text-ide-danger" : "text-ide-success",
+                  ].join(" ")}
+                >
+                  {shortcutMsg.text}
+                </span>
+              )}
+              {/* W4-1: shortened help text */}
+              <span className="text-[11px] text-ide-faint">
+                Click then press a combo. OS-reserved keys (Cmd+Space etc.) cannot be overridden.
+              </span>
+            </div>
+          </SettingsRow>
+        </Panel>
+      </div>
+    );
+  }
+
+  function renderStorage() {
+    return (
+      <div className="space-y-2">
+        <Panel>
+          <SettingsRow label="Max clip text size (MB)">
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0.1}
+                max={100}
+                step={0.1}
+                value={maxTextMb}
+                onChange={(e) => setMaxTextMb(Math.max(0.1, Number(e.target.value) || 1))}
+                onBlur={() => void saveLimitsField("max_text_size_bytes", { max_text_size_bytes: mbToBytes(maxTextMb) })}
+                className={`${numberInputCls} w-24`}
+                disabled={offline}
+              />
+              <LimitsMsg field="max_text_size_bytes" />
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Max clip image size (MB)">
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={500}
+                step={1}
+                value={maxImageMb}
+                onChange={(e) => setMaxImageMb(Math.max(1, Number(e.target.value) || 25))}
+                onBlur={() => void saveLimitsField("max_image_size_bytes", { max_image_size_bytes: mbToBytes(maxImageMb) })}
+                className={`${numberInputCls} w-24`}
+                disabled={offline}
+              />
+              <LimitsMsg field="max_image_size_bytes" />
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Max clip file size (MB)">
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={2000}
+                step={1}
+                value={maxFileMb}
+                onChange={(e) => setMaxFileMb(Math.max(1, Number(e.target.value) || 100))}
+                onBlur={() => void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: mbToBytes(maxFileMb) })}
+                className={`${numberInputCls} w-24`}
+                disabled={offline}
+              />
+              <LimitsMsg field="max_file_size_bytes" />
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Local storage limit (MB)">
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={50}
+                max={50000}
+                step={50}
+                value={quotaMb}
+                onChange={(e) => setQuotaMb(Math.max(50, Number(e.target.value) || 500))}
+                onBlur={() => void saveLimitsField("storage_quota_bytes", { storage_quota_bytes: mbToBytes(quotaMb) })}
+                className={`${numberInputCls} w-24`}
+                disabled={offline}
+              />
+              <LimitsMsg field="storage_quota_bytes" />
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Max stored items">
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={100000}
+                step={1}
+                value={historyLimit}
+                onChange={(e) => setHistoryLimit(Math.max(1, Number(e.target.value) || 1000))}
+                onBlur={() => void saveLimitsField("history_limit", { history_limit: historyLimit })}
+                className={`${numberInputCls} w-24`}
+                disabled={offline}
+              />
+              <LimitsMsg field="history_limit" />
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Sensitive auto-wipe delay (s)">
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={86400}
+                step={1}
+                value={sensitiveTtlSecs}
+                onChange={(e) => setSensitiveTtlSecs(Math.max(1, Number(e.target.value) || 30))}
+                onBlur={() => void saveLimitsField("sensitive_ttl_secs", { sensitive_ttl_secs: sensitiveTtlSecs })}
+                className={`${numberInputCls} w-24`}
+                disabled={offline}
+              />
+              <LimitsMsg field="sensitive_ttl_secs" />
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Image quality (1–100)">
+            <div className="flex items-center gap-2">
+              <SliderRow
+                min={1}
+                max={100}
+                step={1}
+                value={imageQuality}
+                onChange={(v) => setImageQuality(v)}
+                formatValue={(v) => String(v)}
+              />
+              <LimitsMsg field="image_quality" />
+            </div>
+          </SettingsRow>
+          {/* Save button for image quality (slider — no onBlur like inputs) */}
+          <div className="flex justify-end border-t border-ide-divider px-3 py-2">
+            <button
+              type="button"
+              disabled={offline}
+              onClick={() => void saveLimitsField("image_quality", { image_quality: imageQuality })}
+              className={btnCls}
+            >
+              Save image quality
+            </button>
+          </div>
+        </Panel>
+
+        <SubsectionHeader label="Data" />
+        <Panel>
+          <SettingsRow label="Clear clipboard history">
+            <div className="flex items-center gap-3">
+              {deleteMsg !== null && (
+                <span
+                  className={[
+                    "text-[13px]",
+                    deleteMsg.isError ? "text-ide-danger" : "text-ide-dim",
+                  ].join(" ")}
+                >
+                  {deleteMsg.text}
+                </span>
+              )}
+              {deleteConfirm ? (
+                <span className="flex items-center gap-1.5 text-[13px]">
+                  <span className="text-ide-dim">Delete all history?</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteAll()}
+                    className="rounded-ide border border-ide-danger/50 bg-ide-elevated px-2.5 py-1 text-[13px] text-ide-danger hover:bg-ide-hover"
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirm(false)}
+                    className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[13px] text-ide-dim hover:bg-ide-hover"
+                  >
+                    No
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={offline}
+                  onClick={() => setDeleteConfirm(true)}
+                  className={[
+                    "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
+                    "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
+                  ].join(" ")}
+                >
+                  Clear history…
+                </button>
+              )}
+            </div>
+          </SettingsRow>
+        </Panel>
+      </div>
+    );
+  }
+
+  function renderAdvanced() {
+    return (
+      <div className="space-y-2">
+        <div className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-3 text-[13px] text-ide-dim">
+          Advanced daemon and storage limits will appear here in a future release.
+        </div>
+      </div>
     );
   }
 
@@ -786,569 +1399,14 @@ export function SettingsView() {
       )}
 
       {loadState !== "loading" && (
-        <div className="mx-auto max-w-xl space-y-2">
-
-          {/* ── General ──────────────────────────────────────────────────── */}
-          <SectionHeader label="General" />
-          <Panel>
-            <SettingsRow label="Private mode">
-              <div className="flex items-center gap-2">
-                {privateModeError !== null && (
-                  <span className="text-[11px] text-ide-danger">{privateModeError}</span>
-                )}
-                <Toggle
-                  checked={privateMode}
-                  onChange={(v) => void handlePrivateMode(v)}
-                  disabled={offline}
-                />
-              </div>
-            </SettingsRow>
-          </Panel>
-
-          {/* ── Daemon ───────────────────────────────────────────────────── */}
-          <SectionHeader label="Daemon" />
-          <Panel>
-            <SettingsRow label="Version">
-              <span className="text-[13px] text-ide-text">
-                {offline ? "Not running" : (daemonVersion ?? "unknown")}
-              </span>
-            </SettingsRow>
-            <SettingsRow label="Restart">
-              <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
-            </SettingsRow>
-          </Panel>
-
-          {/* ── Display ──────────────────────────────────────────────────── */}
-          <SectionHeader label="Display" />
-          <Panel>
-            {/* W4-2: both slider rows use SliderRow for aligned label/slider/value grid */}
-            <SettingsRow label="Preview lines">
-              <SliderRow
-                min={1}
-                max={6}
-                step={1}
-                value={prefs.previewLines}
-                onChange={(v) => setPrefs({ previewLines: v })}
-                formatValue={(v) => String(v)}
-              />
-            </SettingsRow>
-            <SettingsRow label="Row height">
-              <SliderRow
-                min={24}
-                max={64}
-                step={4}
-                value={prefs.previewSize}
-                onChange={(v) => setPrefs({ previewSize: v })}
-                formatValue={(v) => `${v}px`}
-              />
-            </SettingsRow>
-            <SettingsRow label="Image thumbnail height">
-              <div className="flex flex-col items-end gap-0.5">
-                <SliderRow
-                  min={1}
-                  max={200}
-                  step={1}
-                  value={prefs.imageMaxHeight}
-                  onChange={(v) => setPrefs({ imageMaxHeight: v })}
-                  formatValue={(v) => `${v}px`}
-                />
-                <span className="text-[11px] text-ide-faint">
-                  Max image preview height (1–200 px).
-                </span>
-              </div>
-            </SettingsRow>
-            <SettingsRow label="History size">
-              <div className="flex flex-col items-end gap-0.5">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={1}
-                    max={999}
-                    step={1}
-                    value={prefs.historySize}
-                    onChange={(e) => {
-                      const v = Math.max(1, Math.min(999, Number(e.target.value) || 1));
-                      setPrefs({ historySize: v });
-                    }}
-                    className={numberInputCls}
-                  />
-                  <span className="text-[13px] text-ide-dim">items</span>
-                </div>
-                <span className="text-[11px] text-ide-faint">
-                  Items displayed (1–999).
-                </span>
-              </div>
-            </SettingsRow>
-            <SettingsRow label="Preview delay">
-              <div className="flex flex-col items-end gap-0.5">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={200}
-                    max={100000}
-                    step={100}
-                    value={prefs.previewDelay}
-                    onChange={(e) => {
-                      const v = Math.max(200, Math.min(100000, Number(e.target.value) || 1500));
-                      setPrefs({ previewDelay: v });
-                    }}
-                    className={`${numberInputCls} w-24`}
-                  />
-                  <span className="text-[13px] text-ide-dim">ms</span>
-                </div>
-                <span className="text-[11px] text-ide-faint">
-                  Hover delay before large preview (200–100 000 ms).
-                </span>
-              </div>
-            </SettingsRow>
-            <SettingsRow label="Mask sensitive data">
-              <Toggle
-                checked={prefs.maskSensitive}
-                onChange={(v) => setPrefs({ maskSensitive: v })}
-              />
-            </SettingsRow>
-          </Panel>
-
-          {/* ── Notifications (W4-6) ────────────────────────────────── */}
-          {/* Maccy-style copy feedback toggles. Both default off (Maccy default).
-              Persisted to localStorage via UIPrefs — no daemon involvement. */}
-          <SectionHeader label="Notifications" />
-          <Panel>
-            <SettingsRow label="Play sound on copy">
-              <Toggle
-                checked={prefs.playSoundOnCopy}
-                onChange={(v) => setPrefs({ playSoundOnCopy: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Show notification on copy">
-              <Toggle
-                checked={prefs.notifyOnCopy}
-                onChange={(v) => setPrefs({ notifyOnCopy: v })}
-              />
-            </SettingsRow>
-          </Panel>
-
-          {/* ── Shortcuts ────────────────────────────────────────────────── */}
-          {/* W4-3: SettingsRow now has min-w-[160px] on the label so "Open popup"
-              never wraps; all label columns align with other rows. */}
-          <SectionHeader label="Shortcuts" />
-          <Panel>
-            <SettingsRow label="Open popup">
-              <div className="flex flex-col items-end gap-1">
-                <div className="flex items-center gap-2">
-                  <ShortcutCapture
-                    value={pendingShortcut}
-                    onChange={setPendingShortcut}
-                  />
-                  <button
-                    type="button"
-                    disabled={pendingShortcut === currentShortcut}
-                    onClick={() => void handleSaveShortcut()}
-                    className={[
-                      "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
-                      "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-                    ].join(" ")}
-                  >
-                    Save
-                  </button>
-                </div>
-                {shortcutMsg !== null && (
-                  <span
-                    className={[
-                      "text-[11px]",
-                      shortcutMsg.isError ? "text-ide-danger" : "text-ide-success",
-                    ].join(" ")}
-                  >
-                    {shortcutMsg.text}
-                  </span>
-                )}
-                {/* W4-1: shortened help text */}
-                <span className="text-[11px] text-ide-faint">
-                  Click then press a combo. OS-reserved keys (Cmd+Space etc.) cannot be overridden.
-                </span>
-              </div>
-            </SettingsRow>
-          </Panel>
-
-          {/* ── Sync ─────────────────────────────────────────────────────── */}
-          <SectionHeader label="Sync" />
-          {syncStatus !== null && syncStatus.supabase_configured && (
-            <div className="mb-1 rounded-ide border border-ide-success/30 bg-ide-success/5 px-3 py-2 text-[12px] text-ide-success">
-              Connected ✓
-              {syncStatus.signed_in && syncStatus.email
-                ? ` — signed in as ${syncStatus.email}`
-                : syncStatus.signed_in
-                ? " — signed in"
-                : " — not signed in"}
-              {syncStatus.passphrase_set ? " — passphrase set ✓" : ""}
-            </div>
-          )}
-          {syncStatus !== null &&
-            syncStatus.supabase_configured &&
-            syncStatus.signed_in &&
-            syncStatus.email && (
-              <div className="mb-1 rounded-ide border border-ide-border bg-ide-elevated px-3 py-2 text-[12px] text-ide-dim">
-                <span className="font-medium text-ide-text">
-                  Signed in as {syncStatus.email}
-                </span>
-                <span className="ml-1">
-                  — All devices must use this same account to sync.
-                </span>
-              </div>
-            )}
-          <Panel>
-            {/* Sync parity: P2P toggle (Android already has this) */}
-            <SettingsRow label="Enable P2P (LAN) sync">
-              <div className="flex items-center gap-2">
-                <LimitsMsg field="p2p_enabled" />
-                <Toggle
-                  checked={config.p2p_enabled}
-                  onChange={(v) => void handleP2pToggle(v)}
-                  disabled={offline}
-                />
-              </div>
-            </SettingsRow>
-            {/* Sync parity: wifi-only toggle */}
-            <SettingsRow label="Sync on Wi-Fi only">
-              <div className="flex items-center gap-2">
-                <LimitsMsg field="sync_on_wifi_only" />
-                <Toggle
-                  checked={syncOnWifiOnly}
-                  onChange={(v) => void handleWifiOnlyToggle(v)}
-                  disabled={offline}
-                />
-              </div>
-            </SettingsRow>
-            <SettingsRow label="Supabase URL">
-              <input
-                type="url"
-                className={inputCls}
-                placeholder="https://your-project.supabase.co"
-                value={supabaseUrl}
-                onChange={(e) => setSupabaseUrl(e.target.value)}
-                disabled={offline}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </SettingsRow>
-            <SettingsRow label="Supabase anon key">
-              <div className="flex flex-col items-end gap-0.5">
-                <input
-                  type="password"
-                  className={inputCls}
-                  placeholder={
-                    syncStatus?.supabase_configured && !supabaseKey
-                      ? "set ✓ (leave blank to keep)"
-                      : "eyJ…"
-                  }
-                  value={supabaseKey}
-                  onChange={(e) => setSupabaseKey(e.target.value)}
-                  disabled={offline}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                {syncStatus?.supabase_configured && !supabaseKey && (
-                  <span className="text-[11px] text-ide-success">set ✓</span>
-                )}
-              </div>
-            </SettingsRow>
-            {testMsg !== null && (
-              <div
-                className={[
-                  "border-t border-ide-divider px-3 py-2 text-[12px]",
-                  testMsg.ok ? "text-ide-success" : "text-ide-danger",
-                ].join(" ")}
-              >
-                {testMsg.ok ? "✓ " : "✗ "}
-                {testMsg.text}
-              </div>
-            )}
-            <div className="flex items-center justify-end gap-3 border-t border-ide-divider px-3 py-2">
-              {saveError !== null && (
-                <span className="text-[13px] text-ide-danger">{saveError}</span>
-              )}
-              {savedMsg && !saveError && (
-                <span className="text-[13px] text-ide-success">Saved</span>
-              )}
-              <button
-                type="button"
-                disabled={offline || testing}
-                onClick={() => void handleTestConnection()}
-                className={[
-                  "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
-                  "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-                ].join(" ")}
-              >
-                {testing ? "Testing…" : "Test connection"}
-              </button>
-              <button
-                type="button"
-                disabled={offline}
-                onClick={() => void handleSaveConfig()}
-                className={[
-                  "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
-                  "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-                ].join(" ")}
-              >
-                Save
-              </button>
-            </div>
-          </Panel>
-
-          {/* ── Cloud Sync ───────────────────────────────────────────────── */}
-          <SectionHeader label="Cloud Sync" />
-          <Panel>
-            <SettingsRow label="Sync passphrase">
-              <div className="flex flex-col items-end gap-1">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="password"
-                    className={inputCls}
-                    placeholder="Shared passphrase…"
-                    value={passphrase}
-                    onChange={(e) => setPassphrase(e.target.value)}
-                    disabled={offline}
-                    autoComplete="new-password"
-                    spellCheck={false}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void handleSetPassphrase();
-                    }}
-                  />
-                  <button
-                    type="button"
-                    disabled={offline || passphrase.trim() === ""}
-                    onClick={() => void handleSetPassphrase()}
-                    className={[
-                      "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
-                      "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-                    ].join(" ")}
-                  >
-                    Set
-                  </button>
-                </div>
-                {passphraseSavedMsg !== null && (
-                  <span
-                    className={[
-                      "text-[11px]",
-                      passphraseSavedMsg === "Saved"
-                        ? "text-ide-success"
-                        : "text-ide-danger",
-                    ].join(" ")}
-                  >
-                    {passphraseSavedMsg}
-                  </span>
-                )}
-                <span className="text-[11px] text-ide-faint">
-                  Same passphrase on every device to sync.
-                </span>
-              </div>
-            </SettingsRow>
-            <div className="border-t border-ide-divider px-3 py-2 space-y-1">
-              <div className="text-[11px] uppercase tracking-wide text-ide-faint mb-1">
-                Status
-              </div>
-              {syncStatus === null ? (
-                <div className="text-[13px] text-ide-dim">
-                  {offline
-                    ? "Unavailable (daemon offline)"
-                    : "Not available in this daemon build"}
-                </div>
-              ) : (
-                <div className="space-y-0.5">
-                  <StatusRow label="Passphrase set" ok={syncStatus.passphrase_set} />
-                  <StatusRow label="Supabase configured" ok={syncStatus.supabase_configured} />
-                  <StatusRow label="Signed in" ok={syncStatus.signed_in} />
-                  <div className="flex items-center gap-2 text-[13px] text-ide-dim pt-0.5">
-                    <span className="w-[140px] shrink-0">Last sync</span>
-                    <span className="text-ide-text">
-                      {formatLastSync(syncStatus.last_sync_ms)}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </Panel>
-
-          {/* ── Storage / Limits ─────────────────────────────────────────── */}
-          {/* All fields read from get_config and written via set_config on commit.
-              Byte fields are displayed in MB; converted back to raw bytes before
-              sending to the daemon. */}
-          <SectionHeader label="Storage / Limits" />
-          <Panel>
-            <SettingsRow label="Max clip text size (MB)">
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={0.1}
-                  max={100}
-                  step={0.1}
-                  value={maxTextMb}
-                  onChange={(e) => setMaxTextMb(Math.max(0.1, Number(e.target.value) || 1))}
-                  onBlur={() => void saveLimitsField("max_text_size_bytes", { max_text_size_bytes: mbToBytes(maxTextMb) })}
-                  className={`${numberInputCls} w-24`}
-                  disabled={offline}
-                />
-                <LimitsMsg field="max_text_size_bytes" />
-              </div>
-            </SettingsRow>
-            <SettingsRow label="Max clip image size (MB)">
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={500}
-                  step={1}
-                  value={maxImageMb}
-                  onChange={(e) => setMaxImageMb(Math.max(1, Number(e.target.value) || 25))}
-                  onBlur={() => void saveLimitsField("max_image_size_bytes", { max_image_size_bytes: mbToBytes(maxImageMb) })}
-                  className={`${numberInputCls} w-24`}
-                  disabled={offline}
-                />
-                <LimitsMsg field="max_image_size_bytes" />
-              </div>
-            </SettingsRow>
-            <SettingsRow label="Max clip file size (MB)">
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={2000}
-                  step={1}
-                  value={maxFileMb}
-                  onChange={(e) => setMaxFileMb(Math.max(1, Number(e.target.value) || 100))}
-                  onBlur={() => void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: mbToBytes(maxFileMb) })}
-                  className={`${numberInputCls} w-24`}
-                  disabled={offline}
-                />
-                <LimitsMsg field="max_file_size_bytes" />
-              </div>
-            </SettingsRow>
-            <SettingsRow label="Local storage limit (MB)">
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={50}
-                  max={50000}
-                  step={50}
-                  value={quotaMb}
-                  onChange={(e) => setQuotaMb(Math.max(50, Number(e.target.value) || 500))}
-                  onBlur={() => void saveLimitsField("storage_quota_bytes", { storage_quota_bytes: mbToBytes(quotaMb) })}
-                  className={`${numberInputCls} w-24`}
-                  disabled={offline}
-                />
-                <LimitsMsg field="storage_quota_bytes" />
-              </div>
-            </SettingsRow>
-            <SettingsRow label="Max stored items">
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={100000}
-                  step={1}
-                  value={historyLimit}
-                  onChange={(e) => setHistoryLimit(Math.max(1, Number(e.target.value) || 1000))}
-                  onBlur={() => void saveLimitsField("history_limit", { history_limit: historyLimit })}
-                  className={`${numberInputCls} w-24`}
-                  disabled={offline}
-                />
-                <LimitsMsg field="history_limit" />
-              </div>
-            </SettingsRow>
-            <SettingsRow label="Sensitive auto-wipe delay (s)">
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={86400}
-                  step={1}
-                  value={sensitiveTtlSecs}
-                  onChange={(e) => setSensitiveTtlSecs(Math.max(1, Number(e.target.value) || 30))}
-                  onBlur={() => void saveLimitsField("sensitive_ttl_secs", { sensitive_ttl_secs: sensitiveTtlSecs })}
-                  className={`${numberInputCls} w-24`}
-                  disabled={offline}
-                />
-                <LimitsMsg field="sensitive_ttl_secs" />
-              </div>
-            </SettingsRow>
-            <SettingsRow label="Image quality (1–100)">
-              <div className="flex items-center gap-2">
-                <SliderRow
-                  min={1}
-                  max={100}
-                  step={1}
-                  value={imageQuality}
-                  onChange={(v) => setImageQuality(v)}
-                  formatValue={(v) => String(v)}
-                />
-                <LimitsMsg field="image_quality" />
-              </div>
-            </SettingsRow>
-            {/* Save button for image quality (slider — no onBlur like inputs) */}
-            <div className="flex justify-end border-t border-ide-divider px-3 py-2">
-              <button
-                type="button"
-                disabled={offline}
-                onClick={() => void saveLimitsField("image_quality", { image_quality: imageQuality })}
-                className={[
-                  "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
-                  "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-                ].join(" ")}
-              >
-                Save image quality
-              </button>
-            </div>
-          </Panel>
-
-          {/* ── Data ─────────────────────────────────────────────────────── */}
-          <SectionHeader label="Data" />
-          <Panel>
-            <SettingsRow label="Clear clipboard history">
-              <div className="flex items-center gap-3">
-                {deleteMsg !== null && (
-                  <span
-                    className={[
-                      "text-[13px]",
-                      deleteMsg.isError ? "text-ide-danger" : "text-ide-dim",
-                    ].join(" ")}
-                  >
-                    {deleteMsg.text}
-                  </span>
-                )}
-                {deleteConfirm ? (
-                  <span className="flex items-center gap-1.5 text-[13px]">
-                    <span className="text-ide-dim">Delete all history?</span>
-                    <button
-                      type="button"
-                      onClick={() => void handleDeleteAll()}
-                      className="rounded-ide border border-ide-danger/50 bg-ide-elevated px-2.5 py-1 text-[13px] text-ide-danger hover:bg-ide-hover"
-                    >
-                      Yes
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDeleteConfirm(false)}
-                      className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[13px] text-ide-dim hover:bg-ide-hover"
-                    >
-                      No
-                    </button>
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={offline}
-                    onClick={() => setDeleteConfirm(true)}
-                    className={[
-                      "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
-                      "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-                    ].join(" ")}
-                  >
-                    Clear history…
-                  </button>
-                )}
-              </div>
-            </SettingsRow>
-          </Panel>
+        <div className="mx-auto max-w-xl">
+          <TabBar active={activeTab} onChange={setActiveTab} />
+          {activeTab === "general"   && renderGeneral()}
+          {activeTab === "display"   && renderDisplay()}
+          {activeTab === "sync"      && renderSync()}
+          {activeTab === "shortcuts" && renderShortcuts()}
+          {activeTab === "storage"   && renderStorage()}
+          {activeTab === "advanced"  && renderAdvanced()}
         </div>
       )}
     </ViewShell>

@@ -9,14 +9,14 @@ export type ViewId = "history" | "devices" | "settings" | "about";
 const PREFS_KEY = "copypaste-ui-prefs-v1";
 
 export interface UIPrefs {
-  /** Number of text lines shown in a clip preview (1–10). */
+  /** Number of text lines shown in a clip preview (1–6). */
   previewLines: number;
-  /** Preview row height in px (28–80). */
+  /** Preview row height in px (24–64). Kept for layout wiring; not exposed in UI (row height is now natural padding). */
   previewSize: number;
   /** When true, redact sensitive_spans ranges in clip previews. */
   maskSensitive: boolean;
   /**
-   * Max height (px) of the image thumbnail bounding box — Maccy parity.
+   * Max height (px) of the image thumbnail bounding box in the popup — Maccy parity.
    * The image is scaled to fit within 340 × imageMaxHeight, aspect-preserving,
    * never upscaled. Default 40, range 1–200.
    */
@@ -36,12 +36,12 @@ export interface UIPrefs {
   previewDelay: number;
   /**
    * Play a soft system sound (Tink) when an item is copied — Maccy parity.
-   * Default false (Maccy default is off).
+   * Default true.
    */
   playSoundOnCopy: boolean;
   /**
    * Show a macOS notification banner when an item is copied — Maccy parity.
-   * Default false (Maccy default is off).
+   * Default true.
    */
   notifyOnCopy: boolean;
 }
@@ -53,8 +53,8 @@ const DEFAULT_PREFS: UIPrefs = {
   imageMaxHeight: 40,
   historySize: 200,
   previewDelay: 1500,
-  playSoundOnCopy: false,
-  notifyOnCopy: false,
+  playSoundOnCopy: true,
+  notifyOnCopy: true,
 };
 
 function loadPrefs(): UIPrefs {
