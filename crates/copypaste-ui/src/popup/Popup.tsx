@@ -394,7 +394,7 @@ function PopupRow({
         "flex items-center gap-2 px-3 cursor-pointer transition-colors duration-75 select-none",
         selected ? "bg-white/10" : "hover:bg-white/5",
       ].join(" ")}
-      style={{ minHeight: isImage ? Math.max(itemHeight, 50) : itemHeight }}
+      style={{ minHeight: isImage ? Math.max(rowH, 50) : rowH }}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     >
