@@ -316,7 +316,15 @@ class ClipboardService : Service() {
                             ClipboardRepository.localAesEncrypt(plaintext.toByteArray(Charsets.UTF_8), key)
                         }
                         val lamportTs = System.currentTimeMillis()
-                        syncManager.uploadItem(itemId, blob.ciphertext, blob.nonce, "text/plain", lamportTs)
+                        // Collapse "text/plain" -> canonical "text" at the sync
+                        // boundary. The relay server only accepts
+                        // {"text","image","file"} (rejects "text/plain" with HTTP
+                        // 400) and the daemon ingest only processes
+                        // content_type == "text", so an un-normalized value makes
+                        // EVERY relay push silently dropped. Mirrors the P2P /
+                        // Supabase paths which already send "text".
+                        val contentType = ClipboardRepository.normalizeContentTypeForSync("text/plain")
+                        syncManager.uploadItem(itemId, blob.ciphertext, blob.nonce, contentType, lamportTs)
                     } catch (e: Exception) {
                         Log.w(TAG, "Relay upload failed: ${e.message}")
                     }
