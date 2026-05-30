@@ -95,6 +95,21 @@ export interface SyncStatus {
   degraded_reason?: string | null;
 }
 
+/** Daemon `status` reply. `build_version`/`pid` were added for stale-daemon
+ *  detection after an upgrade and may be absent on older daemons. */
+export interface DaemonStatus {
+  status: "running" | "degraded" | string;
+  private_mode: boolean;
+  ready: boolean;
+  degraded: boolean;
+  degraded_reason?: string | null;
+  /** `<crate-version>+<git-sha>` (or just `<crate-version>`). Absent on a
+   *  daemon predating this field — itself a strong signal it is stale. */
+  build_version?: string | null;
+  /** Daemon OS process id, if reported. */
+  pid?: number | null;
+}
+
 export interface PairedDevice {
   fingerprint: string;
   name: string;
@@ -120,7 +135,7 @@ export const MAX_PAGE = 1000;
 // ---------------------------------------------------------------------------
 
 export const api = {
-  status: () => ipcCall("status"),
+  status: () => ipcCall<DaemonStatus>("status"),
 
   historyPage: (limit: number, offset: number) =>
     ipcCall<HistoryPage>("history_page", { limit: Math.min(limit, MAX_PAGE), offset }),
@@ -217,4 +232,52 @@ export async function pairingQrSvg(): Promise<PairingQr> {
   } catch (e) {
     throw new Error(String(e));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Daemon UPGRADE/RESTART lifecycle (Tauri-direct — talk to launchctl, NOT the
+// daemon IPC, so they work even when the daemon is wedged/unresponsive).
+// ---------------------------------------------------------------------------
+
+/** The app's own build version (crate version, e.g. "0.5.2"). */
+export async function appVersion(): Promise<string> {
+  return invoke<string>("app_version");
+}
+
+/**
+ * Restart the daemon so the freshly-installed binary takes over
+ * (`launchctl kickstart -k`, with a bootout+bootstrap fallback). Throws a
+ * plain `Error` with the launchctl failure message on failure.
+ */
+export async function restartDaemon(): Promise<void> {
+  try {
+    await invoke<void>("restart_daemon");
+  } catch (e) {
+    throw new Error(String(e));
+  }
+}
+
+/**
+ * Compare the running daemon's build to the app's own. Returns the daemon's
+ * version when it is STALE (survived an upgrade), else `null`.
+ *
+ * A daemon is considered stale when its `build_version` semver prefix (the part
+ * before any `+git-sha`) differs from the app's version, OR when it reports no
+ * `build_version` at all (a build predating this field — itself a stale signal
+ * once this app ships). Best-effort: any error (e.g. daemon offline) yields
+ * `null` so callers never block startup on this check.
+ */
+export async function detectStaleDaemon(): Promise<string | null> {
+  let appVer: string;
+  let status: DaemonStatus;
+  try {
+    [appVer, status] = await Promise.all([appVersion(), api.status()]);
+  } catch {
+    return null;
+  }
+  const reported = status.build_version ?? null;
+  // No version field => daemon predates this build => stale by definition.
+  if (reported === null || reported === "") return "unknown";
+  const reportedPrefix = reported.split("+", 1)[0];
+  return reportedPrefix === appVer ? null : reported;
 }

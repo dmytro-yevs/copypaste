@@ -60,6 +60,17 @@ cask "copypaste" do
       system_command "/bin/launchctl",
                      args:         ["bootstrap", "gui/#{uid}", plist.to_s],
                      must_succeed: false
+
+      # UPGRADE FIX: on a `brew upgrade`/`reinstall` the OLD daemon is already
+      # bootstrapped, so the `bootstrap` above is a no-op and the stale process
+      # keeps holding the IPC socket — the new UI then reaches old code (e.g.
+      # "unknown method"). `kickstart -k` terminates the running instance and
+      # relaunches it from the plist (the freshly-installed binary), so the new
+      # daemon serves the new code without the user having to open the app or
+      # reboot. Best-effort: a failure here never aborts the install.
+      system_command "/bin/launchctl",
+                     args:         ["kickstart", "-k", "gui/#{uid}/com.copypaste.daemon"],
+                     must_succeed: false
     end
   end
 

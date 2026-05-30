@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ViewShell } from "../components/ViewShell";
 import { api, formatWallTime, IpcError, type HistoryEntry } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
+import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
 
 // ---------------------------------------------------------------------------
@@ -790,14 +791,19 @@ export function HistoryView() {
     );
   } else if (loadState === "offline") {
     body = (
-      <div className="flex h-full items-center justify-center text-[13px] text-ide-dim">
-        Daemon not running.
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-[13px] text-ide-dim">
+        <span>Daemon not running.</span>
+        <RestartDaemonButton onRestarted={() => void load()} />
       </div>
     );
   } else if (loadState === "error") {
     body = (
-      <div className="flex h-full items-center justify-center text-[13px] text-ide-danger">
-        Failed to load history.
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-[13px] text-ide-danger">
+        <span>Failed to load history.</span>
+        <RestartDaemonButton
+          label="Restart daemon"
+          onRestarted={() => void load()}
+        />
       </div>
     );
   } else if (filtered.length === 0 && items.length === 0) {

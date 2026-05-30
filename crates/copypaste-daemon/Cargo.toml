@@ -55,6 +55,12 @@ base64 = { version = "0.22" }
 # Beta W2.3 (arch-1): canonical Supabase client (auth + realtime).
 copypaste-supabase = { path = "../copypaste-supabase", optional = true }
 
+# UPGRADE/RESTART lifecycle: SIGTERM a stale predecessor daemon during socket
+# takeover (see `bind_with_stale_cleanup` in src/ipc.rs). `libc::kill` is the
+# minimal wrapper; libc is already in the dependency tree transitively.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
 objc2-foundation.workspace = true
