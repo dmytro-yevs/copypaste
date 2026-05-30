@@ -104,6 +104,7 @@ pub fn run() {
             stop_recording_shortcut,
             record_prior_app,
             paste_to_frontmost,
+            hide_popup,
         ])
         .setup(|app| {
             // Load persisted config now that we have the app handle.
@@ -335,6 +336,33 @@ fn record_prior_app(handle: tauri::AppHandle) {
     }
     #[cfg(not(target_os = "macos"))]
     let _ = handle;
+}
+
+/// Hide the popup window without surfacing the main window (D7 fix).
+///
+/// On macOS, simply calling `win.hide()` from JS causes the OS to promote the
+/// next window of the same Regular-policy app to the front — which is our main
+/// window.  This command first activates the prior (external) app so that macOS
+/// hands focus there instead of to our main window, then hides the popup.
+/// This is the correct hide path for both Esc and any other dismiss action.
+#[tauri::command]
+fn hide_popup(handle: tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        // Activate the prior app first so macOS does not auto-focus our main
+        // window when the popup disappears (D7: Esc was surfacing main window).
+        let bundle_id: Option<String> = handle
+            .try_state::<PriorApp>()
+            .and_then(|s| s.0.lock().ok().map(|g| g.clone()))
+            .flatten();
+        if let Some(ref bid) = bundle_id {
+            activate_app_by_bundle_id(bid);
+        }
+    }
+
+    if let Some(popup) = handle.get_webview_window("popup") {
+        let _ = popup.hide();
+    }
 }
 
 /// Activate the previously-focused application (restoring focus) and then
@@ -650,14 +678,28 @@ fn setup_popup_window(app: &tauri::App) -> tauri::Result<()> {
             .build()?
     };
 
-    // Hide on focus loss (user clicked away).
-    popup.on_window_event(|event| {
+    // D6 fix: hide the popup when it loses focus (user clicked outside).
+    // Clone the WebviewWindow handle (cheap Arc clone in Tauri 2) so we own it
+    // inside the 'static closure — the closure only receives &WindowEvent.
+    // We use the app handle to look up the prior-app state and activate it first
+    // (same logic as hide_popup) so macOS doesn't promote the main window (D7).
+    let popup_for_blur = popup.clone();
+    popup.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(false) = event {
-            // The window itself is `self` inside this closure; we cannot call
-            // .hide() here because we only have &WindowEvent, not the handle.
-            // We emit a JS event instead; the frontend listens and calls
-            // getCurrentWindow().hide() on Esc / blur.  The native hide on blur
-            // is handled by the JS focus-out listener in Popup.tsx.
+            // Activate the prior external app before hiding so macOS does not
+            // auto-focus our main window (mirrors the hide_popup command logic).
+            #[cfg(target_os = "macos")]
+            {
+                let bundle_id: Option<String> = popup_for_blur
+                    .app_handle()
+                    .try_state::<PriorApp>()
+                    .and_then(|s| s.0.lock().ok().map(|g| g.clone()))
+                    .flatten();
+                if let Some(ref bid) = bundle_id {
+                    activate_app_by_bundle_id(bid);
+                }
+            }
+            let _ = popup_for_blur.hide();
         }
     });
 

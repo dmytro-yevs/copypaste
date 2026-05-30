@@ -82,18 +82,19 @@ export function Popup() {
     }
   }, [selectedIdx]);
 
-  // Fix #3: hide is async (win.hide() returns a promise). Await it so the
-  // window is actually hidden before we restore focus to the prior app and
-  // synthesise the paste — otherwise our popup can still be frontmost when the
-  // Cmd+V fires (blur race), pasting into the popup instead of the target app.
+  // D7 fix: use hide_popup command instead of win.hide() directly.
+  // On macOS, win.hide() from JS causes the OS to promote our main window to
+  // the front (Regular activation policy picks the next app window). The Rust
+  // hide_popup command activates the prior external app first so macOS hands
+  // focus there instead — preventing Esc from surfacing the main window.
   const hide = useCallback(async () => {
     try {
-      await win.hide();
+      await invoke("hide_popup");
     } catch (e) {
       // Hiding can fail if the window was already destroyed; log, don't crash.
       console.error("popup hide failed", e);
     }
-  }, [win]);
+  }, []);
 
   // Fix #2/#3: hide popup first (awaited), then copy + paste. Errors here used
   // to be silently swallowed (`catch {}`), masking real failures (daemon
@@ -154,13 +155,6 @@ export function Popup() {
     <div
       className="flex flex-col h-screen rounded-xl overflow-hidden"
       style={{ background: "rgba(30,32,36,0.88)", backdropFilter: "blur(24px)" }}
-      // Hide when the user clicks outside (window blur event handles most cases,
-      // but this catches clicks within the webview that land on the overlay).
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-          void hide();
-        }
-      }}
     >
       {/* Search bar */}
       <div className="flex items-center gap-2 px-3 pt-3 pb-2 border-b border-white/10">
