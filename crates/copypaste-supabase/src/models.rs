@@ -85,10 +85,18 @@ pub(crate) struct GoTrueTokenResponse {
 }
 
 /// GoTrue error body.
+///
+/// `error`/`error_code` are the OAuth/structured machine codes GoTrue returns
+/// (e.g. `invalid_grant`, `refresh_token_not_found`); both feed [`Self::message`]
+/// as last-resort fallbacks. Note `invalid_grant` is emitted for *both* a bad
+/// password and a bad refresh token, so callers must classify by grant kind,
+/// not by this body — see `auth::AuthClient::post_json`.
 #[derive(Debug, Deserialize)]
 pub(crate) struct GoTrueErrorBody {
     pub error: Option<String>,
     pub error_description: Option<String>,
+    /// Newer GoTrue structured code, e.g. `refresh_token_not_found`.
+    pub error_code: Option<String>,
     pub msg: Option<String>,
     pub message: Option<String>,
 }
@@ -100,7 +108,38 @@ impl GoTrueErrorBody {
             .clone()
             .or_else(|| self.message.clone())
             .or_else(|| self.msg.clone())
+            .or_else(|| self.error_code.clone())
             .or_else(|| self.error.clone())
             .unwrap_or_else(|| "unknown error".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(json: &str) -> GoTrueErrorBody {
+        serde_json::from_str(json).expect("valid GoTrue error body")
+    }
+
+    #[test]
+    fn message_prefers_description_then_structured_code() {
+        // error_description wins when present.
+        let b = parse(
+            r#"{"error":"invalid_grant","error_description":"Invalid Refresh Token: Already Used"}"#,
+        );
+        assert_eq!(b.message(), "Invalid Refresh Token: Already Used");
+
+        // Newer GoTrue: structured error_code surfaces when no human text.
+        let b = parse(r#"{"code":400,"error_code":"refresh_token_not_found"}"#);
+        assert_eq!(b.message(), "refresh_token_not_found");
+
+        // Legacy OAuth code is the last resort.
+        let b = parse(r#"{"error":"invalid_grant"}"#);
+        assert_eq!(b.message(), "invalid_grant");
+
+        // Nothing usable.
+        let b = parse(r#"{}"#);
+        assert_eq!(b.message(), "unknown error");
     }
 }
