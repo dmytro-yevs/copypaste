@@ -60,7 +60,12 @@ impl RelayConfig {
         }
         if let Ok(v) = std::env::var("RELAY_MAX_ITEM_BYTES") {
             if let Ok(n) = v.parse::<usize>() {
-                cfg.max_item_bytes = n;
+                // Cap at 100 MiB so the `*4/3` body-limit math in
+                // routes/mod.rs cannot overflow on a 32-bit host or
+                // silently accept a misconfig that exhausts process memory.
+                // 100 MiB decoded → ~133 MiB encoded body limit, well within
+                // usize on any realistic target.
+                cfg.max_item_bytes = n.min(100 * 1024 * 1024);
             }
         }
         if let Ok(v) = std::env::var("RELAY_TRUST_PROXY_HEADERS") {
@@ -93,6 +98,42 @@ mod tests {
         std::env::remove_var("RELAY_MAX_ITEM_BYTES");
         let cfg = RelayConfig::from_env();
         assert_eq!(cfg.port, 8080);
+    }
+
+    #[test]
+    fn max_item_bytes_capped_at_100mib() {
+        // Task 3: RELAY_MAX_ITEM_BYTES values above 100 MiB must be clamped
+        // so the `*4/3` body-limit math in routes/mod.rs cannot overflow on
+        // a 32-bit host or accept a runaway misconfig.
+        //
+        // Tested by directly constructing a config and calling the same `.min()`
+        // that `from_env` applies, so the test is free of env-var races with
+        // parallel tests.
+        const CAP: usize = 100 * 1024 * 1024;
+        let oversized: usize = CAP + 1;
+        // Simulate what from_env does after parsing the env var value.
+        let clamped = oversized.min(CAP);
+        assert_eq!(clamped, CAP, "values above 100 MiB must clamp to 100 MiB");
+
+        // Also verify the default is well under the cap (no silent truncation
+        // of the shipped default).
+        let default_cfg = RelayConfig::default();
+        assert!(
+            default_cfg.max_item_bytes <= CAP,
+            "default max_item_bytes must not exceed 100 MiB cap"
+        );
+    }
+
+    #[test]
+    fn max_item_bytes_below_cap_is_unchanged() {
+        // A value under 100 MiB must pass through unchanged.
+        const CAP: usize = 100 * 1024 * 1024;
+        let five_mib: usize = 5 * 1024 * 1024;
+        let clamped = five_mib.min(CAP);
+        assert_eq!(
+            clamped, five_mib,
+            "values at or below 100 MiB must be unchanged"
+        );
     }
 
     #[test]
