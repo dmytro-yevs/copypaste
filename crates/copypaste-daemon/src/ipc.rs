@@ -2744,6 +2744,35 @@ impl IpcServer {
                 }
             }
 
+            // ----------------------------------------------------------------
+            // `get_own_device_info` — rich identity for THIS device.
+            //
+            // Returns fingerprint (same as `get_own_fingerprint`) PLUS
+            // human-readable metadata: device name, model, OS, app version,
+            // and LAN IP.  All fields except `app_version` and `fingerprint`
+            // are optional (`skip_serializing_if = "is_none"`) so older UI
+            // versions that don't know about them still get a valid response.
+            //
+            // The fingerprint field is omitted when P2P is disabled — callers
+            // must gracefully handle a `null` fingerprint (same contract as
+            // `get_own_fingerprint`).
+            // ----------------------------------------------------------------
+            "get_own_device_info" => {
+                let meta = crate::device_meta::DeviceMeta::collect(env!("CARGO_PKG_VERSION"));
+                let fingerprint_val = self.cert_fingerprint.as_deref();
+                Response::ok(
+                    req.id,
+                    serde_json::json!({
+                        "fingerprint": fingerprint_val,
+                        "device_name": meta.device_name,
+                        "device_model": meta.device_model,
+                        "os_version": meta.os_version,
+                        "app_version": meta.app_version,
+                        "local_ip": meta.local_ip,
+                    }),
+                )
+            }
+
             "list_peers" => match load_peers() {
                 Ok(peers) => Response::ok(req.id, serde_json::json!({ "peers": peers })),
                 Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),

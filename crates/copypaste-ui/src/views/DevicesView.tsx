@@ -6,6 +6,7 @@ import {
   formatEpochSecs,
   pairingQrSvg,
   probeStatus,
+  type OwnDeviceInfo,
   type PairedDevice,
   type PairingQr,
 } from "../lib/ipc";
@@ -23,111 +24,132 @@ type QrState =
 // no longer mislabeled "Daemon not running."
 type LoadState = "loading" | "offline" | "degraded" | "error" | "ready";
 
+type OwnDeviceState =
+  | { status: "loading" }
+  | { status: "ready"; info: OwnDeviceInfo }
+  | { status: "offline" };
+
 interface DeviceRowState {
   revokedAt: number | null;
   pending: boolean;
   error: string | null;
 }
 
-type FingerprintState =
-  | { status: "loading" }
-  | { status: "ready"; fingerprint: string }
-  | { status: "degraded"; reason: string | null }
-  | { status: "offline" };
+// ---------------------------------------------------------------------------
+// MetaRow — one labelled line in the rich-info block, hidden when absent
+// ---------------------------------------------------------------------------
 
-// Pairing token TTL from the daemon (PAKE_SESSION_TTL = 120 s).
-// We refresh 15 s before expiry to ensure a valid code is always on-screen.
-const QR_TTL_SECS = 120;
-const QR_REFRESH_MARGIN_SECS = 15;
-
-/** Extract just the IP part from a "host:port" address string. */
-function extractIp(address: string | null | undefined): string | null {
-  if (!address) return null;
-  // IPv6 addresses look like [::1]:4242; IPv4 like 192.168.1.2:4242
-  const v6 = address.match(/^\[(.+)\]:\d+$/);
-  if (v6) return v6[1];
-  const colon = address.lastIndexOf(":");
-  if (colon > 0) return address.slice(0, colon);
-  return address;
+function MetaRow({ label, value }: { label: string; value: string | null | undefined }) {
+  if (!value) return null;
+  return (
+    <p className="text-[11px] text-ide-faint">
+      <span className="text-ide-dim">{label}</span>{" "}
+      <span>{value}</span>
+    </p>
+  );
 }
 
 // ---------------------------------------------------------------------------
-// DeviceRow — renders one device entry (this device or a peer)
+// ThisDeviceCard — rich identity block for the local device
 // ---------------------------------------------------------------------------
 
-interface DeviceRowProps {
+function ThisDeviceCard({
+  info,
+  copied,
+  onCopy,
+}: {
+  info: OwnDeviceInfo;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <div className="px-3 py-2.5">
+      {/* Name + "This Mac" badge */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-1">
+        <p className="truncate text-[13px] font-medium text-ide-text">
+          {info.device_name ?? "This Device"}
+        </p>
+        <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium bg-ide-accent/15 text-ide-accent">
+          This Mac
+        </span>
+      </div>
+
+      {/* Rich metadata rows — each omitted when absent */}
+      <div className="mt-1 space-y-0.5">
+        <MetaRow label="Model" value={info.device_model} />
+        <MetaRow label="OS" value={info.os_version} />
+        <MetaRow label="Version" value={info.app_version} />
+        <MetaRow label="Local IP" value={info.local_ip} />
+
+        {/* Fingerprint — full value with copy button */}
+        {info.fingerprint !== null && (
+          <div className="flex items-center gap-1.5 pt-0.5">
+            <span
+              className="select-all break-all font-mono text-[11px] text-ide-dim"
+              title={info.fingerprint}
+            >
+              {info.fingerprint}
+            </span>
+            <button
+              type="button"
+              onClick={onCopy}
+              className="shrink-0 rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text transition-colors"
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+        )}
+        {info.fingerprint === null && (
+          <p className="text-[11px] text-ide-faint">
+            <span className="text-ide-dim">Fingerprint</span>{" "}
+            <span className="text-ide-warning">P2P disabled — enable COPYPASTE_P2P=1</span>
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PeerRow — one paired device entry
+// ---------------------------------------------------------------------------
+
+interface PeerRowProps {
   peer: PairedDevice;
-  isThisDevice: boolean;
   rowSt: DeviceRowState | undefined;
   onUnpair: (fp: string) => void;
   onRevoke: (fp: string) => void;
-  ownFingerprint: string | null;
-  fpCopied: boolean;
-  onCopyFingerprint: () => void;
 }
 
-function DeviceRow({
-  peer,
-  isThisDevice,
-  rowSt,
-  onUnpair,
-  onRevoke,
-  ownFingerprint: _ownFingerprint,
-  fpCopied,
-  onCopyFingerprint,
-}: DeviceRowProps) {
+function PeerRow({ peer, rowSt, onUnpair, onRevoke }: PeerRowProps) {
   const isPending = rowSt?.pending ?? false;
   const revokedAt = rowSt?.revokedAt ?? null;
   const rowError = rowSt?.error ?? null;
+
+  // Extract IP from optional "host:port" address field.
   const ip = extractIp(peer.address);
 
   return (
     <div className="px-3 py-2.5 hover:bg-ide-hover">
-      {/* Name row */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <p className="truncate text-[13px] font-medium text-ide-text">
-              {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
-            </p>
-            {isThisDevice && (
-              <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium bg-ide-accent/15 text-ide-accent">
-                This Mac
-              </span>
-            )}
-          </div>
+          {/* Name */}
+          <p className="truncate text-[13px] font-medium text-ide-text">
+            {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
+          </p>
 
-          {/* Rich metadata block */}
           <div className="mt-1 space-y-0.5">
-            {/* Fingerprint — full value for this device (copy button), truncated for peers */}
-            {isThisDevice ? (
-              <div className="flex items-center gap-1.5">
-                <span
-                  className="select-all break-all font-mono text-[11px] text-ide-dim"
-                  title={peer.fingerprint}
-                >
-                  {peer.fingerprint}
-                </span>
-                <button
-                  type="button"
-                  onClick={onCopyFingerprint}
-                  className="shrink-0 rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text transition-colors"
-                >
-                  {fpCopied ? "Copied" : "Copy"}
-                </button>
-              </div>
-            ) : (
-              <p
-                className="font-mono text-[11px] text-ide-dim"
-                title={peer.fingerprint}
-              >
-                {peer.fingerprint.length > 32
-                  ? `${peer.fingerprint.slice(0, 16)}…${peer.fingerprint.slice(-8)}`
-                  : peer.fingerprint}
-              </p>
-            )}
+            {/* Truncated fingerprint */}
+            <p
+              className="font-mono text-[11px] text-ide-dim"
+              title={peer.fingerprint}
+            >
+              {peer.fingerprint.length > 32
+                ? `${peer.fingerprint.slice(0, 16)}…${peer.fingerprint.slice(-8)}`
+                : peer.fingerprint}
+            </p>
 
-            {/* IP address */}
+            {/* IP address (from P2P address field) */}
             {ip !== null && (
               <p className="text-[11px] text-ide-faint">
                 <span className="text-ide-dim">IP</span>{" "}
@@ -136,7 +158,7 @@ function DeviceRow({
             )}
 
             {/* Paired date */}
-            {peer.added_at > 0 && (
+            {(peer.added_at ?? 0) > 0 && (
               <p className="text-[11px] text-ide-faint">
                 Paired {formatEpochSecs(peer.added_at)}
               </p>
@@ -154,36 +176,63 @@ function DeviceRow({
           </div>
         </div>
 
-        {/* Actions — only for peer devices, not this device */}
-        {!isThisDevice && (
-          <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
-            <button
-              onClick={() => onUnpair(peer.fingerprint)}
-              disabled={isPending}
-              className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {isPending ? "…" : "Unpair"}
-            </button>
-            <button
-              onClick={() => onRevoke(peer.fingerprint)}
-              disabled={isPending}
-              className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {isPending ? "…" : "Revoke"}
-            </button>
-          </div>
-        )}
+        {/* Actions */}
+        <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
+          <button
+            onClick={() => onUnpair(peer.fingerprint)}
+            disabled={isPending}
+            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isPending ? "…" : "Unpair"}
+          </button>
+          <button
+            onClick={() => onRevoke(peer.fingerprint)}
+            disabled={isPending}
+            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {isPending ? "…" : "Revoke"}
+          </button>
+        </div>
       </div>
     </div>
   );
+}
+
+/** Extract just the IP part from a "host:port" address string. */
+function extractIp(address: string | null | undefined): string | null {
+  if (!address) return null;
+  // IPv6 addresses look like [::1]:4242; IPv4 like 192.168.1.2:4242
+  const v6 = address.match(/^\[(.+)\]:\d+$/);
+  if (v6) return v6[1];
+  const colon = address.lastIndexOf(":");
+  if (colon > 0) return address.slice(0, colon);
+  return address;
 }
 
 // ---------------------------------------------------------------------------
 // Main view
 // ---------------------------------------------------------------------------
 
+// Pairing token TTL from the daemon (PAKE_SESSION_TTL = 120 s).
+// We refresh 15 s before expiry to ensure a valid code is always on-screen.
+const QR_TTL_SECS = 120;
+const QR_REFRESH_MARGIN_SECS = 15;
+
+// Pairing token TTL from the daemon (PAKE_SESSION_TTL = 120 s).
+// We refresh 15 s before expiry to ensure a valid code is always on-screen.
+const QR_TTL_SECS = 120;
+const QR_REFRESH_MARGIN_SECS = 15;
+
+// ---------------------------------------------------------------------------
+// Main view
+// ---------------------------------------------------------------------------
+
 export function DevicesView() {
-  // --- Devices state ---
+  // --- Own device info ---
+  const [ownState, setOwnState] = useState<OwnDeviceState>({ status: "loading" });
+  const [copied, setCopied] = useState(false);
+
+  // --- Paired peers ---
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [peers, setPeers] = useState<PairedDevice[]>([]);
   const [rowState, setRowState] = useState<Record<string, DeviceRowState>>({});
@@ -191,10 +240,6 @@ export function DevicesView() {
   const [revokeAllConfirm, setRevokeAllConfirm] = useState(false);
   const [globalMsg, setGlobalMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const globalMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // --- Own fingerprint ---
-  const [fpState, setFpState] = useState<FingerprintState>({ status: "loading" });
-  const [copied, setCopied] = useState(false);
 
   // --- QR pairing ---
   const [qrState, setQrState] = useState<QrState>({ status: "idle" });
@@ -222,7 +267,30 @@ export function DevicesView() {
     }
   }, []);
 
-  // Auto-generate on mount, auto-refresh before expiry.
+  // --- Load own device info ---
+  useEffect(() => {
+    let cancelled = false;
+    setOwnState({ status: "loading" });
+    api.getOwnDeviceInfo().then(
+      (info) => {
+        if (!cancelled) setOwnState({ status: "ready", info });
+      },
+      (err: unknown) => {
+        if (cancelled) return;
+        const code = err instanceof IpcError ? err.code : null;
+        if (code === "daemon_offline") {
+          setOwnState({ status: "offline" });
+        } else {
+          // Daemon is up but method may not exist on older daemon builds —
+          // treat as offline so the UI still shows the fingerprint section.
+          setOwnState({ status: "offline" });
+        }
+      }
+    );
+    return () => { cancelled = true; };
+  }, []);
+
+  // Auto-generate QR on mount, auto-refresh before expiry.
   useEffect(() => {
     void generateQr();
 
@@ -261,10 +329,16 @@ export function DevicesView() {
         seen.add(p.fingerprint);
         return true;
       });
-      setPeers(deduped);
+      const ownFp =
+        ownState.status === "ready" ? ownState.info.fingerprint : null;
+      // Don't show this device in the peers list.
+      const filteredPeers = deduped.filter(
+        (p) => ownFp === null || p.fingerprint !== ownFp
+      );
+      setPeers(filteredPeers);
       // Preserve transient per-row state across reloads; discard rows no longer
       // in the peer list so stale state doesn't accumulate.
-      const liveFingerprints = new Set(deduped.map((p) => p.fingerprint));
+      const liveFingerprints = new Set(filteredPeers.map((p) => p.fingerprint));
       setRowState((prev) => {
         const next: Record<string, DeviceRowState> = {};
         for (const fp of liveFingerprints) {
@@ -277,7 +351,6 @@ export function DevicesView() {
     } catch (e) {
       // A transport failure means the daemon is genuinely unreachable.
       if (e instanceof IpcError && e.code === "daemon_offline") {
-  
         setLoadState("offline");
         return;
       }
@@ -287,7 +360,6 @@ export function DevicesView() {
       // degraded case was mislabeled "Daemon not running."
       const probe = await probeStatus();
       if (probe.kind === "offline") {
-  
         setLoadState("offline");
       } else if (probe.kind === "degraded") {
         setLoadState("degraded");
@@ -295,37 +367,7 @@ export function DevicesView() {
         setLoadState("error");
       }
     }
-  }, []);
-
-  // --- Load own fingerprint ---
-  useEffect(() => {
-    let cancelled = false;
-    setFpState({ status: "loading" });
-    api.getOwnFingerprint().then(
-      ({ fingerprint }) => {
-        if (!cancelled) setFpState({ status: "ready", fingerprint });
-      },
-      (err: unknown) => {
-        if (cancelled) return;
-        const code = err instanceof IpcError ? err.code : null;
-        if (code === "daemon_offline") {
-          setFpState({ status: "offline" });
-          return;
-        }
-        // Daemon answered but the call failed — distinguish a DB-degraded daemon
-        // from a true offline daemon instead of collapsing both to "offline".
-        void probeStatus().then((probe) => {
-          if (cancelled) return;
-          if (probe.kind === "degraded")
-            setFpState({ status: "degraded", reason: probe.reason });
-          else setFpState({ status: "offline" });
-        });
-      }
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [ownState]);
 
   useEffect(() => {
     void loadPeers();
@@ -400,10 +442,11 @@ export function DevicesView() {
     }
   };
 
-  // --- Fingerprint copy (used both standalone and inside the device row) ---
+  // --- Fingerprint copy ---
   function handleCopy() {
-    if (fpState.status !== "ready") return;
-    navigator.clipboard.writeText(fpState.fingerprint).then(
+    if (ownState.status !== "ready" || ownState.info.fingerprint === null) return;
+    const fp = ownState.info.fingerprint;
+    navigator.clipboard.writeText(fp).then(
       () => {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
@@ -411,7 +454,7 @@ export function DevicesView() {
       () => {
         // Fallback for restricted clipboard contexts.
         const el = document.createElement("textarea");
-        el.value = (fpState as { status: "ready"; fingerprint: string }).fingerprint;
+        el.value = fp;
         el.style.position = "fixed";
         el.style.opacity = "0";
         document.body.appendChild(el);
@@ -423,24 +466,6 @@ export function DevicesView() {
       }
     );
   }
-
-  const ownFingerprint =
-    fpState.status === "ready" ? fpState.fingerprint : null;
-
-  // --- Build the synthetic "this device" row from fingerprint state ---
-  // Shown first in the list regardless of whether peers are loaded yet.
-  const thisDevicePeer: PairedDevice | null =
-    fpState.status === "ready"
-      ? {
-          fingerprint: fpState.fingerprint,
-          // Daemon doesn't expose this device's own name via get_own_fingerprint;
-          // fall back to "This Mac" display name (shown via badge in the row).
-          name: "This Mac",
-          added_at: 0, // own device — no "paired" date concept
-          address: null,
-          sync_key_b64: null,
-        }
-      : null;
 
   // --- Actions bar ---
   const actions = (
@@ -544,35 +569,21 @@ export function DevicesView() {
       {/* ── Single unified device list (this Mac first, then peers) ── */}
       <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">
         {/* This device — always first */}
-        {fpState.status === "loading" && (
+        {ownState.status === "loading" && (
           <div className="px-3 py-2.5">
             <p className="text-[13px] text-ide-faint animate-pulse">Loading…</p>
           </div>
         )}
-        {fpState.status === "offline" && (
+        {ownState.status === "offline" && (
           <div className="px-3 py-2.5">
             <p className="text-[13px] text-ide-danger">Daemon not running.</p>
           </div>
         )}
-        {/* degraded: daemon is up but DB is unavailable — fingerprint cannot be
-            read. Show a placeholder so the row is never silently empty (V-14). */}
-        {fpState.status === "degraded" && (
-          <div className="px-3 py-2.5">
-            <p className="text-[13px] text-ide-warning">
-              This device — Unavailable (database degraded)
-            </p>
-          </div>
-        )}
-        {thisDevicePeer !== null && (
-          <DeviceRow
-            peer={thisDevicePeer}
-            isThisDevice={true}
-            rowSt={undefined}
-            onUnpair={() => undefined}
-            onRevoke={() => undefined}
-            ownFingerprint={ownFingerprint}
-            fpCopied={copied}
-            onCopyFingerprint={handleCopy}
+        {ownState.status === "ready" && (
+          <ThisDeviceCard
+            info={ownState.info}
+            copied={copied}
+            onCopy={handleCopy}
           />
         )}
 
@@ -588,23 +599,15 @@ export function DevicesView() {
           </div>
         )}
         {loadState === "ready" &&
-          peers
-            // Don't render this device's own fingerprint a second time if it
-            // somehow appears in the peers list (defensive guard).
-            .filter((p) => ownFingerprint === null || p.fingerprint !== ownFingerprint)
-            .map((peer) => (
-              <DeviceRow
-                key={peer.fingerprint}
-                peer={peer}
-                isThisDevice={false}
-                rowSt={rowState[peer.fingerprint]}
-                onUnpair={(fp) => void handleUnpair(fp)}
-                onRevoke={(fp) => void handleRevoke(fp)}
-                ownFingerprint={ownFingerprint}
-                fpCopied={false}
-                onCopyFingerprint={() => undefined}
-              />
-            ))}
+          peers.map((peer) => (
+            <PeerRow
+              key={peer.fingerprint}
+              peer={peer}
+              rowSt={rowState[peer.fingerprint]}
+              onUnpair={(fp) => void handleUnpair(fp)}
+              onRevoke={(fp) => void handleRevoke(fp)}
+            />
+          ))}
       </div>
 
       {/* ── Divider ────────────────────────────────────────────── */}
