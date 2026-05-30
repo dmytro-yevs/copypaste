@@ -39,7 +39,7 @@ use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
 use copypaste_core::{
-    build_item_aad_v2, count_items, decrypt_from_cloud, decrypt_item_by_version, derive_v2,
+    build_item_aad_v2, count_items, decrypt_from_cloud, decrypt_item_by_version, derive_v2, detect,
     encrypt_for_cloud, encrypt_item_with_aad, exists_item_by_item_id, get_item_by_item_id,
     insert_item, prune_to_cap, ClipboardItem, Database, SyncKey, AAD_SCHEMA_VERSION_V4,
     ITEM_KEY_VERSION_CURRENT,
@@ -83,6 +83,14 @@ const POLL_INTERVAL_WS_CONNECTED: Duration = Duration::from_secs(120);
 /// has never connected (original behaviour — full-speed polling as the sole
 /// sync path).
 const POLL_INTERVAL_WS_FALLBACK: Duration = Duration::from_secs(10);
+
+/// Maximum number of rows fetched per poll tick.
+///
+/// When a batch comes back full (== POLL_BATCH_SIZE rows), the poll loop
+/// immediately re-polls without waiting for the full interval (burst-drain).
+/// This prevents a burst of simultaneous remote inserts from stalling at the
+/// watermark for a full interval when the batch was exactly exhausted.
+const POLL_BATCH_SIZE: usize = 20;
 
 // ── CloudError ────────────────────────────────────────────────────────────────
 
@@ -859,7 +867,7 @@ async fn push_loop(
                     }
                 }
                 // Zero the key bytes.
-                key_arr.iter_mut().for_each(|b| *b = 0);
+                zeroize::Zeroize::zeroize(&mut key_arr);
                 tracing::info!(
                     "cloud-sync backlog: {} items queued for upload",
                     retry_queue.len()
@@ -1446,6 +1454,8 @@ struct PollCursor {
 /// Base poll query (no lower bound). The keyset cursor filter is appended by
 /// [`build_poll_url`] when a watermark is known. Order is the **compound**
 /// `(wall_time, id)` so pagination is deterministic even within one millisecond.
+/// Base poll query string. The `limit=` value MUST match [`POLL_BATCH_SIZE`];
+/// a compile-time assertion in `poll_once` enforces this.
 const POLL_SELECT_QS: &str = "select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc,id.asc&limit=20";
 
 /// Construct the poll URL for a single tick using a `(wall_time, id)` keyset
@@ -1676,21 +1686,51 @@ async fn realtime_loop(
                 // `fetch_remote_rows_with_refresh`, which performs the bl-cloud
                 // refresh-token grant on a 401 (via `auth`) and updates
                 // `cloud_signed_in`.
-                cursor = poll_once(
-                    &client,
-                    &config,
-                    &bearer,
-                    &db,
-                    &local_key,
-                    &last_sync_ms,
-                    &cloud_signed_in,
-                    &auth,
-                    &key_bytes,
-                    cursor,
-                    history_limit,
-                    storage_quota_bytes,
-                )
-                .await;
+                //
+                // Burst-drain: if the batch came back full (== POLL_BATCH_SIZE),
+                // there may be more rows waiting — re-poll immediately rather than
+                // waiting the full interval, so a multi-device burst of simultaneous
+                // inserts is drained without a full 10-120 s delay per batch.
+                loop {
+                    let (new_cursor, batch_size) = poll_once(
+                        &client,
+                        &config,
+                        &bearer,
+                        &db,
+                        &local_key,
+                        &last_sync_ms,
+                        &cloud_signed_in,
+                        &auth,
+                        &key_bytes,
+                        cursor,
+                        history_limit,
+                        storage_quota_bytes,
+                    )
+                    .await;
+                    cursor = new_cursor;
+                    // Only keep draining if the batch was full AND shutdown hasn't fired.
+                    // Check shutdown without blocking so we don't stall the drain loop.
+                    if batch_size < POLL_BATCH_SIZE {
+                        break;
+                    }
+                    // Check shutdown between burst-drain ticks.
+                    if matches!(
+                        tokio::time::timeout(
+                            Duration::from_millis(0),
+                            shutdown.notified(),
+                        )
+                        .await,
+                        Ok(())
+                    ) {
+                        tracing::info!(
+                            "cloud-sync realtime_loop: shutdown during burst drain"
+                        );
+                        return;
+                    }
+                    tracing::debug!(
+                        "cloud-sync burst drain: batch_size={batch_size} == POLL_BATCH_SIZE, re-polling immediately"
+                    );
+                }
             }
             _ = shutdown.notified() => {
                 tracing::info!("cloud-sync realtime_loop: shutdown received");
@@ -1871,14 +1911,14 @@ async fn ws_ingest_loop(
                                 let preserved_pk = if let Some(local) = existing.as_ref() {
                                     if lamport_ts <= local.lamport_ts {
                                         // Local is equal-or-newer — skip.
-                                        key_arr.iter_mut().for_each(|b| *b = 0);
+                                        zeroize::Zeroize::zeroize(&mut key_arr);
                                         return false;
                                     }
                                     Some(local.id.clone())
                                 } else {
                                     match exists_item_by_item_id(&db_guard, &item_id_owned) {
                                         Ok(true) => {
-                                            key_arr.iter_mut().for_each(|b| *b = 0);
+                                            zeroize::Zeroize::zeroize(&mut key_arr);
                                             return false;
                                         }
                                         Ok(false) => None,
@@ -1954,7 +1994,7 @@ async fn ws_ingest_loop(
                                             count_items(&db_guard).unwrap_or(0) as usize;
                                         if total > history_limit {
                                             let excess = total - history_limit;
-                                            let _ = db_guard.conn().execute(
+                                            match db_guard.conn().execute(
                                                 "DELETE FROM clipboard_items \
                                                  WHERE id IN ( \
                                                      SELECT id FROM clipboard_items \
@@ -1963,11 +2003,28 @@ async fn ws_ingest_loop(
                                                      LIMIT ?1 \
                                                  )",
                                                 rusqlite::params![excess as i64],
-                                            );
+                                            ) {
+                                                Ok(n) => tracing::debug!(
+                                                    "ws_ingest_loop: count-pruned {n} rows \
+                                                     (history_limit={history_limit})"
+                                                ),
+                                                Err(e) => tracing::warn!(
+                                                    "ws_ingest_loop: count-prune failed: {e}"
+                                                ),
+                                            }
                                         }
                                         let max_bytes =
                                             storage_quota_bytes.min(i64::MAX as u64) as i64;
-                                        let _ = prune_to_cap(&db_guard, max_bytes);
+                                        match prune_to_cap(&db_guard, max_bytes) {
+                                            Ok(0) => {}
+                                            Ok(n) => tracing::debug!(
+                                                "ws_ingest_loop: byte-pruned {n} rows \
+                                                 (quota_bytes={storage_quota_bytes})"
+                                            ),
+                                            Err(e) => tracing::warn!(
+                                                "ws_ingest_loop: prune_to_cap failed: {e}"
+                                            ),
+                                        }
                                         true
                                     }
                                     Err(e) => {
@@ -2044,7 +2101,15 @@ async fn poll_once(
     // converges to the cap after backfill instead of materialising unbounded rows.
     history_limit: usize,
     storage_quota_bytes: u64,
-) -> PollCursor {
+) -> (PollCursor, usize) {
+    // Compile-time guard: POLL_SELECT_QS embeds a numeric `limit=` that MUST
+    // match POLL_BATCH_SIZE. If this assert fires, update the limit= in
+    // POLL_SELECT_QS to match POLL_BATCH_SIZE.
+    const _: () = assert!(
+        POLL_BATCH_SIZE == 20,
+        "POLL_SELECT_QS limit= must match POLL_BATCH_SIZE"
+    );
+
     let poll_url = build_poll_url(&config.supabase_url, cursor.wall, &cursor.id);
 
     let rows = match fetch_remote_rows_with_refresh(
@@ -2060,9 +2125,11 @@ async fn poll_once(
         Ok(rows) => rows,
         Err(e) => {
             tracing::warn!("cloud-sync poll failed: {e}");
-            return cursor;
+            return (cursor, 0);
         }
     };
+    // Track raw row count BEFORE blocking processing for burst-drain detection.
+    let batch_len = rows.len();
 
     // Decrypt + re-encrypt + insert in a blocking task so the async executor is
     // not blocked by rusqlite IO. We snapshot the key bytes (non-secret from the
@@ -2240,7 +2307,7 @@ async fn poll_once(
             }
         }
         // Zero the snapshot key bytes before the closure exits.
-        key_arr.iter_mut().for_each(|b| *b = 0);
+        zeroize::Zeroize::zeroize(&mut key_arr);
         // ── Backfill safety: enforce local retention cap after ingest ─────────
         //
         // After writing all rows from this batch, prune oldest UNPINNED items so
@@ -2320,11 +2387,11 @@ async fn poll_once(
             // Advance the in-memory cursor so the next tick's URL keyset-filters
             // past everything we just saw. `new_cursor` is monotonically ≥ the
             // start cursor (batch_max seeds from it), so it never regresses.
-            new_cursor
+            (new_cursor, batch_len)
         }
         Err(e) => {
             tracing::warn!("cloud-sync: insert worker panicked or was cancelled: {e}");
-            cursor
+            (cursor, 0)
         }
     }
 }
@@ -2412,6 +2479,18 @@ fn build_local_item(
     );
     let (nonce, ciphertext) =
         encrypt_item_with_aad(plaintext, &v2_key, &aad).map_err(|e| e.to_string())?;
+
+    // Fix CLOUD-SENSITIVE: run the same sensitive-content detector as the
+    // clipboard capture path so cross-device sensitive items are flagged for
+    // auto-wipe on the receiving device.  The plaintext is already in memory;
+    // detection is fast (regex only) and never logged.
+    let is_sensitive = if content_type == "text" {
+        let text = std::str::from_utf8(plaintext).unwrap_or("");
+        detect(text).is_some()
+    } else {
+        false
+    };
+
     Ok(ClipboardItem {
         id: id.to_owned(),
         item_id: item_id.to_owned(),
@@ -2419,7 +2498,7 @@ fn build_local_item(
         content: Some(ciphertext),
         content_nonce: Some(nonce.to_vec()),
         blob_ref: None,
-        is_sensitive: false,
+        is_sensitive,
         is_synced: true,
         lamport_ts,
         wall_time,
@@ -3470,7 +3549,7 @@ mod tests {
         let key_bytes = sync_key.as_bytes().to_vec();
 
         // Round 1: from an empty cursor (wall 0).
-        let wm1 = poll_once(
+        let (wm1, _) = poll_once(
             &client,
             &cfg,
             &bearer,
@@ -3509,7 +3588,7 @@ mod tests {
 
         // Round 2: from the (2000, 1111...) cursor — request carries the keyset
         // filter, no rows.
-        let wm2 = poll_once(
+        let (wm2, _) = poll_once(
             &client,
             &cfg,
             &bearer,
@@ -3638,7 +3717,7 @@ mod tests {
         // Two ticks, exactly as the realtime loop would do back-to-back.
         let mut cursor = PollCursor::default();
         for _ in 0..2 {
-            cursor = poll_once(
+            (cursor, _) = poll_once(
                 &client,
                 &cfg,
                 &bearer,
@@ -3767,7 +3846,7 @@ mod tests {
         // Three ticks drain all 25 rows.
         let mut cursor = PollCursor::default();
         for _ in 0..3 {
-            cursor = poll_once(
+            (cursor, _) = poll_once(
                 &client,
                 &cfg,
                 &bearer,
@@ -3863,7 +3942,7 @@ mod tests {
             .expect_at_least(1)
             .create();
 
-        poll_once(
+        let _ = poll_once(
             &client,
             &cfg,
             &bearer,

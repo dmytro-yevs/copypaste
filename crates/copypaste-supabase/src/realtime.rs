@@ -359,11 +359,26 @@ async fn connection_loop(
                 tracing::info!("Supabase Realtime client: shutdown requested");
                 break;
             }
-            SessionResult::Disconnected => {
-                tracing::warn!(
-                    backoff_secs = backoff.as_secs_f64(),
-                    "Supabase Realtime disconnected; reconnecting after backoff"
-                );
+            SessionResult::Disconnected(session_age) => {
+                // Reset backoff to initial when the session was "stable" — i.e.
+                // it ran longer than `max_backoff`. A long session implies the
+                // server is healthy and the disconnect is a transient blip, not
+                // a systematic connection failure. Only applying backoff for
+                // pre-message disconnects (ConnectError) or very short sessions
+                // avoids penalising recoveries from brief network interruptions.
+                if session_age >= config.max_backoff {
+                    tracing::info!(
+                        session_secs = session_age.as_secs_f64(),
+                        "Supabase Realtime: long session ended; resetting backoff to initial"
+                    );
+                    backoff = config.initial_backoff;
+                } else {
+                    tracing::warn!(
+                        backoff_secs = backoff.as_secs_f64(),
+                        session_secs = session_age.as_secs_f64(),
+                        "Supabase Realtime disconnected; reconnecting after backoff"
+                    );
+                }
             }
             SessionResult::ConnectError(e) => {
                 tracing::error!(error = %e, "Supabase Realtime connect error");
@@ -379,7 +394,8 @@ async fn connection_loop(
             }
         }
 
-        // Exponential backoff with cap.
+        // Exponential backoff with cap (only increments for short/failed sessions;
+        // long sessions already reset backoff above).
         backoff = (backoff * 2).min(config.max_backoff);
     }
 
@@ -393,9 +409,11 @@ async fn connection_loop(
 enum SessionResult {
     /// Graceful shutdown was requested.
     Shutdown,
-    /// Connection was lost unexpectedly.
-    Disconnected,
-    /// Could not establish the connection.
+    /// Connection was lost unexpectedly after being established.
+    /// Carries how long the session ran so the caller can reset backoff when
+    /// the session was "stable" (ran longer than `max_backoff`).
+    Disconnected(Duration),
+    /// Could not establish the connection (pre-join failure).
     ConnectError(String),
 }
 
@@ -455,6 +473,10 @@ async fn run_session(
     };
 
     tracing::info!("WebSocket connected to Supabase Realtime");
+
+    // Track how long this session runs so the caller can reset backoff when
+    // the session was long enough to be considered "stable".
+    let session_started = std::time::Instant::now();
 
     let (mut sink, mut stream) = ws_stream.split();
 
@@ -525,17 +547,24 @@ async fn run_session(
                     None => {
                         // Stream ended.
                         let _ = hb_stop_tx.send(());
-                        return SessionResult::Disconnected;
+                        return SessionResult::Disconnected(session_started.elapsed());
                     }
                     Some(Err(e)) => {
                         tracing::warn!(error = %e, "WebSocket receive error");
                         let _ = hb_stop_tx.send(());
-                        return SessionResult::Disconnected;
+                        return SessionResult::Disconnected(session_started.elapsed());
                     }
                     Some(Ok(msg)) => {
                         if let Some(result) = handle_message(msg, tx, &config.topic).await {
                             let _ = hb_stop_tx.send(());
-                            return result;
+                            // For Disconnected results from handle_message, replace
+                            // the placeholder duration with the actual session age.
+                            return match result {
+                                SessionResult::Disconnected(_) => {
+                                    SessionResult::Disconnected(session_started.elapsed())
+                                }
+                                other => other,
+                            };
                         }
                     }
                 }
@@ -558,12 +587,12 @@ async fn run_session(
                     Ok(Err(e)) => {
                         tracing::warn!(error = %e, "heartbeat send failed");
                         let _ = hb_stop_tx.send(());
-                        return SessionResult::Disconnected;
+                        return SessionResult::Disconnected(session_started.elapsed());
                     }
                     Err(_) => {
                         tracing::warn!("heartbeat send timed out; treating as disconnect");
                         let _ = hb_stop_tx.send(());
-                        return SessionResult::Disconnected;
+                        return SessionResult::Disconnected(session_started.elapsed());
                     }
                 }
             }
@@ -638,7 +667,9 @@ async fn handle_message(
         Message::Pong(_) => None,
         Message::Close(_) => {
             tracing::info!("received WebSocket Close frame");
-            Some(SessionResult::Disconnected)
+            // Duration::ZERO is a placeholder; run_session replaces it with the
+            // actual elapsed time before returning to connection_loop.
+            Some(SessionResult::Disconnected(Duration::ZERO))
         }
         Message::Frame(_) => None,
     }
