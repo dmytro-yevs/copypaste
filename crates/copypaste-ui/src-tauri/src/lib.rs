@@ -871,8 +871,8 @@ fn toggle_popup(handle: &tauri::AppHandle) {
 // ---------------------------------------------------------------------------
 
 /// Logical popup dimensions (must match tauri.conf.json).
-const POPUP_W_LOGICAL: f64 = 420.0;
-const POPUP_H_LOGICAL: f64 = 520.0;
+const POPUP_W_LOGICAL: f64 = 504.0; // v0.5.3: 1.2× enlargement (was 420)
+const POPUP_H_LOGICAL: f64 = 624.0; // v0.5.3: 1.2× enlargement (was 520)
 
 /// Position the popup window according to `mode`, clamping it onto the visible
 /// screen frame so it never appears partially off-screen.

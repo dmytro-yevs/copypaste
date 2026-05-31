@@ -9,31 +9,26 @@ export type ViewId = "history" | "devices" | "settings" | "about";
 const PREFS_KEY = "copypaste-ui-prefs-v1";
 
 export interface UIPrefs {
-  /** Number of text lines shown in a clip preview (1–6). */
-  previewLines: number;
-  /** Preview row height in px (24–64). Kept for layout wiring; not exposed in UI (row height is now natural padding). */
+  /**
+   * Number of text lines shown in a clip preview in the main History window
+   * (1–6). Separate from popup setting — see previewLinesPopup.
+   */
+  previewLinesApp: number;
+  /**
+   * Number of text lines shown in a clip preview in the Quick-Paste popup
+   * (1–6). Separate from the main window setting — see previewLinesApp.
+   */
+  previewLinesPopup: number;
+  /** Preview row height in px (24–64). Kept for layout wiring; not exposed in UI. */
   previewSize: number;
   /** When true, redact sensitive_spans ranges in clip previews. */
   maskSensitive: boolean;
   /**
-   * Max height (px) of the image thumbnail bounding box in the popup — Maccy parity.
+   * Max height (px) of the image thumbnail bounding box — Maccy parity.
    * The image is scaled to fit within 340 × imageMaxHeight, aspect-preserving,
    * never upscaled. Default 40, range 1–200.
    */
   imageMaxHeight: number;
-  /**
-   * Maximum number of clipboard items to display. Default 200, range 1–999.
-   * Used as the `limit` parameter of history_page so HistoryView never shows
-   * more than this many items.
-   */
-  historySize: number;
-  /**
-   * Delay in milliseconds before showing a large hover-preview of an item.
-   * Default 1500 ms, range 200–100 000. Persisted for future use when a
-   * hover-preview panel is implemented.
-   * TODO: wire this to a hover-preview component when one is built.
-   */
-  previewDelay: number;
   /**
    * Play a soft system sound (Tink) when an item is copied — Maccy parity.
    * Default true.
@@ -53,12 +48,11 @@ export interface UIPrefs {
 }
 
 const DEFAULT_PREFS: UIPrefs = {
-  previewLines: 1,
+  previewLinesApp: 1,
+  previewLinesPopup: 1,
   previewSize: 28,
   maskSensitive: true,
   imageMaxHeight: 40,
-  historySize: 200,
-  previewDelay: 1500,
   playSoundOnCopy: true,
   notifyOnCopy: true,
   translucency: true,
@@ -68,7 +62,26 @@ function loadPrefs(): UIPrefs {
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return DEFAULT_PREFS;
-    return { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+    // ── v0.5.3 migration ──────────────────────────────────────────────────
+    // Migrate the legacy `previewLines` (shared) field to the new split fields.
+    // `historySize` and `previewDelay` are no longer stored — removed silently.
+    if (typeof parsed.previewLines === "number" && parsed.previewLines > 0) {
+      if (parsed.previewLinesApp === undefined) {
+        parsed.previewLinesApp = parsed.previewLines;
+      }
+      if (parsed.previewLinesPopup === undefined) {
+        parsed.previewLinesPopup = parsed.previewLines;
+      }
+    }
+    // Drop obsolete keys so they don't accumulate
+    delete parsed.previewLines;
+    delete parsed.historySize;
+    delete parsed.previewDelay;
+    // ──────────────────────────────────────────────────────────────────────
+
+    return { ...DEFAULT_PREFS, ...parsed };
   } catch {
     return DEFAULT_PREFS;
   }

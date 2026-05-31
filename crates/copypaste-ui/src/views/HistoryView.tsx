@@ -177,15 +177,15 @@ function ContentIcon({ type }: { type: string }) {
 function PinIndicator() {
   return (
     <svg
-      viewBox="0 0 16 16"
-      width="12"
+      viewBox="0 0 16 20"
+      width="9"
       height="12"
       fill="currentColor"
       aria-label="Pinned"
       className="shrink-0 text-ide-warning"
     >
-      {/* Simple thumbtack / pin shape */}
-      <path d="M9.5 1.5a1 1 0 0 0-1.414 0L6.5 3.086 5.207 1.793a1 1 0 1 0-1.414 1.414L5.086 4.5 2.293 7.293A1 1 0 0 0 3 9h3.586l-.293.293V13a1 1 0 0 0 1.707.707l2-2A1 1 0 0 0 10 11V9.414L11.5 7.914A1 1 0 0 0 12 7.207V5.914l.5-.5A1 1 0 0 0 11.086 4L9.5 2.414V1.5z" />
+      {/* Bookmark ribbon — M2: sleek bookmark instead of thumbtack */}
+      <path d="M2 1.5A1.5 1.5 0 0 1 3.5 0h9A1.5 1.5 0 0 1 14 1.5v17.25l-6-3.75-6 3.75V1.5Z" />
     </svg>
   );
 }
@@ -219,22 +219,20 @@ export function rowHeightFor(
 // Icon-only action button SVGs (inline, no external icon library needed)
 // ---------------------------------------------------------------------------
 
-/** Pin icon (filled thumbtack) */
+/** Pin icon (bookmark outline) */
 function IconPin({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true" className={className}>
-      <path d="M9.828 1.172a1.2 1.2 0 0 0-1.697 0L6.424 2.879 5.13 1.586a1 1 0 1 0-1.414 1.414L4.97 4.243 2.757 6.457A1 1 0 0 0 3.464 8H7v3.586l-.293.293a1 1 0 1 0 1.414 1.414l.293-.293.293.293a1 1 0 1 0 1.414-1.414L10 11.586V8h3.536a1 1 0 0 0 .707-1.707L12.03 4.07 13.172 2.93a1.2 1.2 0 0 0 0-1.697l-.344-.344a1.2 1.2 0 0 0-1.697 0L9.828 2.192z" />
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+      <path d="M3.5 2v11.5l4.5-2.7 4.5 2.7V2h-9z" />
     </svg>
   );
 }
 
-/** Unpin icon (outline thumbtack with slash) */
+/** Unpin icon (bookmark filled) */
 function IconPinOff({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
-      <line x1="2" y1="2" x2="14" y2="14" />
-      <path d="M9 3.5 12.5 7M7 5l-.3.3A1 1 0 0 0 7.7 7H10v4l-1 1-1-1V7" />
-      <path d="M6.5 7H3.7a1 1 0 0 1-.7-1.7L5.5 2.8" />
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true" className={className}>
+      <path d="M3.5 2v11.5l4.5-2.7 4.5 2.7V2h-9z" />
     </svg>
   );
 }
@@ -250,9 +248,16 @@ function IconTrash({ className }: { className?: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// HistoryRow
-// ---------------------------------------------------------------------------
+/** Eye / preview icon */
+function IconEye({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+      <path d="M1.5 8s2.5-5 6.5-5 6.5 5 6.5 5-2.5 5-6.5 5-6.5-5-6.5-5Z" />
+      <circle cx="8" cy="8" r="2" />
+    </svg>
+  );
+}
+
 
 
 interface RowProps {
@@ -271,6 +276,9 @@ interface RowProps {
   onCopy: () => void;
   onPin: () => void;
   onDelete: () => void;
+  /** Opens the Details Modal for this entry (M10). */
+  onPreview: () => void;
+  onMouseEnter?: () => void;
 }
 
 function HistoryRow({
@@ -287,6 +295,8 @@ function HistoryRow({
   onCopy,
   onPin,
   onDelete,
+  onPreview,
+  onMouseEnter,
 }: RowProps) {
   // Bare "image" content_type (legacy) or MIME-typed "image/*" future rows.
   const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
@@ -334,6 +344,7 @@ function HistoryRow({
           : "text-ide-text hover:bg-ide-hover",   // panel surface: hover is ide-hover (darker than panel)
       ].join(" ")}
       onClick={handleRowClick}
+      onMouseEnter={onMouseEnter}
     >
       {/* Checkbox — always in flow (reserves 20px). Invisible at rest, fades in
           on hover or when selection mode is active. Clicking it enters/toggles
@@ -371,9 +382,11 @@ function HistoryRow({
       </span>
 
       {isImage ? (
-        // Maccy parity: image rows show ONLY the thumbnail — no text title.
-        // ImageThumb is lazy: fetches via IPC on first render, uses shared LRU cache.
-        <ImageThumb id={entry.id} maxHeight={imageMaxHeight} />
+        // M1: Maccy parity — image rows show ONLY the thumbnail, no text title.
+        // Wrapped in flex-1 min-w-0 so images align in the same column as text rows.
+        <span className="flex-1 min-w-0 flex items-center">
+          <ImageThumb id={entry.id} maxHeight={imageMaxHeight} />
+        </span>
       ) : (
         // Text / URL rows: multi-line preview clamped with webkit-line-clamp.
         <span
@@ -427,6 +440,14 @@ function HistoryRow({
             No "Copy" button: row-click copies instead. */}
         {!selectionMode && (
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+            {/* M10: Eye — show details modal */}
+            <IconActionBtn
+              aria-label="Preview"
+              title="Preview"
+              onClick={onPreview}
+            >
+              <IconEye />
+            </IconActionBtn>
             <IconActionBtn
               aria-label={entry.pinned ? "Unpin" : "Pin"}
               title={entry.pinned ? "Unpin" : "Pin"}
@@ -576,7 +597,82 @@ function BulkActionBar({
 }
 
 // ---------------------------------------------------------------------------
-// Virtualized list — windowing for large histories
+// M10: DetailsModal — full preview for text and image clip entries
+// ---------------------------------------------------------------------------
+
+function DetailsModal({
+  entry,
+  onClose,
+}: {
+  entry: HistoryEntry;
+  onClose: () => void;
+}) {
+  const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Clip details"
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+    >
+      <div
+        className="relative flex max-h-[80vh] w-[480px] max-w-[90vw] flex-col overflow-hidden rounded-xl border border-ide-border bg-ide-elevated shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-ide-border px-4 py-2.5">
+          <span className="text-[13px] font-medium text-ide-text">
+            {isImage ? "Image preview" : "Text preview"}
+          </span>
+          <button
+            type="button"
+            aria-label="Close"
+            onClick={onClose}
+            className="flex h-6 w-6 items-center justify-center rounded hover:bg-ide-hover text-ide-dim"
+          >
+            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M3 3l10 10M13 3 3 13" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-auto p-4">
+          {isImage ? (
+            <ImageThumb id={entry.id} maxHeight={600} />
+          ) : (
+            <pre
+              className="whitespace-pre-wrap break-words text-[13px] text-ide-text font-mono leading-relaxed select-text"
+              style={{ userSelect: "text" }}
+            >
+              {entry.preview}
+            </pre>
+          )}
+        </div>
+
+        {/* Footer: metadata */}
+        <div className="shrink-0 border-t border-ide-border px-4 py-2 text-[11px] text-ide-faint flex items-center gap-3">
+          <span>{entry.content_type}</span>
+          {entry.app_bundle_id && <span>{entry.app_bundle_id}</span>}
+          <span className="ml-auto">{new Date(entry.wall_time).toLocaleString()}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 //
 // Renders only the rows intersecting the viewport plus an overscan buffer.
 // Row heights are computed from rowHeightFor (supporting mixed image/text
@@ -708,8 +804,12 @@ interface ToastState {
 let _toastSeq = 0;
 
 export function HistoryView() {
-  const { previewLines, previewSize, imageMaxHeight, historySize, maskSensitive } =
+  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive } =
     useUI((s) => s.prefs);
+
+  // M5: historySize removed from prefs; use a fixed initial page size.
+  // The daemon server-side MAX_PAGE acts as an additional cap.
+  const PAGE_SIZE = 200;
 
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -737,11 +837,15 @@ export function HistoryView() {
   const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
 
+  // M10: Details modal — entry to preview (null = closed)
+  const [previewEntry, setPreviewEntry] = useState<HistoryEntry | null>(null);
+
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   // Track current signature to avoid unnecessary re-renders on identical data.
   const sigRef = useRef<string>("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isKeyboardNavRef = useRef(false);
 
   const showToast = useCallback(
     (message: string, kind: ToastKind, durationMs = 2500) => {
@@ -761,8 +865,8 @@ export function HistoryView() {
     async (silent = false) => {
       if (!silent) setLoadState("loading");
       try {
-        // historySize controls how many items to request; clamped by MAX_PAGE server-side.
-        const page = await api.historyPage(historySize, 0);
+        // PAGE_SIZE controls how many items to request initially; clamped by MAX_PAGE server-side.
+        const page = await api.historyPage(PAGE_SIZE, 0);
         // Daemon returns pinned items first, then newest-first within each group.
         const incoming = page.items;
         const newSig = itemsSignature(incoming);
@@ -805,7 +909,7 @@ export function HistoryView() {
         setLoadState("error");
       }
     },
-    [historySize]
+    []
   );
 
   // Initial load
@@ -910,6 +1014,7 @@ export function HistoryView() {
   // row isn't in the DOM, so we compute its offset from the height model and
   // scroll the container directly instead of relying on scrollIntoView.
   useEffect(() => {
+    if (!isKeyboardNavRef.current) return;
     if (selectedIdx < 0) return;
     const el = listRef.current;
     if (!el) return;
@@ -925,6 +1030,7 @@ export function HistoryView() {
     } else if (top + rowH > viewBottom) {
       el.scrollTop = top + rowH - el.clientHeight;
     }
+    isKeyboardNavRef.current = false;
   }, [selectedIdx, filtered, previewSize, imageMaxHeight]);
 
   const handleKeyDown = useCallback(
@@ -951,10 +1057,12 @@ export function HistoryView() {
 
       if (e.key === "ArrowDown") {
         e.preventDefault();
+        isKeyboardNavRef.current = true;
         const next = Math.min(selectedIdx + 1, filtered.length - 1);
         setSelectedId(filtered[next].id);
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
+        isKeyboardNavRef.current = true;
         const prev = Math.max(selectedIdx - 1, 0);
         setSelectedId(filtered[prev].id);
       } else if (e.key === "Enter" && selectedId !== null) {
@@ -1388,11 +1496,12 @@ export function HistoryView() {
               selected={entry.id === selectedId}
               multiSelected={multiSelectedIds.has(entry.id)}
               selectionMode={selectionMode}
-              previewLines={previewLines}
+              previewLines={previewLinesApp}
               previewSize={previewSize}
               imageMaxHeight={imageMaxHeight}
               maskSensitive={maskSensitive}
               onSelect={() => {
+                isKeyboardNavRef.current = false;
                 setSelectedId(entry.id);
                 listRef.current?.focus();
               }}
@@ -1403,6 +1512,10 @@ export function HistoryView() {
               onCopy={() => void handleCopy(entry.id)}
               onPin={() => void handlePin(entry.id, entry.pinned)}
               onDelete={() => void handleDelete(entry.id)}
+              onPreview={() => setPreviewEntry(entry)}
+              onMouseEnter={() => {
+                isKeyboardNavRef.current = false;
+              }}
             />
           )}
         />
@@ -1414,6 +1527,10 @@ export function HistoryView() {
     <ViewShell title="History" actions={actions}>
       {body}
       {toast !== null && <Toast key={toast.id} message={toast.message} kind={toast.kind} />}
+      {/* M10: Details modal */}
+      {previewEntry !== null && (
+        <DetailsModal entry={previewEntry} onClose={() => setPreviewEntry(null)} />
+      )}
     </ViewShell>
   );
 }

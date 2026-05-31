@@ -130,6 +130,8 @@ export function Popup() {
     imageMaxHeight = 40,
     playSoundOnCopy = false,
     notifyOnCopy = false,
+    // M4: popup now has its own independent preview line count
+    previewLinesPopup = 1,
   } = useUI((s) => s.prefs);
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<HistoryEntry[]>([]);
@@ -139,6 +141,7 @@ export function Popup() {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const win = getCurrentWindow();
+  const isKeyboardNavRef = useRef(false);
 
   // Fetch/refresh clipboard items from the daemon.
   const refresh = useCallback(async () => {
@@ -218,14 +221,30 @@ export function Popup() {
     }
     const scored: Array<{ item: HistoryEntry; positions: number[]; score: number }> = [];
     for (const item of items) {
-      const result = fuzzyMatch(q, item.preview);
+      const isImage = item.content_type === "image" || item.content_type.startsWith("image/");
+      const isSensitive = item.is_sensitive;
+      let label: string;
+      if (isImage) {
+        label = "[Image]";
+      } else if (isSensitive) {
+        label = "••••••••";
+      } else if (maskSensitive && item.sensitive_spans && item.sensitive_spans.length > 0) {
+        label =
+          applySpanMasking(item.preview, item.sensitive_spans)
+            .replace(/\s+/g, " ")
+            .trim() || "(empty)";
+      } else {
+        label = item.preview.replace(/\s+/g, " ").trim() || "(empty)";
+      }
+
+      const result = fuzzyMatch(q, label);
       if (result !== null) {
         scored.push({ item, positions: result.positions, score: result.score });
       }
     }
     scored.sort((a, b) => b.score - a.score);
     return scored.map(({ item, positions }) => ({ item, positions }));
-  }, [items, query]);
+  }, [items, query, maskSensitive]);
 
   // Keep the selected index in bounds when filter changes.
   useEffect(() => {
@@ -234,12 +253,14 @@ export function Popup() {
 
   // Scroll the selected item into view.
   useEffect(() => {
+    if (!isKeyboardNavRef.current) return;
     const list = listRef.current;
     if (!list) return;
     const child = list.children[selectedIdx] as HTMLElement | undefined;
     if (child) {
       child.scrollIntoView({ block: "nearest" });
     }
+    isKeyboardNavRef.current = false;
   }, [selectedIdx]);
 
   // V-10/V-11 fix: always use invoke("hide_popup") — the Rust side runs the
@@ -288,6 +309,20 @@ export function Popup() {
     [hide, playSoundOnCopy, notifyOnCopy]
   );
 
+  const handlePin = useCallback(
+    async (id: string, pinned: boolean) => {
+      try {
+        await api.pinItem(id, !pinned);
+        // Refresh items directly from the daemon
+        const page = await api.historyPage(MAX_ITEMS, 0);
+        setItems(page.items);
+      } catch (e) {
+        console.error("Popup pin failed", e);
+      }
+    },
+    []
+  );
+
   const confirmSelection = useCallback(async () => {
     const entry = filtered[selectedIdx];
     if (!entry) return;
@@ -313,12 +348,14 @@ export function Popup() {
           break;
         case "ArrowDown":
           e.preventDefault();
+          isKeyboardNavRef.current = true;
           setSelectedIdx((i) =>
             filtered.length === 0 ? 0 : (i + 1) % filtered.length
           );
           break;
         case "ArrowUp":
           e.preventDefault();
+          isKeyboardNavRef.current = true;
           setSelectedIdx((i) =>
             filtered.length === 0 ? 0 : (i - 1 + filtered.length) % filtered.length
           );
@@ -478,9 +515,14 @@ export function Popup() {
               imageMaxHeight={imageMaxHeight}
               maskSensitive={maskSensitive}
               matchPositions={positions}
+              previewLines={previewLinesPopup}
               showKeycap={!showQuery && idx < 9}
-              onMouseEnter={() => setSelectedIdx(idx)}
+              onMouseEnter={() => {
+                isKeyboardNavRef.current = false;
+                setSelectedIdx(idx);
+              }}
               onClick={() => void copyAndPaste(item.id, item.preview)}
+              onPin={() => void handlePin(item.id, item.pinned)}
             />
           ))}
         </ul>
@@ -511,9 +553,12 @@ interface PopupRowProps {
   imageMaxHeight: number;
   maskSensitive: boolean;
   matchPositions: number[];
+  /** M4: number of preview text lines (1 = ellipsis; > 1 = multiline clamp). */
+  previewLines: number;
   showKeycap: boolean;
   onMouseEnter: () => void;
   onClick: () => void;
+  onPin: () => void;
 }
 
 function PopupRow({
@@ -524,9 +569,11 @@ function PopupRow({
   imageMaxHeight,
   maskSensitive,
   matchPositions,
+  previewLines,
   showKeycap,
   onMouseEnter,
   onClick,
+  onPin,
 }: PopupRowProps) {
   const isImage = item.content_type === "image" || item.content_type.startsWith("image/");
   const isSensitive = item.is_sensitive;
@@ -556,13 +603,15 @@ function PopupRow({
     <li
       className={[
         isImage ? "popup-row-image" : "popup-row",
-        "flex items-center gap-2 px-3 cursor-pointer select-none relative",
+        "flex items-center gap-2 px-3 cursor-pointer select-none relative group",
         selected ? "row-selected-bar" : "",
       ].join(" ")}
       style={{
         minHeight: isImage ? Math.max(rowH, 50) : rowH,
         background: selected
           ? "rgba(61,139,255,0.16)"
+          : item.pinned
+          ? "var(--ide-warning-dim)"
           : "transparent",
         transition: `background ${selected ? "0ms" : "80ms"} ease`,
       }}
@@ -580,9 +629,19 @@ function PopupRow({
           className="flex-1 min-w-0 text-[13px]"
           style={{
             color: isSensitive ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.88)",
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
+            // M4: multi-line clamp when previewLines > 1, single-line ellipsis otherwise
+            ...(previewLines > 1
+              ? {
+                  display: "-webkit-box",
+                  WebkitLineClamp: previewLines,
+                  WebkitBoxOrient: "vertical" as const,
+                  overflow: "hidden",
+                }
+              : {
+                  whiteSpace: "nowrap" as const,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }),
           }}
         >
           {canHighlight && matchPositions.length > 0 ? (
@@ -615,7 +674,7 @@ function PopupRow({
       {/* Right cluster — fixed-width so layout never shifts */}
       <div
         className="flex items-center gap-1.5 shrink-0"
-        style={{ minWidth: "5rem", justifyContent: "flex-end" }}
+        style={{ minWidth: "5.5rem", justifyContent: "flex-end" }}
       >
         {/* Relative time (tabular-nums, 11px) */}
         <span
@@ -625,10 +684,44 @@ function PopupRow({
           {relTime}
         </span>
 
-        {/* Pin indicator */}
-        {item.pinned && (
-          <span style={{ color: "#D9A343", fontSize: 10 }}>⚑</span>
-        )}
+        {/* M10: Bookmark interactive hover pin button and at-rest indicator */}
+        <div className="relative flex items-center justify-center h-5 w-5 shrink-0">
+          <button
+            type="button"
+            aria-label={item.pinned ? "Unpin" : "Pin"}
+            title={item.pinned ? "Unpin" : "Pin"}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPin();
+            }}
+            className="absolute inset-0 flex items-center justify-center rounded hover:bg-white/10 text-ide-dim hover:text-white transition-opacity opacity-0 group-hover:opacity-100"
+            style={{ border: "none", background: "none", cursor: "pointer", zIndex: 2 }}
+          >
+            {item.pinned ? (
+              <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true" style={{ color: "#D9A343" }}>
+                <path d="M3.5 2v11.5l4.5-2.7 4.5 2.7V2h-9z" />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3.5 2v11.5l4.5-2.7 4.5 2.7V2h-9z" />
+              </svg>
+            )}
+          </button>
+
+          {item.pinned && (
+            <svg
+              viewBox="0 0 16 20"
+              width="8"
+              height="10"
+              fill="currentColor"
+              aria-label="Pinned"
+              className="group-hover:opacity-0 transition-opacity"
+              style={{ color: "#D9A343", flexShrink: 0, transitionDuration: "120ms" }}
+            >
+              <path d="M2 1.5A1.5 1.5 0 0 1 3.5 0h9A1.5 1.5 0 0 1 14 1.5v17.25l-6-3.75-6 3.75V1.5Z" />
+            </svg>
+          )}
+        </div>
 
         {/* ⌘1-9 keycap (first 9 rows, no active query) */}
         {showKeycap && (

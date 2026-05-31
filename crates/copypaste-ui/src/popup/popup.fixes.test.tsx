@@ -213,6 +213,10 @@ describe("Fix #3: SettingsView P2P toggle sends full config payload", () => {
       expect(screen.queryByText(/^Loading…$/i)).not.toBeInTheDocument();
     });
 
+    // Select the "Sync" tab
+    const syncTab = screen.getByRole("button", { name: /Sync/i });
+    fireEvent.click(syncTab);
+
     // Find the P2P toggle switch and click it.
     const p2pToggle = await screen.findByRole("switch", { name: /P2P sync/i });
     fireEvent.click(p2pToggle);
@@ -264,9 +268,17 @@ describe("Fix #5: DevicesView does not show own device in peer list", () => {
               error_code: null,
             });
           case "get_own_fingerprint":
+          case "get_own_device_info":
             return Promise.resolve({
               ok: true,
-              data: { fingerprint: OWN_FP },
+              data: {
+                fingerprint: OWN_FP,
+                device_name: "This Mac",
+                device_model: "MacBookPro18,2",
+                os_version: "macOS 14.5.0",
+                app_version: "0.5.3",
+                local_ip: "192.168.1.10",
+              },
               error: null,
               error_code: null,
             });

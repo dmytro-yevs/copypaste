@@ -1105,6 +1105,25 @@ async fn handle_tick(
                 // A send error only means there are no active receivers —
                 // that is normal when both P2P and cloud-sync are disabled.
                 let _ = new_item_tx.send(item);
+                // M12: play sound / show notification on macOS when the daemon
+                // captures a new item from another app in the background.
+                // Disabled in tests to avoid OS hangs and sound/notification spam.
+                #[cfg(target_os = "macos")]
+                if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() {
+                    if config.sound_on_copy {
+                        let _ = std::process::Command::new("afplay")
+                            .arg("/System/Library/Sounds/Tink.aiff")
+                            .spawn();
+                    }
+                    if config.notify_on_copy {
+                        let _ = std::process::Command::new("osascript")
+                            .args([
+                                "-e",
+                                r#"display notification "Text item copied" with title "CopyPaste""#,
+                            ])
+                            .spawn();
+                    }
+                }
             }
         }
         Ok(Some(ClipboardContent::Image(raw_bytes))) => {
@@ -1117,6 +1136,24 @@ async fn handle_tick(
                 handle_image(raw_bytes, db, local_key, config, local_device_id).await
             {
                 let _ = new_item_tx.send(item);
+                // M12: play sound / show notification for image captures too.
+                // Disabled in tests to avoid OS hangs and sound/notification spam.
+                #[cfg(target_os = "macos")]
+                if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() {
+                    if config.sound_on_copy {
+                        let _ = std::process::Command::new("afplay")
+                            .arg("/System/Library/Sounds/Tink.aiff")
+                            .spawn();
+                    }
+                    if config.notify_on_copy {
+                        let _ = std::process::Command::new("osascript")
+                            .args([
+                                "-e",
+                                r#"display notification "Image item copied" with title "CopyPaste""#,
+                            ])
+                            .spawn();
+                    }
+                }
             }
         }
         Ok(Some(ClipboardContent::SkippedBatch(missed))) => {
