@@ -15,6 +15,12 @@ pub enum ConfigError {
     Serialize(#[from] toml::ser::Error),
 }
 
+/// Serde default helper: returns `true`.  Used for fields that should default
+/// to `true` when absent from the config file (e.g. `sound_on_copy`).
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AppConfig {
@@ -45,6 +51,14 @@ pub struct AppConfig {
     /// all rich types (RTF, HTML, attributed strings).  Default: `false`.
     #[serde(default)]
     pub paste_as_plain_text: bool,
+    /// Play a soft system sound (Tink) when the daemon captures a new clipboard
+    /// item in the background. macOS only. Default: `true`.
+    #[serde(default = "default_true")]
+    pub sound_on_copy: bool,
+    /// Show a macOS notification banner when the daemon captures a new
+    /// clipboard item. macOS only. Default: `true`.
+    #[serde(default = "default_true")]
+    pub notify_on_copy: bool,
 }
 
 impl Default for AppConfig {
@@ -69,6 +83,8 @@ impl Default for AppConfig {
             max_decoded_image_mb: MAX_DECODED_IMAGE_MB,
             excluded_app_bundle_ids: Vec::new(),
             paste_as_plain_text: false,
+            sound_on_copy: true,
+            notify_on_copy: true,
         }
     }
 }

@@ -13,22 +13,39 @@ import {
 } from "../lib/ipc";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
-import {
-  StepSlider,
-  snapToNearest,
-  TEXT_SIZE_STEPS_BYTES,
-  TEXT_SIZE_LABELS,
-  IMAGE_SIZE_STEPS_BYTES,
-  IMAGE_SIZE_LABELS,
-  FILE_SIZE_STEPS_BYTES,
-  FILE_SIZE_LABELS,
-  QUOTA_STEPS_BYTES,
-  QUOTA_LABELS,
-  HISTORY_STEPS,
-  HISTORY_LABELS,
-  SENSITIVE_TTL_STEPS,
-  SENSITIVE_TTL_LABELS,
-} from "../components/StepSlider";
+// Step arrays (moved from StepSlider.tsx — StepSlider component deleted in v0.5.3,
+// all sliders now use the unified SliderRow component).
+
+/** Return the step value closest to `raw` (by minimum absolute distance). */
+function snapToNearest<T extends number>(steps: readonly T[], raw: number): T {
+  let best = 0;
+  let bestDist = Math.abs(raw - (steps[0] as number));
+  for (let i = 1; i < steps.length; i++) {
+    const d = Math.abs(raw - (steps[i] as number));
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  return steps[best];
+}
+
+const UNLIMITED_SENTINEL = 100_000;
+
+const TEXT_SIZE_STEPS_BYTES = [1,2,5,10,15,25,50,100].map((n) => n * 1_000_000) as unknown as readonly number[];
+const TEXT_SIZE_LABELS = ["1 MB","2 MB","5 MB","10 MB","15 MB","25 MB","50 MB","100 MB (max)"] as const;
+
+const IMAGE_SIZE_STEPS_BYTES = [5,10,25,64,128,256,512].map((n) => n * 1_000_000) as unknown as readonly number[];
+const IMAGE_SIZE_LABELS = ["5 MB","10 MB","25 MB","64 MB","128 MB","256 MB","512 MB (max)"] as const;
+
+const FILE_SIZE_STEPS_BYTES = [64,128,256,512,1024,2048].map((n) => n * 1_000_000) as unknown as readonly number[];
+const FILE_SIZE_LABELS = ["64 MB","128 MB","256 MB","512 MB","1 GB","2 GB (max)"] as const;
+
+const QUOTA_STEPS_BYTES = [1,2,5,10,25,50].map((n) => n * 1_000_000_000) as unknown as readonly number[];
+const QUOTA_LABELS = ["1 GB","2 GB","5 GB","10 GB","25 GB","50 GB (max)"] as const;
+
+const HISTORY_STEPS = [100, 250, 500, 1_000, 2_500, 5_000, 10_000, UNLIMITED_SENTINEL] as const;
+const HISTORY_LABELS = ["100","250","500","1,000","2,500","5,000","10,000","Unlimited"] as const;
+
+const SENSITIVE_TTL_STEPS = [10, 30, 60, 5 * 60, 15 * 60, 60 * 60] as const;
+const SENSITIVE_TTL_LABELS = ["10 s","30 s","1 min","5 min","15 min","1 hour"] as const;
 
 // ---------------------------------------------------------------------------
 // Toggle — iOS-style switch using ide tokens
@@ -38,16 +55,19 @@ function Toggle({
   checked,
   onChange,
   disabled,
+  "aria-label": ariaLabel,
 }: {
   checked: boolean;
   onChange: (val: boolean) => void;
   disabled?: boolean;
+  "aria-label"?: string;
 }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-label={ariaLabel}
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={[
@@ -120,7 +140,8 @@ function StatusRow({ label, ok }: { label: string; ok: boolean }) {
 
 // ---------------------------------------------------------------------------
 // W4-2: Slider row — consistent grid: [slider (flex)] [fixed-width value]
-// Both sliders in the Display section use this component so columns align.
+// Extended in v0.5.3 with optional onRelease to save only on mouse-up/touch-end
+// (prevents spamming IPC on every drag tick in storage sliders).
 // ---------------------------------------------------------------------------
 
 function SliderRow({
@@ -129,18 +150,22 @@ function SliderRow({
   step,
   value,
   onChange,
+  onRelease,
   formatValue,
+  disabled,
 }: {
   min: number;
   max: number;
   step: number;
   value: number;
   onChange: (v: number) => void;
+  /** Called on mouse-up / touch-end / key-up — saves to daemon without spamming. */
+  onRelease?: (v: number) => void;
   /** Format the numeric value for the right-hand value label. */
   formatValue: (v: number) => string;
+  disabled?: boolean;
 }) {
   return (
-    // Grid: slider expands to fill, value label is fixed 52px right-aligned.
     <div className="flex items-center gap-2">
       <input
         type="range"
@@ -148,13 +173,60 @@ function SliderRow({
         max={max}
         step={step}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-28 accent-ide-accent"
+        onMouseUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
+        onTouchEnd={(e) => onRelease?.(Number((e.currentTarget as HTMLInputElement).value))}
+        onKeyUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
+        className="w-28 accent-ide-accent disabled:opacity-40 disabled:cursor-not-allowed"
       />
-      {/* Fixed width + text-right keeps all value labels in the same column. */}
       <span className="w-[52px] text-right text-[13px] text-ide-text">
         {formatValue(value)}
       </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// InfoPopover — collapsible help text behind a ⓘ icon (M8)
+// Click the icon to open; click outside to close.
+// ---------------------------------------------------------------------------
+
+function InfoPopover({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative inline-flex items-center">
+      <button
+        type="button"
+        aria-label="More info"
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-4 w-4 items-center justify-center rounded-full text-ide-faint hover:text-ide-dim transition-colors"
+      >
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
+          <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 3a.9.9 0 1 1 0 1.8A.9.9 0 0 1 8 4Zm-.75 2.75h1.5v4.5h-1.5v-4.5Z" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          className="absolute left-5 top-0 z-50 w-56 rounded-ide border border-ide-border bg-ide-elevated p-2 text-[11px] text-ide-dim shadow-ide-sm"
+          style={{ minWidth: "14rem" }}
+        >
+          {text}
+        </div>
+      )}
     </div>
   );
 }
@@ -224,7 +296,7 @@ function formatLastSync(ms: number | null): string {
 //
 // Core binary defaults (MiB/GiB):
 //   text 15 MiB, image 64 MiB, file 1 GiB, quota 10 GiB
-// Step arrays in StepSlider.tsx cover or exceed each of these.
+// Step arrays defined above (moved from the deleted StepSlider.tsx in v0.5.3) cover or exceed each of these.
 //
 // UNLIMITED_SENTINEL (100_000) = HISTORY_LIMIT in defaults.rs — documented as
 // "intentionally generous: history should feel unbounded to the user"; the
@@ -806,11 +878,7 @@ export function SettingsView() {
     "disabled:cursor-not-allowed disabled:opacity-40",
   ].join(" ");
 
-  const numberInputCls = [
-    "w-20 rounded-ide border border-ide-border bg-ide-bg px-2 py-1",
-    "text-[13px] text-ide-text outline-none focus:border-ide-accent",
-    "disabled:cursor-not-allowed disabled:opacity-40",
-  ].join(" ");
+
 
   const btnCls = [
     "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
@@ -889,69 +957,39 @@ export function SettingsView() {
       <div className="space-y-2">
         <SubsectionHeader label="History list" />
         <Panel>
+          {/* M4: split previewLines — main window has its own independent setting */}
           <SettingsRow label="Preview lines">
-            <SliderRow
-              min={1}
-              max={6}
-              step={1}
-              value={prefs.previewLines}
-              onChange={(v) => setPrefs({ previewLines: v })}
-              formatValue={(v) => String(v)}
-            />
-          </SettingsRow>
-          <SettingsRow label="Items displayed">
-            <div className="flex flex-col items-end gap-0.5">
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={1}
-                  max={999}
-                  step={1}
-                  value={prefs.historySize}
-                  onChange={(e) => {
-                    const v = Math.max(1, Math.min(999, Number(e.target.value) || 1));
-                    setPrefs({ historySize: v });
-                  }}
-                  className={numberInputCls}
-                />
-                <span className="text-[13px] text-ide-dim">items</span>
-              </div>
-              <span className="text-[11px] text-ide-faint">1–999</span>
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Number of text lines shown per clip in the main history window. Independent from the popup setting." />
+              <SliderRow
+                min={1}
+                max={6}
+                step={1}
+                value={prefs.previewLinesApp}
+                onChange={(v) => setPrefs({ previewLinesApp: v })}
+                formatValue={(v) => String(v)}
+              />
             </div>
           </SettingsRow>
-          <SettingsRow label="Preview hover delay">
-            <div className="flex flex-col items-end gap-0.5">
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={200}
-                  max={100000}
-                  step={100}
-                  value={prefs.previewDelay}
-                  onChange={(e) => {
-                    const v = Math.max(200, Math.min(100000, Number(e.target.value) || 1500));
-                    setPrefs({ previewDelay: v });
-                  }}
-                  className={`${numberInputCls} w-24`}
-                />
-                <span className="text-[13px] text-ide-dim">ms</span>
-              </div>
-              <span className="text-[11px] text-ide-faint">200–100 000 ms</span>
-            </div>
-          </SettingsRow>
+          {/* M5: historySize removed — history uses lazy pagination now */}
+          {/* M6: previewDelay removed — replaced by explicit Eye preview button */}
         </Panel>
 
         <SubsectionHeader label="Popup appearance" hint="How the popup looks when triggered." />
         <Panel>
+          {/* M4: popup gets its own independent preview-lines setting */}
           <SettingsRow label="Preview lines">
-            <SliderRow
-              min={1}
-              max={6}
-              step={1}
-              value={prefs.previewLines}
-              onChange={(v) => setPrefs({ previewLines: v })}
-              formatValue={(v) => String(v)}
-            />
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Number of text lines shown per clip in the Quick-Paste popup. Independent from the main window setting." />
+              <SliderRow
+                min={1}
+                max={6}
+                step={1}
+                value={prefs.previewLinesPopup}
+                onChange={(v) => setPrefs({ previewLinesPopup: v })}
+                formatValue={(v) => String(v)}
+              />
+            </div>
           </SettingsRow>
           <SettingsRow label="Image preview height">
             <div className="flex flex-col items-end gap-0.5">
@@ -1024,6 +1062,7 @@ export function SettingsView() {
                 checked={config.p2p_enabled}
                 onChange={(v) => void handleP2pToggle(v)}
                 disabled={offline}
+                aria-label="P2P sync"
               />
             </div>
           </SettingsRow>
@@ -1078,9 +1117,11 @@ export function SettingsView() {
               )}
             </div>
           </SettingsRow>
+          {/* M7: "Set" button removed — passphrase saves on Enter or focus-out */}
           <SettingsRow label="Sync passphrase">
             <div className="flex flex-col items-end gap-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
+                <InfoPopover text="Enter the same passphrase on every device to enable encrypted sync. Saves automatically when you press Enter or move focus away." />
                 <input
                   type="password"
                   className={inputCls}
@@ -1093,15 +1134,10 @@ export function SettingsView() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void handleSetPassphrase();
                   }}
+                  onBlur={() => {
+                    if (passphrase.trim() !== "") void handleSetPassphrase();
+                  }}
                 />
-                <button
-                  type="button"
-                  disabled={offline || passphrase.trim() === ""}
-                  onClick={() => void handleSetPassphrase()}
-                  className={btnCls}
-                >
-                  Set
-                </button>
               </div>
               {passphraseSavedMsg !== null && (
                 <span
@@ -1113,9 +1149,6 @@ export function SettingsView() {
                   {passphraseSavedMsg}
                 </span>
               )}
-              <span className="text-[11px] text-ide-faint">
-                Same passphrase on every device to sync.
-              </span>
             </div>
           </SettingsRow>
           {testMsg !== null && (
@@ -1219,6 +1252,8 @@ export function SettingsView() {
 
   function renderStorage() {
     // Helper: render a stepped slider row with inline feedback badge.
+    // M9: LimitSliderRow now uses the unified SliderRow (index-based 0…steps.length-1).
+    // onRelease fires only on mouse-up/touch-end to avoid hammering the IPC on drag.
     function LimitSliderRow<T extends number>({
       label,
       field,
@@ -1236,19 +1271,21 @@ export function SettingsView() {
       onChange: (v: T) => void;
       onRelease: (v: T) => void;
     }) {
+      const maxIdx = steps.length - 1;
       const idx = steps.indexOf(value);
       const safeIdx = idx < 0 ? 0 : idx;
       return (
         <SettingsRow label={label}>
           <div className="flex items-center gap-2">
-            <StepSlider
-              steps={steps}
-              value={steps[safeIdx]}
-              onChange={onChange}
-              onRelease={onRelease}
-              formatLabel={(v) => labels[steps.indexOf(v as T)] ?? String(v)}
-              ariaLabel={label}
+            <SliderRow
+              min={0}
+              max={maxIdx}
+              step={1}
+              value={safeIdx}
               disabled={offline}
+              onChange={(i) => onChange(steps[Math.min(Math.max(i, 0), maxIdx)] as T)}
+              onRelease={(i) => onRelease(steps[Math.min(Math.max(i, 0), maxIdx)] as T)}
+              formatValue={(i) => labels[Math.min(Math.max(i, 0), maxIdx)] ?? String(i)}
             />
             <LimitsMsg field={field} />
           </div>

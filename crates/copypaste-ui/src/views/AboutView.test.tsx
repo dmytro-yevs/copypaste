@@ -6,6 +6,9 @@ const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
 }));
+vi.mock("@tauri-apps/api/app", () => ({
+  getVersion: () => Promise.resolve("0.5.3"),
+}));
 
 import { AboutView } from "./AboutView";
 
@@ -28,10 +31,12 @@ describe("AboutView visual structure (JetBrains tokens)", () => {
     expect(screen.getByText(/Encrypted clipboard manager for macOS/i)).toBeInTheDocument();
   });
 
-  it("renders a version string in the identity section", () => {
+  it("renders a version string in the identity section", async () => {
     render(<AboutView />);
     // Version is either a semver or a placeholder like "0.x.x" / "v0.5.2"
-    expect(screen.getByText(/v?\d+\.\d+/)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/v?\d+\.\d+/)).toBeInTheDocument();
+    });
   });
 
   it("renders all three feature items with accent checkmarks", () => {
