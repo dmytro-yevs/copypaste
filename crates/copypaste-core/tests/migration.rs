@@ -51,7 +51,8 @@ async fn test_schema_rollback_v5_mid_batch() {
 ///     idx_clipboard_item_id (sync replay dedup). See schema_v2.sql.
 /// v6: adds migration_state table for resumable v4 key-rotation tracking.
 /// v7: adds pinned column on clipboard table (TTL prune respects pin).
-const CURRENT_SCHEMA_VERSION: i64 = 7;
+/// v8: adds pin_order column for user-controlled pinned-item ordering.
+const CURRENT_SCHEMA_VERSION: i64 = 8;
 
 /// v1 schema (the exact contents of src/storage/schema_v1.sql, inlined because
 /// the file is `include_str!`'d into the crate and not accessible from
