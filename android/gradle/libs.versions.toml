@@ -15,7 +15,7 @@ composeBom = "2024.04.01"
 activityCompose = "1.8.2"
 lifecycleViewModelCompose = "2.7.0"
 # lifecycle-runtime-ktx provides Activity.lifecycleScope (M7 leak fix).
-lifecycleRuntimeKtx = "2.7.0"
+lifecycleRuntimeKtx = "2.10.0"
 workManager = "2.9.0"
 # ZXing — QR generation (core) + camera scanning (android-embedded) for device
 # pairing. android-embedded bundles a self-contained scanner Activity so we do
