@@ -3,7 +3,6 @@ package com.copypaste.android
 import android.accessibilityservice.AccessibilityService
 import android.content.ClipboardManager
 import android.content.Context
-import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,13 +56,30 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        settings = Settings(this)
-        repository = ClipboardRepository(this)
-        val relayClient = RelayClient(settings.relayUrl)
-        syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
-        clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboardManager.addPrimaryClipChangedListener(clipListener)
-        Log.i(TAG, "ClipboardAccessibilityService connected — background clipboard access active")
+        AppLogger.i(TAG, "ClipboardAccessibilityService.onServiceConnected called")
+        try {
+            settings = Settings(this)
+            repository = ClipboardRepository(this)
+            val relayClient = RelayClient(settings.relayUrl)
+            syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
+        } catch (e: Exception) {
+            // Sync/relay initialisation failed (bad URL, missing .so, etc.).
+            // Log the failure so it shows up in the in-app log viewer and adb-pullable log,
+            // then fall through and attempt to register the clipboard listener anyway so that
+            // local capture still works even without sync.
+            AppLogger.e(TAG, "onServiceConnected: sync init failed — local-capture-only mode", e)
+        }
+
+        // Always attempt to register the clipboard listener. If clipboardManager cannot be
+        // obtained (e.g. the service context is broken) we at least log the failure rather
+        // than silently dying.
+        try {
+            clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboardManager.addPrimaryClipChangedListener(clipListener)
+            AppLogger.i(TAG, "ClipboardAccessibilityService connected — background clipboard access active")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "onServiceConnected: failed to register clipboard listener", e)
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -72,10 +88,11 @@ class ClipboardAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        Log.w(TAG, "ClipboardAccessibilityService interrupted")
+        AppLogger.w(TAG, "ClipboardAccessibilityService interrupted")
     }
 
     override fun onDestroy() {
+        AppLogger.i(TAG, "ClipboardAccessibilityService.onDestroy called")
         runCatching { clipboardManager.removePrimaryClipChangedListener(clipListener) }
         scope.cancel()
         super.onDestroy()
@@ -86,7 +103,7 @@ class ClipboardAccessibilityService : AccessibilityService() {
         // foreground service so background-captured clips are synced and counted,
         // not just stored locally.
         ClipboardService.captureClip(this, text, settings, repository, syncManager)
-        Log.d(TAG, "AccessibilityService captured background clip")
+        AppLogger.d(TAG, "AccessibilityService captured background clip")
     }
 
     companion object {
