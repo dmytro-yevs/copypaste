@@ -250,17 +250,44 @@ class FgsSyncLoop(
                 // Decrypt; skip rows that fail (wrong key, tampered blob).
                 val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
 
-                val text = item.plaintext.toString(Charsets.UTF_8)
-                if (text.isBlank()) continue
+                val isImage = item.contentType == "image" ||
+                    item.contentType.startsWith("image/")
 
-                // Task 5: LWW replace — replace only when incoming lamport_ts is
-                // strictly newer than the locally stored row for the same item_id.
-                val stored = repository.storeItemWithLww(
-                    plaintext = text,
-                    key = settings.encryptionKey,
-                    itemId = item.itemId,
-                    incomingLamportTs = item.lamportTs,
-                )
+                val stored = if (isImage) {
+                    // Image row: store a placeholder entry then persist raw bytes.
+                    // storeItem deduplicates via overrideId so re-polls are no-ops.
+                    if (item.plaintext.isEmpty()) {
+                        false
+                    } else {
+                        val storedId = repository.storeItem(
+                            plaintext = "[image]",
+                            key = settings.encryptionKey,
+                            overrideId = item.itemId,
+                            contentType = item.contentType,
+                            lamportTs = item.lamportTs,
+                        )
+                        if (storedId.isNotEmpty()) {
+                            repository.storeImageBytes(storedId, item.plaintext)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                } else {
+                    // Text row: LWW replace — replace only when incoming lamport_ts
+                    // is strictly newer than the locally stored row for the same item_id.
+                    val text = item.plaintext.toString(Charsets.UTF_8)
+                    if (text.isBlank()) {
+                        false
+                    } else {
+                        repository.storeItemWithLww(
+                            plaintext = text,
+                            key = settings.encryptionKey,
+                            itemId = item.itemId,
+                            incomingLamportTs = item.lamportTs,
+                        )
+                    }
+                }
                 if (stored) newCount++
             }
 

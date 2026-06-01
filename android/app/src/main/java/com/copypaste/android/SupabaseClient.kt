@@ -379,11 +379,6 @@ class SupabaseClient(
      * fails — never surfaces partial plaintext or throws to the caller.
      */
     fun decryptRow(row: CloudRow, syncKeyBytes: ByteArray): DecryptedItem? {
-        // Only text items are supported today (mirrors macOS daemon behaviour).
-        if (row.contentType != "text") {
-            Log.d(TAG, "decryptRow: skipping non-text row id=${row.id} (${row.contentType})")
-            return null
-        }
         // `payload_ct` comes back as a `bytea` hex literal `\x<hex>` (or, for
         // legacy rows, bare base64). [decodePayloadCt] accepts both, mirroring
         // the daemon's `decode_payload_ct`.
