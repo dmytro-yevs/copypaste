@@ -9,12 +9,14 @@ import { HistoryView } from "./views/HistoryView";
 import { DevicesView } from "./views/DevicesView";
 import { SettingsView } from "./views/SettingsView";
 import { AboutView } from "./views/AboutView";
+import { LogView } from "./views/LogView";
 
 const VIEWS: Record<ViewId, { Component: ComponentType; label: string }> = {
   history: { Component: HistoryView, label: "History" },
   devices: { Component: DevicesView, label: "Devices" },
   settings: { Component: SettingsView, label: "Settings" },
-  about: { Component: AboutView, label: "About" }
+  about: { Component: AboutView, label: "About" },
+  logs: { Component: LogView, label: "Logs" },
 };
 
 export default function App() {

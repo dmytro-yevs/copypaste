@@ -184,6 +184,74 @@ pub async fn pairing_qr_svg() -> Result<PairingQr, String> {
     })
 }
 
+/// Read the most recent daemon log file and return up to `max_lines` trailing
+/// lines. Returns an empty string if no log files are found.
+#[tauri::command]
+pub async fn read_logs(max_lines: usize) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let log_dir = {
+            #[cfg(target_os = "macos")]
+            {
+                home::home_dir()
+                    .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+                    .join("Library/Logs/CopyPaste")
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                std::env::temp_dir().join("copypaste-logs")
+            }
+        };
+
+        let read_dir = std::fs::read_dir(&log_dir)
+            .map_err(|e| format!("cannot read log dir {}: {e}", log_dir.display()))?;
+
+        let mut entries: Vec<std::fs::DirEntry> = read_dir
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name();
+                let s = name.to_string_lossy();
+                s.starts_with("daemon") && s.ends_with(".log")
+            })
+            .collect();
+
+        // Sort descending by filename (daily rotation: daemon.YYYY-MM-DD.log).
+        entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+
+        let Some(entry) = entries.first() else {
+            return Ok(String::new());
+        };
+
+        let content = std::fs::read_to_string(entry.path())
+            .map_err(|e| format!("cannot read log file: {e}"))?;
+
+        let all_lines: Vec<&str> = content.lines().collect();
+        let start = all_lines.len().saturating_sub(max_lines);
+        Ok(all_lines[start..].join("\n"))
+    })
+    .await
+    .map_err(|e| format!("read_logs task join error: {e}"))?
+}
+
+/// Return the path of the daemon log directory.
+#[tauri::command]
+pub fn log_dir_path() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        home::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+            .join("Library/Logs/CopyPaste")
+            .to_string_lossy()
+            .into_owned()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        std::env::temp_dir()
+            .join("copypaste-logs")
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
 /// Render `payload` as an inline SVG QR code string.
 fn render_svg(payload: &str) -> Result<String, String> {
     use qrcode::render::svg;

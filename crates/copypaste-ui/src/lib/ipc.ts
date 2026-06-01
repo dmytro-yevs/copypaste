@@ -558,3 +558,22 @@ export function formatEpochSecs(secs: number | null | undefined): string {
   if (!secs) return "—";
   return new Date(secs * 1000).toLocaleString();
 }
+
+// ---------------------------------------------------------------------------
+// Log viewer commands (Tauri-direct — bypass daemon IPC)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the last `maxLines` lines from the daemon log files in
+ * ~/Library/Logs/CopyPaste/. Returns the log content as a single string.
+ */
+export async function readLogs(maxLines: number): Promise<string> {
+  return invoke<string>("read_logs", { maxLines });
+}
+
+/**
+ * Return the log directory path (~/Library/Logs/CopyPaste on macOS).
+ */
+export async function logDirPath(): Promise<string> {
+  return invoke<string>("log_dir_path");
+}

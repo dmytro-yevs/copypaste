@@ -1860,10 +1860,14 @@ impl IpcServer {
                     // and FTS never drifts from clipboard_items.
                     let conn = db.conn();
                     let tx = conn.unchecked_transaction()?;
-                    let deleted = tx.execute("DELETE FROM clipboard_items", [])?;
-                    // Best-effort FTS purge — a failure here rolls back the
-                    // outer delete too so the two tables stay consistent.
-                    tx.execute("DELETE FROM clipboard_fts", [])?;
+                    let deleted = tx.execute("DELETE FROM clipboard_items WHERE pinned = 0", [])?;
+                    // Sync FTS: remove any rows whose parent item was deleted.
+                    // Pinned items remain in clipboard_items so their FTS rows
+                    // are kept; only orphaned FTS rows (deleted items) are removed.
+                    tx.execute(
+                        "DELETE FROM clipboard_fts WHERE rowid NOT IN (SELECT rowid FROM clipboard_items)",
+                        [],
+                    )?;
                     tx.commit()?;
                     Ok::<_, rusqlite::Error>(deleted)
                 })

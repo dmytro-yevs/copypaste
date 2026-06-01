@@ -241,4 +241,6 @@
     <string name="error_delete_items">Failed to delete items: %1$s</string>
     <string name="status_pairing">Generating pairing token…</string>
     <string name="snackbar_dismiss">Dismiss</string>
+    <string name="settings_saved">Settings saved</string>
+    <string name="action_save">Save</string>
 </resources>

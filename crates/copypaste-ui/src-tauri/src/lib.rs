@@ -169,6 +169,8 @@ pub fn run() {
             set_launch_at_login,
             get_popup_position,
             set_popup_position,
+            ipc::read_logs,
+            ipc::log_dir_path,
         ])
         .setup(|app| {
             // Load persisted config now that we have the app handle.

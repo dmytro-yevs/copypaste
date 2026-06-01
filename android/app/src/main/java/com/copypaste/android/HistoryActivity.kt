@@ -169,7 +169,7 @@ class HistoryActivity : ComponentActivity() {
 // Confirmation dialog enum
 // ─────────────────────────────────────────────────────────────────────────────
 
-private enum class ConfirmAction { CLEAR_ALL, CLEAR_UNPINNED, DELETE_SELECTED }
+private enum class ConfirmAction { CLEAR_UNPINNED, DELETE_SELECTED }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Relative time helper — §5 tabular-nums timestamps
@@ -258,14 +258,12 @@ fun HistoryScreen(
         ConfirmationDialog(
             action = action,
             itemCount = when (action) {
-                ConfirmAction.CLEAR_ALL -> items.size
                 ConfirmAction.CLEAR_UNPINNED -> items.count { !it.pinned }
                 ConfirmAction.DELETE_SELECTED -> selectedIds.size
             },
             onConfirm = {
                 pendingConfirm = null
                 when (action) {
-                    ConfirmAction.CLEAR_ALL -> viewModel.clearAll()
                     ConfirmAction.CLEAR_UNPINNED -> viewModel.clearUnpinned()
                     ConfirmAction.DELETE_SELECTED -> {
                         viewModel.deleteItems(selectedIds.toList())
@@ -382,21 +380,6 @@ fun HistoryScreen(
                                     expanded = overflowExpanded,
                                     onDismissRequest = { overflowExpanded = false },
                                 ) {
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                stringResource(R.string.action_clear_all),
-                                                color = IdeDanger,
-                                            )
-                                        },
-                                        leadingIcon = {
-                                            Icon(Icons.Filled.DeleteSweep, null, tint = IdeDanger)
-                                        },
-                                        onClick = {
-                                            overflowExpanded = false
-                                            pendingConfirm = ConfirmAction.CLEAR_ALL
-                                        },
-                                    )
                                     val unpinnedCount = items.count { !it.pinned }
                                     if (unpinnedCount > 0) {
                                         DropdownMenuItem(
@@ -432,7 +415,7 @@ fun HistoryScreen(
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
     ) { innerPadding ->
         when {
-            loading -> LoadingBox(innerPadding)
+            loading && sortedItems.isEmpty() -> LoadingBox(innerPadding)
             // §9: history completely empty
             sortedItems.isEmpty() -> EmptyHistoryState(innerPadding)
             // §9: search returned no results
@@ -560,13 +543,10 @@ private fun ConfirmationDialog(
     onDismiss: () -> Unit,
 ) {
     val title = when (action) {
-        ConfirmAction.CLEAR_ALL -> stringResource(R.string.dialog_clear_all_title)
         ConfirmAction.CLEAR_UNPINNED -> stringResource(R.string.dialog_clear_unpinned_title)
         ConfirmAction.DELETE_SELECTED -> stringResource(R.string.dialog_delete_selected_title)
     }
     val message = when (action) {
-        ConfirmAction.CLEAR_ALL ->
-            stringResource(R.string.dialog_clear_all_message, itemCount)
         ConfirmAction.CLEAR_UNPINNED ->
             stringResource(R.string.dialog_clear_unpinned_message)
         ConfirmAction.DELETE_SELECTED ->

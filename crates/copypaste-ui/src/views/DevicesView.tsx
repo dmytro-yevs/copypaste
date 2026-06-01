@@ -81,22 +81,19 @@ function ThisDeviceCard({
         <MetaRow label="Version" value={info.app_version} />
         <MetaRow label="Local IP" value={info.local_ip} />
 
-        {/* Fingerprint — full value with copy button */}
+        {/* Fingerprint — click to copy */}
         {info.fingerprint !== null && (
-          <div className="flex items-center gap-1.5 pt-0.5">
+          <div className="pt-0.5">
             <span
-              className="select-all break-all font-mono text-[11px] text-ide-dim"
-              title={info.fingerprint}
-            >
-              {info.fingerprint}
-            </span>
-            <button
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={onCopy}
-              className="shrink-0 rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text transition-colors"
+              onKeyDown={(e) => e.key === "Enter" && onCopy()}
+              className="cursor-pointer select-all break-all font-mono text-[11px] text-ide-dim hover:text-ide-text transition-colors"
+              title={copied ? "Copied!" : "Click to copy fingerprint"}
             >
-              {copied ? "Copied" : "Copy"}
-            </button>
+              {copied ? `${info.fingerprint} ✓` : info.fingerprint}
+            </span>
           </div>
         )}
         {info.fingerprint === null && (

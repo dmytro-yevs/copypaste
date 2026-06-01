@@ -41,10 +41,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Card
@@ -161,8 +166,10 @@ fun PairScreen(
     var syncing by remember { mutableStateOf(false) }
     var syncResult by remember { mutableStateOf<String?>(null) }
     var remainingSeconds by remember { mutableStateOf(0) }
+    var qrBlurred by remember { mutableStateOf(true) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val clipboardManager = LocalClipboardManager.current
     val errorTemplate = stringResource(R.string.error_pairing)
     val dismissLabel = stringResource(R.string.snackbar_dismiss)
 
@@ -422,19 +429,68 @@ fun PairScreen(
                                 // QR needs a light, high-contrast backing to scan
                                 // reliably — sit the code on a white rounded plate
                                 // that fills the reserved slot exactly.
+                                // First tap reveals the QR; second tap regenerates it.
                                 Box(
                                     modifier = Modifier
                                         .size(QR_SLOT_SIZE_DP.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        .background(androidx.compose.ui.graphics.Color.White)
-                                        .padding(QR_PLATE_PADDING_DP.dp),
+                                        .clickable {
+                                            if (qrBlurred) {
+                                                qrBlurred = false
+                                            } else {
+                                                // Second tap: regenerate a fresh QR.
+                                                scope.launch {
+                                                    loading = true
+                                                    try {
+                                                        val result = withContext(Dispatchers.IO) {
+                                                            startPairing(
+                                                                settings.deviceId,
+                                                                android.os.Build.MODEL ?: "Android"
+                                                            )
+                                                        }
+                                                        val newBmp = withContext(Dispatchers.Default) {
+                                                            encodeQrBitmap(result.qr, 512)
+                                                        }
+                                                        qr = result
+                                                        qrBitmap = newBmp
+                                                        qrBlurred = true
+                                                    } catch (e: Exception) {
+                                                        errorMessage = e.message ?: e.javaClass.simpleName
+                                                    } finally {
+                                                        loading = false
+                                                    }
+                                                }
+                                            }
+                                        },
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Image(
-                                        bitmap = bmp.asImageBitmap(),
-                                        contentDescription = "Pairing QR code",
-                                        modifier = Modifier.size(QR_IMAGE_SIZE_DP.dp)
-                                    )
+                                    // White plate with QR image — blurred when unrevealed.
+                                    Box(
+                                        modifier = Modifier
+                                            .size(QR_SLOT_SIZE_DP.dp)
+                                            .background(androidx.compose.ui.graphics.Color.White)
+                                            .padding(QR_PLATE_PADDING_DP.dp)
+                                            .then(
+                                                if (qrBlurred) Modifier.blur(16.dp)
+                                                else Modifier
+                                            ),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Image(
+                                            bitmap = bmp.asImageBitmap(),
+                                            contentDescription = "Pairing QR code",
+                                            modifier = Modifier.size(QR_IMAGE_SIZE_DP.dp)
+                                        )
+                                    }
+                                    // Overlay hint shown only while blurred.
+                                    if (qrBlurred) {
+                                        Text(
+                                            text = "Tap to reveal",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = IdeText,
+                                            textAlign = TextAlign.Center,
+                                        )
+                                    }
                                 }
                             }
                             else -> {
@@ -478,6 +534,12 @@ fun PairScreen(
                             text = pairedFingerprint,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.clickable {
+                                clipboardManager.setText(AnnotatedString(pairedFingerprint))
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Fingerprint copied")
+                                }
+                            },
                         )
                         if (pairedAddr.isNotBlank()) {
                             Text(

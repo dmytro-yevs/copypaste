@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type ViewId = "history" | "devices" | "settings" | "about";
+export type ViewId = "history" | "devices" | "settings" | "about" | "logs";
 
 // ---------------------------------------------------------------------------
 // UI preferences persisted to localStorage

@@ -1099,16 +1099,6 @@ export function HistoryView() {
     async (id: string) => {
       try {
         await api.copyItem(id);
-        // Optimistically move the copied item to the top (daemon bumps recency).
-        setItems((prev) => {
-          const idx = prev.findIndex((it) => it.id === id);
-          if (idx <= 0) return prev; // already at top or not found
-          const next = [...prev];
-          const [item] = next.splice(idx, 1);
-          next.unshift(item);
-          sigRef.current = ""; // allow next poll to re-render with server state
-          return next;
-        });
         void load(true);
       } catch (err) {
         const msg = err instanceof IpcError ? err.message : "Copy failed";
@@ -1273,33 +1263,6 @@ export function HistoryView() {
     }
   }, [bulkBusy, multiSelectedIds, filtered, clearSelection, load, showToast]);
 
-  // Inline confirm state — replaces window.confirm (blocked in Tauri webviews).
-  const [confirmPending, setConfirmPending] = useState(false);
-
-  const handleClearAll = useCallback(() => {
-    setConfirmPending(true);
-  }, []);
-
-  const handleClearAllConfirmed = useCallback(async () => {
-    setConfirmPending(false);
-    try {
-      const result = await api.deleteAll();
-      setSelectedId(null);
-      clearSelection();
-      // Immediately clear the list so the view empties without waiting for reload.
-      setItems([]);
-      clearImageCache(); // the items are gone; drop their cached thumbnails too
-      sigRef.current = ""; // force re-render even if daemon returns identical sig
-      showToast(
-        `Cleared ${result.deleted} item${result.deleted === 1 ? "" : "s"}`,
-        "success"
-      );
-      void load(true);
-    } catch (err) {
-      const msg = err instanceof IpcError ? err.message : "Clear failed";
-      showToast(msg, "error");
-    }
-  }, [load, clearSelection, showToast]);
 
   // Destructive database reset — the recovery escape hatch when the daemon is
   // degraded (DB cannot be decrypted). Erases all local history and recreates a
@@ -1333,40 +1296,14 @@ export function HistoryView() {
   // -------------------------------------------------------------------------
 
   const actions = (
-    <>
-      <input
-        ref={searchRef}
-        type="search"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        placeholder="Filter…"
-        className="h-7 w-44 rounded-ide px-2 text-[12px]"
-      />
-      {confirmPending ? (
-        <span className="flex items-center gap-1.5 text-[12px]">
-          <span className="text-ide-dim">Delete all?</span>
-          <button
-            onClick={() => void handleClearAllConfirmed()}
-            className="rounded-ide border border-ide-danger/40 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised shadow-ide-xs"
-          >
-            Yes
-          </button>
-          <button
-            onClick={() => setConfirmPending(false)}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
-          >
-            No
-          </button>
-        </span>
-      ) : (
-        <button
-          onClick={() => void handleClearAll()}
-          className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/40 shadow-ide-xs"
-        >
-          Clear all
-        </button>
-      )}
-    </>
+    <input
+      ref={searchRef}
+      type="search"
+      value={search}
+      onChange={(e) => setSearch(e.target.value)}
+      placeholder="Filter…"
+      className="h-7 w-44 rounded-ide px-2 text-[12px]"
+    />
   );
 
   let body: React.ReactNode;
