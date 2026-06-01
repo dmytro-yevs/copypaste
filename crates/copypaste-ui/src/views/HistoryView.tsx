@@ -1154,6 +1154,30 @@ export function HistoryView() {
     async (id: string) => {
       try {
         await api.copyItem(id);
+        // Optimistically move the copied item to the top — but only for
+        // unpinned items. Pinned items keep their pin_order position; the daemon
+        // only bumps wall_time, which does not affect their sort position.
+        setItems((prev) => {
+          const idx = prev.findIndex((it) => it.id === id);
+          if (idx <= 0) return prev; // already at top or not found
+          const item = prev[idx];
+          if (item.pinned) {
+            // Pinned items must not jump to top — let the next poll reflect
+            // the server state (wall_time bump only, pin_order unchanged).
+            sigRef.current = "";
+            return prev;
+          }
+          const next = [...prev];
+          next.splice(idx, 1);
+          // Insert after the last pinned item so the unpinned section is correct.
+          const lastPinnedIdx = next.reduce(
+            (acc, it, i) => (it.pinned ? i : acc),
+            -1
+          );
+          next.splice(lastPinnedIdx + 1, 0, item);
+          sigRef.current = ""; // allow next poll to re-render with server state
+          return next;
+        });
         void load(true);
       } catch (err) {
         const msg = err instanceof IpcError ? err.message : "Copy failed";
