@@ -30,10 +30,10 @@ repository = "https://github.com/dmytro/CopyPaste"
 # Crypto
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 chacha20poly1305 = "0.10"
-hkdf = "0.12"
-sha2 = "0.10"
+hkdf = "0.13"
+sha2 = "0.11"
 zeroize = { version = "1.7", features = ["derive"] }
-rand = "0.8"
+rand = "0.9"
 hex = "0.4"
 # S5: Pin subtle >= 2.5 to guarantee constant-time comparison fixes present in 2.5+.
 # 2.6.1 is already in Cargo.lock; this workspace pin prevents any crate from
@@ -42,14 +42,14 @@ subtle = "2.5"
 # P2P TLS (pinned together to keep ring crypto provider consistent)
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
-rcgen = { version = "0.12", default-features = false, features = ["ring"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }
 # mDNS-SD service discovery
-mdns-sd = "0.19"
+mdns-sd = "0.20"
 # Storage
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher", "backup"] }
 # Config
 serde = { version = "1", features = ["derive"] }
-toml = "0.8"
+toml = "1.1"
 # Patterns
 regex = "1.10"
 # Unicode normalisation (NFKC for sensitive-detector bypass guards)
@@ -57,7 +57,7 @@ unicode-normalization = "0.1"
 # Logging
 tracing = "0.1"
 # Errors
-thiserror = "1"
+thiserror = "2"
 # Misc
 # Pin to <1.21 retained for now; MSRV bumped to 1.86 (getrandom 0.4 OK), relax post-beta.
 uuid = { version = ">=1.0, <1.21", features = ["v4"] }
@@ -70,11 +70,11 @@ serde_json = "1"
 # 0.25.x fixes CVEs in 0.24. Transitive `tiff` crate moves from 0.9 → 0.11 (also CVE-fixed).
 image = { version = ">=0.25", default-features = false, features = ["png", "tiff"] }
 # macOS clipboard
-objc2 = "0.5"
-objc2-foundation = { version = "0.2", features = ["NSString", "NSData"] }
-objc2-app-kit = { version = "0.2", features = ["NSPasteboard", "NSPasteboardItem"] }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString", "NSData"] }
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem"] }
 # macOS Keychain
-security-framework = "2"
+security-framework = "3"
 # Logging subscriber
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Rotating file appender for daemon logs
@@ -82,7 +82,7 @@ tracing-appender = "0.2"
 # home dir (pin retained from Rust 1.75 era; safe to relax post-beta now MSRV=1.86)
 home = "=0.5.9"
 # platform config / data dirs
-dirs = "5"
+dirs = "6"
 # error handling
 anyhow = "1"
 # CLI argument parsing (pin retained; relax post-beta now MSRV=1.86 supports edition2024)
@@ -98,12 +98,12 @@ qrcode = { version = "0.14", default-features = false }
 # supabase crate already overrides locally to 0.12; this aligns the workspace.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # Benchmarking
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }
 # WebSocket. rustls (webpki-roots) instead of native-tls so the openssl-sys C
 # build is dropped from the tree; supabase realtime uses plain `connect_async`,
 # so the TLS-backend swap needs no source changes. `connect` must be listed
 # explicitly because disabling default features also drops it.
-tokio-tungstenite = { version = "0.23", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 # Async stream combinators
 futures-util = "0.3"
 

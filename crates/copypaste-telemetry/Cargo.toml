@@ -31,9 +31,9 @@ unicode-normalization = { workspace = true }
 # reqwest transport, so that path was unused, but 0.35 drops the direct
 # `rustls 0.22` dep entirely and resolves to the patched `rustls-webpki
 # 0.103.13` (still on the `ring` backend — no aws-lc-rs/cmake pulled in).
-sentry = { version = "0.35", default-features = false, features = ["reqwest", "rustls", "panic", "anyhow"] }
+sentry = { version = "0.48", default-features = false, features = ["reqwest", "rustls", "panic", "anyhow"] }
 
 [dev-dependencies]
 # `test` feature enables `sentry::test::with_captured_events` — required for
 # the in-memory transport used by `tests/sentry_backend.rs`.
-sentry = { version = "0.35", default-features = false, features = ["test"] }
+sentry = { version = "0.48", default-features = false, features = ["test"] }

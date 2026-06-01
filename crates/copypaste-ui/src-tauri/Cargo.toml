@@ -34,10 +34,10 @@ qrcode = { workspace = true, features = ["svg"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Translucent (NSVisualEffectView) window background for the JetBrains-style look.
-window-vibrancy = "0.5"
+window-vibrancy = "0.6"
 # CGEventTap for intercepting OS-reserved shortcuts (Accessibility permission required).
 core-graphics = { version = "0.25", features = ["highsierra"] }
 core-foundation = "0.10"
-objc2 = "0.5"
-objc2-foundation = { version = "0.2", features = ["NSString"] }
-objc2-app-kit = { version = "0.2", features = ["NSWorkspace", "NSRunningApplication", "NSSound"] }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSString"] }
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication", "NSSound"] }
