@@ -109,14 +109,20 @@ class ClipboardRepository(context: Context) {
      */
     suspend fun getItems(key: ByteArray, limit: Int = 200): List<ClipboardItem> =
         withContext(Dispatchers.IO) {
-            val pinnedSet = storedPinnedIds()
+            val pinnedList = storedPinnedList()
+            val pinnedSet = pinnedList.toHashSet()
+            val pinnedIndex: Map<String, Int> = pinnedList.mapIndexed { idx, id -> id to idx }.toMap()
             val ids = storedIds().takeLast(limit)
             ids.mapNotNull { id ->
                 val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
                 val item = parseItem(id, raw, key) ?: return@mapNotNull null
                 // Attach image bytes when available — non-null only for image/* content types.
                 val withImage = if (item.isImage) item.copy(imagePng = getImageBytes(id)) else item
-                withImage.copy(pinned = id in pinnedSet)
+                val isPinned = id in pinnedSet
+                withImage.copy(
+                    pinned = isPinned,
+                    pinnedSortIndex = if (isPinned) (pinnedIndex[id] ?: Int.MAX_VALUE) else -1,
+                )
             }.reversed()
         }
 
@@ -270,16 +276,46 @@ class ClipboardRepository(context: Context) {
     /**
      * Pin or unpin item [id].
      * Pinned items survive the retention prune pass and have no sensitive TTL.
+     * The order of pinned ids in [KEY_PINNED_IDS] reflects display order (first = top).
+     * Newly pinned items are prepended so they appear at the top of the pinned section.
      */
     fun setPinned(id: String, pinned: Boolean) {
         synchronized(idsWriteLock) {
-            val pinnedSet = storedPinnedIds().toMutableSet()
-            val changed = if (pinned) pinnedSet.add(id) else pinnedSet.remove(id)
+            val pinnedList = storedPinnedList().toMutableList()
+            val changed = if (pinned) {
+                if (id !in pinnedList) {
+                    pinnedList.add(0, id) // prepend — new pins appear at the top
+                    true
+                } else false
+            } else {
+                pinnedList.remove(id)
+            }
             if (changed) {
-                prefs.edit().putString(KEY_PINNED_IDS, pinnedSet.joinToString(",")).apply()
+                prefs.edit().putString(KEY_PINNED_IDS, pinnedList.joinToString(",")).apply()
             }
         }
         Log.d(TAG, "setPinned: item $id pinned=$pinned")
+    }
+
+    /**
+     * Reorder pinned items.
+     *
+     * [ids] must contain exactly the currently-pinned item IDs in the desired
+     * new display order (first element = top of the pinned section).
+     * Unknown ids are silently ignored; missing pinned ids are appended at the end
+     * to avoid data loss.
+     */
+    fun reorderPinned(ids: List<String>) {
+        synchronized(idsWriteLock) {
+            val currentPinned = storedPinnedList().toMutableSet()
+            // Accept only ids that are actually pinned; preserve order from caller.
+            val reordered = ids.filter { it in currentPinned }.toMutableList()
+            // Append any pinned ids that were not included in the caller's list.
+            val missing = currentPinned.filter { it !in reordered }
+            reordered.addAll(missing)
+            prefs.edit().putString(KEY_PINNED_IDS, reordered.joinToString(",")).apply()
+        }
+        Log.d(TAG, "reorderPinned: new order = $ids")
     }
 
     /**
@@ -578,12 +614,14 @@ class ClipboardRepository(context: Context) {
             ?.filter { it.isNotBlank() }
             ?: emptyList()
 
-    private fun storedPinnedIds(): Set<String> =
+    /** Ordered list of pinned ids — position 0 is displayed at the top. */
+    private fun storedPinnedList(): List<String> =
         prefs.getString(KEY_PINNED_IDS, "")
             ?.split(",")
             ?.filter { it.isNotBlank() }
-            ?.toHashSet()
-            ?: emptySet()
+            ?: emptyList()
+
+    private fun storedPinnedIds(): Set<String> = storedPinnedList().toHashSet()
 
     private fun storedSourceIds(): LinkedHashSet<String> =
         LinkedHashSet(

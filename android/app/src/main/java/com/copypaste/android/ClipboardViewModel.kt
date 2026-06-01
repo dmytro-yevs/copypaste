@@ -123,6 +123,22 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * Persist a new user-defined order for pinned items.
+     * [ids] is the full ordered list of pinned item IDs (first = top of pinned section).
+     */
+    fun reorderPinned(ids: List<String>) {
+        viewModelScope.launch {
+            try {
+                repository.reorderPinned(ids)
+                loadItems()
+            } catch (e: Exception) {
+                Log.w(TAG, "reorderPinned failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            }
+        }
+    }
+
     /** Call from UI after the current error has been displayed to the user. */
     fun clearError() {
         _errors.value = null

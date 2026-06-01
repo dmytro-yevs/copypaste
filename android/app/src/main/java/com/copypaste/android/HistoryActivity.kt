@@ -50,9 +50,12 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.CircularProgressIndicator
@@ -223,10 +226,16 @@ fun HistoryScreen(
     var pendingConfirm by remember { mutableStateOf<ConfirmAction?>(null) }
     var overflowExpanded by remember { mutableStateOf(false) }
 
-    // Sort: pinned first, then by recency
+    // ── Reorder mode (pinned items only) ────────────────────────────────────
+    var reorderMode by rememberSaveable { mutableStateOf(false) }
+
+    BackHandler(enabled = reorderMode) { reorderMode = false }
+
+    // Sort: pinned first (by user-defined pinnedSortIndex), then unpinned by recency
     val sortedItems = remember(items) {
         items.sortedWith(
             compareByDescending<ClipboardItem> { it.pinned }
+                .thenBy { if (it.pinned) it.pinnedSortIndex else 0 }
                 .thenByDescending { it.wallTimeMs }
         )
     }
@@ -240,6 +249,11 @@ fun HistoryScreen(
     BackHandler(enabled = selectionMode) {
         selectionMode = false
         selectedIds = emptySet()
+    }
+
+    // Entering selection mode exits reorder mode
+    LaunchedEffect(selectionMode) {
+        if (selectionMode) reorderMode = false
     }
 
     LaunchedEffect(Unit) { viewModel.loadItems() }
@@ -366,6 +380,18 @@ fun HistoryScreen(
                                 modifier = Modifier.size(18.dp),
                             )
                         }
+                        // Reorder toggle — only shown when there are ≥2 pinned items
+                        val pinnedCount = items.count { it.pinned }
+                        if (pinnedCount >= 2) {
+                            IconButton(onClick = { reorderMode = !reorderMode }) {
+                                Icon(
+                                    Icons.Filled.SwapVert,
+                                    contentDescription = stringResource(R.string.cd_reorder_handle),
+                                    tint = if (reorderMode) IdeAccent else IdeDim,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
                         if (items.isNotEmpty()) {
                             Box {
                                 IconButton(onClick = { overflowExpanded = true }) {
@@ -425,8 +451,20 @@ fun HistoryScreen(
                 padding = innerPadding,
                 selectionMode = selectionMode,
                 selectedIds = selectedIds,
+                reorderMode = reorderMode,
                 onDelete = { id -> viewModel.deleteItem(id) },
                 onSetPinned = { id, pinned -> viewModel.setPinned(id, pinned) },
+                onReorderPinned = { id, direction ->
+                    val pinnedItems = sortedItems.filter { it.pinned }
+                    val idx = pinnedItems.indexOfFirst { it.id == id }
+                    if (idx < 0) return@HistoryList
+                    val swapIdx = idx + direction
+                    if (swapIdx < 0 || swapIdx >= pinnedItems.size) return@HistoryList
+                    val newOrder = pinnedItems.toMutableList().also {
+                        val tmp = it[idx]; it[idx] = it[swapIdx]; it[swapIdx] = tmp
+                    }
+                    viewModel.reorderPinned(newOrder.map { it.id })
+                },
                 onLongPress = { id ->
                     selectionMode = true
                     selectedIds = setOf(id)
@@ -719,8 +757,11 @@ private fun HistoryList(
     padding: PaddingValues,
     selectionMode: Boolean,
     selectedIds: Set<String>,
+    reorderMode: Boolean = false,
     onDelete: (String) -> Unit,
     onSetPinned: (String, Boolean) -> Unit,
+    /** Called with (itemId, direction) where direction is -1 (up) or +1 (down). */
+    onReorderPinned: (String, Int) -> Unit = { _, _ -> },
     onLongPress: (String) -> Unit,
     onCheckboxTap: (String) -> Unit,
     onSensitiveTap: () -> Unit = {},
@@ -743,6 +784,7 @@ private fun HistoryList(
     ) {
         // §8 mount fade/rise stagger — AnimatedVisibility per item, capped at 10 items
         // to avoid stagger on large existing lists (only on initial appearance).
+        val pinnedCount = items.count { it.pinned }
         itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
             val mountDelay = (index * Motion.Fast).coerceAtMost(10 * Motion.Fast)
             AnimatedVisibility(
@@ -770,8 +812,13 @@ private fun HistoryList(
                         previewDelayMs = previewDelayMs,
                         selectionMode = selectionMode,
                         isSelected = selectedIds.contains(item.id),
+                        reorderMode = reorderMode,
+                        pinnedIndex = item.pinnedSortIndex,
+                        pinnedCount = pinnedCount,
                         onDelete = onDelete,
                         onSetPinned = onSetPinned,
+                        onMoveUp = { onReorderPinned(item.id, -1) },
+                        onMoveDown = { onReorderPinned(item.id, +1) },
                         onCopy = {
                             scope.launch {
                                 val key = settings.encryptionKey
@@ -820,8 +867,13 @@ private fun HistoryRow(
     previewDelayMs: Long,
     selectionMode: Boolean,
     isSelected: Boolean,
+    reorderMode: Boolean = false,
+    pinnedIndex: Int = -1,
+    pinnedCount: Int = 0,
     onDelete: (String) -> Unit,
     onSetPinned: (String, Boolean) -> Unit,
+    onMoveUp: () -> Unit = {},
+    onMoveDown: () -> Unit = {},
     onCopy: () -> Unit = {},
     onLongPress: () -> Unit,
     onCheckboxTap: () -> Unit,
@@ -959,29 +1011,49 @@ private fun HistoryRow(
                 )
                 if (!selectionMode) {
                     Spacer(Modifier.width(4.dp))
-                    ScaleIconButton(
-                        onClick = { onSetPinned(item.id, !item.pinned) },
-                    ) {
-                        Icon(
-                            imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
-                                          else Icons.Filled.BookmarkBorder,
-                            contentDescription = if (item.pinned)
-                                stringResource(R.string.action_unpin)
-                            else
-                                stringResource(R.string.action_pin),
-                            tint = if (item.pinned) IdeWarning else IdeDim,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                    ScaleIconButton(
-                        onClick = { onDelete(item.id) },
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.Delete,
-                            contentDescription = stringResource(R.string.cd_delete),
-                            tint = IdeDanger,
-                            modifier = Modifier.size(16.dp),
-                        )
+                    if (reorderMode && item.pinned) {
+                        ScaleIconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowUp,
+                                contentDescription = stringResource(R.string.action_move_up),
+                                tint = if (pinnedIndex > 0) IdeAccent else IdeDim.copy(alpha = 0.3f),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        ScaleIconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowDown,
+                                contentDescription = stringResource(R.string.action_move_down),
+                                tint = if (pinnedIndex < pinnedCount - 1) IdeAccent
+                                       else IdeDim.copy(alpha = 0.3f),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    } else {
+                        ScaleIconButton(
+                            onClick = { onSetPinned(item.id, !item.pinned) },
+                        ) {
+                            Icon(
+                                imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
+                                              else Icons.Filled.BookmarkBorder,
+                                contentDescription = if (item.pinned)
+                                    stringResource(R.string.action_unpin)
+                                else
+                                    stringResource(R.string.action_pin),
+                                tint = if (item.pinned) IdeWarning else IdeDim,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        ScaleIconButton(
+                            onClick = { onDelete(item.id) },
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = stringResource(R.string.cd_delete),
+                                tint = IdeDanger,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -1088,26 +1160,53 @@ private fun HistoryRow(
                 )
                 if (!selectionMode) {
                     Spacer(Modifier.width(2.dp))
-                    // §5 icon-only action buttons with press-scale (§8)
-                    ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
-                        Icon(
-                            imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
-                                          else Icons.Filled.BookmarkBorder,
-                            contentDescription = if (item.pinned)
-                                stringResource(R.string.action_unpin)
-                            else
-                                stringResource(R.string.action_pin),
-                            tint = if (item.pinned) IdeWarning else IdeDim,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                    ScaleIconButton(onClick = { onDelete(item.id) }) {
-                        Icon(
-                            imageVector = Icons.Filled.Delete,
-                            contentDescription = stringResource(R.string.cd_delete),
-                            tint = IdeDanger,
-                            modifier = Modifier.size(16.dp),
-                        )
+                    if (reorderMode && item.pinned) {
+                        // Reorder mode: show up/down arrows instead of pin/delete
+                        ScaleIconButton(
+                            onClick = onMoveUp,
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowUp,
+                                contentDescription = stringResource(R.string.action_move_up),
+                                tint = if (pinnedIndex > 0) IdeAccent else IdeDim.copy(alpha = 0.3f),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        ScaleIconButton(
+                            onClick = onMoveDown,
+                            modifier = Modifier.size(28.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.KeyboardArrowDown,
+                                contentDescription = stringResource(R.string.action_move_down),
+                                tint = if (pinnedIndex < pinnedCount - 1) IdeAccent
+                                       else IdeDim.copy(alpha = 0.3f),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    } else {
+                        // §5 icon-only action buttons with press-scale (§8)
+                        ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
+                            Icon(
+                                imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
+                                              else Icons.Filled.BookmarkBorder,
+                                contentDescription = if (item.pinned)
+                                    stringResource(R.string.action_unpin)
+                                else
+                                    stringResource(R.string.action_pin),
+                                tint = if (item.pinned) IdeWarning else IdeDim,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        ScaleIconButton(onClick = { onDelete(item.id) }) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = stringResource(R.string.cd_delete),
+                                tint = IdeDanger,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
                     }
                 }
             }

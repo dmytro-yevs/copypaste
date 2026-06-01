@@ -182,6 +182,9 @@
     <!-- History — bulk / pin actions -->
     <string name="action_pin">Pin</string>
     <string name="action_unpin">Unpin</string>
+    <string name="action_move_up">Move up</string>
+    <string name="action_move_down">Move down</string>
+    <string name="cd_reorder_handle">Reorder pinned item</string>
     <string name="action_clear_all">Clear All</string>
     <string name="action_clear_unpinned">Clear Unpinned</string>
     <string name="action_delete_selected">Delete selected</string>

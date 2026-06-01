@@ -21,10 +21,16 @@ data class ClipboardItem(
      *  - never pruned by the retention/quota pass
      *  - cleared only by the explicit [ClipboardRepository.clearAll] user action
      *
-     * Persisted in the "pinned_ids" SharedPreferences key as a comma-joined set
-     * (same pattern as synced_source_ids). Populated by [ClipboardRepository.getItems].
+     * Persisted in the "pinned_ids" SharedPreferences key as a comma-joined ordered list.
+     * Populated by [ClipboardRepository.getItems].
      */
     val pinned: Boolean = false,
+    /**
+     * Position of this item within the pinned section (0 = top).
+     * -1 for unpinned items. Used to sort pinned items in user-defined order
+     * rather than by recency. Populated by [ClipboardRepository.getItems].
+     */
+    val pinnedSortIndex: Int = -1,
     /**
      * Source application package name or macOS bundle id that produced this
      * clipboard item, e.g. "com.android.chrome" or "com.google.Chrome".
