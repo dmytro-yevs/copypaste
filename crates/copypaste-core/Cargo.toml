@@ -44,7 +44,7 @@ subtle.workspace = true
 
 [dev-dependencies]
 # Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+
-tempfile = ">=3.0, <3.14"
+tempfile = ">=3.0, <3.28"
 criterion.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 hkdf.workspace = true
