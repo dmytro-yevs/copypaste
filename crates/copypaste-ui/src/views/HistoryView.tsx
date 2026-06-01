@@ -258,6 +258,20 @@ function IconEye({ className }: { className?: string }) {
   );
 }
 
+/** Drag-handle icon — two columns of three dots (⠿) */
+function IconDragHandle({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 8 14" width="8" height="14" fill="currentColor" aria-hidden="true" className={className}>
+      <circle cx="2" cy="2" r="1.1" />
+      <circle cx="6" cy="2" r="1.1" />
+      <circle cx="2" cy="7" r="1.1" />
+      <circle cx="6" cy="7" r="1.1" />
+      <circle cx="2" cy="12" r="1.1" />
+      <circle cx="6" cy="12" r="1.1" />
+    </svg>
+  );
+}
+
 
 
 interface RowProps {
@@ -279,6 +293,16 @@ interface RowProps {
   /** Opens the Details Modal for this entry (M10). */
   onPreview: () => void;
   onMouseEnter?: () => void;
+  // Drag-to-reorder (pinned items only). Absent on unpinned rows.
+  dragHandleProps?: {
+    dragging: boolean;
+    dropIndicator: "above" | "below" | null;
+    onDragStart: (e: React.DragEvent) => void;
+    onDragOver: (e: React.DragEvent) => void;
+    onDragLeave: () => void;
+    onDrop: (e: React.DragEvent) => void;
+    onDragEnd: () => void;
+  };
 }
 
 function HistoryRow({
@@ -297,6 +321,7 @@ function HistoryRow({
   onDelete,
   onPreview,
   onMouseEnter,
+  dragHandleProps,
 }: RowProps) {
   // Bare "image" content_type (legacy) or MIME-typed "image/*" future rows.
   const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
@@ -330,6 +355,7 @@ function HistoryRow({
     <div
       role="option"
       aria-selected={multiSelected || selected}
+      draggable={dragHandleProps !== undefined}
       className={[
         "group relative flex cursor-pointer select-none items-center gap-2 px-3 py-1.5",
         "border-b text-[13px]",
@@ -342,10 +368,35 @@ function HistoryRow({
           : entry.pinned
           ? "text-ide-text hover:bg-ide-warning/8"
           : "text-ide-text hover:bg-ide-hover",   // panel surface: hover is ide-hover (darker than panel)
+        dragHandleProps?.dragging ? "opacity-50" : "",
       ].join(" ")}
+      style={
+        dragHandleProps?.dropIndicator === "above"
+          ? { boxShadow: "inset 0 2px 0 0 var(--ide-accent)" }
+          : dragHandleProps?.dropIndicator === "below"
+          ? { boxShadow: "inset 0 -2px 0 0 var(--ide-accent)" }
+          : undefined
+      }
       onClick={handleRowClick}
       onMouseEnter={onMouseEnter}
+      onDragStart={dragHandleProps?.onDragStart}
+      onDragOver={dragHandleProps?.onDragOver}
+      onDragLeave={dragHandleProps?.onDragLeave}
+      onDrop={dragHandleProps?.onDrop}
+      onDragEnd={dragHandleProps?.onDragEnd}
     >
+      {/* Drag handle — only on pinned rows, visible on hover */}
+      {dragHandleProps !== undefined && (
+        <span
+          data-drag-handle
+          className="flex w-3 shrink-0 items-center justify-center opacity-0 group-hover:opacity-40 hover:!opacity-80 transition-opacity"
+          style={{ cursor: "grab" }}
+          title="Drag to reorder"
+        >
+          <IconDragHandle className="text-ide-faint" />
+        </span>
+      )}
+
       {/* Checkbox — always in flow (reserves 20px). Invisible at rest, fades in
           on hover or when selection mode is active. Clicking it enters/toggles
           multi-selection without propagating to the row-click copy handler. */}
@@ -840,6 +891,10 @@ export function HistoryView() {
   // M10: Details modal — entry to preview (null = closed)
   const [previewEntry, setPreviewEntry] = useState<HistoryEntry | null>(null);
 
+  // A1: Drag-to-reorder pinned items state
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: string; position: "above" | "below" } | null>(null);
+
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   // Track current signature to avoid unnecessary re-renders on identical data.
@@ -1134,6 +1189,44 @@ export function HistoryView() {
       }
     },
     [selectedId, load, showToast]
+  );
+
+  // A1: Drag-to-reorder handler — placed after `load` and `showToast` are declared
+  const handleReorderDrop = useCallback(
+    async (draggedId: string, targetId: string, position: "above" | "below") => {
+      if (draggedId === targetId) return;
+      // Compute new order from current pinned items list (preserve optimistic order).
+      const pinnedItems = items.filter((it) => it.pinned);
+      const dragIdx = pinnedItems.findIndex((it) => it.id === draggedId);
+      const targetIdx = pinnedItems.findIndex((it) => it.id === targetId);
+      if (dragIdx < 0 || targetIdx < 0) return;
+
+      // Build the new ordered IDs by moving draggedId to the correct position.
+      const reordered = pinnedItems.filter((it) => it.id !== draggedId);
+      const insertAt = reordered.findIndex((it) => it.id === targetId);
+      const finalIdx = position === "above" ? insertAt : insertAt + 1;
+      reordered.splice(finalIdx, 0, pinnedItems[dragIdx]);
+      const newIds = reordered.map((it) => it.id);
+
+      // Optimistically reorder in local state so the UI responds immediately.
+      setItems((prev) => {
+        const pinnedById = new Map(prev.filter((it) => it.pinned).map((it) => [it.id, it]));
+        const unpinned = prev.filter((it) => !it.pinned);
+        const reorderedPinned = newIds.map((id) => pinnedById.get(id)!).filter(Boolean);
+        return [...reorderedPinned, ...unpinned];
+      });
+
+      try {
+        await api.reorderPinned(newIds);
+        void load(true);
+      } catch (err) {
+        const msg = err instanceof IpcError ? err.message : "Reorder failed";
+        showToast(msg, "error");
+        // Revert to server state on failure.
+        void load(true);
+      }
+    },
+    [items, load, showToast]
   );
 
   // -------------------------------------------------------------------------
@@ -1453,6 +1546,52 @@ export function HistoryView() {
               onMouseEnter={() => {
                 isKeyboardNavRef.current = false;
               }}
+              dragHandleProps={
+                entry.pinned
+                  ? {
+                      dragging: dragId === entry.id,
+                      dropIndicator:
+                        dropTarget?.id === entry.id ? dropTarget.position : null,
+                      onDragStart: (e: React.DragEvent) => {
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", entry.id);
+                        setDragId(entry.id);
+                      },
+                      onDragOver: (e: React.DragEvent) => {
+                        // Only accept drops from within the pinned section.
+                        if (dragId === null) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        // Determine above / below by cursor position within row.
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        const mid = rect.top + rect.height / 2;
+                        const position: "above" | "below" = e.clientY < mid ? "above" : "below";
+                        setDropTarget({ id: entry.id, position });
+                      },
+                      onDragLeave: () => {
+                        setDropTarget((prev) =>
+                          prev?.id === entry.id ? null : prev
+                        );
+                      },
+                      onDrop: (e: React.DragEvent) => {
+                        e.preventDefault();
+                        const sourceId = e.dataTransfer.getData("text/plain");
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        const mid = rect.top + rect.height / 2;
+                        const position: "above" | "below" = e.clientY < mid ? "above" : "below";
+                        setDragId(null);
+                        setDropTarget(null);
+                        if (sourceId && sourceId !== entry.id) {
+                          void handleReorderDrop(sourceId, entry.id, position);
+                        }
+                      },
+                      onDragEnd: () => {
+                        setDragId(null);
+                        setDropTarget(null);
+                      },
+                    }
+                  : undefined
+              }
             />
           )}
         />

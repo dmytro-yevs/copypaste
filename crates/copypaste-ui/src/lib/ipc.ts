@@ -293,7 +293,15 @@ export const api = {
   unpairPeer: (fingerprint: string) => ipcCall("unpair_peer", { fingerprint }),
   revokePeer: (fingerprint: string) =>
     ipcCall<{ revoked_at: number }>("revoke_peer", { fingerprint }),
-  revokeAllPeers: () => ipcCall<{ revoked: number }>("revoke_all_peers", {})
+  revokeAllPeers: () => ipcCall<{ revoked: number }>("revoke_all_peers", {}),
+
+  /**
+   * Persist a new pin order on the daemon. \ must be the complete ordered
+   * list of pinned-item IDs (pinned items only, in the desired display order).
+   * The daemon stores the order and returns it sorted that way in subsequent
+   * \ responses.
+   */
+  reorderPinned: (ids: string[]) => ipcCall("reorder_pinned", { ids }),
 };
 
 /** Format Unix epoch milliseconds for display. */
