@@ -5,8 +5,8 @@ pub const HISTORY_LIMIT: usize = 100_000;
 pub const POLL_INTERVAL_MS: u64 = 500;
 pub const POLL_INTERVAL_MIN_MS: u64 = 100;
 pub const POLL_INTERVAL_MAX_MS: u64 = 5000;
-// 15 MiB — stays safely under the 16 MiB P2P/IPC wire-frame cap.
-pub const MAX_TEXT_SIZE_BYTES: u64 = 15 * 1024 * 1024;
+// 10 MiB — stays safely under the 16 MiB P2P/IPC wire-frame cap.
+pub const MAX_TEXT_SIZE_BYTES: u64 = 10 * 1024 * 1024;
 // 64 MiB — supports high-res screenshots at original quality.
 pub const MAX_IMAGE_SIZE_BYTES: u64 = 64 * 1024 * 1024;
 // 1 GiB — generous; local DB is a cache, not the bottleneck.

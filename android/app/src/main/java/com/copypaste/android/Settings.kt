@@ -334,10 +334,10 @@ class Settings(context: Context) {
     /**
      * Maximum size in bytes for a text clipboard item. Items larger than this
      * are silently dropped at capture time.
-     * Default: 15 MiB (15 728 640 B) — matches MAX_TEXT_SIZE_BYTES in defaults.rs.
+     * Default: 10 MiB (10 485 760 B) — matches MAX_TEXT_SIZE_BYTES in defaults.rs.
      */
     var maxTextSizeBytes: Long
-        get() = prefs.getLong("max_text_size_bytes", 15L * 1024 * 1024)
+        get() = prefs.getLong("max_text_size_bytes", 10L * 1024 * 1024)
         set(v) = prefs.edit().putLong("max_text_size_bytes", v).apply()
 
     /**
@@ -359,6 +359,25 @@ class Settings(context: Context) {
     var storageQuotaBytes: Long
         get() = prefs.getLong("storage_quota_bytes", 10L * 1024 * 1024 * 1024)
         set(v) = prefs.edit().putLong("storage_quota_bytes", v).apply()
+
+    /**
+     * When true, the app operates in private mode: clipboard items are not
+     * persisted to the local database and sync is suppressed for the session.
+     * Mirrors the macOS daemon's `private_mode` IPC field.
+     * Default: false (normal capture mode).
+     */
+    var privateMode: Boolean
+        get() = prefs.getBoolean("private_mode", false)
+        set(v) = prefs.edit().putBoolean("private_mode", v).apply()
+
+    /**
+     * JPEG compression quality for captured image clipboard items (1–100).
+     * 100 = lossless / original quality. Matches IMAGE_QUALITY in defaults.rs.
+     * Default: 100 (no compression).
+     */
+    var imageQuality: Int
+        get() = prefs.getInt("image_quality", 100).coerceIn(1, 100)
+        set(v) = prefs.edit().putInt("image_quality", v.coerceIn(1, 100)).apply()
 
     /**
      * 256-bit AES key used for local clipboard encryption.

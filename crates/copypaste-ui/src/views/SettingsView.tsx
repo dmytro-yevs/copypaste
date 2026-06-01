@@ -301,7 +301,7 @@ function formatLastSync(ms: number | null): string {
 // UNLIMITED_SENTINEL (100_000) = HISTORY_LIMIT in defaults.rs — documented as
 // "intentionally generous: history should feel unbounded to the user"; the
 // daemon's size-only prune still applies independently.
-const DEFAULT_MAX_TEXT_BYTES = 15 * 1024 * 1024;          // 15 MiB
+const DEFAULT_MAX_TEXT_BYTES = 10 * 1024 * 1024;          // 10 MiB
 const DEFAULT_MAX_IMAGE_BYTES = 64 * 1024 * 1024;          // 64 MiB
 const DEFAULT_MAX_FILE_BYTES = 1024 * 1024 * 1024;         // 1 GiB
 const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024; // 10 GiB
@@ -451,7 +451,7 @@ export function SettingsView() {
 
   // Sync / cloud config
   const [config, setConfig] = useState<AppSettings>({
-    p2p_enabled: false,
+    p2p_enabled: true,
     supabase_url: null,
     supabase_anon_key: null,
   });
@@ -578,7 +578,7 @@ export function SettingsView() {
         // Hydrate all AppConfig-backed fields from get_config response.
         const rawCfg = cfg ?? ({} as Partial<AppSettings>);
         setConfig({
-          p2p_enabled: rawCfg.p2p_enabled ?? false,
+          p2p_enabled: rawCfg.p2p_enabled ?? true,
           supabase_url: rawCfg.supabase_url ?? null,
           supabase_anon_key: rawCfg.supabase_anon_key ?? null,
         });
