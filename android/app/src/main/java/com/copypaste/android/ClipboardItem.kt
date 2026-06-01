@@ -19,16 +19,17 @@ data class ClipboardItem(
     /**
      * True when the user has explicitly pinned this item. Pinned items are:
      *  - never pruned by the retention/quota pass
-     *  - cleared only by the explicit [ClipboardRepository.clearAll] user action
+     *  - preserved by [ClipboardRepository.clearAll] (only unpinned items deleted)
      *
-     * Persisted in the "pinned_ids" SharedPreferences key as a comma-joined ordered list.
-     * Populated by [ClipboardRepository.getItems].
+     * Persisted in the "pinned_ids" SharedPreferences key as a comma-joined ordered
+     * list (first = top of pinned section). Populated by [ClipboardRepository.getItems].
      */
     val pinned: Boolean = false,
     /**
-     * Position of this item within the pinned section (0 = top).
-     * -1 for unpinned items. Used to sort pinned items in user-defined order
-     * rather than by recency. Populated by [ClipboardRepository.getItems].
+     * Position of this item within the pinned section (0 = top of pinned section).
+     * -1 for unpinned items. Used to keep pinned items in user-defined order
+     * independent of [wallTimeMs] so copying a pinned item does not move it.
+     * Populated by [ClipboardRepository.getItems].
      */
     val pinnedSortIndex: Int = -1,
     /**

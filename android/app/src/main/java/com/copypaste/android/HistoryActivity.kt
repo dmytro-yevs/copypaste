@@ -48,7 +48,6 @@ import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -231,7 +230,9 @@ fun HistoryScreen(
 
     BackHandler(enabled = reorderMode) { reorderMode = false }
 
-    // Sort: pinned first (by user-defined pinnedSortIndex), then unpinned by recency
+    // Sort: pinned first (by user-defined pinnedSortIndex), then unpinned by recency.
+    // Pinned items are sorted by pinnedSortIndex (NOT wallTimeMs) so copying a pinned
+    // clip does not move it — fixes HW-A15.
     val sortedItems = remember(items) {
         items.sortedWith(
             compareByDescending<ClipboardItem> { it.pinned }

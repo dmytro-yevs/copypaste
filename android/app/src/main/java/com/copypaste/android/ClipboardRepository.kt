@@ -111,6 +111,7 @@ class ClipboardRepository(context: Context) {
         withContext(Dispatchers.IO) {
             val pinnedList = storedPinnedList()
             val pinnedSet = pinnedList.toHashSet()
+            // Build index map: id → position in pinned list (0 = top of pinned section).
             val pinnedIndex: Map<String, Int> = pinnedList.mapIndexed { idx, id -> id to idx }.toMap()
             val ids = storedIds().takeLast(limit)
             ids.mapNotNull { id ->
@@ -159,14 +160,14 @@ class ClipboardRepository(context: Context) {
         val removed = synchronized(idsWriteLock) {
             val ids = storedIds().toMutableList()
             if (!ids.remove(id)) return@synchronized false
-            val pinnedSet = storedPinnedIds().toMutableSet()
-            val wasPinned = pinnedSet.remove(id)
+            val pinnedList = storedPinnedList().toMutableList()
+            val wasPinned = pinnedList.remove(id)
             val editor = prefs.edit()
                 .remove("item_$id")
                 .remove("item_img_$id")
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
             if (wasPinned) {
-                editor.putString(KEY_PINNED_IDS, pinnedSet.joinToString(","))
+                editor.putString(KEY_PINNED_IDS, pinnedList.joinToString(","))
             }
             editor.apply()
             true
@@ -195,8 +196,10 @@ class ClipboardRepository(context: Context) {
             val before = storedList.size
             storedList.removeAll(toDelete)
             deletedCount = before - storedList.size
-            val pinnedSet = storedPinnedIds().toMutableSet()
-            val pinnedChanged = pinnedSet.removeAll(toDelete)
+            val pinnedList = storedPinnedList().toMutableList()
+            val pinnedBefore = pinnedList.size
+            pinnedList.removeAll(toDelete)
+            val pinnedChanged = pinnedList.size != pinnedBefore
             val editor = prefs.edit()
                 .putString(KEY_ITEM_IDS, storedList.joinToString(","))
             for (id in toDelete) {
@@ -204,7 +207,7 @@ class ClipboardRepository(context: Context) {
                 editor.remove("item_img_$id")
             }
             if (pinnedChanged) {
-                editor.putString(KEY_PINNED_IDS, pinnedSet.joinToString(","))
+                editor.putString(KEY_PINNED_IDS, pinnedList.joinToString(","))
             }
             editor.apply()
         }
@@ -215,32 +218,40 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Delete ALL items (text blobs + image blobs + synced-source-id set + pinned
-     * set). This is an explicit user action — even pinned items are removed.
+     * Delete all UNPINNED items (text blobs + image blobs + synced-source-id set).
+     * Pinned items are preserved — mirrors the macOS daemon `DELETE WHERE pinned = 0`
+     * fix (HW-A13). Previously this wiped everything including pinned items;
+     * the behaviour is now consistent across platforms so no user-pinned clip is
+     * ever silently removed by a "clear" action.
      */
     fun clearAll() {
-        var totalDeleted = 0
+        var deletedCount = 0
         synchronized(idsWriteLock) {
+            val pinnedSet = storedPinnedIds()
             val ids = storedIds()
-            totalDeleted = ids.size
             val editor = prefs.edit()
             for (id in ids) {
-                editor.remove("item_$id")
-                editor.remove("item_img_$id")
+                if (id !in pinnedSet) {
+                    editor.remove("item_$id")
+                    editor.remove("item_img_$id")
+                }
             }
+            // Retain only pinned ids in the index; clear the synced-source-id set
+            // (re-syncing pinned items on the next poll is safe).
+            val remaining = ids.filter { it in pinnedSet }
+            deletedCount = ids.size - remaining.size
             editor
-                .remove(KEY_ITEM_IDS)
+                .putString(KEY_ITEM_IDS, remaining.joinToString(","))
                 .remove(KEY_SYNCED_SOURCE_IDS)
-                .remove(KEY_PINNED_IDS)
                 .apply()
         }
-        // Reset cross-listener dedup state so a re-copy after a full clear stores
-        // a fresh row instead of being silently skipped as a duplicate.
+        // Reset cross-listener dedup state so a re-copy after a clear stores a
+        // fresh row instead of being silently skipped as a duplicate.
         resetDedupState()
-        if (totalDeleted > 0) {
-            ClipboardService.onItemsDeleted(appContext, totalDeleted)
+        if (deletedCount > 0) {
+            ClipboardService.onItemsDeleted(appContext, deletedCount)
         }
-        Log.d(TAG, "clearAll: all items deleted")
+        Log.d(TAG, "clearAll: deleted $deletedCount unpinned items (pinned items preserved)")
     }
 
     /**
@@ -614,7 +625,7 @@ class ClipboardRepository(context: Context) {
             ?.filter { it.isNotBlank() }
             ?: emptyList()
 
-    /** Ordered list of pinned ids — position 0 is displayed at the top. */
+    /** Ordered list of pinned ids — position 0 is displayed at the top of the pinned section. */
     private fun storedPinnedList(): List<String> =
         prefs.getString(KEY_PINNED_IDS, "")
             ?.split(",")
