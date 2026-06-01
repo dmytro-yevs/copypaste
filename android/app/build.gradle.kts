@@ -215,7 +215,7 @@ dependencies {
     // APK so UniFFI's Native.load resolves at runtime). Do NOT also depend on
     // the plain `jna:5.14.0` jar — having both puts the same com.sun.jna.*
     // classes on the classpath twice and D8 fails with "Duplicate class".
-    implementation("net.java.dev.jna:jna:5.14.0@aar")
+    implementation("net.java.dev.jna:jna:5.18.1@aar")
 
     // UniFFI Kotlin bindings are compiled as source (CopypasteBindings.kt).
     // Uncomment the line below only when using a separately-packaged bindings jar
@@ -250,5 +250,5 @@ dependencies {
     // androidTest APK has no libjnidispatch.so and UniFFI's Native.load aborts
     // with UnsatisfiedLinkError. Adding the AAR here packages the per-ABI
     // libjnidispatch.so into the test build. pickFirsts (above) dedupes it.
-    androidTestImplementation("net.java.dev.jna:jna:5.14.0@aar")
+    androidTestImplementation("net.java.dev.jna:jna:5.18.1@aar")
 }
