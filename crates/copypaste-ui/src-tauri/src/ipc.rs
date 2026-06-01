@@ -215,7 +215,7 @@ pub async fn read_logs(max_lines: usize) -> Result<String, String> {
             .collect();
 
         // Sort descending by filename (daily rotation: daemon.YYYY-MM-DD.log).
-        entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        entries.sort_by_key(|e| std::cmp::Reverse(e.file_name()));
 
         let Some(entry) = entries.first() else {
             return Ok(String::new());
