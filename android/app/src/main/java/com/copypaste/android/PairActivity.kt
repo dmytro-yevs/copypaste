@@ -28,7 +28,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -330,6 +329,27 @@ fun PairScreen(
         }
     }
 
+    // AND2: Auto-start pairing when the screen opens so the QR appears
+    // immediately without requiring the user to tap "Start Pairing".
+    LaunchedEffect(Unit) {
+        if (qr != null || loading) return@LaunchedEffect
+        loading = true
+        try {
+            val result = withContext(Dispatchers.IO) {
+                startPairing(settings.deviceId, android.os.Build.MODEL ?: "Android")
+            }
+            val bmp = withContext(Dispatchers.Default) {
+                encodeQrBitmap(result.qr, 512)
+            }
+            qr = result
+            qrBitmap = bmp
+        } catch (e: Exception) {
+            errorMessage = e.message ?: e.javaClass.simpleName
+        } finally {
+            loading = false
+        }
+    }
+
     LaunchedEffect(errorMessage) {
         val msg = errorMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(
@@ -430,46 +450,7 @@ fun PairScreen(
                 }
             }
 
-            Button(
-                enabled = !loading,
-                onClick = {
-                    scope.launch {
-                        loading = true
-                        try {
-                            val result = withContext(Dispatchers.IO) {
-                                startPairing(settings.deviceId, android.os.Build.MODEL ?: "Android")
-                            }
-                            val bmp = withContext(Dispatchers.Default) {
-                                encodeQrBitmap(result.qr, 512)
-                            }
-                            qr = result
-                            qrBitmap = bmp
-                        } catch (e: Exception) {
-                            errorMessage = e.message ?: e.javaClass.simpleName
-                        } finally {
-                            loading = false
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = stringResource(
-                        when {
-                            qr == null -> R.string.btn_pair_start
-                            expired -> R.string.pair_request_new_token
-                            else -> R.string.btn_pair_regenerate
-                        }
-                    )
-                )
-            }
 
-            OutlinedButton(
-                onClick = { startScanFlow() },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(text = "Scan a device's QR")
-            }
 
             // ── Paired device display ─────────────────────────────────────
             // Show the persisted paired peer (fingerprint + sync address) so the

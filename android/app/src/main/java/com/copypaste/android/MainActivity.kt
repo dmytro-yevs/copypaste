@@ -172,8 +172,8 @@ class MainActivity : ComponentActivity() {
 // ── Navigation structure ───────────────────────────────────────────────────────
 
 private enum class NavTab(val label: String, val icon: ImageVector) {
-    CLIPS("Clips", Icons.Filled.ContentPaste),
-    DEVICES("Devices", Icons.Filled.Devices),
+    CLIPS("History", Icons.Filled.ContentPaste),
+    DEVICES("Pair", Icons.Filled.Devices),
     SETTINGS("Settings", Icons.Filled.Settings),
 }
 

@@ -5,11 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -17,7 +14,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -358,25 +354,20 @@ private fun LogLine(line: String) {
         else -> IdeDim
     }
 
-    // Wrap in a horizontally scrollable row so long lines don't clip
-    Row(
+    // A6: soft-wrap long lines so everything is visible without horizontal scrolling
+    Text(
+        text = line,
+        style = MaterialTheme.typography.bodySmall.copy(
+            fontFamily = FontFamily.Monospace,
+            fontSize = 11.sp,
+            lineHeight = 16.sp,
+        ),
+        color = color,
+        softWrap = true,
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 8.dp, vertical = 1.dp),
-        horizontalArrangement = Arrangement.Start,
-    ) {
-        Text(
-            text = line,
-            style = MaterialTheme.typography.bodySmall.copy(
-                fontFamily = FontFamily.Monospace,
-                fontSize = 11.sp,
-                lineHeight = 16.sp,
-            ),
-            color = color,
-            softWrap = false, // keep monospace alignment; horizontal scroll handles overflow
-        )
-    }
+    )
 }
 
 // ── I/O helpers (run on Dispatchers.IO) ──────────────────────────────────────
