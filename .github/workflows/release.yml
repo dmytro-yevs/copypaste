@@ -337,7 +337,7 @@ jobs:
           fi
 
       - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: CopyPaste-${{ steps.ver.outputs.version }}-macos-arm64
           path: dist/macos
@@ -411,7 +411,7 @@ jobs:
           fi
 
       - name: Download Android .so artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         # Android build may be skipped/failed (non-blocking) — don't fail if the
         # artifact is absent. The publish step uploads only what exists.
         continue-on-error: true
@@ -420,7 +420,7 @@ jobs:
           path: dist/android
 
       - name: Download Android APK
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: android-debug-apk-${{ steps.ver.outputs.version }}
