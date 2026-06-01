@@ -156,6 +156,7 @@ mod tests {
             origin_device_id: "device-local".to_string(),
             key_version: 1,
             pinned: false,
+            pin_order: None,
         }
     }
 
