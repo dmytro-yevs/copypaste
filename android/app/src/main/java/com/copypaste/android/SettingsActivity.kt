@@ -57,6 +57,7 @@ import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.QUOTA_STEP_LABELS
 import com.copypaste.android.ui.theme.QUOTA_STEP_VALUES
 import com.copypaste.android.ui.theme.SectionLabel
+import com.copypaste.android.ui.theme.ContinuousSliderRow
 import com.copypaste.android.ui.theme.SteppedSliderRow
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
@@ -100,8 +101,10 @@ fun SettingsScreen(
     var showWarnings by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
     var translucency by remember { mutableStateOf(settings.translucency) }
-    var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.toString()) }
-    var previewDelay by remember { mutableStateOf(settings.previewDelay.toString()) }
+    // AND5: Int state (was String) so ContinuousSliderRow can use it directly.
+    var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.coerceIn(10, 200)) }
+    // AND6: Int state (was String); range 200..30000 ms
+    var previewDelay by remember { mutableStateOf(settings.previewDelay.toInt().coerceIn(200, 30_000)) }
 
     // ── Storage — stepped slider state (raw bytes, snapped to nearest step on load) ──
     // Slider saves raw bytes directly; no MB conversion needed.
@@ -258,25 +261,34 @@ fun SettingsScreen(
                 }
             )
             HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-            SettingsNumberField(
+            // AND5: continuous slider 10–200 dp for image thumbnail height.
+            ContinuousSliderRow(
                 label = stringResource(R.string.setting_image_max_height_label),
-                hint = stringResource(R.string.setting_image_max_height_hint),
                 value = imageMaxHeight,
-                onValueChange = { imageMaxHeight = it },
-                onCommit = {
-                    val v = imageMaxHeight.toIntOrNull()?.coerceIn(1, 200) ?: return@SettingsNumberField
-                    try { settings.imageMaxHeight = v; imageMaxHeight = v.toString() }
+                min = 10,
+                max = 200,
+                formatValue = { "${it} dp" },
+                onRelease = { v ->
+                    imageMaxHeight = v
+                    try { settings.imageMaxHeight = v }
                     catch (e: Exception) { settingsError = e.message }
                 },
             )
-            SettingsNumberField(
+            // AND6: continuous slider 200–30000 ms for auto-close delay.
+            ContinuousSliderRow(
                 label = stringResource(R.string.setting_preview_delay_label),
-                hint = stringResource(R.string.setting_preview_delay_hint),
                 value = previewDelay,
-                onValueChange = { previewDelay = it },
-                onCommit = {
-                    val v = previewDelay.toLongOrNull()?.coerceIn(200L, 100_000L) ?: return@SettingsNumberField
-                    try { settings.previewDelay = v; previewDelay = v.toString() }
+                min = 200,
+                max = 30_000,
+                formatValue = { v ->
+                    when {
+                        v < 1000 -> "${v} ms"
+                        else -> "${"%g".format(v / 1000.0).trimEnd('0').trimEnd('.')} s"
+                    }
+                },
+                onRelease = { v ->
+                    previewDelay = v
+                    try { settings.previewDelay = v.toLong() }
                     catch (e: Exception) { settingsError = e.message }
                 },
             )

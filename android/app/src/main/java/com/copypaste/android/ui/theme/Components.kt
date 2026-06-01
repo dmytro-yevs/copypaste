@@ -246,6 +246,79 @@ fun SteppedSliderRow(
 }
 
 // ---------------------------------------------------------------------------
+// ContinuousSliderRow — free-range slider for numeric settings (AND5, AND6).
+//
+// Unlike SteppedSliderRow this slider has no discrete steps — the user can
+// pick any integer value within [min, max]. The formatted value is shown in
+// accent blue to the right of the label; saving happens on drag-end.
+// ---------------------------------------------------------------------------
+
+/**
+ * A continuous (free-range) integer slider row.
+ *
+ * @param label       Row heading text shown above the slider.
+ * @param value       Current integer value.
+ * @param min         Minimum allowed value (inclusive).
+ * @param max         Maximum allowed value (inclusive).
+ * @param formatValue Converts the current integer to a display string (e.g. "120 px").
+ * @param onRelease   Called with the chosen value when the user lifts their finger.
+ */
+@Composable
+fun ContinuousSliderRow(
+    label: String,
+    value: Int,
+    min: Int,
+    max: Int,
+    formatValue: (Int) -> String,
+    onRelease: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var sliderPos by remember(value) { mutableFloatStateOf(value.coerceIn(min, max).toFloat()) }
+
+    Column(modifier = modifier
+        .fillMaxWidth()
+        .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                color = IdeText,
+            )
+            Text(
+                text = formatValue(sliderPos.toInt().coerceIn(min, max)),
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 13.sp,
+                ),
+                color = IdeAccent,
+                textAlign = TextAlign.End,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+
+        Slider(
+            value = sliderPos,
+            onValueChange = { sliderPos = it },
+            onValueChangeFinished = {
+                onRelease(sliderPos.toInt().coerceIn(min, max))
+            },
+            valueRange = min.toFloat()..max.toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor         = IdeAccent,
+                activeTrackColor   = IdeAccent,
+                inactiveTrackColor = IdeBorder,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Step array constants — mirrors StepSlider.tsx on the desktop.
 // All arrays MUST include/exceed core defaults: text 15 MiB, image 64 MiB.
 // ---------------------------------------------------------------------------
