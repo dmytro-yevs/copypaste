@@ -619,6 +619,14 @@ export function SettingsView() {
         // Sync parity
         setSyncOnWifiOnly(rawCfg.sync_on_wifi_only ?? false);
 
+        // Sound / notify — hydrate from daemon config so UI reflects persisted state.
+        if (rawCfg.sound_on_copy != null) {
+          setPrefs({ playSoundOnCopy: rawCfg.sound_on_copy });
+        }
+        if (rawCfg.notify_on_copy != null) {
+          setPrefs({ notifyOnCopy: rawCfg.notify_on_copy });
+        }
+
         setLoadState("ready");
       } catch (err) {
         if (cancelled) return;
@@ -668,6 +676,8 @@ export function SettingsView() {
       sensitive_ttl_secs: sensitiveTtlSecs,
       image_quality: imageQuality,
       sync_on_wifi_only: syncOnWifiOnly,
+      sound_on_copy: prefs.playSoundOnCopy,
+      notify_on_copy: prefs.notifyOnCopy,
       ...overrides,
     };
   }
@@ -920,13 +930,25 @@ export function SettingsView() {
           <SettingsRow label="Play sound on copy">
             <Toggle
               checked={prefs.playSoundOnCopy}
-              onChange={(v) => setPrefs({ playSoundOnCopy: v })}
+              onChange={(v) => {
+                setPrefs({ playSoundOnCopy: v });
+                void api.setConfig(buildConfigPatch({ sound_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
+                  setPrefs({ playSoundOnCopy: !v });
+                });
+              }}
+              disabled={offline}
             />
           </SettingsRow>
           <SettingsRow label="Show notification on copy">
             <Toggle
               checked={prefs.notifyOnCopy}
-              onChange={(v) => setPrefs({ notifyOnCopy: v })}
+              onChange={(v) => {
+                setPrefs({ notifyOnCopy: v });
+                void api.setConfig(buildConfigPatch({ notify_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
+                  setPrefs({ notifyOnCopy: !v });
+                });
+              }}
+              disabled={offline}
             />
           </SettingsRow>
           <SettingsRow label="Mask sensitive data">

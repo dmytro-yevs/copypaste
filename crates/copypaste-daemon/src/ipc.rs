@@ -148,6 +148,14 @@ pub struct AppConfig {
     /// If true, skip cloud/P2P sync when not on Wi-Fi.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_on_wifi_only: Option<bool>,
+    /// Play a soft system sound when the daemon captures a new clipboard item.
+    /// `None` = not specified (preserve existing). macOS only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sound_on_copy: Option<bool>,
+    /// Show a notification banner when the daemon captures a new clipboard item.
+    /// `None` = not specified (preserve existing). macOS only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify_on_copy: Option<bool>,
 }
 
 /// Strip account credentials from a serialised [`AppConfig`] before it leaves
@@ -294,6 +302,8 @@ pub(crate) fn read_config() -> AppConfig {
     cfg.sensitive_ttl_secs = Some(core.sensitive_ttl_secs);
     cfg.image_quality = Some(core.image_quality);
     cfg.sync_on_wifi_only = Some(core.sync_on_wifi_only);
+    cfg.sound_on_copy = Some(core.sound_on_copy);
+    cfg.notify_on_copy = Some(core.notify_on_copy);
     cfg
 }
 
@@ -326,6 +336,12 @@ pub(crate) fn update_core_config(
     }
     if let Some(v) = incoming.sync_on_wifi_only {
         core.sync_on_wifi_only = v;
+    }
+    if let Some(v) = incoming.sound_on_copy {
+        core.sound_on_copy = v;
+    }
+    if let Some(v) = incoming.notify_on_copy {
+        core.notify_on_copy = v;
     }
     // core.save() writes via a sibling temp file + atomic rename and does NOT
     // create the parent dir; ensure it exists (mirrors write_config for the
@@ -363,6 +379,8 @@ fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfig {
         supabase_anon_key: incoming.supabase_anon_key.or(existing.supabase_anon_key),
         supabase_email: incoming.supabase_email.or(existing.supabase_email),
         supabase_password: incoming.supabase_password.or(existing.supabase_password),
+        sound_on_copy: incoming.sound_on_copy.or(existing.sound_on_copy),
+        notify_on_copy: incoming.notify_on_copy.or(existing.notify_on_copy),
         ..incoming
     }
 }

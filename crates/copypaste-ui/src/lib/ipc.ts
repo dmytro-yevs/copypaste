@@ -103,6 +103,9 @@ export interface AppSettings {
   image_quality?: number | null;
   // Sync parity
   sync_on_wifi_only?: boolean | null;
+  // Sound / notification on copy — wired to daemon config.toml.
+  sound_on_copy?: boolean | null;
+  notify_on_copy?: boolean | null;
 }
 
 /**
