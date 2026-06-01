@@ -412,6 +412,13 @@ class ClipboardService : Service() {
                 return
             }
 
+            // Private mode: when enabled, do NOT persist or sync clipboard items.
+            // privateMode=true → suppress capture; privateMode=false (default) → allow capture.
+            if (settings.privateMode) {
+                Log.d(TAG, "Private mode enabled — dropping clipboard change")
+                return
+            }
+
             val sensitive = try { isSensitive(text) } catch (_: UnsatisfiedLinkError) { false }
             if (sensitive) {
                 Log.d(TAG, "Sensitive clip detected — skipping storage")

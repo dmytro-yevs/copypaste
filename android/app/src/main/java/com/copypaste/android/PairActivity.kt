@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -41,7 +43,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
@@ -166,6 +167,8 @@ fun PairScreen(
     var syncing by remember { mutableStateOf(false) }
     var syncResult by remember { mutableStateOf<String?>(null) }
     var remainingSeconds by remember { mutableStateOf(0) }
+    // QR is blurred until the user taps to reveal. Once revealed it stays
+    // visible — including after a tap-triggered regeneration (HW-A5).
     var qrBlurred by remember { mutableStateOf(true) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -174,6 +177,30 @@ fun PairScreen(
     val dismissLabel = stringResource(R.string.snackbar_dismiss)
 
     val expired = qr != null && remainingSeconds <= 0
+
+    // Shared helper: generate a new QR and render its bitmap.
+    // keepVisible=true keeps qrBlurred=false after generation (used for
+    // tap-regen and auto-regen on expiry so the QR stays readable).
+    fun generateQr(keepVisible: Boolean) {
+        scope.launch {
+            loading = true
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    startPairing(settings.deviceId, android.os.Build.MODEL ?: "Android")
+                }
+                val bmp = withContext(Dispatchers.Default) {
+                    encodeQrBitmap(result.qr, 512)
+                }
+                qr = result
+                qrBitmap = bmp
+                if (keepVisible) qrBlurred = false
+            } catch (e: Exception) {
+                errorMessage = e.message ?: e.javaClass.simpleName
+            } finally {
+                loading = false
+            }
+        }
+    }
 
     // Camera scanner (ZXing). On a successful scan, parse the payload natively.
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
@@ -327,12 +354,38 @@ fun PairScreen(
     }
 
     // Countdown ticker — restarts whenever a fresh QR is issued.
+    // When the countdown reaches 0, auto-regenerate the QR and keep it
+    // visible (qrBlurred=false) so the user doesn't need to tap again (HW-A5).
     LaunchedEffect(qr) {
         if (qr == null) return@LaunchedEffect
         remainingSeconds = PAIR_TOKEN_TTL_SECONDS
         while (remainingSeconds > 0) {
             delay(1000)
             remainingSeconds -= 1
+        }
+        // QR expired — auto-regenerate and show unblurred.
+        generateQr(keepVisible = true)
+    }
+
+    // AND2: Auto-start pairing when the screen opens so the QR appears
+    // immediately without requiring the user to tap "Start Pairing".
+    LaunchedEffect(Unit) {
+        if (qr != null || loading) return@LaunchedEffect
+        loading = true
+        try {
+            val result = withContext(Dispatchers.IO) {
+                startPairing(settings.deviceId, android.os.Build.MODEL ?: "Android")
+            }
+            val bmp = withContext(Dispatchers.Default) {
+                encodeQrBitmap(result.qr, 512)
+            }
+            qr = result
+            qrBitmap = bmp
+            // Initial load: keep blurred so user taps to reveal.
+        } catch (e: Exception) {
+            errorMessage = e.message ?: e.javaClass.simpleName
+        } finally {
+            loading = false
         }
     }
 
@@ -429,37 +482,19 @@ fun PairScreen(
                                 // QR needs a light, high-contrast backing to scan
                                 // reliably — sit the code on a white rounded plate
                                 // that fills the reserved slot exactly.
-                                // First tap reveals the QR; second tap regenerates it.
+                                // First tap reveals the QR; second tap regenerates it
+                                // and keeps it visible (HW-A5: no re-blur after regen).
                                 Box(
                                     modifier = Modifier
                                         .size(QR_SLOT_SIZE_DP.dp)
                                         .clip(RoundedCornerShape(12.dp))
                                         .clickable {
                                             if (qrBlurred) {
+                                                // First tap: reveal the QR.
                                                 qrBlurred = false
                                             } else {
-                                                // Second tap: regenerate a fresh QR.
-                                                scope.launch {
-                                                    loading = true
-                                                    try {
-                                                        val result = withContext(Dispatchers.IO) {
-                                                            startPairing(
-                                                                settings.deviceId,
-                                                                android.os.Build.MODEL ?: "Android"
-                                                            )
-                                                        }
-                                                        val newBmp = withContext(Dispatchers.Default) {
-                                                            encodeQrBitmap(result.qr, 512)
-                                                        }
-                                                        qr = result
-                                                        qrBitmap = newBmp
-                                                        qrBlurred = true
-                                                    } catch (e: Exception) {
-                                                        errorMessage = e.message ?: e.javaClass.simpleName
-                                                    } finally {
-                                                        loading = false
-                                                    }
-                                                }
+                                                // Second tap: regenerate and stay visible.
+                                                generateQr(keepVisible = true)
                                             }
                                         },
                                     contentAlignment = Alignment.Center,
@@ -506,7 +541,12 @@ fun PairScreen(
                 }
             }
 
-
+            OutlinedButton(
+                onClick = { startScanFlow() },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(text = "Scan a device's QR")
+            }
 
             // ── Paired device display ─────────────────────────────────────
             // Show the persisted paired peer (fingerprint + sync address) so the
@@ -594,6 +634,7 @@ fun PairScreen(
                         )
                     }
                     else -> {
+                        // Only the countdown timer — no redundant static note (HW-A5).
                         val urgent = remainingSeconds <= PAIR_TOKEN_URGENT_THRESHOLD_SECONDS
                         Text(
                             text = stringResource(
@@ -602,11 +643,6 @@ fun PairScreen(
                             ),
                             style = MaterialTheme.typography.bodyMedium,
                             color = if (urgent) IdeDanger else IdeDim
-                        )
-                        Text(
-                            text = stringResource(R.string.pair_token_note),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = IdeDim
                         )
                     }
                 }
