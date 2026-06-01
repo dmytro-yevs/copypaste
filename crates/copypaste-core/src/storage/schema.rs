@@ -34,7 +34,13 @@ pub enum SchemaError {
 ///     so explicitly pinned items are distinguishable from normal rows with
 ///     `expires_at = NULL`. The TTL prune and history-limit prune both
 ///     filter `WHERE pinned = 0` to guarantee pinned items are never deleted.
-pub const SCHEMA_VERSION: i64 = 7;
+///   * 7 → 8 (A1 drag-to-reorder): added `pin_order REAL DEFAULT NULL` to
+///     `clipboard_items` so pinned items can be reordered by the user. Existing
+///     pinned rows are backfilled with `CAST(rowid AS REAL)` to give them a
+///     stable initial order. Unpinned rows keep `NULL`. The `history_page` and
+///     `get_page_pinned_first` queries order pinned items by `pin_order ASC`
+///     instead of the old `pinned DESC, wall_time DESC`.
+pub const SCHEMA_VERSION: i64 = 8;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -83,6 +89,23 @@ ALTER TABLE clipboard_items \
     ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;\n\
 CREATE INDEX IF NOT EXISTS idx_clipboard_pinned \
     ON clipboard_items(pinned) WHERE pinned = 1;\n";
+
+/// v8 ALTER step — add `pin_order REAL DEFAULT NULL` to `clipboard_items`.
+///
+/// `DEFAULT NULL` means all existing rows start with no explicit order.
+/// The migration immediately backfills all currently-pinned rows with
+/// `CAST(rowid AS REAL)` to provide a stable initial order consistent with
+/// insertion order.  Unpinned rows keep `NULL` and are never given a
+/// `pin_order` value (the column is only meaningful when `pinned = 1`).
+///
+/// `pin_order` is a REAL so fractional values can be inserted between two
+/// adjacent integers without renumbering the whole set (reserved for future
+/// optimistic client-side reorder without a round-trip).
+pub(crate) const V8_ALTER_SQL: &str = "\
+ALTER TABLE clipboard_items \
+    ADD COLUMN pin_order REAL DEFAULT NULL;\n\
+UPDATE clipboard_items \
+    SET pin_order = CAST(rowid AS REAL) WHERE pinned = 1;\n";
 
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
@@ -203,6 +226,15 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // `DEFAULT 0` backfills all existing rows as unpinned, which is safe:
         // items were pinned only by clearing `expires_at`, so no data is lost.
         script.push_str(V7_ALTER_SQL);
+    }
+
+    if current_version < 8 {
+        // Migration v8 (A1 drag-to-reorder): add `pin_order REAL DEFAULT NULL`
+        // so pinned items carry an explicit sort key that the UI can update via
+        // the `reorder_pinned` IPC verb. Existing pinned rows are backfilled
+        // with their rowid so they start in a stable insertion-order sequence.
+        // Unpinned rows keep NULL — the column is only meaningful for pinned items.
+        script.push_str(V8_ALTER_SQL);
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));

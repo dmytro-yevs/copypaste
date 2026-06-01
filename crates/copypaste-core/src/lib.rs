@@ -46,7 +46,7 @@ pub use storage::items::{
     bump_item_recency, count_items, delete_expired, delete_fts, delete_item,
     delete_sensitive_expired, exists_item_by_item_id, fetch_text_preview, find_recent_by_hash,
     get_item_by_id, get_item_by_item_id, get_page, get_page_meta, get_page_pinned_first,
-    insert_item, insert_item_with_fts, pin_item, prune_to_cap, search_items, unpin_item,
-    upsert_fts, ClipboardItem, ItemsError, ITEM_KEY_VERSION_CURRENT, MAX_PREVIEW_BYTES,
+    insert_item, insert_item_with_fts, pin_item, prune_to_cap, reorder_pinned, search_items,
+    unpin_item, upsert_fts, ClipboardItem, ItemsError, ITEM_KEY_VERSION_CURRENT, MAX_PREVIEW_BYTES,
 };
 pub use storage::{Database, DbError, MigrationState};

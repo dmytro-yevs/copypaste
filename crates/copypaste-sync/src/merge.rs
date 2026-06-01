@@ -94,6 +94,10 @@ pub fn wire_to_local(wire: WireItem) -> ClipboardItem {
         // Received items are never pinned by default; the user must pin them
         // explicitly on this device after syncing.
         pinned: false,
+        // pin_order is a local UI concept — it is not synced across devices.
+        // Received items start with NULL and get a position only if the user
+        // explicitly pins them (via pin_item, which assigns MAX+1).
+        pin_order: None,
     }
 }
 

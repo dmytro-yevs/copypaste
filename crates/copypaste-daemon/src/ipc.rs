@@ -6,8 +6,8 @@ use crate::protocol::{
 use copypaste_core::{
     bump_item_recency, chunks_from_blob, count_items, decode_image, decrypt_item_by_version,
     delete_fts, delete_item, derive_v2, ensure_revoked_devices_table, fetch_text_preview,
-    get_item_by_id, get_page, get_page_pinned_first, pin_item, revoke_device, revoke_devices,
-    search_items, unpin_item, Database, EncryptError, SensitiveDetector,
+    get_item_by_id, get_page, get_page_pinned_first, pin_item, reorder_pinned, revoke_device,
+    revoke_devices, search_items, unpin_item, Database, EncryptError, SensitiveDetector,
 };
 #[cfg(feature = "cloud-sync")]
 use copypaste_core::{derive_sync_key, SyncKey};
@@ -1445,6 +1445,7 @@ impl IpcServer {
                 | "stats"
                 | "pin"
                 | "pin_item"
+                | "reorder_pinned"
                 | "history_page"
                 | "import"
                 // export decrypts every row — needs a ready DB.
@@ -2020,6 +2021,54 @@ impl IpcServer {
                     ),
                 }
             }
+            // A1 — reorder pinned items by providing their ids in the desired
+            // display order. Accepts `params.ids: [String]` (primary-key `id`
+            // values, not `item_id`) in the desired order. Assigns consecutive
+            // `pin_order` values (1.0, 2.0, …) inside a single transaction.
+            // Returns `{ "ok": true }`.
+            "reorder_pinned" => {
+                let ids: Vec<String> = match req.params.get("ids").and_then(|v| v.as_array()) {
+                    Some(arr) => {
+                        let mut out = Vec::with_capacity(arr.len());
+                        for v in arr {
+                            match v.as_str() {
+                                Some(s) => out.push(s.to_string()),
+                                None => {
+                                    return Response::err_with_code(
+                                        req.id,
+                                        ERR_CODE_INVALID_ARGUMENT,
+                                        "ids must be an array of strings",
+                                    )
+                                }
+                            }
+                        }
+                        out
+                    }
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: ids (array of item id strings)",
+                        )
+                    }
+                };
+                let db_arc = self.db.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+                    reorder_pinned(&db, &id_refs)
+                })
+                .await;
+                match join {
+                    Ok(Ok(_changed)) => Response::ok(req.id, serde_json::json!({"ok": true})),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
             // T5.x — delete a single item by id. Mirrors the legacy `delete`
             // verb but uses the typed `invalid_argument` error code (the UI
             // branches on `error_code`) and returns a structured `{deleted,
@@ -2387,6 +2436,7 @@ impl IpcServer {
                                 "lamport_ts": item.lamport_ts,
                                 "preview": preview,
                                 "pinned": item.pinned,
+                                "pin_order": item.pin_order,
                                 "sensitive_spans": sensitive_spans,
                             })
                         })

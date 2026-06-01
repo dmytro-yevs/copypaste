@@ -73,6 +73,15 @@ pub struct ClipboardItem {
     /// `unpin_item`. Schema version ≥ 7 stores this as `pinned INTEGER NOT
     /// NULL DEFAULT 0` in `clipboard_items`.
     pub pinned: bool,
+    /// Explicit sort key for drag-to-reorder among pinned items (schema v8+).
+    ///
+    /// `None` for unpinned rows (the column holds SQL NULL).  When an item is
+    /// pinned via `pin_item`, `pin_order` is set to
+    /// `MAX(pin_order) + 1` so newly-pinned items land at the end of the
+    /// pinned section.  The UI updates this by calling `reorder_pinned` with
+    /// the desired id sequence; the daemon writes consecutive integers
+    /// starting at 1.
+    pub pin_order: Option<f64>,
 }
 
 impl ClipboardItem {
@@ -115,6 +124,7 @@ impl ClipboardItem {
             origin_device_id: String::new(),
             key_version: ITEM_KEY_VERSION_CURRENT as u8,
             pinned: false,
+            pin_order: None,
         }
     }
 
@@ -157,6 +167,7 @@ impl ClipboardItem {
             origin_device_id: String::new(),
             key_version: ITEM_KEY_VERSION_CURRENT as u8,
             pinned: false,
+            pin_order: None,
         }
     }
 }
@@ -182,8 +193,8 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+          content_hash, origin_device_id, key_version, pinned, pin_order)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
         params![
             item.id,
             item.item_id,
@@ -201,6 +212,7 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
             item.origin_device_id,
             key_version,
             item.pinned as i64,
+            item.pin_order,
         ],
     )?;
     Ok(())
@@ -258,8 +270,8 @@ pub fn insert_item_with_fts(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+          content_hash, origin_device_id, key_version, pinned, pin_order)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
         params![
             item.id,
             item.item_id,
@@ -277,6 +289,7 @@ pub fn insert_item_with_fts(
             item.origin_device_id,
             key_version,
             item.pinned as i64,
+            item.pin_order,
         ],
     );
 
@@ -401,7 +414,7 @@ pub fn get_page(
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned
+                content_hash, origin_device_id, key_version, pinned, pin_order
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
@@ -431,8 +444,13 @@ pub fn get_page_pinned_first(
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned
-         FROM clipboard_items ORDER BY pinned DESC, wall_time DESC LIMIT ?1 OFFSET ?2",
+                content_hash, origin_device_id, key_version, pinned, pin_order
+         FROM clipboard_items
+         ORDER BY
+           CASE WHEN pinned = 1 THEN 0 ELSE 1 END ASC,
+           pin_order ASC,
+           wall_time DESC
+         LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
         .query_map(params![limit_i64, offset_i64], row_to_item)?
@@ -488,7 +506,7 @@ pub fn get_page_meta(
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, NULL AS content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned
+                content_hash, origin_device_id, key_version, pinned, pin_order
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
@@ -507,7 +525,7 @@ pub fn get_item_by_id(db: &Database, id: &str) -> Result<Option<ClipboardItem>, 
     let result = db.conn().query_row(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned
+                content_hash, origin_device_id, key_version, pinned, pin_order
          FROM clipboard_items WHERE id = ?1",
         params![id],
         row_to_item,
@@ -541,7 +559,7 @@ pub fn get_item_by_item_id(
     let result = db.conn().query_row(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned
+                content_hash, origin_device_id, key_version, pinned, pin_order
          FROM clipboard_items WHERE item_id = ?1",
         params![item_id],
         row_to_item,
@@ -648,25 +666,63 @@ pub fn delete_item(db: &Database, id: &str) -> Result<usize, ItemsError> {
 
 /// Pin an item so it is never auto-deleted by TTL or history-limit prunes.
 ///
-/// Sets `pinned = 1` and clears `expires_at` so the item survives both
-/// `delete_expired` and `prune_history`.
+/// Sets `pinned = 1`, clears `expires_at`, and assigns `pin_order` to
+/// `MAX(pin_order) + 1` among currently-pinned rows so the newly-pinned item
+/// lands at the **end** of the pinned section. This is done atomically in a
+/// single UPDATE + subquery — no separate SELECT is needed.
 pub fn pin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
     db.conn().execute(
-        "UPDATE clipboard_items SET pinned = 1, expires_at = NULL WHERE id = ?1",
+        "UPDATE clipboard_items
+         SET pinned = 1,
+             expires_at = NULL,
+             pin_order = (
+                 SELECT COALESCE(MAX(pin_order), 0) + 1
+                 FROM clipboard_items
+                 WHERE pinned = 1
+             )
+         WHERE id = ?1",
         rusqlite::params![id],
     )?;
     Ok(())
 }
 
 /// Unpin a previously pinned item, restoring normal TTL and history-limit
-/// behaviour. Sets `pinned = 0`; `expires_at` remains `NULL` unless the
-/// caller explicitly sets a new expiry.
+/// behaviour. Sets `pinned = 0` and clears `pin_order` back to NULL;
+/// `expires_at` remains `NULL` unless the caller explicitly sets a new expiry.
 pub fn unpin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
     db.conn().execute(
-        "UPDATE clipboard_items SET pinned = 0 WHERE id = ?1",
+        "UPDATE clipboard_items SET pinned = 0, pin_order = NULL WHERE id = ?1",
         rusqlite::params![id],
     )?;
     Ok(())
+}
+
+/// Reorder the pinned section by assigning consecutive `pin_order` values.
+///
+/// `ids` is a slice of primary-key `id` values (the per-row UUID, not
+/// `item_id`) in the desired display order. Each `id` at index `i` receives
+/// `pin_order = (i + 1) as f64` so the sequence starts at 1.0, 2.0, …
+///
+/// All updates run inside a single transaction. Non-pinned ids in the slice
+/// are silently skipped (the UPDATE touches only rows where `pinned = 1`).
+/// Unknown ids produce a no-op row-count of 0 and are not treated as errors,
+/// matching the "idempotent reorder" contract.
+///
+/// Returns the number of rows whose `pin_order` was actually changed.
+pub fn reorder_pinned(db: &Database, ids: &[&str]) -> Result<usize, ItemsError> {
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+    let mut changed = 0usize;
+    for (i, id) in ids.iter().enumerate() {
+        let order = (i + 1) as f64;
+        let rows = tx.execute(
+            "UPDATE clipboard_items SET pin_order = ?1 WHERE id = ?2 AND pinned = 1",
+            rusqlite::params![order, id],
+        )?;
+        changed += rows;
+    }
+    tx.commit()?;
+    Ok(changed)
 }
 
 /// Prune the oldest unpinned clipboard items so that the total byte size of
@@ -969,7 +1025,8 @@ pub fn search_items(
     let mut stmt = db.conn().prepare_cached(
         "SELECT ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref,
                 ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at,
-                ci.app_bundle_id, ci.content_hash, ci.origin_device_id, ci.key_version, ci.pinned
+                ci.app_bundle_id, ci.content_hash, ci.origin_device_id, ci.key_version,
+                ci.pinned, ci.pin_order
          FROM clipboard_fts fts
          JOIN clipboard_items ci ON ci.id = fts.id
          WHERE clipboard_fts MATCH ?1
@@ -1010,6 +1067,7 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
             u8::try_from(kv).map_err(|_| rusqlite::Error::IntegralValueOutOfRange(14, kv))?
         },
         pinned: row.get::<_, i64>(15)? != 0,
+        pin_order: row.get(16)?,
     })
 }
 
@@ -1687,16 +1745,23 @@ mod tests {
     }
 
     /// Multiple pinned items are sorted newest-first within the pinned group.
+    /// Pinned items appear before unpinned items; within the pinned group they
+    /// are ordered by `pin_order ASC` (insertion order by default, since
+    /// `pin_item` assigns `MAX(pin_order)+1`). This test verifies that the item
+    /// pinned first has the lower `pin_order` and therefore appears first,
+    /// regardless of its `wall_time`.
     #[test]
-    fn get_page_pinned_first_multiple_pins_sorted_by_recency() {
+    fn get_page_pinned_first_multiple_pins_sorted_by_pin_order() {
         let db = Database::open_in_memory().unwrap();
 
+        // old_pin: low wall_time, pinned first → pin_order = 1.0
         let mut old_pin = make_item(1);
         old_pin.wall_time = 100;
         let old_pin_id = old_pin.id.clone();
         insert_item(&db, &old_pin).unwrap();
         pin_item(&db, &old_pin_id).unwrap();
 
+        // new_pin: high wall_time, pinned second → pin_order = 2.0
         let mut new_pin = make_item(2);
         new_pin.wall_time = 900;
         let new_pin_id = new_pin.id.clone();
@@ -1709,14 +1774,25 @@ mod tests {
 
         let page = get_page_pinned_first(&db, 10, 0).unwrap();
         assert_eq!(page.len(), 3);
-        // Both pins first, sorted newest-first within the pinned group.
+        // Both pins appear first.
         assert!(
             page[0].pinned && page[1].pinned,
             "first two items must be pinned"
         );
+        // Within the pinned group, order is by pin_order ASC (insertion order).
+        // old_pin was pinned first (pin_order=1.0) so it appears before new_pin
+        // (pin_order=2.0) even though old_pin has a lower wall_time.
+        assert_eq!(
+            page[0].id, old_pin_id,
+            "item pinned first (lower pin_order) must appear first"
+        );
+        assert_eq!(
+            page[1].id, new_pin_id,
+            "item pinned second (higher pin_order) must appear second"
+        );
         assert!(
-            page[0].wall_time >= page[1].wall_time,
-            "pins must be newest-first within pin group"
+            page[0].pin_order.unwrap() < page[1].pin_order.unwrap(),
+            "pin_order must be ascending within the pinned group"
         );
         // Then unpinned.
         assert!(!page[2].pinned, "third item must not be pinned");
