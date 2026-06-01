@@ -77,6 +77,7 @@ fn make_item(id: &str, lamport: i64) -> ClipboardItem {
         origin_device_id: format!("dev-{id}"),
         key_version: 1,
         pinned: false,
+        pin_order: None,
     }
 }
 

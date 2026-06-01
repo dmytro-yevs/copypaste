@@ -177,6 +177,7 @@ fn make_local(id: &str, lamport: i64, wall: i64) -> ClipboardItem {
         origin_device_id: "device-local".to_string(),
         key_version: 1,
         pinned: false,
+        pin_order: None,
     }
 }
 

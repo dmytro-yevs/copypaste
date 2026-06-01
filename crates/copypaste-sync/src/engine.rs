@@ -526,6 +526,7 @@ mod tests {
             origin_device_id: format!("dev-{id}"),
             key_version: 1,
             pinned: false,
+            pin_order: None,
         }
     }
 
@@ -768,6 +769,7 @@ mod tests {
             origin_device_id: "device-A".to_string(),
             key_version: 1,
             pinned: false,
+            pin_order: None,
         };
 
         let mut engine_a = SyncEngine::new("device-A");

@@ -41,6 +41,7 @@ fn local_item(id: &str, lamport: i64, wall: i64, content: &[u8]) -> ClipboardIte
         origin_device_id: "device-local".to_string(),
         key_version: 1,
         pinned: false,
+        pin_order: None,
     }
 }
 
@@ -92,6 +93,7 @@ fn apply(local: ClipboardItem, remote: &WireItem) -> ClipboardItem {
             origin_device_id: remote.origin_device_id.clone(),
             key_version: 1,
             pinned: false,
+            pin_order: None,
         },
     }
 }
