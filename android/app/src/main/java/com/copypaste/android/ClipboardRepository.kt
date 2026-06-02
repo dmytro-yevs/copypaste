@@ -415,7 +415,13 @@ class ClipboardRepository(context: Context) {
 
         val encoded = encodeItem(blob, textBytes.size, contentType = contentType, lamportTs = lamportTs)
         synchronized(idsWriteLock) {
-            val ids = storedIds().toMutableList().also { it.add(id) }
+            // Append the id, removing any prior occurrence first so the index
+            // stays canonical (no duplicate ids). A synced item re-stored under
+            // the same overrideId — e.g. after clearUnpinned wiped the
+            // synced-source-id seen-set while a pinned id stayed in the index —
+            // would otherwise append a second copy of the same id, which then
+            // crashes the history LazyColumn ("Key … was already used").
+            val ids = appendUniqueId(storedIds(), id)
             prefs.edit()
                 .putString("item_$id", encoded)
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
@@ -541,7 +547,7 @@ class ClipboardRepository(context: Context) {
                 Log.d(TAG, "storeItemWithLww: duplicate detected under lock for item_id=$itemId — aborting")
                 return@withContext false
             }
-            val ids = storedIds().toMutableList().also { it.add(storageId) }
+            val ids = appendUniqueId(storedIds(), storageId)
             prefs.edit()
                 .putString("item_$storageId", encoded)
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
@@ -670,11 +676,32 @@ class ClipboardRepository(context: Context) {
         return (len / 4) * 3 - padding
     }
 
+    /**
+     * The ordered id index, read back canonical: blanks removed and any
+     * duplicate ids collapsed to their FIRST (oldest) occurrence. Persisting a
+     * dup-free index is the invariant every writer relies on; reading it
+     * de-duplicated also heals any index that an older build may have corrupted,
+     * so the history LazyColumn never sees a repeated key.
+     */
     private fun storedIds(): List<String> =
         prefs.getString(KEY_ITEM_IDS, "")
             ?.split(",")
             ?.filter { it.isNotBlank() }
+            ?.distinct()
             ?: emptyList()
+
+    /**
+     * Append [id] to [current], guaranteeing it appears exactly once and at the
+     * end (most-recent position). Any prior occurrence is removed first so the
+     * index can never hold the same id twice — the root invariant that keeps the
+     * history LazyColumn's `key = { it.id }` from crashing on a duplicate.
+     */
+    private fun appendUniqueId(current: List<String>, id: String): List<String> {
+        val next = current.toMutableList()
+        next.remove(id)
+        next.add(id)
+        return next
+    }
 
     /** Ordered list of pinned ids — position 0 is displayed at the top of the pinned section. */
     private fun storedPinnedList(): List<String> =
