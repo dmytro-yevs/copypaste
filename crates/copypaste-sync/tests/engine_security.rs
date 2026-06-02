@@ -40,6 +40,7 @@ fn make_item(id: &str, lamport: i64) -> ClipboardItem {
         key_version: 2,
         pinned: false,
         pin_order: None,
+        thumb: None,
     }
 }
 

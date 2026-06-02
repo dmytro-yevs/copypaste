@@ -3181,6 +3181,7 @@ mod tests {
             key_version: 1,
             pinned: false,
             pin_order: None,
+            thumb: None,
         }
     }
 
@@ -4513,6 +4514,7 @@ mod e2e_live {
             key_version: ITEM_KEY_VERSION_CURRENT as u8,
             pinned: false,
             pin_order: None,
+            thumb: None,
         }
     }
 
@@ -5076,6 +5078,7 @@ mod bytea_e2e {
             key_version: 1,
             pinned: false,
             pin_order: None,
+            thumb: None,
         }
     }
 

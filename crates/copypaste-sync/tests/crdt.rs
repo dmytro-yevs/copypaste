@@ -48,6 +48,7 @@ fn mk_local_with_device(
         key_version: 1,
         pinned: false,
         pin_order: None,
+        thumb: None,
     }
 }
 

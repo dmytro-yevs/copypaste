@@ -550,6 +550,7 @@ mod tests {
             key_version: 1,
             pinned: false,
             pin_order: None,
+            thumb: None,
         }
     }
 
@@ -793,6 +794,7 @@ mod tests {
             key_version: 1,
             pinned: false,
             pin_order: None,
+            thumb: None,
         };
 
         let mut engine_a = SyncEngine::new("device-A");

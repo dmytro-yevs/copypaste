@@ -161,6 +161,7 @@ mod tests {
             key_version: 1,
             pinned: false,
             pin_order: None,
+            thumb: None,
         }
     }
 

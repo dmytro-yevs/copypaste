@@ -42,6 +42,7 @@ fn local_item(id: &str, lamport: i64, wall: i64, content: &[u8]) -> ClipboardIte
         key_version: 1,
         pinned: false,
         pin_order: None,
+        thumb: None,
     }
 }
 
@@ -94,6 +95,7 @@ fn apply(local: ClipboardItem, remote: &WireItem) -> ClipboardItem {
             key_version: 1,
             pinned: false,
             pin_order: None,
+            thumb: None,
         },
     }
 }
