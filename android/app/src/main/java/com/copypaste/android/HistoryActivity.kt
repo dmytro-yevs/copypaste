@@ -259,11 +259,20 @@ fun HistoryScreen(
     // Pinned items are sorted by pinnedSortIndex (NOT wallTimeMs) so copying a pinned
     // clip does not move it — fixes HW-A15.
     val sortedItems = remember(items) {
-        items.sortedWith(
-            compareByDescending<ClipboardItem> { it.pinned }
-                .thenBy { if (it.pinned) it.pinnedSortIndex else 0 }
-                .thenByDescending { it.wallTimeMs }
-        )
+        // Defensive de-dup by id BEFORE the list reaches the LazyColumn. The list
+        // backing the LazyColumn uses `key = { it.id }`, so a duplicate id throws
+        // IllegalArgumentException ("Key … was already used") and crash-loops the
+        // screen. A persistent duplicate can arise in the repository id index (e.g.
+        // a synced item re-appended under the same overrideId after the
+        // synced-source-id seen-set was cleared by clearUnpinned). Collapsing
+        // duplicates here guarantees the LazyColumn can never crash regardless of
+        // how the backing store drifts; the repository fix below removes the source.
+        items.distinctBy { it.id }
+            .sortedWith(
+                compareByDescending<ClipboardItem> { it.pinned }
+                    .thenBy { if (it.pinned) it.pinnedSortIndex else 0 }
+                    .thenByDescending { it.wallTimeMs }
+            )
     }
     // Filter: case-insensitive substring match on snippet
     val filteredItems = remember(sortedItems, searchQuery) {
