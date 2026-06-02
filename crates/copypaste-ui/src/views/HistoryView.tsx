@@ -871,8 +871,6 @@ interface ToastState {
   kind: ToastKind;
 }
 
-let _toastSeq = 0;
-
 export function HistoryView() {
   const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, playSoundOnCopy, notifyOnCopy } =
     useUI((s) => s.prefs);
@@ -920,10 +918,14 @@ export function HistoryView() {
   const sigRef = useRef<string>("");
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isKeyboardNavRef = useRef(false);
+  // Per-instance toast sequence counter — avoids the module-level mutable
+  // global that would be shared (and mutated) across multiple HistoryView
+  // instances rendered in the same JS module scope.
+  const toastSeqRef = useRef(0);
 
   const showToast = useCallback(
     (message: string, kind: ToastKind, durationMs = 2500) => {
-      const id = ++_toastSeq;
+      const id = ++toastSeqRef.current;
       setToast({ id, message, kind });
       if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
       toastTimerRef.current = setTimeout(() => setToast(null), durationMs);
@@ -1062,6 +1064,18 @@ export function HistoryView() {
     setMultiSelectedIds(new Set());
   }, []);
 
+  // Exit selection mode automatically when the last item is deselected.
+  // A useEffect watching the set size is race-free: it runs after React has
+  // committed the new multiSelectedIds state, so a concurrent toggleMultiSelect
+  // that re-adds an item before the effect fires will see size > 0 and won't
+  // flip selectionMode off.  The old Promise.resolve().then() micro-task hack
+  // ran before the next render and could interleave with a concurrent select.
+  useEffect(() => {
+    if (selectionMode && multiSelectedIds.size === 0) {
+      setSelectionMode(false);
+    }
+  }, [selectionMode, multiSelectedIds]);
+
   /** Toggle a single item's multi-select state; activates selection mode on first check. */
   const toggleMultiSelect = useCallback((id: string) => {
     setSelectionMode(true);
@@ -1069,11 +1083,6 @@ export function HistoryView() {
       const next = new Set(prev);
       if (next.has(id)) {
         next.delete(id);
-        // If nothing left, exit selection mode.
-        if (next.size === 0) {
-          // Use a micro-task so the state update lands before we flip mode.
-          Promise.resolve().then(() => setSelectionMode(false));
-        }
       } else {
         next.add(id);
       }

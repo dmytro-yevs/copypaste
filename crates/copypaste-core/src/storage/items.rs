@@ -250,9 +250,12 @@ pub fn get_key_version(db: &Database, id: &str) -> Result<Option<i64>, ItemsErro
 /// `plaintext_for_fts` is the already-decrypted text indexed for search.
 /// Pass an empty string to skip FTS indexing (image items).
 ///
-/// TODO(daemon-owner): existing daemon ingest paths still call
-/// `insert_item` + `upsert_fts` as two separate steps. Switch to this new
-/// fn to close the crash window.
+/// [P2 status] The daemon's `handle_text` and `handle_image` ingest paths
+/// already call this atomic function directly, so the crash window is closed
+/// on the primary capture path. The standalone `insert_item` + `upsert_fts`
+/// two-step remains available only for callers that intentionally split the
+/// insert and FTS update (e.g. post-decryption FTS backfill). No refactor of
+/// other-crate callers is done here per the task constraint.
 pub fn insert_item_with_fts(
     db: &Database,
     item: &ClipboardItem,

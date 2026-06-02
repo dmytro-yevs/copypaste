@@ -1,6 +1,7 @@
 use crate::ipc::IpcClient;
 use anyhow::{anyhow, Result};
 use copypaste_ipc::METHOD_EXPORT;
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
@@ -64,14 +65,31 @@ pub fn run(socket_path: &Path, limit: u64, output: Option<&str>, force: bool) ->
 
 /// Write `contents` to `path`. If `path` already exists and `force` is false,
 /// returns an error instead of overwriting.
+///
+/// The non-force path uses `create_new(true)` which is atomic (single
+/// open(2)/CreateFile call) and avoids the TOCTOU race that a separate
+/// `path.exists()` check introduces.
 fn write_to_file(path: &Path, contents: &str, force: bool) -> Result<()> {
-    if path.exists() && !force {
-        return Err(anyhow!(
-            "file exists, use --force to overwrite: {}",
-            path.display()
-        ));
+    let mut file = if force {
+        // Truncate-or-create: overwrite unconditionally.
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)
+    } else {
+        // Atomic create-or-fail: errors if the file already exists.
+        OpenOptions::new().write(true).create_new(true).open(path)
     }
-    std::fs::write(path, contents)?;
+    .map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            anyhow!("file exists, use --force to overwrite: {}", path.display())
+        } else {
+            anyhow!("could not open {}: {e}", path.display())
+        }
+    })?;
+
+    file.write_all(contents.as_bytes())?;
     Ok(())
 }
 

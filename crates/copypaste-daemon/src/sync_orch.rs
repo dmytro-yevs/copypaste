@@ -22,6 +22,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc, Mutex};
+
+/// Page size used by [`catchup_items`] when iterating local history to build
+/// the catch-up set. Keeping pages small avoids materialising thousands of
+/// structs at once and keeps peak heap usage proportional to this constant
+/// rather than to the total item count.
+const CATCHUP_PAGE_SIZE: usize = 500;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
@@ -470,22 +476,57 @@ fn replace_item_atomic(
 /// Returns an empty vec when there is no shared sync key (nothing decryptable to
 /// send) or the DB read fails — catch-up is best-effort.
 pub fn catchup_items(db: &Database, device_id: &str, crypto: &SyncCrypto) -> Vec<WireItem> {
-    let local: Vec<ClipboardItem> = match copypaste_core::get_page(db, 10_000, 0) {
-        Ok(rows) => rows,
-        Err(e) => {
-            warn!("sync_orch: catchup get_page failed: {e}");
-            return Vec::new();
-        }
+    // P2 fix: load the shared sync key ONCE here rather than on every
+    // `rekey_outbound` call (which re-reads peers.json per item). If no shared
+    // key is available there is nothing to forward — bail early.
+    //
+    // P1 fix: paginate through the local store in CATCHUP_PAGE_SIZE-row batches
+    // instead of materialising up to 10 000 structs in one shot. Each page is
+    // processed immediately and dropped, keeping peak heap usage bounded.
+    use base64::Engine as _;
+
+    // Pre-flight: only bother paginating if a shared key actually exists.
+    let shared_key_available = {
+        let peers = crate::peers::load_peers(&crypto.peers_path);
+        peers.iter().any(|dev| {
+            dev.sync_key_b64.as_deref().map_or(false, |b64| {
+                base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .ok()
+                    .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
+                    .is_some()
+            })
+        })
     };
-    let mut out = Vec::with_capacity(local.len());
-    for item in &local {
-        let mut wire = local_to_wire(item, device_id);
-        // Only forward items we could actually re-key under the shared key; a
-        // still-locally-encrypted (NotApplicable) or failed payload is useless
-        // — or worse, undecryptable — to the peer (sync H2).
-        if rekey_outbound(crypto, &mut wire) == RekeyOutcome::Rewrapped {
-            out.push(wire);
+    if !shared_key_available {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    let mut offset: usize = 0;
+    loop {
+        let page: Vec<ClipboardItem> = match copypaste_core::get_page(db, CATCHUP_PAGE_SIZE, offset)
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!("sync_orch: catchup get_page (offset={offset}) failed: {e}");
+                break;
+            }
+        };
+        let page_len = page.len();
+        for item in &page {
+            let mut wire = local_to_wire(item, device_id);
+            // Only forward items we could actually re-key under the shared key; a
+            // still-locally-encrypted (NotApplicable) or failed payload is useless
+            // — or worse, undecryptable — to the peer (sync H2).
+            if rekey_outbound(crypto, &mut wire) == RekeyOutcome::Rewrapped {
+                out.push(wire);
+            }
         }
+        if page_len < CATCHUP_PAGE_SIZE {
+            break; // last page
+        }
+        offset += CATCHUP_PAGE_SIZE;
     }
     out
 }

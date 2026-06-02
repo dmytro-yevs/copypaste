@@ -313,7 +313,12 @@ pub fn build_pairing_qr(
     panic_boundary::catch_result(|| {
         let payload =
             copypaste_core::PairingPayload::new(fingerprint, device_id, device_name, addr_hint)
-                .map_err(|e| CopypasteError::DecryptionFailed {
+                // P2pError is semantically correct here: QR payload generation is
+                // pairing infrastructure (token generation / encoding), not a
+                // decryption step.  DecryptionFailed was a copy-paste mistake from
+                // parse_pairing_qr (the scan side) and is misleading to Kotlin
+                // callers trying to distinguish pairing vs. crypto failures.
+                .map_err(|e| CopypasteError::P2pError {
                     reason: e.to_string(),
                 })?;
         let pake_password = payload.token.to_pake_password();
@@ -931,6 +936,19 @@ pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
     })
 }
 
+/// Release the handle-table entry for `handle`, allowing the `Database`
+/// object to be dropped and its underlying SQLCipher connection closed.
+///
+/// # Important: handle-table only — path cache is unaffected
+///
+/// This function removes `handle` from the opaque integer→`Database` map
+/// (`DB_HANDLES`) that backs `open_database` / the read/write exports.
+/// It does **NOT** touch `DB_BY_PATH` — the path+key-keyed connection cache
+/// used by the live `add_clipboard_item` / `get_history_count` exports
+/// (feature `android-uniffi-live`).  Callers that need the path-cache
+/// connection to also close (e.g. on logout) must do so at the Kotlin layer
+/// by ensuring the process is restarted or by calling the appropriate
+/// cache-clearing export when one is added.
 pub fn close_database(handle: u64) {
     // A poisoned mutex on the global handle table would otherwise abort the
     // JVM via `unwrap()`. Wrapping in `catch_result` converts that into a

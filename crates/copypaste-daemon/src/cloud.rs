@@ -519,6 +519,18 @@ pub async fn start_cloud(
     // swap in a fresh token without restarting the loops.
     let bearer: Arc<RwLock<String>> = Arc::new(RwLock::new(bearer_str));
 
+    // [P1 audit fix] Wire spawn_auto_refresh so the token is proactively
+    // refreshed before the ~1 h GoTrue expiry.  The JoinHandle is intentionally
+    // dropped here (the task keeps running as a detached background task);
+    // shutdown is handled via the shared `shutdown` Notify below, which the
+    // push/poll loops (and ultimately the daemon teardown) already signal.
+    let _auto_refresh_handle = auth_client.clone().spawn_auto_refresh();
+
+    // Extract the GoTrue user UUID from the session (populated by sign_in).
+    // Used as the Realtime postgres_changes filter so the server pre-filters
+    // rows by user_id before delivering events (P1 audit fix: realtime.rs ~235).
+    let ws_user_id: Option<String> = auth_client.current_session().map(|s| s.user.id.clone());
+
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     // We need two copies of the shutdown signal — use a shared Notify.
     let shutdown = Arc::new(tokio::sync::Notify::new());
@@ -615,14 +627,21 @@ pub async fn start_cloud(
     // actual download work. A WS reconnect on cellular is cheap (a few bytes)
     // and avoids a stale `ws_connected = false` that would needlessly
     // accelerate polling.
+    // [P0 audit fix] Build the RealtimeConfig with the live bearer Arc so
+    // ws_ingest_loop can write the current token into config.user_jwt on every
+    // reconnect, preventing stale-JWT permanent failure after ~1 h expiry.
+    // [P1 audit fix] Also thread ws_user_id so the postgres_changes subscription
+    // carries a server-side filter clause.
     let ws_jwt = bearer.read().await.clone();
-    let ws_realtime_config = RealtimeConfig::with_jwt(
+    let ws_realtime_config = RealtimeConfig::with_jwt_and_user_id(
         config.supabase_url.clone(),
         config.anon_key.clone(),
         RealtimeConfig::DEFAULT_TOPIC,
         Some(ws_jwt),
+        ws_user_id,
         true,
     );
+    let ws_bearer = bearer.clone();
     let ws_sync_key = sync_key.clone();
     let ws_local_key = local_key.clone();
     let ws_db = db;
@@ -631,6 +650,7 @@ pub async fn start_cloud(
     let ws_connected_flag = ws_connected;
     tokio::spawn(ws_ingest_loop(
         ws_realtime_config,
+        ws_bearer,
         ws_db,
         ws_sync_key,
         ws_local_key,
@@ -869,6 +889,8 @@ async fn push_loop(
                         origin_device_id: row.get(13).unwrap_or_default(),
                         key_version: row.get::<_, i64>(14).unwrap_or(2) as u8,
                         pinned: row.get(15).unwrap_or(false),
+                        // pin_order is a local-only ordering field, not synced.
+                        pin_order: None,
                     })
                 })
                 .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
@@ -1804,6 +1826,11 @@ async fn realtime_loop(
 #[allow(clippy::too_many_arguments)]
 async fn ws_ingest_loop(
     config: RealtimeConfig,
+    // [P0 audit fix] Shared bearer written by push/poll loops on 401-refresh.
+    // Before each RealtimeClient::new we write the current token into
+    // config.user_jwt so every reconnect carries the live JWT, not the
+    // one captured at start_cloud time (~1 h before expiry kills the channel).
+    bearer: Arc<RwLock<String>>,
     db: Arc<Mutex<Database>>,
     sync_key: Arc<Mutex<Option<SyncKey>>>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
@@ -1833,14 +1860,16 @@ async fn ws_ingest_loop(
         }
         let key_bytes = key_snapshot.expect("checked above");
 
-        // Build a fresh client for this connection attempt.  If the bearer
-        // has been refreshed since the previous connect, `config.user_jwt`
-        // is updated here so the new join payload carries the live token.
-        // (The bearer is shared with push/poll loops via the Arc<RwLock>
-        // passed to start_cloud; we can't thread that Arc here without
-        // changing every signature, so for simplicity we read it from the
-        // config field that was seeded in start_cloud.  On reconnect we keep
-        // the same token — a future enhancement can re-read the bearer.)
+        // [P0 audit fix] Refresh config.user_jwt from the shared bearer before
+        // building the client so this reconnect uses the most-recent token.
+        // The push/poll loops update `bearer` on every 401-refresh; without
+        // this write the WS would reconnect with the original ~1 h JWT forever.
+        {
+            let current_token = bearer.read().await.clone();
+            *config.user_jwt.write().await = current_token;
+        }
+
+        // Build a fresh client for this connection attempt.
         let (client, mut rx) = RealtimeClient::new(config.clone());
 
         let handle = match client.connect().await {
@@ -1921,19 +1950,43 @@ async fn ws_ingest_loop(
                             let local_key_clone = local_key.clone();
                             let id_owned = id.to_owned();
                             let item_id_owned = item_id.to_owned();
+                            // [P2 audit fix] warn on missing/unexpected field
+                            // values so silent fallbacks are diagnosable.
                             let content_type = row["content_type"]
                                 .as_str()
-                                .unwrap_or("text")
+                                .unwrap_or_else(|| {
+                                    tracing::warn!(
+                                        "ws_ingest_loop: id={id} missing content_type; \
+                                         defaulting to \"text\""
+                                    );
+                                    "text"
+                                })
                                 .to_owned();
-                            let lamport_ts = row["lamport_ts"].as_i64().unwrap_or(0);
-                            let wall_time = row["wall_time"].as_i64().unwrap_or(0);
+                            let lamport_ts = row["lamport_ts"].as_i64().unwrap_or_else(|| {
+                                tracing::warn!(
+                                    "ws_ingest_loop: id={id} missing lamport_ts; defaulting to 0"
+                                );
+                                0
+                            });
+                            let wall_time = row["wall_time"].as_i64().unwrap_or_else(|| {
+                                tracing::warn!(
+                                    "ws_ingest_loop: id={id} missing wall_time; defaulting to 0"
+                                );
+                                0
+                            });
                             let expires_at = row["expires_at"].as_i64();
                             let app_bundle_id =
                                 row["app_bundle_id"].as_str().map(str::to_owned);
                             let origin_device_id = row["device_id"]
                                 .as_str()
                                 .map(str::to_owned)
-                                .unwrap_or_default();
+                                .unwrap_or_else(|| {
+                                    tracing::warn!(
+                                        "ws_ingest_loop: id={id} missing device_id; \
+                                         defaulting to empty"
+                                    );
+                                    String::new()
+                                });
 
                             let mut key_arr = [0u8; 32];
                             key_arr.copy_from_slice(&key_bytes);
@@ -2351,15 +2404,34 @@ async fn poll_once(
             };
 
             // Re-encrypt with local key (v2 HKDF path).
-            let content_type = row["content_type"].as_str().unwrap_or("text").to_owned();
-            let lamport_ts = row["lamport_ts"].as_i64().unwrap_or(0);
+            // [P2 audit fix] warn on missing/unexpected field values so
+            // silent fallbacks are diagnosable without changing control flow.
+            let content_type = row["content_type"]
+                .as_str()
+                .unwrap_or_else(|| {
+                    tracing::warn!(
+                    "cloud-sync poll_once: id={id} missing content_type; defaulting to \"text\""
+                );
+                    "text"
+                })
+                .to_owned();
+            let lamport_ts = row["lamport_ts"].as_i64().unwrap_or_else(|| {
+                tracing::warn!("cloud-sync poll_once: id={id} missing lamport_ts; defaulting to 0");
+                0
+            });
             let wall_time = row_wall;
             let expires_at = row["expires_at"].as_i64();
             let app_bundle_id = row["app_bundle_id"].as_str().map(str::to_owned);
-            let origin_device_id = row["device_id"]
-                .as_str()
-                .map(str::to_owned)
-                .unwrap_or_default();
+            let origin_device_id =
+                row["device_id"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| {
+                        tracing::warn!(
+                            "cloud-sync poll_once: id={id} missing device_id; defaulting to empty"
+                        );
+                        String::new()
+                    });
 
             let mut local_item = match build_local_item(
                 id,
@@ -2664,22 +2736,30 @@ fn build_local_item(
         origin_device_id,
         key_version: ITEM_KEY_VERSION_CURRENT as u8,
         pinned: false,
+        // pin_order is a local-only ordering field, not carried over cloud sync.
+        pin_order: None,
     })
 }
 
 /// Outcome of a single `fetch_remote_rows` attempt.
 ///
-/// Mirrors the 401-distinguishing half of [`PushOutcome`]: the poll path needs
-/// to tell "bearer expired" (refresh-and-retry) apart from every other failure
-/// (log + wait for the next tick).
+/// Mirrors the push-side [`PushOutcome`]: the poll path needs to distinguish
+/// "bearer expired" (refresh-and-retry), "rate-limited" (sleep Retry-After),
+/// and every other failure (log + wait for the next tick).
 enum FetchOutcome {
     /// 2xx — rows decoded successfully.
     Ok(Vec<serde_json::Value>),
     /// 401 — bearer expired or invalid. Caller should refresh and retry once.
     Unauthorized,
-    /// Any other failure (network, 5xx, non-401 4xx, JSON decode). The message
-    /// is for logging only; retrying immediately will not help, so the caller
-    /// just waits for the next poll tick.
+    /// 429 — rate-limited. `Option<Duration>` carries the `Retry-After` value
+    /// (seconds form) when the server provided one.  Caller should sleep that
+    /// duration (or a bounded backoff) before retrying rather than waiting the
+    /// full poll interval, which would ignore the server's guidance.
+    /// [P1 audit fix: poll 429 Retry-After handling]
+    RateLimited(Option<Duration>),
+    /// Any other failure (network, 5xx, non-401/429 4xx, JSON decode). The
+    /// message is for logging only; retrying immediately will not help, so the
+    /// caller just waits for the next poll tick.
     Failed(String),
 }
 
@@ -2712,6 +2792,13 @@ async fn fetch_remote_rows(
     if status.as_u16() == 401 {
         return FetchOutcome::Unauthorized;
     }
+    // [P1 audit fix] Surface 429 as a distinct outcome so the caller can sleep
+    // the Retry-After duration instead of folding it into a generic Failed and
+    // waiting the full poll interval, which ignores the server's guidance.
+    if status.as_u16() == 429 {
+        let retry_after = parse_retry_after_secs(resp.headers());
+        return FetchOutcome::RateLimited(retry_after);
+    }
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
         return FetchOutcome::Failed(format!("REST GET failed ({status}): {text}"));
@@ -2739,6 +2826,9 @@ async fn fetch_remote_rows_with_refresh(
     auth: &AuthClient,
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut refreshed = false;
+    // Single-shot guard: honour Retry-After at most once per call so a
+    // misbehaving server returning permanent 429 cannot pin this loop.
+    let mut honoured_rate_limit_once = false;
     loop {
         let token = bearer.read().await.clone();
         match fetch_remote_rows(client, url, &config.anon_key, &token).await {
@@ -2757,6 +2847,25 @@ async fn fetch_remote_rows_with_refresh(
             }
             FetchOutcome::Unauthorized => {
                 return Err("401 Unauthorized (already refreshed once)".into());
+            }
+            // [P1 audit fix] Sleep Retry-After (or a bounded backoff) before
+            // retrying rather than folding 429 into Failed and waiting the full
+            // poll interval, which ignores the server's rate-limit guidance.
+            FetchOutcome::RateLimited(retry_after) if !honoured_rate_limit_once => {
+                honoured_rate_limit_once = true;
+                let delay = retry_after
+                    .unwrap_or(PUSH_INITIAL_BACKOFF)
+                    .min(PUSH_MAX_BACKOFF);
+                tracing::warn!(
+                    "cloud-sync poll got 429; sleeping {:?} before retry (Retry-After: {:?})",
+                    delay,
+                    retry_after,
+                );
+                tokio::time::sleep(delay).await;
+                continue;
+            }
+            FetchOutcome::RateLimited(_) => {
+                return Err("429 Too Many Requests (already retried after Retry-After)".into());
             }
             FetchOutcome::Failed(msg) => return Err(msg),
         }
@@ -4648,6 +4757,9 @@ mod e2e_live {
             let rows = match fetch_remote_rows(&client, &poll_url, &anon, &user.bearer).await {
                 FetchOutcome::Ok(rows) => rows,
                 FetchOutcome::Unauthorized => panic!("B fetch_remote_rows: 401 Unauthorized"),
+                FetchOutcome::RateLimited(d) => {
+                    panic!("B fetch_remote_rows: 429 rate-limited (Retry-After: {d:?})")
+                }
                 FetchOutcome::Failed(e) => panic!("B fetch_remote_rows: {e}"),
             };
             for row in &rows {
@@ -5080,6 +5192,9 @@ mod bytea_e2e {
         {
             FetchOutcome::Ok(rows) => rows,
             FetchOutcome::Unauthorized => panic!("fetch_remote_rows: 401 Unauthorized"),
+            FetchOutcome::RateLimited(d) => {
+                panic!("fetch_remote_rows: 429 rate-limited (Retry-After: {d:?})")
+            }
             FetchOutcome::Failed(e) => panic!("fetch_remote_rows failed: {e}"),
         };
         let row = rows
@@ -5144,6 +5259,7 @@ mod bytea_e2e {
         {
             FetchOutcome::Ok(rows) => rows,
             FetchOutcome::Unauthorized => panic!("fetch: 401 Unauthorized"),
+            FetchOutcome::RateLimited(d) => panic!("fetch: 429 rate-limited (Retry-After: {d:?})"),
             FetchOutcome::Failed(e) => panic!("fetch failed: {e}"),
         };
 

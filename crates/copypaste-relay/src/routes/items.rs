@@ -92,6 +92,18 @@ pub async fn push(
     // Survive mutex poisoning (security HIGH #1).
     let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
 
+    // TOCTOU guard: the background evictor (`cleanup_inactive_devices`) may
+    // have removed the device record in the window between the first lock
+    // (verify_token) and this second one. Re-check existence here so an
+    // evicted-but-authenticated device is not surfaced as a 404
+    // (DeviceNotFound from push_item_decoded). Collapse to Unauthorized for
+    // consistency with verify_token_at's policy: token-guarded routes never
+    // return a distinct 404 for a missing device (enumeration oracle — see
+    // state.rs verify_token_at comment).
+    if !store.devices.contains_key(&device_id) {
+        return Err(RelayError::Unauthorized);
+    }
+
     // Advance last_seen so an actively-pushing device is never evicted by
     // cleanup_inactive_devices — which reaps on last_seen.elapsed(), not
     // registered_at. Without this call, last_seen stays at registered_at

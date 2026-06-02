@@ -29,9 +29,78 @@
 //! `scrubber_is_idempotent` integration test).
 
 use regex::Regex;
+use std::sync::LazyLock;
 use unicode_normalization::UnicodeNormalization;
 
 use crate::error::ReportableError;
+
+// ---------------------------------------------------------------------------
+// Compiled-once regex statics.
+//
+// Each LazyLock is initialised on first use and reused for the process
+// lifetime, avoiding the per-call Regex::new overhead in with_defaults().
+// MSRV 1.89 stabilises std::sync::LazyLock, so no extra crate is needed.
+// The .expect() strings are only ever reached on a malformed static literal,
+// which would be caught by the scrubber_patterns_compile unit test below.
+// ---------------------------------------------------------------------------
+
+/// URL authority credentials: `scheme://user:pass@host…`
+static RE_URL_AUTH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^/\s:@]+:[^\s/]*@")
+        .expect("url-auth pattern is valid")
+});
+
+/// Email addresses.
+static RE_EMAIL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}").expect("email pattern is valid")
+});
+
+/// UUIDs and UUID-like hex strings (32+ hex chars, optional dashes).
+static RE_UUID_HEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\b[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12,}\b")
+        .expect("uuid/hex pattern is valid")
+});
+
+/// Bare 32+-char hex strings (SHA-256 digests, API keys, etc.).
+static RE_HEX32: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b[0-9a-fA-F]{32,}\b").expect("hex32 pattern is valid"));
+
+/// JWT-like three-segment base64url tokens.
+static RE_JWT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b")
+        .expect("jwt pattern is valid")
+});
+
+/// IPv4 addresses.
+static RE_IPV4: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b(?:\d{1,3}\.){3}\d{1,3}\b").expect("ipv4 pattern is valid"));
+
+/// IPv6 addresses (permissive; see inline comment in with_defaults for rationale).
+static RE_IPV6: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(^|[^0-9a-fA-F:])([0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7})")
+        .expect("ipv6 pattern is valid")
+});
+
+/// macOS home-directory prefix: `/Users/<name>/…` → `~/`.
+static RE_MACOS_HOME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"/Users/[^/\n]+?(?:/|$)").expect("macos home pattern is valid"));
+
+/// Linux home-directory prefix: `/home/<name>/…` → `~/`.
+static RE_LINUX_HOME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"/home/[^/\n]+?(?:/|$)").expect("linux home pattern is valid"));
+
+/// Windows home-directory prefix: `C:\Users\<name>\…` → `~/`.
+///
+/// The character class excludes `\`, `'`, `"`, and newlines so the username
+/// segment is bounded tightly and cannot consume path separators or quote
+/// delimiters that might appear in surrounding log text.
+///
+/// IMPORTANT: this literal MUST use a hash raw string (`r#"…"#`) because the
+/// character class contains a double-quote (`"`), which would terminate a
+/// plain `r"…"` raw string prematurely.
+static RE_WINDOWS_HOME: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)[A-Z]:\\Users\\[^\\'"\n]+?(?:\\|$)"#).expect("windows home pattern is valid")
+});
 
 /// Replacement pattern: a compiled regex plus the literal replacement string
 /// applied by [`Regex::replace_all`].
@@ -81,9 +150,8 @@ impl PiiScrubber {
     /// Patterns are conservative and prefer false positives (over-redaction)
     /// to false negatives (PII leakage).
     pub fn with_defaults() -> Self {
-        // Each `Regex::new` here is fed a static literal that is verified at
-        // crate test time, so `expect` is safe and the alternative
-        // (returning `Result`) would only complicate the call sites.
+        // Patterns reference the process-lifetime LazyLock statics defined at
+        // the top of this module; .clone() is a cheap Regex arc-clone.
         let patterns = vec![
             // URL credentials: strip the `user:pass@` portion, keep scheme
             // and host so the error class remains debuggable.
@@ -102,8 +170,7 @@ impl PiiScrubber {
             // before the path: `[^\s/]*@` backtracks to that final `@`,
             // leaving the host intact.
             Pattern {
-                re: Regex::new(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^/\s:@]+:[^\s/]*@")
-                    .expect("url-auth pattern is valid"),
+                re: RE_URL_AUTH.clone(),
                 replacement: "$1<REDACTED-AUTH>@",
             },
             // Email addresses. Conservative local-part character class to
@@ -115,36 +182,31 @@ impl PiiScrubber {
             // `<REDACTED-HEX>` first, leaving a dangling local part that the
             // email rule could no longer match — leaking the local part.
             Pattern {
-                re: Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
-                    .expect("email pattern is valid"),
+                re: RE_EMAIL.clone(),
                 replacement: "<REDACTED-EMAIL>",
             },
             // Long hex strings: UUIDs (with or without dashes), SHA-256
             // digests, API keys with hex encoding. 32+ hex chars catches
             // MD5 and up. We allow optional dashes inside to match UUIDs.
             Pattern {
-                re: Regex::new(
-                    r"(?i)\b[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12,}\b",
-                )
-                .expect("uuid/hex pattern is valid"),
+                re: RE_UUID_HEX.clone(),
                 replacement: "<REDACTED-HEX>",
             },
             Pattern {
-                re: Regex::new(r"\b[0-9a-fA-F]{32,}\b").expect("hex32 pattern is valid"),
+                re: RE_HEX32.clone(),
                 replacement: "<REDACTED-HEX>",
             },
             // JWT-like: three base64url segments separated by '.'. Each
             // segment is at least 20 chars to avoid eating dotted version
             // strings.
             Pattern {
-                re: Regex::new(r"\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b")
-                    .expect("jwt pattern is valid"),
+                re: RE_JWT.clone(),
                 replacement: "<REDACTED-JWT>",
             },
             // IPv4 — four 1-3 digit groups. We do not enforce 0-255 bounds
             // because we'd rather over-match than under-match.
             Pattern {
-                re: Regex::new(r"\b(?:\d{1,3}\.){3}\d{1,3}\b").expect("ipv4 pattern is valid"),
+                re: RE_IPV4.clone(),
                 replacement: "<REDACTED-IP>",
             },
             // IPv6 — we anchor on ASCII non-hex non-colon boundaries
@@ -180,8 +242,7 @@ impl PiiScrubber {
             // colon-delimited tokens is an accepted, fail-safe tradeoff: the
             // scrubber prefers false positives, and telemetry is unwired today.
             Pattern {
-                re: Regex::new(r"(^|[^0-9a-fA-F:])([0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7})")
-                    .expect("ipv6 pattern is valid"),
+                re: RE_IPV6.clone(),
                 replacement: "$1<REDACTED-IP>",
             },
             // Home directory prefixes: macOS `/Users/<name>/…` and Linux
@@ -198,11 +259,18 @@ impl PiiScrubber {
             // leak; stopping at the first `/` ensures we never over-redact
             // the deeper path segments that carry the debugging signal.
             Pattern {
-                re: Regex::new(r"/Users/[^/\n]+?(?:/|$)").expect("macos home pattern is valid"),
+                re: RE_MACOS_HOME.clone(),
                 replacement: "~/",
             },
             Pattern {
-                re: Regex::new(r"/home/[^/\n]+?(?:/|$)").expect("linux home pattern is valid"),
+                re: RE_LINUX_HOME.clone(),
+                replacement: "~/",
+            },
+            // Windows home-directory prefix: `C:\Users\<name>\…` → `~/`.
+            // Uses RE_WINDOWS_HOME (r#"…"# hash raw string) because the
+            // character class contains `"` which would terminate `r"…"` early.
+            Pattern {
+                re: RE_WINDOWS_HOME.clone(),
                 replacement: "~/",
             },
         ];

@@ -534,13 +534,15 @@ mod tests {
 
         // Derive a key from the passphrase and encrypt.
         let original_key = derive_sync_key(passphrase).expect("derive must succeed");
-        let key_bytes = *original_key.as_bytes();
+        // Wrap in Zeroizing so the stack copy is scrubbed when it goes out of
+        // scope, closing the window where raw key bytes sit on the stack unguarded.
+        let key_bytes = zeroize::Zeroizing::new(*original_key.as_bytes());
         let blob =
             encrypt_for_cloud(&original_key, item_id, plaintext).expect("encrypt must succeed");
 
         // Reconstruct a SyncKey from the raw bytes (simulates the spawn_blocking
         // snapshot path) and verify the blob decrypts to the original plaintext.
-        let reconstructed_key = SyncKey::from_bytes(key_bytes);
+        let reconstructed_key = SyncKey::from_bytes(*key_bytes);
         let decrypted = decrypt_from_cloud(&reconstructed_key, item_id, &blob)
             .expect("decrypt with from_bytes key must succeed");
 

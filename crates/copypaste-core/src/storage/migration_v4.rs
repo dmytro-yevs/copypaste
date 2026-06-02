@@ -411,23 +411,17 @@ fn fetch_v1_image_batch(db: &Database, limit: usize) -> Result<Vec<V1ImageRow>, 
     Ok(rows)
 }
 
-/// Parse the 16-byte `file_id` out of an image row's `blob_ref` JSON. The
-/// metadata shape is produced by `daemon::handle_image`
-/// (`{"width":...,"file_id":[u8; 16]}` — Rust `{:?}` debug-format of the byte
-/// array, which serialises as a JSON array of 16 numbers, e.g.
-/// `"file_id":[12, 34, ...]`).
+/// Parse the 16-byte `file_id` out of an image row's `blob_ref` JSON.
 ///
-/// We parse the single `file_id` array directly rather than pulling
-/// `serde_json` into the production build of `copypaste-core` (it is only a
-/// dev-dependency here). The format is fixed and emitted by our own daemon, so
-/// a targeted extractor is sufficient and avoids a new runtime dependency.
+/// The metadata shape is produced by `daemon::handle_image`:
+/// `{"width":W,"height":H,"original_size":N,"chunk_count":C,"file_id":[u8;16]}`
+/// where `file_id` is serialised as a JSON array of 16 unsigned integers via
+/// Rust's `{:?}` debug format (e.g. `"file_id":[12, 34, ...]`).
 ///
-/// NOTE: this hand-rolled parser only locates a `"file_id":[...]` token; it
-/// assumes the daemon's *current* `blob_ref` schema where `file_id` is a 16-
-/// element JSON byte array. If `daemon::handle_image` ever changes the
-/// `blob_ref` field order, key name, or `file_id` encoding, this extractor must
-/// be updated in lockstep (the migration would otherwise leave image rows at
-/// `key_version = 1`).
+/// Uses `serde_json` (a production dependency of this crate) to parse the full
+/// JSON object and extract the `file_id` array. This is more robust than a
+/// hand-rolled substring scanner: field reordering, extra whitespace, or new
+/// metadata fields added to `blob_ref` in the future will not break extraction.
 fn parse_file_id(id: &str, blob_ref: Option<&str>) -> Result<[u8; 16], MigrationV4Error> {
     let meta_json = blob_ref.ok_or_else(|| MigrationV4Error::ImageMeta {
         id: id.to_string(),
@@ -438,40 +432,32 @@ fn parse_file_id(id: &str, blob_ref: Option<&str>) -> Result<[u8; 16], Migration
         reason,
     };
 
-    // Locate the `"file_id"` key, then the opening `[` and matching `]`.
-    let key_pos = meta_json
-        .find("\"file_id\"")
-        .ok_or_else(|| err("blob_ref missing 'file_id' field".to_string()))?;
-    let after_key = &meta_json[key_pos + "\"file_id\"".len()..];
-    let open = after_key
-        .find('[')
-        .ok_or_else(|| err("'file_id' value is not an array".to_string()))?;
-    let rest = &after_key[open + 1..];
-    let close = rest
-        .find(']')
-        .ok_or_else(|| err("'file_id' array is not closed".to_string()))?;
-    let inner = &rest[..close];
+    let v: serde_json::Value = serde_json::from_str(meta_json)
+        .map_err(|e| err(format!("blob_ref is not valid JSON: {e}")))?;
 
-    let mut out = [0u8; 16];
-    let mut count = 0usize;
-    for tok in inner.split(',') {
-        let tok = tok.trim();
-        if tok.is_empty() {
-            continue;
-        }
-        if count >= 16 {
-            return Err(err("'file_id' has more than 16 elements".to_string()));
-        }
-        out[count] = tok
-            .parse::<u8>()
-            .map_err(|_| err(format!("'file_id[{count}]' is not a u8: {tok:?}")))?;
-        count += 1;
-    }
-    if count != 16 {
+    let arr = v
+        .get("file_id")
+        .and_then(|f| f.as_array())
+        .ok_or_else(|| err("blob_ref missing 'file_id' array".to_string()))?;
+
+    if arr.len() != 16 {
         return Err(err(format!(
-            "'file_id' has wrong length: expected 16, got {count}"
+            "'file_id' has wrong length: expected 16, got {}",
+            arr.len()
         )));
     }
+
+    let mut out = [0u8; 16];
+    for (i, elem) in arr.iter().enumerate() {
+        let n = elem
+            .as_u64()
+            .ok_or_else(|| err(format!("'file_id[{i}]' is not an unsigned integer: {elem}")))?;
+        if n > 255 {
+            return Err(err(format!("'file_id[{i}]' value {n} exceeds u8 range")));
+        }
+        out[i] = n as u8;
+    }
+
     Ok(out)
 }
 

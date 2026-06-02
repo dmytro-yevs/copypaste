@@ -35,6 +35,24 @@ const SENSITIVE_CLEANUP_INTERVAL_MS: u64 = 5_000;
 /// How often the general expires_at TTL cleanup runs (milliseconds).
 const GENERAL_CLEANUP_INTERVAL_MS: u64 = 60_000;
 
+/// How often the degraded-mode loop re-checks the quit flag (milliseconds).
+/// 1 s is responsive enough for human perception while burning ~4× less CPU
+/// than the old 250 ms value.
+const DEGRADED_QUIT_POLL_INTERVAL_MS: u64 = 1_000;
+
+/// Resolve a human-readable device name for P2P advertisements.
+///
+/// Tries `HOSTNAME` (Unix), then `COMPUTERNAME` (Windows), and falls back to
+/// the literal string `"CopyPaste"` if neither is set. Extracted into a helper
+/// so the single source of truth can be reused by `daemon.rs` and `ipc.rs`
+/// (ipc.rs:~3876 has an identical three-way fallback that should call this
+/// function in a follow-up edit).
+pub(crate) fn resolve_device_name() -> String {
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .unwrap_or_else(|_| "CopyPaste".to_string())
+}
+
 use std::sync::RwLock;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::time::interval;
@@ -514,9 +532,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // was called once already; parsing it back to Uuid is cheap).
         let device_id =
             uuid::Uuid::parse_str(&local_device_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
-        let device_name = std::env::var("HOSTNAME")
-            .or_else(|_| std::env::var("COMPUTERNAME"))
-            .unwrap_or_else(|_| "CopyPaste".to_string());
+        let device_name = resolve_device_name();
 
         let p2p_config = p2p::P2pConfig {
             listen_port: 0,
@@ -1019,7 +1035,7 @@ async fn run_degraded(reason: &'static str, quit_flag: Arc<AtomicBool>) -> anyho
             use tokio::signal::unix::{signal, SignalKind};
             signal(SignalKind::terminate())?
         };
-        let mut quit_ticker = interval(Duration::from_millis(250));
+        let mut quit_ticker = interval(Duration::from_millis(DEGRADED_QUIT_POLL_INTERVAL_MS));
         loop {
             if quit_flag.load(Ordering::Relaxed) {
                 tracing::info!("quit flag set, shutting down degraded daemon");

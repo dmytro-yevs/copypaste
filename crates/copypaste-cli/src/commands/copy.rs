@@ -131,8 +131,7 @@ pub fn cmd_copy_by_search(socket_path: &Path, query: &str, limit: u64) -> Result
         .ok_or_else(|| anyhow!("unexpected search response"))?;
 
     if items.is_empty() {
-        eprintln!("No results for {:?}", query);
-        std::process::exit(1);
+        return Err(anyhow!("no results for {:?}", query));
     }
 
     let uuid = items[0]["id"]
@@ -160,8 +159,9 @@ pub fn cmd_copy_by_id(socket_path: &Path, id: &str) -> Result<()> {
     } else {
         let err = resp.error.as_deref().unwrap_or("unknown error");
         if err.contains("unknown method") {
-            eprintln!("copy: daemon does not yet support this command (requires Phase 2a+)");
-            std::process::exit(2);
+            return Err(anyhow!(
+                "copy: daemon does not yet support this command (requires Phase 2a+)"
+            ));
         }
         bail!("{err}");
     }

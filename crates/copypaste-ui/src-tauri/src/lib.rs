@@ -35,6 +35,10 @@ enum PopupPosition {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct UiConfig {
+    /// Per-field default so a config written by a different version (or one
+    /// missing this key) still loads instead of silently resetting every
+    /// setting back to defaults.
+    #[serde(default = "default_popup_shortcut")]
     popup_shortcut: String,
     /// Auto-start CopyPaste at macOS login.  Defaults to `true` so a fresh
     /// install is convenient out-of-the-box; can be disabled in Settings.
@@ -47,6 +51,10 @@ struct UiConfig {
 
 fn default_launch_at_login() -> bool {
     true
+}
+
+fn default_popup_shortcut() -> String {
+    DEFAULT_POPUP_SHORTCUT.to_string()
 }
 
 impl Default for UiConfig {
@@ -71,10 +79,22 @@ fn load_ui_config(handle: &tauri::AppHandle) -> UiConfig {
     let Some(path) = config_path(handle) else {
         return UiConfig::default();
     };
-    std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        // Missing file on first run is normal; fall back to defaults silently.
+        return UiConfig::default();
+    };
+    match serde_json::from_str(&contents) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            // Don't silently wipe everything: at least surface the reason so a
+            // bad/older config that resets the saved shortcut is diagnosable.
+            tracing::warn!(
+                "ui-config.json failed to parse ({e}); using defaults — \
+                 saved popup shortcut / position may be reset"
+            );
+            UiConfig::default()
+        }
+    }
 }
 
 fn save_ui_config(handle: &tauri::AppHandle, cfg: &UiConfig) -> Result<(), String> {
@@ -213,7 +233,17 @@ pub fn run() {
             apply_launch_at_login(app.handle(), persisted.launch_at_login);
 
             setup_tray(app)?;
-            register_popup_shortcut(app.handle(), &persisted.popup_shortcut)?;
+            // Non-fatal: a saved accelerator the OS/plugin can't register
+            // (reserved combo, or a format the plugin rejects) must NOT crash
+            // app startup. The value is already loaded into CurrentShortcut
+            // above, and on macOS the CGEventTap can still handle it.
+            if let Err(e) = register_popup_shortcut(app.handle(), &persisted.popup_shortcut) {
+                tracing::warn!(
+                    "startup: failed to register popup shortcut '{}': {e} \
+                     (value preserved; re-set it in Settings if it doesn't trigger)",
+                    persisted.popup_shortcut
+                );
+            }
             setup_popup_window(app)?;
             setup_main_window(app);
 

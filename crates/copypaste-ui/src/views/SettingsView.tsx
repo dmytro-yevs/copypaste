@@ -665,6 +665,12 @@ export function SettingsView() {
         // Sync parity
         setSyncOnWifiOnly(rawCfg.sync_on_wifi_only ?? false);
 
+        // Guard again — a second reloadKey bump that fired while we were
+        // awaiting could have set cancelled=true between the check above and
+        // the Zustand setPrefs calls below.  Without this, two in-flight loads
+        // can interleave and the stale response wins the last write.
+        if (cancelled) return;
+
         // Sound / notify — hydrate from daemon config so UI reflects persisted state.
         if (rawCfg.sound_on_copy != null) {
           setPrefs({ playSoundOnCopy: rawCfg.sound_on_copy });

@@ -101,6 +101,11 @@ pub struct RealtimeConfig {
     /// GoTrue session is refreshed.  The next WebSocket reconnect (or explicit
     /// disconnect + reconnect) will use the updated token.
     pub user_jwt: Arc<RwLock<String>>,
+
+    /// GoTrue user UUID, used as `filter: "user_id=eq.<uuid>"` in the
+    /// `postgres_changes` subscription so the Realtime server pre-filters rows
+    /// server-side before RLS applies them.  `None` = anon / no filter.
+    pub user_id: Option<String>,
 }
 
 impl RealtimeConfig {
@@ -133,7 +138,14 @@ impl RealtimeConfig {
         let topic = std::env::var("SUPABASE_REALTIME_TOPIC")
             .unwrap_or_else(|_| Self::DEFAULT_TOPIC.to_owned());
 
-        Ok(Self::new(supabase_url, anon_key, topic, enabled))
+        Ok(Self::with_jwt_and_user_id(
+            supabase_url,
+            anon_key,
+            topic,
+            None,
+            None,
+            enabled,
+        ))
     }
 
     /// Construct config programmatically (no user JWT — anon scope).
@@ -143,7 +155,7 @@ impl RealtimeConfig {
         topic: impl Into<String>,
         enabled: bool,
     ) -> Self {
-        Self::with_jwt(supabase_url, anon_key, topic, None, enabled)
+        Self::with_jwt_and_user_id(supabase_url, anon_key, topic, None, None, enabled)
     }
 
     /// Construct config with an explicit user JWT for RLS-aware subscriptions.
@@ -151,11 +163,32 @@ impl RealtimeConfig {
     /// The `user_jwt` is sent as `params.user_token` in the `phx_join` payload
     /// so Supabase Realtime applies the authenticated user's RLS policies when
     /// filtering `postgres_changes` events.  Pass `None` to use anon scope.
+    ///
+    /// `user_id` is the GoTrue user UUID; when `Some` it is added as a
+    /// `filter: "user_id=eq.<uuid>"` clause in the postgres_changes subscription
+    /// so the Realtime server pre-filters rows before RLS.  Pass `None` for
+    /// anon / single-user deployments.
     pub fn with_jwt(
         supabase_url: impl Into<String>,
         anon_key: impl Into<String>,
         topic: impl Into<String>,
         user_jwt: Option<String>,
+        enabled: bool,
+    ) -> Self {
+        Self::with_jwt_and_user_id(supabase_url, anon_key, topic, user_jwt, None, enabled)
+    }
+
+    /// Construct config with both JWT and user-id (for row-level filtering).
+    ///
+    /// Prefer this over [`with_jwt`] when the GoTrue user UUID is available
+    /// so that the `postgres_changes` subscription carries a server-side
+    /// `filter: "user_id=eq.<uuid>"` clause (audit P1 fix).
+    pub fn with_jwt_and_user_id(
+        supabase_url: impl Into<String>,
+        anon_key: impl Into<String>,
+        topic: impl Into<String>,
+        user_jwt: Option<String>,
+        user_id: Option<String>,
         enabled: bool,
     ) -> Self {
         let supabase_url = supabase_url.into();
@@ -176,6 +209,7 @@ impl RealtimeConfig {
             channel_capacity: 256,
             enabled,
             user_jwt: Arc::new(RwLock::new(user_jwt.unwrap_or_default())),
+            user_id,
         }
     }
 }
@@ -216,6 +250,13 @@ pub fn scrub_ws_url(url: &str) -> &str {
 /// authenticates the channel with the caller's RLS identity.  An empty string
 /// disables per-user RLS (anonymous / anon-key-only access).
 ///
+/// # Row filter (P1 audit fix)
+/// When `user_id` is `Some`, a `"filter": "user_id=eq.{user_id}"` clause is
+/// added to the `postgres_changes` subscription.  Without it, the Realtime
+/// server delivers every row it can *see* before RLS is applied at the
+/// channel level, leaking cross-user rows into the event stream on permissive
+/// deployments.  Pass `None` only for anon-scoped / single-user setups.
+///
 /// # Event filter
 /// Registers `event: "*"` so INSERT, UPDATE **and** DELETE changes are all
 /// delivered to this device.  Using `event: "INSERT"` only would mean that
@@ -227,22 +268,31 @@ pub fn scrub_ws_url(url: &str) -> &str {
 ///   "config": {
 ///     "access_token": "<jwt>",
 ///     "postgres_changes": [
-///       { "event": "*", "schema": "public", "table": "clipboard_items" }
+///       { "event": "*", "schema": "public", "table": "clipboard_items",
+///         "filter": "user_id=eq.<uuid>" }
 ///     ]
 ///   }
 /// }
 /// ```
-pub(crate) fn build_join_payload(user_jwt: &str) -> serde_json::Value {
+pub(crate) fn build_join_payload(user_jwt: &str, user_id: Option<&str>) -> serde_json::Value {
+    let filter_entry: serde_json::Value = if let Some(uid) = user_id {
+        serde_json::json!({
+            "event": "*",
+            "schema": "public",
+            "table": "clipboard_items",
+            "filter": format!("user_id=eq.{uid}")
+        })
+    } else {
+        serde_json::json!({
+            "event": "*",
+            "schema": "public",
+            "table": "clipboard_items"
+        })
+    };
     serde_json::json!({
         "config": {
             "access_token": user_jwt,
-            "postgres_changes": [
-                {
-                    "event": "*",
-                    "schema": "public",
-                    "table": "clipboard_items"
-                }
-            ]
+            "postgres_changes": [filter_entry]
         }
     })
 }
@@ -535,7 +585,7 @@ async fn run_session(
     // Fix MED #3: build_join_payload registers event:"*" (INSERT + UPDATE +
     // DELETE) instead of INSERT-only, so cross-device UPDATE/DELETE are delivered.
     let current_jwt = config.user_jwt.read().await.clone();
-    let join_payload = build_join_payload(&current_jwt);
+    let join_payload = build_join_payload(&current_jwt, config.user_id.as_deref());
     let join_msg = PhoenixMessage {
         join_ref: Some("1".to_owned()),
         msg_ref: Some("1".to_owned()),
@@ -1109,7 +1159,7 @@ mod tests {
     #[test]
     fn build_join_payload_includes_bearer_token() {
         let jwt = "my.jwt.token";
-        let payload = build_join_payload(jwt);
+        let payload = build_join_payload(jwt, None);
         // The JWT must appear under config.access_token (Supabase Realtime v2 shape).
         let token_in_payload = payload
             .pointer("/config/access_token")
@@ -1124,7 +1174,7 @@ mod tests {
 
     #[test]
     fn build_join_payload_registers_all_events() {
-        let payload = build_join_payload("tok");
+        let payload = build_join_payload("tok", None);
         let payload_str = serde_json::to_string(&payload).unwrap();
         // event:"*" means INSERT + UPDATE + DELETE are all delivered.
         assert!(
@@ -1134,6 +1184,29 @@ mod tests {
         assert!(
             !payload_str.contains("\"INSERT\""),
             "join payload must NOT limit to INSERT-only, got: {payload_str}"
+        );
+    }
+
+    #[test]
+    fn build_join_payload_with_user_id_adds_filter() {
+        let uid = "550e8400-e29b-41d4-a716-446655440000";
+        let payload = build_join_payload("tok", Some(uid));
+        let payload_str = serde_json::to_string(&payload).unwrap();
+        // Filter clause must be present.
+        assert!(
+            payload_str.contains("user_id=eq."),
+            "join payload must contain user_id filter, got: {payload_str}"
+        );
+        assert!(
+            payload_str.contains(uid),
+            "join payload must embed the user UUID in the filter, got: {payload_str}"
+        );
+        // Without user_id, no filter key.
+        let no_uid = build_join_payload("tok", None);
+        let no_uid_str = serde_json::to_string(&no_uid).unwrap();
+        assert!(
+            !no_uid_str.contains("filter"),
+            "join payload without user_id must not include a filter key, got: {no_uid_str}"
         );
     }
 

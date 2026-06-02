@@ -21,11 +21,15 @@ pub const SENSITIVE_TTL_SECS: u64 = 30;
 // 100 = lossless / original quality (field is currently a no-op for PNG; kept
 // for future JPEG support — never compress by default).
 pub const IMAGE_QUALITY: u8 = 100;
-// FIXWAVE: sqlite_cache_mb is stored in AppConfig and exposed to users, but the
-// actual SQLite cache size is hardcoded to 8 MB in schema.rs (`PRAGMA cache_size`).
-// To wire this up: read AppConfig in db.rs open() and apply
-// `PRAGMA cache_size = -<sqlite_cache_mb * 1024>` after schema init.
-// Owned by the schema/db agent — do not change schema.rs here.
+// [P2] sqlite_cache_mb is stored in AppConfig and exposed to users, but the
+// actual SQLite cache size is hardcoded to 8 MB in both db.rs
+// (CONNECTION_PRAGMAS: `PRAGMA cache_size = -8192`) and schema.rs
+// (`PRAGMA cache_size = -8192` in apply_migrations). The hardcoded value
+// intentionally equals SQLITE_CACHE_MB * 1024 = 8 * 1024 = 8192, so the
+// default matches. To honour a user-supplied value, thread AppConfig through
+// Database::open() and replace the two literal `-8192` values with
+// `-<sqlite_cache_mb as i64 * 1024>` computed at runtime. Deferred because
+// the open() signature ripple touches multiple callers across crates.
 pub const SQLITE_CACHE_MB: u32 = 8;
 pub const ENCRYPTION_CHUNK_KB: u32 = 64;
 pub const MAX_DECODED_IMAGE_MB: u32 = 50;
