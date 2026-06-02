@@ -142,11 +142,16 @@ impl AppConfig {
         // Fix 7: floor values that must never be 0 to prevent wipe-all / divide-by-zero.
         // history_limit = 0 would silently return no history rows from every page query.
         self.history_limit = self.history_limit.max(1);
-        // Size limits of 0 would accept nothing (max_text/image/file) or keep nothing (quota).
-        self.max_text_size_bytes = self.max_text_size_bytes.max(1);
-        self.max_image_size_bytes = self.max_image_size_bytes.max(1);
-        self.max_file_size_bytes = self.max_file_size_bytes.max(1);
-        self.storage_quota_bytes = self.storage_quota_bytes.max(1);
+        // Size/quota caps are floored to sane minimums, not merely .max(1):
+        // a sub-floor storage_quota_bytes (e.g. 200 bytes seen in the wild) makes
+        // prune_to_cap evict nearly every unpinned row after each insert, so the
+        // history self-clears and fresh images never persist. The MIN_ floors are
+        // far below the defaults — they only reject absurd input, never legitimate
+        // small-but-reasonable limits.
+        self.max_text_size_bytes = self.max_text_size_bytes.max(MIN_TEXT_SIZE_BYTES);
+        self.max_image_size_bytes = self.max_image_size_bytes.max(MIN_IMAGE_SIZE_BYTES);
+        self.max_file_size_bytes = self.max_file_size_bytes.max(MIN_FILE_SIZE_BYTES);
+        self.storage_quota_bytes = self.storage_quota_bytes.max(MIN_STORAGE_QUOTA_BYTES);
         // max_decoded_image_mb = 0 would produce a 0-byte image decode limit (reject all images).
         self.max_decoded_image_mb = self.max_decoded_image_mb.max(1);
         // sensitive_ttl_secs is intentionally NOT clamped: 0 is the "auto-wipe
@@ -240,6 +245,31 @@ mod tests {
 
         // Prior config is byte-for-byte valid and unchanged.
         assert_eq!(AppConfig::load(&good_path).unwrap().history_limit, 777);
+    }
+
+    #[test]
+    fn clamp_floors_storage_quota_and_size_caps_to_minimums() {
+        // A sub-floor config (the self-clearing-history bug: 200-byte quota) must
+        // be lifted to the sane minimums so prune_to_cap cannot wipe normal
+        // history or drop fresh images.
+        let mut cfg = AppConfig {
+            storage_quota_bytes: 200,
+            max_text_size_bytes: 1,
+            max_image_size_bytes: 1,
+            max_file_size_bytes: 1,
+            ..Default::default()
+        };
+        cfg.clamp_values();
+        assert_eq!(cfg.storage_quota_bytes, MIN_STORAGE_QUOTA_BYTES);
+        assert_eq!(cfg.max_text_size_bytes, MIN_TEXT_SIZE_BYTES);
+        assert_eq!(cfg.max_image_size_bytes, MIN_IMAGE_SIZE_BYTES);
+        assert_eq!(cfg.max_file_size_bytes, MIN_FILE_SIZE_BYTES);
+
+        // Legitimate large values are preserved (floor only lifts sub-floor input).
+        let mut big = AppConfig::default();
+        big.clamp_values();
+        assert_eq!(big.storage_quota_bytes, STORAGE_QUOTA_BYTES);
+        assert_eq!(big.max_image_size_bytes, MAX_IMAGE_SIZE_BYTES);
     }
 
     #[test]

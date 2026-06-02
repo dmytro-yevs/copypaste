@@ -13,6 +13,21 @@ pub const MAX_IMAGE_SIZE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_FILE_SIZE_BYTES: u64 = 1024 * 1024 * 1024;
 // 10 GiB local quota; cloud / P2P back-fill is bounded by sync_ttl_secs.
 pub const STORAGE_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+// Sane minimum floors for the size/quota caps. A previous bug set
+// storage_quota_bytes to 200 bytes in config.toml; prune_to_cap then evicted
+// almost every unpinned row after every insert (self-clearing history) and
+// dropped fresh images. Flooring at .max(1) is not enough — these caps must
+// stay large enough that normal clipboard use is never wiped. All values are
+// well below their defaults; clamping to them only protects against absurd
+// (sub-floor) input, never against legitimate small-but-reasonable limits.
+// 50 MiB — below this the byte-cap prune would wipe normal history.
+pub const MIN_STORAGE_QUOTA_BYTES: u64 = 50 * 1024 * 1024;
+// 64 KiB — comfortably fits ordinary copied text.
+pub const MIN_TEXT_SIZE_BYTES: u64 = 64 * 1024;
+// 1 MiB — below this even a small screenshot would be rejected.
+pub const MIN_IMAGE_SIZE_BYTES: u64 = 1024 * 1024;
+// 1 MiB — keep file captures usable.
+pub const MIN_FILE_SIZE_BYTES: u64 = 1024 * 1024;
 // 30 days — cloud tail persists long enough for infrequent device pairs.
 pub const SYNC_TTL_SECS: u64 = 2_592_000;
 pub const SENSITIVE_TTL_RELAY_SECS: u64 = 1_800;

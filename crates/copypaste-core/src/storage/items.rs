@@ -780,6 +780,27 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
     // Cast is safe: total_unpinned > max_bytes >= 0, so excess > 0 and fits in i64.
     let excess = total_unpinned - max_bytes;
 
+    // Defense-in-depth: never evict the single most-recent unpinned row in the
+    // same tick that inserted it. If a fresh capture alone exceeds the cap (a
+    // large image, or a mis-set sub-floor quota that the clamp somehow missed),
+    // pruning would otherwise delete the row we just stored — the user copies
+    // something and it instantly vanishes. Protecting the newest row guarantees
+    // the just-captured item always survives; the next-oldest rows still absorb
+    // the cap. Ordering matches the eviction order (wall_time ASC, id ASC), so
+    // the "newest" is the max (wall_time, id) row.
+    let newest_unpinned_id: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT id FROM clipboard_items WHERE pinned = 0 \
+             ORDER BY wall_time DESC, id DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?;
+    // Empty string is never a valid UUID id, so it is a safe "no row to keep"
+    // sentinel for the `id <> ?` filters below.
+    let keep_id = newest_unpinned_id.unwrap_or_default();
+
     // Fix (re-audit): collect the ids to evict first, then delete clipboard_items
     // AND clipboard_fts in a single transaction — mirrors the pattern used in
     // `delete_expired` / `delete_sensitive_expired`. Without the FTS sweep every
@@ -803,13 +824,13 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
                      ROWS UNBOUNDED PRECEDING
                  ) AS cum_bytes
              FROM clipboard_items
-             WHERE pinned = 0
+             WHERE pinned = 0 AND id <> ?2
          )
          SELECT id FROM ranked
          WHERE cum_bytes - row_bytes < ?1",
     )?;
     let ids: Vec<String> = stmt
-        .query_map(params![excess], |r| r.get(0))?
+        .query_map(params![excess, keep_id], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     drop(stmt);
 
@@ -827,14 +848,14 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
                      ROWS UNBOUNDED PRECEDING
                  ) AS cum_bytes
              FROM clipboard_items
-             WHERE pinned = 0
+             WHERE pinned = 0 AND id <> ?2
          )
          DELETE FROM clipboard_items
          WHERE id IN (
              SELECT id FROM ranked
              WHERE cum_bytes - row_bytes < ?1
          )",
-        params![excess],
+        params![excess, keep_id],
     )?;
     for id in &ids {
         tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
