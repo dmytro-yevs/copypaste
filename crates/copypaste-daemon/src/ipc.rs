@@ -1448,7 +1448,11 @@ impl IpcServer {
             }
         };
 
-        let payload = match copypaste_core::PairingPayload::decode(qr) {
+        // Accept both the wrapped cppair://pair?p=… deep-link form (emitted by
+        // pair_generate_qr / Android for external scanners) and a bare CPPAIR1
+        // string (back-compat). strip_deeplink is a no-op on the bare form.
+        let bare = copypaste_core::strip_deeplink(qr);
+        let payload = match copypaste_core::PairingPayload::decode(&bare) {
             Ok(p) => p,
             Err(e) => {
                 return Response::err_with_code(
@@ -4155,7 +4159,12 @@ impl IpcServer {
                     addr_hint,
                 };
 
-                let qr = payload.encode();
+                // Wrap the bare CPPAIR1 payload in the cppair://pair?p= deep-link
+                // URI so external scanners (Google Lens, the system camera) treat
+                // the QR as an actionable link and offer "open in app". The
+                // in-app scanner and Android manifest deep-link both strip the
+                // wrapper before decoding (see copypaste_core::strip_deeplink).
+                let qr = payload.encode_deeplink();
 
                 // Store the token (replacing any prior active QR) so the legacy
                 // IPC `pair_accept_qr` path can re-derive the same PAKE password.
@@ -7407,10 +7416,21 @@ mod tests {
         .await;
         assert_eq!(resp["ok"], true, "pair_generate_qr failed: {resp}");
         let qr = resp["data"]["qr"].as_str().unwrap().to_string();
-        assert!(qr.starts_with("CPPAIR1."), "QR must use the v1 magic: {qr}");
+        // The generated QR is now wrapped in the cppair://pair?p= deep-link URI
+        // so external scanners (Google Lens) can open it in the app.
+        assert!(
+            qr.starts_with(copypaste_core::PAIRING_DEEPLINK_PREFIX),
+            "QR must be wrapped in the cppair:// deep-link: {qr}"
+        );
 
-        // Step 0b: Device A scans + decodes the QR and derives the PAKE password.
-        let payload = copypaste_core::PairingPayload::decode(&qr)
+        // Step 0b: Device A scans, strips the wrapper, decodes the QR and derives
+        // the PAKE password (mirrors the in-app scanner / manifest deep-link path).
+        let bare = copypaste_core::strip_deeplink(&qr);
+        assert!(
+            bare.starts_with("CPPAIR1."),
+            "stripped QR must use the v1 magic: {bare}"
+        );
+        let payload = copypaste_core::PairingPayload::decode(&bare)
             .expect("scanning device must decode the QR");
         let password = payload.token.to_pake_password();
         // The fingerprint A pins is the one carried in the QR (B's fingerprint).

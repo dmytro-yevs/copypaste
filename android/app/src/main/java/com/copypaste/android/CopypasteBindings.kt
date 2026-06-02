@@ -1,5 +1,6 @@
 package com.copypaste.android
 
+import android.net.Uri
 import android.util.Log
 
 // UniFFI-compatible Kotlin bindings for libcopypaste_android.so
@@ -363,8 +364,48 @@ fun cloud_decrypt(itemId: String, blob: ByteArray, syncKeyBytes: ByteArray): Byt
 // ── QR device pairing ─────────────────────────────────────────────────────────
 
 /**
+ * Deep-link URI prefix wrapping the bare `CPPAIR1.…` pairing payload.
+ *
+ * Rendering this wrapped URI (rather than the bare payload) into the QR makes
+ * external scanners — Google Lens, the system camera — recognise the QR as an
+ * actionable link and offer "open in app", routing to [PairActivity] via the
+ * `AndroidManifest.xml` intent-filter (`scheme="cppair" host="pair"`). The bare
+ * payload is carried in the `p` query parameter (`Uri.encode`d).
+ *
+ * Mirrors `copypaste_core::PAIRING_DEEPLINK_PREFIX` (Rust) — keep in sync with
+ * it, [PairActivity.handleDeepLinkIntent], and the manifest intent-filter.
+ */
+const val PAIRING_DEEPLINK_PREFIX = "cppair://pair?p="
+
+/**
+ * Wrap a bare `CPPAIR1.…` pairing payload in the [PAIRING_DEEPLINK_PREFIX] URI.
+ * The receiver (in-app scanner or manifest deep-link) strips the wrapper before
+ * decoding (see [stripPairingDeepLink]).
+ */
+fun wrapPairingDeepLink(barePayload: String): String =
+    PAIRING_DEEPLINK_PREFIX + Uri.encode(barePayload)
+
+/**
+ * Strip the [PAIRING_DEEPLINK_PREFIX] wrapper from a scanned string, returning
+ * the bare `CPPAIR1.…` payload that [parsePairing] / `parsePairingQr` expects.
+ *
+ * Accepts both forms for back-compat: a `cppair://…?p=` URI yields its decoded
+ * `p` parameter; any other string is returned unchanged (trimmed).
+ */
+fun stripPairingDeepLink(scanned: String): String {
+    val trimmed = scanned.trim()
+    if (!trimmed.startsWith("cppair://")) return trimmed
+    // Uri.getQueryParameter URL-decodes the value, recovering the bare payload.
+    return Uri.parse(trimmed).getQueryParameter("p") ?: trimmed
+}
+
+/**
  * Result of [startPairing]: the encoded QR payload to display plus the PAKE
  * password derived from its single-use token.
+ *
+ * [qr] is the wrapped `cppair://pair?p=…` deep-link URI (see
+ * [PAIRING_DEEPLINK_PREFIX]) so external scanners can open it in the app; it is
+ * what callers render into the QR bitmap.
  */
 data class PairingQrResult(val qr: String, val pakePassword: String)
 
@@ -388,7 +429,10 @@ fun startPairing(deviceId: String, deviceName: String): PairingQrResult {
             deviceName = deviceName,
             addrHint = "",
         )
-        PairingQrResult(qr = payload.qr, pakePassword = payload.pakePassword)
+        // Render the deep-link URI (not the bare CPPAIR1 string) so external
+        // scanners (Google Lens) offer "open in app". parsePairing strips the
+        // wrapper on the receiving side.
+        PairingQrResult(qr = wrapPairingDeepLink(payload.qr), pakePassword = payload.pakePassword)
     } catch (e: Exception) {
         Log.w(TAG, "startPairing: native call threw — falling back to stub: ${e.message}")
         val hex = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
@@ -408,5 +452,8 @@ fun parsePairing(payload: String): uniffi.copypaste_android.ScannedPairing {
     if (!isNativeLibraryLoaded) {
         throw IllegalStateException("copypaste_android native library not loaded; parsePairing is unavailable")
     }
-    return uniffi.copypaste_android.parsePairingQr(payload)
+    // Accept both a wrapped cppair://pair?p=… deep-link (external scanners) and a
+    // bare CPPAIR1.… string. The Rust decoder only understands the bare magic, so
+    // strip the wrapper first (no-op on the bare form).
+    return uniffi.copypaste_android.parsePairingQr(stripPairingDeepLink(payload))
 }
