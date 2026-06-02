@@ -20,7 +20,7 @@
         "minWidth": 720,
         "minHeight": 460,
         "transparent": true,
-        "decorations": true,
+        "decorations": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "visible": true
@@ -29,7 +29,7 @@
         "label": "popup",
         "title": "CopyPaste Quick Paste",
         "url": "popup.html",
-        "width": 504,
+        "width": 403,
         "height": 624,
         "decorations": false,
         "transparent": true,

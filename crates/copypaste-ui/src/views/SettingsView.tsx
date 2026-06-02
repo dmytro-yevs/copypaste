@@ -676,6 +676,39 @@ export function SettingsView() {
     };
   }, [reloadKey]);
 
+  // Re-sync the daemon-backed Private mode toggle whenever the window regains
+  // focus or becomes visible. The value is loaded once on mount, but if the
+  // daemon was slow/degraded then (or the user changed it from the tray menu
+  // while Settings was in the background) the toggle would show a stale value
+  // and diverge from the tray — which has its own resync poller. Re-fetching on
+  // focus/visibility makes Settings reflect daemon truth like the tray does.
+  useEffect(() => {
+    let cancelled = false;
+
+    const resyncPrivateMode = () => {
+      api
+        .getPrivateMode()
+        .then((result) => {
+          if (!cancelled && result) setPrivateMode(result.private_mode);
+        })
+        .catch(() => {
+          // Best-effort — leave the current toggle value on transient failure.
+        });
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") resyncPrivateMode();
+    };
+
+    window.addEventListener("focus", resyncPrivateMode);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", resyncPrivateMode);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
   const offline = loadState !== "ready";
   const degraded = loadState === "degraded";
 
