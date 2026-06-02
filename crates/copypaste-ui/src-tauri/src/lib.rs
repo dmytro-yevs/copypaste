@@ -284,6 +284,10 @@ pub fn run() {
                 if let Some(stop) = handle.try_state::<TrayResyncStop>() {
                     stop.0.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
+                // Release the macOS CGEventTap (tap, run-loop source, CFMachPort,
+                // and the boxed trigger callback) so nothing leaks on quit.
+                #[cfg(target_os = "macos")]
+                event_tap::uninstall();
                 daemon_lifecycle::stop_daemon(handle);
             }
         });
