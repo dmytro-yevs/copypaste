@@ -1397,7 +1397,13 @@ mod tests {
                     .expect("bind responder");
                 let port = responder.local_addr().expect("local addr").port();
                 port_tx.send(port).expect("send port");
-                responder.run(&pw, resp_sync_addr).await
+                responder
+                    .run(
+                        &pw,
+                        resp_sync_addr,
+                        &copypaste_p2p::bootstrap::PeerMeta::default(),
+                    )
+                    .await
             })
         });
 
@@ -1483,7 +1489,13 @@ mod tests {
                     .expect("bind responder");
                 let port = responder.local_addr().expect("local addr").port();
                 port_tx.send(port).expect("send port");
-                responder.run(&pw, resp_sync_addr).await
+                responder
+                    .run(
+                        &pw,
+                        resp_sync_addr,
+                        &copypaste_p2p::bootstrap::PeerMeta::default(),
+                    )
+                    .await
             })
         });
 
