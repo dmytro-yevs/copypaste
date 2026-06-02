@@ -51,9 +51,8 @@ argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
 generic-array = "0.14"
 # HKDF for SessionKey -> XChaCha20 key derivation (ADR-001)
 hkdf = { workspace = true }
-# Compact in-band device-metadata frame (P2P Phase 4 bootstrap extension).
-serde = { workspace = true }
-serde_json = { workspace = true }
+# (serde/serde_json above also back the compact in-band device-metadata frame —
+#  P2P Phase 4 bootstrap extension.)
 # Error handling
 thiserror.workspace = true
 # Logging

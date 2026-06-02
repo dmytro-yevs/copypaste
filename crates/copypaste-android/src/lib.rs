@@ -483,6 +483,10 @@ pub fn bootstrap_pair_initiator(
                 key_der.to_vec(),
                 &pake_password,
                 &sync_addr,
+                // Android-side device metadata is gathered in Kotlin and synced
+                // separately; send an empty meta frame so the responder still
+                // gets a well-formed Phase-4 bootstrap exchange.
+                &copypaste_p2p::bootstrap::PeerMeta::default(),
             ))
             .map_err(|e| CopypasteError::P2pError {
                 reason: e.to_string(),
