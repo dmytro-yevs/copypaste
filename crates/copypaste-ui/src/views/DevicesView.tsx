@@ -245,6 +245,9 @@ export function DevicesView() {
   const [revokeAllConfirm, setRevokeAllConfirm] = useState(false);
   const [globalMsg, setGlobalMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const globalMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Reset timer for the "Copied! ✓" fingerprint affordance — held in a ref so
+  // it can be cleared on unmount (and replaced on a rapid second copy).
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- QR pairing ---
   const [qrState, setQrState] = useState<QrState>({ status: "idle" });
@@ -452,6 +455,15 @@ export function DevicesView() {
     return () => { peerActionCancelledRef.current = true; };
   }, []);
 
+  // Clear handler-scheduled message/affordance timers on unmount so a late
+  // tick never calls setState on an unmounted component (UI memory leak).
+  useEffect(() => {
+    return () => {
+      if (globalMsgTimer.current !== null) clearTimeout(globalMsgTimer.current);
+      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+    };
+  }, []);
+
   // --- Row helpers ---
   const setRowPending = (fingerprint: string, pending: boolean) => {
     setRowState((prev) => ({
@@ -529,10 +541,14 @@ export function DevicesView() {
   function handleCopy() {
     if (ownState.status !== "ready" || ownState.info.fingerprint === null) return;
     const fp = ownState.info.fingerprint;
+    const markCopied = () => {
+      setCopied(true);
+      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+      copiedTimer.current = setTimeout(() => setCopied(false), 1500);
+    };
     navigator.clipboard.writeText(fp).then(
       () => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        markCopied();
       },
       () => {
         // Fallback for restricted clipboard contexts.
@@ -544,8 +560,7 @@ export function DevicesView() {
         el.select();
         document.execCommand("copy");
         document.body.removeChild(el);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        markCopied();
       }
     );
   }

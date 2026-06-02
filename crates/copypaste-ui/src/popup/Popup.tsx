@@ -174,16 +174,19 @@ export function Popup() {
     // cancelled prevents a late-resolving unlisten promise or a stale focus
     // event from executing after the component has unmounted / effect re-ran.
     let cancelled = false;
+    let focusTimer: ReturnType<typeof setTimeout> | null = null;
     const unlisten = win.onFocusChanged(({ payload: focused }) => {
       if (cancelled) return;
       if (focused) {
         setQuery("");
         refresh();
-        setTimeout(() => { if (!cancelled) inputRef.current?.focus(); }, FOCUS_DELAY_MS);
+        if (focusTimer !== null) clearTimeout(focusTimer);
+        focusTimer = setTimeout(() => { if (!cancelled) inputRef.current?.focus(); }, FOCUS_DELAY_MS);
       }
     });
     return () => {
       cancelled = true;
+      if (focusTimer !== null) clearTimeout(focusTimer);
       unlisten.then((fn) => fn());
     };
   }, [win, refresh]);
@@ -191,7 +194,8 @@ export function Popup() {
   // Initial load.
   useEffect(() => {
     refresh();
-    setTimeout(() => inputRef.current?.focus(), FOCUS_DELAY_MS);
+    const focusTimer = setTimeout(() => inputRef.current?.focus(), FOCUS_DELAY_MS);
+    return () => clearTimeout(focusTimer);
   }, [refresh]);
 
   // Visibility-gated polling: refresh items every ~3 seconds while the popup
@@ -281,6 +285,7 @@ export function Popup() {
   // call hide_popup → double activation → focus flicker.
   // CRITICAL: hide fires IMMEDIATELY — no exit animation (preserves fix).
   const isHidingRef = useRef(false);
+  const hideResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hide = useCallback(async () => {
     if (isHidingRef.current) return;
     isHidingRef.current = true;
@@ -291,8 +296,16 @@ export function Popup() {
     } catch (e) {
       console.error("popup hide failed", e);
     } finally {
-      setTimeout(() => { isHidingRef.current = false; }, 100);
+      if (hideResetTimer.current !== null) clearTimeout(hideResetTimer.current);
+      hideResetTimer.current = setTimeout(() => { isHidingRef.current = false; }, 100);
     }
+  }, []);
+
+  // Clear the hide-guard reset timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (hideResetTimer.current !== null) clearTimeout(hideResetTimer.current);
+    };
   }, []);
 
   // Open the main window's Settings view. We hide the popup, surface the main
