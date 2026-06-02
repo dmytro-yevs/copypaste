@@ -357,11 +357,12 @@ pub fn ensure_daemon_running(app: &tauri::AppHandle) -> Result<bool, String> {
     })?;
 
     let child = std::process::Command::new(&bin)
-        // Enable P2P (mTLS identity + mDNS LAN advertising) so the app-owned
-        // daemon advertises a device fingerprint and can generate pairing QRs.
-        // The daemon gates P2P on COPYPASTE_P2P; without this it runs P2P-off,
-        // leaving Devices->Fingerprint empty and LAN pairing impossible.
-        .env("COPYPASTE_P2P", "1")
+        // Do NOT set COPYPASTE_P2P here. The daemon's gate falls through to
+        // `ipc::p2p_enabled_from_config()` when the env var is absent, which
+        // reads the persisted `p2p_enabled` config (defaulting to `true` when
+        // unset). Hardcoding "1" overrode that and made the Settings P2P toggle
+        // a no-op. With the env omitted, config governs: default P2P stays on,
+        // and toggling the setting then restarting the daemon takes effect.
         .spawn()
         .map_err(|e| format!("failed to spawn daemon at {}: {e}", bin.display()))?;
 
