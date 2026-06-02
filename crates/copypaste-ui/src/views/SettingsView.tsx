@@ -566,6 +566,22 @@ export function SettingsView() {
   const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const passphraseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Clear every handler-scheduled feedback timer on unmount so a late tick
+  // never calls setState on an unmounted component (UI memory leak). These
+  // timers are started inside event handlers (Save / shortcut / delete / etc.),
+  // so an effect cleanup is the only place that runs on unmount.
+  useEffect(() => {
+    return () => {
+      if (shortcutTimerRef.current !== null) clearTimeout(shortcutTimerRef.current);
+      if (saveErrTimer.current !== null) clearTimeout(saveErrTimer.current);
+      if (pmErrTimer.current !== null) clearTimeout(pmErrTimer.current);
+      if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
+      if (deleteTimerRef.current !== null) clearTimeout(deleteTimerRef.current);
+      if (passphraseTimerRef.current !== null) clearTimeout(passphraseTimerRef.current);
+      for (const t of Object.values(limitsMsgTimers.current)) clearTimeout(t);
+    };
+  }, []);
+
   // -------------------------------------------------------------------------
   // Load
   // -------------------------------------------------------------------------

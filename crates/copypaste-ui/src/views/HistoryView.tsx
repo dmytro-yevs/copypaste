@@ -933,6 +933,14 @@ export function HistoryView() {
     []
   );
 
+  // Clear the pending toast auto-dismiss timer on unmount so it never calls
+  // setToast on an unmounted component (UI memory leak).
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   // -------------------------------------------------------------------------
   // Data loading — shared by initial mount, interval, and manual triggers.
   // -------------------------------------------------------------------------
