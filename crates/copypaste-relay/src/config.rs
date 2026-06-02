@@ -85,7 +85,11 @@ impl RelayConfig {
         }
         if let Ok(v) = std::env::var("RELAY_MAX_ITEMS_PER_DEVICE") {
             if let Ok(n) = v.parse::<usize>() {
-                cfg.max_items_per_device = n;
+                // Clamp to at least 1: n==0 would make effective_history_cap()
+                // return 0, silently draining every push (the oldest item is
+                // pruned to keep len ≤ cap, so cap=0 removes the just-inserted
+                // item immediately — every push is a silent no-op).
+                cfg.max_items_per_device = n.max(1);
             }
         }
         if let Ok(v) = std::env::var("RELAY_TRUST_PROXY_HEADERS") {

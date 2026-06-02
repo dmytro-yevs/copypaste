@@ -118,7 +118,13 @@ pub fn vacuum_with_key(db_path: &Path, key: &[u8; 32], plan: Plan) -> Result<()>
         // Checkpoint WAL into the main file first. Otherwise VACUUM only
         // shrinks the main file while -wal/-shm still hold recent pages,
         // and the reported "after" size is misleading.
-        let _ = db.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE)");
+        // The checkpoint can fail when another reader still holds a read
+        // lock (e.g. a stale -wal not yet cleaned up). We log the error
+        // instead of swallowing it so the user knows the WAL was not fully
+        // flushed and the "after" size may be slightly inflated.
+        if let Err(e) = db.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE)") {
+            eprintln!("warning: wal_checkpoint(TRUNCATE) failed (continuing with VACUUM): {e}");
+        }
         db.conn()
             .execute_batch("VACUUM")
             .context("VACUUM failed (out of disk space? db locked?)")?;

@@ -511,8 +511,16 @@ pub fn app_version() -> String {
 /// after the event fires.
 #[tauri::command]
 pub fn get_daemon_error(app: tauri::AppHandle) -> Option<String> {
-    app.try_state::<DaemonSpawnError>()
-        .and_then(|state| state.0.lock().unwrap_or_else(|e| e.into_inner()).clone())
+    app.try_state::<DaemonSpawnError>().and_then(|state| {
+        let guard = state.0.lock().unwrap_or_else(|e| {
+            tracing::error!(
+                "get_daemon_error: DaemonSpawnError mutex was poisoned; \
+                 recovering inner value (a prior thread panicked while holding it)"
+            );
+            e.into_inner()
+        });
+        guard.clone()
+    })
 }
 
 /// Restart the daemon so the freshly-installed binary takes over.

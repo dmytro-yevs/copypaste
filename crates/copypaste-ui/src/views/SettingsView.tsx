@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import ReactDOM from "react-dom";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
@@ -199,17 +200,38 @@ function SliderRow({
 
 // ---------------------------------------------------------------------------
 // InfoPopover — collapsible help text behind a ⓘ icon (M8)
-// Click the icon to open; click outside to close.
+// HW-M3 fix: popover content is rendered via ReactDOM.createPortal to
+// document.body so it can never be clipped by an ancestor overflow-hidden div.
+// Position is computed from the trigger button's getBoundingClientRect.
+// Click outside to close.
 // ---------------------------------------------------------------------------
 
 function InfoPopover({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Recompute position from the trigger button each time it opens.
+  const handleToggle = useCallback(() => {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      // Place popover to the right of the icon, vertically centered on it.
+      setPos({
+        top: rect.top + rect.height / 2,
+        left: rect.right + 6,
+      });
+    }
+    setOpen((v) => !v);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const outsideBtn = btnRef.current && !btnRef.current.contains(target);
+      const outsidePopover = popoverRef.current && !popoverRef.current.contains(target);
+      if (outsideBtn && outsidePopover) {
         setOpen(false);
       }
     };
@@ -217,26 +239,40 @@ function InfoPopover({ text }: { text: string }) {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  const popoverEl = open
+    ? ReactDOM.createPortal(
+        <div
+          ref={popoverRef}
+          className="z-[9999] w-56 rounded-ide border border-ide-border bg-ide-elevated p-2 text-[11px] text-ide-dim shadow-ide-sm"
+          style={{
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            minWidth: "14rem",
+            transform: "translateY(-50%)",
+          }}
+        >
+          {text}
+        </div>,
+        document.body
+      )
+    : null;
+
   return (
-    <div ref={ref} className="relative inline-flex items-center">
+    <div className="inline-flex items-center">
       <button
+        ref={btnRef}
         type="button"
         aria-label="More info"
-        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        onClick={handleToggle}
         className="flex h-4 w-4 items-center justify-center rounded-full text-ide-faint hover:text-ide-dim transition-colors"
       >
         <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
           <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 3a.9.9 0 1 1 0 1.8A.9.9 0 0 1 8 4Zm-.75 2.75h1.5v4.5h-1.5v-4.5Z" />
         </svg>
       </button>
-      {open && (
-        <div
-          className="absolute left-5 top-0 z-50 w-56 rounded-ide border border-ide-border bg-ide-elevated p-2 text-[11px] text-ide-dim shadow-ide-sm"
-          style={{ minWidth: "14rem" }}
-        >
-          {text}
-        </div>
-      )}
+      {popoverEl}
     </div>
   );
 }
@@ -692,15 +728,22 @@ export function SettingsView() {
     };
   }
 
-  async function saveLimitsField(field: string, patch: Partial<AppSettings>) {
+  // P1 fix: saveLimitsField now accepts an optional per-field revert callback so
+  // it can undo only the specific field that failed, instead of triggering a full
+  // reload (setReloadKey) which resets ALL sliders from scratch.
+  async function saveLimitsField(
+    field: string,
+    patch: Partial<AppSettings>,
+    onRevert?: () => void,
+  ) {
     try {
       await api.setConfig(buildConfigPatch(patch) as unknown as Parameters<typeof api.setConfig>[0]);
       showLimitsMsg(field, "Saved", 2000);
     } catch (err) {
       const msg = err instanceof IpcError ? err.message : "Save failed";
       showLimitsMsg(field, msg, 4000);
-      // Revert local state to what the daemon had before.
-      setReloadKey((k) => k + 1);
+      // Revert only the specific field that failed, not all sliders.
+      onRevert?.();
     }
   }
 
@@ -792,10 +835,15 @@ export function SettingsView() {
 
   const handleP2pToggle = useCallback(
     async (val: boolean) => {
+      // P0 fix: do not send the stale `config` closure snapshot directly.
+      // buildConfigPatch reads current state for ALL fields and applies the
+      // override, so storage/supabase fields cannot be clobbered.
       const prev = config.p2p_enabled;
       setConfig((c) => ({ ...c, p2p_enabled: val }));
       try {
-        await api.setConfig({ ...config, p2p_enabled: val });
+        await api.setConfig(
+          buildConfigPatch({ p2p_enabled: val }) as unknown as Parameters<typeof api.setConfig>[0],
+        );
       } catch (err) {
         // Revert on failure
         setConfig((c) => ({ ...c, p2p_enabled: prev }));
@@ -803,21 +851,27 @@ export function SettingsView() {
         showLimitsMsg("p2p_enabled", msg, 4000);
       }
     },
-    [config]
+    // buildConfigPatch captures live state via closure at call time; the only
+    // dep that should re-create the callback is config.p2p_enabled (used for
+    // prev capture) — the rest are stable refs or component-level state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [config.p2p_enabled]
   );
 
   const handleWifiOnlyToggle = useCallback(
     async (val: boolean) => {
+      // P1 fix: capture `prev` BEFORE the optimistic update. saveLimitsField
+      // now accepts an onRevert callback so it reverts only this field on error
+      // rather than triggering a full reload. The outer try/catch is removed —
+      // saveLimitsField does NOT throw; it handles the error path internally.
       const prev = syncOnWifiOnly;
       setSyncOnWifiOnly(val);
-      try {
-        await saveLimitsField("sync_on_wifi_only", { sync_on_wifi_only: val });
-      } catch {
-        // saveLimitsField already handles revert + error display
-        setSyncOnWifiOnly(prev);
-      }
+      await saveLimitsField(
+        "sync_on_wifi_only",
+        { sync_on_wifi_only: val },
+        () => setSyncOnWifiOnly(prev),
+      );
     },
-    // saveLimitsField is stable (defined inline) — only syncOnWifiOnly matters
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [syncOnWifiOnly]
   );
@@ -941,10 +995,15 @@ export function SettingsView() {
             <Toggle
               checked={prefs.playSoundOnCopy}
               onChange={(v) => {
+                // P0 fix: only persist to daemon once settings are fully loaded.
+                // buildConfigPatch reads hydrated slider/toggle state; calling it
+                // before "ready" would push default values over the real config.
                 setPrefs({ playSoundOnCopy: v });
-                void api.setConfig(buildConfigPatch({ sound_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
-                  setPrefs({ playSoundOnCopy: !v });
-                });
+                if (loadState === "ready") {
+                  void api.setConfig(buildConfigPatch({ sound_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
+                    setPrefs({ playSoundOnCopy: !v });
+                  });
+                }
               }}
               disabled={offline}
             />
@@ -953,10 +1012,13 @@ export function SettingsView() {
             <Toggle
               checked={prefs.notifyOnCopy}
               onChange={(v) => {
+                // P0 fix: same guard as sound_on_copy above.
                 setPrefs({ notifyOnCopy: v });
-                void api.setConfig(buildConfigPatch({ notify_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
-                  setPrefs({ notifyOnCopy: !v });
-                });
+                if (loadState === "ready") {
+                  void api.setConfig(buildConfigPatch({ notify_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
+                    setPrefs({ notifyOnCopy: !v });
+                  });
+                }
               }}
               disabled={offline}
             />
@@ -1330,7 +1392,13 @@ export function SettingsView() {
             labels={TEXT_SIZE_LABELS}
             value={maxTextBytes}
             onChange={(v) => setMaxTextBytes(v)}
-            onRelease={(v) => void saveLimitsField("max_text_size_bytes", { max_text_size_bytes: v })}
+            onRelease={(v) => {
+              // P1 fix: capture prev before optimistic update (onChange already fired);
+              // revert only this field on error, not the full reload.
+              const prev = maxTextBytes;
+              setMaxTextBytes(v);
+              void saveLimitsField("max_text_size_bytes", { max_text_size_bytes: v }, () => setMaxTextBytes(prev));
+            }}
           />
           <LimitSliderRow
             label="Max clip image size"
@@ -1339,7 +1407,11 @@ export function SettingsView() {
             labels={IMAGE_SIZE_LABELS}
             value={maxImageBytes}
             onChange={(v) => setMaxImageBytes(v)}
-            onRelease={(v) => void saveLimitsField("max_image_size_bytes", { max_image_size_bytes: v })}
+            onRelease={(v) => {
+              const prev = maxImageBytes;
+              setMaxImageBytes(v);
+              void saveLimitsField("max_image_size_bytes", { max_image_size_bytes: v }, () => setMaxImageBytes(prev));
+            }}
           />
           <LimitSliderRow
             label="Max clip file size"
@@ -1348,7 +1420,11 @@ export function SettingsView() {
             labels={FILE_SIZE_LABELS}
             value={maxFileBytes}
             onChange={(v) => setMaxFileBytes(v)}
-            onRelease={(v) => void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: v })}
+            onRelease={(v) => {
+              const prev = maxFileBytes;
+              setMaxFileBytes(v);
+              void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: v }, () => setMaxFileBytes(prev));
+            }}
           />
           <LimitSliderRow
             label="Local storage limit"
@@ -1357,7 +1433,11 @@ export function SettingsView() {
             labels={QUOTA_LABELS}
             value={quotaBytes}
             onChange={(v) => setQuotaBytes(v)}
-            onRelease={(v) => void saveLimitsField("storage_quota_bytes", { storage_quota_bytes: v })}
+            onRelease={(v) => {
+              const prev = quotaBytes;
+              setQuotaBytes(v);
+              void saveLimitsField("storage_quota_bytes", { storage_quota_bytes: v }, () => setQuotaBytes(prev));
+            }}
           />
           <LimitSliderRow
             label="Max stored items"
@@ -1366,7 +1446,11 @@ export function SettingsView() {
             labels={HISTORY_LABELS}
             value={historyLimit}
             onChange={(v) => setHistoryLimit(v)}
-            onRelease={(v) => void saveLimitsField("history_limit", { history_limit: v })}
+            onRelease={(v) => {
+              const prev = historyLimit;
+              setHistoryLimit(v);
+              void saveLimitsField("history_limit", { history_limit: v }, () => setHistoryLimit(prev));
+            }}
           />
           <LimitSliderRow
             label="Sensitive auto-wipe"
@@ -1375,7 +1459,11 @@ export function SettingsView() {
             labels={SENSITIVE_TTL_LABELS}
             value={sensitiveTtlSecs}
             onChange={(v) => setSensitiveTtlSecs(v)}
-            onRelease={(v) => void saveLimitsField("sensitive_ttl_secs", { sensitive_ttl_secs: v })}
+            onRelease={(v) => {
+              const prev = sensitiveTtlSecs;
+              setSensitiveTtlSecs(v);
+              void saveLimitsField("sensitive_ttl_secs", { sensitive_ttl_secs: v }, () => setSensitiveTtlSecs(prev));
+            }}
           />
           <SettingsRow label="Image quality (1–100)">
             <div className="flex items-center gap-2">
@@ -1395,7 +1483,10 @@ export function SettingsView() {
             <button
               type="button"
               disabled={offline}
-              onClick={() => void saveLimitsField("image_quality", { image_quality: imageQuality })}
+              onClick={() => {
+                const prev = imageQuality;
+                void saveLimitsField("image_quality", { image_quality: imageQuality }, () => setImageQuality(prev));
+              }}
               className={btnCls}
             >
               Save image quality

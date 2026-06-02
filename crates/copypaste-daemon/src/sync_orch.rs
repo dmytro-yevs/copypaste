@@ -28,7 +28,7 @@ use tracing::{debug, info, warn};
 use copypaste_core::{
     build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2, encrypt_for_cloud,
     encrypt_item_with_aad, prune_to_cap, ClipboardItem, Database, MigrationState, SyncKey,
-    AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT, NONCE_SIZE,
+    AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
 use copypaste_sync::{
     merge::{local_to_wire, resolve, wire_to_local, MergeOutcome},
@@ -263,7 +263,14 @@ pub async fn merge_incoming_with_crypto(
         let db_guard = db.blocking_lock();
 
         let mut upserted = 0usize;
-        for wire in items {
+        for mut wire in items {
+            // P0 security/correctness: clamp any negative lamport_ts / wall_time
+            // before processing. A hostile or buggy peer can send lamport_ts = -1
+            // which, when cast to u64 for the Lamport clock, becomes u64::MAX and
+            // wins every LWW comparison forever. Clamping to 0 at ingest makes
+            // the item a low-priority candidate that local items will override.
+            wire.clamp_timestamps();
+
             // B1 FIX: look up by the STABLE cross-device `item_id` (the CRDT
             // identity), NOT `wire.id` (the peer's per-row primary key which is a
             // fresh UUID on every device and therefore never matches the local row).
@@ -376,8 +383,11 @@ pub async fn merge_incoming_with_crypto(
 /// the FTS rewrite below (keyed on `item.id`) stays consistent.
 ///
 /// `fts_text` is the already-decrypted plaintext to index; `None`/empty skips
-/// FTS (e.g. verbatim or image rows). The stored `key_version` mirrors what the
-/// non-atomic path wrote (`insert_item` stamps the current item key version).
+/// FTS (e.g. verbatim or image rows). The stored `key_version` is taken from
+/// `item.key_version` rather than hardcoded to ITEM_KEY_VERSION_CURRENT so that
+/// a verbatim (non-rewrapped) incoming row with key_version=1 is stored as v1
+/// and can be decrypted by the existing v1 path, instead of being stamped v2
+/// (which would make it permanently undecryptable — auth-tag mismatch).
 fn replace_item_atomic(
     db: &Database,
     existed: bool,
@@ -425,7 +435,11 @@ fn replace_item_atomic(
             item.app_bundle_id,
             item.content_hash,
             item.origin_device_id,
-            ITEM_KEY_VERSION_CURRENT,
+            // Use item.key_version (set by rekey_inbound=2 or wire_to_local=wire.key_version)
+            // rather than the hardcoded ITEM_KEY_VERSION_CURRENT. A verbatim legacy
+            // key_version=1 row would be stamped v2 here but its ciphertext is still
+            // v1-encrypted → permanent auth-tag failure on every subsequent decrypt.
+            item.key_version as i64,
             item.pinned as i64,
         ],
     )?;

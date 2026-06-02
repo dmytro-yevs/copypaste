@@ -221,7 +221,16 @@ pub fn channel_confirmation_tag(bound_key: &[u8; 32], role: ConfirmRole) -> [u8;
 /// followed by a 2-byte big-endian length of the `ServerSetup` blob, then
 /// `ServerSetup` bytes, then `ServerRegistration` bytes (length implied by
 /// remaining slice). Both are required to drive `ServerLogin::start`.
-#[derive(Clone)]
+///
+/// # Zeroization
+///
+/// `serialized` contains the OPAQUE server long-term key material
+/// (`ServerSetup`) concatenated with the per-peer envelope
+/// (`ServerRegistration`). Both are sensitive: `ServerSetup` is a long-lived
+/// private key; `ServerRegistration` encodes the verifier that protects the
+/// pairing password. `ZeroizeOnDrop` ensures the heap buffer is wiped when
+/// the `PasswordFile` is dropped, including on panic / early-return paths.
+#[derive(Clone, zeroize::ZeroizeOnDrop)]
 pub struct PasswordFile {
     /// Versioned serialised blob — see struct docs for layout.
     pub serialized: Vec<u8>,

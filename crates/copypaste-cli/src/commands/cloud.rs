@@ -17,6 +17,9 @@
 use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 use anyhow::{anyhow, Result};
+use copypaste_ipc::{
+    METHOD_CLOUD_TEST_CONNECTION, METHOD_GET_CONFIG, METHOD_GET_SYNC_STATUS, METHOD_SET_CONFIG,
+};
 use std::path::Path;
 use zeroize::Zeroizing;
 
@@ -135,11 +138,29 @@ pub fn setup(
     // Read-merge-write: fetch current config so we don't drop other fields.
     let mut cfg = {
         let mut client = IpcClient::connect(socket_path)?;
-        let req = IpcClient::build_request("1", "get_config", serde_json::json!({}));
+        let req = IpcClient::build_request(
+            &IpcClient::next_id(),
+            METHOD_GET_CONFIG,
+            serde_json::json!({}),
+        );
         let resp = client.call(&req)?;
         exit_on_err(&resp);
         resp.data.unwrap_or_else(|| serde_json::json!({}))
     };
+
+    // Build the password JSON value directly from the Zeroizing wrapper to
+    // avoid cloning the secret into a separate plain String. serde_json::Value
+    // internally stores strings as Arc<str> / String, so one heap copy is
+    // unavoidable before the IPC serialization; we minimise the number of
+    // live copies by never assigning to a plain `String` binding.
+    //
+    // RESIDUAL EXPOSURE: serde_json::Value holds the password as a plain
+    // String internally until the Value is dropped at the end of this scope.
+    // This is an inherent limitation of the current IPC serialization path.
+    // FIXWAVE: once the daemon reads the password from Keychain instead of
+    // IPC (see KEYCHAIN_ACCOUNT_SUPABASE_PW), remove the password field here
+    // entirely to eliminate this residual exposure.
+    let password_value = serde_json::Value::String(password.trim().to_string());
 
     if let Some(obj) = cfg.as_object_mut() {
         obj.insert("supabase_url".into(), serde_json::json!(url));
@@ -149,22 +170,19 @@ pub fn setup(
         // reads it from the Keychain (see KEYCHAIN_ACCOUNT_SUPABASE_PW).
         // Until then we send it over IPC so the daemon can authenticate; the
         // daemon must NOT persist this field to config.json on disk.
-        obj.insert(
-            "supabase_password".into(),
-            serde_json::json!(password.trim()),
-        );
+        obj.insert("supabase_password".into(), password_value);
     } else {
         cfg = serde_json::json!({
             "supabase_url": url,
             "supabase_anon_key": anon_key,
             "supabase_email": email,
             // FIXWAVE: same as above — remove once daemon reads from Keychain.
-            "supabase_password": password.trim(),
+            "supabase_password": password_value,
         });
     }
 
     let mut client = IpcClient::connect(socket_path)?;
-    let req = IpcClient::build_request("1", "set_config", cfg);
+    let req = IpcClient::build_request(&IpcClient::next_id(), METHOD_SET_CONFIG, cfg);
     let resp = client.call(&req)?;
     // `password` (Zeroizing) is dropped and zeroed after the IPC call completes.
     exit_on_err(&resp);
@@ -210,7 +228,11 @@ fn resolve_secret(explicit: Option<String>, env_var: &str, prompt: &str) -> Resu
 /// Print the current cloud-sync status reported by the daemon.
 pub fn status(socket_path: &Path) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = IpcClient::build_request("1", "get_sync_status", serde_json::json!({}));
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_GET_SYNC_STATUS,
+        serde_json::json!({}),
+    );
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
@@ -243,7 +265,11 @@ pub fn status(socket_path: &Path) -> Result<()> {
 /// is scriptable (`copypaste cloud test && echo ok`).
 pub fn test(socket_path: &Path) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = IpcClient::build_request("1", "cloud_test_connection", serde_json::json!({}));
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_CLOUD_TEST_CONNECTION,
+        serde_json::json!({}),
+    );
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 

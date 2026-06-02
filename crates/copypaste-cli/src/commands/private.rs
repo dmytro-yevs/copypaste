@@ -1,6 +1,7 @@
 use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 use anyhow::Result;
+use copypaste_ipc::{METHOD_GET_PRIVATE_MODE, METHOD_SET_PRIVATE_MODE};
 use std::path::Path;
 
 /// Enable or disable private/pause mode on the daemon.
@@ -8,8 +9,8 @@ use std::path::Path;
 pub fn run(socket_path: &Path, enable: bool) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
     let req = IpcClient::build_request(
-        "1",
-        "set_private_mode",
+        &IpcClient::next_id(),
+        METHOD_SET_PRIVATE_MODE,
         serde_json::json!({ "enabled": enable }),
     );
     let resp = client.call(&req)?;
@@ -23,7 +24,11 @@ pub fn run(socket_path: &Path, enable: bool) -> Result<()> {
 /// Query the current private mode state from the daemon.
 pub fn run_get(socket_path: &Path) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = IpcClient::build_request("1", "get_private_mode", serde_json::json!({}));
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_GET_PRIVATE_MODE,
+        serde_json::json!({}),
+    );
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 

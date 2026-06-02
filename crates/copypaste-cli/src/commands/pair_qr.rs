@@ -9,11 +9,16 @@
 use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 use anyhow::{anyhow, Result};
+use copypaste_ipc::METHOD_PAIR_GENERATE_QR;
 use std::path::Path;
 
 pub fn run(socket_path: &Path, raw: bool) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = IpcClient::build_request("1", "pair_generate_qr", serde_json::json!({}));
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_PAIR_GENERATE_QR,
+        serde_json::json!({}),
+    );
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 

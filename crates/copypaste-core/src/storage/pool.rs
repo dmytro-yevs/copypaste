@@ -75,7 +75,8 @@ pub fn open_pool(path: &Path, key: &[u8; 32], max_size: u32) -> Result<SqlitePoo
          PRAGMA busy_timeout = 5000;\n\
          PRAGMA synchronous = NORMAL;\n\
          PRAGMA foreign_keys = ON;\n\
-         PRAGMA temp_store = MEMORY;",
+         PRAGMA temp_store = MEMORY;\n\
+         PRAGMA cache_size = -8192;",
         key_hex.as_str()
     ));
     let manager = SqliteConnectionManager::file(path).with_init(move |conn| {

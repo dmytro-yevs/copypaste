@@ -156,18 +156,85 @@ pub fn usable_advertise_addrs() -> Vec<IpAddr> {
     }
 }
 
+/// Probe the OS routing table to discover the default-route source IP.
+///
+/// Opens a **connected** UDP socket to `probe_target` and reads `local_addr()`.
+/// A connected UDP socket does not send any data — `connect()` on UDP merely
+/// sets the kernel's routing destination used by `getsockname()` (i.e.
+/// `local_addr()`). This is the standard no-new-dep trick for learning the
+/// outgoing interface on multi-homed hosts without parsing routing tables.
+///
+/// `probe_target` is deliberately a public anycast address (`1.1.1.1:53`) so
+/// the kernel selects the default-route interface; use any reachable LAN host
+/// when you only want to prefer a specific subnet.
+///
+/// Returns `None` when the host has no default route (offline, sandboxed CI)
+/// or the socket call fails for any reason — callers fall back gracefully.
+fn probe_default_route_source(probe_target: std::net::SocketAddrV4) -> Option<Ipv4Addr> {
+    let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    // connect() on UDP is non-blocking and sends no data — it only sets the
+    // kernel's idea of the destination for routing/getsockname purposes.
+    sock.connect(probe_target).ok()?;
+    match sock.local_addr().ok()? {
+        std::net::SocketAddr::V4(v4) => {
+            let ip = *v4.ip();
+            // Only use the probed result when it is itself a usable LAN address;
+            // if the kernel returns 0.0.0.0 (no route) or loopback, discard.
+            if ip.is_unspecified() || ip.is_loopback() {
+                None
+            } else {
+                Some(ip)
+            }
+        }
+        std::net::SocketAddr::V6(_) => None,
+    }
+}
+
 /// Pick the single LAN-routable host address to advertise to a peer, from an
 /// already-enumerated list of usable addresses.
 ///
-/// IPv4 is preferred over IPv6 because it is the cleanest cross-device /
-/// emulator case (link-local/zone-id handling for IPv6 is fragile across the
-/// pairing and dial paths). When `usable` is empty (no real LAN interface —
-/// e.g. an offline machine, a CI sandbox, or a single-host loopback test) the
-/// caller's loopback fallback is returned so same-host pairing still works.
+/// **Egress-interface preference (HW-B2 fix):** on multi-homed hosts the first
+/// enumerated IPv4 address is nondeterministic and may belong to a NIC that is
+/// unreachable from the peer's subnet. Instead we probe the OS routing table by
+/// connecting a no-op UDP socket to a public anycast target and reading
+/// `local_addr()` — this yields the IP the kernel would use for default-route
+/// traffic, which is the address most likely reachable by a LAN peer. If that
+/// probed IP appears in `usable`, it is preferred; otherwise we fall back to
+/// the first IPv4 in `usable`, then the first address of any family, then
+/// `fallback`.
+///
+/// IPv4 is still preferred over IPv6 in all paths because link-local/zone-id
+/// handling for IPv6 is fragile across the pairing and dial paths.
+///
+/// When `usable` is empty (no real LAN interface — e.g. an offline machine, a
+/// CI sandbox, or a single-host loopback test) the caller's loopback fallback
+/// is returned so same-host pairing still works.
 ///
 /// Split out as a pure function over an explicit address list so the selection
 /// policy can be unit-tested without a live NIC.
 pub fn pick_advertise_host(usable: &[IpAddr], fallback: IpAddr) -> IpAddr {
+    if usable.is_empty() {
+        return fallback;
+    }
+
+    // Probe the OS routing table: connected UDP socket → local_addr() reveals
+    // the source IP the kernel selects for default-route traffic (no data sent).
+    // Use 1.1.1.1:53 (Cloudflare anycast) as the probe target — any routable
+    // public IP works; the socket is UDP and never actually sends a packet.
+    let probe_target = std::net::SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), 53);
+    if let Some(egress_ip) = probe_default_route_source(probe_target) {
+        let egress = IpAddr::V4(egress_ip);
+        if usable.contains(&egress) {
+            debug!(egress_ip = %egress_ip, "pick_advertise_host: using probed default-route source IP");
+            return egress;
+        }
+        debug!(
+            egress_ip = %egress_ip,
+            "pick_advertise_host: probed IP not in usable list, falling back"
+        );
+    }
+
+    // Fallback: first IPv4 in usable, then first of any family.
     usable
         .iter()
         .find(|ip| ip.is_ipv4())

@@ -11,8 +11,12 @@ pub use version::{
 
 use copypaste_core::{
     build_item_aad, decrypt_from_cloud, decrypt_item_with_aad, derive_sync_key, detect,
-    encrypt_for_cloud, encrypt_item_with_aad, SyncKeyError, AAD_SCHEMA_VERSION, NONCE_SIZE,
+    encrypt_for_cloud, encrypt_item_with_aad, SyncKeyError, AAD_SCHEMA_VERSION,
+    ITEM_KEY_VERSION_CURRENT, NONCE_SIZE,
 };
+// Only used by the feature-gated `add_clipboard_item` live binding below.
+#[cfg(feature = "android-uniffi-live")]
+use copypaste_core::{build_item_aad_v2, AAD_SCHEMA_VERSION_V4};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use zeroize::Zeroizing;
@@ -174,12 +178,16 @@ const MIN_PASSPHRASE_LEN: usize = 8;
 ///     occur with the hardcoded constants; surfaces as a non-panic error).
 pub fn derive_cloud_sync_key(passphrase: String) -> Result<Vec<u8>, CopypasteError> {
     panic_boundary::catch_result(|| {
-        if passphrase.len() < MIN_PASSPHRASE_LEN {
+        // Guard on char count (Unicode scalar values), not byte length, to match
+        // copypaste_core::derive_sync_key which uses passphrase.chars().count().
+        // A byte-length guard would silently pass a 2-emoji passphrase (which is
+        // ≥8 bytes) while core rejects it as PassphraseTooShort.
+        let char_count = passphrase.chars().count();
+        if char_count < MIN_PASSPHRASE_LEN {
             return Err(CopypasteError::DecryptionFailed {
                 reason: format!(
-                    "passphrase too short: must be at least {MIN_PASSPHRASE_LEN} bytes \
-                     (got {})",
-                    passphrase.len()
+                    "passphrase too short: must be at least {MIN_PASSPHRASE_LEN} characters \
+                     (got {char_count})",
                 ),
             });
         }
@@ -188,9 +196,25 @@ pub fn derive_cloud_sync_key(passphrase: String) -> Result<Vec<u8>, CopypasteErr
             SyncKeyError::Argon2Params(msg) | SyncKeyError::Argon2Hash(msg) => {
                 CopypasteError::DecryptionFailed { reason: msg }
             }
-            // These variants should not arise from key derivation, but map
-            // them to EncryptionFailed rather than silently swallowing them.
-            _ => CopypasteError::EncryptionFailed,
+            // Core pre-checked length above, but handle PassphraseTooShort
+            // explicitly so the reason is never swallowed into EncryptionFailed.
+            SyncKeyError::PassphraseTooShort(n) => CopypasteError::DecryptionFailed {
+                reason: format!(
+                    "passphrase too short: must be at least {MIN_PASSPHRASE_LEN} characters \
+                     (got {n})",
+                ),
+            },
+            // These encryption/decryption variants should not arise from key
+            // derivation alone; surface them with a reason string.
+            SyncKeyError::EncryptFailed(msg) => CopypasteError::DecryptionFailed {
+                reason: format!("cloud encrypt failed during key derivation: {msg}"),
+            },
+            SyncKeyError::DecryptFailed => CopypasteError::DecryptionFailed {
+                reason: "cloud decrypt failed during key derivation".into(),
+            },
+            SyncKeyError::BlobTooShort(n) => CopypasteError::DecryptionFailed {
+                reason: format!("blob too short during key derivation: {n} bytes"),
+            },
         })?;
         Ok(key.as_bytes().to_vec())
     })
@@ -480,12 +504,33 @@ pub fn bootstrap_pair_initiator(
 
 /// Fixed, non-secret domain-separation salt for the P2P content sync key.
 ///
-/// MUST stay byte-for-byte identical to the macOS daemon's
-/// `ipc::Handler::derive_peer_sync_key_b64` constant — both sides derive the
-/// shared XChaCha20-Poly1305 content key from the same PAKE `SessionKey` via
-/// `SessionKey::derive_xchacha_key(P2P_SYNC_KEY_SALT)`, so a mismatch here
-/// would make every synced item undecryptable on the peer.
+/// **MUST stay byte-for-byte identical to the macOS daemon's constant.**
+/// Canonical location: `crates/copypaste-daemon/src/ipc.rs`, constant
+/// `PEER_SYNC_KEY_SALT` (search for `copypaste/p2p/content-sync-key/v1`).
+/// Both sides derive the shared XChaCha20-Poly1305 content key from the same
+/// PAKE `SessionKey` via `SessionKey::derive_xchacha_key(P2P_SYNC_KEY_SALT)`,
+/// so a mismatch here makes every synced item undecryptable on the peer.
+///
+/// If this value ever needs to change, update BOTH locations in lockstep and
+/// bump the P2P protocol version. A shared-crate constant is the correct long-
+/// term fix but requires a workspace restructure (out of scope for this patch).
 const P2P_SYNC_KEY_SALT: &[u8] = b"copypaste/p2p/content-sync-key/v1";
+
+/// Compile-time assertion that `P2P_SYNC_KEY_SALT` is non-empty.
+/// This catches accidental truncation to `b""` during a merge conflict.
+const _: () = assert!(
+    !P2P_SYNC_KEY_SALT.is_empty(),
+    "P2P_SYNC_KEY_SALT must not be empty — check daemon ipc.rs for the canonical value",
+);
+
+/// `key_version` stamped on outbound `WireItem`s during P2P sync.
+///
+/// Must match `ITEM_KEY_VERSION_CURRENT` in `copypaste-core` (currently 2).
+/// `WireItem::key_version` is `u8`; the cast is lossless because
+/// `ITEM_KEY_VERSION_CURRENT` is a small positive constant.
+/// Using this named constant instead of the literal `2` makes accidental drift
+/// visible at the use site and during code review.
+const P2P_WIRE_KEY_VERSION: u8 = ITEM_KEY_VERSION_CURRENT as u8;
 
 /// A local clipboard item (plaintext) offered to a peer during one sync session.
 ///
@@ -656,7 +701,7 @@ pub fn sync_with_peer(
                 origin_device_id: device_id.clone(),
                 // Sync-key-wrapped blobs are version-independent on the wire;
                 // the daemon stamps the same default for re-keyed items.
-                key_version: 2,
+                key_version: P2P_WIRE_KEY_VERSION,
             });
         }
 
@@ -850,10 +895,15 @@ fn with_cached_db<T>(
             })?;
         map.insert(cache_key.clone(), db);
     }
-    // Just inserted or already present → unwrap is safe.
+    // Just inserted or already present — but use ok_or instead of expect so a
+    // logic error here (e.g. if HashMap::insert was somehow rolled back by a
+    // reallocation failure) surfaces as a DatabaseError rather than unwinding
+    // across the JNI boundary and aborting the JVM.
     let db = map
         .get(&cache_key)
-        .expect("db just inserted/present in cache");
+        .ok_or_else(|| CopypasteError::DatabaseError {
+            reason: "cache miss after insert — this is a bug".into(),
+        })?;
     f(db)
 }
 
@@ -930,11 +980,21 @@ pub fn add_clipboard_item(
         }
 
         // v0.3: pre-generate item_id so the AAD baked into the ciphertext matches
-        // the value persisted in the row — decryption later rebuilds the AAD from
-        // the stored item_id (AAD_SCHEMA_VERSION = 3). Legacy empty-AAD fallback
-        // was removed in 1c55e57.
+        // the value persisted in the row.
+        //
+        // IMPORTANT: use build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, 2) —
+        // NOT the 2-arg build_item_aad(…, AAD_SCHEMA_VERSION=3). The item is
+        // stamped with key_version=ITEM_KEY_VERSION_CURRENT=2 by ClipboardItem::new_text,
+        // and the daemon decrypts key_version=2 rows with AAD "{item_id}|4|2"
+        // (build_item_aad_v2). Using the 2-arg form ("{item_id}|3") causes an
+        // auth-tag mismatch and makes every FFI-inserted item undecryptable on
+        // the daemon side.
         let item_id = uuid::Uuid::new_v4().to_string();
-        let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+        let aad = build_item_aad_v2(
+            &item_id,
+            AAD_SCHEMA_VERSION_V4,
+            ITEM_KEY_VERSION_CURRENT as u32,
+        );
         let (nonce, ciphertext) = encrypt_item_with_aad(text.as_bytes(), &key_arr, &aad)
             .map_err(|_| CopypasteError::EncryptionFailed)?;
 

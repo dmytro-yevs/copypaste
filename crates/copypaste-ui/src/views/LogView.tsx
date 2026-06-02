@@ -44,7 +44,9 @@ export function LogView() {
     a.href = url;
     a.download = "copypaste-daemon.log";
     a.click();
-    URL.revokeObjectURL(url);
+    // Defer revoke so the browser has time to start the download before the
+    // object URL is invalidated (immediate revoke can abort the download).
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, [content]);
 
   return (

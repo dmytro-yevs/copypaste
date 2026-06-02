@@ -289,18 +289,27 @@ impl ErrorReporter for SentryReporter {
     }
 }
 
-/// Build a reporter for the given consent level **without** initialising
-/// the Sentry SDK.
+/// Build a **no-op** reporter regardless of `consent`.
 ///
-/// Returns a boxed trait object so the caller can store it behind a single
-/// type regardless of the chosen backend. With [`ReportConsent::Disabled`]
-/// this returns a [`NoopReporter`] and performs zero I/O.
+/// # ⚠ Consent is not honoured — this function always returns a [`NoopReporter`]
 ///
-/// For any `Enabled*` consent value this still returns a [`NoopReporter`]
-/// because no DSN has been supplied. Use [`init_with_dsn`] (or construct a
-/// [`SentryReporter`] directly) to enable network reporting.
+/// Despite accepting a [`ReportConsent`] argument, `init` never initialises
+/// the Sentry SDK and never performs any network I/O, **even when called with
+/// [`ReportConsent::EnabledMinimal`] or [`ReportConsent::EnabledFull`]**. The
+/// consent value is accepted for API-stability only.
+///
+/// This is intentional while the telemetry crate remains unwired: no caller
+/// in the daemon, CLI, or UI routes errors through it, so there is no risk of
+/// accidental PII transmission. When real reporting is needed, use
+/// [`init_with_dsn`] (or construct a [`SentryReporter`] directly), which
+/// actually gates on `consent` and initialises the transport.
+///
+/// Returns a boxed [`NoopReporter`] that discards every event.
 pub fn init(consent: ReportConsent) -> Box<dyn ErrorReporter> {
-    let _ = consent; // future-proofing — variant may matter once minimal/full diverge
+    // Explicitly ignored: no DSN is available at this call site, so every
+    // consent level maps to a Noop. See the doc-comment above — callers that
+    // need real reporting MUST use init_with_dsn instead.
+    let _ = consent;
     Box::new(NoopReporter::new())
 }
 

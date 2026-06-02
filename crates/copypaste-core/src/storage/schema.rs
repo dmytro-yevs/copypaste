@@ -127,9 +127,7 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
     conn.execute_batch(&format!("PRAGMA cache_size=-{};", 8 * 1024))?;
 
-    let current_version: i64 = conn
-        .query_row("PRAGMA user_version", [], |r| r.get(0))
-        .unwrap_or(0);
+    let current_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
 
     if current_version == SCHEMA_VERSION {
         return Ok(());

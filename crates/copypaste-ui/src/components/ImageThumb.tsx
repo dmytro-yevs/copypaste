@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/ipc";
 
 // ---------------------------------------------------------------------------
@@ -13,6 +13,11 @@ import { api } from "../lib/ipc";
 
 const IMAGE_CACHE_MAX = 100;
 const imageCache = new Map<string, string | null>();
+
+// In-flight promise cache — prevents parallel duplicate fetches for the same
+// item id (e.g. popup + history both mount an ImageThumb for the same id).
+// Mirrors the pattern used in AppIcon.tsx.
+const inflight = new Map<string, Promise<string | null>>();
 
 function cacheGet(id: string): string | null | undefined {
   if (!imageCache.has(id)) return undefined;
@@ -36,6 +41,36 @@ function cacheSet(id: string, value: string | null): void {
 /** Drop all cached thumbnails (call when the user clears history). */
 export function clearImageCache(): void {
   imageCache.clear();
+  inflight.clear();
+}
+
+// ---------------------------------------------------------------------------
+// fetchImage — coalesces concurrent fetches for the same item id so that when
+// popup + history both mount an ImageThumb for the same id only one IPC call
+// is made. Mirrors AppIcon.tsx's fetchIcon pattern.
+// ---------------------------------------------------------------------------
+
+function fetchImage(id: string): Promise<string | null> {
+  // Resolved cache — fastest path.
+  const cached = cacheGet(id);
+  if (cached !== undefined) return Promise.resolve(cached);
+
+  // Coalesce in-flight fetches.
+  const existing = inflight.get(id);
+  if (existing) return existing;
+
+  const p = api
+    .getItemImage(id)
+    .then(({ data_uri }) => data_uri)
+    .catch(() => null as string | null)
+    .then((result) => {
+      cacheSet(id, result);
+      inflight.delete(id);
+      return result;
+    });
+
+  inflight.set(id, p);
+  return p;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +81,7 @@ export function clearImageCache(): void {
 //   • Never upscale: if the image is already smaller than the box, show at
 //     natural size (CSS: max-width / max-height, no min-* forcing).
 //   • CSS object-fit: contain; image-rendering: auto (high-quality downscale).
+//   • On fetch failure renders a small placeholder instead of null (blank row).
 // ---------------------------------------------------------------------------
 
 interface ImageThumbProps {
@@ -60,27 +96,86 @@ interface ImageThumbProps {
   className?: string;
 }
 
+// Sentinel distinct from null (= recorded miss) and undefined (= not cached).
+const FETCH_FAILED = "__failed__";
+
 export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
-  const cached = cacheGet(id);
-  const [src, setSrc] = useState<string | null>(cached ?? null);
+  // Seed state from the resolved cache synchronously to avoid flicker on
+  // re-mounts (same pattern as AppIcon).
+  const [src, setSrc] = useState<string | null | typeof FETCH_FAILED>(() => {
+    const cached = cacheGet(id);
+    return cached !== undefined ? cached : FETCH_FAILED;
+  });
+
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
-    // Skip if already in cache (hit or recorded miss).
-    if (cacheGet(id) !== undefined) return;
+    // If already resolved (hit or recorded miss), skip the fetch.
+    const cached = cacheGet(id);
+    if (cached !== undefined) {
+      setSrc(cached);
+      return;
+    }
 
-    api
-      .getItemImage(id)
-      .then(({ data_uri }) => {
-        cacheSet(id, data_uri);
-        setSrc(data_uri);
-      })
-      .catch(() => {
-        // Record miss so we don't retry on every render.
-        cacheSet(id, null);
-      });
+    // Reset to loading state while the fetch is in flight.
+    setSrc(null);
+
+    fetchImage(id).then((result) => {
+      if (!mountedRef.current) return;
+      // null from fetchImage means fetch failed — use sentinel so render shows
+      // placeholder instead of staying blank (null = "still loading" ambiguity).
+      setSrc(result ?? FETCH_FAILED);
+    });
   }, [id]);
 
-  if (!src) return null;
+  if (src === null) {
+    // Still loading — render nothing (avoids layout shift; row height is already
+    // reserved by the virtualizer).
+    return null;
+  }
+
+  if (src === FETCH_FAILED) {
+    // Fetch failed — render a small faint placeholder so the row isn't blank.
+    return (
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 48,
+          height: Math.min(maxHeight, 32),
+          borderRadius: 3,
+          background: "var(--ide-elevated)",
+          border: "1px solid var(--ide-divider)",
+          flexShrink: 0,
+        }}
+        aria-label="Image unavailable"
+        title="Image unavailable"
+      >
+        {/* Faint broken-image glyph */}
+        <svg
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ color: "var(--ide-faint)" }}
+          aria-hidden="true"
+        >
+          <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
+          <path d="m1.5 11 3.5-3.5 2 2 2-2 4.5 4" strokeDasharray="2 2" />
+          <line x1="10" y1="2.5" x2="10" y2="13.5" strokeDasharray="2 2" />
+        </svg>
+      </span>
+    );
+  }
 
   return (
     <img

@@ -12,6 +12,11 @@ import { AppIcon } from "../components/AppIcon";
 // quick-access surface, not a full history browser.
 const MAX_ITEMS = 50;
 
+// Brief delay (ms) before focusing the search input after the window is shown.
+// Needed because the native window activation and React render are not
+// synchronous — focusing too early silently no-ops on macOS.
+const FOCUS_DELAY_MS = 50;
+
 // Default text row height when previewSize hasn't been set yet.
 const DEFAULT_TEXT_ROW_H = 34;
 
@@ -128,8 +133,8 @@ export function Popup() {
     maskSensitive,
     previewSize = DEFAULT_TEXT_ROW_H,
     imageMaxHeight = 40,
-    playSoundOnCopy = false,
-    notifyOnCopy = false,
+    playSoundOnCopy = true,
+    notifyOnCopy = true,
     // M4: popup now has its own independent preview line count
     previewLinesPopup = 1,
   } = useUI((s) => s.prefs);
@@ -164,14 +169,19 @@ export function Popup() {
 
   // Refresh when the window gains focus (popup was shown).
   useEffect(() => {
+    // cancelled prevents a late-resolving unlisten promise or a stale focus
+    // event from executing after the component has unmounted / effect re-ran.
+    let cancelled = false;
     const unlisten = win.onFocusChanged(({ payload: focused }) => {
+      if (cancelled) return;
       if (focused) {
         setQuery("");
         refresh();
-        setTimeout(() => inputRef.current?.focus(), 50);
+        setTimeout(() => { if (!cancelled) inputRef.current?.focus(); }, FOCUS_DELAY_MS);
       }
     });
     return () => {
+      cancelled = true;
       unlisten.then((fn) => fn());
     };
   }, [win, refresh]);
@@ -179,7 +189,7 @@ export function Popup() {
   // Initial load.
   useEffect(() => {
     refresh();
-    setTimeout(() => inputRef.current?.focus(), 50);
+    setTimeout(() => inputRef.current?.focus(), FOCUS_DELAY_MS);
   }, [refresh]);
 
   // Visibility-gated polling: refresh items every ~3 seconds while the popup

@@ -82,7 +82,8 @@ function loadPrefs(): UIPrefs {
     // ──────────────────────────────────────────────────────────────────────
 
     return { ...DEFAULT_PREFS, ...parsed };
-  } catch {
+  } catch (err) {
+    console.warn("loadPrefs: failed to read localStorage, using defaults", err);
     return DEFAULT_PREFS;
   }
 }
@@ -90,8 +91,8 @@ function loadPrefs(): UIPrefs {
 function savePrefs(prefs: UIPrefs) {
   try {
     localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn("savePrefs: failed to write localStorage", err);
   }
 }
 

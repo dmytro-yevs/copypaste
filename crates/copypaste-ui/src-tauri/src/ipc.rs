@@ -42,6 +42,15 @@ fn socket_path() -> PathBuf {
     }
 }
 
+/// JSON-RPC request id sent by all UI→daemon calls.
+///
+/// The wire value is intentionally fixed (not a correlation counter) because
+/// each call opens a fresh short-lived connection and reads exactly one reply,
+/// so there is no in-flight multiplexing that would require unique ids. If
+/// per-call correlation is needed in the future, replace this with an atomic
+/// counter and format it as a string (e.g. `ui-{n}`).
+const IPC_REQUEST_ID: &str = "ui-1";
+
 /// Daemon reply, mirroring the wire shape so the frontend can branch on
 /// `ok` / `error_code` exactly like the daemon emits.
 #[derive(serde::Serialize)]
@@ -71,7 +80,7 @@ fn do_call(method: &str, params: Value) -> Result<IpcReply, String> {
         .set_read_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| format!("io_error:{e}"))?;
 
-    let req = serde_json::json!({ "id": "ui-1", "method": method, "params": params });
+    let req = serde_json::json!({ "id": IPC_REQUEST_ID, "method": method, "params": params });
     let mut line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
     line.push('\n');
     (&stream)
@@ -186,6 +195,12 @@ pub async fn pairing_qr_svg() -> Result<PairingQr, String> {
 
 /// Read the most recent daemon log file and return up to `max_lines` trailing
 /// lines. Returns an empty string if no log files are found.
+///
+/// **Note:** only the single most-recent log file (by filename, descending sort
+/// of `daemon.YYYY-MM-DD.log`) is read. Older rotated files are not included.
+/// If the daemon rolled over at midnight the tail of the previous day's log is
+/// not returned. This is intentional for simplicity; a future improvement could
+/// read across rotation boundaries when `max_lines` is not yet satisfied.
 #[tauri::command]
 pub async fn read_logs(max_lines: usize) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {

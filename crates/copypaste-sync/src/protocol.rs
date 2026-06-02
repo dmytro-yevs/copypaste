@@ -142,10 +142,24 @@ impl Message {
     /// Encode this message as a length-prefixed JSON frame.
     ///
     /// Format: `[u32 LE length][UTF-8 JSON bytes]`
+    ///
+    /// Returns an error if the serialised payload exceeds `u32::MAX` bytes
+    /// (≈ 4 GiB). Casting `json.len()` to `u32` without this guard would
+    /// silently truncate the length prefix and corrupt every downstream read.
     pub fn encode(&self) -> Result<Vec<u8>, serde_json::Error> {
         let json = serde_json::to_vec(self)?;
-        let len = json.len() as u32;
-        let mut buf = Vec::with_capacity(4 + json.len());
+        // Guard before casting: a payload larger than u32::MAX cannot be
+        // represented in the 4-byte length prefix; serialise a descriptive
+        // error rather than silently truncating the length.
+        let json_len = json.len();
+        if json_len > u32::MAX as usize {
+            return Err(serde_json::Error::io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("frame too large: {json_len} bytes exceeds u32::MAX"),
+            )));
+        }
+        let len = json_len as u32;
+        let mut buf = Vec::with_capacity(4 + json_len);
         buf.extend_from_slice(&len.to_le_bytes());
         buf.extend_from_slice(&json);
         Ok(buf)

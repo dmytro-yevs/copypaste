@@ -236,7 +236,11 @@ fn legacy_config_path() -> Option<std::path::PathBuf> {
 /// requires editing `daemon.rs` (out of scope for this agent) — the call site
 /// is the block immediately before `start_p2p` in `daemon::run`.
 pub fn p2p_enabled_from_config() -> bool {
-    read_config().p2p_enabled.unwrap_or(false)
+    // S2: default ON. A fresh install with no config.json must start P2P so the
+    // user can pair devices without having to toggle it on first. `Some(false)`
+    // is the explicit opt-out stored by the UI toggle; `None` (absent / new
+    // install) means "not yet set" → enable.
+    read_config().p2p_enabled.unwrap_or(true)
 }
 
 /// Load the IPC `AppConfig` (config.json) and overlay the limit fields from the
@@ -591,18 +595,77 @@ fn load_peers() -> anyhow::Result<Vec<serde_json::Value>> {
     Ok(filtered)
 }
 
-/// Persist peers list to peers.json, creating directories as needed.
+/// Persist peers list to peers.json atomically with mode 0600 from the first byte.
+///
+/// # Security
+///
+/// The local `save_peers` (distinct from `crate::peers::save_peers` which takes
+/// `&[PairedDevice]`) is used by the pairing/revocation handlers that work with
+/// raw `serde_json::Value` records (some carry legacy fields such as
+/// `password_file_b64` that are not part of `PairedDevice`). To avoid a
+/// world-readable window we replicate the atomic 0600 pattern from
+/// `crate::peers::save_peers`: write JSON to a temp file in the SAME directory
+/// (same filesystem → rename is atomic on POSIX), set mode 0600 before any bytes
+/// are written, then rename over the destination. A crash between write and rename
+/// leaves an invisible temp file that the next write will clean up.
 fn save_peers(peers: &[serde_json::Value]) -> anyhow::Result<()> {
+    use std::io::Write as _;
+
     let path = peers_file_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-        // Best-effort: tighten parent dir perms to user-only.
-        let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("peers path has no parent directory: {}", path.display()))?;
+    std::fs::create_dir_all(parent)?;
+    // Best-effort: tighten parent dir perms to user-only.
+    let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+
+    let json = serde_json::to_string_pretty(peers)?;
+
+    // Atomic 0600 write: uniquely-named temp file in the same directory so the
+    // final rename is guaranteed to be on the same filesystem (POSIX atomic).
+    let tmp = parent.join(format!(
+        ".peers.json.tmp.{}.{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+
+    let write_result = (|| -> std::io::Result<()> {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // Create with 0600 from the outset — the sync_key_b64 is never
+            // momentarily group/other-readable between create and chmod.
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&tmp)?;
+        // Defence-in-depth: re-assert 0600 in case a restrictive parent umask
+        // or a non-honouring filesystem ignored the create mode above.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        }
+        f.write_all(json.as_bytes())?;
+        f.flush()?;
+        f.sync_all()?;
+        Ok(())
+    })();
+
+    if let Err(e) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
     }
-    let data = serde_json::to_string_pretty(peers)?;
-    std::fs::write(&path, data)?;
-    // chmod 0600 — peer fingerprints are sensitive identifiers; never world-readable.
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.into());
+    }
+
     Ok(())
 }
 
@@ -1834,15 +1897,36 @@ impl IpcServer {
                             // request, matching Maccy-style recency ordering.
                             let db_arc2 = self.db.clone();
                             let item_id_bump = item.id.clone();
-                            let _ = tokio::task::spawn_blocking(move || {
+                            // P1: surface bump errors via tracing instead of
+                            // double-swallowing (let _ spawn + let _ inside).
+                            // Promote-on-copy is best-effort — a failure must
+                            // not abort the copy response — but silent failures
+                            // make it impossible to diagnose why items don't
+                            // reorder after being copied.
+                            match tokio::task::spawn_blocking(move || {
                                 let db = db_arc2.blocking_lock();
                                 let now_ms = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map(|d| d.as_millis() as i64)
                                     .unwrap_or(0);
-                                let _ = bump_item_recency(&db, &item_id_bump, now_ms, now_ms);
+                                bump_item_recency(&db, &item_id_bump, now_ms, now_ms)
                             })
-                            .await;
+                            .await
+                            {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => {
+                                    tracing::warn!(
+                                        id = %item.id,
+                                        "bump_item_recency failed: {e}"
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        id = %item.id,
+                                        "bump_item_recency task join error: {e}"
+                                    );
+                                }
+                            }
                             Response::ok(
                                 req.id,
                                 serde_json::json!({
@@ -2164,15 +2248,32 @@ impl IpcServer {
                             // request, matching Maccy-style recency ordering.
                             let db_arc2 = self.db.clone();
                             let item_id_bump = item.id.clone();
-                            let _ = tokio::task::spawn_blocking(move || {
+                            // P1: surface bump errors via tracing instead of
+                            // double-swallowing (let _ spawn + let _ inside).
+                            match tokio::task::spawn_blocking(move || {
                                 let db = db_arc2.blocking_lock();
                                 let now_ms = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map(|d| d.as_millis() as i64)
                                     .unwrap_or(0);
-                                let _ = bump_item_recency(&db, &item_id_bump, now_ms, now_ms);
+                                bump_item_recency(&db, &item_id_bump, now_ms, now_ms)
                             })
-                            .await;
+                            .await
+                            {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => {
+                                    tracing::warn!(
+                                        id = %item.id,
+                                        "bump_item_recency failed: {e}"
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        id = %item.id,
+                                        "bump_item_recency task join error: {e}"
+                                    );
+                                }
+                            }
                             Response::ok(
                                 req.id,
                                 serde_json::json!({

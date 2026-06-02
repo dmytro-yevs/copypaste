@@ -756,7 +756,15 @@ async fn push_loop(
     // Live core config for hot-reload of sync_on_wifi_only (A-SET-2).
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) {
-    let client = reqwest::Client::new();
+    // P1: set a per-request timeout so a stalled Supabase endpoint cannot hang
+    // this loop indefinitely. 30 s is generous for the REST operations here
+    // (single-row upserts / small batch reads) while still bounding worst-case
+    // latency to a recoverable window. Without a timeout reqwest's default is
+    // infinite, meaning one unresponsive endpoint blocks the whole push loop.
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
     let rest_url = format!("{}/rest/v1/clipboard_items", config.supabase_url);
     // Track whether we've already warned about a missing sync key so we don't
     // spam the log on every item in a burst.
@@ -786,6 +794,37 @@ async fn push_loop(
             guard.as_ref().map(|k| k.as_bytes().to_vec())
         };
         if let Some(ref key_bytes) = key_snapshot {
+            // P0: mark non-text unsynced rows as is_synced=1 so they are not
+            // re-queued on every startup. Cloud upload of image/file items is
+            // not implemented — decrypt_item_plaintext explicitly rejects them
+            // because the multi-chunk blob format requires a different encode
+            // path that push_loop does not have. Leaving them at is_synced=0
+            // causes them to appear in the unsynced-item count forever without
+            // ever being pushed. We warn once per row so operators know why
+            // images are absent from the cloud store.
+            {
+                let db_arc2 = db.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    let db = db_arc2.blocking_lock();
+                    match db.conn().execute(
+                        "UPDATE clipboard_items SET is_synced = 1 \
+                         WHERE is_synced = 0 AND content_type != 'text'",
+                        [],
+                    ) {
+                        Ok(0) => {}
+                        Ok(n) => tracing::warn!(
+                            "cloud-sync backlog: marked {n} non-text item(s) is_synced=1; \
+                             image/file cloud-upload is not yet implemented — \
+                             these items will not appear in the cloud store"
+                        ),
+                        Err(e) => tracing::warn!(
+                            "cloud-sync backlog: failed to mark non-text items synced: {e}"
+                        ),
+                    }
+                })
+                .await;
+            }
+
             let db_arc = db.clone();
             let local_key_clone = local_key.clone();
             let mut key_arr = [0u8; 32];
@@ -1569,7 +1608,12 @@ async fn realtime_loop(
     // set_config changes take effect without a daemon restart.
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) {
-    let client = reqwest::Client::new();
+    // P1: same 30 s timeout as push_loop — prevents a stalled endpoint from
+    // hanging the poll loop indefinitely.
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
     // Start at the fallback (full-speed) interval; the tick period is
     // updated dynamically before each sleep based on ws_connected.
     let mut interval = tokio::time::interval(POLL_INTERVAL_WS_FALLBACK);

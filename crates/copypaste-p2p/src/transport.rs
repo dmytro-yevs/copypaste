@@ -343,6 +343,11 @@ pub struct PeerTransport {
     own_fingerprint: DeviceFingerprint,
     /// Known paired peers.
     peers: Arc<PairedPeers>,
+    /// `ServerConfig`/`TlsAcceptor` built once and reused across all `accept()`
+    /// calls. Constructed lazily on the first call so construction errors are
+    /// still surfaced as `TransportError` rather than panics, while the hot
+    /// path (steady-state accept loop) never rebuilds the config.
+    cached_acceptor: std::sync::OnceLock<Arc<TlsAcceptor>>,
 }
 
 impl PeerTransport {
@@ -363,6 +368,7 @@ impl PeerTransport {
             own_key_der: key_der,
             own_fingerprint,
             peers: Arc::new(peers),
+            cached_acceptor: std::sync::OnceLock::new(),
         }
     }
 
@@ -384,8 +390,23 @@ impl PeerTransport {
         &self,
         listener: &TcpListener,
     ) -> Result<(SocketAddr, DeviceFingerprint, PeerStream), TransportError> {
-        let server_config = self.build_server_config()?;
-        let acceptor = TlsAcceptor::from(Arc::new(server_config));
+        // Build the TlsAcceptor exactly once across all accept() calls. The
+        // ServerConfig embeds a PeerCertVerifier that holds an Arc<PairedPeers>,
+        // so live peer-list updates (add/rotate/remove) are still reflected on
+        // every handshake — only the TLS config scaffolding is cached, not the
+        // peer set. Using OnceLock means no lock contention on the hot path.
+        let acceptor = match self.cached_acceptor.get() {
+            Some(a) => a.clone(),
+            None => {
+                // `OnceLock::get_or_try_init` is unstable, so build-then-`set`
+                // on the stable API. A concurrent first-accept may win the
+                // `set` race; either way we end up with a single cached value.
+                let server_config = self.build_server_config()?;
+                let built = Arc::new(TlsAcceptor::from(Arc::new(server_config)));
+                let _ = self.cached_acceptor.set(built.clone());
+                self.cached_acceptor.get().cloned().unwrap_or(built)
+            }
+        };
 
         let (tcp_stream, peer_addr) = listener.accept().await?;
         tracing::debug!(peer_addr = %peer_addr, "incoming TCP connection");

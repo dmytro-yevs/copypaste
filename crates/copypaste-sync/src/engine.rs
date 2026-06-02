@@ -45,10 +45,11 @@ const MAX_FRAME_SIZE: u32 = 16 * 1024 * 1024;
 /// larger than (10^6 devices × 10^6 writes each), so it accommodates any
 /// realistic scenario while still preventing a single hostile/buggy peer from
 /// jamming the local clock to u64::MAX (which would make that peer win every
-/// future LWW conflict forever). The wall_time is a Unix-ms timestamp; 10^15 ms
-/// is roughly 31 years in the future, a similarly generous but finite bound.
+/// future LWW conflict forever). The wall_time is a Unix-ms timestamp; 10^12 ms
+/// is roughly 31.7 years in the future (1 year ≈ 3.156 × 10^10 ms), a similarly
+/// generous but finite bound.
 pub const MAX_LAMPORT_SKEW: u64 = 1_000_000_000_000; // 10^12 ticks
-pub const MAX_WALL_TIME_SKEW_MS: i64 = 1_000_000_000_000_000_i64; // ~31 years in ms
+pub const MAX_WALL_TIME_SKEW_MS: i64 = 1_000_000_000_000_i64; // 10^12 ms ≈ 31.7 years
 
 /// Error type for sync operations.
 #[derive(Debug)]
@@ -359,10 +360,24 @@ impl SyncEngine {
         // cross-device `item_id` so an incoming wire item resolves against the
         // local row that represents the SAME logical item (its per-row `id`
         // differs across devices).
-        let local_by_item_id: HashMap<&str, &ClipboardItem> = local_items
-            .iter()
-            .map(|i| (i.item_id.as_str(), i))
-            .collect();
+        //
+        // Use max-lamport dedup instead of plain `.collect()`: if the same
+        // item_id appears more than once in local storage (e.g. a migration
+        // anomaly or a race), `.collect()` would silently keep whichever row
+        // happens to iterate last (undefined order), which could cause LWW to
+        // compare the wire item against a *stale* local row and wrongly replace
+        // a newer local version. The highest-lamport row is the authoritative
+        // local copy, mirroring the same pattern used for the peer HAVE list.
+        let mut local_by_item_id: HashMap<&str, &ClipboardItem> =
+            HashMap::with_capacity(local_items.len());
+        for item in local_items.iter() {
+            let entry = local_by_item_id
+                .entry(item.item_id.as_str())
+                .or_insert(item);
+            if item.lamport_ts > entry.lamport_ts {
+                *entry = item;
+            }
+        }
 
         let mut to_upsert: Vec<ClipboardItem> = Vec::new();
 
@@ -443,11 +458,19 @@ impl SyncEngine {
             return Err(SyncError::ProtocolViolation("expected DONE".to_string()));
         }
 
-        // Record peer's last known clock.
+        // Record the peer's last known clock.
+        //
+        // Use `self.clock.get()` (our clock AFTER the full item exchange and
+        // observe() calls) rather than the stale `peer_clock` value from the
+        // HELLO handshake. By the time DONE is exchanged our clock has been
+        // advanced by every item we observed from the peer, so it accurately
+        // reflects the highest timestamp either side has seen. Storing the raw
+        // HELLO value would understate the peer's effective clock and cause the
+        // next session to re-request items the peer already delivered.
         self.peer_clocks.insert(
             peer_device_id,
             PeerState {
-                last_clock: peer_clock,
+                last_clock: self.clock.get(),
             },
         );
 

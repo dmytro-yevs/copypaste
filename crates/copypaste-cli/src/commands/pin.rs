@@ -10,6 +10,7 @@
 //! separate `unpin` method on the daemon, so we must not send one.
 
 use anyhow::{anyhow, Result};
+use copypaste_ipc::METHOD_PIN_ITEM;
 use std::path::Path;
 
 use crate::commands::common::exit_on_err;
@@ -45,8 +46,8 @@ pub fn run_pin(socket_path: &Path, id: &str) -> Result<()> {
     validate_uuid(id)?;
     let mut client = IpcClient::connect(socket_path)?;
     let req = IpcClient::build_request(
-        "1",
-        "pin_item",
+        &IpcClient::next_id(),
+        METHOD_PIN_ITEM,
         serde_json::json!({"id": id, "pinned": true}),
     );
     let resp = client.call(&req)?;
@@ -60,8 +61,8 @@ pub fn run_unpin(socket_path: &Path, id: &str) -> Result<()> {
     validate_uuid(id)?;
     let mut client = IpcClient::connect(socket_path)?;
     let req = IpcClient::build_request(
-        "1",
-        "pin_item",
+        &IpcClient::next_id(),
+        METHOD_PIN_ITEM,
         serde_json::json!({"id": id, "pinned": false}),
     );
     let resp = client.call(&req)?;

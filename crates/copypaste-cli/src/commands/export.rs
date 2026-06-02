@@ -1,11 +1,16 @@
 use crate::ipc::IpcClient;
 use anyhow::{anyhow, Result};
+use copypaste_ipc::METHOD_EXPORT;
 use std::io::Write;
 use std::path::Path;
 
 pub fn run(socket_path: &Path, limit: u64, output: Option<&str>, force: bool) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = IpcClient::build_request("1", "export", serde_json::json!({"limit": limit}));
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_EXPORT,
+        serde_json::json!({"limit": limit}),
+    );
     let resp = client.call(&req)?;
 
     // If the daemon does not recognise the `export` method (older daemon or

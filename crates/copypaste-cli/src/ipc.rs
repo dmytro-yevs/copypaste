@@ -100,7 +100,11 @@ impl IpcClient {
     /// 2. A `version_mismatch` error code in the response is surfaced as a
     ///    clear, actionable error so the user knows to upgrade CLI or daemon.
     pub fn call(&mut self, request: &Value) -> Result<Response> {
-        let req_id = request["id"].as_str().unwrap_or("").to_string();
+        // Capture the id Value directly so we can compare it against the
+        // response id Value without losing type information. Using
+        // `.as_str().unwrap_or("")` would coerce a numeric id (e.g. `1`)
+        // to `""`, making both sides `""` and the mismatch guard always pass.
+        let req_id_value = request["id"].clone();
 
         // Write request line
         let mut line = serde_json::to_string(request)?;
@@ -140,14 +144,27 @@ impl IpcClient {
         // Guard: reject responses whose id doesn't echo the request id.
         // This catches framing desyncs where we read a stale response meant
         // for a previous request (or a rogue peer injecting traffic).
-        let resp_id = v["id"].as_str().unwrap_or("");
-        if resp_id != req_id {
+        //
+        // We compare the serde_json::Value directly so both string ids
+        // ("1") and numeric ids (1) round-trip correctly. Using `.as_str()`
+        // on a numeric JSON value returns None, which `.unwrap_or("")`
+        // silently collapses to "" on both sides — making the guard a no-op
+        // for any non-string id.
+        let resp_id_value = v["id"].clone();
+        if resp_id_value != req_id_value {
             return Err(anyhow!(
-                "response id mismatch: sent {:?}, got {:?}",
-                req_id,
-                resp_id
+                "response id mismatch: sent {}, got {}",
+                req_id_value,
+                resp_id_value
             ));
         }
+        // For the Response struct we still store a String. Prefer the string
+        // representation if the id is a JSON string; fall back to the JSON
+        // serialisation for numeric ids so callers always get something useful.
+        let resp_id_str = resp_id_value
+            .as_str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| resp_id_value.to_string());
 
         let error_code = v["error_code"].as_str().and_then(ErrorCode::parse);
 
@@ -164,7 +181,7 @@ impl IpcClient {
         }
 
         Ok(Response {
-            id: resp_id.to_string(),
+            id: resp_id_str,
             ok: v["ok"].as_bool().unwrap_or(false),
             data: if v["data"].is_null() {
                 None

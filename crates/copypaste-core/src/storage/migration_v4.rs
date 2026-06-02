@@ -507,7 +507,17 @@ fn rotate_one_image(
                 source: e,
             }
         })?;
-    let v2_blob = chunks_to_blob(&v2_chunks);
+    let v2_blob = chunks_to_blob(&v2_chunks).map_err(|e| {
+        // chunks_to_blob only errors with TooManyChunks; extract the inner ChunkError.
+        let source = match e {
+            crate::image::ImageError::Chunk(ce) => ce,
+            _ => crate::crypto::chunks::ChunkError::TooManyChunks,
+        };
+        MigrationV4Error::ImageChunkEncrypt {
+            id: row.id.clone(),
+            source,
+        }
+    })?;
 
     // Atomically swap to v2. The WHERE re-asserts key_version=1 so a concurrent
     // writer bumping the version can't be silently overwritten. `content_nonce`
@@ -731,7 +741,7 @@ mod tests {
         let file_id: [u8; 16] = *Uuid::new_v4().as_bytes();
 
         let chunks = encrypt_chunks(plaintext, v1_key, &file_id, chunk_size).unwrap();
-        let blob = chunks_to_blob(&chunks);
+        let blob = chunks_to_blob(&chunks).unwrap();
 
         // Mirror the JSON shape from daemon::handle_image: a `file_id` array
         // of 16 numbers (Rust `{:?}` debug-format of the byte array).

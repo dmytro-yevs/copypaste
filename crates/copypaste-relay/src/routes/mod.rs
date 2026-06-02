@@ -16,6 +16,9 @@ use tower_governor::GovernorLayer;
 
 use crate::api::metrics;
 use crate::config::RelayConfig;
+use crate::middleware::rate_limit::{
+    PER_DEVICE_BURST_SIZE, PER_DEVICE_PER_SECOND, PER_IP_BURST_SIZE, PER_IP_PER_SECOND,
+};
 use crate::state::AppState;
 
 /// `KeyExtractor` that pulls the `:device_id` segment out of paths shaped like
@@ -25,10 +28,11 @@ use crate::state::AppState;
 /// per-device bucket while a single attacker on many IPs got a fresh bucket
 /// per IP. Both directions of that error are now closed.
 ///
-/// Returns `UnableToExtractKey` (which `tower_governor` maps to a 500) if the
-/// URI does not look like a device-scoped item route; in practice that never
-/// happens because this extractor is only attached to the `item_routes`
-/// sub-router, but we fail closed rather than silently merging the bucket.
+/// Returns a `GovernorError::Other` with 400 BAD_REQUEST if the URI does not
+/// start with `/devices/`, or 404 NOT_FOUND if the device id segment is empty.
+/// In practice neither case arises because this extractor is only attached to
+/// the `item_routes` sub-router, but explicit error codes are returned so that
+/// misdirected requests produce actionable status codes rather than 500.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct DeviceIdKeyExtractor;
 
@@ -39,9 +43,13 @@ impl KeyExtractor for DeviceIdKeyExtractor {
         // Expected shape: "/devices/<id>/items" or "/devices/<id>/items/<item_id>".
         // No allocation in the happy path beyond the returned `String`.
         let path = req.uri().path();
+        // A path that doesn't start with "/devices/" is a client error (wrong
+        // route), not a server fault — return 400 rather than 500 so the caller
+        // gets an actionable status code and monitoring doesn't fire server-error
+        // alerts for misdirected requests.
         let rest = path.strip_prefix("/devices/").ok_or(GovernorError::Other {
-            code: StatusCode::INTERNAL_SERVER_ERROR,
-            msg: Some("device-rate-limited route without device id segment".into()),
+            code: StatusCode::BAD_REQUEST,
+            msg: Some("request path does not contain a device id segment".into()),
             headers: None,
         })?;
         let id = match rest.find('/') {
@@ -49,9 +57,12 @@ impl KeyExtractor for DeviceIdKeyExtractor {
             None => rest,
         };
         if id.is_empty() {
+            // Empty device id in a well-formed "/devices//" path — 404 because
+            // there is no device with an empty id, and the caller can determine
+            // what went wrong from the error message.
             return Err(GovernorError::Other {
-                code: StatusCode::INTERNAL_SERVER_ERROR,
-                msg: Some("empty device id in path".into()),
+                code: StatusCode::NOT_FOUND,
+                msg: Some("device id segment is empty".into()),
                 headers: None,
             });
         }
@@ -118,8 +129,8 @@ where
     // still shares this per-IP bucket.
     let per_ip_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(3)
-            .burst_size(60)
+            .per_second(PER_IP_PER_SECOND)
+            .burst_size(PER_IP_BURST_SIZE)
             .key_extractor(per_ip_key)
             .finish()
             .expect("invalid per-IP governor configuration"),
@@ -139,8 +150,8 @@ where
     // inside the handler), which the tower layer stack cannot do here.
     let per_device_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(1)
-            .burst_size(20)
+            .per_second(PER_DEVICE_PER_SECOND)
+            .burst_size(PER_DEVICE_BURST_SIZE)
             .key_extractor(DeviceIdKeyExtractor)
             .finish()
             .expect("invalid per-device governor configuration"),

@@ -1,6 +1,7 @@
 use crate::commands::common::format_unix_ms;
 use crate::ipc::IpcClient;
 use anyhow::{anyhow, bail, Result};
+use copypaste_ipc::{METHOD_COPY, METHOD_LIST, METHOD_SEARCH};
 use std::path::Path;
 
 /// Run the `copy` command.
@@ -112,8 +113,8 @@ pub fn cmd_copy_by_index(socket_path: &Path, n: u64, limit: u64) -> Result<()> {
 pub fn cmd_copy_by_search(socket_path: &Path, query: &str, limit: u64) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
     let req = IpcClient::build_request(
-        "1",
-        "search",
+        &IpcClient::next_id(),
+        METHOD_SEARCH,
         serde_json::json!({"query": query, "limit": limit}),
     );
     let resp = client.call(&req)?;
@@ -144,7 +145,11 @@ pub fn cmd_copy_by_search(socket_path: &Path, query: &str, limit: u64) -> Result
 /// Send `copy` IPC for a known UUID.
 pub fn cmd_copy_by_id(socket_path: &Path, id: &str) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
-    let req = IpcClient::build_request("1", "copy", serde_json::json!({"id": id}));
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_COPY,
+        serde_json::json!({"id": id}),
+    );
     let resp = client.call(&req)?;
 
     if resp.ok {
@@ -168,8 +173,8 @@ pub fn cmd_copy_by_id(socket_path: &Path, id: &str) -> Result<()> {
 pub fn fetch_history(socket_path: &Path, limit: u64) -> Result<Vec<serde_json::Value>> {
     let mut client = IpcClient::connect(socket_path)?;
     let req = IpcClient::build_request(
-        "1",
-        "list",
+        &IpcClient::next_id(),
+        METHOD_LIST,
         serde_json::json!({"limit": limit, "offset": 0}),
     );
     let resp = client.call(&req)?;

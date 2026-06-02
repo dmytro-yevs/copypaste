@@ -8,7 +8,7 @@ use copypaste_core::{
     build_item_aad_v2, bump_item_recency, chunks_to_blob, derive_v2, encode_image_with_limit,
     encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts,
     is_sensitive_for_autowipe, prune_to_cap, AppConfig, ClipboardItem, Database, DeviceKeypair,
-    AAD_SCHEMA_VERSION_V4,
+    AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -27,6 +27,14 @@ use std::time::Duration;
 /// abandoned thread may stay parked on the OS prompt; that is acceptable — it
 /// holds only a clone of nothing and is reaped when the process exits.
 const KEYCHAIN_READ_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// How often the sensitive-item TTL cleanup runs (milliseconds). Used in both
+/// the macOS and non-macOS monitor loops to avoid magic literals.
+const SENSITIVE_CLEANUP_INTERVAL_MS: u64 = 5_000;
+
+/// How often the general expires_at TTL cleanup runs (milliseconds).
+const GENERAL_CLEANUP_INTERVAL_MS: u64 = 60_000;
+
 use std::sync::RwLock;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio::time::interval;
@@ -738,32 +746,41 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                         .read()
                         .map(|g| g.clone())
                         .unwrap_or_else(|_| config.clone());
-                    let sensitive_ttl_ms = live_config.sensitive_ttl_secs as i64 * 1000;
+                    // P2: guard sensitive_ttl_secs == 0 → "disabled". When the
+                    // user sets ttl to 0 (no auto-wipe), sensitive_ttl_ms would be
+                    // 0, making threshold = now_ms - 0 = now_ms which deletes ALL
+                    // sensitive items on every tick. Skip the cleanup entirely when
+                    // ttl is 0 to honour the "disabled" intent.
+                    let sensitive_ttl_ms = if live_config.sensitive_ttl_secs == 0 {
+                        None
+                    } else {
+                        Some(live_config.sensitive_ttl_secs as i64 * 1000)
+                    };
                     handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
-                    // Sensitive item TTL: run every 5 seconds.
-                    // `5_000 / poll_interval_ms` is integer-divided; for any
-                    // `poll_interval_ms > 5000` the quotient is 0, which would
-                    // make this branch fire every tick. Clamp the threshold to
-                    // at least 1 so the cleanup runs (at most) every tick.
-                    let do_sensitive =
-                        sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)).max(1);
+                    // Sensitive item TTL: run every SENSITIVE_CLEANUP_INTERVAL_MS.
+                    // Integer-divide gives 0 when poll_interval > interval; clamp
+                    // to 1 so cleanup runs at most once per tick in that case.
+                    let do_sensitive = sensitive_ttl_ms.is_some()
+                        && sensitive_cleanup_ticks
+                            >= (SENSITIVE_CLEANUP_INTERVAL_MS
+                                / config.poll_interval_ms.max(1))
+                            .max(1);
                     if do_sensitive {
                         sensitive_cleanup_ticks = 0;
                     }
-                    // General expires_at TTL: run every 60 seconds. Same
-                    // integer-division clamp as above.
+                    // General expires_at TTL: run every GENERAL_CLEANUP_INTERVAL_MS.
                     let do_general =
-                        cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)).max(1);
+                        cleanup_ticks >= (GENERAL_CLEANUP_INTERVAL_MS / config.poll_interval_ms.max(1)).max(1);
                     if do_general {
                         cleanup_ticks = 0;
                     }
                     // daemon-core L1: the deletes are synchronous rusqlite. Run
                     // them on a blocking thread (like the IPC path) so the async
                     // executor is never blocked while the DB lock is held.
-                    run_ttl_cleanup(&db, sensitive_ttl_ms, do_sensitive, do_general).await;
+                    run_ttl_cleanup(&db, sensitive_ttl_ms.unwrap_or(0), do_sensitive, do_general).await;
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down");
@@ -799,25 +816,32 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                         .read()
                         .map(|g| g.clone())
                         .unwrap_or_else(|_| config.clone());
-                    let sensitive_ttl_ms = live_config.sensitive_ttl_secs as i64 * 1000;
+                    let sensitive_ttl_ms = if live_config.sensitive_ttl_secs == 0 {
+                        None
+                    } else {
+                        Some(live_config.sensitive_ttl_secs as i64 * 1000)
+                    };
                     handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
-                    // Sensitive item TTL: run every 5 seconds.
-                    let do_sensitive =
-                        sensitive_cleanup_ticks >= (5_000 / config.poll_interval_ms.max(1)).max(1);
+                    // Sensitive item TTL: run every SENSITIVE_CLEANUP_INTERVAL_MS.
+                    let do_sensitive = sensitive_ttl_ms.is_some()
+                        && sensitive_cleanup_ticks
+                            >= (SENSITIVE_CLEANUP_INTERVAL_MS
+                                / config.poll_interval_ms.max(1))
+                            .max(1);
                     if do_sensitive {
                         sensitive_cleanup_ticks = 0;
                     }
-                    // General expires_at TTL: run every 60 seconds.
+                    // General expires_at TTL: run every GENERAL_CLEANUP_INTERVAL_MS.
                     let do_general =
-                        cleanup_ticks >= (60_000 / config.poll_interval_ms.max(1)).max(1);
+                        cleanup_ticks >= (GENERAL_CLEANUP_INTERVAL_MS / config.poll_interval_ms.max(1)).max(1);
                     if do_general {
                         cleanup_ticks = 0;
                     }
                     // daemon-core L1: offload the synchronous rusqlite deletes.
-                    run_ttl_cleanup(&db, sensitive_ttl_ms, do_sensitive, do_general).await;
+                    run_ttl_cleanup(&db, sensitive_ttl_ms.unwrap_or(0), do_sensitive, do_general).await;
                 }
                 _ = tokio::signal::ctrl_c() => {
                     tracing::info!("SIGINT received, shutting down");
@@ -1111,17 +1135,31 @@ async fn handle_tick(
                 #[cfg(target_os = "macos")]
                 if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() {
                     if config.sound_on_copy {
-                        let _ = std::process::Command::new("afplay")
+                        // P1: reap the child in a detached thread so the capture
+                        // path is never blocked and no zombie process accumulates
+                        // (dropping a Child without wait() leaves a zombie entry
+                        // in the process table until the daemon exits).
+                        if let Ok(mut child) = std::process::Command::new("afplay")
                             .arg("/System/Library/Sounds/Tink.aiff")
-                            .spawn();
+                            .spawn()
+                        {
+                            std::thread::spawn(move || {
+                                let _ = child.wait();
+                            });
+                        }
                     }
                     if config.notify_on_copy {
-                        let _ = std::process::Command::new("osascript")
+                        if let Ok(mut child) = std::process::Command::new("osascript")
                             .args([
                                 "-e",
                                 r#"display notification "Text item copied" with title "CopyPaste""#,
                             ])
-                            .spawn();
+                            .spawn()
+                        {
+                            std::thread::spawn(move || {
+                                let _ = child.wait();
+                            });
+                        }
                     }
                 }
             }
@@ -1141,17 +1179,25 @@ async fn handle_tick(
                 #[cfg(target_os = "macos")]
                 if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() {
                     if config.sound_on_copy {
-                        let _ = std::process::Command::new("afplay")
+                        if let Ok(mut child) = std::process::Command::new("afplay")
                             .arg("/System/Library/Sounds/Tink.aiff")
-                            .spawn();
+                            .spawn()
+                        {
+                            std::thread::spawn(move || {
+                                let _ = child.wait();
+                            });
+                        }
                     }
                     if config.notify_on_copy {
-                        let _ = std::process::Command::new("osascript")
+                        if let Ok(mut child) = std::process::Command::new("osascript")
                             .args([
                                 "-e",
                                 r#"display notification "Image item copied" with title "CopyPaste""#,
                             ])
-                            .spawn();
+                            .spawn()
+                        {
+                            std::thread::spawn(move || { let _ = child.wait(); });
+                        }
                     }
                 }
             }
@@ -1202,11 +1248,16 @@ fn encrypt_text_for_storage(
     encrypt_item_with_aad(plaintext, &v2_key, &aad)
 }
 
-/// `key_version` stamped into newly-inserted rows, mirrored from
-/// `copypaste_core::storage::items::ITEM_KEY_VERSION_CURRENT` (= 2). Pinned as
-/// a `u32` here because `build_item_aad_v2` binds the key version into the AAD
-/// as a `u32` and the read path uses the literal `2`.
-const ITEM_KEY_VERSION_CURRENT_U32: u32 = 2;
+/// `key_version` stamped into newly-inserted rows, cast from the canonical
+/// `copypaste_core::ITEM_KEY_VERSION_CURRENT` (i64) to `u32` as required by
+/// `build_item_aad_v2`. A compile-time assertion keeps them in sync.
+const ITEM_KEY_VERSION_CURRENT_U32: u32 = ITEM_KEY_VERSION_CURRENT as u32;
+// Compile-time guard: if core ever bumps ITEM_KEY_VERSION_CURRENT the cast
+// above silently changes too, but this assert documents the expected value.
+const _: () = assert!(
+    ITEM_KEY_VERSION_CURRENT == 2,
+    "ITEM_KEY_VERSION_CURRENT changed — review encrypt_text_for_storage AAD"
+);
 
 async fn handle_text(
     text: String,
@@ -1435,7 +1486,13 @@ async fn handle_image(
             config.max_decoded_image_mb,
         ) {
             Ok((meta, chunks)) => {
-                let blob = chunks_to_blob(&chunks);
+                let blob = match chunks_to_blob(&chunks) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::error!(error = %e, "chunks_to_blob failed; dropping image");
+                        return None;
+                    }
+                };
                 let meta_json = format!(
                     r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
                     meta.width, meta.height, meta.original_size, meta.chunk_count, meta.file_id

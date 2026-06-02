@@ -56,6 +56,18 @@ pub const DEFAULT_PULL_LIMIT: usize = 200;
 /// Hard ceiling on a caller-supplied `limit`; larger values are clamped down.
 pub const MAX_PULL_LIMIT: usize = 500;
 
+/// Per-request byte-budget cap for `pull_items`.
+///
+/// Bounds the total bytes of `content_b64` cloned while the global store
+/// mutex is held. Without this, a caller supplying `limit=500` against an
+/// inbox full of 10 MiB items could force up to 5 GiB of cloning under the
+/// lock, stalling every concurrent request (authenticated DoS). Expressed as
+/// total base64-encoded bytes; items are accumulated in order and collection
+/// stops once the running total would exceed this threshold. A legitimate
+/// sync client fetching normal clipboard items (≤1 MiB each) hits this
+/// limit only after >100 text items, well above typical usage.
+pub const MAX_PULL_BYTES_BUDGET: usize = 128 * 1024 * 1024; // 128 MiB
+
 /// Per-device registration-rate-limit window (security MEDIUM #13).
 pub const REG_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 /// Maximum registration attempts allowed per device_id within `REG_LIMIT_WINDOW`.
@@ -632,9 +644,18 @@ impl RelayStore {
             RelayError::Internal("sync id counter exhausted".into())
         })?;
 
+        // Fail closed on clock error: a stored inserted_at=0 would be treated as
+        // epoch and pruned immediately by prune_expired (cutoff = now - ttl > 0),
+        // silently losing every pushed item. Mirror verify_token: clock errors
+        // return Internal rather than storing a bogus timestamp.
         let inserted_at_unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
+            .map_err(|_| {
+                tracing::error!(
+                    "host clock is before UNIX_EPOCH; refusing to store item with inserted_at=0"
+                );
+                RelayError::Internal("server clock error; cannot record item insertion time".into())
+            })?
             .as_secs();
 
         let inbox = self.sync_items.entry(device_id.to_string()).or_default();
@@ -739,16 +760,26 @@ impl RelayStore {
             None => inbox.partition_point(|item| item.wall_time <= since),
         };
 
-        let result: Vec<PullItem> = inbox[start..]
-            .iter()
-            .take(limit)
-            .map(|item| PullItem {
+        // Collect at most `limit` items but also enforce a byte-budget cap
+        // (MAX_PULL_BYTES_BUDGET) on the total content_b64 bytes cloned under
+        // the global mutex. Without this an authenticated caller with
+        // limit=MAX_PULL_LIMIT items × up to 10 MiB each could force ~5 GiB
+        // of cloning while holding the lock, stalling all other requests (DoS).
+        let mut budget_remaining = MAX_PULL_BYTES_BUDGET;
+        let mut result = Vec::new();
+        for item in inbox[start..].iter().take(limit) {
+            let item_bytes = item.content_b64.len();
+            if item_bytes > budget_remaining {
+                break;
+            }
+            budget_remaining -= item_bytes;
+            result.push(PullItem {
                 id: item.id,
                 content_type: item.content_type.clone(),
                 content_b64: item.content_b64.clone(),
                 wall_time: item.wall_time,
-            })
-            .collect();
+            });
+        }
 
         Ok(result)
     }

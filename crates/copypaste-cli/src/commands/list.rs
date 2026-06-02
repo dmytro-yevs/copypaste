@@ -1,13 +1,14 @@
 use crate::commands::common::{exit_on_err, format_unix_ms};
 use crate::ipc::IpcClient;
 use anyhow::Result;
+use copypaste_ipc::METHOD_LIST;
 use std::path::Path;
 
 pub fn run(socket_path: &Path, limit: u64, offset: u64) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
     let req = IpcClient::build_request(
-        "1",
-        "list",
+        &IpcClient::next_id(),
+        METHOD_LIST,
         serde_json::json!({"limit": limit, "offset": offset}),
     );
     let resp = client.call(&req)?;

@@ -437,10 +437,12 @@ fn peer_from_resolved(resolved: &ResolvedService) -> Option<PeerInfo> {
     let device_name = resolved.get_property_val_str(TXT_DEVICE_NAME)?.to_string();
 
     // Collect all addresses, deduplicated and sorted for determinism.
+    // Unknown ScopedIp variants return None and are filtered out so 0.0.0.0
+    // is never placed into the dial list.
     let mut ip_addrs: Vec<IpAddr> = resolved
         .get_addresses()
         .iter()
-        .map(scoped_ip_to_ip_addr)
+        .filter_map(scoped_ip_to_ip_addr)
         .collect();
     ip_addrs.sort_unstable_by_key(|a| (a.is_ipv6(), a.to_string()));
     ip_addrs.dedup();
@@ -453,11 +455,6 @@ fn peer_from_resolved(resolved: &ResolvedService) -> Option<PeerInfo> {
     })
 }
 
-/// Convert a [`ScopedIp`] to a standard [`IpAddr`].
-///
-/// `ScopedIp` is `#[non_exhaustive]`; the wildcard arm handles any future
-/// variants by falling back to the IPv4 unspecified address so callers
-/// can safely filter it out if needed.
 /// Decision for whether a resolved peer should be inserted into `known_peers`.
 #[derive(Debug, PartialEq, Eq)]
 enum PeerAdmission {
@@ -495,17 +492,28 @@ fn address_set_key(addrs: &[IpAddr]) -> String {
     sorted.join(",")
 }
 
-fn scoped_ip_to_ip_addr(scoped: &ScopedIp) -> IpAddr {
+/// Convert a [`ScopedIp`] to a standard [`IpAddr`].
+///
+/// Returns `None` for unknown `ScopedIp` variants (the type is
+/// `#[non_exhaustive]`) so callers filter them out rather than dialling
+/// `0.0.0.0`, which would be an unreachable and security-confusing address.
+fn scoped_ip_to_ip_addr(scoped: &ScopedIp) -> Option<IpAddr> {
     match scoped {
-        ScopedIp::V4(v4) => IpAddr::V4(*v4.addr()),
-        ScopedIp::V6(v6) => IpAddr::V6(*v6.addr()),
-        // Safety net for any future ScopedIp variants.
-        &_ => IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+        ScopedIp::V4(v4) => Some(IpAddr::V4(*v4.addr())),
+        ScopedIp::V6(v6) => Some(IpAddr::V6(*v6.addr())),
+        // `ScopedIp` is #[non_exhaustive]; unknown future variants are dropped
+        // rather than substituted with 0.0.0.0, which would be dialled.
+        &_ => None,
     }
 }
 
 /// Replace characters that are invalid in mDNS labels with hyphens and
 /// trim leading/trailing hyphens.
+///
+/// If the result is empty (e.g. the device name consists entirely of
+/// non-alphanumeric characters such as `"!!!"`) a hardcoded fallback label
+/// `"copypaste"` is substituted so `ServiceInfo` is never constructed with an
+/// invalid `".{id}"` label that would cause `mdns-sd` to reject registration.
 fn sanitize_label(s: &str) -> String {
     let sanitized: String = s
         .chars()
@@ -517,7 +525,12 @@ fn sanitize_label(s: &str) -> String {
             }
         })
         .collect();
-    sanitized.trim_matches('-').to_string()
+    let trimmed = sanitized.trim_matches('-');
+    if trimmed.is_empty() {
+        "copypaste".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -545,13 +558,15 @@ mod tests {
 
     #[test]
     fn sanitize_label_empty_input() {
-        assert_eq!(sanitize_label(""), "");
+        // Empty input → empty after trim → fallback label returned.
+        assert_eq!(sanitize_label(""), "copypaste");
     }
 
     #[test]
-    fn sanitize_label_pure_special_chars_becomes_empty() {
-        // All specials → hyphens → trimmed → empty
-        assert_eq!(sanitize_label("!!!"), "");
+    fn sanitize_label_pure_special_chars_becomes_fallback() {
+        // All specials → hyphens → trimmed → empty → fallback label.
+        // ServiceInfo must never be created with an empty label (invalid mDNS).
+        assert_eq!(sanitize_label("!!!"), "copypaste");
     }
 
     // ── PeerInfo helpers ─────────────────────────────────────────────────────

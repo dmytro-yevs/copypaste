@@ -19,12 +19,35 @@
 //! `imported: <inserted> skipped: <skipped>` on success.
 
 use anyhow::{anyhow, Context, Result};
+use copypaste_ipc::METHOD_IMPORT;
 use std::path::Path;
 
 use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 
+/// Maximum import file size accepted before reading into memory.
+///
+/// A 64 MiB cap prevents an accidental (or malicious) multi-GB file from
+/// OOM-ing the CLI process. Legitimate export files are bounded by the
+/// daemon's own in-memory list limit, so this cap should never be hit in
+/// normal usage.
+const MAX_IMPORT_FILE_BYTES: u64 = 64 * 1024 * 1024; // 64 MiB
+
 pub fn run(socket_path: &Path, file: &str) -> Result<()> {
+    // Pre-check file size before reading into memory.  read_to_string would
+    // allocate the full file contents up-front; without this guard a multi-GB
+    // file could exhaust the process's virtual address space.
+    let file_size = std::fs::metadata(file)
+        .with_context(|| format!("failed to stat import file: {file}"))?
+        .len();
+    if file_size > MAX_IMPORT_FILE_BYTES {
+        return Err(anyhow!(
+            "import file is too large ({} bytes > {} byte limit): {file}",
+            file_size,
+            MAX_IMPORT_FILE_BYTES
+        ));
+    }
+
     let content = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read import file: {file}"))?;
     let data: serde_json::Value = serde_json::from_str(&content)
@@ -45,7 +68,11 @@ pub fn run(socket_path: &Path, file: &str) -> Result<()> {
     }
 
     let mut client = IpcClient::connect(socket_path)?;
-    let req = IpcClient::build_request("1", "import", serde_json::json!({ "items": items }));
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_IMPORT,
+        serde_json::json!({ "items": items }),
+    );
     let resp = client.call(&req)?;
     exit_on_err(&resp);
 
@@ -61,8 +88,37 @@ pub fn run(socket_path: &Path, file: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn run_signature_compiles() {
         let _: fn(&Path, &str) -> Result<()> = run;
+    }
+
+    /// A file larger than MAX_IMPORT_FILE_BYTES must be rejected before
+    /// read_to_string so we never allocate the full content in memory.
+    /// We create a sparse file (via set_len) so the test stays fast.
+    #[test]
+    fn oversized_file_is_rejected_before_read() {
+        use std::fs::OpenOptions;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.json");
+
+        // Create a sparse file just over the cap without writing all the bytes.
+        let f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(&path)
+            .unwrap();
+        f.set_len(MAX_IMPORT_FILE_BYTES + 1).unwrap();
+        drop(f);
+
+        let sock = dir.path().join("dummy.sock"); // doesn't need to exist
+        let err = run(&sock, path.to_str().unwrap()).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("too large"),
+            "expected 'too large' error, got: {msg}"
+        );
     }
 }

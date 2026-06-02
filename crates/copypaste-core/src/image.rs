@@ -261,8 +261,8 @@ pub fn encode_image_with_limit(
     // ceil(MAX_IMAGE_BYTES / 512 KiB) = 20, so it always fits in a u32.
     // Use try_from + expect to make the invariant explicit and catch any
     // future refactor that widens the gate.
-    let chunk_count = u32::try_from(chunks.len())
-        .expect("chunk count must fit in u32: provably bounded by upstream raw-byte gate");
+    let chunk_count =
+        u32::try_from(chunks.len()).map_err(|_| ImageError::Chunk(ChunkError::TooManyChunks))?;
 
     let meta = ImageMeta {
         width,
@@ -291,19 +291,22 @@ pub fn decode_image(
 /// Serialize chunks to a flat byte blob for SQLite BLOB storage.
 ///
 /// Format: `[chunk_count: u32 BE] [chunk_0_wire] [chunk_1_wire] ...`
-pub fn chunks_to_blob(chunks: &[EncryptedChunk]) -> Vec<u8> {
+///
+/// Returns `Err(ImageError::Chunk(ChunkError::TooManyChunks))` if the slice
+/// is somehow longer than `u32::MAX` (cannot happen via `encrypt_chunks` which
+/// enforces the same bound, but avoids a panic on a direct call with an
+/// oversized slice).
+pub fn chunks_to_blob(chunks: &[EncryptedChunk]) -> Result<Vec<u8>, ImageError> {
     let mut out = Vec::new();
-    // [LOW] chunks.len() is provably ≤ ceil(MAX_IMAGE_BYTES / IMAGE_CHUNK_SIZE) ≤ 20,
-    // so it always fits in u32. Use try_from+expect to make the invariant explicit.
-    let count = u32::try_from(chunks.len())
-        .expect("chunk count must fit in u32: provably bounded by upstream raw-byte gate");
+    let count =
+        u32::try_from(chunks.len()).map_err(|_| ImageError::Chunk(ChunkError::TooManyChunks))?;
     out.extend_from_slice(&count.to_be_bytes());
     for chunk in chunks {
         let wire = chunk.to_wire();
         out.extend_from_slice(&(wire.len() as u32).to_be_bytes());
         out.extend_from_slice(&wire);
     }
-    out
+    Ok(out)
 }
 
 /// Deserialize chunks from the SQLite BLOB format produced by `chunks_to_blob`.
@@ -519,7 +522,7 @@ mod tests {
         let chunks = encrypt_chunks(data, &key, &file_id, 10).unwrap();
         assert!(chunks.len() > 1);
 
-        let blob = chunks_to_blob(&chunks);
+        let blob = chunks_to_blob(&chunks).unwrap();
         let recovered_chunks = chunks_from_blob(&blob).unwrap();
         assert_eq!(recovered_chunks.len(), chunks.len());
 
@@ -535,7 +538,7 @@ mod tests {
         let chunks = encrypt_chunks(data, &key, &file_id, 64 * 1024).unwrap();
         assert_eq!(chunks.len(), 1);
 
-        let blob = chunks_to_blob(&chunks);
+        let blob = chunks_to_blob(&chunks).unwrap();
         let recovered = chunks_from_blob(&blob).unwrap();
         let plaintext = decrypt_chunks(&recovered, &key, &file_id).unwrap();
         assert_eq!(plaintext, data);
@@ -546,7 +549,7 @@ mod tests {
         let key = test_key();
         let file_id = test_file_id();
         let chunks = encrypt_chunks(b"test", &key, &file_id, 64 * 1024).unwrap();
-        let blob = chunks_to_blob(&chunks);
+        let blob = chunks_to_blob(&chunks).unwrap();
         // Truncate to just the count field
         let truncated = &blob[..4];
         let err = chunks_from_blob(truncated).unwrap_err();
@@ -575,7 +578,7 @@ mod tests {
         let file_id = test_file_id();
         let chunks = encrypt_chunks(b"hi", &key, &file_id, 64 * 1024).unwrap();
         assert_eq!(chunks.len(), 1);
-        let mut blob = chunks_to_blob(&chunks);
+        let mut blob = chunks_to_blob(&chunks).unwrap();
         blob[0..4].copy_from_slice(&u32::MAX.to_be_bytes());
         // Reading the (single) real chunk succeeds, then the second iteration
         // hits the wire-length bounds check and errors — no huge allocation.

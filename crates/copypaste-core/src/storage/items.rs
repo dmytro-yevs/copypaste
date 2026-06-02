@@ -976,9 +976,23 @@ fn sanitize_fts5_query(raw: &str) -> Option<String> {
         return Some(trimmed.to_string());
     }
 
-    // Multi-word input: split into tokens, join with AND, suffix-prefix the last token.
-    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
-    // tokens is non-empty because trimmed is non-empty.
+    // Multi-word input: split into tokens, strip FTS5 reserved keywords
+    // (NOT, OR, AND, NEAR) case-insensitively so a query like "secret NOT test"
+    // degrades to a valid MATCH instead of an FTS5 operator-syntax error.
+    let tokens: Vec<&str> = trimmed
+        .split_whitespace()
+        .filter(|t| {
+            !matches!(
+                t.to_ascii_uppercase().as_str(),
+                "NOT" | "OR" | "AND" | "NEAR"
+            )
+        })
+        .collect();
+    // All tokens may have been stripped (e.g. query was "NOT AND") — return None
+    // so the caller returns empty results rather than panicking on len()-1.
+    if tokens.is_empty() {
+        return None;
+    }
     let last_idx = tokens.len() - 1;
     let parts: Vec<String> = tokens
         .iter()

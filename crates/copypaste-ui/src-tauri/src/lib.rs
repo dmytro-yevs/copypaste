@@ -122,6 +122,11 @@ struct PrivateModeMenuItem(Mutex<Option<tauri::menu::CheckMenuItem<tauri::Wry>>>
 /// The `Option` is `None` until `setup_tray` runs.
 struct RecentSubmenu(Mutex<Option<tauri::menu::Submenu<tauri::Wry>>>);
 
+/// Stop flag for `spawn_tray_recent_resync`. Set to `true` in `RunEvent::Exit`
+/// so the background polling loop exits cleanly instead of holding the
+/// `AppHandle` forever and blocking teardown.
+struct TrayResyncStop(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
 // ---------------------------------------------------------------------------
 // Tauri entry point
 // ---------------------------------------------------------------------------
@@ -141,6 +146,10 @@ pub fn run() {
         // Recent-resync: placeholder populated by setup_tray; background poller
         // rebuilds the submenu once the daemon responds and then periodically.
         .manage(RecentSubmenu(Mutex::new(None)))
+        // Stop flag for the recent-resync background thread; set on app exit.
+        .manage(TrayResyncStop(std::sync::Arc::new(
+            std::sync::atomic::AtomicBool::new(false),
+        )))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -239,6 +248,12 @@ pub fn run() {
             // `setup_main_window`) and never reaches Exit, so the daemon
             // correctly survives a window close (standard macOS pattern).
             if let tauri::RunEvent::Exit = event {
+                // Signal the recent-resync background thread to exit before we
+                // tear down the daemon, so it doesn't make IPC calls against a
+                // dead socket during teardown.
+                if let Some(stop) = handle.try_state::<TrayResyncStop>() {
+                    stop.0.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
                 daemon_lifecycle::stop_daemon(handle);
             }
         });
@@ -281,8 +296,15 @@ fn set_popup_shortcut(
         guard.clone()
     };
 
-    // Unregister the old shortcut (best-effort; ignore errors if it wasn't registered).
-    let _ = handle.global_shortcut().unregister(old.as_str());
+    // Unregister the old shortcut (best-effort). Log a warning when this fails
+    // so a ghost shortcut registration doesn't go unnoticed.
+    if let Err(e) = handle.global_shortcut().unregister(old.as_str()) {
+        tracing::warn!(
+            "set_popup_shortcut: failed to unregister old shortcut '{}': {e} \
+             (ghost registration possible — old hotkey may still be active)",
+            old
+        );
+    }
 
     // Fix #2: attempt to register via the plugin.  On macOS, OS-reserved or
     // shift+alt combos (e.g. Alt+Shift+Q which produces "Œ") may fail here.
@@ -1021,7 +1043,7 @@ fn setup_popup_window(app: &tauri::App) -> tauri::Result<()> {
     } else {
         WebviewWindowBuilder::new(app, "popup", WebviewUrl::App("popup.html".into()))
             .title("CopyPaste Quick Paste")
-            .inner_size(420.0, 520.0)
+            .inner_size(POPUP_W_LOGICAL, POPUP_H_LOGICAL)
             .decorations(false)
             .transparent(true)
             .always_on_top(true)
@@ -1236,8 +1258,24 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                 other if other.starts_with("recent:") && other != "recent:none" => {
                     let item_id = &other["recent:".len()..];
                     let result = ipc::call("copy_item", serde_json::json!({ "id": item_id }));
-                    if let Err(e) = result {
-                        tracing::warn!("copy_item IPC error: {e}");
+                    match &result {
+                        Ok(reply) if reply.ok => {
+                            // Mirror the sound/notification that row-click copy fires so
+                            // tray copies are consistent with the "always sound on copy"
+                            // promise (audit finding P1 / M12 parity).
+                            play_copy_sound();
+                            let preview = reply
+                                .data
+                                .as_ref()
+                                .and_then(|d| d["preview"].as_str())
+                                .unwrap_or("")
+                                .to_owned();
+                            show_copy_notification(preview);
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!("copy_item IPC error: {e}");
+                        }
                     }
                 }
                 _ => {}
@@ -1451,8 +1489,16 @@ fn rebuild_recent_submenu(
 /// The refresh is intentionally cheap: 10-item `history_page` call, only runs
 /// while the app is alive, stops after `GIVE_UP_AFTER` of daemon silence.
 fn spawn_tray_recent_resync(handle: tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
     use std::thread;
     use std::time::{Duration, Instant};
+
+    // Grab the stop flag from managed state so the RunEvent::Exit handler can
+    // signal this thread to exit cleanly without holding the AppHandle.
+    let stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool> = handle
+        .try_state::<TrayResyncStop>()
+        .map(|s| std::sync::Arc::clone(&s.0))
+        .unwrap_or_else(|| std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
 
     thread::spawn(move || {
         /// How long to wait between refreshes once the daemon is up.
@@ -1465,6 +1511,9 @@ fn spawn_tray_recent_resync(handle: tauri::AppHandle) {
         // Phase 1: wait for the daemon to become ready.
         let deadline = Instant::now() + GIVE_UP_AFTER;
         loop {
+            if stop_flag.load(Ordering::Relaxed) {
+                return;
+            }
             if Instant::now() >= deadline {
                 tracing::warn!("tray Recent re-sync: daemon not ready after 30 s — giving up");
                 return;
@@ -1484,8 +1533,11 @@ fn spawn_tray_recent_resync(handle: tauri::AppHandle) {
             thread::sleep(POLL_INTERVAL);
         }
 
-        // Phase 2: rebuild now and then periodically.
+        // Phase 2: rebuild now and then periodically; exit when stop flag is set.
         loop {
+            if stop_flag.load(Ordering::Relaxed) {
+                return;
+            }
             if let Err(e) = rebuild_recent_submenu(&handle) {
                 tracing::warn!("tray Recent re-sync: rebuild failed: {e}");
             }

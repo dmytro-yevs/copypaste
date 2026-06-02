@@ -145,7 +145,19 @@ impl SensitiveDetector {
     /// candidates with the value-strength check to avoid prose false positives.
     pub fn is_sensitive(&self, text: &str) -> bool {
         let normalised = nfkc_normalize(text);
-        let matches: Vec<usize> = pattern_set().matches(&normalised).into_iter().collect();
+        let ps = pattern_set();
+        // Guard: if the RegexSet degraded to empty (all patterns failed to
+        // compile), the fast-path would silently return false for every input.
+        // Log an error and fall back to the full per-pattern detect() path so
+        // sensitive content is still caught.
+        if ps.len() == 0 {
+            tracing::error!(
+                "sensitive pattern_set is empty (regex compile failure); \
+                 falling back to full detect() path"
+            );
+            return !self.detect_normalised(&normalised).is_empty();
+        }
+        let matches: Vec<usize> = ps.matches(&normalised).into_iter().collect();
         if matches.is_empty() {
             return false;
         }

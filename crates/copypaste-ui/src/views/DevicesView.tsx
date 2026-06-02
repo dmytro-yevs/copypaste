@@ -223,6 +223,9 @@ export function DevicesView() {
   // --- Own device info ---
   const [ownState, setOwnState] = useState<OwnDeviceState>({ status: "loading" });
   const [copied, setCopied] = useState(false);
+  // Ref that always holds the latest own fingerprint so loadPeers (a useCallback)
+  // can read the current value without closing over a stale ownState snapshot.
+  const ownFpRef = useRef<string | null>(null);
 
   // --- Paired peers ---
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -243,22 +246,35 @@ export function DevicesView() {
   // A5 blur logic: QR starts blurred; first click reveals it, second click
   // regenerates (stays visible — no re-blur after first reveal).
   const [qrRevealed, setQrRevealed] = useState(false);
+  // Inflight guard: prevents two concurrent generateQr calls (e.g. auto-refresh
+  // tick racing a manual click) from both issuing a pairingQrSvg() request and
+  // wasting single-use tokens. Unmount flag doubles as a cancelled guard.
+  const qrInflightRef = useRef(false);
+  const qrCancelledRef = useRef(false);
 
   const generateQr = useCallback(async () => {
+    // Drop duplicate concurrent calls — only one generation runs at a time.
+    if (qrInflightRef.current) return;
+    qrInflightRef.current = true;
     setQrState({ status: "loading" });
     qrStateRef.current = { status: "loading" };
     setQrSecsLeft(null);
     try {
       const qr = await pairingQrSvg();
+      // Don't update state if the component unmounted while we awaited.
+      if (qrCancelledRef.current) return;
       const next: QrState = { status: "ready", qr, generatedAt: Date.now() };
       setQrState(next);
       qrStateRef.current = next;
       setQrSecsLeft(qr.expires_in_secs > 0 ? qr.expires_in_secs : QR_TTL_SECS);
     } catch (err) {
+      if (qrCancelledRef.current) return;
       const message = err instanceof Error ? err.message : "Failed to generate pairing code";
       const next: QrState = { status: "error", message };
       setQrState(next);
       qrStateRef.current = next;
+    } finally {
+      qrInflightRef.current = false;
     }
   }, []);
 
@@ -277,7 +293,12 @@ export function DevicesView() {
     setOwnState({ status: "loading" });
     api.getOwnDeviceInfo().then(
       (info) => {
-        if (!cancelled) setOwnState({ status: "ready", info });
+        if (!cancelled) {
+          // Keep the ref in sync so loadPeers always reads the latest fingerprint
+          // without closing over a stale ownState snapshot.
+          ownFpRef.current = info.fingerprint ?? null;
+          setOwnState({ status: "ready", info });
+        }
       },
       (err: unknown) => {
         if (cancelled) return;
@@ -296,6 +317,7 @@ export function DevicesView() {
 
   // Auto-generate QR on mount, auto-refresh before expiry.
   useEffect(() => {
+    qrCancelledRef.current = false;
     void generateQr();
 
     // Tick every second: update the countdown and trigger a refresh
@@ -316,10 +338,13 @@ export function DevicesView() {
       }
     }, 1000);
 
-    return () => clearInterval(interval);
+    return () => {
+      // Signal any in-flight pairingQrSvg() call not to setState after unmount.
+      qrCancelledRef.current = true;
+      clearInterval(interval);
+    };
   // generateQr is stable (useCallback with no deps), so this only runs once.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [generateQr]);
 
   // --- Load peers ---
   const loadPeers = useCallback(async () => {
@@ -333,8 +358,9 @@ export function DevicesView() {
         seen.add(p.fingerprint);
         return true;
       });
-      const ownFp =
-        ownState.status === "ready" ? ownState.info.fingerprint : null;
+      // Read from ref so we always use the latest fingerprint even if ownState
+      // hasn't re-rendered yet — avoids the stale-closure bug (P1 audit finding).
+      const ownFp = ownFpRef.current;
       // Don't show this device in the peers list.
       const filteredPeers = deduped.filter(
         (p) => ownFp === null || p.fingerprint !== ownFp
@@ -371,11 +397,21 @@ export function DevicesView() {
         setLoadState("error");
       }
     }
-  }, [ownState]);
+  // ownFpRef is a ref — reading it inside the callback is always current.
+  // No dep on ownState avoids a stale-closure re-creation on every render.
+  }, []);
 
   useEffect(() => {
     void loadPeers();
   }, [loadPeers]);
+
+  // Unmount guard for handleUnpair / handleRevoke — prevents setState after
+  // the component unmounts if the user navigates away mid-request (P2 finding).
+  const peerActionCancelledRef = useRef(false);
+  useEffect(() => {
+    peerActionCancelledRef.current = false;
+    return () => { peerActionCancelledRef.current = true; };
+  }, []);
 
   // --- Row helpers ---
   const setRowPending = (fingerprint: string, pending: boolean) => {
@@ -404,8 +440,10 @@ export function DevicesView() {
     setRowPending(fingerprint, true);
     try {
       await api.unpairPeer(fingerprint);
+      if (peerActionCancelledRef.current) return;
       await loadPeers();
     } catch (err) {
+      if (peerActionCancelledRef.current) return;
       const msg = err instanceof IpcError ? err.message : "Unpair failed";
       setRowError(fingerprint, msg);
     }
@@ -415,12 +453,14 @@ export function DevicesView() {
     setRowPending(fingerprint, true);
     try {
       const { revoked_at } = await api.revokePeer(fingerprint);
+      if (peerActionCancelledRef.current) return;
       setRowState((prev) => ({
         ...prev,
         [fingerprint]: { revokedAt: revoked_at, pending: false, error: null },
       }));
       await loadPeers();
     } catch (err) {
+      if (peerActionCancelledRef.current) return;
       const msg = err instanceof IpcError ? err.message : "Revoke failed";
       setRowError(fingerprint, msg);
     }
@@ -570,12 +610,6 @@ export function DevicesView() {
     );
   }
 
-  // --- Already-paired indicator for QR panel ---
-  // If the user shows a QR code but they already have paired devices, surface a
-  // note. The daemon will reject a duplicate-fingerprint scan with an error, but
-  // surfacing this proactively avoids confusion on the displaying side.
-  const alreadyPairedCount = peers.length;
-
   return (
     <ViewShell title="Devices" actions={actions}>
       {/* ── Devices section header ──────────────────────────────── */}
@@ -640,19 +674,6 @@ export function DevicesView() {
       </p>
 
       <section className="rounded-ide-lg border border-ide-border bg-ide-elevated p-4 space-y-3 shadow-ide-sm">
-        {/* Already-paired warning: shown when QR is visible and peers exist.
-            A device scanning this QR that is already paired will be rejected by
-            the daemon ("peer already paired") — surface the context proactively. */}
-        {qrState.status === "ready" && alreadyPairedCount > 0 && (
-          <div className="flex items-start gap-2 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2">
-            <span className="text-[11px] text-ide-warning">
-              {alreadyPairedCount === 1
-                ? "1 device is already paired. Scanning this code from an already-paired device will have no effect."
-                : `${alreadyPairedCount} devices are already paired. Scanning from an already-paired device will have no effect.`}
-            </span>
-          </div>
-        )}
-
         {qrState.status === "loading" && (
           <p className="text-[12px] text-ide-dim animate-pulse">Generating…</p>
         )}

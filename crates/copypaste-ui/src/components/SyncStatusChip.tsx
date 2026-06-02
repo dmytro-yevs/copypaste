@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, formatWallTime } from "../lib/ipc";
 import type { SyncStatus, PairedDevice } from "../lib/ipc";
 
@@ -95,13 +95,19 @@ export function SyncStatusChip() {
   // cancelRef prevents setState after unmount when the poll fires mid-flight.
   const cancelRef = useRef(false);
 
-  const refresh = async () => {
+  // Stable callback — useCallback ensures the effect dep array sees a constant
+  // reference, so the interval is set up exactly once while the component is
+  // mounted. cancelRef is a ref, so it doesn't need to be listed as a dep.
+  const refresh = useCallback(async () => {
     // Fetch sync status and peer list concurrently; each fails independently.
     const [syncResult, peersResult] = await Promise.allSettled([
       api.getSyncStatus(),
       api.listPeers(),
     ]);
 
+    // Guard against setting state after the component has unmounted or after
+    // the effect has been torn down and re-run (e.g. React StrictMode double
+    // invoke). cancelRef is reset to false at the top of each effect run.
     if (cancelRef.current) return;
 
     // If the sync-status call itself failed → daemon is offline.
@@ -122,7 +128,7 @@ export function SyncStatusChip() {
       lastSyncMs,
       email: sync.email ?? null,
     });
-  };
+  }, []); // no external deps — api is module-level stable, setInfo is stable
 
   useEffect(() => {
     cancelRef.current = false;
@@ -133,9 +139,7 @@ export function SyncStatusChip() {
       cancelRef.current = true;
       clearInterval(id);
     };
-  // refresh is a stable closure defined outside the effect; no deps required.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refresh]); // refresh is stable (useCallback with no deps) → runs once
 
   const tooltip = buildTooltip(info);
 

@@ -9,6 +9,76 @@
 
 use serde::{Deserialize, Serialize};
 
+// ── Core clipboard methods ──────────────────────────────────────────────────
+
+/// Fetch a paginated list of clipboard items.
+pub const METHOD_LIST: &str = "list";
+
+/// Full-text search over clipboard items.
+pub const METHOD_SEARCH: &str = "search";
+
+/// Copy a clipboard item back to the system clipboard by id.
+pub const METHOD_COPY: &str = "copy";
+
+/// Delete a single clipboard item by id.
+pub const METHOD_DELETE: &str = "delete";
+
+/// Delete all clipboard items (clear history).
+pub const METHOD_DELETE_ALL: &str = "delete_all";
+
+/// Return the total count of stored clipboard items.
+pub const METHOD_COUNT: &str = "count";
+
+/// Return aggregate statistics about the clipboard database.
+pub const METHOD_STATS: &str = "stats";
+
+// ── Daemon health ───────────────────────────────────────────────────────────
+
+/// Query the running daemon's health / readiness state.
+pub const METHOD_STATUS: &str = "status";
+
+// ── Import / export ─────────────────────────────────────────────────────────
+
+/// Export clipboard items as a JSON blob.
+pub const METHOD_EXPORT: &str = "export";
+
+/// Bulk-import clipboard items from a JSON blob.
+pub const METHOD_IMPORT: &str = "import";
+
+// ── Pinning ─────────────────────────────────────────────────────────────────
+
+/// Pin or unpin a clipboard item (takes `{id, pinned: bool}`).
+pub const METHOD_PIN_ITEM: &str = "pin_item";
+
+// ── Private / pause mode ────────────────────────────────────────────────────
+
+/// Enable or disable clipboard recording pause mode.
+pub const METHOD_SET_PRIVATE_MODE: &str = "set_private_mode";
+
+/// Query the current private-mode state.
+pub const METHOD_GET_PRIVATE_MODE: &str = "get_private_mode";
+
+// ── Cloud sync ──────────────────────────────────────────────────────────────
+
+/// Read the current daemon configuration object.
+pub const METHOD_GET_CONFIG: &str = "get_config";
+
+/// Write / merge a partial daemon configuration object.
+pub const METHOD_SET_CONFIG: &str = "set_config";
+
+/// Query the current cloud-sync state.
+pub const METHOD_GET_SYNC_STATUS: &str = "get_sync_status";
+
+/// Run a live connection diagnostic against the configured cloud backend.
+pub const METHOD_CLOUD_TEST_CONNECTION: &str = "cloud_test_connection";
+
+// ── Pairing ─────────────────────────────────────────────────────────────────
+
+/// Generate a short-lived QR pairing payload.
+pub const METHOD_PAIR_GENERATE_QR: &str = "pair_generate_qr";
+
+// ── Database maintenance ────────────────────────────────────────────────────
+
 /// Method name for the destructive "reset database" recovery operation.
 ///
 /// This wipes `clipboard.db` (and its `-wal` / `-shm` siblings) and recreates a

@@ -193,8 +193,13 @@ pub fn pattern_set() -> &'static RegexSet {
     // to an empty `RegexSet` (detection simply matches nothing) rather than
     // panicking on the hot clipboard-scan path.
     PATTERN_SET.get_or_init(|| {
-        RegexSet::new(RAW_PATTERNS.iter().map(|(_, p, _, _)| *p))
-            .unwrap_or_else(|_| RegexSet::empty())
+        RegexSet::new(RAW_PATTERNS.iter().map(|(_, p, _, _)| *p)).unwrap_or_else(|e| {
+            tracing::error!(
+                error = %e,
+                "sensitive RegexSet failed to compile; detection degraded to empty set"
+            );
+            RegexSet::empty()
+        })
     })
 }
 

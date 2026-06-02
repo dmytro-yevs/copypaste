@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
@@ -839,7 +839,20 @@ function VirtualList({
           to where the visible window starts. */}
       <div style={{ height: totalH, position: "relative" }}>
         <div style={{ position: "absolute", top: padTop, left: 0, right: 0 }}>
-          {visible.map((entry) => renderRow(entry))}
+          {/* Wrap each row in a keyed fragment so React tracks identity by item
+              id across the sliding virtual window — not by position within the
+              visible slice, which changes on every scroll. The renderRow callback
+              also sets key on HistoryRow (belt-and-suspenders), but the key here
+              at the map() call site is what React actually uses for reconciliation. */}
+          {visible.map((entry) => (
+            // React.Fragment with an explicit key is the correct way to place a
+            // stable key at the map() call site while delegating the actual
+            // element to renderRow. This ensures React reconciles by item id
+            // across the sliding virtual window, not by position in the slice.
+            <React.Fragment key={entry.id}>
+              {renderRow(entry)}
+            </React.Fragment>
+          ))}
         </div>
       </div>
     </div>
@@ -980,13 +993,25 @@ export function HistoryView() {
 
   // Auto-refresh while the window is visible; backed off when the daemon is
   // unreachable so we don't hammer a dead daemon at full rate.
+  //
+  // loadState is intentionally read via a ref rather than being a dep: adding it
+  // to the dep array would restart (and therefore double-fire) the effect on every
+  // state-recovery transition (e.g. "offline" → "ready"), causing a duplicate
+  // silent load immediately after the one that just recovered.
+  const loadStateRef = useRef<LoadState>(loadState);
+  useEffect(() => {
+    loadStateRef.current = loadState;
+  });
+
   useEffect(() => {
     const ACTIVE_MS = 1200;
     const BACKOFF_MS = 5000;
     let timer: ReturnType<typeof setInterval> | null = null;
 
     const intervalFor = () =>
-      loadState === "offline" || loadState === "error" ? BACKOFF_MS : ACTIVE_MS;
+      loadStateRef.current === "offline" || loadStateRef.current === "error"
+        ? BACKOFF_MS
+        : ACTIVE_MS;
 
     const stop = () => {
       if (timer !== null) {
@@ -1015,7 +1040,7 @@ export function HistoryView() {
       stop();
       document.removeEventListener("visibilitychange", sync);
     };
-  }, [load, loadState]);
+  }, [load]);
 
   // -------------------------------------------------------------------------
   // Filtered list
@@ -1094,68 +1119,8 @@ export function HistoryView() {
     isKeyboardNavRef.current = false;
   }, [selectedIdx, filtered, previewSize, imageMaxHeight]);
 
-  const handleKeyDown = useCallback(
-    async (e: React.KeyboardEvent<HTMLDivElement>) => {
-      // Escape always clears multi-selection (or single selection if in selection mode).
-      if (e.key === "Escape") {
-        e.preventDefault();
-        if (selectionMode) {
-          clearSelection();
-        } else {
-          setSelectedId(null);
-        }
-        return;
-      }
-
-      // Cmd+A (or Ctrl+A on non-Mac) selects all when focused on the list.
-      if ((e.metaKey || e.ctrlKey) && e.key === "a") {
-        e.preventDefault();
-        selectAll();
-        return;
-      }
-
-      if (filtered.length === 0) return;
-
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        isKeyboardNavRef.current = true;
-        const next = Math.min(selectedIdx + 1, filtered.length - 1);
-        setSelectedId(filtered[next].id);
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        isKeyboardNavRef.current = true;
-        const prev = Math.max(selectedIdx - 1, 0);
-        setSelectedId(filtered[prev].id);
-      } else if (e.key === "Enter" && selectedId !== null) {
-        e.preventDefault();
-        try {
-          await api.copyItem(selectedId);
-          void load(true);
-        } catch (err) {
-          const msg = err instanceof IpcError ? err.message : "Copy failed";
-          showToast(msg, "error");
-        }
-      } else if ((e.key === "Backspace" || e.key === "Delete") && selectedId !== null) {
-        e.preventDefault();
-        try {
-          await api.deleteItem(selectedId);
-          // Select the next item after deletion.
-          const newIdx = Math.min(selectedIdx, filtered.length - 2);
-          setSelectedId(newIdx >= 0 ? (filtered[newIdx]?.id ?? null) : null);
-          void load(true);
-        } catch (err) {
-          const msg = err instanceof IpcError ? err.message : "Delete failed";
-          showToast(msg, "error");
-        }
-      }
-    },
-    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, load, showToast]
-  );
-
-  // -------------------------------------------------------------------------
-  // Single-item actions (existing per-row behavior)
-  // -------------------------------------------------------------------------
-
+  // Defined before handleKeyDown so the Enter-key path can route copies through
+  // it (sound/notification fire on success via the same prefs as row-click copy).
   const handleCopy = useCallback(
     async (id: string) => {
       try {
@@ -1204,6 +1169,64 @@ export function HistoryView() {
     },
     [items, load, playSoundOnCopy, notifyOnCopy, showToast]
   );
+
+  const handleKeyDown = useCallback(
+    async (e: React.KeyboardEvent<HTMLDivElement>) => {
+      // Escape always clears multi-selection (or single selection if in selection mode).
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (selectionMode) {
+          clearSelection();
+        } else {
+          setSelectedId(null);
+        }
+        return;
+      }
+
+      // Cmd+A (or Ctrl+A on non-Mac) selects all when focused on the list.
+      if ((e.metaKey || e.ctrlKey) && e.key === "a") {
+        e.preventDefault();
+        selectAll();
+        return;
+      }
+
+      if (filtered.length === 0) return;
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        isKeyboardNavRef.current = true;
+        const next = Math.min(selectedIdx + 1, filtered.length - 1);
+        setSelectedId(filtered[next].id);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        isKeyboardNavRef.current = true;
+        const prev = Math.max(selectedIdx - 1, 0);
+        setSelectedId(filtered[prev].id);
+      } else if (e.key === "Enter" && selectedId !== null) {
+        e.preventDefault();
+        // Route through handleCopy so sound/notification fire on success
+        // using the same playSoundOnCopy/notifyOnCopy gates as row-click copy.
+        await handleCopy(selectedId);
+      } else if ((e.key === "Backspace" || e.key === "Delete") && selectedId !== null) {
+        e.preventDefault();
+        try {
+          await api.deleteItem(selectedId);
+          // Select the next item after deletion.
+          const newIdx = Math.min(selectedIdx, filtered.length - 2);
+          setSelectedId(newIdx >= 0 ? (filtered[newIdx]?.id ?? null) : null);
+          void load(true);
+        } catch (err) {
+          const msg = err instanceof IpcError ? err.message : "Delete failed";
+          showToast(msg, "error");
+        }
+      }
+    },
+    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, load, showToast, handleCopy]
+  );
+
+  // -------------------------------------------------------------------------
+  // Single-item actions (existing per-row behavior)
+  // -------------------------------------------------------------------------
 
   const handlePin = useCallback(
     async (id: string, currentlyPinned: boolean) => {
@@ -1390,13 +1413,24 @@ export function HistoryView() {
 
       clearSelection();
       void load(true);
+      // Fire sound / notification on successful bulk copy — same gates as row-click.
+      if (playSoundOnCopy) {
+        void playCopySound();
+      }
+      if (notifyOnCopy) {
+        const firstItem = selectedItems[0];
+        const preview = firstItem
+          ? firstItem.preview.replace(/\s+/g, " ").trim().slice(0, 60) || "Copied"
+          : "Copied";
+        void showCopyNotification(preview);
+      }
       showToast(`Copied ${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`, "success");
     } finally {
       // Always release the busy flag — even if clearSelection/load throws,
       // so the bulk action bar is never permanently disabled (V-13).
       setBulkBusy(false);
     }
-  }, [bulkBusy, multiSelectedIds, filtered, clearSelection, load, showToast]);
+  }, [bulkBusy, multiSelectedIds, filtered, clearSelection, load, showToast, playSoundOnCopy, notifyOnCopy]);
 
 
   // Destructive database reset — the recovery escape hatch when the daemon is

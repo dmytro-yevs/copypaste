@@ -25,8 +25,20 @@ pub fn format_unix_ms(ms: i64) -> String {
     format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, mo, d, h, mi, ss)
 }
 
+/// Epoch-ms value corresponding to 9999-12-31 23:59:59 UTC.
+///
+/// Any wall_time beyond this is almost certainly a bug (clock skew, overflow,
+/// corrupted data). We clamp to this sentinel so `days_to_ymd` can never loop
+/// for more than ~8 000 iterations instead of potentially looping for billions
+/// of years on a near-i64::MAX value.
+const MAX_VALID_MS: i64 = 253_402_300_799_000; // 9999-12-31 23:59:59 UTC in ms
+
 fn days_to_ymd(days: u64) -> (u64, u64, u64) {
-    let mut remaining = days;
+    // Hard upper bound: anything past year 9999 is treated as 9999-12-31.
+    // Without this guard a near-u64::MAX `days` value would spin the loop
+    // below for an astronomically long time and hang the process.
+    const MAX_DAYS: u64 = MAX_VALID_MS as u64 / 1000 / 86_400; // ~2_932_896
+    let mut remaining = days.min(MAX_DAYS);
     let mut year = 1970u64;
     loop {
         let diy = if is_leap(year) { 366 } else { 365 };
@@ -210,5 +222,28 @@ mod tests {
         assert_eq!(&s[10..11], " ");
         assert_eq!(&s[13..14], ":");
         assert_eq!(&s[16..17], ":");
+    }
+
+    /// A near-i64::MAX wall_time must not hang the process by spinning
+    /// `days_to_ymd` for billions of years. The upper-bound clamp must
+    /// return quickly with a well-formed date string (not necessarily
+    /// accurate, but structured).
+    #[test]
+    fn format_unix_ms_near_max_does_not_hang() {
+        // Use i64::MAX — far beyond any real timestamp.
+        let s = format_unix_ms(i64::MAX);
+        // Must be a well-formed date string, not an em dash.
+        assert_eq!(s.len(), 19, "expected YYYY-MM-DD HH:MM:SS, got: {s}");
+        assert_eq!(&s[4..5], "-");
+        assert_eq!(&s[7..8], "-");
+        assert_eq!(&s[10..11], " ");
+    }
+
+    /// MAX_VALID_MS itself should format without panicking and produce a
+    /// year-9999 date (the sentinel cap).
+    #[test]
+    fn format_unix_ms_at_max_valid_ms() {
+        let s = format_unix_ms(MAX_VALID_MS);
+        assert!(s.starts_with("9999-"), "expected year 9999, got: {s}");
     }
 }

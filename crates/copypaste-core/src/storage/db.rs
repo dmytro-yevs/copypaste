@@ -557,17 +557,30 @@ impl Database {
         // Step 6: re-open under the new key. Mirrors the happy-path of
         // `Self::open` but skips the plaintext-detection branch since we
         // just wrote a properly-encrypted file.
+        // Embed `path` in every error here so callers can recover or report
+        // a meaningful location when the rebuilt file cannot be re-opened
+        // (e.g. permissions changed by rename, or disk full after fsync).
+        let path_str = path.display().to_string();
         let enc = Connection::open_with_flags(
             &path,
             OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
-        )?;
-        enc.execute_batch(&key_pragma(new_key))?;
+        )
+        .map_err(|e| DbError::Migration(format!("rekey re-open failed at {path_str}: {e}")))?;
+        enc.execute_batch(&key_pragma(new_key)).map_err(|e| {
+            DbError::Migration(format!("rekey key-pragma failed at {path_str}: {e}"))
+        })?;
         // Validate the new key actually opens the rebuilt file.
         enc.query_row("SELECT COUNT(*) FROM sqlite_master", [], |r| {
             r.get::<_, i64>(0)
+        })
+        .map_err(|e| {
+            DbError::Migration(format!("rekey key-validation failed at {path_str}: {e}"))
         })?;
-        enc.execute_batch(CONNECTION_PRAGMAS)?;
-        apply_migrations(&enc)?;
+        enc.execute_batch(CONNECTION_PRAGMAS)
+            .map_err(|e| DbError::Migration(format!("rekey pragmas failed at {path_str}: {e}")))?;
+        apply_migrations(&enc).map_err(|e| {
+            DbError::Migration(format!("rekey migrations failed at {path_str}: {e}"))
+        })?;
 
         Ok(Self {
             conn: enc,
@@ -711,14 +724,11 @@ impl Database {
         // rows were attempted. A mid-pass crash leaves `completed_at = NULL`
         // and the next startup re-runs the pass from scratch (the
         // `WHERE key_version = 1` predicate is the cursor).
-        let max_id: i64 = self
-            .conn
-            .query_row(
-                "SELECT COALESCE(MAX(rowid), 0) FROM clipboard_items",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
+        let max_id: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(rowid), 0) FROM clipboard_items",
+            [],
+            |r| r.get(0),
+        )?;
         self.conn.execute(
             "UPDATE migration_state \
              SET last_processed_id = ?1, completed_at = strftime('%s','now') \
