@@ -431,7 +431,10 @@ pub struct ClientHandle {
 impl ClientHandle {
     /// Signal the client to shut down and wait for acknowledgement.
     pub async fn shutdown(self) {
-        self.shutdown.notify_waiters();
+        // `signal_shutdown` clears `running` and wakes any parked waiter; the
+        // `Drop` impl would do the same, but we run it explicitly here so the
+        // brief settle-sleep below observes the already-signalled state.
+        self.signal_shutdown();
         // Brief yield to allow the background task to notice the shutdown signal.
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
@@ -439,6 +442,39 @@ impl ClientHandle {
     /// Returns `true` if the background worker is still active.
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
+    }
+
+    /// Clear the `running` flag and wake any task parked on the shutdown
+    /// `Notify`. Idempotent: both operations are safe to run more than once
+    /// (e.g. explicit `shutdown()` followed by `Drop`).
+    ///
+    /// The flag is set BEFORE `notify_waiters` so that a task which is *not*
+    /// currently parked on `shutdown.notified()` (e.g. mid-`run_session`, or at
+    /// the top-of-loop `running` check) still observes the stop request on its
+    /// next state transition — `notify_waiters` alone only wakes current
+    /// waiters and would otherwise be lost.
+    fn signal_shutdown(&self) {
+        self.running.store(false, Ordering::SeqCst);
+        self.shutdown.notify_waiters();
+    }
+}
+
+impl Drop for ClientHandle {
+    /// Audit-concurrency HIGH: a dropped or *replaced* `ClientHandle` must never
+    /// orphan its `connection_loop` task.
+    ///
+    /// Previously `ClientHandle` had no `Drop`, so the daemon's reconnect path
+    /// (which builds a fresh `RealtimeClient` and dropped the old handle without
+    /// awaiting `shutdown()`) left the old `connection_loop` running with
+    /// `running == true`. It independently reconnected, so each WS disconnect
+    /// accumulated another live client stack (task + heartbeat child + WS/TLS
+    /// socket + mpsc buffer + Arcs) for the daemon's whole uptime.
+    ///
+    /// Clearing `running` and notifying on Drop guarantees the invariant: at
+    /// most one live `connection_loop` per logical client, and a dropped handle
+    /// terminates its task.
+    fn drop(&mut self) {
+        self.signal_shutdown();
     }
 }
 
@@ -1231,6 +1267,72 @@ mod tests {
         client.update_jwt("fresh.token.abc".to_owned()).await;
         let updated = client.current_jwt().await;
         assert_eq!(updated, "fresh.token.abc", "updated JWT should be visible");
+    }
+
+    // ── ClientHandle Drop / shutdown invariant ────────────────────────────────
+
+    /// Audit-concurrency HIGH: dropping a `ClientHandle` must terminate its
+    /// `connection_loop` task — i.e. it must clear the shared `running` flag
+    /// (which the loop checks at the top of each iteration) and wake any task
+    /// parked on the shutdown `Notify`. Without this, the daemon's reconnect
+    /// path leaked one live client stack per WS disconnect.
+    #[tokio::test]
+    async fn dropping_handle_clears_running_flag() {
+        let shutdown = Arc::new(Notify::new());
+        let running = Arc::new(AtomicBool::new(true));
+        let handle = ClientHandle {
+            shutdown: shutdown.clone(),
+            running: running.clone(),
+        };
+        assert!(handle.is_running(), "precondition: flag starts true");
+
+        drop(handle);
+
+        assert!(
+            !running.load(Ordering::SeqCst),
+            "dropping the handle must clear the running flag so connection_loop exits"
+        );
+    }
+
+    /// A live `connection_loop` task must observe the drop of its handle and
+    /// terminate. We point it at an unreachable address (TEST-NET-1, RFC 5737)
+    /// so it cycles through connect-error → backoff, then drop the handle and
+    /// assert the `running` flag is cleared (the loop's top-of-iteration check
+    /// then breaks). This exercises the real task, not just the Drop impl.
+    #[tokio::test(start_paused = true)]
+    async fn dropping_handle_stops_connection_loop_task() {
+        // Enabled config with a near-zero backoff so the loop spins quickly to
+        // its `shutdown.notified()` / top-of-loop check under the paused clock.
+        let mut config = RealtimeConfig::new(
+            "https://192.0.2.1", // RFC 5737 TEST-NET-1: guaranteed unreachable
+            "anon-key",
+            RealtimeConfig::DEFAULT_TOPIC,
+            true,
+        );
+        config.initial_backoff = Duration::from_millis(1);
+        config.max_backoff = Duration::from_millis(1);
+
+        let (client, _rx) = RealtimeClient::new(config);
+        let running = client.running.clone();
+        let handle = client.connect().await.expect("connect spawns the loop");
+
+        // The loop set running=true synchronously inside connect().
+        assert!(running.load(Ordering::SeqCst), "loop should be running");
+
+        // Drop the handle: signal_shutdown clears running + notifies.
+        drop(handle);
+
+        // running is cleared synchronously by Drop.
+        assert!(
+            !running.load(Ordering::SeqCst),
+            "dropped handle must clear running so the loop exits at its next check"
+        );
+
+        // Let the task actually wind down (top-of-loop sees running=false and
+        // breaks, or the backoff select sees the notify). Yield a few times.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
     }
 
     // ── Disabled client ───────────────────────────────────────────────────────
