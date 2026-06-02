@@ -108,6 +108,7 @@ mod tests {
         let f = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&path)
             .unwrap();
         f.set_len(MAX_IMPORT_FILE_BYTES + 1).unwrap();

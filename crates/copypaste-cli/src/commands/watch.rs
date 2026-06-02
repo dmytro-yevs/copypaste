@@ -64,11 +64,17 @@ impl SeenIds {
 /// tight loop, wasting CPU and potentially flooding the daemon.
 const MIN_INTERVAL_MS: u64 = 100;
 
+/// Clamp a requested polling interval up to `MIN_INTERVAL_MS` so `--interval 0`
+/// (or very small values) can never busy-poll the socket.
+fn clamp_interval(interval_ms: u64) -> u64 {
+    interval_ms.max(MIN_INTERVAL_MS)
+}
+
 pub fn run(socket_path: &Path, interval_ms: u64) -> Result<()> {
     // Enforce a floor so `--interval 0` (or very small values) don't create a
     // tight CPU/socket spin. Use the minimum silently; callers that want 0
     // already know the daemon is local and low-latency.
-    let interval_ms = interval_ms.max(MIN_INTERVAL_MS);
+    let interval_ms = clamp_interval(interval_ms);
 
     let mut seen_ids = SeenIds::new(MAX_SEEN_IDS);
     let mut first_run = true;
@@ -179,11 +185,11 @@ mod tests {
     /// via the constant rather than calling `run` (which loops forever).
     #[test]
     fn interval_zero_is_clamped_to_minimum() {
-        assert_eq!(0u64.max(MIN_INTERVAL_MS), MIN_INTERVAL_MS);
-        assert_eq!(50u64.max(MIN_INTERVAL_MS), MIN_INTERVAL_MS);
-        assert_eq!(MIN_INTERVAL_MS.max(MIN_INTERVAL_MS), MIN_INTERVAL_MS);
+        assert_eq!(clamp_interval(0), MIN_INTERVAL_MS);
+        assert_eq!(clamp_interval(50), MIN_INTERVAL_MS);
+        assert_eq!(clamp_interval(MIN_INTERVAL_MS), MIN_INTERVAL_MS);
         // Values above the floor are unchanged.
-        assert_eq!(500u64.max(MIN_INTERVAL_MS), 500);
-        assert_eq!(1000u64.max(MIN_INTERVAL_MS), 1000);
+        assert_eq!(clamp_interval(500), 500);
+        assert_eq!(clamp_interval(1000), 1000);
     }
 }
