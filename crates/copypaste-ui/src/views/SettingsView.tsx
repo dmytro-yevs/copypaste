@@ -28,6 +28,11 @@ function snapToNearest<T extends number>(steps: readonly T[], raw: number): T {
   return steps[best];
 }
 
+// Default popup shortcut. Mirrors DEFAULT_POPUP_SHORTCUT in
+// src-tauri/src/lib.rs (the Rust default is not exposed over IPC, so it is
+// duplicated here for the "reset to default" button). Keep the two in sync.
+const DEFAULT_POPUP_SHORTCUT = "CmdOrCtrl+Shift+V";
+
 const TEXT_SIZE_STEPS_BYTES = [1,2,5,10,15,25,50,100].map((n) => n * 1_000_000) as unknown as readonly number[];
 const TEXT_SIZE_LABELS = ["1 MB","2 MB","5 MB","10 MB","15 MB","25 MB","50 MB","100 MB (max)"] as const;
 
@@ -503,8 +508,8 @@ export function SettingsView() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
 
   // Shortcuts
-  const [currentShortcut, setCurrentShortcut] = useState("CmdOrCtrl+Shift+V");
-  const [pendingShortcut, setPendingShortcut] = useState("CmdOrCtrl+Shift+V");
+  const [currentShortcut, setCurrentShortcut] = useState(DEFAULT_POPUP_SHORTCUT);
+  const [pendingShortcut, setPendingShortcut] = useState(DEFAULT_POPUP_SHORTCUT);
   const [shortcutMsg, setShortcutMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const shortcutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -877,6 +882,30 @@ export function SettingsView() {
       shortcutTimerRef.current = setTimeout(() => setShortcutMsg(null), 4000);
     }
   }, [pendingShortcut, currentShortcut]);
+
+  // Reset the popup shortcut back to its built-in default and persist it via
+  // the same IPC the manual Save uses, so the UI and registered hotkey stay
+  // in sync.
+  const handleResetShortcut = useCallback(async () => {
+    if (currentShortcut === DEFAULT_POPUP_SHORTCUT) {
+      setPendingShortcut(DEFAULT_POPUP_SHORTCUT);
+      return;
+    }
+    setPendingShortcut(DEFAULT_POPUP_SHORTCUT);
+    try {
+      await setPopupShortcut(DEFAULT_POPUP_SHORTCUT);
+      setCurrentShortcut(DEFAULT_POPUP_SHORTCUT);
+      setShortcutMsg({ text: "Reset to default", isError: false });
+      if (shortcutTimerRef.current !== null) clearTimeout(shortcutTimerRef.current);
+      shortcutTimerRef.current = setTimeout(() => setShortcutMsg(null), 2500);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to reset shortcut";
+      setShortcutMsg({ text: msg, isError: true });
+      setPendingShortcut(currentShortcut);
+      if (shortcutTimerRef.current !== null) clearTimeout(shortcutTimerRef.current);
+      shortcutTimerRef.current = setTimeout(() => setShortcutMsg(null), 4000);
+    }
+  }, [currentShortcut]);
 
   // -------------------------------------------------------------------------
   // Cloud sync — Set passphrase
@@ -1294,6 +1323,22 @@ export function SettingsView() {
                   value={pendingShortcut}
                   onChange={setPendingShortcut}
                 />
+                <button
+                  type="button"
+                  aria-label="Reset shortcut to default"
+                  title={`Reset to default (${DEFAULT_POPUP_SHORTCUT})`}
+                  disabled={
+                    currentShortcut === DEFAULT_POPUP_SHORTCUT &&
+                    pendingShortcut === DEFAULT_POPUP_SHORTCUT
+                  }
+                  onClick={() => void handleResetShortcut()}
+                  className="flex h-7 w-7 items-center justify-center rounded-ide border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+                >
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M2.5 8a5.5 5.5 0 1 1 1.6 3.9" />
+                    <path d="M2.5 12v-3.2h3.2" />
+                  </svg>
+                </button>
                 <button
                   type="button"
                   disabled={pendingShortcut === currentShortcut}
