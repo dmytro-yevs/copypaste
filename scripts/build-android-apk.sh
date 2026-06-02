@@ -17,7 +17,7 @@ set -euo pipefail
 
 # Pull JAVA_HOME from image-baked profile (Debian's path differs by arch).
 [[ -f /etc/profile.d/java_home.sh ]] && source /etc/profile.d/java_home.sh
-export JAVA_HOME="${JAVA_HOME:-$(dirname $(dirname $(readlink -f $(which javac))))}"
+export JAVA_HOME="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(which javac)")")")}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -34,7 +34,11 @@ ANDROID_DIR="$ROOT/android"
 CRATE_DIR="$ROOT/crates/copypaste-android"
 JNI_BASE="$ANDROID_DIR/app/src/main/jniLibs"
 DIST_DIR="$ROOT/dist"
-ARTIFACT_NAME="CopyPaste-v0.2.0-beta.1-android-arm64.apk"
+
+# Derive version from the workspace Cargo.toml so the artifact name tracks
+# the single source of truth ([workspace.package] version = "...").
+CARGO_VERSION="$(grep -m1 '^version' "$ROOT/Cargo.toml" | sed 's/.*"\(.*\)".*/\1/')"
+ARTIFACT_NAME="CopyPaste-v${CARGO_VERSION}-android-arm64.apk"
 
 echo "==[1/5] cargo ndk: building .so for arm64-v8a, armeabi-v7a =="
 # NOTE: x86_64 ABI is intentionally dropped from the beta build matrix.
@@ -79,9 +83,10 @@ find "$BINDGEN_OUT" -name "*.kt"
 echo
 echo "==[3/5] gradle assembleRelease =="
 cd "$ANDROID_DIR"
-# Gradle wrapper not vendored — use system gradle from the image.
+# Use the Gradle wrapper (./gradlew) so the build is tied to the project's
+# declared Gradle version rather than whatever `gradle` is on PATH in the image.
 # Skip buildCargoNdk task — we already ran cargo-ndk in step 1.
-gradle --no-daemon -p . assembleRelease -x buildCargoNdk
+./gradlew --no-daemon assembleRelease -x buildCargoNdk
 
 UNSIGNED_APK="$ANDROID_DIR/app/build/outputs/apk/release/app-release-unsigned.apk"
 SIGNED_APK="$ANDROID_DIR/app/build/outputs/apk/release/app-release.apk"
@@ -100,8 +105,25 @@ fi
 echo
 echo "==[4/5] sign (beta keystore) =="
 KEYSTORE_PATH="${KEYSTORE_PATH:-$ANDROID_DIR/keystore-beta.jks}"
-KEYSTORE_PASS="${KEYSTORE_PASS:-copypaste-beta}"
 KEY_ALIAS="${KEY_ALIAS:-copypaste-beta}"
+
+# SECURITY: KEYSTORE_PASS must be set in the environment for any real release.
+# Do NOT hardcode a production keystore password here.
+# LOCAL BETA FALLBACK ONLY: if running inside Docker without an explicit
+# KEYSTORE_PASS and no real keystore exists (keytool will generate one below),
+# a well-known placeholder is acceptable for local/CI beta builds only.
+# Set KEYSTORE_PASS in your environment or CI secrets for any distribution build.
+if [[ -z "${KEYSTORE_PASS:-}" ]]; then
+  if [[ -f "$KEYSTORE_PATH" ]]; then
+    echo "!! KEYSTORE_PASS is not set but $KEYSTORE_PATH already exists." >&2
+    echo "   Set KEYSTORE_PASS in your environment before signing." >&2
+    exit 1
+  fi
+  # Keystore does not exist yet — we will generate a local-beta one below.
+  # LOCAL BETA ONLY: not for distribution.
+  KEYSTORE_PASS="copypaste-beta"
+  echo "  (LOCAL BETA ONLY) KEYSTORE_PASS not set; using placeholder for generated beta keystore."
+fi
 
 if [[ ! -f "$KEYSTORE_PATH" ]]; then
   echo "  no keystore at $KEYSTORE_PATH — generating beta keystore"

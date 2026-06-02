@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 VERSION="${1:-0.1.0-alpha.1}"
 DMG_NAME="CopyPaste-${VERSION}.dmg"

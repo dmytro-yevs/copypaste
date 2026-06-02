@@ -77,7 +77,10 @@ bundle_app() {
   cp "$src_dir/copypaste-daemon" target/release/
   cp "$src_dir/copypaste"        target/release/
 
-  bash scripts/make_app_bundle.sh "0.2.0-beta.0" || {
+  # Derive version from the workspace Cargo.toml ([workspace.package] version).
+  local cargo_version
+  cargo_version="$(grep -m1 '^version' "$ROOT/Cargo.toml" | sed 's/.*"\(.*\)".*/\1/')"
+  bash scripts/make_app_bundle.sh "$cargo_version" || {
     echo "  !! make_app_bundle.sh failed (non-fatal)"
     return 0
   }

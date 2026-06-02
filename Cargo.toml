@@ -59,7 +59,7 @@ tracing = "0.1"
 # Errors
 thiserror = "1"
 # Misc
-# Pin to <1.21 retained for now; MSRV bumped to 1.86 (getrandom 0.4 OK), relax post-beta.
+# Pin to <1.21 retained for now; MSRV bumped to 1.89 (current floor), relax post-beta.
 uuid = { version = ">=1.0, <1.21", features = ["v4"] }
 # Async runtime
 tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "macros", "signal", "sync", "time"] }
@@ -79,13 +79,13 @@ security-framework = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Rotating file appender for daemon logs
 tracing-appender = "0.2"
-# home dir (pin retained from Rust 1.75 era; safe to relax post-beta now MSRV=1.86)
+# home dir (pin retained from Rust 1.75 era; safe to relax post-beta now MSRV=1.89)
 home = "=0.5.9"
 # platform config / data dirs
 dirs = "5"
 # error handling
 anyhow = "1"
-# CLI argument parsing (pin retained; relax post-beta now MSRV=1.86 supports edition2024)
+# CLI argument parsing (pin retained; relax post-beta now MSRV=1.89 supports edition2024)
 clap = { version = ">=4.0, <4.5.40", features = ["derive"] }
 # Base64 encoding
 base64 = "0.22"

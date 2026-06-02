@@ -38,4 +38,9 @@ jobs:
       - name: cargo audit
         # --no-fetch uses the cached advisory-db; falls back to full network
         # fetch on a cache miss (first run of the week or cold runner).
+        # AUDIT: `cargo audit --no-fetch || cargo audit` retries without --no-fetch
+        # on failure, but this also masks a genuine advisory hit on the first run
+        # (if --no-fetch fails for any reason, the retry may succeed and hide the
+        # vulnerability finding). Consider: `cargo audit --no-fetch || { cargo audit --db-update; cargo audit --no-fetch; }`
+        # to separate cache-miss recovery from advisory failures. Human decision required.
         run: cargo audit --no-fetch || cargo audit

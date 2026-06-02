@@ -249,14 +249,19 @@ jobs:
 
       - name: Resolve version
         id: ver
+        # SECURITY: github.event.inputs.version is passed via env, not interpolated
+        # directly into the run: shell, to prevent expression injection attacks.
+        # See: https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#understanding-the-risk-of-script-injections
         env:
           GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: \${{ github.event.inputs.version || '' }}
+          CLIENT_PAYLOAD_VERSION: \${{ github.event.client_payload.version || '' }}
         run: |
           set -euo pipefail
-          if [ -n \"\${{ github.event.inputs.version || '' }}\" ]; then
-            VERSION='\${{ github.event.inputs.version }}'
-          elif [ -n \"\${{ github.event.client_payload.version || '' }}\" ]; then
-            VERSION='\${{ github.event.client_payload.version }}'
+          if [ -n \"\$INPUT_VERSION\" ]; then
+            VERSION=\"\$INPUT_VERSION\"
+          elif [ -n \"\$CLIENT_PAYLOAD_VERSION\" ]; then
+            VERSION=\"\$CLIENT_PAYLOAD_VERSION\"
           else
             # Fallback: query upstream latest release tag.
             TAG=\$(gh api repos/$GITHUB_USER/CopyPaste/releases/latest --jq .tag_name)

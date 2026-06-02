@@ -86,6 +86,11 @@ android {
         applicationId = "com.copypaste.android"
         minSdk = 26
         targetSdk = 35
+        // MAINTENANCE: versionCode and versionName must be kept in sync with
+        // [workspace.package] version in the root Cargo.toml. There is no
+        // automated wiring — bump both manually on every release to avoid drift.
+        // versionCode must be a monotonically increasing integer; increment it
+        // with every Play Store / sideload release regardless of version string.
         versionCode = 8
         versionName = "0.5.3"
         // Instrumented (androidTest) runner for the cross-language crypto

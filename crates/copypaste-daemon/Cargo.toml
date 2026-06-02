@@ -146,7 +146,10 @@ name = "harness_single_daemon"
 path = "tests/harness_single_daemon.rs"
 
 [dev-dependencies]
-tempfile = "3"
+# Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+
+# (our MSRV is 1.89 so this is already satisfied, but the pin keeps the
+# lock consistent with copypaste-core and avoids an accidental bump).
+tempfile = ">=3.0, <3.14"
 serde_json = "1"
 # Beta-bonus integration tests need direct access to the sync engine + P2P public APIs
 # because copypaste-daemon is a binary-only crate (no lib.rs).  See module docs in

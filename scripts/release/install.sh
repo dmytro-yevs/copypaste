@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
 # install.sh — curl-piped end-user installer for CopyPaste on macOS.
 #
+# SECURITY NOTICE: This script is designed to be piped directly from curl.
+# Before running, consider reviewing the script source at:
+#   https://raw.githubusercontent.com/dmytro-yevs/copypaste/main/scripts/release/install.sh
+# If a .sha256 sidecar is published alongside the DMG on the release, this
+# script will verify the download before mounting. If no sidecar is present,
+# a warning is printed but installation continues (best-effort verification).
+#
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/dmytro-yevs/copypaste/main/scripts/release/install.sh | bash
 #   curl -fsSL https://raw.githubusercontent.com/dmytro-yevs/copypaste/main/scripts/release/install.sh | bash -s -- 0.5.1
 #
 # What it does:
 #   1. Downloads CopyPaste-v<version>-macos-arm64.dmg from the GitHub release.
-#   2. Mounts, copies CopyPaste.app to /Applications, drops quarantine attr
+#   2. Verifies SHA-256 checksum against the published .sha256 sidecar (if present).
+#   3. Mounts, copies CopyPaste.app to /Applications, drops quarantine attr
 #      (ad-hoc signed builds would otherwise trip Gatekeeper on first launch).
-#   3. Loads ~/Library/LaunchAgents/com.copypaste.daemon.plist if present.
+#   4. Boots out any leftover launchd agent (app now owns the daemon lifecycle).
 #
 # Override the repo via COPYPASTE_REPO env for forks.
 set -euo pipefail
@@ -67,6 +75,26 @@ if ! curl -fSL --retry 3 --retry-delay 2 "$ASSET_URL" -o "$DMG"; then
     echo "ERROR: download failed. Check version exists at:" >&2
     echo "       https://github.com/${REPO}/releases" >&2
     exit 1
+fi
+
+echo "==> Verifying checksum"
+SHA256_URL="${ASSET_URL}.sha256"
+SHA256_FILE="${TMP}/${APP_NAME}.dmg.sha256"
+if curl -fsSL --retry 3 --retry-delay 2 "$SHA256_URL" -o "$SHA256_FILE" 2>/dev/null; then
+    # Sidecar downloaded — verify the DMG matches.
+    EXPECTED_HASH="$(awk '{print $1}' "$SHA256_FILE")"
+    ACTUAL_HASH="$(shasum -a 256 "$DMG" | awk '{print $1}')"
+    if [[ "$EXPECTED_HASH" != "$ACTUAL_HASH" ]]; then
+        echo "ERROR: SHA-256 mismatch — download may be corrupt or tampered." >&2
+        echo "  expected: $EXPECTED_HASH" >&2
+        echo "  got:      $ACTUAL_HASH" >&2
+        exit 1
+    fi
+    echo "    checksum OK ($ACTUAL_HASH)"
+else
+    echo "WARNING: no .sha256 sidecar found at release; skipping checksum verification."
+    echo "         For maximum security, download and verify manually:"
+    echo "         https://github.com/${REPO}/releases"
 fi
 
 echo "==> Mounting DMG"
