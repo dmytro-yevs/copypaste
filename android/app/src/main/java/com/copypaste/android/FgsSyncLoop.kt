@@ -24,13 +24,19 @@ import uniffi.copypaste_android.syncWithPeer
  * a heavyweight SDK or writing a 400-line RFC-6455 client. The added complexity
  * outweighs the ~60-second latency benefit for a clipboard tool.
  *
- * **Chosen approach: 60-second poll loop in the FGS**
+ * **Chosen approach: short-cadence poll loop in the FGS (stopgap)**
  * - The foreground service holds a WakeLock implicitly (via the notification),
  *   so Doze does not cut network access *while the FGS is running*.
- * - A 60-second interval is fast enough to feel near-real-time for clipboard
- *   sync (typical user expectation: "copy on Mac, paste on phone within a
- *   minute") and the battery impact of one HTTPS GET per minute is negligible
- *   (< 1 mAh/h on LTE).
+ * - STOPGAP: the active interval is 3 s so a clip copied on macOS (which lands
+ *   in Supabase in <1 s) reaches an active/foreground Android app within ~3 s
+ *   instead of up to a minute. This is a band-aid until the Android Supabase
+ *   Realtime-WS receive channel lands; once that push channel exists this active
+ *   poll cadence can be relaxed again. The 3 s rate applies ONLY while the
+ *   FGS/app is alive — an idle backoff still engages (see below) and the loop
+ *   pauses entirely under deep Doze, so battery stays sane.
+ * - P2P LAN dialing runs on its own per-tick cadence (decoupled from the poll
+ *   delay) so the priority mTLS transport establishes quickly and then delivers
+ *   instantly over the persistent link.
  * - Doze *does* defer the loop when the device enters deep Doze (screen off +
  *   stationary for >1h), but at that point the user is not actively switching
  *   between devices, so the 15-minute WorkManager catch-up worker covers the gap.
@@ -52,12 +58,13 @@ import uniffi.copypaste_android.syncWithPeer
  * row is replaced (last-writer-wins), mirroring the daemon's cloud.rs LWW.
  *
  * ## Interval tuning
- * - POLL_INTERVAL_MS = 60_000 (1 min) while the FGS is alive and network is up.
+ * - POLL_INTERVAL_MS = 3_000 (3 s, stopgap) while the FGS is alive and network
+ *   is up — see the stopgap note above.
  * - RETRY_BACKOFF_BASE_MS = 30_000 (30 s) — first retry after a transient error;
  *   doubles each consecutive failure up to RETRY_BACKOFF_MAX_MS (real exponential
  *   backoff, reset to 0 failures on the first success).
- * - IDLE_POLL_INTERVAL_MS = 300_000 (5 min) after IDLE_THRESHOLD_POLLS empty polls
- *   (battery courtesy for long idle periods).
+ * - IDLE_POLL_INTERVAL_MS = 15_000 (15 s) after IDLE_THRESHOLD_POLLS empty polls
+ *   (battery courtesy for idle periods, but still responsive while alive).
  *
  * Note: this class does NOT hold an explicit WakeLock. Foreground services
  * on Android 8+ implicitly prevent CPU sleep while the FGS notification is
@@ -74,12 +81,23 @@ class FgsSyncLoop(
     companion object {
         private const val TAG = "FgsSyncLoop"
 
-        /** Normal poll interval when the FGS is running and network is available. */
-        private const val POLL_INTERVAL_MS = 60_000L
+        /**
+         * Active poll interval when the FGS is running and network is available.
+         *
+         * STOPGAP: 3 s (was 60 s). A clip copied on macOS reaches Supabase in
+         * <1 s, but Android only sees it on its next active poll. Dropping this
+         * to 3 s makes a foreground/FGS-active app receive clips within ~3 s.
+         * This is a band-aid until the Android Supabase Realtime-WS push receive
+         * channel lands; once that exists this cadence can be relaxed. The 3 s
+         * rate applies ONLY while the FGS/app is alive — the idle backoff below
+         * still engages, and deep Doze pauses the loop entirely.
+         */
+        private const val POLL_INTERVAL_MS = 3_000L
 
         /** Reduced poll interval after several consecutive empty polls — save
-         *  battery when nothing is changing. */
-        private const val IDLE_POLL_INTERVAL_MS = 300_000L
+         *  battery when nothing is changing. Kept responsive (15 s, was 5 min)
+         *  so the loop stays snappy while the FGS is alive but still backs off. */
+        private const val IDLE_POLL_INTERVAL_MS = 15_000L
 
         /** First retry delay after a transient network failure; doubled per
          *  consecutive failure up to [RETRY_BACKOFF_MAX_MS]. */
@@ -93,6 +111,16 @@ class FgsSyncLoop(
 
         /** Cap on local items pushed per background P2P dial (mirrors PairActivity). */
         private const val P2P_LOCAL_ITEM_LIMIT = 200
+
+        /**
+         * Cadence for the background LAN P2P dial, DECOUPLED from the Supabase
+         * poll delay. The poll delay can grow to [IDLE_POLL_INTERVAL_MS] after an
+         * empty streak, but the P2P link is the priority transport — we want it
+         * dialed and established quickly so it can then deliver instantly over the
+         * persistent mTLS link. So the dial fires on this fixed short cadence
+         * regardless of how long the next poll is deferred.
+         */
+        private const val P2P_DIAL_INTERVAL_MS = 3_000L
 
         /**
          * M6: pure exponential-backoff computation, extracted so it can be unit
@@ -177,15 +205,30 @@ class FgsSyncLoop(
                     nextDelay = intervalForEmptyStreak(consecutiveEmpty)
                 }
 
-                delay(nextDelay)
+                // Background Android→macOS LAN P2P dial, DECOUPLED from the poll
+                // delay above. Whenever we hold a complete set of persisted
+                // pairing credentials we dial the paired peer so a one-time pair
+                // keeps syncing unattended. The P2P link is the priority
+                // transport, so we dial it on a fixed short cadence
+                // ([P2P_DIAL_INTERVAL_MS]) even while the Supabase poll is backed
+                // off to the idle interval. We sleep out `nextDelay` in P2P-dial
+                // chunks: dial, sleep one chunk, repeat, until the poll is due
+                // again. Failures are logged, never fatal.
+                dialPairedPeer()
                 if (!isActive) break
 
-                // Background Android→macOS LAN P2P dial. Independent of the
-                // Supabase poll above: whenever we hold a complete set of
-                // persisted pairing credentials we dial the paired peer so a
-                // one-time pair keeps syncing unattended. Failures are logged,
-                // never fatal.
-                dialPairedPeer()
+                var remaining = nextDelay
+                while (remaining > 0 && isActive) {
+                    val chunk = minOf(remaining, P2P_DIAL_INTERVAL_MS)
+                    delay(chunk)
+                    if (!isActive) break
+                    remaining -= chunk
+                    // Re-dial on each chunk boundary that is not the final poll
+                    // tick (the post-poll dial above already covers tick zero).
+                    if (remaining > 0) {
+                        dialPairedPeer()
+                    }
+                }
                 if (!isActive) break
             }
             Log.i(TAG, "FgsSyncLoop stopped")
