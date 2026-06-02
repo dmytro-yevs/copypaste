@@ -810,7 +810,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-android"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "bytes",
  "copypaste-core",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-bench"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "clap",
  "copypaste-core",
@@ -844,7 +844,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-cli"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-core"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -897,7 +897,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-daemon"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -941,7 +941,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-ipc"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -949,7 +949,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-p2p"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -979,7 +979,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-relay"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "anyhow",
  "axum",
@@ -1001,7 +1001,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-supabase"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "futures-util",
  "mockito",
@@ -1018,7 +1018,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-sync"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "copypaste-core",
  "serde",
@@ -1029,7 +1029,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-telemetry"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "regex",
  "sentry",
@@ -1041,7 +1041,7 @@ dependencies = [
 
 [[package]]
 name = "copypaste-ui"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "anyhow",
  "copypaste-ipc",
