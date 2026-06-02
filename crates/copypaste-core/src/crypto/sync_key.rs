@@ -236,12 +236,15 @@ pub fn derive_sync_key(passphrase: &str) -> Result<SyncKey, SyncKeyError> {
 
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
-    let mut key_bytes = [0u8; 32];
+    // Wrap the derived-key stack buffer in Zeroizing so the bytes are scrubbed
+    // on drop even if move semantics leave a stale copy behind (the SyncKey we
+    // return owns its own copy and is itself ZeroizeOnDrop).
+    let mut key_bytes = zeroize::Zeroizing::new([0u8; 32]);
     argon2
-        .hash_password_into(passphrase.as_bytes(), ARGON2_SYNC_SALT, &mut key_bytes)
+        .hash_password_into(passphrase.as_bytes(), ARGON2_SYNC_SALT, &mut key_bytes[..])
         .map_err(|e| SyncKeyError::Argon2Hash(e.to_string()))?;
 
-    Ok(SyncKey(key_bytes))
+    Ok(SyncKey(*key_bytes))
 }
 
 /// Encrypt `plaintext` for cloud storage using `key`, binding the ciphertext

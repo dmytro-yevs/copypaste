@@ -104,7 +104,10 @@ export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
   // re-mounts (same pattern as AppIcon).
   const [src, setSrc] = useState<string | null | typeof FETCH_FAILED>(() => {
     const cached = cacheGet(id);
-    return cached !== undefined ? cached : FETCH_FAILED;
+    // Cache miss → null (loading; row height already reserved by the
+    // virtualizer), NOT FETCH_FAILED — that would flash the broken-image
+    // placeholder for one frame before the real fetch resolves.
+    return cached !== undefined ? cached : null;
   });
 
   const mountedRef = useRef(true);

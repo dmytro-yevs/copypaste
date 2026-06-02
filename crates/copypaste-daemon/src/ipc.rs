@@ -3974,9 +3974,7 @@ impl IpcServer {
                 // Device name mirrors the P2P subsystem's source (HOSTNAME /
                 // COMPUTERNAME, falling back to "CopyPaste") so the scanning
                 // device shows a consistent label.
-                let device_name = std::env::var("HOSTNAME")
-                    .or_else(|_| std::env::var("COMPUTERNAME"))
-                    .unwrap_or_else(|_| "CopyPaste".to_string());
+                let device_name = crate::daemon::resolve_device_name();
 
                 // device_id is best-effort: the canonical fingerprint doubles
                 // as a stable identifier when no UUID is threaded here. The QR

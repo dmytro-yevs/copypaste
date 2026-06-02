@@ -131,8 +131,11 @@ fun LogViewerScreen(onBack: () -> Unit) {
 
     // Scroll to bottom when atBottom is requested
     LaunchedEffect(atBottom, displayLines.size) {
-        if (atBottom && displayLines.isNotEmpty()) {
-            listState.scrollToItem(displayLines.size - 1)
+        if (displayLines.isNotEmpty()) {
+            // The toggle flips atBottom: true → newest (bottom), false → oldest
+            // (top). Both directions must scroll, or the "scroll to top" button
+            // does nothing.
+            listState.scrollToItem(if (atBottom) displayLines.size - 1 else 0)
         }
     }
 

@@ -839,48 +839,41 @@ export function SettingsView() {
   // Sync parity — p2p toggle + wifi-only
   // -------------------------------------------------------------------------
 
-  const handleP2pToggle = useCallback(
-    async (val: boolean) => {
-      // P0 fix: do not send the stale `config` closure snapshot directly.
-      // buildConfigPatch reads current state for ALL fields and applies the
-      // override, so storage/supabase fields cannot be clobbered.
-      const prev = config.p2p_enabled;
-      setConfig((c) => ({ ...c, p2p_enabled: val }));
-      try {
-        await api.setConfig(
-          buildConfigPatch({ p2p_enabled: val }) as unknown as Parameters<typeof api.setConfig>[0],
-        );
-      } catch (err) {
-        // Revert on failure
-        setConfig((c) => ({ ...c, p2p_enabled: prev }));
-        const msg = err instanceof IpcError ? err.message : "Failed to update P2P setting";
-        showLimitsMsg("p2p_enabled", msg, 4000);
-      }
-    },
-    // buildConfigPatch captures live state via closure at call time; the only
-    // dep that should re-create the callback is config.p2p_enabled (used for
-    // prev capture) — the rest are stable refs or component-level state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [config.p2p_enabled]
-  );
-
-  const handleWifiOnlyToggle = useCallback(
-    async (val: boolean) => {
-      // P1 fix: capture `prev` BEFORE the optimistic update. saveLimitsField
-      // now accepts an onRevert callback so it reverts only this field on error
-      // rather than triggering a full reload. The outer try/catch is removed —
-      // saveLimitsField does NOT throw; it handles the error path internally.
-      const prev = syncOnWifiOnly;
-      setSyncOnWifiOnly(val);
-      await saveLimitsField(
-        "sync_on_wifi_only",
-        { sync_on_wifi_only: val },
-        () => setSyncOnWifiOnly(prev),
+  // NOT memoized: buildConfigPatch reads live component state (sliders,
+  // supabase fields) via closure. Memoizing on a narrow dep list would freeze
+  // a stale buildConfigPatch and clobber unsaved fields when the toggle fires,
+  // so this handler is recreated each render to capture current state.
+  const handleP2pToggle = async (val: boolean) => {
+    // P0 fix: do not send the stale `config` closure snapshot directly.
+    // buildConfigPatch reads current state for ALL fields and applies the
+    // override, so storage/supabase fields cannot be clobbered.
+    const prev = config.p2p_enabled;
+    setConfig((c) => ({ ...c, p2p_enabled: val }));
+    try {
+      await api.setConfig(
+        buildConfigPatch({ p2p_enabled: val }) as unknown as Parameters<typeof api.setConfig>[0],
       );
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [syncOnWifiOnly]
-  );
+    } catch (err) {
+      // Revert on failure
+      setConfig((c) => ({ ...c, p2p_enabled: prev }));
+      const msg = err instanceof IpcError ? err.message : "Failed to update P2P setting";
+      showLimitsMsg("p2p_enabled", msg, 4000);
+    }
+  };
+
+  // Also NOT memoized — saveLimitsField/buildConfigPatch read live slider state
+  // via closure, so the handler must be recreated each render.
+  const handleWifiOnlyToggle = async (val: boolean) => {
+    // P1 fix: capture `prev` BEFORE the optimistic update. saveLimitsField
+    // reverts only this field on error (no full reload) and does not throw.
+    const prev = syncOnWifiOnly;
+    setSyncOnWifiOnly(val);
+    await saveLimitsField(
+      "sync_on_wifi_only",
+      { sync_on_wifi_only: val },
+      () => setSyncOnWifiOnly(prev),
+    );
+  };
 
   // -------------------------------------------------------------------------
   // Shortcuts — Save popup shortcut
