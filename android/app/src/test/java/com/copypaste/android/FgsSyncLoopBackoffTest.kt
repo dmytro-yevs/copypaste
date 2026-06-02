@@ -52,12 +52,29 @@ class FgsSyncLoopBackoffTest {
 
     @Test
     fun intervalUsesNormalUntilThresholdThenIdle() {
-        // Normal (60s) for streaks below IDLE_THRESHOLD_POLLS (3).
-        assertEquals(60_000L, FgsSyncLoop.intervalForEmptyStreak(0))
-        assertEquals(60_000L, FgsSyncLoop.intervalForEmptyStreak(1))
-        assertEquals(60_000L, FgsSyncLoop.intervalForEmptyStreak(2))
-        // Idle (5min) once the empty streak reaches the threshold.
-        assertEquals(300_000L, FgsSyncLoop.intervalForEmptyStreak(3))
-        assertEquals(300_000L, FgsSyncLoop.intervalForEmptyStreak(10))
+        // Stopgap: active cadence is 3s for streaks below IDLE_THRESHOLD_POLLS.
+        assertEquals(3_000L, FgsSyncLoop.intervalForEmptyStreak(0))
+        assertEquals(3_000L, FgsSyncLoop.intervalForEmptyStreak(1))
+        // Idle (15s) once the empty streak reaches the threshold.
+        assertTrue(FgsSyncLoop.intervalForEmptyStreak(100) >= 15_000L)
+    }
+
+    @Test
+    fun activeCadenceIsThreeSecondStopgap() {
+        // The stopgap active interval must be 3s so a foreground/FGS-active app
+        // receives a Supabase clip within ~3s instead of up to a minute.
+        assertEquals(3_000L, FgsSyncLoop.intervalForEmptyStreak(0))
+    }
+
+    @Test
+    fun idleBackoffStaysResponsive() {
+        // Idle backoff must not balloon back to the old 5-minute cadence while
+        // the FGS is alive — keep it responsive (<= 15s).
+        val idle = FgsSyncLoop.intervalForEmptyStreak(IDLE_FAR_STREAK)
+        assertTrue("idle interval $idle should be <= 15s", idle <= 15_000L)
+    }
+
+    private companion object {
+        const val IDLE_FAR_STREAK = 100
     }
 }
