@@ -380,6 +380,20 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putInt("image_quality", v.coerceIn(1, 100)).apply()
 
     /**
+     * Whether P2P (LAN, direct device-to-device) sync is enabled.
+     *
+     * When true (default), the background P2P dialer (FgsSyncLoop) is allowed
+     * to connect to [pairedPeerSyncAddr] using the [pairedPeerSessionKey].
+     * When false, the P2P sync path is suppressed even when a paired peer is
+     * known — useful when the user wants cloud-only sync without LAN noise.
+     *
+     * Default: true — mirrors the project default S2 (P2P ON by default).
+     */
+    var p2pSyncEnabled: Boolean
+        get() = prefs.getBoolean(KEY_P2P_SYNC_ENABLED, true)
+        set(v) = prefs.edit().putBoolean(KEY_P2P_SYNC_ENABLED, v).apply()
+
+    /**
      * 256-bit AES key used for local clipboard encryption.
      *
      * Storage: the raw 32 random bytes are wrapped with an AndroidKeyStore-
@@ -745,5 +759,8 @@ class Settings(context: Context) {
         private const val KEY_LEGACY_SUPABASE_PW_PLAIN = "supabase_password"
         private const val KEY_SUPABASE_PW_WRAPPED_B64 = "supabase_password_wrapped_b64"
         private const val KEY_SUPABASE_PW_IV_B64 = "supabase_password_iv_b64"
+
+        // ── P2P sync ──────────────────────────────────────────────────────────
+        const val KEY_P2P_SYNC_ENABLED = "p2p_sync_enabled"
     }
 }

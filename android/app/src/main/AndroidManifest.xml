@@ -85,8 +85,29 @@
 
         <activity
             android:name=".PairActivity"
-            android:exported="false"
-            android:theme="@style/Theme.CopyPaste" />
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.CopyPaste">
+            <!--
+                cppair:// deep-link: lets external QR scanners (Google Lens, etc.)
+                open PairActivity directly when they scan a pairing QR that encodes
+                a cppair:// URI.  The URI carries the raw CPPAIR1 payload in the
+                query param "p", e.g.:
+                  cppair://pair?p=CPPAIR1.<fp>.<token>.<deviceid>.<name>.<host:port>
+                PairActivity.onNewIntent extracts the "p" value and feeds it into
+                the existing parsePairingQr path — no change to the internal scanner.
+
+                android:exported="true" is required for the system to route the
+                intent here; it is safe because the activity has no sensitive data
+                of its own — it only initiates an outbound PAKE session.
+            -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="cppair" android:host="pair" />
+            </intent-filter>
+        </activity>
 
         <!--
             Portrait-locked ZXing QR scanner used by the pairing flow.

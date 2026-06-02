@@ -1,9 +1,11 @@
 package com.copypaste.android
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -115,14 +117,46 @@ private const val QR_SLOT_SIZE_DP = QR_IMAGE_SIZE_DP + QR_PLATE_PADDING_DP * 2
  * The QR is a transport for the existing PAKE pairing material — not new crypto.
  */
 class PairActivity : ComponentActivity() {
+
+    // Holds an incoming cppair:// deep-link payload (the raw CPPAIR1.… string)
+    // so the Compose screen can observe and process it.  Written from both
+    // onCreate (cold start via deep-link) and onNewIntent (singleTop re-launch).
+    private val deepLinkPayload = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Extract payload from a cold-start deep-link intent, if present.
+        extractCppairPayload(intent)?.let { deepLinkPayload.value = it }
         setContent {
             CopyPasteTheme {
-                PairScreen(onBack = { finish() })
+                PairScreen(
+                    onBack = { finish() },
+                    incomingDeepLinkPayload = deepLinkPayload.value,
+                    onDeepLinkConsumed = { deepLinkPayload.value = null },
+                )
             }
         }
+    }
+
+    // Called by the system when launchMode="singleTop" delivers a new intent
+    // to the already-running activity (e.g. user scans another QR via Lens).
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        extractCppairPayload(intent)?.let { deepLinkPayload.value = it }
+    }
+
+    /**
+     * Extract the raw CPPAIR1 pairing payload from a `cppair://pair?p=…` URI.
+     * Returns null for any other intent (normal launch, back-stack restore, etc.).
+     */
+    private fun extractCppairPayload(intent: Intent?): String? {
+        if (intent?.action != Intent.ACTION_VIEW) return null
+        val uri: Uri = intent.data ?: return null
+        if (uri.scheme != "cppair" || uri.host != "pair") return null
+        val p = uri.getQueryParameter("p") ?: return null
+        // Sanity-check: only accept payloads that look like CPPAIR1 tokens.
+        return if (p.startsWith("CPPAIR1.")) p else null
     }
 }
 
@@ -152,6 +186,8 @@ fun PairScreen(
     modifier: Modifier = Modifier,
     showBackButton: Boolean = true,
     onBack: () -> Unit = {},
+    incomingDeepLinkPayload: String? = null,
+    onDeepLinkConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
@@ -410,6 +446,24 @@ fun PairScreen(
         }
     }
 
+    // Consume an incoming cppair:// deep-link payload from an external QR scanner
+    // (e.g. Google Lens).  The payload is the raw CPPAIR1.… string, identical to
+    // what the in-app ZXing scanner would return — so we feed it through exactly
+    // the same parsePairing path and surface the same confirmation UI.
+    LaunchedEffect(incomingDeepLinkPayload) {
+        val payload = incomingDeepLinkPayload ?: return@LaunchedEffect
+        try {
+            val info = withContext(Dispatchers.IO) { parsePairing(payload) }
+            scannedPeer = info
+            syncResult = null
+            scannedInfo = formatScannedInfo(info.deviceName, info.fingerprint)
+        } catch (e: Exception) {
+            errorMessage = e.message ?: "Invalid pairing code"
+        } finally {
+            onDeepLinkConsumed()
+        }
+    }
+
     LaunchedEffect(errorMessage) {
         val msg = errorMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(
@@ -545,7 +599,7 @@ fun PairScreen(
                 onClick = { startScanFlow() },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(text = "Scan a device's QR")
+                Text(text = stringResource(R.string.btn_scan_qr))
             }
 
             // ── Paired device display ─────────────────────────────────────
@@ -596,7 +650,14 @@ fun PairScreen(
                 Text(
                     text = "Scanned: $info",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = IdeText
+                    color = IdeText,
+                    modifier = Modifier.clickable {
+                        val fp = scannedPeer?.fingerprint ?: info
+                        clipboardManager.setText(AnnotatedString(fp))
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Fingerprint copied")
+                        }
+                    },
                 )
             }
 

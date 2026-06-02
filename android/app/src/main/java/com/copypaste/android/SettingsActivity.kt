@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -30,8 +32,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -118,6 +122,7 @@ fun SettingsScreen(
     var translucency by remember { mutableStateOf(settings.translucency) }
     var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.coerceIn(10, 200)) }
     var previewDelay by remember { mutableStateOf(settings.previewDelay.toInt().coerceIn(200, 30_000)) }
+    var imageQuality by remember { mutableStateOf(settings.imageQuality) }
 
     // ── Storage ──
     var maxTextSizeBytes by remember {
@@ -133,6 +138,7 @@ fun SettingsScreen(
     // ── Sync ──
     var syncBackend by remember { mutableStateOf(settings.syncBackend) }
     var syncOnWifiOnly by remember { mutableStateOf(settings.syncOnWifiOnly) }
+    var p2pSyncEnabled by remember { mutableStateOf(settings.p2pSyncEnabled) }
     var supabaseUrl by remember { mutableStateOf(settings.supabaseUrl) }
     var supabaseAnonKey by remember { mutableStateOf(settings.supabaseAnonKey) }
     var cloudPassphrase by remember { mutableStateOf(settings.cloudSyncPassphrase) }
@@ -147,6 +153,99 @@ fun SettingsScreen(
     // ── Diagnostics (General tab) ──
     var logcatEnabled by remember { mutableStateOf(settings.logcatCaptureEnabled) }
     var logcatStatus by remember { mutableStateOf(LogcatCaptureService.status(ctx, settings)) }
+
+    // ── HW-A10: dirty tracking — snapshot of saved values for discard check ──
+    // Captured once on composition; reset after each successful Save.
+    data class SettingsSnapshot(
+        val captureEnabled: Boolean,
+        val syncEnabled: Boolean,
+        val showWarnings: Boolean,
+        val maskSensitive: Boolean,
+        val translucency: Boolean,
+        val imageMaxHeight: Int,
+        val previewDelay: Int,
+        val imageQuality: Int,
+        val maxTextSizeBytes: Long,
+        val maxImageSizeBytes: Long,
+        val storageQuotaBytes: Long,
+        val syncBackend: SyncBackend,
+        val syncOnWifiOnly: Boolean,
+        val p2pSyncEnabled: Boolean,
+        val supabaseUrl: String,
+        val supabaseAnonKey: String,
+        val cloudPassphrase: String,
+        val supabaseEmail: String,
+        val supabasePassword: String,
+        val relayUrl: String,
+        val notifyOnCopy: Boolean,
+        val soundOnCopy: Boolean,
+        val logcatEnabled: Boolean,
+    )
+
+    var savedSnapshot by remember {
+        mutableStateOf(
+            SettingsSnapshot(
+                captureEnabled = settings.captureEnabled,
+                syncEnabled = settings.syncEnabled,
+                showWarnings = settings.showSensitiveWarnings,
+                maskSensitive = settings.maskSensitiveContent,
+                translucency = settings.translucency,
+                imageMaxHeight = settings.imageMaxHeight.coerceIn(10, 200),
+                previewDelay = settings.previewDelay.toInt().coerceIn(200, 30_000),
+                imageQuality = settings.imageQuality,
+                maxTextSizeBytes = snapToNearestLong(TEXT_SIZE_STEP_VALUES, settings.maxTextSizeBytes),
+                maxImageSizeBytes = snapToNearestLong(IMAGE_SIZE_STEP_VALUES, settings.maxImageSizeBytes),
+                storageQuotaBytes = snapToNearestLong(QUOTA_STEP_VALUES, settings.storageQuotaBytes),
+                syncBackend = settings.syncBackend,
+                syncOnWifiOnly = settings.syncOnWifiOnly,
+                p2pSyncEnabled = settings.p2pSyncEnabled,
+                supabaseUrl = settings.supabaseUrl,
+                supabaseAnonKey = settings.supabaseAnonKey,
+                cloudPassphrase = settings.cloudSyncPassphrase,
+                supabaseEmail = settings.supabaseEmail,
+                supabasePassword = settings.supabasePassword,
+                relayUrl = settings.relayUrl,
+                notifyOnCopy = settings.notifyOnCopy,
+                soundOnCopy = settings.soundOnCopy,
+                logcatEnabled = settings.logcatCaptureEnabled,
+            )
+        )
+    }
+
+    val isDirty by remember {
+        derivedStateOf {
+            captureEnabled != savedSnapshot.captureEnabled ||
+                syncEnabled != savedSnapshot.syncEnabled ||
+                showWarnings != savedSnapshot.showWarnings ||
+                maskSensitive != savedSnapshot.maskSensitive ||
+                translucency != savedSnapshot.translucency ||
+                imageMaxHeight != savedSnapshot.imageMaxHeight ||
+                previewDelay != savedSnapshot.previewDelay ||
+                imageQuality != savedSnapshot.imageQuality ||
+                maxTextSizeBytes != savedSnapshot.maxTextSizeBytes ||
+                maxImageSizeBytes != savedSnapshot.maxImageSizeBytes ||
+                storageQuotaBytes != savedSnapshot.storageQuotaBytes ||
+                syncBackend != savedSnapshot.syncBackend ||
+                syncOnWifiOnly != savedSnapshot.syncOnWifiOnly ||
+                p2pSyncEnabled != savedSnapshot.p2pSyncEnabled ||
+                supabaseUrl != savedSnapshot.supabaseUrl ||
+                supabaseAnonKey != savedSnapshot.supabaseAnonKey ||
+                cloudPassphrase != savedSnapshot.cloudPassphrase ||
+                supabaseEmail != savedSnapshot.supabaseEmail ||
+                supabasePassword != savedSnapshot.supabasePassword ||
+                relayUrl != savedSnapshot.relayUrl ||
+                notifyOnCopy != savedSnapshot.notifyOnCopy ||
+                soundOnCopy != savedSnapshot.soundOnCopy ||
+                logcatEnabled != savedSnapshot.logcatEnabled
+        }
+    }
+
+    var showDiscardDialog by remember { mutableStateOf(false) }
+
+    // Intercept system back when there are unsaved changes.
+    BackHandler(enabled = isDirty) {
+        showDiscardDialog = true
+    }
 
     // ── Tab selection ──
     var selectedTab by remember { mutableStateOf(TAB_GENERAL) }
@@ -167,11 +266,13 @@ fun SettingsScreen(
             settings.translucency = translucency
             settings.imageMaxHeight = imageMaxHeight
             settings.previewDelay = previewDelay.toLong()
+            settings.imageQuality = imageQuality
             settings.maxTextSizeBytes = maxTextSizeBytes
             settings.maxImageSizeBytes = maxImageSizeBytes
             settings.storageQuotaBytes = storageQuotaBytes
             settings.syncOnWifiOnly = syncOnWifiOnly
             settings.syncBackend = syncBackend
+            settings.p2pSyncEnabled = p2pSyncEnabled
             // Supabase / relay fields — trim text fields on save
             settings.supabaseUrl = supabaseUrl.trim()
             settings.supabaseAnonKey = supabaseAnonKey.trim()
@@ -186,6 +287,32 @@ fun SettingsScreen(
             SupabasePollWorker.schedule(ctx, enabled = syncBackend == SyncBackend.SUPABASE)
             LogcatCaptureService.syncState(ctx, settings)
             logcatStatus = LogcatCaptureService.status(ctx, settings)
+            // HW-A10: reset dirty snapshot so back-press no longer shows the dialog
+            savedSnapshot = SettingsSnapshot(
+                captureEnabled = captureEnabled,
+                syncEnabled = syncEnabled,
+                showWarnings = showWarnings,
+                maskSensitive = maskSensitive,
+                translucency = translucency,
+                imageMaxHeight = imageMaxHeight,
+                previewDelay = previewDelay,
+                imageQuality = imageQuality,
+                maxTextSizeBytes = maxTextSizeBytes,
+                maxImageSizeBytes = maxImageSizeBytes,
+                storageQuotaBytes = storageQuotaBytes,
+                syncBackend = syncBackend,
+                syncOnWifiOnly = syncOnWifiOnly,
+                p2pSyncEnabled = p2pSyncEnabled,
+                supabaseUrl = supabaseUrl.trim(),
+                supabaseAnonKey = supabaseAnonKey.trim(),
+                cloudPassphrase = cloudPassphrase,
+                supabaseEmail = supabaseEmail.trim(),
+                supabasePassword = supabasePassword,
+                relayUrl = relayUrl.trim(),
+                notifyOnCopy = notifyOnCopy,
+                soundOnCopy = soundOnCopy,
+                logcatEnabled = logcatEnabled,
+            )
             scope.launch {
                 snackbarHostState.showSnackbar(
                     message = savedMessage,
@@ -203,6 +330,28 @@ fun SettingsScreen(
         }
     }
 
+    // HW-A10: Discard-changes confirmation dialog shown when back is pressed with unsaved edits.
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text(stringResource(R.string.dialog_discard_title)) },
+            text = { Text(stringResource(R.string.dialog_discard_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDiscardDialog = false
+                    onBack()
+                }) {
+                    Text(stringResource(R.string.dialog_discard_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) {
+                    Text(stringResource(R.string.dialog_discard_keep))
+                }
+            },
+        )
+    }
+
     Scaffold(
         modifier = modifier,
         containerColor = IdeBg,
@@ -210,7 +359,8 @@ fun SettingsScreen(
             CopyPasteTopBar(
                 title = stringResource(R.string.title_settings),
                 showBackButton = showBackButton,
-                onBack = onBack,
+                // HW-A10: intercept the top-bar back arrow for dirty check too.
+                onBack = { if (isDirty) showDiscardDialog = true else onBack() },
                 backContentDescription = stringResource(R.string.cd_back),
                 actions = {
                     Button(
@@ -273,6 +423,8 @@ fun SettingsScreen(
                         onImageMaxHeightChange = { imageMaxHeight = it },
                         previewDelay = previewDelay,
                         onPreviewDelayChange = { previewDelay = it },
+                        imageQuality = imageQuality,
+                        onImageQualityChange = { imageQuality = it },
                     )
                     TAB_STORAGE -> StorageTab(
                         maxTextSizeBytes = maxTextSizeBytes,
@@ -288,6 +440,8 @@ fun SettingsScreen(
                         onSyncBackendChange = { syncBackend = it },
                         syncOnWifiOnly = syncOnWifiOnly,
                         onSyncOnWifiOnlyChange = { syncOnWifiOnly = it },
+                        p2pSyncEnabled = p2pSyncEnabled,
+                        onP2pSyncEnabledChange = { p2pSyncEnabled = it },
                         supabaseUrl = supabaseUrl,
                         onSupabaseUrlChange = { supabaseUrl = it },
                         supabaseAnonKey = supabaseAnonKey,
@@ -423,6 +577,8 @@ private fun DisplayTab(
     onImageMaxHeightChange: (Int) -> Unit,
     previewDelay: Int,
     onPreviewDelayChange: (Int) -> Unit,
+    imageQuality: Int,
+    onImageQualityChange: (Int) -> Unit,
 ) {
     Column {
         SectionLabel(stringResource(R.string.section_display))
@@ -469,6 +625,15 @@ private fun DisplayTab(
                 }
             },
             onRelease = onPreviewDelayChange,
+        )
+        // HW-A14: image quality slider — no separate Save button; persisted via main Save.
+        ContinuousSliderRow(
+            label = stringResource(R.string.setting_image_quality_label),
+            value = imageQuality,
+            min = 1,
+            max = 100,
+            formatValue = { "${it}%" },
+            onRelease = onImageQualityChange,
         )
         HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
     }
@@ -525,6 +690,8 @@ private fun SyncTab(
     onSyncBackendChange: (SyncBackend) -> Unit,
     syncOnWifiOnly: Boolean,
     onSyncOnWifiOnlyChange: (Boolean) -> Unit,
+    p2pSyncEnabled: Boolean,
+    onP2pSyncEnabledChange: (Boolean) -> Unit,
     supabaseUrl: String,
     onSupabaseUrlChange: (String) -> Unit,
     supabaseAnonKey: String,
@@ -540,6 +707,14 @@ private fun SyncTab(
 ) {
     Column {
         SectionLabel(stringResource(R.string.section_sync))
+        // HW-A9: P2P sync toggle — LAN direct device-to-device sync.
+        SettingsRow(
+            title = stringResource(R.string.setting_p2p_sync_title),
+            subtitle = stringResource(R.string.setting_p2p_sync_subtitle),
+            checked = p2pSyncEnabled,
+            onCheckedChange = onP2pSyncEnabledChange,
+        )
+        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
         SettingsRow(
             title = stringResource(R.string.setting_sync_wifi_only_title),
             subtitle = stringResource(R.string.setting_sync_wifi_only_subtitle),

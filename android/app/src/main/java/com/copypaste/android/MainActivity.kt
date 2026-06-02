@@ -158,9 +158,13 @@ class MainActivity : ComponentActivity() {
         // Previously this called repository.storeItem directly, skipping all of
         // bumpTodayCounter / postCopyNotification / playCopySound / notifySyncManager.
         ClipboardService.captureClip(this, text, settings, repository, syncManager)
-        // Refresh the Clips tab regardless of whether the item was new (captureClip
-        // deduplicates internally; a no-op store is silent and cheap here).
-        viewModel.loadItems()
+        // Do NOT call viewModel.loadItems() here. The ViewModel's storeListener
+        // (registered on SharedPreferences KEY_ITEM_IDS) already fires a loadItems()
+        // automatically whenever captureClip actually stores a new item. Calling it
+        // unconditionally here caused a redundant refresh on every clipboard change —
+        // including suppressed echo-copies (copy-from-history taps) — and could
+        // interact with HW-A3 by triggering a UI reload before the dedup window
+        // had a chance to suppress all concurrent listener fires.
     }
 
     companion object {

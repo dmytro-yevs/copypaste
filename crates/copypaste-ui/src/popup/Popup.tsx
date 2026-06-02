@@ -285,13 +285,20 @@ export function Popup() {
 
   const copyAndPaste = useCallback(
     async (id: string, _preview: string) => {
-      await hide();
+      // HW-M6 fix: copy FIRST so the daemon write completes before we hide.
+      // Hiding before the copy finished caused every-other-click races (the
+      // isHidingRef 100ms debounce swallowed the second click) and image copy
+      // failures (copyItem write error was silently lost after hide()).
+      // On error we do NOT hide — the error toast remains visible to the user.
+      // Only on success do we hide and paste.
       try {
         const copied = await api.copyItem(id);
         const preview =
           typeof copied === "object" && copied !== null && "preview" in copied
             ? String((copied as { preview: string }).preview)
             : "";
+        // Copy succeeded — now hide (activates prior app) and paste.
+        await hide();
         await invoke("paste_to_frontmost");
         if (playSoundOnCopy) {
           void playCopySound();
@@ -303,7 +310,10 @@ export function Popup() {
       } catch (e) {
         const msg = e instanceof IpcError ? e.message : String(e);
         console.error("popup copy/paste failed", e);
-        setError(`Paste failed: ${msg}`);
+        // Surface the error while the popup is still visible.
+        setError(`Copy failed: ${msg}`);
+        // Reset isHidingRef so the user can retry immediately.
+        isHidingRef.current = false;
       }
     },
     [hide, playSoundOnCopy, notifyOnCopy]
@@ -684,8 +694,28 @@ function PopupRow({
           {relTime}
         </span>
 
-        {/* M10: Bookmark interactive hover pin button and at-rest indicator */}
+        {/* M10: Bookmark interactive hover pin button and at-rest indicator.
+            HW-M5 fix: both the hover button and the at-rest badge are absolute
+            within the fixed h-5 w-5 slot — no in-flow children, so the slot
+            width never changes between pinned/unpinned rows, keeping the
+            timestamp and keycap aligned across all rows. */}
         <div className="relative flex items-center justify-center h-5 w-5 shrink-0">
+          {/* At-rest pinned badge — visible when pinned, fades out on row hover */}
+          {item.pinned && (
+            <svg
+              viewBox="0 0 16 20"
+              width="8"
+              height="10"
+              fill="currentColor"
+              aria-label="Pinned"
+              className="absolute group-hover:opacity-0 transition-opacity"
+              style={{ color: "#D9A343", transitionDuration: "120ms", zIndex: 1 }}
+            >
+              <path d="M2 1.5A1.5 1.5 0 0 1 3.5 0h9A1.5 1.5 0 0 1 14 1.5v17.25l-6-3.75-6 3.75V1.5Z" />
+            </svg>
+          )}
+
+          {/* Hover pin/unpin button — shown on group hover, sits above badge */}
           <button
             type="button"
             aria-label={item.pinned ? "Unpin" : "Pin"}
@@ -707,20 +737,6 @@ function PopupRow({
               </svg>
             )}
           </button>
-
-          {item.pinned && (
-            <svg
-              viewBox="0 0 16 20"
-              width="8"
-              height="10"
-              fill="currentColor"
-              aria-label="Pinned"
-              className="group-hover:opacity-0 transition-opacity"
-              style={{ color: "#D9A343", flexShrink: 0, transitionDuration: "120ms" }}
-            >
-              <path d="M2 1.5A1.5 1.5 0 0 1 3.5 0h9A1.5 1.5 0 0 1 14 1.5v17.25l-6-3.75-6 3.75V1.5Z" />
-            </svg>
-          )}
         </div>
 
         {/* ⌘1-9 keycap (first 9 rows, no active query) */}

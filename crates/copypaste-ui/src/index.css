@@ -257,7 +257,15 @@ input[type="range"] {
 
 input[type="range"]::-webkit-slider-runnable-track {
   height: 4px;
-  background: var(--ide-elevated);
+  /* HW-M4: accent fill up to --_fill, unfilled portion uses elevated bg.
+     appearance:none disables native accent-color, so we drive it via a gradient. */
+  background: linear-gradient(
+    to right,
+    var(--ide-accent) 0%,
+    var(--ide-accent) var(--_fill, 0%),
+    var(--ide-elevated) var(--_fill, 0%),
+    var(--ide-elevated) 100%
+  );
   border-radius: 2px;
   border: 1px solid var(--ide-border);
 }

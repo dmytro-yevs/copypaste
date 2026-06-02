@@ -89,6 +89,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import android.content.ClipData
@@ -929,15 +930,29 @@ private fun HistoryRow(
         isSelected        -> IdeSelection
         expanded          -> IdeElevated
         detectedSensitive -> IdeDanger.copy(alpha = 0.07f)
-        item.pinned       -> IdeWarning.copy(alpha = 0.06f)
+        item.pinned       -> IdeWarning.copy(alpha = 0.16f)
         else              -> Color.Transparent
     }
+
+    // Left accent bar color: visible amber when pinned and no stronger state is active.
+    val pinnedAccentColor = if (item.pinned && !isSelected && !expanded && !detectedSensitive)
+        IdeWarning.copy(alpha = 0.72f)
+    else
+        Color.Transparent
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .scale(rowScale)
             .background(rowBg)
+            .drawBehind {
+                // 2.dp left accent bar for pinned rows
+                val barWidthPx = 2.dp.toPx()
+                drawRect(
+                    color = pinnedAccentColor,
+                    size = androidx.compose.ui.geometry.Size(barWidthPx, size.height),
+                )
+            }
             .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null, // press scale handles visual feedback

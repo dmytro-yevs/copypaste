@@ -31,7 +31,8 @@ class ClipboardAccessibilityService : AccessibilityService() {
     private val scope = CoroutineScope(Dispatchers.IO)
     private lateinit var settings: Settings
     private lateinit var repository: ClipboardRepository
-    private lateinit var syncManager: SyncManager
+    // Nullable: may remain null when sync-init fails; handleClip skips sync safely.
+    private var syncManager: SyncManager? = null
     private lateinit var clipboardManager: ClipboardManager
 
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
@@ -44,7 +45,13 @@ class ClipboardAccessibilityService : AccessibilityService() {
         if (imageMime != null) {
             val uri = clip.getItemAt(0)?.uri
             if (uri != null) {
-                scope.launch { ClipboardService.captureImageClip(this@ClipboardAccessibilityService, uri, imageMime, settings, repository, syncManager) }
+                // syncManager may be null if sync init failed; captureImageClip
+                // takes non-null, so supply a fallback instance (image sync is not
+                // wired anyway — the parameter is @Suppress UNUSED_PARAMETER there).
+                val sm = syncManager ?: try {
+                    SyncManager(RelayClient(""), settings.deviceId, token = "", settings = settings)
+                } catch (_: Exception) { return@OnPrimaryClipChangedListener }
+                scope.launch { ClipboardService.captureImageClip(this@ClipboardAccessibilityService, uri, imageMime, settings, repository, sm) }
             }
             return@OnPrimaryClipChangedListener
         }
@@ -57,16 +64,21 @@ class ClipboardAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         AppLogger.i(TAG, "ClipboardAccessibilityService.onServiceConnected called")
+
+        // Initialize settings and repository FIRST — these must succeed for the
+        // clipboard listener to function at all. They only need the application
+        // context, so they are safe to construct here unconditionally.
+        settings = Settings(this)
+        repository = ClipboardRepository(this)
+
+        // Sync init is best-effort: a bad relay URL, missing .so, or any other
+        // transient failure must not prevent local clipboard capture. When this
+        // block throws, syncManager remains null and handleClip skips sync while
+        // continuing to store clips locally via captureClip's fallback path.
         try {
-            settings = Settings(this)
-            repository = ClipboardRepository(this)
             val relayClient = RelayClient(settings.relayUrl)
             syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
         } catch (e: Exception) {
-            // Sync/relay initialisation failed (bad URL, missing .so, etc.).
-            // Log the failure so it shows up in the in-app log viewer and adb-pullable log,
-            // then fall through and attempt to register the clipboard listener anyway so that
-            // local capture still works even without sync.
             AppLogger.e(TAG, "onServiceConnected: sync init failed — local-capture-only mode", e)
         }
 
@@ -102,7 +114,25 @@ class ClipboardAccessibilityService : AccessibilityService() {
         // HIGH-2: route through the same store + count + sync pipeline as the
         // foreground service so background-captured clips are synced and counted,
         // not just stored locally.
-        ClipboardService.captureClip(this, text, settings, repository, syncManager)
+        //
+        // syncManager may be null when sync init failed in onServiceConnected.
+        // In that case, captureClip is still called with a no-op SyncManager so
+        // that local capture (store + count + notification) works correctly.
+        // The SyncManager.syncEnabled path inside captureClip will be skipped
+        // because settings.syncEnabled is read fresh each time.
+        val sm = syncManager ?: run {
+            // Sync init failed — construct a minimal SyncManager for the call.
+            // It will not be used because captureClip checks settings.syncEnabled,
+            // and without a valid relay URL sync would be disabled anyway.
+            try {
+                val relayClient = RelayClient("")
+                SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
+            } catch (e: Exception) {
+                AppLogger.w(TAG, "handleClip: cannot construct fallback SyncManager — sync will be skipped", e)
+                return  // extremely unlikely; local capture will miss this clip
+            }
+        }
+        ClipboardService.captureClip(this, text, settings, repository, sm)
         AppLogger.d(TAG, "AccessibilityService captured background clip")
     }
 

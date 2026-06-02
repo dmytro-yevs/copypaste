@@ -4,7 +4,9 @@ import {
   api,
   formatWallTime,
   IpcError,
+  playCopySound,
   resetDatabase,
+  showCopyNotification,
   sourceAppLabel,
   type HistoryEntry,
 } from "../lib/ipc";
@@ -359,14 +361,18 @@ function HistoryRow({
       className={[
         "group relative flex cursor-pointer select-none items-center gap-2 px-3 py-1.5",
         "border-b text-[13px]",
-        // v0.5.3: warningDim tint for pinned rows, deeper selection blue
-        entry.pinned ? "border-ide-warning/15 bg-ide-warningDim/40" : "border-ide-divider/50",
+        // v0.5.3: warningDim tint for pinned rows — border-l-2 gives a clear
+        // amber left edge; bg-ide-warningDim (no opacity modifier) at its native
+        // 0.10 alpha is visible without overwhelming. border-b remains divider.
+        entry.pinned
+          ? "border-b border-ide-divider/50 border-l-2 border-l-ide-warning bg-ide-warningDim"
+          : "border-b border-ide-divider/50",
         multiSelected
           ? "bg-ide-selection text-ide-text"
           : selected
           ? "bg-ide-selection text-ide-text"
           : entry.pinned
-          ? "text-ide-text hover:bg-ide-warning/8"
+          ? "text-ide-text hover:bg-ide-warning/15"
           : "text-ide-text hover:bg-ide-hover",   // panel surface: hover is ide-hover (darker than panel)
         dragHandleProps?.dragging ? "opacity-50" : "",
       ].join(" ")}
@@ -855,7 +861,7 @@ interface ToastState {
 let _toastSeq = 0;
 
 export function HistoryView() {
-  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive } =
+  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, playSoundOnCopy, notifyOnCopy } =
     useUI((s) => s.prefs);
 
   // M5: historySize removed from prefs; use a fixed initial page size.
@@ -1154,6 +1160,18 @@ export function HistoryView() {
     async (id: string) => {
       try {
         await api.copyItem(id);
+        // Fire sound / notification on successful copy — same gates as the popup.
+        if (playSoundOnCopy) {
+          void playCopySound();
+        }
+        if (notifyOnCopy) {
+          // Build a short preview from the current items list for the notification.
+          const item = items.find((it) => it.id === id);
+          const preview = item
+            ? item.preview.replace(/\s+/g, " ").trim().slice(0, 60) || "Copied"
+            : "Copied";
+          void showCopyNotification(preview);
+        }
         // Optimistically move the copied item to the top — but only for
         // unpinned items. Pinned items keep their pin_order position; the daemon
         // only bumps wall_time, which does not affect their sort position.
@@ -1184,7 +1202,7 @@ export function HistoryView() {
         showToast(msg, "error");
       }
     },
-    [load, showToast]
+    [items, load, playSoundOnCopy, notifyOnCopy, showToast]
   );
 
   const handlePin = useCallback(

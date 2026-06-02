@@ -24,7 +24,7 @@
     <string name="pair_instructions">Scan the QR code with the other device, or scan its QR here.</string>
     <string name="btn_pair_start">Start Pairing</string>
     <string name="btn_pair_regenerate">Regenerate Token</string>
-    <string name="pair_token_note">Token expires in 60 seconds. Keep this screen visible.</string>
+    <string name="btn_scan_qr">Scan a device\'s QR</string>
     <string name="pair_token_expires_in_seconds">Expires in %1$d s</string>
     <string name="pair_token_expired">Token expired — request a new one.</string>
     <string name="pair_request_new_token">Request new token</string>
@@ -64,6 +64,13 @@
     <string name="setting_max_image_size_hint">1–512 MB (default 64)</string>
     <string name="setting_storage_quota_label">Local storage limit (MB)</string>
     <string name="setting_storage_quota_hint">50–20480 MB (default 10240)</string>
+
+    <!-- Settings — Display (HW-A14: image quality) -->
+    <string name="setting_image_quality_label">Image capture quality</string>
+
+    <!-- Settings — Sync (HW-A9: P2P toggle) -->
+    <string name="setting_p2p_sync_title">P2P sync (LAN)</string>
+    <string name="setting_p2p_sync_subtitle">Direct device-to-device sync over your local network. Requires a paired device. Disable for cloud-only sync.</string>
 
     <!-- Settings — Sync -->
     <string name="setting_sync_wifi_only_title">Sync on Wi-Fi only</string>
@@ -193,6 +200,12 @@
     <string name="selection_count">%1$d selected</string>
 
     <!-- Confirmation dialogs -->
+    <!-- HW-A10: unsaved settings discard warning -->
+    <string name="dialog_discard_title">Discard changes?</string>
+    <string name="dialog_discard_message">You have unsaved changes. Leave without saving?</string>
+    <string name="dialog_discard_confirm">Discard</string>
+    <string name="dialog_discard_keep">Keep editing</string>
+
     <string name="dialog_clear_all_title">Clear All History</string>
     <string name="dialog_clear_all_message">This will permanently delete all %1$d clipboard items. This cannot be undone.</string>
     <string name="dialog_clear_unpinned_title">Clear Unpinned Items</string>

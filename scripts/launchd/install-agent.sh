@@ -56,6 +56,14 @@ if launchctl print "gui/${UID_NUM}/${LABEL}" >/dev/null 2>&1; then
     launchctl bootout "gui/${UID_NUM}/${LABEL}" 2>/dev/null || true
 fi
 
+# Kill any lingering daemon process so the in-use binary is not held open
+# when we install the new one. Safe/idempotent: `|| true` means the script
+# never fails when no process is running.
+echo "==> stopping any running daemon process"
+pkill -f copypaste-daemon 2>/dev/null || true
+# Brief settle so the OS releases file handles before we bootstrap the new agent.
+sleep 1
+
 # Clear any persistent disabled override BEFORE bootstrap. A prior
 # `launchctl unload -w` / `disable` (or even a plain `bootout`) can leave the
 # label on launchd's per-user disabled list, which makes `bootstrap` fail with

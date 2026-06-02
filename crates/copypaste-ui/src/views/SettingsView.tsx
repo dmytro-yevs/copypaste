@@ -120,9 +120,15 @@ function SettingsRow({
 }
 
 function Panel({ children }: { children: React.ReactNode }) {
+  // HW-M3: overflow-hidden was clipping the absolutely-positioned InfoPopover (z-50).
+  // The outer div keeps the border/shadow/rounding; an inner div clips the row
+  // bottom-borders to the panel's rounded corners without clipping the popover,
+  // which floats above the outer div via z-50.
   return (
-    <div className="overflow-hidden rounded-ide-lg border border-ide-border bg-ide-elevated shadow-ide-sm">
-      {children}
+    <div className="rounded-ide-lg border border-ide-border bg-ide-elevated shadow-ide-sm">
+      <div className="overflow-hidden rounded-ide-lg">
+        {children}
+      </div>
     </div>
   );
 }
@@ -165,6 +171,9 @@ function SliderRow({
   formatValue: (v: number) => string;
   disabled?: boolean;
 }) {
+  // HW-M4: compute fill % for the accent-colored track. Since appearance:none
+  // disables native accent-color, we drive the gradient via a CSS custom prop.
+  const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
   return (
     <div className="flex items-center gap-2">
       <input
@@ -178,7 +187,8 @@ function SliderRow({
         onMouseUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
         onTouchEnd={(e) => onRelease?.(Number((e.currentTarget as HTMLInputElement).value))}
         onKeyUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
-        className="w-28 accent-ide-accent disabled:opacity-40 disabled:cursor-not-allowed"
+        className="w-28 disabled:opacity-40 disabled:cursor-not-allowed"
+        style={{ ["--_fill" as string]: `${pct}%` }}
       />
       <span className="w-[52px] text-right text-[13px] text-ide-text">
         {formatValue(value)}
@@ -1014,7 +1024,8 @@ export function SettingsView() {
             </div>
           </SettingsRow>
           <SettingsRow label="Image preview height">
-            <div className="flex flex-col items-end gap-0.5">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Max image thumbnail height (1–200 px)" />
               <SliderRow
                 min={1}
                 max={200}
@@ -1023,7 +1034,6 @@ export function SettingsView() {
                 onChange={(v) => setPrefs({ imageMaxHeight: v })}
                 formatValue={(v) => `${v}px`}
               />
-              <span className="text-[11px] text-ide-faint">Max image thumbnail height (1–200 px)</span>
             </div>
           </SettingsRow>
         </Panel>
@@ -1031,14 +1041,12 @@ export function SettingsView() {
         <SubsectionHeader label="Window" hint="Visual style of the application window." />
         <Panel>
           <SettingsRow label="Translucency / vibrancy">
-            <div className="flex flex-col items-end gap-0.5">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Blur + transparency behind surfaces. Disable for solid backgrounds." />
               <Toggle
                 checked={prefs.translucency ?? true}
                 onChange={(v) => setPrefs({ translucency: v })}
               />
-              <span className="text-[11px] text-ide-faint">
-                Blur + transparency behind surfaces. Disable for solid backgrounds.
-              </span>
             </div>
           </SettingsRow>
         </Panel>
@@ -1238,6 +1246,7 @@ export function SettingsView() {
           <SettingsRow label="Open popup">
             <div className="flex flex-col items-end gap-1">
               <div className="flex items-center gap-2">
+                <InfoPopover text="Click then press a combo. OS-reserved keys (Cmd+Space etc.) cannot be overridden." />
                 <ShortcutCapture
                   value={pendingShortcut}
                   onChange={setPendingShortcut}
@@ -1261,10 +1270,6 @@ export function SettingsView() {
                   {shortcutMsg.text}
                 </span>
               )}
-              {/* W4-1: shortened help text */}
-              <span className="text-[11px] text-ide-faint">
-                Click then press a combo. OS-reserved keys (Cmd+Space etc.) cannot be overridden.
-              </span>
             </div>
           </SettingsRow>
         </Panel>

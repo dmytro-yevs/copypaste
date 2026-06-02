@@ -807,21 +807,37 @@ class ClipboardRepository(context: Context) {
         }
 
         /**
-         * Returns true (and consumes the expectation) when [content] matches a
-         * pending [expectClip] within [EXPECTED_CLIP_WINDOW_MS]. Single-shot: the
-         * expectation is cleared on the first match (or once expired) so only the
-         * immediate echo is suppressed, never a later genuine re-copy.
+         * Returns true when [content] matches a pending [expectClip] within
+         * [EXPECTED_CLIP_WINDOW_MS].
+         *
+         * The expectation is NOT cleared on a match — it stays active for the
+         * full window so that all concurrent listeners (ClipboardService,
+         * ClipboardAccessibilityService, MainActivity) that fire for the same
+         * user tap are all suppressed, not just the first one.  Without this,
+         * the second listener would see [expectedClipHasValue] already cleared
+         * and store a duplicate row.
+         *
+         * The expectation is cleared only when:
+         *   - the window expires (stale expectation — genuinely new copy), or
+         *   - the content hash does NOT match (different clip — not our echo).
+         *
+         * A later genuine re-copy of the same text after [EXPECTED_CLIP_WINDOW_MS]
+         * has elapsed will not be suppressed because the window will have expired.
          */
         fun shouldSkipExpectedClip(content: String): Boolean {
             synchronized(expectedClipLock) {
                 if (!expectedClipHasValue) return false
                 val now = System.currentTimeMillis()
                 if (now - expectedClipAtMs > EXPECTED_CLIP_WINDOW_MS) {
+                    // Window expired — clear and treat as a new clip.
                     expectedClipHasValue = false
                     return false
                 }
                 if (content.hashCode() == expectedClipHash) {
-                    expectedClipHasValue = false  // consume — single-shot
+                    // Hash matches within window: suppress this echo.
+                    // Do NOT clear expectedClipHasValue — other concurrent
+                    // listeners firing for the same tap must also be suppressed.
+                    // The window expiry above will self-clear after 5 s.
                     return true
                 }
                 return false
