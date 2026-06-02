@@ -555,6 +555,28 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("logcat_capture_enabled", false)
         set(v) = prefs.edit().putBoolean("logcat_capture_enabled", v).apply()
 
+    // ── Recent searches (history search bar) ────────────────────────────────
+
+    /**
+     * Last-5 history search queries, newest first. Persisted as a single
+     * SharedPreferences string with entries joined by a NUL delimiter
+     * — NUL never appears in user text, so it is a safe separator for arbitrary
+     * query strings (commas, pipes, etc. are all preserved). Reads filter out
+     * blanks and cap at 5; writes apply the same cap.
+     */
+    var recentSearches: List<String>
+        get() = prefs.getString(KEY_RECENT_SEARCHES, "")
+            ?.split(RECENT_SEARCH_DELIM)
+            ?.filter { it.isNotBlank() }
+            ?.take(MAX_RECENT_SEARCHES)
+            ?: emptyList()
+        set(v) {
+            val capped = v.filter { it.isNotBlank() }.take(MAX_RECENT_SEARCHES)
+            prefs.edit()
+                .putString(KEY_RECENT_SEARCHES, capped.joinToString(RECENT_SEARCH_DELIM))
+                .apply()
+        }
+
     /**
      * Runtime flag set by [LogcatCaptureService] to track whether it has
      * successfully read at least one clipboard item via logcat.
@@ -836,5 +858,15 @@ class Settings(context: Context) {
 
         // ── P2P sync ──────────────────────────────────────────────────────────
         const val KEY_P2P_SYNC_ENABLED = "p2p_sync_enabled"
+
+        // ── Recent searches ─────────────────────────────────────────────────────
+        private const val KEY_RECENT_SEARCHES = "recent_searches"
+        private const val MAX_RECENT_SEARCHES = 5
+
+        /**
+         * NUL delimiter for the joined [recentSearches] pref string. NUL never
+         * occurs in user-entered search text, so it cannot collide with a query.
+         */
+        private const val RECENT_SEARCH_DELIM = "\u0000"
     }
 }

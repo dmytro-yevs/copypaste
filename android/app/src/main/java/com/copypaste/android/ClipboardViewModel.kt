@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
 /**
@@ -112,13 +113,15 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setPinned(id: String, pinned: Boolean) {
-        viewModelScope.launch {
+        // setPinned now uses a blocking commit() — run off the main thread.
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.setPinned(id, pinned)
                 loadItems()
             } catch (e: Exception) {
                 Log.w(TAG, "setPinned($id, $pinned) failed", e)
-                _errors.value = e.message ?: e.javaClass.simpleName
+                // postValue: this coroutine runs on Dispatchers.IO, not the main thread.
+                _errors.postValue(e.message ?: e.javaClass.simpleName)
             }
         }
     }
@@ -128,13 +131,33 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
      * [ids] is the full ordered list of pinned item IDs (first = top of pinned section).
      */
     fun reorderPinned(ids: List<String>) {
-        viewModelScope.launch {
+        // reorderPinned now uses a blocking commit() — run off the main thread.
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.reorderPinned(ids)
                 loadItems()
             } catch (e: Exception) {
                 Log.w(TAG, "reorderPinned failed", e)
-                _errors.value = e.message ?: e.javaClass.simpleName
+                // postValue: this coroutine runs on Dispatchers.IO, not the main thread.
+                _errors.postValue(e.message ?: e.javaClass.simpleName)
+            }
+        }
+    }
+
+    /**
+     * Move the just-copied item [id] to the top of the recency (non-pinned)
+     * section, then refresh. Pinned items are left in place by
+     * [ClipboardRepository.bumpToTop]. Mirrors macOS `bump_item_recency`.
+     */
+    fun copyItem(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                repository.bumpToTop(id)
+                loadItems()
+            } catch (e: Exception) {
+                Log.w(TAG, "copyItem($id) failed", e)
+                // postValue: this coroutine runs on Dispatchers.IO, not the main thread.
+                _errors.postValue(e.message ?: e.javaClass.simpleName)
             }
         }
     }
