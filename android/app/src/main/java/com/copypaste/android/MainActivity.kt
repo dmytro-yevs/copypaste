@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Devices
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -196,6 +197,7 @@ private enum class NavTab(val label: String, val icon: ImageVector) {
     CLIPS("History", Icons.Filled.ContentPaste),
     DEVICES("Pair", Icons.Filled.Devices),
     SETTINGS("Settings", Icons.Filled.Settings),
+    ABOUT("About", Icons.Filled.Info),
 }
 
 @Composable
@@ -247,6 +249,11 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                 onBack = {}
             )
             NavTab.SETTINGS -> SettingsScreen(
+                modifier = Modifier.padding(innerPadding),
+                showBackButton = false,
+                onBack = {}
+            )
+            NavTab.ABOUT -> AboutScreen(
                 modifier = Modifier.padding(innerPadding),
                 showBackButton = false,
                 onBack = {}
