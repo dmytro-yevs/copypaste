@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { api, HistoryEntry, IpcError, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
@@ -293,6 +295,26 @@ export function Popup() {
     }
   }, []);
 
+  // Open the main window's Settings view. We hide the popup, surface the main
+  // window (show + focus via the JS WebviewWindow API), then emit a global
+  // "open-settings" event that App.tsx listens for to navigate to the Settings
+  // route. This reuses the existing event-bus mechanism (App already uses
+  // `listen` from @tauri-apps/api/event) rather than introducing a new IPC.
+  const openSettings = useCallback(async () => {
+    await hide();
+    try {
+      const main = await WebviewWindow.getByLabel("main");
+      if (main) {
+        await main.show();
+        await main.unminimize();
+        await main.setFocus();
+      }
+      await emit("open-settings");
+    } catch (e) {
+      console.error("popup open-settings failed", e);
+    }
+  }, [hide]);
+
   const copyAndPaste = useCallback(
     async (id: string, _preview: string) => {
       // HW-M6 fix: copy FIRST so the daemon write completes before we hide.
@@ -557,7 +579,29 @@ export function Popup() {
         }}
       >
         <span className="text-[10.5px]">↑↓ navigate</span>
-        <span className="text-[10.5px]">⏎ paste · Esc close</span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10.5px]">⏎ paste · Esc close</span>
+          {/* Settings gear — opens the main window Settings view. Inline SVG to
+              match the popup's existing inline-icon style (Lucide "settings"). */}
+          <button
+            type="button"
+            aria-label="Open settings"
+            title="Open settings"
+            onClick={() => void openSettings()}
+            className="flex items-center justify-center rounded p-0.5 hover:bg-white/10 transition-colors"
+            style={{ border: "none", background: "none", cursor: "pointer", color: "rgba(255,255,255,0.35)" }}
+          >
+            <svg
+              width="13" height="13" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" strokeWidth="1.75"
+              strokeLinecap="round" strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
   );

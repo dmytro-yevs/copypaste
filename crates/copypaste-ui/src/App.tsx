@@ -21,8 +21,28 @@ const VIEWS: Record<ViewId, { Component: ComponentType; label: string }> = {
 
 export default function App() {
   const view = useUI((s) => s.view);
+  const setView = useUI((s) => s.setView);
   const translucency = useUI((s) => s.prefs.translucency);
   const { Component: View, label } = VIEWS[view];
+
+  // The popup window emits "open-settings" (after showing this main window) when
+  // the user clicks its footer gear. Navigate to the Settings view in response.
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void listen("open-settings", () => {
+      if (!cancelled) setView("settings");
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    }).catch(() => {
+      // Best-effort — popup gear is a convenience, not critical path.
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [setView]);
 
   // Apply/remove the no-translucency root class whenever the pref changes.
   // When translucency is OFF we add "no-translucency" on <html> so the CSS
