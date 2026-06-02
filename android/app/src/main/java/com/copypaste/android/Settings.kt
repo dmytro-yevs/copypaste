@@ -23,6 +23,7 @@ enum class SyncBackend {
 }
 
 class Settings(context: Context) {
+    private val appContext: Context = context.applicationContext
     private val prefs: SharedPreferences = context.getSharedPreferences("copypaste", Context.MODE_PRIVATE)
 
     /**
@@ -540,6 +541,101 @@ class Settings(context: Context) {
                 .apply()
         }
 
+    // ── P2P device identity (mTLS) ──────────────────────────────────────────
+
+    /**
+     * This device's persistent P2P mTLS identity (self-signed cert + private key
+     * + the derived fingerprint the peer pins), or null when no identity has been
+     * generated yet.
+     *
+     * STABILITY CONTRACT: this identity MUST be generated exactly once and reused
+     * across every app launch, pairing, and sync session. The peer pins our
+     * [P2pIdentity.fingerprint] (= SHA-256 of [P2pIdentity.certDer]) into its mTLS
+     * allowlist at pairing time; regenerating the cert mints a new fingerprint,
+     * which the peer rejects, silently breaking P2P sync after a restart. This is
+     * the Android-side mirror of the daemon's `load_or_create` cert persistence.
+     *
+     * The private [P2pIdentity.keyDer] is wrapped with the AndroidKeyStore-resident
+     * KEK (same mechanism as [encryptionKey] / [pairedPeerSessionKey]) so it never
+     * sits in SharedPreferences in cleartext. The cert DER, device id, and
+     * fingerprint are public material and stored verbatim.
+     *
+     * A legacy plaintext identity persisted by an earlier build in the dedicated
+     * `copypaste_device_cert` prefs file is migrated into this wrapped form on
+     * first read (see [migrateLegacyP2pIdentity]) so existing pairings survive the
+     * upgrade. Returns null (forcing regeneration) only if the wrapped key can no
+     * longer be unwrapped — a lost KEK already invalidates every other secret.
+     *
+     * DO NOT log [P2pIdentity.keyDer] or include it in crash reports.
+     */
+    var p2pIdentity: P2pIdentity?
+        get() {
+            migrateLegacyP2pIdentity()
+            val deviceId = prefs.getString(KEY_P2P_DEVICE_ID, null) ?: return null
+            val fingerprint = prefs.getString(KEY_P2P_FINGERPRINT, null) ?: return null
+            val certB64 = prefs.getString(KEY_P2P_CERT_DER_B64, null) ?: return null
+            val wrappedB64 = prefs.getString(KEY_P2P_KEY_WRAPPED_B64, null) ?: return null
+            val ivB64 = prefs.getString(KEY_P2P_KEY_IV_B64, null) ?: return null
+            val keyDer = runCatching {
+                unwrapKey(
+                    wrapped = Base64.decode(wrappedB64, Base64.DEFAULT),
+                    iv = Base64.decode(ivB64, Base64.DEFAULT),
+                )
+            }.getOrElse { e ->
+                Log.w(TAG, "Failed to unwrap P2P device key (${e.javaClass.simpleName}); identity reset", e)
+                return null
+            }
+            return P2pIdentity(
+                deviceId = deviceId,
+                fingerprint = fingerprint,
+                certDer = Base64.decode(certB64, Base64.DEFAULT),
+                keyDer = keyDer,
+            )
+        }
+        set(v) {
+            if (v == null) {
+                prefs.edit()
+                    .remove(KEY_P2P_DEVICE_ID)
+                    .remove(KEY_P2P_FINGERPRINT)
+                    .remove(KEY_P2P_CERT_DER_B64)
+                    .remove(KEY_P2P_KEY_WRAPPED_B64)
+                    .remove(KEY_P2P_KEY_IV_B64)
+                    .apply()
+                return
+            }
+            val (wrapped, iv) = wrapKey(v.keyDer)
+            prefs.edit()
+                .putString(KEY_P2P_DEVICE_ID, v.deviceId)
+                .putString(KEY_P2P_FINGERPRINT, v.fingerprint)
+                .putString(KEY_P2P_CERT_DER_B64, Base64.encodeToString(v.certDer, Base64.NO_WRAP))
+                .putString(KEY_P2P_KEY_WRAPPED_B64, Base64.encodeToString(wrapped, Base64.DEFAULT))
+                .putString(KEY_P2P_KEY_IV_B64, Base64.encodeToString(iv, Base64.DEFAULT))
+                .commit() // synchronous: an identity lost to a force-stop breaks pairing
+        }
+
+    /**
+     * Migrate a P2P identity persisted by an earlier build in the dedicated
+     * `copypaste_device_cert` SharedPreferences file (where the private key was
+     * stored as plaintext base64) into the KEK-wrapped form above, then scrub the
+     * legacy file. No-op when nothing legacy exists or migration already ran.
+     */
+    private fun migrateLegacyP2pIdentity() {
+        if (prefs.contains(KEY_P2P_KEY_WRAPPED_B64)) return
+        val legacy = appContext.getSharedPreferences(LEGACY_CERT_PREFS, Context.MODE_PRIVATE)
+        val deviceId = legacy.getString(LEGACY_CERT_DEVICE_ID, null) ?: return
+        val fingerprint = legacy.getString(LEGACY_CERT_FINGERPRINT, null) ?: return
+        val certB64 = legacy.getString(LEGACY_CERT_CERT_DER, null) ?: return
+        val keyB64 = legacy.getString(LEGACY_CERT_KEY_DER, null) ?: return
+        Log.i(TAG, "Migrating legacy plaintext P2P identity into AndroidKeyStore wrap")
+        p2pIdentity = P2pIdentity(
+            deviceId = deviceId,
+            fingerprint = fingerprint,
+            certDer = Base64.decode(certB64, Base64.NO_WRAP),
+            keyDer = Base64.decode(keyB64, Base64.NO_WRAP),
+        )
+        legacy.edit().clear().apply()
+    }
+
     // ── Logcat capture (adb READ_LOGS fallback) ────────────────────────────
 
     /**
@@ -834,5 +930,54 @@ class Settings(context: Context) {
 
         // ── P2P sync ──────────────────────────────────────────────────────────
         const val KEY_P2P_SYNC_ENABLED = "p2p_sync_enabled"
+
+        // ── P2P device identity (mTLS): cert/id/fingerprint plain, key KEK-wrapped ──
+        private const val KEY_P2P_DEVICE_ID = "p2p_identity_device_id"
+        private const val KEY_P2P_FINGERPRINT = "p2p_identity_fingerprint"
+        private const val KEY_P2P_CERT_DER_B64 = "p2p_identity_cert_der_b64"
+        private const val KEY_P2P_KEY_WRAPPED_B64 = "p2p_identity_key_wrapped_b64"
+        private const val KEY_P2P_KEY_IV_B64 = "p2p_identity_key_iv_b64"
+
+        // Legacy plaintext identity prefs file (pre-KEK-wrap builds). Read-only,
+        // migrated and cleared by [migrateLegacyP2pIdentity].
+        private const val LEGACY_CERT_PREFS = "copypaste_device_cert"
+        private const val LEGACY_CERT_DEVICE_ID = "device_id"
+        private const val LEGACY_CERT_FINGERPRINT = "fingerprint"
+        private const val LEGACY_CERT_CERT_DER = "cert_der_b64"
+        private const val LEGACY_CERT_KEY_DER = "key_der_b64"
+    }
+}
+
+/**
+ * This device's persistent P2P mTLS identity. The raw DER blobs cross the UniFFI
+ * boundary as `List<UByte>` (see [uniffi.copypaste_android.DeviceCert]); this
+ * type holds them as `ByteArray` for storage and is converted at the FFI seam.
+ *
+ * [keyDer] is secret private-key material — never log it or persist it in
+ * cleartext. [Settings.p2pIdentity] wraps it with the AndroidKeyStore KEK.
+ */
+data class P2pIdentity(
+    val deviceId: String,
+    val fingerprint: String,
+    val certDer: ByteArray,
+    val keyDer: ByteArray,
+) {
+    // Content equality on the DER blobs (the default data-class equals/hashCode
+    // compare ByteArray by reference, which is never useful here).
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is P2pIdentity) return false
+        return deviceId == other.deviceId &&
+            fingerprint == other.fingerprint &&
+            certDer.contentEquals(other.certDer) &&
+            keyDer.contentEquals(other.keyDer)
+    }
+
+    override fun hashCode(): Int {
+        var result = deviceId.hashCode()
+        result = 31 * result + fingerprint.hashCode()
+        result = 31 * result + certDer.contentHashCode()
+        result = 31 * result + keyDer.contentHashCode()
+        return result
     }
 }

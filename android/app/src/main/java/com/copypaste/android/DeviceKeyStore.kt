@@ -1,8 +1,6 @@
 package com.copypaste.android
 
 import android.content.Context
-import android.content.SharedPreferences
-import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import uniffi.copypaste_android.DeviceCert
@@ -12,73 +10,52 @@ import uniffi.copypaste_android.generateDeviceCert
  * Persists this device's P2P identity certificate.
  *
  * On first use [getOrCreate] calls the Rust FFI [generateDeviceCert] (a fresh
- * self-signed X25519 leaf cert + private key) and stores the four fields in a
- * dedicated SharedPreferences file. The DER blobs are base64-encoded; the
- * device_id and fingerprint are stored verbatim.
+ * self-signed ECDSA P-256 leaf cert + private key) ONCE and persists it via
+ * [Settings.p2pIdentity], which wraps the private key with the AndroidKeyStore
+ * KEK (the same mechanism used for the master encryption key and the paired-peer
+ * session key). Every subsequent launch reuses the stored identity.
  *
- * The same cert/key pair must be reused across every pairing and sync so the
- * peer can pin our fingerprint — regenerating would invalidate prior pairings.
+ * STABILITY CONTRACT: the same cert/key pair MUST be reused across every pairing
+ * and sync so the peer can pin our fingerprint. Regenerating would mint a new
+ * fingerprint, which the peer's mTLS allowlist rejects — silently breaking P2P
+ * sync after an app restart. This is the Android-side mirror of the daemon's
+ * `load_or_create` cert persistence.
  *
  * Generation is lazy (first pairing) and happens on [Dispatchers.IO] since the
  * Rust call does CPU-bound key generation off the main thread.
  */
 class DeviceKeyStore(context: Context) {
 
-    private val prefs: SharedPreferences =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val settings = Settings(context)
 
     /**
      * Return the persisted device cert, generating and storing it on first use.
      * Must be called off the main thread (already hops to [Dispatchers.IO]).
      */
     suspend fun getOrCreate(): DeviceCert = withContext(Dispatchers.IO) {
-        load() ?: run {
+        settings.p2pIdentity?.toDeviceCert() ?: run {
             val cert = generateDeviceCert()
-            persist(cert)
+            settings.p2pIdentity = cert.toP2pIdentity()
             cert
         }
     }
 
     /** Return the persisted cert, or null if pairing has never run. */
-    fun peek(): DeviceCert? = load()
+    fun peek(): DeviceCert? = settings.p2pIdentity?.toDeviceCert()
 
-    private fun load(): DeviceCert? {
-        val deviceId = prefs.getString(KEY_DEVICE_ID, null) ?: return null
-        val fingerprint = prefs.getString(KEY_FINGERPRINT, null) ?: return null
-        val certB64 = prefs.getString(KEY_CERT_DER, null) ?: return null
-        val keyB64 = prefs.getString(KEY_KEY_DER, null) ?: return null
-        return DeviceCert(
+    private companion object {
+        private fun P2pIdentity.toDeviceCert(): DeviceCert = DeviceCert(
             deviceId = deviceId,
             fingerprint = fingerprint,
-            certDer = decodeUBytes(certB64),
-            keyDer = decodeUBytes(keyB64),
+            certDer = certDer.map { it.toUByte() },
+            keyDer = keyDer.map { it.toUByte() },
         )
-    }
 
-    private fun persist(cert: DeviceCert) {
-        prefs.edit()
-            .putString(KEY_DEVICE_ID, cert.deviceId)
-            .putString(KEY_FINGERPRINT, cert.fingerprint)
-            .putString(KEY_CERT_DER, encodeUBytes(cert.certDer))
-            .putString(KEY_KEY_DER, encodeUBytes(cert.keyDer))
-            .apply()
-    }
-
-    companion object {
-        private const val PREFS_NAME = "copypaste_device_cert"
-        private const val KEY_DEVICE_ID = "device_id"
-        private const val KEY_FINGERPRINT = "fingerprint"
-        private const val KEY_CERT_DER = "cert_der_b64"
-        private const val KEY_KEY_DER = "key_der_b64"
-
-        private fun encodeUBytes(bytes: List<UByte>): String {
-            val raw = ByteArray(bytes.size) { bytes[it].toByte() }
-            return Base64.encodeToString(raw, Base64.NO_WRAP)
-        }
-
-        private fun decodeUBytes(b64: String): List<UByte> {
-            val raw = Base64.decode(b64, Base64.NO_WRAP)
-            return raw.map { it.toUByte() }
-        }
+        private fun DeviceCert.toP2pIdentity(): P2pIdentity = P2pIdentity(
+            deviceId = deviceId,
+            fingerprint = fingerprint,
+            certDer = ByteArray(certDer.size) { certDer[it].toByte() },
+            keyDer = ByteArray(keyDer.size) { keyDer[it].toByte() },
+        )
     }
 }
