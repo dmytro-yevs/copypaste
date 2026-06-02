@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
+import { emit, listen } from "@tauri-apps/api/event";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
@@ -728,10 +729,21 @@ export function SettingsView() {
 
     window.addEventListener("focus", resyncPrivateMode);
     document.addEventListener("visibilitychange", onVisibility);
+
+    // M4: When the toggle originates from the tray menu, the backend re-emits
+    // `private-mode-changed` so this window converges without waiting for a
+    // focus/visibility re-fetch. Keep the local React state in sync.
+    const unlistenPromise = listen<boolean>("private-mode-changed", (event) => {
+      if (!cancelled && typeof event.payload === "boolean") {
+        setPrivateMode(event.payload);
+      }
+    });
+
     return () => {
       cancelled = true;
       window.removeEventListener("focus", resyncPrivateMode);
       document.removeEventListener("visibilitychange", onVisibility);
+      void unlistenPromise.then((unlisten) => unlisten());
     };
   }, []);
 
@@ -808,6 +820,10 @@ export function SettingsView() {
         // state always matches the actual daemon state, never an assumption.
         const result = await api.setPrivateMode(val);
         setPrivateMode(result.private_mode);
+        // M4: Push the daemon-confirmed value to the tray so its CheckMenuItem
+        // refreshes immediately instead of showing a stale cached state. Emit
+        // the confirmed value, never the optimistic pre-toggle one.
+        void emit("private-mode-changed", result.private_mode);
       } catch (err) {
         // Revert on failure and surface the error.
         setPrivateMode(!val);

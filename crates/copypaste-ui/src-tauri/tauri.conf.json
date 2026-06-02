@@ -21,7 +21,7 @@
         "minHeight": 460,
         "dragDropEnabled": false,
         "transparent": true,
-        "decorations": false,
+        "decorations": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "visible": true
