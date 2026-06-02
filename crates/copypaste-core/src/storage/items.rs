@@ -191,6 +191,53 @@ impl ClipboardItem {
             thumb,
         }
     }
+
+    /// Create a file item whose content is an encrypted chunk blob.
+    ///
+    /// Identical to [`new_image`](Self::new_image) except `content_type` is
+    /// `"file"` and `thumb` is always `None` (files have no inline thumbnail).
+    /// `encrypted_blob` is produced by `copypaste_core::chunks_to_blob` over the
+    /// chunks returned by `copypaste_core::encode_file` (raw bytes — NO
+    /// decode/re-encode). `file_meta_json` stores
+    /// filename/mime/original_size/chunk_count/file_id as JSON in `blob_ref`.
+    /// `content_nonce` is `None` because XChaCha20 nonces live per-chunk inside
+    /// the blob itself.
+    ///
+    /// NOTE: like [`new_image`](Self::new_image), `item_id` is the cross-device
+    /// identity the sync/merge/dedup layer keys on. The constructor seeds it
+    /// with a fresh UUID, but a capture pipeline that can derive a stable
+    /// content identity (e.g. from the file `file_id`) SHOULD overwrite
+    /// `item_id` once at capture, and a reconstructed item MUST preserve the
+    /// originating `item_id` rather than regenerate it.
+    pub fn new_file(encrypted_blob: Vec<u8>, file_meta_json: String, lamport_ts: i64) -> Self {
+        // Same clock-before-epoch degradation contract as `new_text` /
+        // `new_image`: prefer `unwrap_or_default()` over `unwrap()` so a
+        // pathological host clock yields `wall_time = 0` rather than a panic.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64;
+        Self {
+            id: Uuid::new_v4().to_string(),
+            item_id: Uuid::new_v4().to_string(),
+            content_type: "file".to_string(),
+            content: Some(encrypted_blob),
+            content_nonce: None,
+            blob_ref: Some(file_meta_json),
+            is_sensitive: false,
+            is_synced: false,
+            lamport_ts,
+            wall_time: now,
+            expires_at: None,
+            app_bundle_id: None,
+            content_hash: None,
+            origin_device_id: String::new(),
+            key_version: ITEM_KEY_VERSION_CURRENT as u8,
+            pinned: false,
+            pin_order: None,
+            thumb: None,
+        }
+    }
 }
 
 /// Current HKDF key generation written into the `key_version` column for
@@ -1181,6 +1228,45 @@ mod tests {
 
         let txt = ClipboardItem::new_text(vec![0x00], vec![0u8; 24], 1);
         assert!(txt.thumb.is_none(), "text items must not carry a thumbnail");
+    }
+
+    #[test]
+    fn new_file_has_file_content_type_and_no_thumb() {
+        let item = ClipboardItem::new_file(vec![0x01, 0x02], "{\"k\":1}".to_string(), 3);
+        assert_eq!(item.content_type, "file");
+        assert!(
+            item.thumb.is_none(),
+            "file items must not carry a thumbnail"
+        );
+        assert!(
+            item.content_nonce.is_none(),
+            "file blob nonces live per-chunk"
+        );
+        assert_eq!(item.blob_ref.as_deref(), Some("{\"k\":1}"));
+    }
+
+    #[test]
+    fn new_file_roundtrips_through_insert_and_select() {
+        let db = Database::open_in_memory().unwrap();
+        let blob = vec![0xCAu8, 0xFE, 0xBA, 0xBE];
+        let meta_json =
+            "{\"filename\":\"a.bin\",\"mime\":\"application/octet-stream\"}".to_string();
+        let item = ClipboardItem::new_file(blob.clone(), meta_json.clone(), 5);
+        let id = item.id.clone();
+        insert_item(&db, &item).unwrap();
+
+        let got = get_item_by_id(&db, &id).unwrap().expect("row must exist");
+        assert_eq!(got.content_type, "file");
+        assert_eq!(
+            got.content.as_deref(),
+            Some(blob.as_slice()),
+            "encrypted blob must survive insert + select"
+        );
+        assert_eq!(
+            got.blob_ref.as_deref(),
+            Some(meta_json.as_str()),
+            "blob_ref meta JSON must survive insert + select"
+        );
     }
 
     #[test]
@@ -2311,6 +2397,45 @@ mod tests {
         assert!(exists(&ids[2]), "third must remain");
         assert!(exists(&ids[3]), "fourth must remain");
         assert!(exists(&ids[4]), "newest must remain");
+    }
+
+    /// A `new_file` blob counts toward the byte cap exactly like text/image
+    /// rows (`prune_to_cap` sums LENGTH(content) for all content types) and is
+    /// evicted oldest-first.
+    #[test]
+    fn prune_to_cap_evicts_oldest_file_blob() {
+        let db = Database::open_in_memory().unwrap();
+        // Oldest row is a file blob (40 bytes); two newer text rows (20 each).
+        // Total = 80, quota = 40 → must evict the oldest (the file) only.
+        let mut file_item = ClipboardItem::new_file(vec![0xFFu8; 40], "{}".to_string(), 1);
+        file_item.wall_time = 1_000;
+        let file_id = file_item.id.clone();
+        insert_item(&db, &file_item).unwrap();
+
+        let mid = make_sized_item(2, 2_000, 20);
+        let mid_id = mid.id.clone();
+        insert_item(&db, &mid).unwrap();
+
+        let newest = make_sized_item(3, 3_000, 20);
+        let newest_id = newest.id.clone();
+        insert_item(&db, &newest).unwrap();
+
+        let deleted = prune_to_cap(&db, 40).unwrap();
+        assert_eq!(deleted, 1, "only the oldest (file) row evicted");
+
+        let conn = db.conn();
+        let exists = |id: &str| -> bool {
+            conn.query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE id=?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap()
+                > 0
+        };
+        assert!(!exists(&file_id), "oldest file blob must be evicted first");
+        assert!(exists(&mid_id), "newer text row survives");
+        assert!(exists(&newest_id), "newest text row survives");
     }
 
     /// The "tipping" row that crosses the byte threshold is evicted.
