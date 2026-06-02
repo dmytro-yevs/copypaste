@@ -131,7 +131,7 @@ fn db_file_bytes_do_not_contain_plaintext_image() {
 
     {
         let db = Database::open(&path, &key).unwrap();
-        let item = ClipboardItem::new_image(image_bytes.clone(), "{}".to_string(), 1);
+        let item = ClipboardItem::new_image(image_bytes.clone(), "{}".to_string(), 1, None);
         insert_item(&db, &item).unwrap();
         checkpoint_wal(&db);
     }

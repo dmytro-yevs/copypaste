@@ -23,6 +23,15 @@ pub const IMAGE_CHUNK_SIZE: usize = 512 * 1024;
 /// Maximum accepted image size (raw bytes before compression): 10 MB.
 pub const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 
+/// Longest-side bound (px) for the capture-time encrypted thumbnail.
+///
+/// The thumbnail is generated once at capture from the SAME decoded
+/// `DynamicImage` as the full-resolution blob (see [`encode_image_full`]) and
+/// stored encrypted in the `thumb` column (schema v9). 680 px matches the
+/// design-system preview cap so the UI can render a crisp inline preview
+/// without ever decrypting/decoding the multi-hundred-KB full image.
+pub const THUMBNAIL_MAX_DIM: u32 = 680;
+
 #[derive(Debug, Error)]
 pub enum ImageError {
     #[error("Image too large: {actual} bytes (max {max})")]
@@ -300,6 +309,155 @@ pub fn decode_image(
 ) -> Result<Vec<u8>, ImageError> {
     let png_bytes = decrypt_chunks(chunks, key, file_id)?;
     Ok(png_bytes)
+}
+
+/// Encode a small preview thumbnail of `img` into an encrypted chunk blob.
+///
+/// Pipeline:
+///   `img.thumbnail(max_dim, max_dim)` (downscale only — never upscales, and
+///   preserves aspect ratio)
+///     → encode to bytes
+///     → [`encrypt_chunks`] keyed by `thumb_file_id` (a DISTINCT file_id from
+///       the full image's, so the thumbnail's AEAD AAD is isolated)
+///     → [`chunks_to_blob`]
+///
+/// Returns the serialized blob ready for the `clipboard_items.thumb` BLOB
+/// column. Use [`decode_thumbnail`] to recover the encoded bytes.
+///
+/// ## Thumbnail image format
+///
+/// The thumbnail is encoded as **PNG**, not WebP. The production `image` crate
+/// dependency is pinned to `features = ["png", "tiff"]` (see root `Cargo.toml`)
+/// and does not enable a WebP *encoder* (the `image` 0.25 WebP support is
+/// decode-only / lossless and the encoder was dropped upstream). Per the Phase
+/// 1 plan we fall back to PNG rather than widening the dependency's feature set
+/// in a core primitive. PNG keeps the thumbnail lossless and pure-Rust; a
+/// future phase may revisit a lossy codec if thumbnail byte size becomes a
+/// concern.
+pub fn encode_thumbnail(
+    img: &DynamicImage,
+    key: &[u8; 32],
+    thumb_file_id: &[u8; 16],
+    max_dim: u32,
+) -> Result<Vec<u8>, ImageError> {
+    let (bytes, _w, _h) = encode_thumbnail_bytes(img, max_dim)?;
+    let chunks = encrypt_chunks(&bytes, key, thumb_file_id, IMAGE_CHUNK_SIZE)?;
+    chunks_to_blob(&chunks)
+}
+
+/// Downscale `img` to fit `(max_dim, max_dim)` (never upscaling) and encode the
+/// result as PNG bytes. Returns `(png_bytes, width, height)` of the thumbnail.
+///
+/// Shared by [`encode_thumbnail`] and [`encode_image_full`] so the thumbnail
+/// dimensions can be recorded in the image meta without re-deriving them.
+fn encode_thumbnail_bytes(
+    img: &DynamicImage,
+    max_dim: u32,
+) -> Result<(Vec<u8>, u32, u32), ImageError> {
+    // `DynamicImage::thumbnail` scales to FIT the bound and will UPSCALE a
+    // source smaller than the bound. We only ever want to shrink, so guard:
+    // when the source already fits within `(max_dim, max_dim)` keep it as-is.
+    let (sw, sh) = img.dimensions();
+    let thumb = if sw > max_dim || sh > max_dim {
+        img.thumbnail(max_dim, max_dim)
+    } else {
+        img.clone()
+    };
+    let (w, h) = thumb.dimensions();
+    let bytes = encode_as_png(&thumb)?;
+    Ok((bytes, w, h))
+}
+
+/// Decode an encrypted thumbnail blob (produced by [`encode_thumbnail`]) back
+/// into the encoded image bytes (PNG). Mirrors [`decode_image`].
+///
+/// `thumb_file_id` MUST be the same value passed to [`encode_thumbnail`]; the
+/// chunk AEAD binds it as AAD, so a wrong id fails the integrity check rather
+/// than returning garbage.
+pub fn decode_thumbnail(
+    blob: &[u8],
+    key: &[u8; 32],
+    thumb_file_id: &[u8; 16],
+) -> Result<Vec<u8>, ImageError> {
+    let chunks = chunks_from_blob(blob)?;
+    let bytes = decrypt_chunks(&chunks, key, thumb_file_id)?;
+    Ok(bytes)
+}
+
+/// Full capture-time encode producing BOTH the full-resolution encrypted
+/// chunks AND a small encrypted thumbnail blob from a SINGLE decode of `raw`.
+///
+/// This is the Variant-B entry point: decoding clipboard bytes is the
+/// expensive step, so we decode once and reuse the same [`DynamicImage`] for
+/// the full PNG re-encode and the downscaled thumbnail — no second decode.
+///
+/// Returns `(meta, full_chunks, thumb_blob, thumb_w, thumb_h)` where:
+///   * `meta` / `full_chunks` are exactly what [`encode_image_with_limit`]
+///     produces (same gates, same `file_id` AAD).
+///   * `thumb_blob` is the serialized encrypted thumbnail keyed by the
+///     SEPARATE `thumb_file_id` (distinct AAD from the full image).
+///   * `thumb_w` / `thumb_h` are the thumbnail's pixel dimensions.
+///
+/// `file_id` and `thumb_file_id` MUST differ so the full image and its
+/// thumbnail have independent AEAD contexts. The caller is responsible for
+/// generating two distinct ids.
+///
+/// [`encode_image_with_limit`] is left intact for back-compat callers that do
+/// not need a thumbnail.
+#[allow(clippy::type_complexity)] // 5-tuple is the documented Phase-1 return contract; a named struct lands in Phase 2 with the IPC wiring.
+pub fn encode_image_full(
+    raw: &[u8],
+    key: &[u8; 32],
+    file_id: &[u8; 16],
+    thumb_file_id: &[u8; 16],
+    max_bytes: usize,
+    max_decoded_mb: u32,
+    thumb_max_dim: u32,
+) -> Result<(ImageMeta, Vec<EncryptedChunk>, Vec<u8>, u32, u32), ImageError> {
+    let max = if max_bytes == 0 {
+        MAX_IMAGE_BYTES
+    } else {
+        max_bytes
+    };
+    if raw.len() > max {
+        return Err(ImageError::TooLarge {
+            actual: raw.len(),
+            max,
+        });
+    }
+
+    // Decode ONCE; reuse for both the full re-encode and the thumbnail.
+    let img = decode_clipboard_image_limited(raw, max_decoded_mb)?;
+    let (width, height) = (img.width(), img.height());
+    let original_size = raw.len() as u64;
+
+    let png_bytes = encode_as_png(&img)?;
+    // Same decode-amplification guard as encode_image_with_limit.
+    if png_bytes.len() > max {
+        return Err(ImageError::TooLarge {
+            actual: png_bytes.len(),
+            max,
+        });
+    }
+
+    let chunks = encrypt_chunks(&png_bytes, key, file_id, IMAGE_CHUNK_SIZE)?;
+    let chunk_count =
+        u32::try_from(chunks.len()).map_err(|_| ImageError::Chunk(ChunkError::TooManyChunks))?;
+
+    // Thumbnail reuses the already-decoded image — no second decode.
+    let (thumb_bytes, thumb_w, thumb_h) = encode_thumbnail_bytes(&img, thumb_max_dim)?;
+    let thumb_chunks = encrypt_chunks(&thumb_bytes, key, thumb_file_id, IMAGE_CHUNK_SIZE)?;
+    let thumb_blob = chunks_to_blob(&thumb_chunks)?;
+
+    let meta = ImageMeta {
+        width,
+        height,
+        original_size,
+        chunk_count,
+        file_id: *file_id,
+    };
+
+    Ok((meta, chunks, thumb_blob, thumb_w, thumb_h))
 }
 
 /// Serialize chunks to a flat byte blob for SQLite BLOB storage.
@@ -694,6 +852,164 @@ mod tests {
             err,
             ImageError::Decode(_) | ImageError::UnsupportedFormat
         ));
+    }
+
+    // --- Variant B Phase 1: capture-time encrypted thumbnail ---
+
+    fn test_thumb_file_id() -> [u8; 16] {
+        [0xCCu8; 16]
+    }
+
+    #[test]
+    fn thumbnail_encrypt_roundtrip() {
+        let png = synthetic_png(400, 200);
+        let key = test_key();
+        let thumb_id = test_thumb_file_id();
+        let img = decode_clipboard_image(&png).unwrap();
+
+        let blob = encode_thumbnail(&img, &key, &thumb_id, THUMBNAIL_MAX_DIM).unwrap();
+        let recovered = decode_thumbnail(&blob, &key, &thumb_id).unwrap();
+        // Recovered bytes must be a valid image decodable back to a thumbnail
+        // bounded by THUMBNAIL_MAX_DIM.
+        let thumb_img = decode_clipboard_image(&recovered).unwrap();
+        assert!(thumb_img.width() <= THUMBNAIL_MAX_DIM);
+        assert!(thumb_img.height() <= THUMBNAIL_MAX_DIM);
+    }
+
+    #[test]
+    fn thumbnail_is_smaller_or_equal_dimensions_than_original() {
+        // 1000x500 source bounded to 680 → longest side hits 680, aspect kept.
+        let png = synthetic_png(1000, 500);
+        let key = test_key();
+        let thumb_id = test_thumb_file_id();
+        let img = decode_clipboard_image(&png).unwrap();
+        let (orig_w, orig_h) = img.dimensions();
+
+        let blob = encode_thumbnail(&img, &key, &thumb_id, THUMBNAIL_MAX_DIM).unwrap();
+        let thumb =
+            decode_clipboard_image(&decode_thumbnail(&blob, &key, &thumb_id).unwrap()).unwrap();
+        assert!(
+            thumb.width() <= orig_w && thumb.height() <= orig_h,
+            "thumb {}x{} must not exceed original {}x{}",
+            thumb.width(),
+            thumb.height(),
+            orig_w,
+            orig_h
+        );
+        assert_eq!(thumb.width(), 680, "longest side must hit the 680 bound");
+        assert_eq!(thumb.height(), 340, "aspect ratio (2:1) must be preserved");
+    }
+
+    #[test]
+    fn thumbnail_never_upscales_small_source() {
+        // 64x32 source is already under 680 → thumbnail must keep its dimensions.
+        let png = synthetic_png(64, 32);
+        let key = test_key();
+        let thumb_id = test_thumb_file_id();
+        let img = decode_clipboard_image(&png).unwrap();
+
+        let blob = encode_thumbnail(&img, &key, &thumb_id, THUMBNAIL_MAX_DIM).unwrap();
+        let thumb =
+            decode_clipboard_image(&decode_thumbnail(&blob, &key, &thumb_id).unwrap()).unwrap();
+        assert_eq!(thumb.width(), 64, "must not upscale width");
+        assert_eq!(thumb.height(), 32, "must not upscale height");
+    }
+
+    #[test]
+    fn thumbnail_wrong_file_id_fails_decode() {
+        // AAD isolation: decrypting the thumbnail with a different thumb_file_id
+        // must fail the chunk integrity check.
+        let png = synthetic_png(400, 200);
+        let key = test_key();
+        let thumb_id = test_thumb_file_id();
+        let img = decode_clipboard_image(&png).unwrap();
+
+        let blob = encode_thumbnail(&img, &key, &thumb_id, THUMBNAIL_MAX_DIM).unwrap();
+        let wrong_id = [0x00u8; 16];
+        let err = decode_thumbnail(&blob, &key, &wrong_id).unwrap_err();
+        assert!(matches!(err, ImageError::Chunk(_)));
+    }
+
+    #[test]
+    fn encode_image_full_produces_full_and_thumbnail_from_one_decode() {
+        let png = synthetic_png(1000, 500);
+        let key = test_key();
+        let file_id = test_file_id();
+        let thumb_id = test_thumb_file_id();
+
+        let (meta, chunks, thumb_blob, thumb_w, thumb_h) = encode_image_full(
+            &png,
+            &key,
+            &file_id,
+            &thumb_id,
+            0,
+            crate::config::MAX_DECODED_IMAGE_MB,
+            THUMBNAIL_MAX_DIM,
+        )
+        .unwrap();
+
+        // Full image meta reflects the ORIGINAL dimensions.
+        assert_eq!(meta.width, 1000);
+        assert_eq!(meta.height, 500);
+        assert_eq!(meta.chunk_count as usize, chunks.len());
+        assert!(meta.chunk_count >= 1);
+
+        // Thumbnail is the downscaled 2:1 → 680x340.
+        assert_eq!(thumb_w, 680);
+        assert_eq!(thumb_h, 340);
+
+        // Full blob decodes (via file_id) to the original dimensions.
+        let full = decode_clipboard_image(&decode_image(&chunks, &key, &file_id).unwrap()).unwrap();
+        assert_eq!(full.dimensions(), (1000, 500));
+
+        // Thumb blob decodes (via thumb_file_id) to the thumbnail dimensions.
+        let thumb =
+            decode_clipboard_image(&decode_thumbnail(&thumb_blob, &key, &thumb_id).unwrap())
+                .unwrap();
+        assert_eq!(thumb.dimensions(), (680, 340));
+    }
+
+    #[test]
+    fn encode_image_full_isolates_full_and_thumb_aad() {
+        // The full file_id must NOT decrypt the thumbnail blob and vice versa.
+        let png = synthetic_png(400, 200);
+        let key = test_key();
+        let file_id = test_file_id();
+        let thumb_id = test_thumb_file_id();
+
+        let (_, chunks, thumb_blob, _, _) = encode_image_full(
+            &png,
+            &key,
+            &file_id,
+            &thumb_id,
+            0,
+            crate::config::MAX_DECODED_IMAGE_MB,
+            THUMBNAIL_MAX_DIM,
+        )
+        .unwrap();
+
+        // Cross-decrypt must fail (distinct AAD).
+        assert!(decode_thumbnail(&thumb_blob, &key, &file_id).is_err());
+        assert!(decode_image(&chunks, &key, &thumb_id).is_err());
+    }
+
+    #[test]
+    fn encode_image_full_rejects_oversized_raw() {
+        let huge = vec![0u8; MAX_IMAGE_BYTES + 1];
+        let key = test_key();
+        let file_id = test_file_id();
+        let thumb_id = test_thumb_file_id();
+        let err = encode_image_full(
+            &huge,
+            &key,
+            &file_id,
+            &thumb_id,
+            0,
+            crate::config::MAX_DECODED_IMAGE_MB,
+            THUMBNAIL_MAX_DIM,
+        )
+        .unwrap_err();
+        assert!(matches!(err, ImageError::TooLarge { .. }));
     }
 
     #[test]

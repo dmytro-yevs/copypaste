@@ -31,8 +31,9 @@ pub use crypto::{
 };
 pub use image::{
     chunks_from_blob, chunks_to_blob, decode_clipboard_image, decode_clipboard_image_limited,
-    decode_image, encode_as_png, encode_image, encode_image_with_limit, thumbnail, ImageError,
-    ImageMeta, IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES,
+    decode_image, decode_thumbnail, encode_as_png, encode_image, encode_image_full,
+    encode_image_with_limit, encode_thumbnail, thumbnail, ImageError, ImageMeta, IMAGE_CHUNK_SIZE,
+    MAX_IMAGE_BYTES, THUMBNAIL_MAX_DIM,
 };
 pub use sensitive::{
     detect, is_sensitive_app, is_sensitive_for_autowipe, luhn_valid, redact, PatternMatch,
@@ -47,6 +48,7 @@ pub use storage::items::{
     delete_sensitive_expired, exists_item_by_item_id, fetch_text_preview, find_recent_by_hash,
     get_item_by_id, get_item_by_item_id, get_page, get_page_meta, get_page_pinned_first,
     insert_item, insert_item_with_fts, pin_item, prune_to_cap, reorder_pinned, search_items,
-    unpin_item, upsert_fts, ClipboardItem, ItemsError, ITEM_KEY_VERSION_CURRENT, MAX_PREVIEW_BYTES,
+    set_thumb, unpin_item, upsert_fts, ClipboardItem, ItemsError, ITEM_KEY_VERSION_CURRENT,
+    MAX_PREVIEW_BYTES,
 };
 pub use storage::{Database, DbError, MigrationState};
