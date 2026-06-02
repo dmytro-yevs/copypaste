@@ -9,6 +9,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -31,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import com.copypaste.android.ui.SyncStatusBadge
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
@@ -234,23 +237,30 @@ private fun MainShell(viewModel: ClipboardViewModel) {
             }
         }
     ) { innerPadding ->
-        when (NavTab.entries[selectedTab]) {
-            NavTab.CLIPS -> HistoryScreen(
-                viewModel = viewModel,
-                modifier = Modifier.padding(innerPadding),
-                showBackButton = false,
-                onBack = {}
-            )
-            NavTab.DEVICES -> PairScreen(
-                modifier = Modifier.padding(innerPadding),
-                showBackButton = false,
-                onBack = {}
-            )
-            NavTab.SETTINGS -> SettingsScreen(
-                modifier = Modifier.padding(innerPadding),
-                showBackButton = false,
-                onBack = {}
-            )
+        // Stack the active screen above a slim sync-status strip. The strip
+        // hosts the online-devices badge (Android parity for the macOS sidebar
+        // SyncStatusChip): app label on the left, coloured dot + count on the
+        // right. innerPadding is applied to the Column so the screen content and
+        // the strip both clear the bottom NavigationBar inset.
+        Column(modifier = Modifier.padding(innerPadding)) {
+            Box(modifier = Modifier.weight(1f)) {
+                when (NavTab.entries[selectedTab]) {
+                    NavTab.CLIPS -> HistoryScreen(
+                        viewModel = viewModel,
+                        showBackButton = false,
+                        onBack = {}
+                    )
+                    NavTab.DEVICES -> PairScreen(
+                        showBackButton = false,
+                        onBack = {}
+                    )
+                    NavTab.SETTINGS -> SettingsScreen(
+                        showBackButton = false,
+                        onBack = {}
+                    )
+                }
+            }
+            SyncStatusBadge()
         }
     }
 }
