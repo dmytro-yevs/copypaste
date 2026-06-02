@@ -373,10 +373,33 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // `None` when P2P is disabled: no transport runs, so there is no cert to
     // advertise; the pairing IPC handlers then return a clear error.
     let p2p_cert: Option<copypaste_p2p::cert::SelfSignedCert> = if p2p_enabled {
-        match copypaste_p2p::cert::SelfSignedCert::generate(&local_device_id) {
+        // P2P-DURABILITY: persist the mTLS identity so the fingerprint peers
+        // pin at pairing time is STABLE across daemon restarts. Generating a
+        // fresh cert on every launch (the previous behaviour) silently
+        // invalidated every existing pairing on restart, so P2P sync never
+        // survived a daemon restart. `load_or_create` reloads the same cert
+        // from `p2p_identity.json` when it exists, generating + persisting one
+        // only on first run.
+        //
+        // EXCEPTION: tests/dev set COPYPASTE_EPHEMERAL_KEY=1 to keep each
+        // instance isolated (no shared on-disk identity), so honour that by
+        // falling back to an ephemeral `generate()`.
+        let ephemeral = std::env::var("COPYPASTE_EPHEMERAL_KEY").as_deref() == Ok("1");
+        let result = if ephemeral {
+            copypaste_p2p::cert::SelfSignedCert::generate(&local_device_id)
+                .map_err(|e| std::io::Error::other(format!("cert generate: {e}")))
+        } else {
+            copypaste_p2p::cert::SelfSignedCert::load_or_create(
+                &paths::p2p_identity_path(),
+                &local_device_id,
+            )
+        };
+        match result {
             Ok(cert) => Some(cert),
             Err(e) => {
-                tracing::warn!("mTLS cert generation failed ({e}); pairing disabled this session");
+                tracing::warn!(
+                    "mTLS cert load/generate failed ({e}); pairing disabled this session"
+                );
                 None
             }
         }
@@ -498,10 +521,27 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // known; the pairing handlers then send it in-band over the bootstrap
         // channel so the peer can persist it for the Phase 3 connector.
         let sync_addr_slot = server.p2p_sync_addr_slot();
-        let socket_clone = socket_path.clone();
         let ipc_shutdown = shutdown_token.clone();
+        // DUAL-DAEMON FIX: bind the IPC listener SYNCHRONOUSLY here, before
+        // spawning the accept loop and before `start_p2p` runs. If the bind
+        // fails, another healthy daemon already owns the socket
+        // (`bind_with_stale_cleanup` refuses to steal it) — this instance is
+        // the loser and must EXIT WITHOUT starting any P2P/mDNS stack. The old
+        // code bound inside the spawned future, so a bind failure only logged
+        // and `start_p2p` ran anyway, leaving a second concurrent P2P stack.
+        let listener = match server.bind(&socket_path) {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::error!(
+                    "IPC bind failed on {}: {e} — another daemon owns the socket; \
+                     exiting WITHOUT starting P2P to avoid a duplicate P2P/mDNS stack",
+                    socket_path.display()
+                );
+                return Err(e);
+            }
+        };
         let handle = tokio::spawn(async move {
-            if let Err(e) = server.serve(&socket_clone, ipc_shutdown).await {
+            if let Err(e) = server.serve_on(listener, ipc_shutdown).await {
                 tracing::error!("IPC server error: {e}");
             }
         });

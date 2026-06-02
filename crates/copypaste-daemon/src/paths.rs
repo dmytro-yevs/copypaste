@@ -276,6 +276,21 @@ pub fn device_id_path() -> Result<PathBuf, PathsError> {
     Ok(try_app_support_dir()?.join("device_id"))
 }
 
+/// Returns the path to the persisted P2P mTLS identity file.
+///
+/// The file stores the device's self-signed certificate + private key (DER,
+/// base64) as JSON. It MUST persist across daemon restarts: the cert
+/// fingerprint is the device identity peers pin during pairing, so
+/// regenerating it on every launch would silently break every existing
+/// pairing. Lives alongside `peers.json` / `clipboard.db` in the app-support
+/// dir. Honours `COPYPASTE_P2P_IDENTITY_PATH` for tests.
+pub fn p2p_identity_path() -> PathBuf {
+    if let Ok(p) = std::env::var("COPYPASTE_P2P_IDENTITY_PATH") {
+        return PathBuf::from(p);
+    }
+    app_support_dir().join("p2p_identity.json")
+}
+
 /// Path to the persisted private-mode flag. Stored as a tiny `"1"`/`"0"` file in
 /// the app-support dir so private mode survives a daemon restart. Overridable
 /// via `COPYPASTE_PRIVATE_MODE_PATH` (used by tests).
