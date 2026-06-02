@@ -237,13 +237,23 @@ pub fn encode_image_with_limit(
         });
     }
 
-    // Use the caller-supplied decoded-bytes budget so AppConfig::max_decoded_image_mb
-    // is honoured rather than the hardcoded compile-time constant.
-    let img = decode_clipboard_image_limited(raw, max_decoded_mb)?;
-    let (width, height) = (img.width(), img.height());
     let original_size = raw.len() as u64;
 
-    let png_bytes = encode_as_png(&img)?;
+    // [PERF] Scope the decoded `DynamicImage` to this block so it (≈ width *
+    // height * 4 bytes — tens of MB for a 4K image) is freed the instant the
+    // PNG buffer is produced, well before chunk encryption allocates its own
+    // Vecs. Holding the bitmap + PNG bytes + chunk Vecs simultaneously was the
+    // encode-path memory peak. Only `(width, height)` and the PNG bytes outlive
+    // the block.
+    let (width, height, png_bytes) = {
+        // Use the caller-supplied decoded-bytes budget so AppConfig::max_decoded_image_mb
+        // is honoured rather than the hardcoded compile-time constant.
+        let img = decode_clipboard_image_limited(raw, max_decoded_mb)?;
+        let (width, height) = (img.width(), img.height());
+        let png_bytes = encode_as_png(&img)?;
+        (width, height, png_bytes)
+        // `img` drops here, before encrypt_chunks runs below.
+    };
 
     // [HIGH] Guard against decode-amplification: a highly-compressed input
     // passes the raw-byte gate above, decodes within the Limits budget, and
@@ -257,6 +267,10 @@ pub fn encode_image_with_limit(
     }
 
     let chunks = encrypt_chunks(&png_bytes, key, file_id, IMAGE_CHUNK_SIZE)?;
+    // [PERF] The PNG bytes now live in the chunk ciphertexts; free the
+    // intermediate buffer before building meta / returning so it does not
+    // co-reside with the chunk Vecs any longer than necessary.
+    drop(png_bytes);
     // [LOW] chunks.len() is provably ≤ ceil(max / IMAGE_CHUNK_SIZE) ≤
     // ceil(MAX_IMAGE_BYTES / 512 KiB) = 20, so it always fits in a u32.
     // Use try_from + expect to make the invariant explicit and catch any
@@ -584,6 +598,35 @@ mod tests {
         // hits the wire-length bounds check and errors — no huge allocation.
         let err = chunks_from_blob(&blob).unwrap_err();
         assert!(matches!(err, ImageError::Decode(_)));
+    }
+
+    /// Regression guard for the buffer-lifetime refactor: the encode pipeline
+    /// must remain byte-identical to its decoded-PNG plaintext. Encrypting then
+    /// decrypting the chunks must reproduce exactly the PNG bytes that
+    /// `encode_as_png` yields for the decoded image. Scoping/dropping the
+    /// decoded `DynamicImage` and the intermediate PNG buffer earlier must not
+    /// change *what* is produced, only *when* it is freed.
+    #[test]
+    fn encode_chunks_reproduce_canonical_png_bytes() {
+        let key = test_key();
+        let file_id = test_file_id();
+        // A non-trivial image so the PNG buffer is meaningfully sized.
+        let raw = synthetic_png(300, 200);
+
+        // Canonical PNG bytes the pipeline must encrypt: decode then re-encode.
+        let decoded = decode_clipboard_image(&raw).unwrap();
+        let canonical_png = encode_as_png(&decoded).unwrap();
+
+        let (meta, chunks) = encode_image(&raw, &key, &file_id, 0).unwrap();
+        assert_eq!(meta.width, 300);
+        assert_eq!(meta.height, 200);
+        assert_eq!(meta.chunk_count as usize, chunks.len());
+
+        let recovered = decrypt_chunks(&chunks, &key, &file_id).unwrap();
+        assert_eq!(
+            recovered, canonical_png,
+            "encrypted chunks must decrypt to the exact canonical PNG bytes"
+        );
     }
 
     #[test]
