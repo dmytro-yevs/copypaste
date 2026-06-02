@@ -8,7 +8,7 @@ use std::net::IpAddr;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
-use tokio::task::JoinHandle;
+use tokio::task::{AbortHandle, JoinHandle};
 use tracing::{debug, info, warn};
 
 use crate::error::DiscoveryError;
@@ -96,6 +96,13 @@ pub struct DiscoveryService {
     /// Per-source-IP token bucket guarding inbound `ServiceResolved` events
     /// from mDNS flood (THREAT-MODEL OI-3). See [`MdnsRateLimiter`].
     rate_limiter: Arc<MdnsRateLimiter>,
+    /// Abort handle for the background browse task spawned by [`start`].
+    /// Retained so [`Drop`] can abort it, preventing the browse loop from
+    /// outliving the service across P2P toggle / reconfigure cycles.
+    browse_abort: Arc<Mutex<Option<AbortHandle>>>,
+    /// Clone of the mDNS [`ServiceDaemon`] created in [`start`]. Retained so
+    /// [`Drop`] can shut it down, releasing the mDNS socket.
+    daemon: Arc<Mutex<Option<ServiceDaemon>>>,
 }
 
 #[derive(Clone)]
@@ -114,6 +121,8 @@ impl DiscoveryService {
             known_peers: Arc::new(Mutex::new(HashMap::new())),
             registration: Arc::new(Mutex::new(None)),
             rate_limiter: Arc::new(MdnsRateLimiter::new()),
+            browse_abort: Arc::new(Mutex::new(None)),
+            daemon: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -177,6 +186,11 @@ impl DiscoveryService {
     /// Returns a [`JoinHandle`] that can be awaited or aborted for graceful
     /// shutdown.
     pub async fn start(&self) -> Result<JoinHandle<()>, DiscoveryError> {
+        // If a previous browse task / daemon is still alive on this instance
+        // (restart-in-place), tear it down first so we never accumulate
+        // orphaned tasks or mDNS sockets.
+        self.shutdown_inner();
+
         let daemon = ServiceDaemon::new().map_err(|e| DiscoveryError::Daemon(e.to_string()))?;
 
         // Advertise own service if registration was provided.
@@ -195,6 +209,11 @@ impl DiscoveryService {
         let known_peers = Arc::clone(&self.known_peers);
         let rate_limiter = Arc::clone(&self.rate_limiter);
         let own_id: Option<String> = reg_opt.map(|r| r.device_id);
+
+        // Retain a daemon handle (`ServiceDaemon` is a cheap clonable handle to
+        // the same background daemon) so `Drop` can shut it down and release the
+        // mDNS socket.
+        lock_safe(&self.daemon).replace(daemon.clone());
 
         let handle = tokio::spawn(async move {
             // Keep the daemon alive for the duration of the task.
@@ -222,7 +241,28 @@ impl DiscoveryService {
             }
         });
 
+        // Retain an abort handle so `Drop` (and a restart-in-place via
+        // `shutdown_inner`) can stop the browse loop. The owned `JoinHandle` is
+        // still returned to the caller for awaiting / explicit shutdown.
+        lock_safe(&self.browse_abort).replace(handle.abort_handle());
+
         Ok(handle)
+    }
+
+    /// Abort the retained browse task and shut down the retained mDNS daemon,
+    /// if any. Idempotent: safe to call when nothing is running. Used both by
+    /// [`start`] (restart-in-place) and [`Drop`].
+    fn shutdown_inner(&self) {
+        if let Some(abort) = lock_safe(&self.browse_abort).take() {
+            abort.abort();
+        }
+        if let Some(daemon) = lock_safe(&self.daemon).take() {
+            // Best-effort: closing the daemon releases the mDNS socket and
+            // closes the browse channel. The browse task may already be gone.
+            if let Err(e) = daemon.shutdown() {
+                debug!("mDNS daemon shutdown failed: {}", e);
+            }
+        }
     }
 
     /// Return a snapshot of all currently known peers.
@@ -315,6 +355,16 @@ impl DiscoveryService {
 impl Default for DiscoveryService {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Drop for DiscoveryService {
+    /// Abort the background browse task and shut down the mDNS daemon when the
+    /// service is dropped (P2P toggled off, daemon reconfigured, or a new
+    /// instance replaces this one), so neither the task nor the mDNS socket
+    /// leaks across reconnect cycles.
+    fn drop(&mut self) {
+        self.shutdown_inner();
     }
 }
 
@@ -919,5 +969,34 @@ mod tests {
         // And `lock_safe` directly returns a usable guard.
         let guard = lock_safe(&svc.on_found);
         assert_eq!(guard.len(), 2, "callback list survives poisoning");
+    }
+
+    // ── Drop aborts the spawned browse task ──────────────────────────────────
+
+    /// Dropping the service must abort the background browse task it spawned
+    /// in `start()` so it does not leak across reconfigure/toggle cycles.
+    #[tokio::test]
+    async fn drop_aborts_spawned_browse_task() {
+        let svc = DiscoveryService::new();
+        let handle = svc.start().await.expect("start must succeed");
+        assert!(
+            !handle.is_finished(),
+            "browse task should be running before drop"
+        );
+
+        // Dropping the service must abort the retained handle.
+        drop(svc);
+
+        // Awaiting an aborted task resolves to a cancellation `JoinError`.
+        // A bounded wait guards against a never-ending leak if Drop is missing.
+        let joined = tokio::time::timeout(std::time::Duration::from_secs(5), handle).await;
+        match joined {
+            Ok(Err(e)) => assert!(
+                e.is_cancelled(),
+                "browse task must be cancelled by Drop, got: {e:?}"
+            ),
+            Ok(Ok(())) => {} // task returned on its own (daemon shutdown closed the channel)
+            Err(_) => panic!("browse task was not aborted within timeout — leak"),
+        }
     }
 }
