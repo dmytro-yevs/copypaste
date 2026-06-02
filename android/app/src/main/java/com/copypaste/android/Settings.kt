@@ -596,6 +596,7 @@ class Settings(context: Context) {
      */
     fun saveScreenSettings(
         captureEnabled: Boolean,
+        privateMode: Boolean,
         syncEnabled: Boolean,
         showSensitiveWarnings: Boolean,
         maskSensitiveContent: Boolean,
@@ -619,6 +620,7 @@ class Settings(context: Context) {
     ) {
         prefs.edit()
             .putBoolean("capture_enabled", captureEnabled)
+            .putBoolean("private_mode", privateMode)
             .putBoolean("sync_enabled", syncEnabled)
             .putBoolean("show_sensitive_warnings", showSensitiveWarnings)
             .putBoolean("mask_sensitive_content", maskSensitiveContent)

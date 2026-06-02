@@ -114,7 +114,11 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
 
     // ── General ──
-    var captureEnabled by remember { mutableStateOf(settings.captureEnabled) }
+    // Private mode (ON = this device stops recording new clips). Mirrors the
+    // macOS daemon `private_mode`. Distinct from `captureEnabled` (the
+    // notification's temporary Pause/Resume), which is intentionally NOT a
+    // Settings switch — see root-cause note in CaptureControlReceiver.
+    var privateMode by remember { mutableStateOf(settings.privateMode) }
     var syncEnabled by remember { mutableStateOf(settings.syncEnabled) }
 
     // ── Display ──
@@ -161,7 +165,7 @@ fun SettingsScreen(
     // ── HW-A10: dirty tracking — snapshot of saved values for discard check ──
     // Captured once on composition; reset after each successful Save.
     data class SettingsSnapshot(
-        val captureEnabled: Boolean,
+        val privateMode: Boolean,
         val syncEnabled: Boolean,
         val showWarnings: Boolean,
         val maskSensitive: Boolean,
@@ -189,7 +193,7 @@ fun SettingsScreen(
     var savedSnapshot by remember {
         mutableStateOf(
             SettingsSnapshot(
-                captureEnabled = settings.captureEnabled,
+                privateMode = settings.privateMode,
                 syncEnabled = settings.syncEnabled,
                 showWarnings = settings.showSensitiveWarnings,
                 maskSensitive = settings.maskSensitiveContent,
@@ -218,7 +222,7 @@ fun SettingsScreen(
 
     val isDirty by remember {
         derivedStateOf {
-            captureEnabled != savedSnapshot.captureEnabled ||
+            privateMode != savedSnapshot.privateMode ||
                 syncEnabled != savedSnapshot.syncEnabled ||
                 showWarnings != savedSnapshot.showWarnings ||
                 maskSensitive != savedSnapshot.maskSensitive ||
@@ -271,7 +275,10 @@ fun SettingsScreen(
             // getters reported ON again). commit() blocks until the write hits
             // disk, so the toggle now survives an immediate kill.
             settings.saveScreenSettings(
-                captureEnabled = captureEnabled,
+                // captureEnabled is owned by the notification Pause/Resume, not
+                // this screen — round-trip its current value unchanged.
+                captureEnabled = settings.captureEnabled,
+                privateMode = privateMode,
                 syncEnabled = syncEnabled,
                 showSensitiveWarnings = showWarnings,
                 maskSensitiveContent = maskSensitive,
@@ -302,7 +309,7 @@ fun SettingsScreen(
             LogcatCaptureService.syncState(ctx, settings)
             // HW-A10: reset dirty snapshot so back-press no longer shows the dialog
             savedSnapshot = SettingsSnapshot(
-                captureEnabled = captureEnabled,
+                privateMode = privateMode,
                 syncEnabled = syncEnabled,
                 showWarnings = showWarnings,
                 maskSensitive = maskSensitive,
@@ -416,8 +423,8 @@ fun SettingsScreen(
             ) {
                 when (selectedTab) {
                     TAB_GENERAL -> GeneralTab(
-                        captureEnabled = captureEnabled,
-                        onCaptureEnabledChange = { captureEnabled = it },
+                        privateMode = privateMode,
+                        onPrivateModeChange = { privateMode = it },
                         syncEnabled = syncEnabled,
                         onSyncEnabledChange = { syncEnabled = it },
                         logcatEnabled = logcatEnabled,
@@ -486,8 +493,8 @@ fun SettingsScreen(
 
 @Composable
 private fun GeneralTab(
-    captureEnabled: Boolean,
-    onCaptureEnabledChange: (Boolean) -> Unit,
+    privateMode: Boolean,
+    onPrivateModeChange: (Boolean) -> Unit,
     syncEnabled: Boolean,
     onSyncEnabledChange: (Boolean) -> Unit,
     logcatEnabled: Boolean,
@@ -498,10 +505,10 @@ private fun GeneralTab(
     Column {
         SectionLabel(stringResource(R.string.section_general))
         SettingsRow(
-            title = stringResource(R.string.setting_capture_enabled_title),
-            subtitle = stringResource(R.string.setting_capture_enabled_subtitle),
-            checked = captureEnabled,
-            onCheckedChange = onCaptureEnabledChange,
+            title = stringResource(R.string.setting_private_mode_title),
+            subtitle = stringResource(R.string.setting_private_mode_subtitle),
+            checked = privateMode,
+            onCheckedChange = onPrivateModeChange,
         )
         HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
         SettingsRow(
