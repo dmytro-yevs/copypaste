@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, formatWallTime } from "../lib/ipc";
-import type { SyncStatus, PairedDevice } from "../lib/ipc";
+import type { PairedDevice } from "../lib/ipc";
 
 // ---------------------------------------------------------------------------
 // SyncState — the three conditions we surface
@@ -26,20 +26,22 @@ const POLL_INTERVAL_MS = 10_000;
 // ---------------------------------------------------------------------------
 
 function deriveSyncState(
-  sync: SyncStatus,
-  lastSyncMs: number | null
+  lastSyncMs: number | null,
+  deviceCount: number
 ): SyncState {
-  // Determine "connected" by recency of last_sync_ms — works for both P2P and
-  // Supabase paths since both update last_sync_ms on a successful round-trip.
-  if (lastSyncMs !== null && Date.now() - lastSyncMs <= RECENT_SYNC_MS) {
+  // "connected" (green dot) means at least one device is online/syncing. We
+  // require BOTH a paired device AND a recent last_sync_ms: a recent sync
+  // round-trip is the only liveness signal the daemon exposes today, and it is
+  // updated by both the P2P and Supabase paths on a successful exchange. With
+  // zero paired devices there is nothing to be "connected" to, so we stay grey.
+  const recentSync =
+    lastSyncMs !== null && Date.now() - lastSyncMs <= RECENT_SYNC_MS;
+  if (deviceCount > 0 && recentSync) {
     return "connected";
   }
-  // Sync is configured but hasn't completed recently → idle.
-  // We don't treat "not configured yet" as alarming (idle, not offline).
-  if (sync.passphrase_set || sync.signed_in || sync.supabase_configured) {
-    return "idle";
-  }
-  // Nothing configured — still idle, never red, to avoid alarm on fresh install.
+  // Paired/configured but no recent round-trip, or zero devices → idle (grey).
+  // We never show red here for a missing sync, to avoid alarm on a fresh
+  // install or while a peer is simply offline.
   return "idle";
 }
 
@@ -121,10 +123,11 @@ export function SyncStatusChip() {
       peersResult.status === "fulfilled" ? peersResult.value.peers : [];
 
     const lastSyncMs = sync.last_sync_ms ?? null;
+    const deviceCount = peers.length;
 
     setInfo({
-      state: deriveSyncState(sync, lastSyncMs),
-      deviceCount: peers.length,
+      state: deriveSyncState(lastSyncMs, deviceCount),
+      deviceCount,
       lastSyncMs,
       email: sync.email ?? null,
     });
