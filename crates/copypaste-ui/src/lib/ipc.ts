@@ -200,6 +200,18 @@ export interface PairedDevice {
   address: string | null;
   /** Base64 shared content-sync key (not displayed; serde default = null). */
   sync_key_b64: string | null;
+  /** Peer's friendly hardware model (e.g. "MacBook Air"), learned in-band during pairing. */
+  model: string | null;
+  /** Peer's OS name + version (e.g. "macOS 15.5"), learned in-band. */
+  os_version: string | null;
+  /** Peer's app/daemon version, learned in-band. */
+  app_version: string | null;
+  /** Peer's best LAN-routable display IP, learned in-band. */
+  local_ip: string | null;
+  /** Unix epoch seconds of the first successful sync, or null until the first sync. */
+  first_sync_at: number | null;
+  /** Unix epoch seconds of the most recent successful sync, or null. */
+  last_sync_at: number | null;
 }
 
 /**

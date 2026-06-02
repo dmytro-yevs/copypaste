@@ -1237,6 +1237,24 @@ impl IpcServer {
             .unwrap_or_else(|poisoned| poisoned.into_inner().clone().unwrap_or_default())
     }
 
+    /// Collect THIS device's identity metadata for the in-band bootstrap
+    /// metadata exchange (P2P Phase 4).
+    ///
+    /// Maps [`DeviceMeta`](crate::device_meta::DeviceMeta) onto the transport's
+    /// [`PeerMeta`](copypaste_p2p::bootstrap::PeerMeta). The collection spawns
+    /// short-lived child processes (`scutil`, `sysctl`, `sw_vers`) that can block
+    /// up to ~2 s, so callers MUST invoke this from a blocking context (e.g.
+    /// `tokio::task::spawn_blocking`) rather than on an async worker thread.
+    fn collect_own_peer_meta() -> copypaste_p2p::bootstrap::PeerMeta {
+        let meta = crate::device_meta::DeviceMeta::collect(BUILD_VERSION);
+        copypaste_p2p::bootstrap::PeerMeta {
+            model: meta.device_model,
+            os_version: meta.os_version,
+            app_version: Some(meta.app_version),
+            local_ip: meta.local_ip,
+        }
+    }
+
     /// Derive the base64-encoded shared content sync key for a peer from the
     /// PAKE [`SessionKey`](copypaste_p2p::pake::SessionKey).
     ///
@@ -1277,6 +1295,7 @@ impl IpcServer {
         peer_fp_canonical: &str,
         peer_sync_addr: &str,
         session_key: &copypaste_p2p::pake::SessionKey,
+        peer_meta: &copypaste_p2p::bootstrap::PeerMeta,
     ) {
         let display = display_fingerprint(peer_fp_canonical);
         let added_at = std::time::SystemTime::now()
@@ -1298,6 +1317,13 @@ impl IpcServer {
 
         let path = peers_file_path();
         let mut peers = crate::peers::load_peers(&path);
+        // Preserve any existing first/last-sync stamps across a re-pair so the
+        // "first sync" history is not reset when the peer is re-paired.
+        let (prior_first_sync, prior_last_sync) = peers
+            .iter()
+            .find(|p| canonical_fingerprint(&p.fingerprint) == peer_fp_canonical)
+            .map(|p| (p.first_sync_at, p.last_sync_at))
+            .unwrap_or((None, None));
         // Drop any prior record for the same peer (canonical compare) so a
         // re-pair refreshes the address/name instead of duplicating the entry.
         peers.retain(|p| canonical_fingerprint(&p.fingerprint) != peer_fp_canonical);
@@ -1307,6 +1333,12 @@ impl IpcServer {
             added_at,
             address,
             sync_key_b64,
+            model: peer_meta.model.clone(),
+            os_version: peer_meta.os_version.clone(),
+            app_version: peer_meta.app_version.clone(),
+            local_ip: peer_meta.local_ip.clone(),
+            first_sync_at: prior_first_sync,
+            last_sync_at: prior_last_sync,
         });
 
         match crate::peers::save_peers(&path, &peers) {
@@ -1344,7 +1376,13 @@ impl IpcServer {
         // persist it; and used by nothing else here. Captured before the move.
         let own_sync_addr = self.own_sync_addr();
         tokio::spawn(async move {
-            match responder.run(&password, &own_sync_addr).await {
+            // P2P Phase 4: collect our own device metadata to advertise in-band.
+            // DeviceMeta::collect spawns child processes (up to ~2 s), so run it
+            // off the async worker. Falls back to empty metadata on join error.
+            let own_meta = tokio::task::spawn_blocking(Self::collect_own_peer_meta)
+                .await
+                .unwrap_or_default();
+            match responder.run(&password, &own_sync_addr, &own_meta).await {
                 Ok(outcome) => {
                     tracing::info!(
                         peer_fingerprint = %outcome.peer_fingerprint,
@@ -1363,11 +1401,19 @@ impl IpcServer {
                     }
                     // P2P Phase 2: durably persist the peer (fingerprint +
                     // sync-listener address) so it survives a restart and the
-                    // Phase 3 connector can dial it directly.
+                    // Phase 3 connector can dial it directly. Phase 4: also
+                    // persist the peer's advertised device metadata.
+                    let peer_meta = copypaste_p2p::bootstrap::PeerMeta {
+                        model: outcome.peer_model.clone(),
+                        os_version: outcome.peer_os.clone(),
+                        app_version: outcome.peer_app_version.clone(),
+                        local_ip: outcome.peer_local_ip.clone(),
+                    };
                     Self::persist_paired_peer(
                         &outcome.peer_fingerprint,
                         &outcome.peer_sync_addr,
                         &outcome.session_key,
+                        &peer_meta,
                     );
                 }
                 Err(e) => {
@@ -1427,12 +1473,19 @@ impl IpcServer {
         // Our own P2P sync-listener address, sent in-band so the responder can
         // persist it for its Phase 3 connector.
         let own_sync_addr = self.own_sync_addr();
+        // P2P Phase 4: collect our own device metadata to advertise in-band.
+        // DeviceMeta::collect spawns child processes (up to ~2 s), so run it off
+        // the async worker; empty metadata on join error.
+        let own_meta = tokio::task::spawn_blocking(Self::collect_own_peer_meta)
+            .await
+            .unwrap_or_default();
         match copypaste_p2p::bootstrap::run_initiator(
             addr,
             cert_der,
             key_der,
             &password,
             &own_sync_addr,
+            &own_meta,
         )
         .await
         {
@@ -1451,11 +1504,19 @@ impl IpcServer {
                 }
                 // P2P Phase 2: durably persist the peer (fingerprint + the
                 // sync-listener address it advertised) for restart-survival and
-                // the Phase 3 outbound connector.
+                // the Phase 3 outbound connector. Phase 4: also persist the
+                // peer's advertised device metadata.
+                let peer_meta = copypaste_p2p::bootstrap::PeerMeta {
+                    model: outcome.peer_model.clone(),
+                    os_version: outcome.peer_os.clone(),
+                    app_version: outcome.peer_app_version.clone(),
+                    local_ip: outcome.peer_local_ip.clone(),
+                };
                 Self::persist_paired_peer(
                     &outcome.peer_fingerprint,
                     &outcome.peer_sync_addr,
                     &outcome.session_key,
+                    &peer_meta,
                 );
                 Response::ok(
                     req_id,

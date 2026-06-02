@@ -123,8 +123,9 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke }: PeerRowProps) {
   const revokedAt = rowSt?.revokedAt ?? null;
   const rowError = rowSt?.error ?? null;
 
-  // Extract IP from optional "host:port" address field.
-  const ip = extractIp(peer.address);
+  // Prefer the peer's in-band advertised local_ip; fall back to parsing the
+  // "host:port" P2P address field.
+  const ip = peer.local_ip ?? extractIp(peer.address);
 
   return (
     <div className="px-3 py-2.5 hover:bg-ide-hover">
@@ -146,20 +147,29 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke }: PeerRowProps) {
                 : peer.fingerprint}
             </p>
 
-            {/* IP address (from P2P address field) */}
-            {ip !== null && (
-              <p className="text-[11px] text-ide-faint">
-                <span className="text-ide-dim">IP</span>{" "}
-                <span className="font-mono">{ip}</span>
-              </p>
-            )}
+            {/* Rich peer metadata — each row omitted when absent, mirroring
+                the "This device" card. Learned in-band over the bootstrap
+                channel during pairing. */}
+            <MetaRow label="Model" value={peer.model} />
+            <MetaRow label="OS" value={peer.os_version} />
+            <MetaRow label="Version" value={peer.app_version} />
+            <MetaRow label="Local IP" value={ip} />
 
-            {/* Paired date */}
+            {/* Paired / first-sync / last-sync timestamps. formatEpochSecs
+                returns "—" for null/0. */}
             {(peer.added_at ?? 0) > 0 && (
               <p className="text-[11px] text-ide-faint">
                 Paired {formatEpochSecs(peer.added_at)}
               </p>
             )}
+            <p className="text-[11px] text-ide-faint">
+              <span className="text-ide-dim">First sync</span>{" "}
+              <span>{formatEpochSecs(peer.first_sync_at)}</span>
+            </p>
+            <p className="text-[11px] text-ide-faint">
+              <span className="text-ide-dim">Last sync</span>{" "}
+              <span>{formatEpochSecs(peer.last_sync_at)}</span>
+            </p>
 
             {/* Revoked / error states */}
             {revokedAt !== null && (
