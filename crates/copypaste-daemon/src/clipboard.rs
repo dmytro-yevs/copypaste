@@ -70,6 +70,48 @@ pub fn image_content_hash(raw: &[u8]) -> [u8; 16] {
     out
 }
 
+/// Derive the thumbnail's `file_id` deterministically from the full image's
+/// `file_id`. The thumbnail is encrypted with the SAME content key but a
+/// DISTINCT `file_id` so its AEAD AAD is isolated from the full image's
+/// (see `image::encode_image_full`). Domain-separating the hash (a `"thumb"`
+/// prefix) guarantees the two ids never collide while staying deterministic,
+/// so identical images still dedup and a reader can recompute / parse the id.
+pub fn image_thumb_file_id(file_id: &[u8; 16]) -> [u8; 16] {
+    let mut hasher = Sha256::new();
+    hasher.update(b"copypaste-thumb-v1");
+    hasher.update(file_id);
+    let digest = hasher.finalize();
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&digest[..16]);
+    out
+}
+
+/// Build the image `blob_ref` meta JSON for an image item.
+///
+/// Keeps the original `width`/`height`/`original_size`/`chunk_count`/`file_id`
+/// keys (consumed by `ipc::parse_image_file_id` and the full-res decode path)
+/// and ADDITIVELY records the thumbnail's `thumb_file_id` (as a byte array, the
+/// same shape as `file_id`) plus `thumb_w`/`thumb_h`. The core reader ignores
+/// unknown keys, so this stays forward-/backward-compatible.
+pub fn build_image_meta_json(
+    meta: &copypaste_core::ImageMeta,
+    thumb_file_id: &[u8; 16],
+    thumb_w: u32,
+    thumb_h: u32,
+) -> String {
+    format!(
+        r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?},"thumb_file_id":{:?},"thumb_w":{},"thumb_h":{}}}"#,
+        meta.width,
+        meta.height,
+        meta.original_size,
+        meta.chunk_count,
+        meta.file_id,
+        thumb_file_id,
+        thumb_w,
+        thumb_h
+    )
+}
+
 /// Process-wide set of pasteboard kinds we've already logged once.
 /// Keeps the steady-state log volume bounded when the user repeatedly
 /// copies an unsupported type (e.g. RTF inside a text editor).

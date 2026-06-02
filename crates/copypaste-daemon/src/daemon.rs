@@ -5,7 +5,7 @@ use crate::{
     p2p, paths,
 };
 use copypaste_core::{
-    build_item_aad_v2, bump_item_recency, chunks_to_blob, derive_v2, encode_image_with_limit,
+    build_item_aad_v2, bump_item_recency, chunks_to_blob, derive_v2, encode_image_full,
     encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts,
     is_sensitive_for_autowipe, prune_to_cap, AppConfig, ClipboardItem, Database, DeviceKeypair,
     AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
@@ -1545,17 +1545,26 @@ async fn handle_image(
         // images the config permitted. `usize::MAX` saturation keeps 32-bit
         // targets safe.
         let max_image_bytes = usize::try_from(config.max_image_size_bytes).unwrap_or(usize::MAX);
+        // The thumbnail is encrypted with the SAME content key but a DISTINCT
+        // file_id so its AEAD AAD is isolated from the full image's. Derive it
+        // deterministically from the content-hash file_id so identical images
+        // still dedup and the reader can recompute / parse it.
+        let thumb_file_id = crate::clipboard::image_thumb_file_id(&file_id);
         // Item 3: pass config.max_decoded_image_mb so the decode-bomb budget
         // comes from the live AppConfig rather than the compile-time default
-        // baked into the `encode_image` wrapper.
-        match encode_image_with_limit(
+        // baked into the `encode_image` wrapper. encode_image_full decodes ONCE
+        // and reuses the bitmap for both the full PNG and the downscaled
+        // thumbnail (Variant-B: avoid a second decode of the clipboard bytes).
+        match encode_image_full(
             &raw_bytes,
             &local_key,
             &file_id,
+            &thumb_file_id,
             max_image_bytes,
             config.max_decoded_image_mb,
+            copypaste_core::THUMBNAIL_MAX_DIM,
         ) {
-            Ok((meta, chunks)) => {
+            Ok((meta, chunks, thumb_blob, thumb_w, thumb_h)) => {
                 let blob = match chunks_to_blob(&chunks) {
                     Ok(b) => b,
                     Err(e) => {
@@ -1563,15 +1572,27 @@ async fn handle_image(
                         return None;
                     }
                 };
-                let meta_json = format!(
-                    r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
-                    meta.width, meta.height, meta.original_size, meta.chunk_count, meta.file_id
+                // Additively record thumb_file_id / thumb_w / thumb_h alongside
+                // the existing width/height/original_size/chunk_count/file_id
+                // keys; the core reader ignores unknown keys, so this stays
+                // forward- and backward-compatible.
+                let meta_json = crate::clipboard::build_image_meta_json(
+                    &meta,
+                    &thumb_file_id,
+                    thumb_w,
+                    thumb_h,
                 );
-                // thumb=None: the daemon capture path still uses
-                // encode_image_with_limit (full image only); the capture-time
-                // thumbnail pipeline (encode_image_full) is not yet wired here,
-                // so the thumbnail is left for lazy backfill via set_thumb.
-                let mut item = ClipboardItem::new_image(blob, meta_json, 0, None);
+                // encode_image_full always produces a thumbnail blob; treat an
+                // (unexpected) empty blob as "no thumb" so get_item_thumbnail
+                // returns the null sentinel rather than failing decode. Capture
+                // is never failed on thumbnail trouble — the Err arm below only
+                // fires on full-image encode failure.
+                let thumb = if thumb_blob.is_empty() {
+                    None
+                } else {
+                    Some(thumb_blob)
+                };
+                let mut item = ClipboardItem::new_image(blob, meta_json, 0, thumb);
                 // Stable cross-device item identity (mirror handle_text, which
                 // sets `item.item_id` once at capture). `new_image` seeds a fresh
                 // random `item_id`; that would give the SAME image a different

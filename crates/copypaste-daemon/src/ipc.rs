@@ -1595,6 +1595,8 @@ impl IpcServer {
                 | "export"
                 // get_item_image decrypts image chunks — needs a ready DB.
                 | "get_item_image"
+                // get_item_thumbnail decrypts the thumbnail blob — needs a ready DB.
+                | "get_item_thumbnail"
                 | "revoke_peer"
                 | "revoke_all_peers"
         )
@@ -2524,6 +2526,127 @@ impl IpcServer {
                         // because decode_image always returns PNG bytes.
                         let data_uri = format!("data:image/png;base64,{b64}");
                         Response::ok(req.id, serde_json::json!({ "data_uri": data_uri }))
+                    }
+                    Ok(Ok(None)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_NOT_FOUND,
+                        format!("item not found: {id}"),
+                    ),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
+            // A'. get_item_thumbnail — decrypt and return the small capture-time
+            // thumbnail as a data URI. Mirrors `get_item_image` but reads
+            // `item.thumb` (keyed by the DISTINCT `thumb_file_id` in the meta)
+            // instead of the full-res `item.content`.
+            //
+            // Params: {"id": "<uuid>"}
+            // Success (thumb present): {"thumbnail": "data:image/png;base64,<b64>"}
+            // Success (no thumb):      {"thumbnail": null}   ← UI falls back to
+            //                          get_item_image (full-res).
+            // Error: item not found, non-image content_type, parse/decode failure.
+            "get_item_thumbnail" => {
+                let id = match req.params.get("id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
+                };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
+                }
+                let db_arc = self.db.clone();
+                let id_for_task = id.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let item = get_item_by_id(&db, &id_for_task)?;
+                    Ok::<_, anyhow::Error>(item)
+                })
+                .await;
+                match join {
+                    Ok(Ok(Some(item))) => {
+                        let is_image =
+                            item.content_type == "image" || item.content_type.starts_with("image/");
+                        if !is_image {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                format!(
+                                    "item {} is not an image (content_type: {})",
+                                    id, item.content_type
+                                ),
+                            );
+                        }
+                        // No thumbnail captured (legacy row or thumb-less sync
+                        // import): return the null sentinel so the UI falls back
+                        // to the full-res image rather than treating it as an
+                        // error.
+                        let thumb_blob = match &item.thumb {
+                            Some(b) => b.clone(),
+                            None => {
+                                return Response::ok(
+                                    req.id,
+                                    serde_json::json!({ "thumbnail": serde_json::Value::Null }),
+                                )
+                            }
+                        };
+                        let meta_json = match item.blob_ref.as_deref() {
+                            Some(s) => s.to_owned(),
+                            None => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("image item {} missing blob_ref metadata", id),
+                                )
+                            }
+                        };
+                        // The thumbnail is keyed by a DISTINCT thumb_file_id
+                        // recorded additively in the meta JSON.
+                        let thumb_file_id = match parse_image_thumb_file_id(&meta_json) {
+                            Ok(fid) => fid,
+                            Err(e) => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("image item {id} thumb meta parse error: {e}"),
+                                )
+                            }
+                        };
+                        // `decode_thumbnail` takes the serialized blob directly
+                        // (it runs `chunks_from_blob` internally), mirroring how
+                        // `encode_thumbnail`/`encode_image_full` produce it.
+                        let local_key: [u8; 32] = **self.local_key;
+                        let png_bytes = match copypaste_core::decode_thumbnail(
+                            &thumb_blob,
+                            &local_key,
+                            &thumb_file_id,
+                        ) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_AUTH_FAILED,
+                                    format!("image item {id} thumb decode failed: {e}"),
+                                )
+                            }
+                        };
+                        use base64::Engine as _;
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                        let data_uri = format!("data:image/png;base64,{b64}");
+                        Response::ok(req.id, serde_json::json!({ "thumbnail": data_uri }))
                     }
                     Ok(Ok(None)) => Response::err_with_code(
                         req.id,
@@ -5331,15 +5454,31 @@ impl PasteboardError {
 /// the dead-code allowance on non-macOS builds.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn parse_image_file_id(meta_json: &str) -> Result<[u8; 16], String> {
+    parse_meta_id_array(meta_json, "file_id")
+}
+
+/// Parse the thumbnail's distinct `thumb_file_id` (a 16-byte array) out of the
+/// image `blob_ref` meta JSON. Mirrors [`parse_image_file_id`]; the thumbnail
+/// is encrypted with the SAME content key but this SEPARATE id as AEAD AAD
+/// (written additively by `clipboard::build_image_meta_json`). Backs the
+/// `get_item_thumbnail` IPC verb.
+pub(crate) fn parse_image_thumb_file_id(meta_json: &str) -> Result<[u8; 16], String> {
+    parse_meta_id_array(meta_json, "thumb_file_id")
+}
+
+/// Parse a named 16-byte array (e.g. `"file_id"` / `"thumb_file_id"`) out of an
+/// image `blob_ref` meta JSON. Shared by [`parse_image_file_id`] and
+/// [`parse_image_thumb_file_id`].
+fn parse_meta_id_array(meta_json: &str, key: &str) -> Result<[u8; 16], String> {
     let value: serde_json::Value =
         serde_json::from_str(meta_json).map_err(|e| format!("image meta_json parse error: {e}"))?;
     let arr = value
-        .get("file_id")
+        .get(key)
         .and_then(|v| v.as_array())
-        .ok_or_else(|| "image meta_json missing 'file_id' array".to_string())?;
+        .ok_or_else(|| format!("image meta_json missing '{key}' array"))?;
     if arr.len() != 16 {
         return Err(format!(
-            "image meta_json 'file_id' has wrong length: expected 16, got {}",
+            "image meta_json '{key}' has wrong length: expected 16, got {}",
             arr.len()
         ));
     }
@@ -5348,7 +5487,7 @@ pub(crate) fn parse_image_file_id(meta_json: &str) -> Result<[u8; 16], String> {
         out[i] = v
             .as_u64()
             .and_then(|n| u8::try_from(n).ok())
-            .ok_or_else(|| format!("image meta_json 'file_id[{i}]' not a u8"))?;
+            .ok_or_else(|| format!("image meta_json '{key}[{i}]' not a u8"))?;
     }
     Ok(out)
 }
@@ -8534,6 +8673,129 @@ mod tests {
             merged.p2p_enabled,
             Some(true),
             "merge_config must preserve existing p2p_enabled when incoming is None"
+        );
+    }
+
+    // ── get_item_thumbnail: serves the capture-time thumbnail blob ──────────
+
+    /// Build a large PNG, encode it via `encode_image_full` with the test
+    /// server's zero key, insert the resulting image item (full chunks +
+    /// thumbnail blob + extended meta_json), then assert:
+    ///   * `get_item_thumbnail` returns a non-null PNG data-URI,
+    ///   * the thumbnail data-URI is SMALLER than the full-res `get_item_image`
+    ///     output (the thumb is a downscaled re-encode),
+    ///   * an image item with NO thumb returns the `{ "thumbnail": null }`
+    ///     sentinel so the UI can fall back to full-res.
+    #[tokio::test]
+    async fn get_item_thumbnail_serves_thumb_and_null_sentinel() {
+        use copypaste_core::THUMBNAIL_MAX_DIM;
+        use image::{DynamicImage, RgbaImage};
+
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let server = IpcServer::new(
+            db.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+            Arc::new([0u8; 32]),
+        );
+        let key = [0u8; 32];
+
+        // A 1000×1000 image: larger than THUMBNAIL_MAX_DIM (680) so the
+        // thumbnail is genuinely downscaled and its PNG is smaller than the
+        // full-res PNG. A per-pixel gradient keeps PNG compression honest (a
+        // flat color would compress so well the size gap could vanish).
+        let mut buf = RgbaImage::new(1000, 1000);
+        for (x, y, px) in buf.enumerate_pixels_mut() {
+            *px = image::Rgba([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8, 255]);
+        }
+        let raw = copypaste_core::encode_as_png(&DynamicImage::ImageRgba8(buf)).unwrap();
+
+        // file_id = content hash (mirrors handle_image); thumb_file_id distinct.
+        let file_id = crate::clipboard::image_content_hash(&raw);
+        let thumb_file_id = crate::clipboard::image_thumb_file_id(&file_id);
+
+        let (meta, chunks, thumb_blob, thumb_w, thumb_h) = copypaste_core::encode_image_full(
+            &raw,
+            &key,
+            &file_id,
+            &thumb_file_id,
+            0,
+            64,
+            THUMBNAIL_MAX_DIM,
+        )
+        .unwrap();
+        assert!(!thumb_blob.is_empty(), "thumbnail blob must be produced");
+
+        let blob = copypaste_core::chunks_to_blob(&chunks).unwrap();
+        let meta_json =
+            crate::clipboard::build_image_meta_json(&meta, &thumb_file_id, thumb_w, thumb_h);
+
+        let mut item =
+            copypaste_core::ClipboardItem::new_image(blob, meta_json, 0, Some(thumb_blob));
+        item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+        let with_thumb_id = item.id.clone();
+
+        // A second image item with NO thumbnail (full-image-only legacy path).
+        let (meta2, chunks2) =
+            copypaste_core::encode_image_with_limit(&raw, &key, &file_id, 0, 64).unwrap();
+        let blob2 = copypaste_core::chunks_to_blob(&chunks2).unwrap();
+        let meta_json2 = format!(
+            r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
+            meta2.width, meta2.height, meta2.original_size, meta2.chunk_count, meta2.file_id
+        );
+        let mut item2 = copypaste_core::ClipboardItem::new_image(blob2, meta_json2, 0, None);
+        item2.item_id = uuid::Uuid::new_v4().to_string();
+        item2.id = uuid::Uuid::new_v4().to_string();
+        let no_thumb_id = item2.id.clone();
+
+        {
+            let guard = db.lock().await;
+            copypaste_core::insert_item_with_fts(&guard, &item, "").unwrap();
+            copypaste_core::insert_item_with_fts(&guard, &item2, "").unwrap();
+        }
+
+        // get_item_thumbnail on the item WITH a thumb → non-null data-URI.
+        let thumb_resp = server
+            .dispatch(&format!(
+                r#"{{"id":"t1","method":"get_item_thumbnail","params":{{"id":"{with_thumb_id}"}}}}"#
+            ))
+            .await;
+        let thumb_data = thumb_resp.data.expect("get_item_thumbnail data");
+        let thumb_uri = thumb_data["thumbnail"]
+            .as_str()
+            .expect("thumbnail must be a non-null data-URI string");
+        assert!(
+            thumb_uri.starts_with("data:image/png;base64,"),
+            "thumbnail must be a PNG data-URI"
+        );
+
+        // get_item_image on the same item → full-res data-URI.
+        let full_resp = server
+            .dispatch(&format!(
+                r#"{{"id":"f1","method":"get_item_image","params":{{"id":"{with_thumb_id}"}}}}"#
+            ))
+            .await;
+        let full_uri = full_resp.data.expect("get_item_image data")["data_uri"]
+            .as_str()
+            .expect("data_uri")
+            .to_string();
+        assert!(
+            thumb_uri.len() < full_uri.len(),
+            "thumbnail data-URI ({}) must be smaller than full-res ({})",
+            thumb_uri.len(),
+            full_uri.len()
+        );
+
+        // get_item_thumbnail on the item WITHOUT a thumb → null sentinel.
+        let null_resp = server
+            .dispatch(&format!(
+                r#"{{"id":"t2","method":"get_item_thumbnail","params":{{"id":"{no_thumb_id}"}}}}"#
+            ))
+            .await;
+        let null_data = null_resp.data.expect("get_item_thumbnail (no thumb) data");
+        assert!(
+            null_data["thumbnail"].is_null(),
+            "thumb-less item must return null sentinel: {null_data}"
         );
     }
 
