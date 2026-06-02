@@ -952,6 +952,7 @@ name = "copypaste-p2p"
 version = "0.5.4"
 dependencies = [
  "argon2",
+ "base64 0.22.1",
  "bytes",
  "futures-util",
  "generic-array",
@@ -963,6 +964,8 @@ dependencies = [
  "rand 0.8.6",
  "rcgen",
  "rustls",
+ "serde",
+ "serde_json",
  "sha2",
  "subtle",
  "thiserror 1.0.69",

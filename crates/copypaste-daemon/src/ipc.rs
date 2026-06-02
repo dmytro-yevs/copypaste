@@ -615,6 +615,14 @@ fn load_peers() -> anyhow::Result<Vec<serde_json::Value>> {
 /// (same filesystem → rename is atomic on POSIX), set mode 0600 before any bytes
 /// are written, then rename over the destination. A crash between write and rename
 /// leaves an invisible temp file that the next write will clean up.
+///
+/// TODO(P2P-durability): two writers for `peers.json` coexist — this local
+/// `serde_json::Value` variant and the typed `crate::peers::save_peers`. They
+/// should be unified onto the typed `PairedDevice` form (the preferred one) so
+/// there is a single source of truth, but that is a larger refactor touching
+/// every pairing/revocation handler. The concurrent-writer *race* is already
+/// removed by the dual-daemon fix (a losing daemon now exits on IPC-bind
+/// failure instead of running a second stack), so unification is deferred.
 fn save_peers(peers: &[serde_json::Value]) -> anyhow::Result<()> {
     use std::io::Write as _;
 
@@ -1531,26 +1539,22 @@ impl IpcServer {
     ///
     /// D2: accepts a [`CancellationToken`] so the daemon can stop the server
     /// cleanly on SIGINT/SIGTERM instead of relying on task abort.
-    pub async fn serve(
-        self,
-        socket_path: &std::path::Path,
-        shutdown: CancellationToken,
-    ) -> anyhow::Result<()> {
-        // T4 (v0.3) — make sure the `revoked_devices` audit table exists
-        // before any client can call `revoke_peer`. The DDL is purely
-        // additive (`CREATE TABLE IF NOT EXISTS`) and does NOT bump the
-        // SQLite `user_version`, keeping us out of the HKDF v2 worker's
-        // schema-migration territory.
-        {
-            let db = self.db.lock().await;
-            if let Err(e) = ensure_revoked_devices_table(db.conn()) {
-                tracing::error!(
-                    "failed to ensure revoked_devices table: {e} — \
-                     revoke_peer requests will fail until this is fixed"
-                );
-            }
-        }
-
+    /// Bind the IPC listener (self-healing stale sockets) WITHOUT starting the
+    /// accept loop.
+    ///
+    /// # Why this is split out from [`serve`](Self::serve)
+    ///
+    /// DUAL-DAEMON FIX: the daemon startup must treat a bind failure as FATAL
+    /// (another healthy daemon already owns the socket → this instance is the
+    /// loser and must exit WITHOUT starting its own P2P/mDNS stack). When the
+    /// bind was buried inside the `tokio::spawn`ed `serve` future, a bind
+    /// failure only logged and the rest of startup — including `start_p2p` —
+    /// ran anyway, producing a second concurrent P2P stack. Binding here, in
+    /// the caller's context, lets the caller `return Err` / exit before P2P.
+    ///
+    /// On success the socket exists with mode `0600` and is ready for
+    /// [`serve_on`](Self::serve_on).
+    pub fn bind(&self, socket_path: &std::path::Path) -> anyhow::Result<UnixListener> {
         // Ensure parent directory exists and is user-only (0o700) so that the
         // socket cannot be reached by other local users even if the socket
         // mode itself were ever loosened.
@@ -1578,6 +1582,39 @@ impl IpcServer {
         std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))?;
 
         tracing::info!("IPC listening on {} (mode=0600)", socket_path.display());
+        Ok(listener)
+    }
+
+    pub async fn serve(
+        self,
+        socket_path: &std::path::Path,
+        shutdown: CancellationToken,
+    ) -> anyhow::Result<()> {
+        let listener = self.bind(socket_path)?;
+        self.serve_on(listener, shutdown).await
+    }
+
+    /// Run the IPC accept loop on an already-bound listener (see
+    /// [`bind`](Self::bind)).
+    pub async fn serve_on(
+        self,
+        listener: UnixListener,
+        shutdown: CancellationToken,
+    ) -> anyhow::Result<()> {
+        // T4 (v0.3) — make sure the `revoked_devices` audit table exists
+        // before any client can call `revoke_peer`. The DDL is purely
+        // additive (`CREATE TABLE IF NOT EXISTS`) and does NOT bump the
+        // SQLite `user_version`, keeping us out of the HKDF v2 worker's
+        // schema-migration territory.
+        {
+            let db = self.db.lock().await;
+            if let Err(e) = ensure_revoked_devices_table(db.conn()) {
+                tracing::error!(
+                    "failed to ensure revoked_devices table: {e} — \
+                     revoke_peer requests will fail until this is fixed"
+                );
+            }
+        }
 
         let server = Arc::new(self);
         // daemon-core L2: track in-flight per-connection tasks in a JoinSet so
