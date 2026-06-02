@@ -224,30 +224,46 @@ mod tests {
 
     // ── Mock server helpers ─────────────────────────────────────────────
 
-    /// Spawn a fake daemon that serves one canned JSON response line.
-    fn mock_server_once(socket_path: &Path, response_json: &'static str) {
+    /// Spawn a fake daemon that serves one connection, echoing the request id
+    /// back in the response. `response_template` is a JSON object string where
+    /// the literal `"ECHO_ID"` is replaced with the id from the incoming
+    /// request, so the id-enforcement guard in `IpcClient::call` is satisfied.
+    fn mock_server_once(socket_path: &Path, response_template: &'static str) {
         let listener = UnixListener::bind(socket_path).unwrap();
         thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
                 let mut buf = String::new();
                 std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut buf)
                     .unwrap();
-                stream.write_all(response_json.as_bytes()).unwrap();
+                // Parse the request id and splice it into the response so the
+                // IpcClient id-enforcement guard accepts the response.
+                let req_id = serde_json::from_str::<serde_json::Value>(buf.trim())
+                    .ok()
+                    .and_then(|v| v["id"].as_str().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "1".to_string());
+                let response = response_template.replace("ECHO_ID", &req_id);
+                stream.write_all(response.as_bytes()).unwrap();
                 stream.write_all(b"\n").unwrap();
             }
         });
     }
 
-    /// Spawn a fake daemon that serves two sequential connections.
+    /// Spawn a fake daemon that serves two sequential connections, echoing the
+    /// request id in each response via the `ECHO_ID` placeholder.
     fn mock_server_two(socket_path: &Path, first: &'static str, second: &'static str) {
         let listener = UnixListener::bind(socket_path).unwrap();
         thread::spawn(move || {
-            for resp in [first, second] {
+            for resp_template in [first, second] {
                 if let Ok((mut stream, _)) = listener.accept() {
                     let mut buf = String::new();
                     std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut buf)
                         .unwrap();
-                    stream.write_all(resp.as_bytes()).unwrap();
+                    let req_id = serde_json::from_str::<serde_json::Value>(buf.trim())
+                        .ok()
+                        .and_then(|v| v["id"].as_str().map(|s| s.to_string()))
+                        .unwrap_or_else(|| "1".to_string());
+                    let response = resp_template.replace("ECHO_ID", &req_id);
+                    stream.write_all(response.as_bytes()).unwrap();
                     stream.write_all(b"\n").unwrap();
                 }
             }
@@ -262,7 +278,7 @@ mod tests {
         let sock = dir.path().join("list_empty.sock");
         mock_server_once(
             &sock,
-            r#"{"id":"1","ok":true,"data":{"items":[],"total":0}}"#,
+            r#"{"id":"ECHO_ID","ok":true,"data":{"items":[],"total":0}}"#,
         );
         let res = cmd_list(&sock, 10);
         assert!(res.is_ok());
@@ -274,7 +290,7 @@ mod tests {
         let sock = dir.path().join("list_items.sock");
         mock_server_once(
             &sock,
-            r#"{"id":"1","ok":true,"data":{"items":[{"id":"aaaa-1111","content_type":"text","is_sensitive":false,"wall_time":1704067200000,"lamport_ts":1},{"id":"bbbb-2222","content_type":"text","is_sensitive":true,"wall_time":1704070800000,"lamport_ts":2}],"total":2}}"#,
+            r#"{"id":"ECHO_ID","ok":true,"data":{"items":[{"id":"aaaa-1111","content_type":"text","is_sensitive":false,"wall_time":1704067200000,"lamport_ts":1},{"id":"bbbb-2222","content_type":"text","is_sensitive":true,"wall_time":1704070800000,"lamport_ts":2}],"total":2}}"#,
         );
         let res = cmd_list(&sock, 50);
         assert!(res.is_ok());
@@ -288,7 +304,7 @@ mod tests {
         let sock = dir.path().join("copy_id_ok.sock");
         mock_server_once(
             &sock,
-            r#"{"id":"1","ok":true,"data":{"id":"test-uuid","found":true}}"#,
+            r#"{"id":"ECHO_ID","ok":true,"data":{"id":"test-uuid","found":true}}"#,
         );
         let res = cmd_copy_by_id(&sock, "test-uuid");
         assert!(res.is_ok());
@@ -300,7 +316,7 @@ mod tests {
         let sock = dir.path().join("copy_id_err.sock");
         mock_server_once(
             &sock,
-            r#"{"id":"1","ok":false,"error":"item not found: bad-id"}"#,
+            r#"{"id":"ECHO_ID","ok":false,"error":"item not found: bad-id"}"#,
         );
         let res = cmd_copy_by_id(&sock, "bad-id");
         assert!(res.is_err());
@@ -315,8 +331,8 @@ mod tests {
         let sock = dir.path().join("copy_idx.sock");
         mock_server_two(
             &sock,
-            r#"{"id":"1","ok":true,"data":{"items":[{"id":"first-uuid","content_type":"text","is_sensitive":false,"wall_time":1704067200000,"lamport_ts":1}],"total":1}}"#,
-            r#"{"id":"1","ok":true,"data":{"id":"first-uuid","found":true}}"#,
+            r#"{"id":"ECHO_ID","ok":true,"data":{"items":[{"id":"first-uuid","content_type":"text","is_sensitive":false,"wall_time":1704067200000,"lamport_ts":1}],"total":1}}"#,
+            r#"{"id":"ECHO_ID","ok":true,"data":{"id":"first-uuid","found":true}}"#,
         );
         let res = cmd_copy_by_index(&sock, 1, 50);
         assert!(res.is_ok());
@@ -328,7 +344,7 @@ mod tests {
         let sock = dir.path().join("copy_idx_oor.sock");
         mock_server_once(
             &sock,
-            r#"{"id":"1","ok":true,"data":{"items":[{"id":"only-one","content_type":"text","is_sensitive":false,"wall_time":1704067200000,"lamport_ts":1}],"total":1}}"#,
+            r#"{"id":"ECHO_ID","ok":true,"data":{"items":[{"id":"only-one","content_type":"text","is_sensitive":false,"wall_time":1704067200000,"lamport_ts":1}],"total":1}}"#,
         );
         let res = cmd_copy_by_index(&sock, 5, 50);
         assert!(res.is_err());
@@ -343,8 +359,8 @@ mod tests {
         let sock = dir.path().join("copy_search_match.sock");
         mock_server_two(
             &sock,
-            r#"{"id":"1","ok":true,"data":{"items":[{"id":"match-uuid","content_type":"text","is_sensitive":false,"wall_time":1704067200000,"lamport_ts":1}]}}"#,
-            r#"{"id":"1","ok":true,"data":{"id":"match-uuid","found":true}}"#,
+            r#"{"id":"ECHO_ID","ok":true,"data":{"items":[{"id":"match-uuid","content_type":"text","is_sensitive":false,"wall_time":1704067200000,"lamport_ts":1}]}}"#,
+            r#"{"id":"ECHO_ID","ok":true,"data":{"id":"match-uuid","found":true}}"#,
         );
         let res = cmd_copy_by_search(&sock, "hello", 20);
         assert!(res.is_ok());
@@ -356,7 +372,7 @@ mod tests {
         let sock = dir.path().join("copy_search_err.sock");
         mock_server_once(
             &sock,
-            r#"{"id":"1","ok":false,"error":"missing param: query"}"#,
+            r#"{"id":"ECHO_ID","ok":false,"error":"missing param: query"}"#,
         );
         let res = cmd_copy_by_search(&sock, "hello", 20);
         assert!(res.is_err());
@@ -368,7 +384,10 @@ mod tests {
     fn fetch_history_daemon_error_propagates() {
         let dir = tempdir().unwrap();
         let sock = dir.path().join("hist_err.sock");
-        mock_server_once(&sock, r#"{"id":"1","ok":false,"error":"db corrupted"}"#);
+        mock_server_once(
+            &sock,
+            r#"{"id":"ECHO_ID","ok":false,"error":"db corrupted"}"#,
+        );
         let res = fetch_history(&sock, 50);
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("db corrupted"));
@@ -380,7 +399,7 @@ mod tests {
         let sock = dir.path().join("hist_empty.sock");
         mock_server_once(
             &sock,
-            r#"{"id":"1","ok":true,"data":{"items":[],"total":0}}"#,
+            r#"{"id":"ECHO_ID","ok":true,"data":{"items":[],"total":0}}"#,
         );
         let items = fetch_history(&sock, 50).unwrap();
         assert!(items.is_empty());

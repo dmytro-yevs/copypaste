@@ -150,7 +150,7 @@ impl SensitiveDetector {
         // compile), the fast-path would silently return false for every input.
         // Log an error and fall back to the full per-pattern detect() path so
         // sensitive content is still caught.
-        if ps.len() == 0 {
+        if ps.is_empty() {
             tracing::error!(
                 "sensitive pattern_set is empty (regex compile failure); \
                  falling back to full detect() path"

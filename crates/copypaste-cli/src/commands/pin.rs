@@ -82,9 +82,11 @@ mod tests {
     use tempfile::tempdir;
 
     /// Spin up a one-shot mock daemon that records the request line it
-    /// receives, then sends back `response_json`. Returns a channel the test
-    /// can drain to assert on the wire format.
-    fn mock_server(socket_path: &Path, response_json: &'static str) -> mpsc::Receiver<String> {
+    /// receives, then sends back a response derived from `response_template`.
+    /// The literal `ECHO_ID` in the template is replaced with the id from the
+    /// incoming request so the IpcClient id-enforcement guard is satisfied.
+    /// Returns a channel the test can drain to assert on the wire format.
+    fn mock_server(socket_path: &Path, response_template: &'static str) -> mpsc::Receiver<String> {
         let listener = UnixListener::bind(socket_path).unwrap();
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
@@ -92,8 +94,13 @@ mod tests {
                 let mut buf = String::new();
                 let mut reader = BufReader::new(&stream);
                 reader.read_line(&mut buf).unwrap();
-                tx.send(buf).unwrap();
-                stream.write_all(response_json.as_bytes()).unwrap();
+                tx.send(buf.clone()).unwrap();
+                let req_id = serde_json::from_str::<serde_json::Value>(buf.trim())
+                    .ok()
+                    .and_then(|v| v["id"].as_str().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "1".to_string());
+                let response = response_template.replace("ECHO_ID", &req_id);
+                stream.write_all(response.as_bytes()).unwrap();
                 stream.write_all(b"\n").unwrap();
             }
         });
@@ -108,7 +115,7 @@ mod tests {
         let sock = dir.path().join("pin.sock");
         let rx = mock_server(
             &sock,
-            r#"{"id":"1","ok":true,"data":{"pinned":true,"id":"550e8400-e29b-41d4-a716-446655440000"}}"#,
+            r#"{"id":"ECHO_ID","ok":true,"data":{"pinned":true,"id":"550e8400-e29b-41d4-a716-446655440000"}}"#,
         );
         thread::sleep(std::time::Duration::from_millis(20));
 
@@ -127,7 +134,7 @@ mod tests {
         let sock = dir.path().join("unpin.sock");
         let rx = mock_server(
             &sock,
-            r#"{"id":"1","ok":true,"data":{"unpinned":true,"id":"550e8400-e29b-41d4-a716-446655440000"}}"#,
+            r#"{"id":"ECHO_ID","ok":true,"data":{"unpinned":true,"id":"550e8400-e29b-41d4-a716-446655440000"}}"#,
         );
         thread::sleep(std::time::Duration::from_millis(20));
 
