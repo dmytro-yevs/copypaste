@@ -133,6 +133,15 @@ impl ClipboardMonitor {
         self.max_image_bytes = bytes;
     }
 
+    /// Override the text-size READ gate with the user-configured cap.
+    ///
+    /// The daemon poll loop pushes the live `max_text_size_bytes` here each tick
+    /// so raising/lowering the cap via `set_config` takes effect without a
+    /// restart (the monitor's gate would otherwise keep its startup snapshot).
+    pub fn set_max_text_bytes(&mut self, bytes: u64) {
+        self.max_text_bytes = bytes;
+    }
+
     /// Poll for new clipboard content. Returns `Some` only if the pasteboard changed.
     ///
     /// Priority: text > PNG > TIFF.  Image data is returned as raw bytes for

@@ -347,6 +347,13 @@ pub(crate) fn update_core_config(
     if let Some(v) = incoming.notify_on_copy {
         core.notify_on_copy = v;
     }
+    // Clamp the merged config into valid ranges ONCE, here, before both the
+    // disk write and the returned (hot-loaded) value — otherwise an unclamped
+    // set_config (e.g. image_quality:0) would be persisted and pushed straight
+    // into the live core_config Arc, taking effect until the next restart.
+    // sensitive_ttl_secs:0 is preserved as the "disabled" sentinel (see
+    // AppConfig::clamp_values).
+    core.clamp_values();
     // core.save() writes via a sibling temp file + atomic rename and does NOT
     // create the parent dir; ensure it exists (mirrors write_config for the
     // sibling config.json) so first-run / test config dirs don't ENOENT.

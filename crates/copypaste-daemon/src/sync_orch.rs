@@ -310,6 +310,11 @@ pub async fn merge_incoming_with_crypto(
             // Fix-3: capture the local `pinned` flag before `wire_to_local`
             // (which always sets pinned=false — the wire carries no pinned field).
             let local_pinned: bool = existing.as_ref().map(|r| r.pinned).unwrap_or(false);
+            // Fix (pin_order): also capture the local `pin_order` before
+            // `wire_to_local` (which carries no pin_order → None). The replace
+            // INSERT must re-bind this or the user's pinned ordering is reset to
+            // NULL on every LWW content update of a pinned item.
+            let local_pin_order: Option<f64> = existing.as_ref().and_then(|r| r.pin_order);
 
             // P2P Phase 3: unwrap the shared-key payload into a row encrypted under
             // this device's own local key, recovering the plaintext for FTS. Returns
@@ -337,6 +342,14 @@ pub async fn merge_incoming_with_crypto(
             // that gets a content update via LWW TakeRemote is not silently
             // unpinned (losing its prune-exemption → TTL data loss).
             to_insert.pinned = to_insert.pinned || local_pinned;
+            // Fix (pin_order, cont.): carry the prior pin_order across the
+            // replace so the pinned ordering is preserved. `wire_to_local`
+            // leaves pin_order=None, so without this the replace INSERT would
+            // store NULL and scramble the user's pinned order. Prefer the
+            // existing local value; only keep an inbound non-None as a fallback.
+            if to_insert.pin_order.is_none() {
+                to_insert.pin_order = local_pin_order;
+            }
 
             // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
             // ran `delete_item` then a separate `insert_item`; if the insert failed
@@ -424,8 +437,8 @@ fn replace_item_atomic(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+          content_hash, origin_device_id, key_version, pinned, pin_order)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
         params![
             item.id,
             item.item_id,
@@ -447,6 +460,10 @@ fn replace_item_atomic(
             // v1-encrypted → permanent auth-tag failure on every subsequent decrypt.
             item.key_version as i64,
             item.pinned as i64,
+            // pin_order: preserved from the prior local row by the caller's
+            // OR-merge above. Without this column the replace defaulted it to
+            // NULL and scrambled the user's pinned ordering on every update.
+            item.pin_order,
         ],
     )?;
     if let Some(text) = fts_text {

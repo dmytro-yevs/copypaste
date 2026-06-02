@@ -772,6 +772,13 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     } else {
                         Some(live_config.sensitive_ttl_secs as i64 * 1000)
                     };
+                    // Hot-reload the monitor's READ gate from the live config so
+                    // raising/lowering the text/image cap via set_config takes
+                    // effect without a restart (cheap: two field writes per tick).
+                    monitor.set_max_text_bytes(live_config.max_text_size_bytes);
+                    monitor.set_max_image_bytes(
+                        usize::try_from(live_config.max_image_size_bytes).unwrap_or(usize::MAX),
+                    );
                     handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
@@ -837,6 +844,13 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     } else {
                         Some(live_config.sensitive_ttl_secs as i64 * 1000)
                     };
+                    // Hot-reload the monitor's READ gate from the live config so
+                    // raising/lowering the text/image cap via set_config takes
+                    // effect without a restart (cheap: two field writes per tick).
+                    monitor.set_max_text_bytes(live_config.max_text_size_bytes);
+                    monitor.set_max_image_bytes(
+                        usize::try_from(live_config.max_image_size_bytes).unwrap_or(usize::MAX),
+                    );
                     handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;

@@ -1504,7 +1504,10 @@ const POLL_WATERMARK_KEY: &str = "cloud_poll_watermark";
 /// component used to page forward through rows that share the same `wall`
 /// millisecond (see [`build_poll_url`]). `id` is empty on a cold start (only the
 /// `wall` lower bound is applied) and is populated once a row is ingested.
-#[derive(Debug, Clone, Default)]
+// PartialEq: the burst-drain loop compares the post-poll cursor against the
+// pre-poll snapshot to detect a no-advance stall (full batch but no usable
+// keyset progress) and break rather than re-poll the same window forever.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct PollCursor {
     wall: i64,
     id: String,
@@ -1756,6 +1759,12 @@ async fn realtime_loop(
                 // waiting the full interval, so a multi-device burst of simultaneous
                 // inserts is drained without a full 10-120 s delay per batch.
                 loop {
+                    // Snapshot the cursor before this poll so we can detect a
+                    // stall: if a full batch's rows all lack a usable id/item_id,
+                    // `batch_max`/`new_cursor` never advance past `start_cursor`
+                    // and the keyset filter re-requests the exact same window
+                    // forever. Break on no-advance below (defensive).
+                    let start_cursor = cursor.clone();
                     let (new_cursor, batch_size) = poll_once(
                         &client,
                         &config,
@@ -1774,6 +1783,19 @@ async fn realtime_loop(
                     // Only keep draining if the batch was full AND shutdown hasn't fired.
                     // Check shutdown without blocking so we don't stall the drain loop.
                     if batch_size < POLL_BATCH_SIZE {
+                        break;
+                    }
+                    // Defensive stall-guard: a full batch whose cursor did NOT
+                    // advance means no row was usable for keyset progress, so
+                    // re-polling would spin on the same window indefinitely. A
+                    // genuine backlog always advances the cursor, so this only
+                    // breaks the pathological no-progress case. Placed AFTER the
+                    // partial-batch break so the normal path is untouched.
+                    if cursor == start_cursor {
+                        tracing::warn!(
+                            "cloud-sync burst drain: full batch but cursor did not advance; \
+                             breaking drain to avoid re-polling the same window"
+                        );
                         break;
                     }
                     // Check shutdown between burst-drain ticks.
@@ -2082,6 +2104,22 @@ async fn ws_ingest_loop(
                                     local_item.id = pk.clone();
                                 }
 
+                                // Pin preservation: a pinned item edited on
+                                // another device and pulled via cloud LWW-replace
+                                // must keep its pinned flag AND pin_order. The
+                                // cloud `build_local_item` always sets pinned=false
+                                // / pin_order=None (the wire carries no pin state),
+                                // so OR-merge the prior local row's pin state on
+                                // replace — mirroring sync_orch's P2P TakeRemote
+                                // path. Without this the item loses prune-exemption
+                                // (→ TTL data loss) and its ordering resets to NULL.
+                                if let Some(local) = existing.as_ref() {
+                                    local_item.pinned = local_item.pinned || local.pinned;
+                                    if local_item.pin_order.is_none() {
+                                        local_item.pin_order = local.pin_order;
+                                    }
+                                }
+
                                 let write_res = if preserved_pk.is_some() {
                                     replace_cloud_item_by_item_id(&db_guard, &local_item)
                                 } else {
@@ -2387,6 +2425,20 @@ async fn poll_once(
                 local_item.id = pk.clone();
             }
 
+            // Pin preservation: a pinned item edited on another device and pulled
+            // via cloud LWW-replace must keep its pinned flag AND pin_order.
+            // `build_local_item` always sets pinned=false / pin_order=None (the
+            // wire carries no pin state), so OR-merge the prior local row's pin
+            // state on replace — mirroring sync_orch's P2P TakeRemote path.
+            // Without this the item loses prune-exemption (→ TTL data loss) and
+            // its ordering resets to NULL.
+            if let Some(local) = existing.as_ref() {
+                local_item.pinned = local_item.pinned || local.pinned;
+                if local_item.pin_order.is_none() {
+                    local_item.pin_order = local.pin_order;
+                }
+            }
+
             let write_res = if preserved_pk.is_some() {
                 // Replace the prior version atomically (delete by item_id +
                 // re-insert with the preserved PK). Cloud items are text-only
@@ -2505,8 +2557,8 @@ fn replace_cloud_item_by_item_id(db: &Database, item: &ClipboardItem) -> anyhow:
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
+          content_hash, origin_device_id, key_version, pinned, pin_order)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
         params![
             item.id,
             item.item_id,
@@ -2524,6 +2576,10 @@ fn replace_cloud_item_by_item_id(db: &Database, item: &ClipboardItem) -> anyhow:
             item.origin_device_id,
             ITEM_KEY_VERSION_CURRENT,
             item.pinned as i64,
+            // pin_order: preserved from the prior local row by the caller's
+            // OR-merge. Without this column the replace defaulted it to NULL
+            // and scrambled the user's pinned ordering on every cloud update.
+            item.pin_order,
         ],
     )?;
     tx.commit()?;

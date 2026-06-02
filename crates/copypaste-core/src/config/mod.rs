@@ -121,7 +121,18 @@ impl AppConfig {
         Ok(())
     }
 
-    fn clamp_values(&mut self) {
+    /// Clamp every tunable field into its valid range.
+    ///
+    /// Idempotent (`&mut self`): running it twice yields the same result, so it
+    /// is safe to call on both `load()` and before every `save()`. The daemon
+    /// calls this on the live config it receives over `set_config` so that disk
+    /// and in-memory state are both clamped without waiting for a restart.
+    ///
+    /// Note on `sensitive_ttl_secs`: `0` is a *valid* "auto-wipe disabled"
+    /// sentinel (honoured by the daemon's cleanup loop), so it is deliberately
+    /// NOT floored to 1 — doing so would silently turn "never wipe" into "wipe
+    /// after 1 second" and destroy the user's sensitive items.
+    pub fn clamp_values(&mut self) {
         self.poll_interval_ms = self
             .poll_interval_ms
             .clamp(POLL_INTERVAL_MIN_MS, POLL_INTERVAL_MAX_MS);
@@ -138,8 +149,9 @@ impl AppConfig {
         self.storage_quota_bytes = self.storage_quota_bytes.max(1);
         // max_decoded_image_mb = 0 would produce a 0-byte image decode limit (reject all images).
         self.max_decoded_image_mb = self.max_decoded_image_mb.max(1);
-        // sensitive_ttl_secs = 0 would wipe all sensitive items immediately on every cleanup tick.
-        self.sensitive_ttl_secs = self.sensitive_ttl_secs.max(1);
+        // sensitive_ttl_secs is intentionally NOT clamped: 0 is the "auto-wipe
+        // disabled" sentinel that the daemon's cleanup loop honours. Flooring it
+        // to 1 would convert "never wipe" into "wipe after 1s" — silent data loss.
     }
 }
 
