@@ -34,6 +34,34 @@ use core_graphics::event::{
 };
 
 // ---------------------------------------------------------------------------
+// Popup-tap lifecycle handle (idempotency + teardown)
+// ---------------------------------------------------------------------------
+
+/// Owns the run loop of the live popup tap thread so installation can be made
+/// idempotent and the tap can be torn down (which releases the `CGEventTap`,
+/// its `CFRunLoopSource`, the underlying `CFMachPort`, and the boxed callback).
+///
+/// `CFRunLoop` is `Send + Sync`; stopping it from another thread makes the tap
+/// thread's `CFRunLoop::run_current()` return, after which that thread drops
+/// the stack-owned tap + source (the crate's `Drop for CGEventTap` invalidates
+/// the `CFMachPort`).
+struct TapHandle {
+    /// The run loop that the tap thread is parked on.
+    run_loop: CFRunLoop,
+}
+
+// SAFETY: `CFRunLoop` is declared `Send + Sync` by core-foundation, and we only
+// ever call `stop()` on it from another thread, which CFRunLoopStop supports.
+unsafe impl Send for TapHandle {}
+
+/// Slot holding the live popup tap, if any. `Some` ⇒ a tap thread is running.
+static TAP_HANDLE: OnceLock<Mutex<Option<TapHandle>>> = OnceLock::new();
+
+fn tap_handle() -> &'static Mutex<Option<TapHandle>> {
+    TAP_HANDLE.get_or_init(|| Mutex::new(None))
+}
+
+// ---------------------------------------------------------------------------
 // Shared state — popup tap
 // ---------------------------------------------------------------------------
 
@@ -140,8 +168,11 @@ pub fn stop_recording() {
 /// `on_trigger` is called (on the tap thread) when the configured shortcut
 /// fires.  Returns `Err` if Accessibility permission is not granted.
 ///
-/// Only one tap is ever installed; subsequent calls update the callback and
-/// shortcut but do not create a second tap.
+/// Idempotent: only one tap is ever installed.  Subsequent calls update the
+/// callback and shortcut in place but do **not** spawn a second tap thread or
+/// create a second `CGEventTap`/`CFRunLoopSource` (which would leak the old
+/// ones, since each tap thread parks on an immortal run loop).  To replace the
+/// live tap, call [`uninstall`] first.
 pub fn install(initial_accel: &str, on_trigger: impl Fn() + Send + 'static) -> Result<(), String> {
     if !accessibility_granted() {
         return Err("Accessibility permission not granted".into());
@@ -153,12 +184,45 @@ pub fn install(initial_accel: &str, on_trigger: impl Fn() + Send + 'static) -> R
         *cb = Some(Box::new(on_trigger));
     }
 
+    // Idempotency guard: if a tap thread is already live, we have just refreshed
+    // its callback + shortcut above — do not spawn another one.
+    if tap_already_live() {
+        return Ok(());
+    }
+
     std::thread::Builder::new()
         .name("cgeventtap-runloop".into())
         .spawn(tap_thread_main)
         .map_err(|e| format!("spawn tap thread: {e}"))?;
 
     Ok(())
+}
+
+/// Whether a popup tap thread is currently live (its run loop is parked and the
+/// `CGEventTap` + `CFRunLoopSource` are held by that thread).
+fn tap_already_live() -> bool {
+    tap_handle().lock().expect("mutex poisoned").is_some()
+}
+
+/// Tear down the live popup tap, if any.
+///
+/// Stops the tap thread's run loop, which causes `tap_thread_main` to return
+/// and drop the stack-owned `CGEventTap` (the crate's `Drop` invalidates the
+/// `CFMachPort`) and its `CFRunLoopSource`.  Also reclaims the boxed trigger
+/// callback so it is freed.  No-op if no tap is installed.
+pub fn uninstall() {
+    // Take the handle out first so a concurrent `install` sees "not live".
+    let handle = tap_handle().lock().expect("mutex poisoned").take();
+    if let Some(h) = handle {
+        // Waking + stopping the run loop unblocks `CFRunLoop::run_current()`
+        // on the tap thread, after which it removes the source and drops the
+        // tap (releasing the CFMachPort) before exiting.
+        h.run_loop.stop();
+    }
+    // Reclaim the boxed callback regardless, so it does not outlive the tap.
+    if let Ok(mut cb) = global_callback().lock() {
+        *cb = None;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -216,15 +280,39 @@ fn tap_thread_main() {
             tracing::error!("CGEventTap::new failed — Accessibility permission revoked?");
         }
         Ok(tap) => {
-            let source = tap
-                .mach_port()
-                .create_runloop_source(0)
-                .expect("CGEventTap: create_runloop_source failed");
+            let Ok(source) = tap.mach_port().create_runloop_source(0) else {
+                tracing::error!("CGEventTap: create_runloop_source failed");
+                // `tap` drops here, invalidating the CFMachPort — nothing leaks.
+                return;
+            };
             let rl = CFRunLoop::get_current();
             rl.add_source(&source, unsafe { kCFRunLoopCommonModes });
             tap.enable();
+
+            // Publish our run loop so `uninstall` can stop it (idempotency +
+            // teardown).  If a tap is somehow already registered, bail out and
+            // let our local tap/source drop rather than overwrite + leak it.
+            {
+                let mut slot = tap_handle().lock().expect("mutex poisoned");
+                if slot.is_some() {
+                    tracing::warn!("CGEventTap: a tap is already live; abandoning duplicate");
+                    rl.remove_source(&source, unsafe { kCFRunLoopCommonModes });
+                    return;
+                }
+                *slot = Some(TapHandle {
+                    run_loop: rl.clone(),
+                });
+            }
+
+            // Parks here until `uninstall` (or revoked permission) stops the loop.
             CFRunLoop::run_current();
-            tracing::warn!("CGEventTap run loop exited unexpectedly");
+
+            // Run loop stopped: remove the source and clear the published handle.
+            // `tap` (and `source`) drop at end of scope; the crate's
+            // `Drop for CGEventTap` invalidates the underlying CFMachPort.
+            rl.remove_source(&source, unsafe { kCFRunLoopCommonModes });
+            *tap_handle().lock().expect("mutex poisoned") = None;
+            tracing::debug!("CGEventTap run loop exited; tap + source released");
         }
     }
 }
@@ -513,4 +601,78 @@ fn ascii_to_keycode(c: char) -> Option<u16> {
         'M' => 0x2E,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    // These tests share the process-global tap state, so they must not run
+    // concurrently. Serialize them under a dedicated mutex and always reset
+    // state at the start so one test's residue cannot affect another.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn reset_state() {
+        *tap_handle().lock().expect("mutex poisoned") = None;
+        *global_callback().lock().expect("mutex poisoned") = None;
+    }
+
+    /// A `CFRunLoop` handle obtained on the test thread is a valid stand-in for
+    /// the tap thread's run loop for the purposes of guard/teardown logic.
+    fn fake_handle() -> TapHandle {
+        TapHandle {
+            run_loop: CFRunLoop::get_current(),
+        }
+    }
+
+    #[test]
+    fn guard_reports_not_live_when_no_tap_registered() {
+        let _g = TEST_LOCK.lock().expect("test lock");
+        reset_state();
+        assert!(!tap_already_live());
+    }
+
+    #[test]
+    fn guard_reports_live_after_handle_registered() {
+        let _g = TEST_LOCK.lock().expect("test lock");
+        reset_state();
+        *tap_handle().lock().expect("mutex poisoned") = Some(fake_handle());
+        assert!(
+            tap_already_live(),
+            "install must treat an existing tap as live and not spawn a second"
+        );
+        reset_state();
+    }
+
+    #[test]
+    fn uninstall_clears_handle_and_callback() {
+        let _g = TEST_LOCK.lock().expect("test lock");
+        reset_state();
+        // Simulate a fully-installed tap: a live handle plus a boxed callback.
+        *tap_handle().lock().expect("mutex poisoned") = Some(fake_handle());
+        *global_callback().lock().expect("mutex poisoned") = Some(Box::new(|| {}) as Callback);
+
+        uninstall();
+
+        assert!(
+            tap_handle().lock().expect("mutex poisoned").is_none(),
+            "uninstall must take the handle so a re-install is not blocked"
+        );
+        assert!(
+            global_callback().lock().expect("mutex poisoned").is_none(),
+            "uninstall must reclaim the boxed callback so it does not outlive the tap"
+        );
+        // After teardown the guard must report not-live again (clean replace).
+        assert!(!tap_already_live());
+    }
+
+    #[test]
+    fn uninstall_is_noop_when_not_installed() {
+        let _g = TEST_LOCK.lock().expect("test lock");
+        reset_state();
+        // Must not panic and must leave state empty.
+        uninstall();
+        assert!(!tap_already_live());
+        assert!(global_callback().lock().expect("mutex poisoned").is_none());
+    }
 }
