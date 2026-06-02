@@ -609,7 +609,11 @@ class ClipboardRepository(context: Context) {
 
             val blobSizes: Map<String, Int> = ids.associate { id ->
                 val textBytes = prefs.getString("item_$id", null)?.toByteArray(Charsets.UTF_8)?.size ?: 0
-                val imgBytes = prefs.getString("item_img_$id", null)?.length ?: 0
+                // Measure the SAME unit storeImageBytes caps on: raw decoded bytes,
+                // not the ~1.33x-inflated Base64 string length. Deriving the raw
+                // size from the Base64 length (NO_WRAP, so it is a multiple of 4
+                // with '=' padding) avoids a full decode allocation per row.
+                val imgBytes = prefs.getString("item_img_$id", null)?.let { base64RawByteSize(it) } ?: 0
                 id to (textBytes + imgBytes)
             }
 
@@ -644,6 +648,26 @@ class ClipboardRepository(context: Context) {
         if (evictedCount > 0) {
             ClipboardService.onItemsDeleted(appContext, evictedCount)
         }
+    }
+
+    /**
+     * Raw decoded byte count of a Base64 (NO_WRAP) string, computed without
+     * allocating the decoded buffer. NO_WRAP emits no line breaks, so the input
+     * length is a multiple of 4 and any padding is 0–2 trailing '=' chars:
+     *   rawBytes = (len / 4) * 3 - paddingCount
+     * Used by [pruneToLimits] so image rows are accounted in the same unit
+     * ([storeImageBytes] caps on raw `bytes.size`), preventing the byte quota
+     * from being over-counted by the ~1.33x Base64 inflation.
+     */
+    private fun base64RawByteSize(b64: String): Int {
+        val len = b64.length
+        if (len == 0) return 0
+        val padding = when {
+            b64.endsWith("==") -> 2
+            b64.endsWith("=") -> 1
+            else -> 0
+        }
+        return (len / 4) * 3 - padding
     }
 
     private fun storedIds(): List<String> =

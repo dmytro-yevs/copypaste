@@ -451,6 +451,7 @@ pub fn get_page_pinned_first(
          FROM clipboard_items
          ORDER BY
            CASE WHEN pinned = 1 THEN 0 ELSE 1 END ASC,
+           pin_order IS NULL ASC,
            pin_order ASC,
            wall_time DESC
          LIMIT ?1 OFFSET ?2",
@@ -945,10 +946,19 @@ pub fn delete_fts(db: &Database, id: &str) -> Result<(), ItemsError> {
 /// This is a whitelist approach: only known-safe characters pass through, preventing
 /// FTS5 operator injection (e.g. `NOT`, `OR`, `NEAR`, column filters).
 fn sanitize_fts5_query(raw: &str) -> Option<String> {
-    // Keep only alphanum, underscore, hyphen, quote, asterisk, and whitespace.
+    // Keep only alphanum, underscore, quote, asterisk, and whitespace.
+    //
+    // `-` (hyphen/minus) is an FTS5 operator: in a MATCH expression `foo -bar`
+    // means "foo AND NOT column bar", so a hyphen-joined token like `foo-bar*`
+    // makes FTS5 parse `-bar` as a column filter and error with
+    // "no such column: bar". We therefore REWRITE `-` to whitespace (rather than
+    // keeping or stripping it) so `foo-bar` splits into two AND-ed terms
+    // (`foo* AND bar*`) before any per-token `*` prefix logic runs, and no raw
+    // `-` ever reaches the MATCH operator.
     let cleaned: String = raw
         .chars()
-        .filter(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '"' | '*' | ' ' | '\t'))
+        .map(|c| if c == '-' { ' ' } else { c })
+        .filter(|c| c.is_alphanumeric() || matches!(c, '_' | '"' | '*' | ' ' | '\t'))
         .collect();
 
     let trimmed = cleaned.trim();
@@ -1340,6 +1350,57 @@ mod tests {
 
         let results = search_items(&db, "common", 3).unwrap();
         assert_eq!(results.len(), 3);
+    }
+
+    /// Regression (P0): a hyphen-joined query like `foo-bar` must not reach the
+    /// FTS5 MATCH operator with a raw `-`, otherwise FTS5 parses `-bar` as a
+    /// column filter and errors with "no such column: bar". The sanitizer
+    /// rewrites `-` to whitespace so these queries succeed (return Ok).
+    #[test]
+    fn search_items_hyphen_query_does_not_error() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        upsert_fts(&db, &item.id, "harmless content").unwrap();
+
+        // Each of these previously triggered "no such column: ..." on real DBs.
+        for q in [
+            "foo-bar",
+            "2026-06-02",
+            "x86-64",
+            "well-known",
+            "co-op coffee",
+        ] {
+            let res = search_items(&db, q, 10);
+            assert!(
+                res.is_ok(),
+                "hyphen query {q:?} must not error, got: {:?}",
+                res.err()
+            );
+        }
+    }
+
+    /// A stored item containing a hyphenated word must be found when the user
+    /// searches for that same hyphenated term: `well-known` → `well AND known*`.
+    #[test]
+    fn search_items_finds_hyphenated_term() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        upsert_fts(&db, &item.id, "this is a well-known endpoint").unwrap();
+
+        let results = search_items(&db, "well-known", 10).unwrap();
+        assert_eq!(results.len(), 1, "hyphenated term must match stored item");
+        assert_eq!(results[0].id, item.id);
+    }
+
+    /// Direct unit check of the sanitizer: hyphens become whitespace-separated
+    /// AND-ed terms and no raw `-` survives.
+    #[test]
+    fn sanitize_fts5_query_rewrites_hyphen_to_space() {
+        let out = sanitize_fts5_query("foo-bar").expect("non-empty");
+        assert!(!out.contains('-'), "no raw hyphen may remain: {out:?}");
+        assert_eq!(out, "foo AND bar*");
     }
 
     #[test]
@@ -1813,6 +1874,53 @@ mod tests {
         );
         // Then unpinned.
         assert!(!page[2].pinned, "third item must not be pinned");
+    }
+
+    /// Defensive (HIGH): a sync-replaced pinned row whose `pin_order` became
+    /// NULL must sort AFTER pinned rows with explicit `pin_order` values, not
+    /// before them. SQLite sorts NULL first under plain `ASC`, so the ORDER BY
+    /// adds `pin_order IS NULL ASC` to push NULLs to the end of the pinned group.
+    #[test]
+    fn get_page_pinned_first_null_pin_order_sorts_last_among_pins() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Two normally-pinned items with explicit pin_order 1.0 and 2.0.
+        let mut p1 = make_item(1);
+        p1.wall_time = 100;
+        let p1_id = p1.id.clone();
+        insert_item(&db, &p1).unwrap();
+        pin_item(&db, &p1_id).unwrap();
+
+        let mut p2 = make_item(2);
+        p2.wall_time = 200;
+        let p2_id = p2.id.clone();
+        insert_item(&db, &p2).unwrap();
+        pin_item(&db, &p2_id).unwrap();
+
+        // A pinned item whose pin_order is NULL (simulating a sync replace that
+        // dropped pin_order). Insert directly with pinned=1, pin_order=None.
+        let mut null_pin = make_item(3);
+        null_pin.wall_time = 9_999; // newest, to prove ordering is by pin_order not wall_time
+        null_pin.pinned = true;
+        null_pin.pin_order = None;
+        let null_pin_id = null_pin.id.clone();
+        insert_item(&db, &null_pin).unwrap();
+
+        let page = get_page_pinned_first(&db, 10, 0).unwrap();
+        assert_eq!(page.len(), 3);
+        assert!(
+            page[0].pinned && page[1].pinned && page[2].pinned,
+            "all three items are pinned"
+        );
+        // Explicit pin_order rows come first, in pin_order order.
+        assert_eq!(page[0].id, p1_id, "pin_order=1.0 first");
+        assert_eq!(page[1].id, p2_id, "pin_order=2.0 second");
+        // The NULL pin_order row sorts LAST despite the newest wall_time.
+        assert_eq!(
+            page[2].id, null_pin_id,
+            "NULL pin_order must sort after explicit pin_order values"
+        );
+        assert!(page[2].pin_order.is_none());
     }
 
     /// Unpinning an item moves it back into the unpinned group.

@@ -316,13 +316,20 @@ export function DevicesView() {
   }, []);
 
   // Auto-generate QR on mount, auto-refresh before expiry.
+  //
+  // Visibility-gated (mirrors Popup.tsx): the 1 s tick — and therefore the
+  // ~every-105 s single-use-token regeneration — only runs while the window is
+  // in the foreground. A backgrounded/hidden window would otherwise keep burning
+  // fresh single-use pairing tokens that nobody is looking at. When the window
+  // becomes visible again the tick resumes; if the on-screen token already
+  // expired while hidden, the first tick (remaining <= margin) regenerates it.
   useEffect(() => {
     qrCancelledRef.current = false;
     void generateQr();
 
-    // Tick every second: update the countdown and trigger a refresh
-    // QR_REFRESH_MARGIN_SECS before the token expires.
-    const interval = setInterval(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const tick = () => {
       const current = qrStateRef.current;
       if (current.status !== "ready") return;
 
@@ -336,12 +343,34 @@ export function DevicesView() {
       if (remaining <= QR_REFRESH_MARGIN_SECS) {
         void generateQr();
       }
-    }, 1000);
+    };
+
+    const start = () => {
+      if (interval !== null) return;
+      // Tick every second: update the countdown and trigger a refresh
+      // QR_REFRESH_MARGIN_SECS before the token expires.
+      interval = setInterval(tick, 1000);
+    };
+    const stop = () => {
+      if (interval !== null) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const sync = () => {
+      if (document.visibilityState === "visible") start();
+      else stop();
+    };
+
+    sync();
+    document.addEventListener("visibilitychange", sync);
 
     return () => {
       // Signal any in-flight pairingQrSvg() call not to setState after unmount.
       qrCancelledRef.current = true;
-      clearInterval(interval);
+      stop();
+      document.removeEventListener("visibilitychange", sync);
     };
   // generateQr is stable (useCallback with no deps), so this only runs once.
   }, [generateQr]);

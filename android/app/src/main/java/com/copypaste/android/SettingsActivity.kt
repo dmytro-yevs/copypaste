@@ -263,30 +263,39 @@ fun SettingsScreen(
     // AND4: Write ALL buffered settings to SharedPreferences in one go.
     val onSave: () -> Unit = {
         try {
-            settings.captureEnabled = captureEnabled
-            settings.syncEnabled = syncEnabled
-            settings.showSensitiveWarnings = showWarnings
-            settings.maskSensitiveContent = maskSensitive
-            settings.translucency = translucency
-            settings.imageMaxHeight = imageMaxHeight
-            settings.previewDelay = previewDelay.toLong()
-            settings.imageQuality = imageQuality
-            settings.maxTextSizeBytes = maxTextSizeBytes
-            settings.maxImageSizeBytes = maxImageSizeBytes
-            settings.storageQuotaBytes = storageQuotaBytes
-            settings.syncOnWifiOnly = syncOnWifiOnly
-            settings.syncBackend = syncBackend
-            settings.p2pSyncEnabled = p2pSyncEnabled
-            // Supabase / relay fields — trim text fields on save
-            settings.supabaseUrl = supabaseUrl.trim()
-            settings.supabaseAnonKey = supabaseAnonKey.trim()
+            // ROOT-CAUSE FIX (settings revert on force-stop): persist every scalar
+            // setting in ONE synchronous commit() instead of many async apply()
+            // calls. apply() flushes to disk on a background thread; a force-stop
+            // (SIGKILL) right after Save killed the process before that flush ran,
+            // so the relaunch read the old on-disk value (and defaulted-true
+            // getters reported ON again). commit() blocks until the write hits
+            // disk, so the toggle now survives an immediate kill.
+            settings.saveScreenSettings(
+                captureEnabled = captureEnabled,
+                syncEnabled = syncEnabled,
+                showSensitiveWarnings = showWarnings,
+                maskSensitiveContent = maskSensitive,
+                translucency = translucency,
+                imageMaxHeight = imageMaxHeight,
+                previewDelayMs = previewDelay.toLong(),
+                imageQuality = imageQuality,
+                maxTextSizeBytes = maxTextSizeBytes,
+                maxImageSizeBytes = maxImageSizeBytes,
+                storageQuotaBytes = storageQuotaBytes,
+                syncOnWifiOnly = syncOnWifiOnly,
+                syncBackend = syncBackend,
+                p2pSyncEnabled = p2pSyncEnabled,
+                supabaseUrl = supabaseUrl.trim(),
+                supabaseAnonKey = supabaseAnonKey.trim(),
+                supabaseEmail = supabaseEmail.trim(),
+                relayUrl = relayUrl.trim(),
+                notifyOnCopy = notifyOnCopy,
+                soundOnCopy = soundOnCopy,
+                logcatCaptureEnabled = logcatEnabled,
+            )
+            // KEK-wrapped secrets keep their dedicated keystore write path.
             settings.cloudSyncPassphrase = cloudPassphrase
-            settings.supabaseEmail = supabaseEmail.trim()
             settings.supabasePassword = supabasePassword
-            settings.relayUrl = relayUrl.trim()
-            settings.notifyOnCopy = notifyOnCopy
-            settings.soundOnCopy = soundOnCopy
-            settings.logcatCaptureEnabled = logcatEnabled
             // Side-effects that must happen immediately after persisting.
             // logcatStatus is re-read on next recomposition automatically — no assignment needed.
             SupabasePollWorker.schedule(ctx, enabled = syncBackend == SyncBackend.SUPABASE)

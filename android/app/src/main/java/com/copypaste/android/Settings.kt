@@ -570,6 +570,78 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("logcat_capture_working", false)
         set(v) = prefs.edit().putBoolean("logcat_capture_working", v).apply()
 
+    /**
+     * Atomically persist all scalar Settings-screen values in ONE editor using
+     * a synchronous [SharedPreferences.Editor.commit].
+     *
+     * ROOT-CAUSE FIX (HW settings-don't-persist): the individual property
+     * setters each call `apply()`, which only writes to the in-memory map
+     * synchronously and flushes to disk on a background thread. A force-stop
+     * (SIGKILL) issued shortly after Save kills the process before that
+     * background flush runs, so the relaunch reads the on-disk file that still
+     * holds the OLD value — and a defaulted-to-`true` getter (e.g. [syncEnabled])
+     * then reports ON again. SQLite-backed history/pins survive because they
+     * fsync synchronously; SharedPreferences `apply()` does not.
+     *
+     * `commit()` blocks until the write reaches disk, so the value survives an
+     * immediate kill. Save is a rare, user-initiated action (not a hot path),
+     * so the synchronous write is acceptable.
+     *
+     * KEK-wrapped secrets (passphrase, Supabase password) are intentionally NOT
+     * batched here — they go through [writeWrappedSecret] separately because
+     * their keystore wrap produces blob+IV pairs that this scalar batch cannot
+     * express. They are also `apply()`-based, but losing a just-typed secret on
+     * an immediate force-stop is far less surprising than a flipped toggle, and
+     * folding them in would require restructuring the keystore path.
+     */
+    fun saveScreenSettings(
+        captureEnabled: Boolean,
+        syncEnabled: Boolean,
+        showSensitiveWarnings: Boolean,
+        maskSensitiveContent: Boolean,
+        translucency: Boolean,
+        imageMaxHeight: Int,
+        previewDelayMs: Long,
+        imageQuality: Int,
+        maxTextSizeBytes: Long,
+        maxImageSizeBytes: Long,
+        storageQuotaBytes: Long,
+        syncOnWifiOnly: Boolean,
+        syncBackend: SyncBackend,
+        p2pSyncEnabled: Boolean,
+        supabaseUrl: String,
+        supabaseAnonKey: String,
+        supabaseEmail: String,
+        relayUrl: String,
+        notifyOnCopy: Boolean,
+        soundOnCopy: Boolean,
+        logcatCaptureEnabled: Boolean,
+    ) {
+        prefs.edit()
+            .putBoolean("capture_enabled", captureEnabled)
+            .putBoolean("sync_enabled", syncEnabled)
+            .putBoolean("show_sensitive_warnings", showSensitiveWarnings)
+            .putBoolean("mask_sensitive_content", maskSensitiveContent)
+            .putBoolean("translucency", translucency)
+            .putInt("image_max_height", imageMaxHeight.coerceIn(1, 200))
+            .putLong("preview_delay_ms", previewDelayMs.coerceIn(200L, 100_000L))
+            .putInt("image_quality", imageQuality.coerceIn(1, 100))
+            .putLong("max_text_size_bytes", maxTextSizeBytes)
+            .putLong("max_image_size_bytes", maxImageSizeBytes)
+            .putLong("storage_quota_bytes", storageQuotaBytes)
+            .putBoolean("sync_on_wifi_only", syncOnWifiOnly)
+            .putString("sync_backend", syncBackend.name)
+            .putBoolean(KEY_P2P_SYNC_ENABLED, p2pSyncEnabled)
+            .putString("supabase_url", supabaseUrl.trimEnd('/'))
+            .putString("supabase_anon_key", supabaseAnonKey)
+            .putString("supabase_email", supabaseEmail.trim())
+            .putString("relay_url", relayUrl)
+            .putBoolean("notify_on_copy", notifyOnCopy)
+            .putBoolean("sound_on_copy", soundOnCopy)
+            .putBoolean("logcat_capture_enabled", logcatCaptureEnabled)
+            .commit() // synchronous: survives an immediate force-stop (SIGKILL)
+    }
+
     fun clear() {
         // H4: drop the cached master key so a re-created key after clear() is
         // not shadowed by a stale RAM copy.

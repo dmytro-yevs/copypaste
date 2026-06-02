@@ -104,10 +104,13 @@ export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
   // re-mounts (same pattern as AppIcon).
   const [src, setSrc] = useState<string | null | typeof FETCH_FAILED>(() => {
     const cached = cacheGet(id);
-    // Cache miss → null (loading; row height already reserved by the
-    // virtualizer), NOT FETCH_FAILED — that would flash the broken-image
-    // placeholder for one frame before the real fetch resolves.
-    return cached !== undefined ? cached : null;
+    // Uncached (undefined) → null (loading; row height already reserved by the
+    // virtualizer). A recorded miss (null) means a genuine fetch failure, so map
+    // it to FETCH_FAILED and render the placeholder instead of staying blank —
+    // otherwise a previously-failed row re-mounting (virtualized scroll) shows a
+    // permanent blank because null is also the "still loading" state.
+    if (cached === undefined) return null;
+    return cached === null ? FETCH_FAILED : cached;
   });
 
   const mountedRef = useRef(true);
@@ -117,10 +120,12 @@ export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
   }, []);
 
   useEffect(() => {
-    // If already resolved (hit or recorded miss), skip the fetch.
+    // If already resolved, skip the fetch. A recorded miss (null) maps to the
+    // FETCH_FAILED placeholder; only a truly uncached id (undefined) below falls
+    // through to the loading state and a fresh fetch.
     const cached = cacheGet(id);
     if (cached !== undefined) {
-      setSrc(cached);
+      setSrc(cached === null ? FETCH_FAILED : cached);
       return;
     }
 
