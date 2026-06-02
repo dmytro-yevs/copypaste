@@ -214,6 +214,46 @@ pub fn channel_confirmation_tag(bound_key: &[u8; 32], role: ConfirmRole) -> [u8;
     tag
 }
 
+/// Number of decimal digits in a Short Authentication String (SAS).
+///
+/// 6 digits ≈ 20 bits of entropy. Combined with single-shot ephemeral keys and
+/// abort-on-mismatch this caps an online MitM forgery at ~1-in-10^6 per attempt
+/// (Bluetooth numeric-comparison / Magic-Wormhole verifier pattern).
+pub const SAS_DIGITS: usize = 6;
+
+/// Derive a human-comparable 6-digit Short Authentication String (SAS) from a
+/// TLS-channel-bound session key.
+///
+/// # Protocol (LAN/SAS pairing)
+///
+/// On the discovery pairing path there is NO pre-shared secret: bootstrap runs
+/// with an ephemeral password the initiator sends in-clear inside the bootstrap
+/// TLS channel, and authentication is provided ENTIRELY by the human comparing
+/// the SAS on both screens. The SAS MUST derive from `bound_key` (post-PAKE,
+/// post-channel-binding) so a relay/MitM substituting its own password per leg
+/// derives a different `bound_key` per leg → a different SAS per leg → the user
+/// sees a mismatch and aborts.
+///
+/// The info string is domain-separated from
+/// [`channel_confirmation_tag`]'s strings so the displayed SAS is not a
+/// truncation of either confirmation tag.
+///
+/// # Digit math
+///
+/// HKDF-SHA256 (no salt, IKM = `bound_key`, info = `b"copypaste/p2p/sas/v1"`)
+/// expands to 4 bytes; those are interpreted big-endian as a `u32`, reduced
+/// `% 1_000_000`, and zero-padded to [`SAS_DIGITS`] decimal digits. The
+/// reduction introduces a negligible modulo bias (2^32 mod 10^6) that does not
+/// meaningfully weaken the ~20-bit single-shot guarantee.
+pub fn derive_sas(bound_key: &[u8; 32]) -> String {
+    let hk = Hkdf::<Sha256>::new(None, bound_key);
+    let mut out = [0u8; 4];
+    hk.expand(b"copypaste/p2p/sas/v1", &mut out)
+        .expect("4 bytes is well within HKDF-SHA256 output limit");
+    let n = u32::from_be_bytes(out) % 1_000_000;
+    format!("{n:06}")
+}
+
 /// Server-side password material derived during initial registration.
 ///
 /// Persisted in SQLCipher (`paired_peers.pake_password_file BLOB`). First
@@ -613,6 +653,78 @@ mod tests {
         let (client_key, msg3) = client.finish(&msg2).expect("client finish");
         let server_key = server.finish(&msg3).expect("server finish");
         assert_eq!(client_key.as_bytes(), server_key.as_bytes());
+    }
+
+    /// SAS derivation must be deterministic and yield a 6-digit decimal string.
+    #[test]
+    fn derive_sas_is_deterministic_and_six_digits() {
+        let key = [0x37u8; 32];
+        let sas1 = derive_sas(&key);
+        let sas2 = derive_sas(&key);
+        assert_eq!(sas1, sas2, "same key must yield the same SAS");
+        assert_eq!(sas1.len(), SAS_DIGITS, "SAS must be SAS_DIGITS chars");
+        assert!(
+            sas1.bytes().all(|b| b.is_ascii_digit()),
+            "SAS must be all decimal digits, got {sas1}"
+        );
+    }
+
+    /// Different bound keys (e.g. distinct relay legs) must yield different SAS
+    /// strings — that divergence is exactly what the human compare detects.
+    #[test]
+    fn derive_sas_differs_for_different_keys() {
+        let sas_a = derive_sas(&[0x01u8; 32]);
+        let sas_b = derive_sas(&[0x02u8; 32]);
+        assert_ne!(
+            sas_a, sas_b,
+            "different bound keys must yield different SAS values"
+        );
+    }
+
+    /// Both ends of a real PAKE + channel-binding handshake derive the SAME SAS
+    /// when they share the same TLS binder. Mirrors
+    /// `channel_binding_is_symmetric_after_pake`.
+    #[test]
+    fn derive_sas_is_symmetric_after_pake() {
+        let password = "sas-symmetry-test-password";
+        let pf = PasswordFile::register(password).expect("register");
+
+        let (client, msg1) = PakeInitiator::new(password).expect("client new");
+        let (server, msg2) = PakeResponder::respond(&pf, &msg1).expect("server respond");
+        let (client_key, msg3) = client.finish(&msg2).expect("client finish");
+        let server_key = server.finish(&msg3).expect("server finish");
+
+        let shared_binder = [0xFEu8; 32];
+        let client_bound = client_key.bind_to_tls_channel(&shared_binder);
+        let server_bound = server_key.bind_to_tls_channel(&shared_binder);
+
+        assert_eq!(
+            derive_sas(&client_bound),
+            derive_sas(&server_bound),
+            "both sides must derive the same SAS from the same bound key"
+        );
+    }
+
+    /// Domain separation: the SAS info string differs from the confirmation-tag
+    /// info strings, so the SAS is not a truncation of either tag.
+    #[test]
+    fn derive_sas_is_domain_separated_from_confirm_tags() {
+        let key = [0x5Au8; 32];
+        let sas = derive_sas(&key);
+        let init_tag = channel_confirmation_tag(&key, ConfirmRole::Initiator);
+        let resp_tag = channel_confirmation_tag(&key, ConfirmRole::Responder);
+        // Reproduce the SAS digit math from the tags' first 4 bytes to prove the
+        // SAS is NOT derived from the same HKDF stream as either tag.
+        let from_init = format!(
+            "{:06}",
+            u32::from_be_bytes([init_tag[0], init_tag[1], init_tag[2], init_tag[3]]) % 1_000_000
+        );
+        let from_resp = format!(
+            "{:06}",
+            u32::from_be_bytes([resp_tag[0], resp_tag[1], resp_tag[2], resp_tag[3]]) % 1_000_000
+        );
+        assert_ne!(sas, from_init);
+        assert_ne!(sas, from_resp);
     }
 
     /// Sanity: PakeError display strings.

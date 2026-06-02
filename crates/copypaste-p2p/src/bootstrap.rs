@@ -103,8 +103,8 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 
 use crate::cert::fingerprint_of;
 use crate::pake::{
-    channel_confirmation_tag, ConfirmRole, PakeInitiator, PakeResponder, PasswordFile, SessionKey,
-    CONFIRM_TAG_LEN,
+    channel_confirmation_tag, derive_sas, ConfirmRole, PakeInitiator, PakeResponder, PasswordFile,
+    SessionKey, CONFIRM_TAG_LEN,
 };
 use crate::transport::{
     tls_channel_binder_client, tls_channel_binder_server, DeviceFingerprint, TransportError,
@@ -146,6 +146,18 @@ const MAX_FRAME_BYTES: usize = 64 * 1024;
 /// that does not send a version frame at all is treated as a pre-extension
 /// (legacy) peer and the metadata step is skipped.
 pub const BOOTSTRAP_PROTO_VERSION: u8 = 1;
+
+/// SAS-confirm wire bytes (frame 10a, LAN/SAS pairing path only).
+///
+/// After frame 9 (channel-binding tag verified) the confirm-gated variants
+/// exchange exactly one byte each: `SAS_ACCEPT` (0x01) when the local user
+/// confirmed the SAS matched, or `SAS_REJECT` (0x00) otherwise. Pairing
+/// proceeds to the metadata exchange / `Ok` ONLY when BOTH bytes are
+/// `SAS_ACCEPT`. This frame exists solely on the new `*_with_confirm` paths;
+/// the legacy `run`/`run_initiator` transcript is byte-unchanged.
+const SAS_ACCEPT: u8 = 0x01;
+/// See [`SAS_ACCEPT`].
+const SAS_REJECT: u8 = 0x00;
 
 /// Upper bound on the peer metadata JSON frame. The four short strings (model,
 /// OS, app version, IP) total well under 256 bytes; 1 KiB is a wide ceiling that
@@ -301,6 +313,12 @@ pub struct BootstrapPairing {
     pub peer_sync_addr: String,
     /// The 32-byte PAKE session key (identical on both sides on success).
     pub session_key: SessionKey,
+    /// The 6-digit Short Authentication String derived from the channel-bound
+    /// key ([`crate::pake::derive_sas`]). Identical on both honest endpoints;
+    /// different per relay leg under a MitM. Surfaced for the human compare on
+    /// the discovery pairing path; the QR path may display it as a confidence
+    /// check (the token already authenticates there).
+    pub sas: String,
     /// Peer's friendly hardware model, learned over the post-handshake metadata
     /// extension. `None` when the peer is a legacy (pre-extension) build or did
     /// not advertise the field.
@@ -499,6 +517,11 @@ impl BootstrapResponder {
                 ));
             }
 
+            // SAS for the human compare (LAN/SAS path). Additive: computing it
+            // here does NOT change the wire transcript — the legacy path simply
+            // surfaces it in the returned struct without exchanging frame 10a.
+            let sas = derive_sas(&bound_key);
+
             // P2P Phase 4 (optional, post-handshake): exchange device metadata.
             // The pairing is already complete and authenticated at this point;
             // any failure here is swallowed (legacy peer closed, etc.).
@@ -508,6 +531,7 @@ impl BootstrapResponder {
                 peer_fingerprint: tls_peer_fp,
                 peer_sync_addr,
                 session_key,
+                sas,
                 peer_model: peer_meta.model,
                 peer_os: peer_meta.os_version,
                 peer_app_version: peer_meta.app_version,
@@ -524,6 +548,163 @@ impl BootstrapResponder {
         })??;
 
         Ok(pairing)
+    }
+
+    /// Confirm-gated variant of [`BootstrapResponder::run`] for the LAN/SAS
+    /// discovery pairing path.
+    ///
+    /// Runs the IDENTICAL handshake transcript through frame 9 (PAKE +
+    /// channel-binding tag verify), then derives the 6-digit SAS and invokes
+    /// `confirm(sas)`. If the user rejects (returns `false`) the pairing aborts
+    /// with an error (keys drop/zeroize). Otherwise both sides exchange a NEW
+    /// frame 10a ([`SAS_ACCEPT`]/[`SAS_REJECT`]) and proceed to the metadata
+    /// exchange / `Ok` ONLY if BOTH bytes are [`SAS_ACCEPT`].
+    ///
+    /// This is a separate method so the QR `run` transcript stays byte-compatible
+    /// (frame 10a is never sent there).
+    pub async fn run_with_confirm<F, Fut>(
+        self,
+        password: &str,
+        sync_addr: &str,
+        own_meta: &PeerMeta,
+        confirm: F,
+    ) -> Result<BootstrapPairing, TransportError>
+    where
+        F: FnOnce(&str) -> Fut,
+        Fut: std::future::Future<Output = bool>,
+    {
+        let (tcp_stream, peer_addr) =
+            match tokio::time::timeout(BOOTSTRAP_ACCEPT_TIMEOUT, self.listener.accept()).await {
+                Ok(res) => res?,
+                Err(_elapsed) => {
+                    tracing::warn!(
+                        timeout = ?BOOTSTRAP_ACCEPT_TIMEOUT,
+                        "bootstrap: SAS responder timed out waiting for inbound pairing connection"
+                    );
+                    return Err(TransportError::HandshakeTimeout);
+                }
+            };
+        tracing::debug!(peer_addr = %peer_addr, "bootstrap(sas): inbound TCP connection");
+
+        let tls_stream =
+            match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, self.acceptor.accept(tcp_stream))
+                .await
+            {
+                Ok(res) => res?,
+                Err(_elapsed) => {
+                    tracing::warn!("bootstrap(sas): TLS server handshake timed out");
+                    return Err(TransportError::HandshakeTimeout);
+                }
+            };
+
+        let tls_peer_fp = {
+            let (_, conn) = tls_stream.get_ref();
+            let certs = conn.peer_certificates().ok_or(TransportError::NoPeerCert)?;
+            let first = certs.first().ok_or(TransportError::NoPeerCert)?;
+            fingerprint_of(first.as_ref())
+        };
+
+        let tls_binder = tls_channel_binder_server(&tls_stream)?;
+        let mut framed = Framed::new(tls_stream, length_codec());
+        debug_assert!(!self.own_cert_der.is_empty());
+
+        let own_fingerprint = self.own_fingerprint.clone();
+
+        // The 9-frame PAKE exchange is bounded by PAKE_EXCHANGE_TIMEOUT. It
+        // borrows `framed` (so it can be reused for frame 10a) and returns the
+        // SAS plus everything needed to finish. The user-confirm step runs
+        // OUTSIDE this deadline: a human may take longer than 30 s, and a slow
+        // confirm must not be mistaken for a stalled peer.
+        let prepared = tokio::time::timeout(PAKE_EXCHANGE_TIMEOUT, async {
+            let password_file = PasswordFile::register(password)
+                .map_err(|e| io_other(format!("PasswordFile::register: {e}")))?;
+
+            // Frame 1 ← initiator's PAKE message1.
+            let msg1 = recv_frame(&mut framed).await?;
+            // Frame 2 ← initiator's cert fingerprint.
+            let frame_peer_fp = recv_fingerprint(&mut framed).await?;
+            // Frame 3 ← initiator's P2P sync-listener address.
+            let peer_sync_addr = recv_sync_addr(&mut framed).await?;
+
+            if frame_peer_fp.to_lowercase() != tls_peer_fp {
+                return Err(io_other(format!(
+                    "bootstrap: initiator frame fingerprint {frame_peer_fp} != TLS cert {tls_peer_fp}"
+                )));
+            }
+
+            let (responder, msg2) = PakeResponder::respond(&password_file, &msg1)
+                .map_err(|e| io_other(format!("PAKE respond: {e}")))?;
+
+            // Frame 4 → our PAKE message2.
+            send_frame(&mut framed, &msg2).await?;
+            // Frame 5 → our cert fingerprint.
+            send_frame(&mut framed, own_fingerprint.as_bytes()).await?;
+            // Frame 6 → our P2P sync-listener address.
+            send_frame(&mut framed, sync_addr.as_bytes()).await?;
+
+            // Frame 7 ← initiator's PAKE finalisation.
+            let msg3 = recv_frame(&mut framed).await?;
+            let session_key = responder
+                .finish(&msg3)
+                .map_err(|e| io_other(format!("PAKE finish: {e}")))?;
+
+            let bound_key = session_key.bind_to_tls_channel(&tls_binder);
+            let own_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Responder);
+            let expected_peer_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
+
+            // Frame 8 → our confirmation tag.
+            send_frame(&mut framed, &own_tag).await?;
+            // Frame 9 ← initiator's confirmation tag.
+            let peer_tag = recv_confirmation_tag(&mut framed).await?;
+            if peer_tag.ct_eq(&expected_peer_tag).unwrap_u8() != 1 {
+                return Err(io_other(
+                    "bootstrap: channel-binding confirmation mismatch — possible relay MitM, pairing aborted".into(),
+                ));
+            }
+
+            let sas = derive_sas(&bound_key);
+            Ok::<_, TransportError>((sas, tls_peer_fp, peer_sync_addr, session_key))
+        })
+        .await
+        .map_err(|_elapsed| {
+            tracing::warn!(
+                timeout = ?PAKE_EXCHANGE_TIMEOUT,
+                "bootstrap(sas): PAKE exchange timed out — evicting stalled peer"
+            );
+            io_other("bootstrap: PAKE exchange timed out".into())
+        })??;
+
+        let (sas, peer_fingerprint, peer_sync_addr, session_key) = prepared;
+
+        // Human SAS confirmation (outside the PAKE deadline). On reject, return
+        // an error so `session_key` drops/zeroizes and the caller persists nothing.
+        let accepted_locally = confirm(&sas).await;
+
+        // Frame 10a: exchange ACCEPT/REJECT bytes. Proceed only if BOTH accept.
+        let our_byte = if accepted_locally {
+            SAS_ACCEPT
+        } else {
+            SAS_REJECT
+        };
+        send_frame(&mut framed, &[our_byte]).await?;
+        let peer_byte = recv_confirm_byte(&mut framed).await?;
+        if our_byte != SAS_ACCEPT || peer_byte != SAS_ACCEPT {
+            return Err(io_other("SAS rejected by user — pairing aborted".into()));
+        }
+
+        // Both confirmed: optional post-handshake metadata exchange.
+        let peer_meta = exchange_peer_meta(&mut framed, own_meta).await;
+
+        Ok(BootstrapPairing {
+            peer_fingerprint,
+            peer_sync_addr,
+            session_key,
+            sas,
+            peer_model: peer_meta.model,
+            peer_os: peer_meta.os_version,
+            peer_app_version: peer_meta.app_version,
+            peer_local_ip: peer_meta.local_ip,
+        })
     }
 }
 
@@ -662,6 +843,10 @@ pub async fn run_initiator(
             ));
         }
 
+        // SAS for the human compare (LAN/SAS path). Additive — does not change
+        // the wire transcript; the legacy path just surfaces it.
+        let sas = derive_sas(&bound_key);
+
         // P2P Phase 4 (optional, post-handshake): exchange device metadata.
         // Pairing is already complete and authenticated; failures are swallowed.
         let peer_meta = exchange_peer_meta(&mut framed, &own_meta).await;
@@ -670,6 +855,7 @@ pub async fn run_initiator(
             peer_fingerprint: tls_peer_fp,
             peer_sync_addr,
             session_key,
+            sas,
             peer_model: peer_meta.model,
             peer_os: peer_meta.os_version,
             peer_app_version: peer_meta.app_version,
@@ -686,6 +872,178 @@ pub async fn run_initiator(
     })??;
 
     Ok(pairing)
+}
+
+/// Confirm-gated variant of [`run_initiator`] for the LAN/SAS discovery pairing
+/// path.
+///
+/// Runs the IDENTICAL handshake transcript through frame 9 (PAKE +
+/// channel-binding tag verify), then derives the 6-digit SAS and invokes
+/// `confirm(sas)`. On reject (`false`) the pairing aborts with an error so the
+/// session key drops/zeroizes. Otherwise both sides exchange frame 10a
+/// ([`SAS_ACCEPT`]/[`SAS_REJECT`]) and the pairing succeeds ONLY if BOTH bytes
+/// are [`SAS_ACCEPT`].
+///
+/// Separate from [`run_initiator`] so the QR transcript stays byte-compatible.
+#[allow(clippy::too_many_arguments)] // mirrors `run_initiator` + one confirm cb
+pub async fn run_initiator_with_confirm<F, Fut>(
+    addr: SocketAddr,
+    cert_der: Vec<u8>,
+    key_der: Vec<u8>,
+    password: &str,
+    sync_addr: &str,
+    own_meta: &PeerMeta,
+    confirm: F,
+) -> Result<BootstrapPairing, TransportError>
+where
+    F: FnOnce(&str) -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    let own_fingerprint = fingerprint_of(&cert_der);
+
+    let cert = CertificateDer::from(cert_der);
+    let key = rustls::pki_types::PrivatePkcs8KeyDer::from(key_der);
+    let private_key = PrivateKeyDer::Pkcs8(key);
+
+    let client_config = ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
+        .with_client_auth_cert(vec![cert], private_key)
+        .map_err(TransportError::TlsConfig)?;
+    let connector = TlsConnector::from(Arc::new(client_config));
+
+    let tcp_stream = match tokio::time::timeout(TCP_CONNECT_TIMEOUT, TcpStream::connect(addr)).await
+    {
+        Ok(res) => res?,
+        Err(_elapsed) => {
+            tracing::warn!(
+                peer_addr = %addr,
+                timeout = ?TCP_CONNECT_TIMEOUT,
+                "bootstrap(sas): TCP connect timed out — transient"
+            );
+            return Err(TransportError::Io(std::io::Error::from(
+                std::io::ErrorKind::TimedOut,
+            )));
+        }
+    };
+
+    let server_name =
+        ServerName::try_from(P2P_SNI_SENTINEL).expect("static server name is always valid");
+
+    let tls_stream = match tokio::time::timeout(
+        TLS_HANDSHAKE_TIMEOUT,
+        connector.connect(server_name, tcp_stream),
+    )
+    .await
+    {
+        Ok(res) => res?,
+        Err(_elapsed) => {
+            tracing::warn!(peer_addr = %addr, "bootstrap(sas): TLS client handshake timed out");
+            return Err(TransportError::HandshakeTimeout);
+        }
+    };
+
+    let tls_peer_fp = {
+        let (_, conn) = tls_stream.get_ref();
+        let certs = conn.peer_certificates().ok_or(TransportError::NoPeerCert)?;
+        let first = certs.first().ok_or(TransportError::NoPeerCert)?;
+        fingerprint_of(first.as_ref())
+    };
+
+    let tls_binder = tls_channel_binder_client(&tls_stream)?;
+    let mut framed = Framed::new(tls_stream, length_codec());
+
+    let own_fingerprint_owned = own_fingerprint.clone();
+
+    // 9-frame exchange bounded by PAKE_EXCHANGE_TIMEOUT; borrows `framed` so it
+    // is reusable for frame 10a. Confirm runs OUTSIDE this deadline.
+    let prepared = tokio::time::timeout(PAKE_EXCHANGE_TIMEOUT, async {
+        let (client, msg1) =
+            PakeInitiator::new(password).map_err(|e| io_other(format!("PAKE init: {e}")))?;
+
+        // Frame 1 → our PAKE message1.
+        send_frame(&mut framed, &msg1).await?;
+        // Frame 2 → our cert fingerprint.
+        send_frame(&mut framed, own_fingerprint_owned.as_bytes()).await?;
+        // Frame 3 → our P2P sync-listener address.
+        send_frame(&mut framed, sync_addr.as_bytes()).await?;
+
+        // Frame 4 ← responder's PAKE message2.
+        let msg2 = recv_frame(&mut framed).await?;
+        // Frame 5 ← responder's cert fingerprint.
+        let frame_peer_fp = recv_fingerprint(&mut framed).await?;
+        // Frame 6 ← responder's P2P sync-listener address.
+        let peer_sync_addr = recv_sync_addr(&mut framed).await?;
+
+        if frame_peer_fp.to_lowercase() != tls_peer_fp {
+            return Err(io_other(format!(
+                "bootstrap: responder frame fingerprint {frame_peer_fp} != TLS cert {tls_peer_fp}"
+            )));
+        }
+
+        let (session_key, msg3) = client
+            .finish(&msg2)
+            .map_err(|e| io_other(format!("PAKE finish: {e}")))?;
+
+        // Frame 7 → our PAKE finalisation.
+        send_frame(&mut framed, &msg3).await?;
+
+        let bound_key = session_key.bind_to_tls_channel(&tls_binder);
+        let own_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
+        let expected_peer_tag = channel_confirmation_tag(&bound_key, ConfirmRole::Responder);
+
+        // Frame 8 ← responder's confirmation tag.
+        let peer_tag = recv_confirmation_tag(&mut framed).await?;
+        // Frame 9 → our confirmation tag.
+        send_frame(&mut framed, &own_tag).await?;
+        if peer_tag.ct_eq(&expected_peer_tag).unwrap_u8() != 1 {
+            return Err(io_other(
+                "bootstrap: channel-binding confirmation mismatch — possible relay MitM, pairing aborted".into(),
+            ));
+        }
+
+        let sas = derive_sas(&bound_key);
+        Ok::<_, TransportError>((sas, tls_peer_fp, peer_sync_addr, session_key))
+    })
+    .await
+    .map_err(|_elapsed| {
+        tracing::warn!(
+            timeout = ?PAKE_EXCHANGE_TIMEOUT,
+            "bootstrap(sas): initiator PAKE exchange timed out — stalled responder"
+        );
+        io_other("bootstrap: PAKE exchange timed out".into())
+    })??;
+
+    let (sas, peer_fingerprint, peer_sync_addr, session_key) = prepared;
+
+    // Human SAS confirmation (outside the PAKE deadline). Reject → error → keys
+    // drop/zeroize.
+    let accepted_locally = confirm(&sas).await;
+
+    // Frame 10a: exchange ACCEPT/REJECT bytes. Proceed only if BOTH accept.
+    let our_byte = if accepted_locally {
+        SAS_ACCEPT
+    } else {
+        SAS_REJECT
+    };
+    send_frame(&mut framed, &[our_byte]).await?;
+    let peer_byte = recv_confirm_byte(&mut framed).await?;
+    if our_byte != SAS_ACCEPT || peer_byte != SAS_ACCEPT {
+        return Err(io_other("SAS rejected by user — pairing aborted".into()));
+    }
+
+    let peer_meta = exchange_peer_meta(&mut framed, own_meta).await;
+
+    Ok(BootstrapPairing {
+        peer_fingerprint,
+        peer_sync_addr,
+        session_key,
+        sas,
+        peer_model: peer_meta.model,
+        peer_os: peer_meta.os_version,
+        peer_app_version: peer_meta.app_version,
+        peer_local_ip: peer_meta.local_ip,
+    })
 }
 
 // ── device-metadata exchange (P2P Phase 4) ────────────────────────────────────
@@ -800,6 +1158,27 @@ where
         ))
     })?;
     Ok(tag)
+}
+
+/// Receive the peer's frame-10a SAS-confirm byte (LAN/SAS path only).
+///
+/// Enforces an exact 1-byte frame so a desynced/malicious peer cannot smuggle a
+/// longer frame into this slot. Any byte other than [`SAS_ACCEPT`] is treated as
+/// a reject by the caller.
+async fn recv_confirm_byte<S>(
+    framed: &mut Framed<S, LengthDelimitedCodec>,
+) -> Result<u8, TransportError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let bytes = recv_frame(framed).await?;
+    if bytes.len() != 1 {
+        return Err(io_other(format!(
+            "bootstrap: SAS-confirm frame wrong length ({} bytes)",
+            bytes.len()
+        )));
+    }
+    Ok(bytes[0])
 }
 
 async fn recv_fingerprint<S>(
@@ -1247,6 +1626,291 @@ mod tests {
             PeerMeta::default(),
             "a legacy peer that sends no metadata must yield all-None"
         );
+    }
+
+    // ── LAN/SAS phase 1: confirm-gated handshake variants ────────────────────
+
+    /// Both endpoints run the confirm-gated variants over a real loopback
+    /// TLS socket: each side's `confirm` callback is invoked with the SAS, both
+    /// accept, and the handshake completes. The two SAS strings MUST be equal
+    /// (same `bound_key`), and the returned `BootstrapPairing.sas` matches.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn confirm_variants_loopback_sas_matches_and_accepts() {
+        use std::sync::{Arc, Mutex};
+
+        let responder_cert = SelfSignedCert::generate("responder-device").unwrap();
+        let initiator_cert = SelfSignedCert::generate("initiator-device").unwrap();
+        let password = "sas-confirm-loopback";
+
+        let responder = BootstrapResponder::bind(
+            responder_cert.cert_der.clone(),
+            responder_cert.key_der.clone(),
+        )
+        .await
+        .expect("bind responder");
+        let port = responder.local_addr().expect("local addr").port();
+
+        let resp_seen: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let init_seen: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+        let resp_seen_cb = resp_seen.clone();
+        let responder_task = tokio::spawn(async move {
+            responder
+                .run_with_confirm(
+                    "sas-confirm-loopback",
+                    "127.0.0.1:7101",
+                    &PeerMeta::default(),
+                    move |sas| {
+                        let slot = resp_seen_cb.clone();
+                        let sas = sas.to_string();
+                        async move {
+                            *slot.lock().unwrap() = Some(sas);
+                            true
+                        }
+                    },
+                )
+                .await
+        });
+
+        let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+        let init_seen_cb = init_seen.clone();
+        let initiator_task = tokio::spawn(async move {
+            run_initiator_with_confirm(
+                addr,
+                initiator_cert.cert_der,
+                initiator_cert.key_der,
+                "sas-confirm-loopback",
+                "127.0.0.1:7102",
+                &PeerMeta::default(),
+                move |sas| {
+                    let slot = init_seen_cb.clone();
+                    let sas = sas.to_string();
+                    async move {
+                        *slot.lock().unwrap() = Some(sas);
+                        true
+                    }
+                },
+            )
+            .await
+        });
+
+        let _ = password;
+        let (resp_res, init_res) = tokio::join!(responder_task, initiator_task);
+        let resp = resp_res
+            .expect("responder join")
+            .expect("responder pairing");
+        let init = init_res
+            .expect("initiator join")
+            .expect("initiator pairing");
+
+        let resp_sas = resp_seen
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("responder saw sas");
+        let init_sas = init_seen
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("initiator saw sas");
+        assert_eq!(resp_sas, init_sas, "both sides must see the same SAS");
+        assert_eq!(resp.sas, resp_sas, "returned sas matches confirmed sas");
+        assert_eq!(init.sas, init_sas, "returned sas matches confirmed sas");
+        assert_eq!(resp.sas, init.sas);
+        assert_eq!(resp.session_key.as_bytes(), init.session_key.as_bytes());
+    }
+
+    /// If EITHER side's user rejects the SAS, BOTH endpoints must abort with an
+    /// error and neither returns a `BootstrapPairing` (keys drop/zeroize).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn confirm_variant_reject_aborts_both() {
+        let responder_cert = SelfSignedCert::generate("responder-device").unwrap();
+        let initiator_cert = SelfSignedCert::generate("initiator-device").unwrap();
+        let password = "sas-confirm-reject";
+
+        let responder = BootstrapResponder::bind(
+            responder_cert.cert_der.clone(),
+            responder_cert.key_der.clone(),
+        )
+        .await
+        .expect("bind responder");
+        let port = responder.local_addr().expect("local addr").port();
+
+        // Responder accepts; initiator rejects → both must fail.
+        let responder_task = tokio::spawn(async move {
+            responder
+                .run_with_confirm(
+                    "sas-confirm-reject",
+                    "127.0.0.1:7103",
+                    &PeerMeta::default(),
+                    |_sas| async { true },
+                )
+                .await
+        });
+
+        let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+        let initiator_task = tokio::spawn(async move {
+            run_initiator_with_confirm(
+                addr,
+                initiator_cert.cert_der,
+                initiator_cert.key_der,
+                "sas-confirm-reject",
+                "127.0.0.1:7104",
+                &PeerMeta::default(),
+                |_sas| async { false },
+            )
+            .await
+        });
+
+        let _ = password;
+        let (resp_res, init_res) = tokio::join!(responder_task, initiator_task);
+        let init = init_res.expect("initiator join");
+        assert!(
+            init.is_err(),
+            "initiator must abort when it rejects the SAS"
+        );
+        let resp = resp_res.expect("responder join");
+        assert!(
+            resp.is_err(),
+            "responder must abort when the peer rejects the SAS"
+        );
+    }
+
+    /// Under a relay MitM the two legs derive DIFFERENT `bound_key`s, so the two
+    /// SAS values diverge — the human compare is what catches the attack. We use
+    /// the confirm variants and capture each side's SAS; if both captured one
+    /// they must differ. The channel-binding tag check already aborts both, so
+    /// this also asserts both still fail.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn confirm_variant_relay_mitm_yields_different_sas_per_leg() {
+        use std::sync::{Arc, Mutex};
+        use tokio::io::{copy, AsyncWriteExt};
+
+        let responder_cert = SelfSignedCert::generate("responder-device").unwrap();
+        let initiator_cert = SelfSignedCert::generate("initiator-device").unwrap();
+        let relay_cert = SelfSignedCert::generate("relay-mitm-device").unwrap();
+        let password = "sas-relay-secret";
+
+        let responder = BootstrapResponder::bind(
+            responder_cert.cert_der.clone(),
+            responder_cert.key_der.clone(),
+        )
+        .await
+        .expect("bind responder");
+        let responder_port = responder.local_addr().expect("local addr").port();
+
+        let resp_seen: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let init_seen: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+        let resp_seen_cb = resp_seen.clone();
+        let responder_task = tokio::spawn(async move {
+            responder
+                .run_with_confirm(
+                    "sas-relay-secret",
+                    "127.0.0.1:7105",
+                    &PeerMeta::default(),
+                    move |sas| {
+                        let slot = resp_seen_cb.clone();
+                        let sas = sas.to_string();
+                        async move {
+                            *slot.lock().unwrap() = Some(sas);
+                            true
+                        }
+                    },
+                )
+                .await
+        });
+
+        let relay_listener = TcpListener::bind("127.0.0.1:0").await.expect("relay bind");
+        let relay_port = relay_listener.local_addr().unwrap().port();
+
+        let relay_server_cfg = ServerConfig::builder()
+            .with_client_cert_verifier(Arc::new(AcceptAnyCert))
+            .with_single_cert(
+                vec![CertificateDer::from(relay_cert.cert_der.clone())],
+                PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(
+                    relay_cert.key_der.clone(),
+                )),
+            )
+            .expect("relay server cfg");
+        let relay_acceptor = TlsAcceptor::from(Arc::new(relay_server_cfg));
+
+        let relay_client_cfg = ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAnyCert))
+            .with_client_auth_cert(
+                vec![CertificateDer::from(relay_cert.cert_der.clone())],
+                PrivateKeyDer::Pkcs8(rustls::pki_types::PrivatePkcs8KeyDer::from(
+                    relay_cert.key_der.clone(),
+                )),
+            )
+            .expect("relay client cfg");
+        let relay_connector = TlsConnector::from(Arc::new(relay_client_cfg));
+
+        let relay_task = tokio::spawn(async move {
+            let (inbound, _) = relay_listener.accept().await.expect("relay accept");
+            let init_tls = relay_acceptor
+                .accept(inbound)
+                .await
+                .expect("relay tls accept");
+            let upstream = TcpStream::connect(("127.0.0.1", responder_port))
+                .await
+                .expect("relay->responder connect");
+            let server_name = ServerName::try_from("copypaste.peer").unwrap();
+            let resp_tls = relay_connector
+                .connect(server_name, upstream)
+                .await
+                .expect("relay->responder tls");
+            let (mut ir, mut iw) = tokio::io::split(init_tls);
+            let (mut rr, mut rw) = tokio::io::split(resp_tls);
+            let a = tokio::spawn(async move {
+                let _ = copy(&mut ir, &mut rw).await;
+                let _ = rw.shutdown().await;
+            });
+            let b = tokio::spawn(async move {
+                let _ = copy(&mut rr, &mut iw).await;
+                let _ = iw.shutdown().await;
+            });
+            let _ = tokio::join!(a, b);
+        });
+
+        let relay_addr: SocketAddr = ([127, 0, 0, 1], relay_port).into();
+        let init_seen_cb = init_seen.clone();
+        let initiator_task = tokio::spawn(async move {
+            run_initiator_with_confirm(
+                relay_addr,
+                initiator_cert.cert_der,
+                initiator_cert.key_der,
+                "sas-relay-secret",
+                "127.0.0.1:7106",
+                &PeerMeta::default(),
+                move |sas| {
+                    let slot = init_seen_cb.clone();
+                    let sas = sas.to_string();
+                    async move {
+                        *slot.lock().unwrap() = Some(sas);
+                        true
+                    }
+                },
+            )
+            .await
+        });
+
+        let _ = password;
+        let (resp_res, init_res, _relay_res) =
+            tokio::join!(responder_task, initiator_task, relay_task);
+
+        // Both must reject (the constant-time tag check aborts before confirm).
+        assert!(init_res.expect("initiator join").is_err());
+        assert!(resp_res.expect("responder join").is_err());
+
+        // If both sides DID surface a SAS to the user, the two would differ —
+        // that divergence is the human-visible MitM signal.
+        let r = resp_seen.lock().unwrap().clone();
+        let i = init_seen.lock().unwrap().clone();
+        if let (Some(rs), Some(is)) = (r, i) {
+            assert_ne!(rs, is, "relay legs must yield different SAS values");
+        }
     }
 
     // ── Fix 4: fingerprint comparison is case-insensitive ────────────────────
