@@ -54,6 +54,7 @@ data class ClipboardItem(
             snippet == other.snippet &&
             imagePng.contentEquals(other.imagePng) &&
             pinned == other.pinned &&
+            pinnedSortIndex == other.pinnedSortIndex &&
             sourceApp == other.sourceApp
     }
 
@@ -65,6 +66,7 @@ data class ClipboardItem(
         result = 31 * result + snippet.hashCode()
         result = 31 * result + (imagePng?.contentHashCode() ?: 0)
         result = 31 * result + pinned.hashCode()
+        result = 31 * result + pinnedSortIndex
         result = 31 * result + (sourceApp?.hashCode() ?: 0)
         return result
     }

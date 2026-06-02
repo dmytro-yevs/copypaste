@@ -310,7 +310,9 @@ class ClipboardRepository(context: Context) {
                 pinnedList.remove(id)
             }
             if (changed) {
-                prefs.edit().putString(KEY_PINNED_IDS, pinnedList.joinToString(",")).apply()
+                // commit() (synchronous) so the new pinned set survives an immediate
+                // force-stop (SIGKILL) — matches the project pattern from 0f1d1ef.
+                prefs.edit().putString(KEY_PINNED_IDS, pinnedList.joinToString(",")).commit()
             }
         }
         Log.d(TAG, "setPinned: item $id pinned=$pinned")
@@ -332,9 +334,49 @@ class ClipboardRepository(context: Context) {
             // Append any pinned ids that were not included in the caller's list.
             val missing = currentPinned.filter { it !in reordered }
             reordered.addAll(missing)
-            prefs.edit().putString(KEY_PINNED_IDS, reordered.joinToString(",")).apply()
+            // commit() (synchronous) so the reordered set survives an immediate
+            // force-stop (SIGKILL) — matches the project pattern from 0f1d1ef.
+            prefs.edit().putString(KEY_PINNED_IDS, reordered.joinToString(",")).commit()
         }
         Log.d(TAG, "reorderPinned: new order = $ids")
+    }
+
+    /**
+     * Move item [id] to the top of the non-pinned (recency) section by re-stamping
+     * its wall-time to now and moving it to the END of the stored id index (the end
+     * is "most recent" because [getItems] does takeLast().reversed()).
+     *
+     * PINNED items are skipped: their position is governed solely by
+     * [KEY_PINNED_IDS] / pinnedSortIndex, so re-copying a pinned clip must NOT
+     * move it. Mirrors macOS `bump_item_recency` on copy (HW parity).
+     *
+     * Only field 0 (wall-time) of the pipe-delimited blob is rewritten; the crypto
+     * fields (nonce/ciphertext) and lamport_ts are preserved verbatim so the AEAD
+     * AAD binding and LWW ordering remain intact.
+     */
+    fun bumpToTop(id: String) {
+        synchronized(idsWriteLock) {
+            if (id in storedPinnedIds()) return  // pinned items keep their fixed order
+            val ids = storedIds().toMutableList()
+            if (!ids.remove(id)) return  // unknown id — nothing to bump
+            val raw = prefs.getString("item_$id", null) ?: return
+            val parts = raw.split("|")
+            // v2 blob = <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>
+            if (parts.size < 6) return  // legacy/malformed — leave untouched
+            val rebuilt = buildString {
+                append(System.currentTimeMillis())  // field 0: fresh wall-time
+                for (i in 1 until parts.size) {
+                    append('|')
+                    append(parts[i])
+                }
+            }
+            ids.add(id)  // re-append → most-recent position
+            prefs.edit()
+                .putString("item_$id", rebuilt)
+                .putString(KEY_ITEM_IDS, ids.joinToString(","))
+                .commit()  // synchronous: survives an immediate force-stop (SIGKILL)
+        }
+        Log.d(TAG, "bumpToTop: re-stamped item $id to most-recent")
     }
 
     /**
