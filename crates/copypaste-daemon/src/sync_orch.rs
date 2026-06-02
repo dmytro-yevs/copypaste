@@ -489,7 +489,7 @@ pub fn catchup_items(db: &Database, device_id: &str, crypto: &SyncCrypto) -> Vec
     let shared_key_available = {
         let peers = crate::peers::load_peers(&crypto.peers_path);
         peers.iter().any(|dev| {
-            dev.sync_key_b64.as_deref().map_or(false, |b64| {
+            dev.sync_key_b64.as_deref().is_some_and(|b64| {
                 base64::engine::general_purpose::STANDARD
                     .decode(b64)
                     .ok()
