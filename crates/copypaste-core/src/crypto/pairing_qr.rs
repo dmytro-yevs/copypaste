@@ -77,6 +77,20 @@ pub const PAIRING_QR_MAGIC: &str = "CPPAIR1";
 /// Number of `.`-separated fields in the v1 payload after the magic prefix.
 const PAIRING_QR_FIELD_COUNT: usize = 5;
 
+/// Deep-link URI prefix wrapping the bare [`PAIRING_QR_MAGIC`] payload so that
+/// external QR scanners (e.g. Google Lens, the iOS/Android camera app) treat the
+/// QR as an actionable link and offer "open in app" instead of plain text.
+///
+/// The wrapped form is `cppair://pair?p=<percent-encoded CPPAIR1...>`. The bare
+/// payload is the value of the `p` query parameter. This is purely a *transport*
+/// envelope around the unchanged [`PairingPayload::encode`] wire format — the
+/// `AndroidManifest.xml` intent-filter (`scheme="cppair" host="pair"`) and
+/// `PairActivity.handleDeepLinkIntent` already extract `?p=` on the receiver side.
+///
+/// Keep this in sync with the Android `PairActivity` / `CopypasteBindings`
+/// constants and the manifest intent-filter.
+pub const PAIRING_DEEPLINK_PREFIX: &str = "cppair://pair?p=";
+
 /// Length in bytes of the pairing token.
 ///
 /// 32 bytes = 256 bits of entropy, drawn from the OS CSPRNG. This is the
@@ -293,6 +307,117 @@ impl PairingPayload {
             device_name,
             addr_hint,
         })
+    }
+
+    /// Serialise and wrap the payload in the [`PAIRING_DEEPLINK_PREFIX`] URI so
+    /// external scanners (Google Lens, the system camera) offer "open in app".
+    ///
+    /// The bare [`encode`](Self::encode) output is percent-encoded into the `p`
+    /// query parameter. The receiver strips the wrapper with
+    /// [`strip_deeplink`] (or, on Android, the manifest deep-link path) before
+    /// calling [`decode`](Self::decode).
+    pub fn encode_deeplink(&self) -> String {
+        format!(
+            "{PAIRING_DEEPLINK_PREFIX}{}",
+            percent_encode_component(&self.encode())
+        )
+    }
+}
+
+/// Strip the [`PAIRING_DEEPLINK_PREFIX`] wrapper from a scanned QR string,
+/// returning the bare `CPPAIR1.…` payload ready for [`PairingPayload::decode`].
+///
+/// Accepts both forms for backward compatibility:
+/// * Wrapped: `cppair://pair?p=<percent-encoded CPPAIR1…>` → decoded `p` value.
+/// * Bare: any string not starting with the prefix is returned unchanged
+///   (trimmed), so legacy QR codes and in-app scans keep working.
+///
+/// This is intentionally tolerant: it only knows how to *unwrap* the envelope,
+/// never to validate the inner payload — that remains [`PairingPayload::decode`]'s
+/// job (which still rejects anything without the exact `CPPAIR1` magic).
+pub fn strip_deeplink(scanned: &str) -> String {
+    let trimmed = scanned.trim();
+    match trimmed.strip_prefix(PAIRING_DEEPLINK_PREFIX) {
+        Some(encoded) => percent_decode_component(encoded),
+        None => trimmed.to_string(),
+    }
+}
+
+/// Minimal RFC 3986 percent-encoding for the `p` query-component value.
+///
+/// We encode everything that is not an unreserved character (`A-Z a-z 0-9 - _ .
+/// ~`). The bare payload uses `.` and the base64url alphabet (`A-Z a-z 0-9 - _`),
+/// all of which are unreserved, so in practice only the rare `:` inside an
+/// `addr_hint` (`host:port`) is escaped — but we encode defensively so any future
+/// field change stays URL-safe. Kept dependency-free to avoid pulling a URL crate
+/// into `copypaste-core`.
+fn percent_encode_component(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for &b in input.as_bytes() {
+        let unreserved = b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~');
+        if unreserved {
+            out.push(b as char);
+        } else {
+            out.push('%');
+            out.push(hex_upper(b >> 4));
+            out.push(hex_upper(b & 0x0f));
+        }
+    }
+    out
+}
+
+/// Inverse of [`percent_encode_component`]. Decodes `%XX` escapes (and `+` as a
+/// space, matching `application/x-www-form-urlencoded` query semantics) and
+/// passes any malformed escape through verbatim so a decode never panics — the
+/// downstream [`PairingPayload::decode`] will reject a corrupted payload.
+fn percent_decode_component(input: &str) -> String {
+    let bytes = input.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => {
+                match (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                    (Some(hi), Some(lo)) => {
+                        out.push((hi << 4) | lo);
+                        i += 3;
+                    }
+                    // Malformed escape: keep the literal '%' and continue.
+                    _ => {
+                        out.push(b'%');
+                        i += 1;
+                    }
+                }
+            }
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            other => {
+                out.push(other);
+                i += 1;
+            }
+        }
+    }
+    // Lossy is safe: a non-UTF-8 result means a corrupted QR; decode() rejects it.
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Map a 0–15 nibble to its uppercase hex ASCII digit.
+fn hex_upper(nibble: u8) -> char {
+    match nibble {
+        0..=9 => (b'0' + nibble) as char,
+        _ => (b'A' + (nibble - 10)) as char,
+    }
+}
+
+/// Parse a single hex ASCII digit (upper or lower case) into its 0–15 value.
+fn hex_val(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
     }
 }
 
@@ -532,6 +657,59 @@ mod tests {
             Err(e) => e,
         };
         assert!(matches!(err, PairingQrError::EmptyFingerprint));
+    }
+
+    #[test]
+    fn deeplink_wrap_strip_decode_roundtrip() {
+        // Full wrap → strip → decode cycle must recover the original payload,
+        // exercising the cppair:// envelope external scanners (Google Lens) need.
+        let original = sample();
+        let wrapped = original.encode_deeplink();
+        assert!(
+            wrapped.starts_with(PAIRING_DEEPLINK_PREFIX),
+            "deep-link must carry the cppair://pair?p= prefix: {wrapped}"
+        );
+        // The bare CPPAIR1 magic must NOT appear before the prefix (i.e. it is
+        // wrapped, not concatenated), so external scanners see a URI.
+        assert!(wrapped.starts_with("cppair://pair?p="));
+
+        let stripped = strip_deeplink(&wrapped);
+        assert!(
+            stripped.starts_with("CPPAIR1."),
+            "stripping the wrapper must yield the bare payload: {stripped}"
+        );
+        assert_eq!(stripped, original.encode(), "strip must invert wrap");
+
+        let decoded = decode(&stripped);
+        assert_eq!(decoded.fingerprint, original.fingerprint);
+        assert!(decoded.token == original.token);
+        assert_eq!(decoded.device_id, original.device_id);
+        assert_eq!(decoded.device_name, original.device_name);
+        assert_eq!(decoded.addr_hint, original.addr_hint);
+    }
+
+    #[test]
+    fn strip_deeplink_passes_through_bare_payload() {
+        // Back-compat: a bare (unwrapped) CPPAIR1 string must be returned as-is.
+        let bare = sample().encode();
+        assert_eq!(strip_deeplink(&bare), bare);
+        // Whitespace is trimmed.
+        let padded = format!("  {bare}  ");
+        assert_eq!(strip_deeplink(&padded), bare);
+    }
+
+    #[test]
+    fn deeplink_escapes_addr_hint_colon() {
+        // addr_hint host:port contains ':', which must be percent-escaped in the
+        // URI and faithfully restored on strip.
+        let original = sample(); // addr_hint = "192.168.1.5:54321"
+        let wrapped = original.encode_deeplink();
+        assert!(
+            wrapped.contains("%3A"),
+            "the ':' in host:port must be percent-encoded: {wrapped}"
+        );
+        let decoded = decode(&strip_deeplink(&wrapped));
+        assert_eq!(decoded.addr_hint, "192.168.1.5:54321");
     }
 
     #[test]
