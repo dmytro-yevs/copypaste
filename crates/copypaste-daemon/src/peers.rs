@@ -46,6 +46,71 @@ pub struct PairedDevice {
     /// key off world-readable storage; it never leaves this host as plaintext.
     #[serde(default)]
     pub sync_key_b64: Option<String>,
+
+    /// Friendly hardware model of the peer (e.g. `"MacBook Air"`), learned
+    /// in-band over the bootstrap channel during pairing. `#[serde(default)]`
+    /// for backward compatibility with records that predate this field.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Peer's OS name + version (e.g. `"macOS 15.5"`), learned in-band.
+    #[serde(default)]
+    pub os_version: Option<String>,
+    /// Peer's app/daemon version string, learned in-band.
+    #[serde(default)]
+    pub app_version: Option<String>,
+    /// Peer's best LAN-routable display IP, learned in-band. Preferred over
+    /// parsing the `host:port` `address` field for UI display.
+    #[serde(default)]
+    pub local_ip: Option<String>,
+    /// Unix timestamp (seconds) of the FIRST successful sync connection with
+    /// this peer. Set once and never overwritten. `None` until the first sync.
+    #[serde(default)]
+    pub first_sync_at: Option<i64>,
+    /// Unix timestamp (seconds) of the MOST RECENT successful sync connection
+    /// with this peer. Updated on every established (throttled) connection.
+    #[serde(default)]
+    pub last_sync_at: Option<i64>,
+}
+
+/// Normalise a fingerprint to the canonical colon-free, lowercase hex form used
+/// by the mTLS/P2P layer.
+///
+/// `peers.json` stores fingerprints in the user-facing `XX:XX:…` colon-hex
+/// form, while the P2P layer reports colon-free hex. To match a peer record
+/// against a P2P-reported fingerprint both sides must be canonicalised. This
+/// mirrors `crate::ipc::canonical_fingerprint` (kept local so `peers` has no
+/// dependency on the IPC module).
+fn canonical_fp(fp: &str) -> String {
+    fp.replace(':', "").to_ascii_lowercase()
+}
+
+/// Stamp first/last sync timestamps for the peer identified by `fingerprint`.
+///
+/// Loads `peers.json`, finds the record whose fingerprint canonicalises to the
+/// same value as `fingerprint` (so a colon-hex stored record matches a
+/// colon-free P2P fingerprint and vice versa), sets `first_sync_at` only if it
+/// was previously `None`, and ALWAYS updates `last_sync_at` to `now_secs`, then
+/// atomically rewrites the file via [`save_peers`].
+///
+/// No-op (and not an error) when no matching peer record exists — the peer may
+/// not yet be persisted, or may have been unpaired between connect and stamp.
+/// Callers should throttle invocations (per-connection or debounced ≥ 60 s) to
+/// avoid write amplification; this function does not throttle internally.
+pub fn touch_sync_times(path: &Path, fingerprint: &str, now_secs: i64) -> anyhow::Result<()> {
+    let target = canonical_fp(fingerprint);
+    let mut peers = load_peers(path);
+    let Some(peer) = peers
+        .iter_mut()
+        .find(|p| canonical_fp(&p.fingerprint) == target)
+    else {
+        // No matching record — nothing to stamp. Not an error.
+        return Ok(());
+    };
+    if peer.first_sync_at.is_none() {
+        peer.first_sync_at = Some(now_secs);
+    }
+    peer.last_sync_at = Some(now_secs);
+    save_peers(path, &peers)
 }
 
 /// Load the list of paired devices from `path`.
@@ -151,6 +216,12 @@ mod tests {
             added_at: 1_700_000_000,
             address: Some("127.0.0.1:4242".to_string()),
             sync_key_b64: None,
+            model: None,
+            os_version: None,
+            app_version: None,
+            local_ip: None,
+            first_sync_at: None,
+            last_sync_at: None,
         }
     }
 
@@ -235,5 +306,72 @@ mod tests {
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].fingerprint, "aabbcc");
         assert_eq!(loaded[0].address, None);
+    }
+
+    /// A `peers.json` written before the metadata / sync-time fields existed
+    /// must still deserialise — all the new fields default to `None`.
+    #[test]
+    fn legacy_record_without_metadata_loads_as_none() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        std::fs::write(
+            &path,
+            br#"[{"fingerprint":"aa:bb:cc","name":"Old","added_at":1700000000,"address":"127.0.0.1:4242"}]"#,
+        )
+        .unwrap();
+        let loaded = load_peers(&path);
+        assert_eq!(loaded.len(), 1);
+        let p = &loaded[0];
+        assert_eq!(p.model, None);
+        assert_eq!(p.os_version, None);
+        assert_eq!(p.app_version, None);
+        assert_eq!(p.local_ip, None);
+        assert_eq!(p.first_sync_at, None);
+        assert_eq!(p.last_sync_at, None);
+    }
+
+    /// `touch_sync_times` sets `first_sync_at` only on the first call and
+    /// always advances `last_sync_at`. Matching is canonical: the stored
+    /// fingerprint is colon-hex but the lookup key is colon-free hex.
+    #[test]
+    fn touch_sync_times_sets_first_once_and_last_always() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        // Stored in colon-hex form (the user-facing peers.json form).
+        save_peers(&path, &[make_device("aa:bb:cc:dd", "Alice")]).unwrap();
+
+        // First stamp via the colon-FREE canonical fingerprint (as the P2P
+        // layer reports it) — must match the colon-hex stored record.
+        touch_sync_times(&path, "aabbccdd", 1_000).unwrap();
+        let after_first = load_peers(&path);
+        assert_eq!(after_first[0].first_sync_at, Some(1_000));
+        assert_eq!(after_first[0].last_sync_at, Some(1_000));
+
+        // Second stamp: first_sync_at is preserved, last_sync_at advances.
+        touch_sync_times(&path, "AA:BB:CC:DD", 2_000).unwrap();
+        let after_second = load_peers(&path);
+        assert_eq!(
+            after_second[0].first_sync_at,
+            Some(1_000),
+            "first_sync_at must never be overwritten"
+        );
+        assert_eq!(
+            after_second[0].last_sync_at,
+            Some(2_000),
+            "last_sync_at must always advance"
+        );
+    }
+
+    /// `touch_sync_times` is a no-op (and not an error) when no matching peer
+    /// record exists.
+    #[test]
+    fn touch_sync_times_no_match_is_noop() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        save_peers(&path, &[make_device("aa:bb:cc:dd", "Alice")]).unwrap();
+        touch_sync_times(&path, "deadbeef", 5_000).unwrap();
+        let loaded = load_peers(&path);
+        assert_eq!(loaded[0].first_sync_at, None);
+        assert_eq!(loaded[0].last_sync_at, None);
     }
 }

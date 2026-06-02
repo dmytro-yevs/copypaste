@@ -435,6 +435,10 @@ async fn accept_loop(
                         // receiver makes the replay idempotent.
                         push_catchup(&catchup, &cleanup_tx).await;
 
+                        // Stamp first/last sync times for this peer (once per
+                        // established connection — see `stamp_peer_sync`).
+                        stamp_peer_sync(&crate::ipc::peers_file_path(), &peer_fp);
+
                         let incoming_tx = incoming_tx.clone();
                         let peer_sinks = Arc::clone(&peer_sinks);
                         tokio::spawn(async move {
@@ -632,6 +636,10 @@ async fn peer_connector_loop(
                         // Sync-on-connect catch-up: replay local history once so
                         // items produced before this link came up reach the peer.
                         push_catchup(&catchup, &cleanup_tx).await;
+
+                        // Stamp first/last sync times for this peer (once per
+                        // established connection — see `stamp_peer_sync`).
+                        stamp_peer_sync(&peers_path, &peer.fingerprint);
 
                         let incoming_tx = incoming_tx.clone();
                         let peer_sinks = Arc::clone(&peer_sinks);
@@ -833,6 +841,28 @@ async fn outbound_loop(
 /// the shared sync key) and forwards each item to `sink`. Best-effort: a closed
 /// sink (peer already gone) just stops the replay. Called exactly once per
 /// established connection, before/at the start of the duplex pump.
+/// Stamp first/last sync timestamps for a freshly-established peer connection.
+///
+/// Called ONCE per established connection (both the accept and connector paths),
+/// right after the sync-on-connect catch-up. This per-connection cadence is the
+/// throttle: `peers.json` is rewritten when a link comes up, never per synced
+/// item, so there is no write amplification under a busy stream.
+///
+/// `peer_fp` is the verified mTLS certificate fingerprint (colon-free hex);
+/// [`crate::peers::touch_sync_times`] canonicalises it against the colon-hex
+/// form stored in `peers.json`. A missing peer record or a write failure only
+/// logs at `debug` — sync-time stamping is best-effort and must never disrupt
+/// the live connection.
+fn stamp_peer_sync(peers_path: &std::path::Path, peer_fp: &DeviceFingerprint) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    if let Err(e) = crate::peers::touch_sync_times(peers_path, peer_fp, now) {
+        tracing::debug!(%peer_fp, "failed to stamp peer sync times: {e}");
+    }
+}
+
 async fn push_catchup(catchup: &CatchupProvider, sink: &mpsc::Sender<WireItem>) {
     let items = catchup();
     if items.is_empty() {

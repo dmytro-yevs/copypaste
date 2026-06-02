@@ -963,6 +963,8 @@ dependencies = [
  "rand 0.8.6",
  "rcgen",
  "rustls",
+ "serde",
+ "serde_json",
  "sha2",
  "subtle",
  "thiserror 1.0.69",
