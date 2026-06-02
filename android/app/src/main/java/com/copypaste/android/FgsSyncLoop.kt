@@ -402,23 +402,69 @@ class FgsSyncLoop(
             )
             var stored = 0
             for (item in result.items) {
-                val plaintext = String(
-                    ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
-                    Charsets.UTF_8,
-                )
                 // Advance the local Lamport clock to stay causally after every
                 // received item — mirrors the SyncManager.kt:440 Supabase path.
                 // Without this the local clock lags behind the peer's, making
                 // future local pushes appear "older" and breaking LWW ordering.
                 settings.lamportClock.observe(item.wallTimeMs)
-                // Persist under the peer's STABLE item_id (overrideId): dedups a
-                // re-dial AND lets a later re-sync of this clip reuse the same
-                // cross-device id instead of minting a fresh local UUID.
-                if (repository.storeItem(plaintext, key, overrideId = item.itemId)
-                        .isNotEmpty()
-                ) {
-                    stored += 1
+
+                val isImage = item.contentType == "image" ||
+                    item.contentType.startsWith("image/")
+                val isFile = item.contentType == "file"
+
+                // UniFFI maps `sequence<u8>` to List<UByte>; storeImageBytes and
+                // the UTF-8 text decode below both want a ByteArray.
+                val plaintextBytes = ByteArray(item.plaintext.size) { item.plaintext[it].toByte() }
+
+                val didStore = when {
+                    isImage -> {
+                        // Image frame: mirror the cloud-poll branch (poll():299).
+                        // Store a placeholder row under the peer's STABLE item_id,
+                        // then persist the raw image bytes so HistoryActivity can
+                        // render them. Re-dials dedup via overrideId.
+                        if (plaintextBytes.isEmpty()) {
+                            false
+                        } else {
+                            val storedId = repository.storeItem(
+                                plaintext = "[image]",
+                                key = key,
+                                overrideId = item.itemId,
+                                contentType = item.contentType,
+                            )
+                            if (storedId.isNotEmpty()) {
+                                repository.storeImageBytes(storedId, plaintextBytes)
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    }
+                    isFile -> {
+                        // File frame: Android has no file UI yet, so store a
+                        // minimal text placeholder for now (transport lands here;
+                        // display is the v0.6 P3 follow-up). The raw bytes are
+                        // dropped until a file store/render path exists.
+                        // TODO(v0.6 P3): persist the file bytes + original
+                        // name/mime (once SyncedItem carries blob_ref) and add a
+                        // file row UI to HistoryActivity instead of this stub.
+                        repository.storeItem(
+                            plaintext = "[file]",
+                            key = key,
+                            overrideId = item.itemId,
+                            contentType = item.contentType,
+                        ).isNotEmpty()
+                    }
+                    else -> {
+                        // Text frame: persist under the peer's STABLE item_id
+                        // (overrideId) — dedups a re-dial AND lets a later
+                        // re-sync of this clip reuse the same cross-device id
+                        // instead of minting a fresh local UUID.
+                        val plaintext = String(plaintextBytes, Charsets.UTF_8)
+                        repository.storeItem(plaintext, key, overrideId = item.itemId)
+                            .isNotEmpty()
+                    }
                 }
+                if (didStore) stored += 1
             }
             if (result.itemsReceived > 0uL || result.itemsSent > 0uL) {
                 Log.i(

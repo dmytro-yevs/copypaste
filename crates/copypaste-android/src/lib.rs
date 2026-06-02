@@ -665,17 +665,29 @@ pub fn sync_with_peer(
         // Build the outbound `WireItem`s in the SAME sync-key-wrapped wire form
         // the daemon's `rekey_outbound` produces: the cloud blob (self-framed,
         // its own 24-byte nonce prefix) goes in `content`, and `content_nonce`
-        // is `None` so the peer recognises it as sync-key-wrapped. Only text
-        // items are re-keyed (image chunks use a separate scheme).
+        // is `None` so the peer recognises it as sync-key-wrapped. Text, image
+        // and file items are all re-keyed identically here (v0.6 Option 2 wire
+        // contract): the whole plaintext travels as ONE shared-key blob, no
+        // per-chunk re-key and no wire `file_id`.
         let mut outbound: Vec<WireItem> = Vec::with_capacity(local_items.len());
         for it in &local_items {
-            // Defense-in-depth: callers (the Android Kotlin layer) normalize to
-            // the canonical "text" token, but tolerate MIME-style "text/plain"
-            // and any "text/*" here so a stored content type never silently
-            // drops an item from the send path. Canonical "text" stays primary.
-            if !(it.content_type == "text" || it.content_type.starts_with("text/")) {
-                continue;
-            }
+            // Determine the canonical wire content type for this item, or skip
+            // it if the type is one we don't sync. Defense-in-depth: callers
+            // (the Android Kotlin layer) normalize to the canonical "text"
+            // token, but tolerate MIME-style "text/plain" and any "text/*" here
+            // so a stored content type never silently drops an item from the
+            // send path. Image/file items (Android→macOS symmetry) are carried
+            // with their content type preserved.
+            let wire_content_type =
+                if it.content_type == "text" || it.content_type.starts_with("text/") {
+                    "text".to_string()
+                } else if it.content_type == "image" || it.content_type.starts_with("image/") {
+                    it.content_type.clone()
+                } else if it.content_type == "file" {
+                    "file".to_string()
+                } else {
+                    continue;
+                };
             // STABLE identity: reuse the caller's `item_id` (minted ONCE at
             // capture and persisted on the row) on every send so the daemon
             // dedups/LWW-merges this clip instead of seeing a new item each
@@ -697,7 +709,7 @@ pub fn sync_with_peer(
             outbound.push(WireItem {
                 id,
                 item_id,
-                content_type: "text".to_string(),
+                content_type: wire_content_type,
                 content: Some(blob),
                 // `None` is the daemon's "sync-key-wrapped" unwrap marker.
                 content_nonce: None,
@@ -793,9 +805,12 @@ pub fn sync_with_peer(
             )?;
 
         // Unwrap every received item back to plaintext using the shared key. A
-        // sync-key-wrapped text item carries `content` (the cloud blob) and no
-        // `content_nonce`; skip anything that doesn't fit that shape, and skip
-        // (rather than fail) a blob we cannot decrypt.
+        // sync-key-wrapped text/image/file item carries `content` (the cloud
+        // blob) and no `content_nonce`; skip anything that doesn't fit that
+        // shape, and skip (rather than fail) a blob we cannot decrypt. Images
+        // and files travel under the SAME wrapped shape as text (v0.6 Option 2
+        // wire contract): the whole plaintext is ONE shared-key blob, recovered
+        // with `decrypt_from_cloud` exactly like text.
         let mut items: Vec<SyncedItem> = Vec::with_capacity(received.len());
         let mut items_skipped_legacy: u32 = 0;
         for wire in &received {
@@ -824,13 +839,25 @@ pub fn sync_with_peer(
                 );
                 continue;
             }
-            if wire.content_type != "text" {
+            // Accept text, image and file frames. Every accepted type uses the
+            // identical sync-key-wrapped shape (`content` present, `content_nonce`
+            // None), so the decrypt path below is shared. Any other content type
+            // is unknown to this build and is skipped.
+            let is_text = wire.content_type == "text" || wire.content_type.starts_with("text/");
+            let is_image = wire.content_type == "image" || wire.content_type.starts_with("image/");
+            let is_file = wire.content_type == "file";
+            if !(is_text || is_image || is_file) {
                 continue;
             }
             let Some(blob) = wire.content.as_ref() else {
                 continue;
             };
             match decrypt_from_cloud(&shared, &wire.item_id, blob) {
+                // TODO(v0.6 P3): `SyncedItem` has no `blob_ref` field, so the
+                // file's original name/mime (carried in the daemon's at-rest
+                // `blob_ref` meta) is not surfaced to Kotlin yet. File display
+                // is a follow-up (Android has no file UI); add a `blob_ref`
+                // field here when that lands so the filename can be shown.
                 Ok(plaintext) => items.push(SyncedItem {
                     id: wire.id.clone(),
                     // Carry the peer's STABLE item_id through so Kotlin can
@@ -1771,6 +1798,148 @@ mod tests {
         assert_eq!(
             frames_peer_got, 1,
             "peer must have received the FFI initiator's one offered framed WireItem"
+        );
+    }
+
+    /// v0.6 image/file sync (RECEIVE + outbound symmetry): an image frame
+    /// arrives on the wire under the SAME sync-key-wrapped shape as text
+    /// (`content` = `encrypt_for_cloud(shared, item_id, plaintext)`,
+    /// `content_nonce = None`, `content_type = "image"`). The FFI must NOT drop
+    /// it (the old `content_type != "text"` guard did), must decrypt it back to
+    /// the raw image bytes, and must surface it as a `SyncedItem` whose
+    /// `content_type` is preserved as "image". Symmetrically, an image
+    /// `LocalItem` offered by Android must be re-keyed and sent to the peer.
+    #[test]
+    fn sync_with_peer_receives_image_frame_from_loopback_peer() {
+        use bytes::Bytes;
+        use copypaste_p2p::pake::SessionKey;
+        use copypaste_p2p::transport::{PairedPeers, PeerTransport};
+        use copypaste_sync::protocol::WireItem;
+        use futures_util::{SinkExt, StreamExt};
+        use std::sync::mpsc;
+        use tokio::net::TcpListener;
+
+        let session_key = [0x5Au8; 32];
+        let shared = {
+            let sk = SessionKey(session_key);
+            copypaste_core::SyncKey::from_bytes(sk.derive_xchacha_key(P2P_SYNC_KEY_SALT))
+        };
+
+        let peer_cert = generate_device_cert().expect("peer cert");
+        let init_cert = generate_device_cert().expect("initiator cert");
+        let peer_fp = peer_cert.fingerprint.clone();
+        let init_fp = init_cert.fingerprint.clone();
+
+        // The peer pushes ONE image item, wrapped under the shared key exactly
+        // as the daemon's `rekey_outbound` does for images: the raw PNG bytes
+        // are the plaintext, the self-framed cloud blob goes in `content`, and
+        // `content_nonce` is `None`.
+        let known_item_id = uuid::Uuid::new_v4().to_string();
+        // A minimal "PNG-ish" byte payload (content is opaque to sync).
+        let known_plaintext: Vec<u8> =
+            vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+        let known_blob = encrypt_for_cloud(&shared, &known_item_id, &known_plaintext)
+            .expect("peer wraps its image under the shared key");
+        let peer_wire = WireItem {
+            id: known_item_id.clone(),
+            item_id: known_item_id.clone(),
+            content_type: "image".to_string(),
+            content: Some(known_blob),
+            content_nonce: None,
+            blob_ref: None,
+            is_sensitive: false,
+            lamport_ts: 9,
+            wall_time: 9,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "loopback-peer".to_string(),
+            key_version: 2,
+        };
+
+        let (port_tx, port_rx) = mpsc::channel::<u16>();
+        let peer_cert_der = peer_cert.cert_der.clone();
+        let peer_key_der = peer_cert.key_der.clone();
+        let init_fp_for_peer = init_fp.clone();
+        let peer_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("peer runtime");
+            rt.block_on(async move {
+                let peers = PairedPeers::new();
+                peers.add(init_fp_for_peer, "android-initiator");
+                let transport = PeerTransport::from_cert(peer_cert_der, peer_key_der, peers);
+
+                let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+                port_tx
+                    .send(listener.local_addr().expect("addr").port())
+                    .expect("send port");
+
+                let (_addr, _fp, mut framed) = transport.accept(&listener).await.expect("accept");
+
+                let payload = serde_json::to_vec(&peer_wire).expect("serialise peer WireItem");
+                framed
+                    .send(Bytes::from(payload))
+                    .await
+                    .expect("peer push frame");
+
+                // Capture the content_type of the frame the FFI offers back, so
+                // we can prove the outbound image symmetry (Android → macOS).
+                let mut received_content_types: Vec<String> = Vec::new();
+                while let Ok(Some(Ok(frame))) =
+                    tokio::time::timeout(std::time::Duration::from_secs(2), framed.next()).await
+                {
+                    if let Ok(w) = serde_json::from_slice::<WireItem>(&frame) {
+                        received_content_types.push(w.content_type);
+                    }
+                }
+                received_content_types
+            })
+        });
+
+        let port = port_rx.recv().expect("peer port");
+        let addr = format!("127.0.0.1:{port}");
+
+        // The FFI offers ONE local IMAGE item (exercising the outbound path).
+        let offered_plaintext: Vec<u8> = vec![0x89, b'P', b'N', b'G', 9, 8, 7];
+        let offered_item_id = uuid::Uuid::new_v4().to_string();
+        let local_items = vec![LocalItem {
+            id: String::new(),
+            item_id: offered_item_id.clone(),
+            wall_time_ms: 11,
+            content_type: "image".to_string(),
+            plaintext: offered_plaintext.clone(),
+        }];
+
+        let result = sync_with_peer(
+            addr,
+            peer_fp,
+            session_key.to_vec(),
+            init_cert.cert_der.clone(),
+            init_cert.key_der.clone(),
+            local_items,
+        )
+        .expect("FFI sync_with_peer must succeed over loopback");
+
+        assert_eq!(
+            result.items_sent, 1,
+            "FFI must offer its one local image item (outbound symmetry)"
+        );
+        let got = result
+            .items
+            .iter()
+            .find(|i| i.plaintext == known_plaintext)
+            .expect("the peer's image must come back decrypted to its plaintext");
+        assert_eq!(
+            got.content_type, "image",
+            "received SyncedItem must preserve the image content type"
+        );
+        assert_eq!(got.item_id, known_item_id);
+
+        let peer_content_types = peer_thread.join().expect("peer thread join");
+        assert!(
+            peer_content_types.iter().any(|ct| ct == "image"),
+            "peer must have received the FFI initiator's offered image frame, got {peer_content_types:?}"
         );
     }
 
