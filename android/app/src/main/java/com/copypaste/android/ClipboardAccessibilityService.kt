@@ -6,6 +6,7 @@ import android.content.Context
 import android.view.accessibility.AccessibilityEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
@@ -28,7 +29,9 @@ import kotlinx.coroutines.launch
  */
 class ClipboardAccessibilityService : AccessibilityService() {
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    // SupervisorJob: one failing child coroutine does not cancel sibling capture
+    // coroutines — all clipboard capture paths remain active after any one failure.
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var settings: Settings
     private lateinit var repository: ClipboardRepository
     // Nullable: may remain null when sync-init fails; handleClip skips sync safely.

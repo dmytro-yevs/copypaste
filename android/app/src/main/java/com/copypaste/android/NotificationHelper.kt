@@ -1,11 +1,15 @@
 package com.copypaste.android
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 
 object NotificationHelper {
     private const val CHANNEL_SENSITIVE = "copypaste_sensitive"
@@ -46,6 +50,29 @@ object NotificationHelper {
             .setAutoCancel(true)
             .build()
 
-        NotificationManagerCompat.from(context).notify(id, notification)
+        // [P1] API 33+ (TIRAMISU) requires POST_NOTIFICATIONS permission at runtime.
+        // NotificationManagerCompat.notify() throws SecurityException if the permission
+        // was granted then revoked. Guard with both an areNotificationsEnabled() check
+        // (covers all API levels) and a belt-and-suspenders try/catch for the
+        // SecurityException path on API 33+ where revocation can race with notify().
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            Log.d(TAG, "notifySensitiveDetected: notifications disabled — skipping")
+            return
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                Log.d(TAG, "notifySensitiveDetected: POST_NOTIFICATIONS not granted — skipping")
+                return
+            }
+        }
+        try {
+            NotificationManagerCompat.from(context).notify(id, notification)
+        } catch (e: SecurityException) {
+            Log.w(TAG, "notifySensitiveDetected: notify() blocked by SecurityException — " +
+                "POST_NOTIFICATIONS was revoked concurrently: ${e.message}")
+        }
     }
+
+    private const val TAG = "NotificationHelper"
 }

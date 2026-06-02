@@ -26,6 +26,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
@@ -79,7 +80,9 @@ import java.util.Calendar
  */
 class ClipboardService : Service() {
 
-    private val scope = CoroutineScope(Dispatchers.IO)
+    // SupervisorJob: one failing child coroutine (e.g. a bad image decode) does
+    // not cancel sibling coroutines — all capture paths remain active.
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var settings: Settings
     private lateinit var repository: ClipboardRepository
     private lateinit var clipboardManager: ClipboardManager
@@ -482,6 +485,13 @@ class ClipboardService : Service() {
                 return
             }
 
+            // Private mode: mirror the text-path check in captureClip (~417).
+            // Images must also be suppressed in private mode (privacy parity).
+            if (settings.privateMode) {
+                Log.d(TAG, "Private mode enabled — dropping image clipboard change")
+                return
+            }
+
             // Decode at full resolution (inSampleSize=1 = no sub-sampling).
             val decodeOpts = BitmapFactory.Options().apply {
                 inSampleSize = 1
@@ -756,19 +766,31 @@ class ClipboardService : Service() {
         }
 
         /**
+         * Guards [bumpTodayCounter]'s read-modify-write against concurrent callers
+         * (ClipboardService + ClipboardAccessibilityService both call captureClip/
+         * captureImageClip on the IO dispatcher and can race on the same prefs file).
+         */
+        private val counterLock = Any()
+
+        /**
          * Bump today's capture counter. Rolls over at local midnight (uses
          * day-of-year as the bucket key so the rollover is visible the
          * morning after).
+         *
+         * Guarded by [counterLock] to prevent a lost-update between the read of
+         * KEY_TODAY_COUNT and the write of KEY_TODAY_COUNT + 1.
          */
         private fun bumpTodayCounter(context: Context) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val today = todayBucket()
-            val storedBucket = prefs.getInt(KEY_DAY_BUCKET, -1)
-            val current = if (storedBucket == today) prefs.getInt(KEY_TODAY_COUNT, 0) else 0
-            prefs.edit()
-                .putInt(KEY_DAY_BUCKET, today)
-                .putInt(KEY_TODAY_COUNT, current + 1)
-                .apply()
+            synchronized(counterLock) {
+                val today = todayBucket()
+                val storedBucket = prefs.getInt(KEY_DAY_BUCKET, -1)
+                val current = if (storedBucket == today) prefs.getInt(KEY_TODAY_COUNT, 0) else 0
+                prefs.edit()
+                    .putInt(KEY_DAY_BUCKET, today)
+                    .putInt(KEY_TODAY_COUNT, current + 1)
+                    .apply()
+            }
         }
 
         /**

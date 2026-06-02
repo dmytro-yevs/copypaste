@@ -13,7 +13,10 @@ import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
@@ -54,9 +57,10 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextField
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -88,6 +92,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
@@ -213,6 +224,14 @@ fun HistoryScreen(
 
     // ── Search / filter state ────────────────────────────────────────────────
     var searchQuery by rememberSaveable { mutableStateOf("") }
+    // HW-A8: icon-toggle search bar — expanded state + last-5 recent queries.
+    var searchExpanded by rememberSaveable { mutableStateOf(false) }
+    var recentSearches by rememberSaveable(
+        stateSaver = listSaver(
+            save    = { it.toList() },
+            restore = { it.toMutableList() },
+        )
+    ) { mutableStateOf(mutableListOf<String>()) }
 
     // ── Selection state (survives rotation) ─────────────────────────────────
     var selectionMode by rememberSaveable { mutableStateOf(false) }
@@ -223,8 +242,15 @@ fun HistoryScreen(
         )
     ) { mutableStateOf(setOf<String>()) }
 
-    var pendingConfirm by remember { mutableStateOf<ConfirmAction?>(null) }
-    var overflowExpanded by remember { mutableStateOf(false) }
+    // rememberSaveable so dialog/menu state survives rotation (fix P2).
+    // ConfirmAction is an enum — saved as its ordinal Int.
+    var pendingConfirm by rememberSaveable(
+        stateSaver = androidx.compose.runtime.saveable.Saver(
+            save    = { it?.ordinal },
+            restore = { ord -> ord?.let { ConfirmAction.entries[it] } },
+        )
+    ) { mutableStateOf<ConfirmAction?>(null) }
+    var overflowExpanded by rememberSaveable { mutableStateOf(false) }
 
     // ── Reorder mode (pinned items only) ────────────────────────────────────
     var reorderMode by rememberSaveable { mutableStateOf(false) }
@@ -355,25 +381,116 @@ fun HistoryScreen(
                         }
                     },
                     actions = {
-                        // §9 search filter — desktop "Filter…" bar parity
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            placeholder = {
-                                Text(
-                                    text = stringResource(R.string.history_filter_placeholder),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = IdeFaint,
+                        // HW-A8: animated icon-toggle search bar.
+                        // Collapsed → Search icon button. Expanded → full-width TextField
+                        // that slides in from the right, with a recent-5 suggestions dropdown.
+                        val searchFocusRequester = remember { FocusRequester() }
+                        val keyboardController = LocalSoftwareKeyboardController.current
+                        var searchFieldFocused by remember { mutableStateOf(false) }
+
+                        AnimatedVisibility(
+                            visible = searchExpanded,
+                            enter = expandHorizontally() + fadeIn(),
+                            exit = shrinkHorizontally() + fadeOut(),
+                        ) {
+                            Box {
+                                TextField(
+                                    value = searchQuery,
+                                    onValueChange = { searchQuery = it },
+                                    placeholder = {
+                                        Text(
+                                            text = stringResource(R.string.history_search_placeholder),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = IdeFaint,
+                                        )
+                                    },
+                                    singleLine = true,
+                                    colors = ideTextFieldColors(),
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = IdeText),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                    keyboardActions = KeyboardActions(onSearch = {
+                                        val q = searchQuery.trim()
+                                        if (q.isNotEmpty()) {
+                                            // Persist to recent-5, dedup, newest first.
+                                            val updated = (listOf(q) + recentSearches.filter { it != q })
+                                                .take(5)
+                                                .toMutableList()
+                                            recentSearches = updated
+                                        }
+                                        keyboardController?.hide()
+                                    }),
+                                    trailingIcon = {
+                                        IconButton(onClick = {
+                                            searchQuery = ""
+                                            searchExpanded = false
+                                            keyboardController?.hide()
+                                        }) {
+                                            Icon(
+                                                Icons.Filled.Close,
+                                                contentDescription = stringResource(R.string.cd_search_close),
+                                                tint = IdeDim,
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(searchFocusRequester)
+                                        .onFocusChanged { searchFieldFocused = it.isFocused },
                                 )
-                            },
-                            singleLine = true,
-                            colors = ideTextFieldColors(),
-                            modifier = Modifier
-                                .width(160.dp)
-                                .height(44.dp),
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = IdeText),
-                        )
-                        Spacer(Modifier.width(4.dp))
+                                // Recent searches dropdown — shown when field is focused and query is empty.
+                                DropdownMenu(
+                                    expanded = searchFieldFocused && searchQuery.isEmpty() && recentSearches.isNotEmpty(),
+                                    onDismissRequest = { /* keep open while focused */ },
+                                ) {
+                                    Text(
+                                        text = stringResource(R.string.history_recent_searches),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = IdeFaint,
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                                    )
+                                    recentSearches.forEach { recent ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(recent, color = IdeText,
+                                                    style = MaterialTheme.typography.bodyMedium)
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Filled.Search, null,
+                                                    tint = IdeDim, modifier = Modifier.size(14.dp))
+                                            },
+                                            onClick = {
+                                                searchQuery = recent
+                                                keyboardController?.hide()
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Search toggle icon — shown when search bar is collapsed.
+                        if (!searchExpanded) {
+                            IconButton(onClick = {
+                                searchExpanded = true
+                                // Request focus after the AnimatedVisibility frame completes.
+                            }) {
+                                Icon(
+                                    Icons.Filled.Search,
+                                    contentDescription = stringResource(R.string.cd_search_open),
+                                    tint = IdeDim,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+
+                        // Request keyboard focus once search bar becomes visible.
+                        LaunchedEffect(searchExpanded) {
+                            if (searchExpanded) {
+                                searchFocusRequester.requestFocus()
+                            }
+                        }
+
                         IconButton(onClick = { viewModel.loadItems() }) {
                             Icon(
                                 Icons.Filled.Refresh,
@@ -770,9 +887,11 @@ private fun HistoryList(
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
-    val maskSensitive = remember { settings.maskSensitiveContent }
-    val imageMaxHeightDp = remember { settings.imageMaxHeight }
-    val previewDelayMs = remember { settings.previewDelay }
+    // Read live on every recomposition so changes in SettingsActivity are reflected
+    // immediately without restarting the screen (fix P2: stale remember wrappers removed).
+    val maskSensitive = settings.maskSensitiveContent
+    val imageMaxHeightDp = settings.imageMaxHeight
+    val previewDelayMs = settings.previewDelay
     val repository = remember { ClipboardRepository(ctx) }
     val scope = rememberCoroutineScope()
 
@@ -884,7 +1003,10 @@ private fun HistoryRow(
     val detectedSensitive = item.isSensitive
 
     var expanded by remember(item.id) { mutableStateOf(false) }
-    LaunchedEffect(expanded) {
+    // Key on (item.id, expanded) so the coroutine is cancelled and restarted whenever
+    // the item is rebound to a different id, preventing stale `expanded = false` writes
+    // from a previous item's timer leaking into the new item (fix P1).
+    LaunchedEffect(item.id, expanded) {
         if (expanded) {
             delay(previewDelayMs)
             expanded = false
@@ -913,7 +1035,11 @@ private fun HistoryRow(
             withContext(Dispatchers.Default) {
                 runCatching {
                     BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                }.getOrNull()
+                }.getOrElse { t ->
+                    // Fix P2: log decode failures so they are diagnosable via adb/log export.
+                    AppLogger.w("HistoryRow", "image decode failed for item ${item.id}", t)
+                    null
+                }
             }
         }
     }
@@ -1130,7 +1256,11 @@ private fun HistoryRow(
                                             BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
                                                 ?.asImageBitmap()
                                         }
-                                }.getOrNull()
+                                }.getOrElse { t ->
+                                    // Fix P2: log icon load failures so they are diagnosable.
+                                    AppLogger.w("HistoryRow", "app icon load failed for item ${item.id} pkg=$pkg", t)
+                                    null
+                                }
                             }
                         }
                     }

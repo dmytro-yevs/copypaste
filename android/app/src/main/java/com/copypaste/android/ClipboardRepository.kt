@@ -46,7 +46,7 @@ class ClipboardRepository(context: Context) {
     private val appContext: Context = context.applicationContext
 
     private val prefs: SharedPreferences =
-        context.getSharedPreferences("copypaste_items", Context.MODE_PRIVATE)
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /** Read fresh each store so a UI change to the cap takes effect immediately. */
     private val settings = Settings(context)
@@ -165,6 +165,8 @@ class ClipboardRepository(context: Context) {
             val editor = prefs.edit()
                 .remove("item_$id")
                 .remove("item_img_$id")
+                // Remove the reverse-lookup key to prevent orphan LWW ghost on re-sync.
+                .remove("item_id_ref_$id")
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
             if (wasPinned) {
                 editor.putString(KEY_PINNED_IDS, pinnedList.joinToString(","))
@@ -205,6 +207,8 @@ class ClipboardRepository(context: Context) {
             for (id in toDelete) {
                 editor.remove("item_$id")
                 editor.remove("item_img_$id")
+                // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
+                editor.remove("item_id_ref_$id")
             }
             if (pinnedChanged) {
                 editor.putString(KEY_PINNED_IDS, pinnedList.joinToString(","))
@@ -234,6 +238,8 @@ class ClipboardRepository(context: Context) {
                 if (id !in pinnedSet) {
                     editor.remove("item_$id")
                     editor.remove("item_img_$id")
+                    // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
+                    editor.remove("item_id_ref_$id")
                 }
             }
             // Retain only pinned ids in the index; clear the synced-source-id set
@@ -268,6 +274,8 @@ class ClipboardRepository(context: Context) {
                 if (id !in pinnedSet) {
                     editor.remove("item_$id")
                     editor.remove("item_img_$id")
+                    // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
+                    editor.remove("item_id_ref_$id")
                 }
             }
             // Retain only pinned ids in the index; clear source-id seen-set.
@@ -516,6 +524,14 @@ class ClipboardRepository(context: Context) {
         val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs)
 
         synchronized(idsWriteLock) {
+            // TOCTOU guard: re-check inside the lock. A concurrent caller (FgsSyncLoop
+            // + SupabasePollWorker both polling) may have raced through the new-item
+            // path and already inserted this itemId between our first lookup (above,
+            // which returned false) and now. If so, abort to avoid a duplicate row.
+            if (prefs.getString("item_id_ref_$storageId", null) != null) {
+                Log.d(TAG, "storeItemWithLww: duplicate detected under lock for item_id=$itemId — aborting")
+                return@withContext false
+            }
             val ids = storedIds().toMutableList().also { it.add(storageId) }
             prefs.edit()
                 .putString("item_$storageId", encoded)
@@ -604,6 +620,8 @@ class ClipboardRepository(context: Context) {
                 totalBytes -= sz
                 editor.remove("item_$evictId")
                 editor.remove("item_img_$evictId")
+                // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
+                editor.remove("item_id_ref_$evictId")
                 didEvict = true
                 evictedCount++
                 Log.d(TAG, "pruneToLimits: evicted $evictId (blob ${sz}B, totalNow=${totalBytes}B)")
@@ -744,6 +762,9 @@ class ClipboardRepository(context: Context) {
     companion object {
         private const val TAG = "ClipboardRepository"
 
+        /** SharedPreferences file name — single source of truth, not scattered as string literals. */
+        const val PREFS_NAME = "copypaste_items"
+
         fun normalizeContentTypeForSync(stored: String): String =
             if (stored == "text" || stored.startsWith("text/")) "text" else stored
 
@@ -869,6 +890,13 @@ class ClipboardRepository(context: Context) {
         private const val GCM_TAG_BITS = 128
         private const val GCM_NONCE_BYTES = 12
 
+        /**
+         * Process-wide SecureRandom singleton. SecureRandom is thread-safe and
+         * expensive to instantiate (seeds from /dev/urandom on Android). Promoting
+         * it here avoids re-instantiation on every localAesEncrypt call.
+         */
+        private val secureRandom = java.security.SecureRandom()
+
         fun previewFromPlaintext(text: String): String {
             val collapsed = text.replace(Regex("\\s+"), " ").trim()
             if (collapsed.isEmpty()) return ""
@@ -891,7 +919,7 @@ class ClipboardRepository(context: Context) {
 
         fun localAesEncrypt(plaintext: ByteArray, key: ByteArray): EncryptedBlob {
             val nonce = ByteArray(GCM_NONCE_BYTES).also {
-                java.security.SecureRandom().nextBytes(it)
+                secureRandom.nextBytes(it)
             }
             val cipher = Cipher.getInstance(AES_TRANSFORMATION)
             cipher.init(

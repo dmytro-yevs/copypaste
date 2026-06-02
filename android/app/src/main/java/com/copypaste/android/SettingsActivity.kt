@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -152,7 +153,10 @@ fun SettingsScreen(
 
     // ── Diagnostics (General tab) ──
     var logcatEnabled by remember { mutableStateOf(settings.logcatCaptureEnabled) }
-    var logcatStatus by remember { mutableStateOf(LogcatCaptureService.status(ctx, settings)) }
+    // Read live on every recomposition so the status refreshes automatically when the user
+    // grants the adb READ_LOGS permission externally and returns to this screen.
+    // LogcatCaptureService.status() is a cheap synchronous check (no I/O), so this is safe.
+    val logcatStatus = LogcatCaptureService.status(ctx, settings)
 
     // ── HW-A10: dirty tracking — snapshot of saved values for discard check ──
     // Captured once on composition; reset after each successful Save.
@@ -247,8 +251,8 @@ fun SettingsScreen(
         showDiscardDialog = true
     }
 
-    // ── Tab selection ──
-    var selectedTab by remember { mutableStateOf(TAB_GENERAL) }
+    // ── Tab selection — rememberSaveable so the selected tab survives rotation ──
+    var selectedTab by rememberSaveable { mutableStateOf(TAB_GENERAL) }
     val tabs = listOf("General", "Display", "Storage", "Sync", "Notifications")
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -283,10 +287,10 @@ fun SettingsScreen(
             settings.notifyOnCopy = notifyOnCopy
             settings.soundOnCopy = soundOnCopy
             settings.logcatCaptureEnabled = logcatEnabled
-            // Side-effects that must happen immediately after persisting
+            // Side-effects that must happen immediately after persisting.
+            // logcatStatus is re-read on next recomposition automatically — no assignment needed.
             SupabasePollWorker.schedule(ctx, enabled = syncBackend == SyncBackend.SUPABASE)
             LogcatCaptureService.syncState(ctx, settings)
-            logcatStatus = LogcatCaptureService.status(ctx, settings)
             // HW-A10: reset dirty snapshot so back-press no longer shows the dialog
             savedSnapshot = SettingsSnapshot(
                 captureEnabled = captureEnabled,

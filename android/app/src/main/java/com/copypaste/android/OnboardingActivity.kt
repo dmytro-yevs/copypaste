@@ -300,7 +300,9 @@ fun OnboardingScreen(
 
     val a11yEnabled = ClipboardAccessibilityService.isEnabled(ctx)
 
-    val batteryExempt = remember(ctx) {
+    // Not memoized: must re-read on every recomposition so it reflects changes
+    // made in the system battery-optimisation screen (mirrors PermissionsSettingsActivity:232).
+    val batteryExempt = run {
         val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE) as PowerManager
         pm.isIgnoringBatteryOptimizations(ctx.packageName)
     }
@@ -357,6 +359,12 @@ fun OnboardingScreen(
                 buttonLabel = if (a11yEnabled) "Enabled" else "Enable in Settings",
                 onClick = onOpenAccessibility,
                 required = true,
+            )
+            // HW-A11: tap-to-copy ADB command for power users / testers.
+            AdbCommandBlock(
+                label = stringResource(R.string.a11y_adb_label),
+                command = stringResource(R.string.a11y_adb_command),
+                toastText = stringResource(R.string.a11y_adb_copied),
             )
 
             // 3. Battery Optimization

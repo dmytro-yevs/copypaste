@@ -128,15 +128,24 @@ class RelayClient(private val baseUrl: String) {
         token?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
         conn.connectTimeout = 10_000
         conn.readTimeout = 10_000
-        OutputStreamWriter(conn.outputStream).use { it.write(body) }
+        // Explicit Charsets.UTF_8: OutputStreamWriter(stream) uses the platform
+        // default charset which varies by device/locale — always write UTF-8.
+        OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body) }
         return readResponse(conn)
     }
 
     private fun readResponse(conn: HttpURLConnection): HttpResponse {
-        val code = conn.responseCode
-        val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-        val body = BufferedReader(InputStreamReader(stream)).use { it.readText() }
-        return HttpResponse(code, body)
+        return try {
+            val code = conn.responseCode
+            // errorStream can be null (e.g. no response body on some error codes or
+            // when the connection was dropped). Fall back to inputStream to avoid NPE.
+            val stream = if (code in 200..299) conn.inputStream
+                         else (conn.errorStream ?: conn.inputStream)
+            val body = BufferedReader(InputStreamReader(stream, Charsets.UTF_8)).use { it.readText() }
+            HttpResponse(code, body)
+        } finally {
+            conn.disconnect()
+        }
     }
 
     companion object {

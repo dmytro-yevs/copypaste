@@ -195,16 +195,11 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 onBack = onBack,
                 backContentDescription = "Back",
                 actions = {
-                    // Scroll to top / bottom toggle
+                    // Scroll to top / bottom toggle.
+                    // Only mutate atBottom here; the LaunchedEffect(atBottom, displayLines.size)
+                    // below is the single scroll driver — two concurrent scroll paths would race.
                     IconButton(onClick = {
                         atBottom = !atBottom
-                        scope.launch {
-                            if (!atBottom && displayLines.isNotEmpty()) {
-                                listState.scrollToItem(0)
-                            } else if (atBottom && displayLines.isNotEmpty()) {
-                                listState.scrollToItem(displayLines.size - 1)
-                            }
-                        }
                     }) {
                         Icon(
                             imageVector = if (atBottom) Icons.Default.KeyboardArrowUp
@@ -338,12 +333,13 @@ fun LogViewerScreen(onBack: () -> Unit) {
 private fun LogLine(line: String) {
     val color = when {
         // Level codes come after the timestamp: "... E/Tag:" or "... W/Tag:"
-        Regex("""\d \w/""").containsMatchIn(line) -> {
+        // Uses file-level precompiled regexes to avoid allocation on every recomposition.
+        RE_LEVEL_ANY.containsMatchIn(line) -> {
             when {
-                Regex("""\d E/""").containsMatchIn(line) -> IdeDanger
-                Regex("""\d W/""").containsMatchIn(line) -> IdeWarning
-                Regex("""\d I/""").containsMatchIn(line) -> IdeText
-                Regex("""\d D/""").containsMatchIn(line) -> IdeDim
+                RE_LEVEL_E.containsMatchIn(line) -> IdeDanger
+                RE_LEVEL_W.containsMatchIn(line) -> IdeWarning
+                RE_LEVEL_I.containsMatchIn(line) -> IdeText
+                RE_LEVEL_D.containsMatchIn(line) -> IdeDim
                 else -> IdeDim
             }
         }
@@ -369,6 +365,13 @@ private fun LogLine(line: String) {
             .padding(horizontal = 8.dp, vertical = 1.dp),
     )
 }
+
+// ── Pre-compiled log-level regexes (hoisted to avoid per-line-per-recomposition allocation) ──
+private val RE_LEVEL_ANY = Regex("""\d \w/""")
+private val RE_LEVEL_E   = Regex("""\d E/""")
+private val RE_LEVEL_W   = Regex("""\d W/""")
+private val RE_LEVEL_I   = Regex("""\d I/""")
+private val RE_LEVEL_D   = Regex("""\d D/""")
 
 // ── I/O helpers (run on Dispatchers.IO) ──────────────────────────────────────
 

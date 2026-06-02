@@ -5,12 +5,12 @@
 
     <!-- Navigation -->
     <string name="nav_history">History</string>
-    <string name="nav_pair">Pair Device</string>
+    <string name="nav_pair">Pair</string>
     <string name="nav_settings">Settings</string>
 
     <!-- Screen titles -->
     <string name="title_history">History</string>
-    <string name="title_pair">Pair Device</string>
+    <string name="title_pair">Pair</string>
     <string name="title_settings">Settings</string>
 
     <!-- History screen — §9 empty states + search filter -->
@@ -19,11 +19,13 @@
     <string name="empty_search_title">No results for \"%1$s\"</string>
     <string name="empty_search_subtitle">Try a different search term.</string>
     <string name="history_filter_placeholder">Filter…</string>
+    <string name="history_search_placeholder">Search history…</string>
+    <string name="history_recent_searches">Recent searches</string>
+    <string name="cd_search_open">Open search</string>
+    <string name="cd_search_close">Clear and close search</string>
 
     <!-- Pair screen -->
     <string name="pair_instructions">Scan the QR code with the other device, or scan its QR here.</string>
-    <string name="btn_pair_start">Start Pairing</string>
-    <string name="btn_pair_regenerate">Regenerate Token</string>
     <string name="btn_scan_qr">Scan a device\'s QR</string>
     <string name="pair_token_expires_in_seconds">Expires in %1$d s</string>
     <string name="pair_token_expired">Token expired — request a new one.</string>
@@ -55,7 +57,7 @@
     <string name="setting_image_max_height_label">Image max height (dp)</string>
     <string name="setting_image_max_height_hint">1–200 dp (default 40)</string>
     <string name="setting_preview_delay_label">Action-row auto-close delay (ms)</string>
-    <string name="setting_preview_delay_hint">200–100000 ms (default 1500)</string>
+    <string name="setting_preview_delay_hint">200–30000 ms (default 1500)</string>
 
     <!-- Settings — Storage / Limits (no item-count cap — size only) -->
     <string name="setting_max_text_size_label">Max text item size (MB)</string>
@@ -98,6 +100,11 @@
     <!-- Permissions screen -->
     <string name="title_permissions">Permissions</string>
     <string name="permissions_intro">Review the status of each permission CopyPaste uses. Tap a button to re-open its request or settings screen at any time.</string>
+
+    <!-- HW-A11: ADB accessibility-enable command (shown below the Accessibility card) -->
+    <string name="a11y_adb_label">Or enable via ADB:</string>
+    <string name="a11y_adb_command">adb shell settings put secure enabled_accessibility_services com.copypaste.android/.ClipboardAccessibilityService</string>
+    <string name="a11y_adb_copied">Command copied</string>
 
     <!-- Background Capture Setup screen -->
     <string name="title_bg_capture_setup">Background Capture Setup</string>

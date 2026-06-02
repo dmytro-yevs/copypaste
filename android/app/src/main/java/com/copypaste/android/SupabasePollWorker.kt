@@ -95,17 +95,45 @@ class SupabasePollWorker(
                     // Decrypt the row; skip if decryption fails (wrong key / tampered).
                     val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
 
-                    val text = item.plaintext.toString(Charsets.UTF_8)
-                    if (text.isBlank()) continue
+                    val isImage = item.contentType == "image" ||
+                        item.contentType.startsWith("image/")
 
-                    // Task 5: LWW replace — if item_id already exists locally, replace
-                    // only when the incoming lamport_ts is strictly newer.
-                    val stored = repository.storeItemWithLww(
-                        plaintext = text,
-                        key = settings.encryptionKey,
-                        itemId = item.itemId,
-                        incomingLamportTs = item.lamportTs,
-                    )
+                    val stored = if (isImage) {
+                        // Image row: store a placeholder entry then persist raw bytes.
+                        // Mirror the FgsSyncLoop.poll() image path so image rows are
+                        // not silently corrupted by UTF-8 decoding of binary data.
+                        if (item.plaintext.isEmpty()) {
+                            false
+                        } else {
+                            val storedId = repository.storeItem(
+                                plaintext = "[image]",
+                                key = settings.encryptionKey,
+                                overrideId = item.itemId,
+                                contentType = item.contentType,
+                                lamportTs = item.lamportTs,
+                            )
+                            if (storedId.isNotEmpty()) {
+                                repository.storeImageBytes(storedId, item.plaintext)
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    } else {
+                        val text = item.plaintext.toString(Charsets.UTF_8)
+                        if (text.isBlank()) {
+                            false
+                        } else {
+                            // Task 5: LWW replace — if item_id already exists locally, replace
+                            // only when the incoming lamport_ts is strictly newer.
+                            repository.storeItemWithLww(
+                                plaintext = text,
+                                key = settings.encryptionKey,
+                                itemId = item.itemId,
+                                incomingLamportTs = item.lamportTs,
+                            )
+                        }
+                    }
                     if (stored) newCount++
                 }
 

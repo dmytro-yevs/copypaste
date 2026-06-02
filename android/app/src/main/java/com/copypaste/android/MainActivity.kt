@@ -109,8 +109,25 @@ class MainActivity : ComponentActivity() {
 
         settings = Settings(this)
         repository = ClipboardRepository(this)
-        val relayClient = RelayClient(settings.relayUrl)
-        syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
+        // [P2] Wrap sync setup in try/catch so a constructor failure does not
+        // prevent the clipboard listener from registering. Falls back to a stub
+        // RelayClient pointing at an empty base URL; the relay cloud path is already
+        // disabled (SyncBackend.RELAY is a no-op) so the listener still works.
+        try {
+            val relayClient = RelayClient(settings.relayUrl)
+            // [P1] The relay bearer token (used by RelayClient.uploadItem) is obtained
+            // from RelayClient.registerDevice() at pairing time and was never persisted
+            // to Settings — there is no relayToken field on Settings. The SyncBackend.RELAY
+            // cloud upload path is DISABLED (ClipboardService.notifySyncManager logs a
+            // warning and returns without calling uploadItem), so token="" causes no 401s
+            // in practice. If the relay path is ever re-enabled, store the Device.token
+            // returned by registerDevice() in Settings and pass it here.
+            syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
+        } catch (e: Exception) {
+            Log.w(TAG, "SyncManager init failed — proceeding without relay sync: ${e.javaClass.simpleName} ${e.message}")
+            val fallback = RelayClient("")
+            syncManager = SyncManager(fallback, settings.deviceId, token = "", settings = settings)
+        }
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager.addPrimaryClipChangedListener(clipListener)
 

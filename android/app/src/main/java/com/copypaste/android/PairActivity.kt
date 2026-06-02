@@ -104,6 +104,9 @@ private const val QR_PLATE_PADDING_DP = 12
  */
 private const val QR_SLOT_SIZE_DP = QR_IMAGE_SIZE_DP + QR_PLATE_PADDING_DP * 2
 
+/** Pixel resolution of the QR bitmap passed to ZXing. Single source of truth. */
+private const val QR_BITMAP_PX = 512
+
 /**
  * Pair Device screen.
  *
@@ -123,17 +126,24 @@ class PairActivity : ComponentActivity() {
     // onCreate (cold start via deep-link) and onNewIntent (singleTop re-launch).
     private val deepLinkPayload = mutableStateOf<String?>(null)
 
+    // Set to a non-null message when a cppair:// URI is received but the `p`
+    // param fails the CPPAIR1. sanity check — gives the user visible feedback
+    // instead of silently ignoring the malformed link.
+    private val deepLinkError = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // Extract payload from a cold-start deep-link intent, if present.
-        extractCppairPayload(intent)?.let { deepLinkPayload.value = it }
+        handleDeepLinkIntent(intent)
         setContent {
             CopyPasteTheme {
                 PairScreen(
                     onBack = { finish() },
                     incomingDeepLinkPayload = deepLinkPayload.value,
                     onDeepLinkConsumed = { deepLinkPayload.value = null },
+                    incomingDeepLinkError = deepLinkError.value,
+                    onDeepLinkErrorConsumed = { deepLinkError.value = null },
                 )
             }
         }
@@ -143,20 +153,24 @@ class PairActivity : ComponentActivity() {
     // to the already-running activity (e.g. user scans another QR via Lens).
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        extractCppairPayload(intent)?.let { deepLinkPayload.value = it }
+        handleDeepLinkIntent(intent)
     }
 
     /**
-     * Extract the raw CPPAIR1 pairing payload from a `cppair://pair?p=…` URI.
-     * Returns null for any other intent (normal launch, back-stack restore, etc.).
+     * Route an incoming intent: valid CPPAIR1 payload → deepLinkPayload;
+     * cppair:// URI with unrecognised payload → deepLinkError for user feedback.
      */
-    private fun extractCppairPayload(intent: Intent?): String? {
-        if (intent?.action != Intent.ACTION_VIEW) return null
-        val uri: Uri = intent.data ?: return null
-        if (uri.scheme != "cppair" || uri.host != "pair") return null
-        val p = uri.getQueryParameter("p") ?: return null
-        // Sanity-check: only accept payloads that look like CPPAIR1 tokens.
-        return if (p.startsWith("CPPAIR1.")) p else null
+    private fun handleDeepLinkIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val uri: Uri = intent.data ?: return
+        if (uri.scheme != "cppair" || uri.host != "pair") return
+        val p = uri.getQueryParameter("p") ?: return
+        if (p.startsWith("CPPAIR1.")) {
+            deepLinkPayload.value = p
+        } else {
+            // Payload present but not a recognised CPPAIR1 token — surface to user.
+            deepLinkError.value = "Invalid pairing link"
+        }
     }
 }
 
@@ -188,6 +202,8 @@ fun PairScreen(
     onBack: () -> Unit = {},
     incomingDeepLinkPayload: String? = null,
     onDeepLinkConsumed: () -> Unit = {},
+    incomingDeepLinkError: String? = null,
+    onDeepLinkErrorConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
@@ -225,7 +241,7 @@ fun PairScreen(
                     startPairing(settings.deviceId, android.os.Build.MODEL ?: "Android")
                 }
                 val bmp = withContext(Dispatchers.Default) {
-                    encodeQrBitmap(result.qr, 512)
+                    encodeQrBitmap(result.qr, QR_BITMAP_PX)
                 }
                 qr = result
                 qrBitmap = bmp
@@ -413,32 +429,11 @@ fun PairScreen(
                 startPairing(settings.deviceId, android.os.Build.MODEL ?: "Android")
             }
             val bmp = withContext(Dispatchers.Default) {
-                encodeQrBitmap(result.qr, 512)
+                encodeQrBitmap(result.qr, QR_BITMAP_PX)
             }
             qr = result
             qrBitmap = bmp
             // Initial load: keep blurred so user taps to reveal.
-        } catch (e: Exception) {
-            errorMessage = e.message ?: e.javaClass.simpleName
-        } finally {
-            loading = false
-        }
-    }
-
-    // AND2: Auto-start pairing when the screen opens so the QR appears
-    // immediately without requiring the user to tap "Start Pairing".
-    LaunchedEffect(Unit) {
-        if (qr != null || loading) return@LaunchedEffect
-        loading = true
-        try {
-            val result = withContext(Dispatchers.IO) {
-                startPairing(settings.deviceId, android.os.Build.MODEL ?: "Android")
-            }
-            val bmp = withContext(Dispatchers.Default) {
-                encodeQrBitmap(result.qr, 512)
-            }
-            qr = result
-            qrBitmap = bmp
         } catch (e: Exception) {
             errorMessage = e.message ?: e.javaClass.simpleName
         } finally {
@@ -462,6 +457,17 @@ fun PairScreen(
         } finally {
             onDeepLinkConsumed()
         }
+    }
+
+    // Surface a malformed deep-link (cppair:// with unrecognised payload) as a
+    // snackbar so the user gets explicit feedback instead of nothing happening.
+    LaunchedEffect(incomingDeepLinkError) {
+        val errMsg = incomingDeepLinkError ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(
+            message = errMsg,
+            actionLabel = dismissLabel,
+        )
+        onDeepLinkErrorConsumed()
     }
 
     LaunchedEffect(errorMessage) {
@@ -542,6 +548,13 @@ fun PairScreen(
                                     modifier = Modifier
                                         .size(QR_SLOT_SIZE_DP.dp)
                                         .clip(RoundedCornerShape(12.dp))
+                                        // Blur applied after clip so the rounded corners
+                                        // uniformly contain the blur — QR edges near the
+                                        // padding are fully obscured, not just the image.
+                                        .then(
+                                            if (qrBlurred) Modifier.blur(16.dp)
+                                            else Modifier
+                                        )
                                         .clickable {
                                             if (qrBlurred) {
                                                 // First tap: reveal the QR.
@@ -553,16 +566,12 @@ fun PairScreen(
                                         },
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    // White plate with QR image — blurred when unrevealed.
+                                    // White plate with QR image.
                                     Box(
                                         modifier = Modifier
                                             .size(QR_SLOT_SIZE_DP.dp)
                                             .background(androidx.compose.ui.graphics.Color.White)
-                                            .padding(QR_PLATE_PADDING_DP.dp)
-                                            .then(
-                                                if (qrBlurred) Modifier.blur(16.dp)
-                                                else Modifier
-                                            ),
+                                            .padding(QR_PLATE_PADDING_DP.dp),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Image(

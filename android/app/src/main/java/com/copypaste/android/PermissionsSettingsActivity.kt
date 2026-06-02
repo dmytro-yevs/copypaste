@@ -2,6 +2,9 @@ package com.copypaste.android
 
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -13,6 +16,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.CopyPasteCard
@@ -287,6 +292,12 @@ fun PermissionsScreen(
                 onClick = onOpenAccessibility,
                 required = true,
             )
+            // HW-A11: tap-to-copy ADB command for power users / testers.
+            AdbCommandBlock(
+                label = stringResource(R.string.a11y_adb_label),
+                command = stringResource(R.string.a11y_adb_command),
+                toastText = stringResource(R.string.a11y_adb_copied),
+            )
 
             // 3. Battery Optimization exemption
             PermissionStatusCard(
@@ -339,6 +350,49 @@ fun PermissionsScreen(
                 infoOnly = true,
             )
         }
+    }
+}
+
+/**
+ * A small monospace code block displaying [command] with a tap-to-copy
+ * interaction. On tap it writes [command] to the system clipboard and shows
+ * a short [android.widget.Toast] with [toastText].
+ *
+ * Used below the Accessibility card so power-users / testers can copy the
+ * exact `adb shell settings put secure enabled_accessibility_services …`
+ * command without having to look it up (HW-A11).
+ */
+@Composable
+internal fun AdbCommandBlock(
+    label: String,
+    command: String,
+    toastText: String,
+) {
+    val ctx = LocalContext.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = IdeDim,
+        )
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = command,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            color = IdeText,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("adb_a11y_command", command))
+                    android.widget.Toast.makeText(ctx, toastText, android.widget.Toast.LENGTH_SHORT).show()
+                }
+                .padding(vertical = 4.dp),
+        )
     }
 }
 

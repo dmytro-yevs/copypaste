@@ -329,6 +329,10 @@ class FgsSyncLoop(
      * note in PairActivity.runPairAndSync).
      */
     private suspend fun dialPairedPeer() = withContext(Dispatchers.IO) {
+        // Gate on both syncEnabled and p2pSyncEnabled so the user's toggle is honoured.
+        // Without this guard P2P dials fire even when the user disabled P2P (HW-A9 inert).
+        if (!settings.syncEnabled || !settings.p2pSyncEnabled) return@withContext
+
         val peerAddr = settings.pairedPeerSyncAddr
         val peerFingerprint = settings.pairedPeerFingerprint
         val sessionKey = settings.pairedPeerSessionKey
@@ -359,6 +363,11 @@ class FgsSyncLoop(
                     ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
                     Charsets.UTF_8,
                 )
+                // Advance the local Lamport clock to stay causally after every
+                // received item — mirrors the SyncManager.kt:440 Supabase path.
+                // Without this the local clock lags behind the peer's, making
+                // future local pushes appear "older" and breaking LWW ordering.
+                settings.lamportClock.observe(item.wallTimeMs)
                 // Persist under the peer's STABLE item_id (overrideId): dedups a
                 // re-dial AND lets a later re-sync of this clip reuse the same
                 // cross-device id instead of minting a fresh local UUID.
