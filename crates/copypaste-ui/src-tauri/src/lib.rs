@@ -9,7 +9,7 @@ mod ipc;
 mod event_tap;
 
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Listener, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 const DEFAULT_POPUP_SHORTCUT: &str = "CmdOrCtrl+Shift+V";
 /// Config filename stored in the Tauri app-config directory.
@@ -253,6 +253,36 @@ pub fn run() {
             // background thread that polls until the daemon responds, then
             // re-syncs the CheckMenuItem to the daemon's true value.
             spawn_tray_private_mode_resync(app.handle().clone());
+
+            // M4: Push path — refresh the tray CheckMenuItem whenever private
+            // mode is toggled anywhere (Settings window, or the tray itself
+            // re-emitting after its own toggle). The Settings frontend emits
+            // `private-mode-changed` with the daemon-confirmed bool as payload.
+            {
+                let listen_handle = app.handle().clone();
+                app.listen("private-mode-changed", move |event| {
+                    // Payload is a JSON-encoded bool (e.g. "true").
+                    let Ok(new_value) = serde_json::from_str::<bool>(event.payload()) else {
+                        tracing::warn!(
+                            "private-mode-changed: unparseable payload {:?}",
+                            event.payload()
+                        );
+                        return;
+                    };
+                    // Reuse the exact CheckMenuItem update pattern from the
+                    // startup re-sync handler (spawn_tray_private_mode_resync).
+                    if let Some(state) = listen_handle.try_state::<PrivateModeMenuItem>() {
+                        if let Ok(guard) = state.0.lock() {
+                            if let Some(ref item) = *guard {
+                                let current = item.is_checked().unwrap_or(!new_value);
+                                if current != new_value {
+                                    let _ = item.set_checked(new_value);
+                                }
+                            }
+                        }
+                    }
+                });
+            }
 
             // Recent-resync: the tray Recent submenu was built at startup before
             // the daemon was ready, so it likely shows a placeholder.  Spawn a
@@ -1281,12 +1311,22 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                         "set_private_mode",
                         serde_json::json!({ "enabled": new_state }),
                     );
-                    if let Err(e) = result {
-                        // V-21-B: IPC failed — the daemon did not change state.
-                        // Revert the checkmark so the tray reflects daemon truth
-                        // rather than staying in the (incorrect) toggled position.
-                        tracing::warn!("set_private_mode IPC error (reverting tray): {e}");
-                        let _ = private_mode_clone.set_checked(!new_state);
+                    match result {
+                        Ok(_) => {
+                            // M4: Broadcast the confirmed toggle so the Settings
+                            // window (and any other listener) converges on the
+                            // same value, regardless of where the toggle began.
+                            let _ = app.emit("private-mode-changed", new_state);
+                        }
+                        Err(e) => {
+                            // V-21-B: IPC failed — the daemon did not change state.
+                            // Revert the checkmark so the tray reflects daemon truth
+                            // rather than staying in the (incorrect) toggled position.
+                            tracing::warn!("set_private_mode IPC error (reverting tray): {e}");
+                            let _ = private_mode_clone.set_checked(!new_state);
+                            // Broadcast the reverted (daemon-truth) value too.
+                            let _ = app.emit("private-mode-changed", !new_state);
+                        }
                     }
                 }
                 other if other.starts_with("recent:") && other != "recent:none" => {
