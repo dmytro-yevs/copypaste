@@ -519,11 +519,12 @@ fun PairScreen(
             )
 
             CopyPasteCard {
-                Box(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(28.dp),
-                    contentAlignment = Alignment.Center
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     // Reserve a fixed-size slot for the QR area. Every state
                     // (loading / QR present / placeholder) renders into this same
@@ -609,6 +610,32 @@ fun PairScreen(
                                     contentDescription = null,
                                     tint = IdeDim,
                                     modifier = Modifier.size(96.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // Countdown sits INSIDE the grey QR card, directly under the
+                    // code, so the expiry is read together with the QR.
+                    if (qr != null) {
+                        when {
+                            expired -> {
+                                Text(
+                                    text = stringResource(R.string.pair_token_expired),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = IdeDanger
+                                )
+                            }
+                            else -> {
+                                // Only the countdown timer — no redundant static note (HW-A5).
+                                val urgent = remainingSeconds <= PAIR_TOKEN_URGENT_THRESHOLD_SECONDS
+                                Text(
+                                    text = stringResource(
+                                        R.string.pair_token_expires_in_seconds,
+                                        remainingSeconds
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (urgent) IdeDanger else IdeDim
                                 )
                             }
                         }
@@ -704,30 +731,6 @@ fun PairScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = IdeAccent
                 )
-            }
-
-            if (qr != null) {
-                when {
-                    expired -> {
-                        Text(
-                            text = stringResource(R.string.pair_token_expired),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = IdeDanger
-                        )
-                    }
-                    else -> {
-                        // Only the countdown timer — no redundant static note (HW-A5).
-                        val urgent = remainingSeconds <= PAIR_TOKEN_URGENT_THRESHOLD_SECONDS
-                        Text(
-                            text = stringResource(
-                                R.string.pair_token_expires_in_seconds,
-                                remainingSeconds
-                            ),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (urgent) IdeDanger else IdeDim
-                        )
-                    }
-                }
             }
         }
     }

@@ -582,6 +582,16 @@ private fun GeneralTab(
             }
         }
         HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+        // ── ABOUT (last General entry) ─────────────────────────────────────
+        SettingsNavRow(
+            title = stringResource(R.string.title_about),
+            subtitle = stringResource(R.string.about_tagline),
+            onClick = {
+                ctx.startActivity(Intent(ctx, AboutActivity::class.java))
+            }
+        )
+        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
     }
 }
 
