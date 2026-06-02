@@ -164,7 +164,11 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
     #   3) If no diff → already up to date, exit 0.
     #   4) Commit + push. Retry up to 3 times on push race.
     git fetch origin main
-    git checkout -B main origin/main
+    # -f: the cask was rewritten in-place above while on the detached tag HEAD,
+    # so the working tree differs from origin/main and a plain checkout aborts
+    # ("local changes would be overwritten"). The new content is preserved in
+    # $NEW_CASK_CONTENT and re-applied below, so discarding the edit here is safe.
+    git checkout -f -B main origin/main
 
     printf '%s\n' "$NEW_CASK_CONTENT" > "$CASK"
     git add "$CASK"
