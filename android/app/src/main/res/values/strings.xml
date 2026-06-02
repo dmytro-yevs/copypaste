@@ -42,8 +42,8 @@
     <string name="section_notifications">Notifications</string>
 
     <!-- Settings — General -->
-    <string name="setting_capture_enabled_title">Pause capture / Private mode</string>
-    <string name="setting_capture_enabled_subtitle">When off, the clipboard monitor stops recording new items. Also togglable from the notification.</string>
+    <string name="setting_private_mode_title">Private mode</string>
+    <string name="setting_private_mode_subtitle">When on, this device stops recording new clipboard items. Matches Private mode on your other devices. (Temporary pause is also available from the notification.)</string>
     <string name="setting_sync_enabled_title">Enable Clipboard Sync</string>
     <string name="setting_sync_enabled_subtitle">Sync clipboard items with paired devices via the relay.</string>
 
