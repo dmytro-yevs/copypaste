@@ -98,6 +98,10 @@ pub fn wire_to_local(wire: WireItem) -> ClipboardItem {
         // Received items start with NULL and get a position only if the user
         // explicitly pins them (via pin_item, which assigns MAX+1).
         pin_order: None,
+        // thumb is a local-only, capture-time derived image thumbnail (schema
+        // v9). It is NOT part of the WireItem sync payload; received items start
+        // with no thumbnail and can be backfilled later via `set_thumb`.
+        thumb: None,
     }
 }
 

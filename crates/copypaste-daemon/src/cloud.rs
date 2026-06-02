@@ -908,6 +908,9 @@ async fn push_loop(
                         pinned: row.get(15).unwrap_or(false),
                         // pin_order is a local-only ordering field, not synced.
                         pin_order: None,
+                        // text backlog query selects no thumb column; text items
+                        // never carry a thumbnail (schema v9, local-only field).
+                        thumb: None,
                     })
                 })
                 .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
@@ -2691,6 +2694,9 @@ fn build_local_item(
         pinned: false,
         // pin_order is a local-only ordering field, not carried over cloud sync.
         pin_order: None,
+        // thumb is a local-only image thumbnail (schema v9); cloud download is
+        // text-only here, so it never carries one.
+        thumb: None,
     })
 }
 

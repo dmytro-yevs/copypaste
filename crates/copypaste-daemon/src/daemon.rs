@@ -1567,7 +1567,11 @@ async fn handle_image(
                     r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
                     meta.width, meta.height, meta.original_size, meta.chunk_count, meta.file_id
                 );
-                let mut item = ClipboardItem::new_image(blob, meta_json, 0);
+                // thumb=None: the daemon capture path still uses
+                // encode_image_with_limit (full image only); the capture-time
+                // thumbnail pipeline (encode_image_full) is not yet wired here,
+                // so the thumbnail is left for lazy backfill via set_thumb.
+                let mut item = ClipboardItem::new_image(blob, meta_json, 0, None);
                 // Stable cross-device item identity (mirror handle_text, which
                 // sets `item.item_id` once at capture). `new_image` seeds a fresh
                 // random `item_id`; that would give the SAME image a different
