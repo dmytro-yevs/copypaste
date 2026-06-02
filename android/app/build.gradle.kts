@@ -159,6 +159,11 @@ android {
     // Jetpack Compose (beta-bonus history / pair / settings screens).
     buildFeatures {
         compose = true
+        // AGP 8.x defaults buildConfig to OFF. The About screen reads the app
+        // version/build at runtime from BuildConfig.VERSION_NAME / VERSION_CODE
+        // (generated from versionName / versionCode above), so the version shown
+        // to the user can never drift from the manifest. Required for AboutScreen.
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = libs.versions.composeCompiler.get()
