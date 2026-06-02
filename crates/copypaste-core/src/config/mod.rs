@@ -25,6 +25,7 @@ fn default_true() -> bool {
 #[serde(default)]
 pub struct AppConfig {
     pub config_version: u32,
+    /// Deprecated: no longer used for pruning; retained for config back-compat.
     pub history_limit: usize,
     pub poll_interval_ms: u64,
     pub max_text_size_bytes: u64,

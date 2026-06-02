@@ -39,9 +39,9 @@ use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
 use copypaste_core::{
-    build_item_aad_v2, count_items, decrypt_from_cloud, decrypt_item_by_version, derive_v2,
-    encrypt_for_cloud, encrypt_item_with_aad, exists_item_by_item_id, get_item_by_item_id,
-    insert_item, is_sensitive_for_autowipe, prune_to_cap, ClipboardItem, Database, SyncKey,
+    build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2, encrypt_for_cloud,
+    encrypt_item_with_aad, exists_item_by_item_id, get_item_by_item_id, insert_item,
+    is_sensitive_for_autowipe, prune_to_cap, ClipboardItem, Database, SyncKey,
     AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
 };
 
@@ -470,9 +470,9 @@ pub async fn start_cloud(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
-    // Shared live core config. The push/poll loops read `sync_on_wifi_only`,
-    // `history_limit`, and `storage_quota_bytes` on every tick so runtime
-    // changes via `set_config` take effect without a daemon restart (A-SET-2).
+    // Shared live core config. The push/poll loops read `sync_on_wifi_only`
+    // and `storage_quota_bytes` on every tick so runtime changes via
+    // `set_config` take effect without a daemon restart (A-SET-2).
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) -> anyhow::Result<CloudHandle> {
     // Defence-in-depth: re-validate the URL even though CloudConfig::new should
@@ -588,15 +588,10 @@ pub async fn start_cloud(
     let poll_signed_in = cloud_signed_in.clone();
     let poll_auth = auth_client.clone();
     let poll_ws_connected = ws_connected.clone();
-    // Snapshot retention limits for ws_ingest_loop (which takes plain values,
-    // not an Arc) before core_config is moved into realtime_loop.
-    let (ws_history_limit_val, ws_quota_bytes_val) = {
-        let defaults = copypaste_core::AppConfig::default();
-        core_config
-            .read()
-            .map(|g| (g.history_limit, g.storage_quota_bytes))
-            .unwrap_or((defaults.history_limit, defaults.storage_quota_bytes))
-    };
+    // Share the live core config Arc with ws_ingest_loop so it reads the
+    // current `storage_quota_bytes` on every prune (byte-only policy, hot-reload)
+    // — mirroring realtime_loop.  Clone before core_config is moved below.
+    let ws_core_config = core_config.clone();
     let poll_core_config = core_config;
     tokio::spawn(realtime_loop(
         poll_config,
@@ -657,8 +652,7 @@ pub async fn start_cloud(
         ws_last_sync_ms,
         ws_shutdown,
         ws_connected_flag,
-        ws_history_limit_val,
-        ws_quota_bytes_val,
+        ws_core_config,
     ));
 
     tracing::info!(
@@ -1625,7 +1619,7 @@ async fn realtime_loop(
     // `false` (WS down / never connected), the loop runs at
     // POLL_INTERVAL_WS_FALLBACK (10 s) as the sole download path.
     ws_connected: Arc<std::sync::atomic::AtomicBool>,
-    // Live core config for hot-reload of sync_on_wifi_only, history_limit, and
+    // Live core config for hot-reload of sync_on_wifi_only and
     // storage_quota_bytes (A-SET-2).  Loops read on every tick so runtime
     // set_config changes take effect without a daemon restart.
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
@@ -1707,12 +1701,12 @@ async fn realtime_loop(
                 // runtime set_config change takes effect without a restart.
                 // The is_on_wifi check runs on a blocking thread (networksetup
                 // shell invocation) so it doesn't block the async executor.
-                let (sync_on_wifi_only, history_limit, storage_quota_bytes) = {
+                let (sync_on_wifi_only, storage_quota_bytes) = {
                     let defaults = copypaste_core::AppConfig::default();
                     core_config
                         .read()
-                        .map(|g| (g.sync_on_wifi_only, g.history_limit, g.storage_quota_bytes))
-                        .unwrap_or((false, defaults.history_limit, defaults.storage_quota_bytes))
+                        .map(|g| (g.sync_on_wifi_only, g.storage_quota_bytes))
+                        .unwrap_or((false, defaults.storage_quota_bytes))
                 };
                 if sync_on_wifi_only
                     && !tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
@@ -1773,7 +1767,6 @@ async fn realtime_loop(
                         &auth,
                         &key_bytes,
                         cursor,
-                        history_limit,
                         storage_quota_bytes,
                     )
                     .await;
@@ -1837,8 +1830,10 @@ async fn ws_ingest_loop(
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     shutdown: Arc<tokio::sync::Notify>,
     ws_connected: Arc<std::sync::atomic::AtomicBool>,
-    history_limit: usize,
-    storage_quota_bytes: u64,
+    // Live core config for hot-reload of the byte-only storage cap
+    // (`storage_quota_bytes`).  Read on every prune so a runtime set_config
+    // change takes effect without a restart — mirrors realtime_loop.
+    core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) {
     loop {
         // Snapshot the current sync key.  If absent, back off and retry —
@@ -1991,6 +1986,18 @@ async fn ws_ingest_loop(
                             let mut key_arr = [0u8; 32];
                             key_arr.copy_from_slice(&key_bytes);
 
+                            // Read the live byte cap out of the shared config and
+                            // drop the std RwLock guard before the spawn_blocking
+                            // move (the guard is !Send and must not cross the
+                            // closure boundary).  Byte-only prune policy, hot-reload.
+                            let storage_quota_bytes = {
+                                let defaults = copypaste_core::AppConfig::default();
+                                core_config
+                                    .read()
+                                    .map(|g| g.storage_quota_bytes)
+                                    .unwrap_or(defaults.storage_quota_bytes)
+                            };
+
                             // Decrypt + re-encrypt + insert on the blocking pool.
                             let result = tokio::task::spawn_blocking(move || {
                                 let db_guard = db_arc.blocking_lock();
@@ -2090,91 +2097,11 @@ async fn ws_ingest_loop(
                                             local_item.item_id,
                                             local_item.id
                                         );
-                                        // Prune to retention cap.
-                                        let total =
-                                            count_items(&db_guard).unwrap_or(0) as usize;
-                                        if total > history_limit {
-                                            let excess = total - history_limit;
-                                            // Fix (re-audit): collect ids first, then
-                                            // delete clipboard_items + clipboard_fts in
-                                            // one transaction to avoid orphan FTS rows.
-                                            let conn = db_guard.conn();
-                                            match conn.unchecked_transaction() {
-                                                Err(e) => tracing::warn!(
-                                                    "ws_ingest_loop: count-prune tx failed: {e}"
-                                                ),
-                                                Ok(tx) => {
-                                                    let ids_res: Result<Vec<String>, _> = tx
-                                                        .prepare(
-                                                            "SELECT id FROM clipboard_items \
-                                                             WHERE pinned = 0 \
-                                                             ORDER BY wall_time ASC \
-                                                             LIMIT ?1",
-                                                        )
-                                                        .and_then(|mut s| {
-                                                            s.query_map(
-                                                                rusqlite::params![excess as i64],
-                                                                |r| r.get(0),
-                                                            )
-                                                            .and_then(|rows| {
-                                                                rows.collect::<Result<Vec<_>, _>>()
-                                                            })
-                                                        });
-                                                    match ids_res {
-                                                        Err(e) => tracing::warn!(
-                                                            "ws_ingest_loop: count-prune \
-                                                             id-collect failed: {e}"
-                                                        ),
-                                                        Ok(ids) => {
-                                                            let del_res = tx.execute(
-                                                                "DELETE FROM clipboard_items \
-                                                                 WHERE id IN ( \
-                                                                     SELECT id \
-                                                                     FROM clipboard_items \
-                                                                     WHERE pinned = 0 \
-                                                                     ORDER BY wall_time ASC \
-                                                                     LIMIT ?1 \
-                                                                 )",
-                                                                rusqlite::params![excess as i64],
-                                                            );
-                                                            let fts_ok =
-                                                                del_res.is_ok() && ids.iter().all(
-                                                                    |id| {
-                                                                        tx.execute(
-                                                                            "DELETE FROM \
-                                                                             clipboard_fts \
-                                                                             WHERE id = ?1",
-                                                                            rusqlite::params![id],
-                                                                        )
-                                                                        .is_ok()
-                                                                    },
-                                                                );
-                                                            if fts_ok {
-                                                                match tx.commit() {
-                                                                    Ok(()) => tracing::debug!(
-                                                                        "ws_ingest_loop: \
-                                                                         count-pruned {} rows \
-                                                                         (history_limit=\
-                                                                         {history_limit})",
-                                                                        ids.len()
-                                                                    ),
-                                                                    Err(e) => tracing::warn!(
-                                                                        "ws_ingest_loop: \
-                                                                         count-prune commit \
-                                                                         failed: {e}"
-                                                                    ),
-                                                                }
-                                                            } else if let Err(e) = del_res {
-                                                                tracing::warn!(
-                                                                    "ws_ingest_loop: \
-                                                                     count-prune failed: {e}"
-                                                                );
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
+                                        // Prune to the byte-only storage cap.
+                                        // Count-based (`history_limit`) pruning was
+                                        // removed: `prune_to_cap` against
+                                        // `storage_quota_bytes` is the single
+                                        // authoritative retention policy.
                                         let max_bytes =
                                             storage_quota_bytes.min(i64::MAX as u64) as i64;
                                         match prune_to_cap(&db_guard, max_bytes) {
@@ -2259,9 +2186,8 @@ async fn poll_once(
     auth: &AuthClient,
     key_bytes: &[u8],
     cursor: PollCursor,
-    // Retention limits threaded from `AppConfig` so a long-offline device
+    // Retention limit threaded from `AppConfig` so a long-offline device
     // converges to the cap after backfill instead of materialising unbounded rows.
-    history_limit: usize,
     storage_quota_bytes: u64,
 ) -> (PollCursor, usize) {
     // Compile-time guard: POLL_SELECT_QS embeds a numeric `limit=` that MUST
@@ -2492,9 +2418,13 @@ async fn poll_once(
         // ── Backfill safety: enforce local retention cap after ingest ─────────
         //
         // After writing all rows from this batch, prune oldest UNPINNED items so
-        // the local DB stays within the configured count and byte caps. This
-        // prevents a long-offline device from materialising thousands of cloud
-        // rows unbounded on reconnect (each poll tick adds up to 20 rows).
+        // the local DB stays within the configured byte cap. This prevents a
+        // long-offline device from materialising thousands of cloud rows
+        // unbounded on reconnect (each poll tick adds up to 20 rows).
+        //
+        // Count-based (`history_limit`) pruning was removed: `prune_to_cap`
+        // against `storage_quota_bytes` is the single authoritative retention
+        // policy.
         //
         // The cloud watermark (persisted below) tracks the highest cloud row
         // seen and is stored in the `settings` table — completely independent of
@@ -2503,72 +2433,6 @@ async fn poll_once(
         // advances from the cloud side. Cloud still holds the older items; only
         // the local cache is capped.
         if synced > 0 {
-            // Count cap: mirrors daemon.rs `prune_history` — bulk DELETE oldest
-            // unpinned rows when the total exceeds `history_limit`.
-            // Fix (re-audit): collect ids first, then delete clipboard_items +
-            // clipboard_fts in one transaction to avoid orphan FTS rows.
-            let total = count_items(&db_guard).unwrap_or(0) as usize;
-            if total > history_limit {
-                let excess = total - history_limit;
-                let conn = db_guard.conn();
-                match conn.unchecked_transaction() {
-                    Err(e) => {
-                        tracing::warn!("cloud-sync poll_once: count-prune tx failed: {e}")
-                    }
-                    Ok(tx) => {
-                        let ids_res: Result<Vec<String>, _> = tx
-                            .prepare(
-                                "SELECT id FROM clipboard_items
-                                 WHERE pinned = 0
-                                 ORDER BY wall_time ASC
-                                 LIMIT ?1",
-                            )
-                            .and_then(|mut s| {
-                                s.query_map(rusqlite::params![excess as i64], |r| r.get(0))
-                                    .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
-                            });
-                        match ids_res {
-                            Err(e) => tracing::warn!(
-                                "cloud-sync poll_once: count-prune id-collect failed: {e}"
-                            ),
-                            Ok(ids) => {
-                                let del_res = tx.execute(
-                                    "DELETE FROM clipboard_items WHERE id IN (
-                                         SELECT id FROM clipboard_items
-                                         WHERE pinned = 0
-                                         ORDER BY wall_time ASC
-                                         LIMIT ?1
-                                     )",
-                                    rusqlite::params![excess as i64],
-                                );
-                                let fts_ok = del_res.is_ok()
-                                    && ids.iter().all(|id| {
-                                        tx.execute(
-                                            "DELETE FROM clipboard_fts WHERE id = ?1",
-                                            rusqlite::params![id],
-                                        )
-                                        .is_ok()
-                                    });
-                                if fts_ok {
-                                    match tx.commit() {
-                                        Ok(()) => tracing::debug!(
-                                            "cloud-sync poll_once: count-pruned {} rows \
-                                             (history_limit={history_limit})",
-                                            ids.len()
-                                        ),
-                                        Err(e) => tracing::warn!(
-                                            "cloud-sync poll_once: count-prune commit \
-                                             failed: {e}"
-                                        ),
-                                    }
-                                } else if let Err(e) = del_res {
-                                    tracing::warn!("cloud-sync poll_once: count-prune failed: {e}");
-                                }
-                            }
-                        }
-                    }
-                }
-            }
             // Byte cap: window-function prune via core API (takes i64 max_bytes).
             // `storage_quota_bytes` is u64 from AppConfig; saturating cast to i64
             // keeps the value in range (i64::MAX ≈ 9.2 EB, far beyond any real quota).
@@ -3221,6 +3085,7 @@ mod tests {
             origin_device_id: String::new(),
             key_version: 1,
             pinned: false,
+            pin_order: None,
         }
     }
 
@@ -3825,7 +3690,6 @@ mod tests {
             &auth,
             &key_bytes,
             PollCursor::default(),
-            1000,        // history_limit: sensible test value
             500_000_000, // storage_quota_bytes: 500 MB
         )
         .await;
@@ -3864,7 +3728,6 @@ mod tests {
             &auth,
             &key_bytes,
             wm1,
-            1000,        // history_limit
             500_000_000, // storage_quota_bytes
         )
         .await;
@@ -3993,7 +3856,6 @@ mod tests {
                 &auth,
                 &key_bytes,
                 cursor,
-                1000,        // history_limit
                 500_000_000, // storage_quota_bytes
             )
             .await;
@@ -4122,7 +3984,6 @@ mod tests {
                 &auth,
                 &key_bytes,
                 cursor,
-                1000,        // history_limit
                 500_000_000, // storage_quota_bytes
             )
             .await;
@@ -4218,7 +4079,6 @@ mod tests {
             &auth,
             &key_bytes,
             PollCursor::default(),
-            1000,        // history_limit
             500_000_000, // storage_quota_bytes
         )
         .await;
@@ -4557,6 +4417,7 @@ mod e2e_live {
             origin_device_id: device_id.to_owned(),
             key_version: ITEM_KEY_VERSION_CURRENT as u8,
             pinned: false,
+            pin_order: None,
         }
     }
 
@@ -5119,6 +4980,7 @@ mod bytea_e2e {
             origin_device_id: String::new(),
             key_version: 1,
             pinned: false,
+            pin_order: None,
         }
     }
 

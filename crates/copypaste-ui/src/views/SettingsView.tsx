@@ -28,8 +28,6 @@ function snapToNearest<T extends number>(steps: readonly T[], raw: number): T {
   return steps[best];
 }
 
-const UNLIMITED_SENTINEL = 100_000;
-
 const TEXT_SIZE_STEPS_BYTES = [1,2,5,10,15,25,50,100].map((n) => n * 1_000_000) as unknown as readonly number[];
 const TEXT_SIZE_LABELS = ["1 MB","2 MB","5 MB","10 MB","15 MB","25 MB","50 MB","100 MB (max)"] as const;
 
@@ -41,9 +39,6 @@ const FILE_SIZE_LABELS = ["64 MB","128 MB","256 MB","512 MB","1 GB","2 GB (max)"
 
 const QUOTA_STEPS_BYTES = [1,2,5,10,25,50].map((n) => n * 1_000_000_000) as unknown as readonly number[];
 const QUOTA_LABELS = ["1 GB","2 GB","5 GB","10 GB","25 GB","50 GB (max)"] as const;
-
-const HISTORY_STEPS = [100, 250, 500, 1_000, 2_500, 5_000, 10_000, UNLIMITED_SENTINEL] as const;
-const HISTORY_LABELS = ["100","250","500","1,000","2,500","5,000","10,000","Unlimited"] as const;
 
 const SENSITIVE_TTL_STEPS = [10, 30, 60, 5 * 60, 15 * 60, 60 * 60] as const;
 const SENSITIVE_TTL_LABELS = ["10 s","30 s","1 min","5 min","15 min","1 hour"] as const;
@@ -343,16 +338,11 @@ function formatLastSync(ms: number | null): string {
 // Core binary defaults (MiB/GiB):
 //   text 15 MiB, image 64 MiB, file 1 GiB, quota 10 GiB
 // Step arrays defined above (moved from the deleted StepSlider.tsx in v0.5.3) cover or exceed each of these.
-//
-// UNLIMITED_SENTINEL (100_000) = HISTORY_LIMIT in defaults.rs — documented as
-// "intentionally generous: history should feel unbounded to the user"; the
-// daemon's size-only prune still applies independently.
 const DEFAULT_MAX_TEXT_BYTES = 10 * 1024 * 1024;          // 10 MiB
 const DEFAULT_MAX_IMAGE_BYTES = 64 * 1024 * 1024;          // 64 MiB
 const DEFAULT_MAX_FILE_BYTES = 1024 * 1024 * 1024;         // 1 GiB
 const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024; // 10 GiB
 const DEFAULT_IMAGE_QUALITY = 100;
-const DEFAULT_HISTORY_LIMIT = 1000;
 const DEFAULT_SENSITIVE_TTL_SECS = 30;
 
 // ---------------------------------------------------------------------------
@@ -532,9 +522,6 @@ export function SettingsView() {
   const [quotaBytes, setQuotaBytes] = useState(
     snapToNearest(QUOTA_STEPS_BYTES as unknown as readonly number[], DEFAULT_STORAGE_QUOTA_BYTES)
   );
-  const [historyLimit, setHistoryLimit] = useState(
-    snapToNearest(HISTORY_STEPS as unknown as readonly number[], DEFAULT_HISTORY_LIMIT)
-  );
   const [sensitiveTtlSecs, setSensitiveTtlSecs] = useState(
     snapToNearest(SENSITIVE_TTL_STEPS as unknown as readonly number[], DEFAULT_SENSITIVE_TTL_SECS)
   );
@@ -652,10 +639,6 @@ export function SettingsView() {
           QUOTA_STEPS_BYTES as unknown as readonly number[],
           rawCfg.storage_quota_bytes ?? DEFAULT_STORAGE_QUOTA_BYTES
         ));
-        setHistoryLimit(snapToNearest(
-          HISTORY_STEPS as unknown as readonly number[],
-          rawCfg.history_limit ?? DEFAULT_HISTORY_LIMIT
-        ));
         setSensitiveTtlSecs(snapToNearest(
           SENSITIVE_TTL_STEPS as unknown as readonly number[],
           rawCfg.sensitive_ttl_secs ?? DEFAULT_SENSITIVE_TTL_SECS
@@ -724,7 +707,6 @@ export function SettingsView() {
       max_image_size_bytes: maxImageBytes,
       max_file_size_bytes: maxFileBytes,
       storage_quota_bytes: quotaBytes,
-      history_limit: historyLimit,
       sensitive_ttl_secs: sensitiveTtlSecs,
       image_quality: imageQuality,
       sync_on_wifi_only: syncOnWifiOnly,
@@ -1436,19 +1418,6 @@ export function SettingsView() {
               const prev = quotaBytes;
               setQuotaBytes(v);
               void saveLimitsField("storage_quota_bytes", { storage_quota_bytes: v }, () => setQuotaBytes(prev));
-            }}
-          />
-          <LimitSliderRow
-            label="Max stored items"
-            field="history_limit"
-            steps={HISTORY_STEPS as unknown as readonly number[]}
-            labels={HISTORY_LABELS}
-            value={historyLimit}
-            onChange={(v) => setHistoryLimit(v)}
-            onRelease={(v) => {
-              const prev = historyLimit;
-              setHistoryLimit(v);
-              void saveLimitsField("history_limit", { history_limit: v }, () => setHistoryLimit(prev));
             }}
           />
           <LimitSliderRow

@@ -98,7 +98,6 @@ export interface AppSettings {
   max_image_size_bytes?: number | null;
   max_file_size_bytes?: number | null;
   storage_quota_bytes?: number | null;
-  history_limit?: number | null;
   sensitive_ttl_secs?: number | null;
   image_quality?: number | null;
   // Sync parity

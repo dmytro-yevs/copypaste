@@ -284,6 +284,21 @@ fun HistoryScreen(
         if (selectionMode) reorderMode = false
     }
 
+    // Drop selected ids that no longer exist when the underlying list changes
+    // (background sync eviction, prune, TTL, remote delete) so the selected
+    // count stays accurate. Intersect against the FULL `items` list — not the
+    // search-filtered view — so selected-but-hidden items are not wrongly lost.
+    LaunchedEffect(items) {
+        if (selectionMode) {
+            val currentIds = items.mapTo(HashSet()) { it.id }
+            val pruned = selectedIds.intersect(currentIds)
+            if (pruned.size != selectedIds.size) {
+                selectedIds = pruned
+                if (pruned.isEmpty()) selectionMode = false
+            }
+        }
+    }
+
     LaunchedEffect(Unit) { viewModel.loadItems() }
 
     LaunchedEffect(error) {

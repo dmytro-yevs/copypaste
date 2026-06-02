@@ -505,10 +505,19 @@ class ClipboardRepository(context: Context) {
             true  // replaced successfully
         }
 
-        // null  → duplicate (older/equal lamport), skip
-        // true  → replaced, return immediately
+        // null  → duplicate (older/equal lamport), skip (nothing changed → no prune)
+        // true  → replaced in-place; prune since the replace may have grown a row
         // false → item not found, fall through to new-item insert below
-        if (replaced != false) return@withContext replaced == true
+        when (replaced) {
+            null -> return@withContext false
+            true -> {
+                // The replace's synchronized(idsWriteLock) block has already exited
+                // above, so pruneToLimits() (which takes idsWriteLock) cannot deadlock.
+                pruneToLimits()
+                return@withContext true
+            }
+            else -> { /* false: fall through to new-item insert below */ }
+        }
 
         // New item: generate a fresh storage id and store normally.
         val storageId = itemId // Use the stable item_id as the storage key for easy lookup.
