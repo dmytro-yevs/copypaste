@@ -19,10 +19,15 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCode
@@ -495,7 +500,14 @@ fun PairScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                // innerPadding keeps content BELOW the Scaffold top bar (and snackbar).
                 .padding(innerPadding)
+                // Make the screen scrollable so a tall scanned-info + cards block
+                // (post-QR-scan confirmation, paired-device card, countdown) can be
+                // reached instead of being clipped — mirrors Settings/History.
+                .verticalScroll(rememberScrollState())
+                // Keep the bottom-most content clear of the system navigation bar.
+                .windowInsetsPadding(WindowInsets.navigationBars)
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.Top)
