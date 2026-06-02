@@ -33,16 +33,21 @@ function snapToNearest<T extends number>(steps: readonly T[], raw: number): T {
 // duplicated here for the "reset to default" button). Keep the two in sync.
 const DEFAULT_POPUP_SHORTCUT = "CmdOrCtrl+Shift+V";
 
-const TEXT_SIZE_STEPS_BYTES = [1,2,5,10,15,25,50,100].map((n) => n * 1_000_000) as unknown as readonly number[];
+// NOTE: step values are BINARY (MiB/GiB, ×1024² / ×1024³) to match the core
+// defaults (DEFAULT_MAX_* below) which are also binary. Using decimal here
+// would make e.g. the 10 MiB default snap to a 10 MB (10_000_000) step and
+// silently persist a ~5% smaller cap — label drift. Labels keep "MB"/"GB"
+// (MB-as-MiB is the common app convention) while the values are binary.
+const TEXT_SIZE_STEPS_BYTES = [1,2,5,10,15,25,50,100].map((n) => n * 1024 * 1024) as unknown as readonly number[];
 const TEXT_SIZE_LABELS = ["1 MB","2 MB","5 MB","10 MB","15 MB","25 MB","50 MB","100 MB (max)"] as const;
 
-const IMAGE_SIZE_STEPS_BYTES = [5,10,25,64,128,256,512].map((n) => n * 1_000_000) as unknown as readonly number[];
+const IMAGE_SIZE_STEPS_BYTES = [5,10,25,64,128,256,512].map((n) => n * 1024 * 1024) as unknown as readonly number[];
 const IMAGE_SIZE_LABELS = ["5 MB","10 MB","25 MB","64 MB","128 MB","256 MB","512 MB (max)"] as const;
 
-const FILE_SIZE_STEPS_BYTES = [64,128,256,512,1024,2048].map((n) => n * 1_000_000) as unknown as readonly number[];
+const FILE_SIZE_STEPS_BYTES = [64,128,256,512,1024,2048].map((n) => n * 1024 * 1024) as unknown as readonly number[];
 const FILE_SIZE_LABELS = ["64 MB","128 MB","256 MB","512 MB","1 GB","2 GB (max)"] as const;
 
-const QUOTA_STEPS_BYTES = [1,2,5,10,25,50].map((n) => n * 1_000_000_000) as unknown as readonly number[];
+const QUOTA_STEPS_BYTES = [1,2,5,10,25,50].map((n) => n * 1024 * 1024 * 1024) as unknown as readonly number[];
 const QUOTA_LABELS = ["1 GB","2 GB","5 GB","10 GB","25 GB","50 GB (max)"] as const;
 
 const SENSITIVE_TTL_STEPS = [10, 30, 60, 5 * 60, 15 * 60, 60 * 60] as const;
