@@ -28,8 +28,10 @@ use std::time::{Duration, Instant};
 /// The dialer advances one step on each consecutive failure (or flap) and only
 /// resets to the first step once a connection has been healthy for
 /// [`MIN_HEALTHY_DWELL`], so an offline or flapping peer is retried with
-/// increasing spacing (5s → 30s → 60s, capped) rather than hammered every tick.
-pub const BACKOFF_STEPS: [u64; 3] = [5, 30, 60];
+/// increasing spacing (2s → 5s → 10s → 30s → 60s, capped) rather than hammered
+/// every tick. The gentle early ramp redials within a couple of seconds after a
+/// transient blip while still backing off to 60s for a genuinely-offline peer.
+pub const BACKOFF_STEPS: [u64; 5] = [2, 5, 10, 30, 60];
 
 /// Minimum time a connection must remain healthy before its peer's backoff is
 /// reset to the first step. Sized comfortably above the connector tick so a
@@ -172,6 +174,14 @@ mod tests {
         );
     }
 
+    #[test]
+    fn backoff_schedule_has_gentle_early_ramp() {
+        // A transient blip must redial quickly (2s) and only ramp toward the
+        // 60s cap if the peer is genuinely offline, so a brief failure does not
+        // cost up to a minute before the next dial.
+        assert_eq!(BACKOFF_STEPS, [2, 5, 10, 30, 60]);
+    }
+
     // ── M3: dwell-gated backoff reset ───────────────────────────────────────
 
     #[test]
@@ -181,7 +191,7 @@ mod tests {
         let mut s = DialBackoff::new();
         let t0 = Instant::now();
 
-        // First failure → step 0 (5s), idx advances to 1.
+        // First failure → step 0, idx advances to 1.
         assert_eq!(s.record_failure(t0), BACKOFF_STEPS[0]);
         assert_eq!(s.backoff_idx(), 1);
 
@@ -194,7 +204,7 @@ mod tests {
         assert_eq!(s.backoff_idx(), 1, "backoff must survive a sub-dwell flap");
         s.record_disconnected();
 
-        // Next failure escalates from where we left off (idx 1 → step 30s).
+        // Next failure escalates from where we left off (idx 1 → BACKOFF_STEPS[1]).
         let t2 = t1 + Duration::from_secs(3);
         assert_eq!(
             s.record_failure(t2),
@@ -284,9 +294,10 @@ mod tests {
         let t0 = Instant::now();
         assert!(s.may_dial(t0), "fresh state dials immediately");
 
-        s.record_failure(t0); // next_attempt = t0 + 5s
-        assert!(!s.may_dial(t0 + Duration::from_secs(4)));
-        assert!(s.may_dial(t0 + Duration::from_secs(5)));
+        let delay = s.record_failure(t0); // next_attempt = t0 + BACKOFF_STEPS[0]
+        assert_eq!(delay, BACKOFF_STEPS[0]);
+        assert!(!s.may_dial(t0 + Duration::from_secs(delay) - Duration::from_millis(1)));
+        assert!(s.may_dial(t0 + Duration::from_secs(delay)));
     }
 
     #[test]
