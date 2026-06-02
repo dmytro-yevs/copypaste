@@ -416,15 +416,30 @@ pub fn preflight_encrypted_db_check(db_path: &std::path::Path) -> Result<(), Clo
 ///      it explicitly) still signals both loops.
 pub struct CloudHandle {
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
+    /// JoinHandle for the GoTrue auto-refresh task (`spawn_auto_refresh`).
+    ///
+    /// Audit-concurrency MEDIUM: that task loops forever holding an
+    /// `Arc<AuthClient>` (and its reqwest connection pool); it has no shutdown
+    /// path of its own (no `Notify`/token to `select!` on). Previously the
+    /// JoinHandle was dropped with `let _ =`, so every cloud (re)start leaked
+    /// one immortal task + AuthClient. Retaining the handle here lets us
+    /// `.abort()` it on cloud shutdown/restart so it cannot outlive the loops
+    /// it serves.
+    auth_refresh_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl CloudHandle {
-    /// Signal both background tasks to stop. Idempotent — calling twice is a
-    /// no-op (the second call finds `None` in the slot).
+    /// Signal both background tasks to stop and abort the auth-refresh task.
+    /// Idempotent — calling twice is a no-op (the slots are emptied on the
+    /// first call; the consumed `self` then drops, and `Drop` finds `None`).
     pub fn shutdown(mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
             // Receiver dropped or send failure → loops already exited.
             let _ = tx.send(());
+        }
+        if let Some(handle) = self.auth_refresh_handle.take() {
+            // The auto-refresh loop has no cooperative shutdown; abort it.
+            handle.abort();
         }
     }
 }
@@ -432,10 +447,14 @@ impl CloudHandle {
 impl Drop for CloudHandle {
     /// Belt-and-braces: if the caller forgot to call [`shutdown`] explicitly
     /// (or dropped the handle on a panic/early return), still signal the
-    /// background tasks so they don't outlive the daemon.
+    /// background tasks and abort the auth-refresh task so they don't outlive
+    /// the daemon.
     fn drop(&mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
+        }
+        if let Some(handle) = self.auth_refresh_handle.take() {
+            handle.abort();
         }
     }
 }
@@ -520,11 +539,14 @@ pub async fn start_cloud(
     let bearer: Arc<RwLock<String>> = Arc::new(RwLock::new(bearer_str));
 
     // [P1 audit fix] Wire spawn_auto_refresh so the token is proactively
-    // refreshed before the ~1 h GoTrue expiry.  The JoinHandle is intentionally
-    // dropped here (the task keeps running as a detached background task);
-    // shutdown is handled via the shared `shutdown` Notify below, which the
-    // push/poll loops (and ultimately the daemon teardown) already signal.
-    let _auto_refresh_handle = auth_client.clone().spawn_auto_refresh();
+    // refreshed before the ~1 h GoTrue expiry.
+    //
+    // Audit-concurrency MEDIUM: the auto-refresh loop has no cooperative
+    // shutdown of its own, so we must NOT detach it with `let _ =` — that
+    // leaked one immortal task (+ its `Arc<AuthClient>` and reqwest pool) per
+    // cloud (re)start. Retain the JoinHandle in the CloudHandle and `.abort()`
+    // it on shutdown/drop instead.
+    let auth_refresh_handle = auth_client.clone().spawn_auto_refresh();
 
     // Extract the GoTrue user UUID from the session (populated by sign_in).
     // Used as the Realtime postgres_changes filter so the server pre-filters
@@ -661,6 +683,7 @@ pub async fn start_cloud(
     );
     Ok(CloudHandle {
         shutdown_tx: Some(shutdown_tx),
+        auth_refresh_handle: Some(auth_refresh_handle),
     })
 }
 
@@ -1927,6 +1950,16 @@ async fn ws_ingest_loop(
                                  setting ws_connected=false, will reconnect"
                             );
                             ws_connected.store(false, Ordering::Relaxed);
+                            // Audit-concurrency HIGH: explicitly shut down the
+                            // OLD client before the outer loop builds a fresh
+                            // one. Without this, the previous `connection_loop`
+                            // task kept its `running` flag set and reconnected
+                            // independently — leaking one live client stack per
+                            // disconnect. (`ClientHandle`'s `Drop` is the
+                            // backstop, but we shut down explicitly here so the
+                            // old socket/task tears down before the new connect
+                            // rather than at an indeterminate later drop point.)
+                            handle.shutdown().await;
                             break; // outer loop will reconnect
                         }
                         Some(event) => {
