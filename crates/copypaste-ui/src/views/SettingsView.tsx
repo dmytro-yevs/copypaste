@@ -1441,25 +1441,17 @@ export function SettingsView() {
                 step={1}
                 value={imageQuality}
                 onChange={(v) => setImageQuality(v)}
+                onRelease={(v) => {
+                  // Autosave on commit (mouse-up / touch-end / key-up), matching the
+                  // neighbouring limit sliders — no dedicated Save button.
+                  const prev = imageQuality;
+                  void saveLimitsField("image_quality", { image_quality: v }, () => setImageQuality(prev));
+                }}
                 formatValue={(v) => String(v)}
               />
               <LimitsMsg field="image_quality" />
             </div>
           </SettingsRow>
-          {/* Save button for image quality (continuous slider — save on button click) */}
-          <div className="flex justify-end border-t border-ide-divider px-3 py-2">
-            <button
-              type="button"
-              disabled={offline}
-              onClick={() => {
-                const prev = imageQuality;
-                void saveLimitsField("image_quality", { image_quality: imageQuality }, () => setImageQuality(prev));
-              }}
-              className={btnCls}
-            >
-              Save image quality
-            </button>
-          </div>
         </Panel>
 
         <SubsectionHeader label="Data" />
