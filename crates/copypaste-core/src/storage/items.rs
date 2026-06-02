@@ -82,6 +82,15 @@ pub struct ClipboardItem {
     /// the desired id sequence; the daemon writes consecutive integers
     /// starting at 1.
     pub pin_order: Option<f64>,
+    /// Small capture-time encrypted thumbnail blob for image items (schema v9).
+    ///
+    /// `None` for text rows and for image rows captured before the thumbnail
+    /// pipeline existed (lazily backfillable via [`set_thumb`]). When present
+    /// it is the serialized encrypted chunk blob produced by
+    /// `image::encode_thumbnail` / `image::encode_image_full`, keyed by a
+    /// distinct `thumb_file_id` (recorded in the image `blob_ref` meta JSON).
+    /// Stored in the `thumb BLOB DEFAULT NULL` column.
+    pub thumb: Option<Vec<u8>>,
 }
 
 impl ClipboardItem {
@@ -125,6 +134,7 @@ impl ClipboardItem {
             key_version: ITEM_KEY_VERSION_CURRENT as u8,
             pinned: false,
             pin_order: None,
+            thumb: None,
         }
     }
 
@@ -142,7 +152,17 @@ impl ClipboardItem {
     /// `item_id` once at capture so the same image converges to one row across
     /// devices, and a reconstructed item MUST preserve the originating
     /// `item_id` rather than regenerate it.
-    pub fn new_image(encrypted_blob: Vec<u8>, image_meta_json: String, lamport_ts: i64) -> Self {
+    ///
+    /// `thumb` is the optional capture-time encrypted thumbnail blob
+    /// (`image::encode_image_full` produces it alongside the full chunks). Pass
+    /// `None` when no thumbnail was generated; it can be backfilled later via
+    /// [`set_thumb`].
+    pub fn new_image(
+        encrypted_blob: Vec<u8>,
+        image_meta_json: String,
+        lamport_ts: i64,
+        thumb: Option<Vec<u8>>,
+    ) -> Self {
         // Same clock-before-epoch degradation contract as `new_text`: prefer
         // `unwrap_or_default()` over `unwrap()` so a pathological host clock
         // yields `wall_time = 0` rather than a daemon panic.
@@ -168,6 +188,7 @@ impl ClipboardItem {
             key_version: ITEM_KEY_VERSION_CURRENT as u8,
             pinned: false,
             pin_order: None,
+            thumb,
         }
     }
 }
@@ -193,8 +214,8 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned, pin_order)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+          content_hash, origin_device_id, key_version, pinned, pin_order, thumb)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
         params![
             item.id,
             item.item_id,
@@ -213,6 +234,7 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
             key_version,
             item.pinned as i64,
             item.pin_order,
+            item.thumb,
         ],
     )?;
     Ok(())
@@ -273,8 +295,8 @@ pub fn insert_item_with_fts(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned, pin_order)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+          content_hash, origin_device_id, key_version, pinned, pin_order, thumb)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
         params![
             item.id,
             item.item_id,
@@ -293,6 +315,7 @@ pub fn insert_item_with_fts(
             key_version,
             item.pinned as i64,
             item.pin_order,
+            item.thumb,
         ],
     );
 
@@ -417,7 +440,7 @@ pub fn get_page(
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
@@ -447,7 +470,7 @@ pub fn get_page_pinned_first(
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb
          FROM clipboard_items
          ORDER BY
            CASE WHEN pinned = 1 THEN 0 ELSE 1 END ASC,
@@ -510,7 +533,7 @@ pub fn get_page_meta(
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, NULL AS content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb
          FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
@@ -529,7 +552,7 @@ pub fn get_item_by_id(db: &Database, id: &str) -> Result<Option<ClipboardItem>, 
     let result = db.conn().query_row(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb
          FROM clipboard_items WHERE id = ?1",
         params![id],
         row_to_item,
@@ -563,7 +586,7 @@ pub fn get_item_by_item_id(
     let result = db.conn().query_row(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb
          FROM clipboard_items WHERE item_id = ?1",
         params![item_id],
         row_to_item,
@@ -726,6 +749,22 @@ pub fn reorder_pinned(db: &Database, ids: &[&str]) -> Result<usize, ItemsError> 
         changed += rows;
     }
     tx.commit()?;
+    Ok(changed)
+}
+
+/// Set (or clear) the encrypted thumbnail blob for an item by primary-key `id`.
+///
+/// Used for lazy backfill: an image row captured before the thumbnail pipeline
+/// existed (or downloaded via sync without a thumbnail) can have its `thumb`
+/// column populated after the fact once a thumbnail is generated. Passing
+/// `None` clears the column back to SQL NULL.
+///
+/// Returns the number of rows updated (`0` when no row matches `id`).
+pub fn set_thumb(db: &Database, id: &str, blob: Option<&[u8]>) -> Result<usize, ItemsError> {
+    let changed = db.conn().execute(
+        "UPDATE clipboard_items SET thumb = ?1 WHERE id = ?2",
+        params![blob, id],
+    )?;
     Ok(changed)
 }
 
@@ -1074,7 +1113,7 @@ pub fn search_items(
         "SELECT ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref,
                 ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at,
                 ci.app_bundle_id, ci.content_hash, ci.origin_device_id, ci.key_version,
-                ci.pinned, ci.pin_order
+                ci.pinned, ci.pin_order, ci.thumb
          FROM clipboard_fts fts
          JOIN clipboard_items ci ON ci.id = fts.id
          WHERE clipboard_fts MATCH ?1
@@ -1116,6 +1155,7 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
         },
         pinned: row.get::<_, i64>(15)? != 0,
         pin_order: row.get(16)?,
+        thumb: row.get(17)?,
     })
 }
 
@@ -1126,6 +1166,66 @@ mod tests {
 
     fn make_item(lamport: i64) -> ClipboardItem {
         ClipboardItem::new_text(vec![0xAA, 0xBB], vec![0u8; 24], lamport)
+    }
+
+    #[test]
+    fn new_image_carries_thumb_and_text_does_not() {
+        let img = ClipboardItem::new_image(
+            vec![0x01, 0x02],
+            "{}".to_string(),
+            1,
+            Some(vec![0xAA, 0xBB, 0xCC]),
+        );
+        assert_eq!(img.thumb.as_deref(), Some(&[0xAA, 0xBB, 0xCC][..]));
+        assert_eq!(img.content_type, "image");
+
+        let txt = ClipboardItem::new_text(vec![0x00], vec![0u8; 24], 1);
+        assert!(txt.thumb.is_none(), "text items must not carry a thumbnail");
+    }
+
+    #[test]
+    fn thumb_roundtrips_through_insert_and_select() {
+        let db = Database::open_in_memory().unwrap();
+        let thumb = vec![0xDEu8, 0xAD, 0xBE, 0xEF];
+        let item =
+            ClipboardItem::new_image(vec![0x10, 0x20], "{}".to_string(), 1, Some(thumb.clone()));
+        let id = item.id.clone();
+        insert_item(&db, &item).unwrap();
+
+        let got = get_item_by_id(&db, &id).unwrap().expect("row must exist");
+        assert_eq!(
+            got.thumb.as_deref(),
+            Some(thumb.as_slice()),
+            "thumb blob must survive insert + select"
+        );
+    }
+
+    #[test]
+    fn set_thumb_backfills_and_clears() {
+        let db = Database::open_in_memory().unwrap();
+        // Insert an image row with NO thumbnail (legacy / pre-pipeline row).
+        let item = ClipboardItem::new_image(vec![0x10, 0x20], "{}".to_string(), 1, None);
+        let id = item.id.clone();
+        insert_item(&db, &item).unwrap();
+        assert!(get_item_by_id(&db, &id).unwrap().unwrap().thumb.is_none());
+
+        // Lazy backfill.
+        let blob = vec![0x01u8, 0x02, 0x03];
+        let changed = set_thumb(&db, &id, Some(&blob)).unwrap();
+        assert_eq!(changed, 1);
+        assert_eq!(
+            get_item_by_id(&db, &id).unwrap().unwrap().thumb.as_deref(),
+            Some(blob.as_slice())
+        );
+
+        // Clearing back to NULL.
+        let changed = set_thumb(&db, &id, None).unwrap();
+        assert_eq!(changed, 1);
+        assert!(get_item_by_id(&db, &id).unwrap().unwrap().thumb.is_none());
+
+        // No-op on an unknown id.
+        let changed = set_thumb(&db, "00000000-0000-0000-0000-000000000000", Some(&blob)).unwrap();
+        assert_eq!(changed, 0);
     }
 
     #[test]

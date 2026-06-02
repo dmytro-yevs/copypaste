@@ -70,6 +70,7 @@ fn image_item(raw_bytes: &[u8], wall_time: i64, lamport_ts: i64) -> ClipboardIte
         raw_bytes.to_vec(),
         String::from("{\"width\":1,\"height\":1,\"chunks\":1,\"file_id\":\"x\"}"),
         lamport_ts,
+        None,
     );
     item.wall_time = wall_time;
     item.content_hash = Some(sha256_hex(raw_bytes));

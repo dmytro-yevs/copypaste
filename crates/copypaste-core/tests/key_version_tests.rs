@@ -328,7 +328,7 @@ fn t4_new_text_stamps_key_version_2() {
 /// T4.5: `ClipboardItem::new_image` must stamp `key_version=2` on fresh items.
 #[test]
 fn t4_new_image_stamps_key_version_2() {
-    let item = ClipboardItem::new_image(vec![0xCC, 0xDD], "{}".to_string(), 1);
+    let item = ClipboardItem::new_image(vec![0xCC, 0xDD], "{}".to_string(), 1, None);
     assert_eq!(
         item.key_version, 2,
         "ClipboardItem::new_image must stamp key_version=2"

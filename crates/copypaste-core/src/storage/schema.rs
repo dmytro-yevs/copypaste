@@ -40,7 +40,13 @@ pub enum SchemaError {
 ///     stable initial order. Unpinned rows keep `NULL`. The `history_page` and
 ///     `get_page_pinned_first` queries order pinned items by `pin_order ASC`
 ///     instead of the old `pinned DESC, wall_time DESC`.
-pub const SCHEMA_VERSION: i64 = 8;
+///   * 8 → 9 (Variant B image thumbnail): added `thumb BLOB DEFAULT NULL` to
+///     `clipboard_items` so each image row can carry a small capture-time
+///     encrypted thumbnail blob (see `image::encode_thumbnail` /
+///     `image::encode_image_full`). `DEFAULT NULL` backfills all existing rows
+///     with no thumbnail; the daemon may lazily backfill later via
+///     `items::set_thumb`. Text rows keep `NULL`.
+pub const SCHEMA_VERSION: i64 = 9;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -106,6 +112,18 @@ ALTER TABLE clipboard_items \
     ADD COLUMN pin_order REAL DEFAULT NULL;\n\
 UPDATE clipboard_items \
     SET pin_order = CAST(rowid AS REAL) WHERE pinned = 1;\n";
+
+/// v9 ALTER step — add `thumb BLOB DEFAULT NULL` to `clipboard_items`.
+///
+/// `DEFAULT NULL` means every existing row (and any text row) carries no
+/// thumbnail. Image rows captured after this migration store a small
+/// XChaCha20-Poly1305-encrypted preview blob here (produced by
+/// `image::encode_image_full` / `image::encode_thumbnail`); older image rows
+/// can be lazily backfilled later via `items::set_thumb`. SQLite requires a
+/// literal constant default for `ALTER TABLE ADD COLUMN`, and `NULL` is the
+/// correct "no thumbnail yet" sentinel.
+pub(crate) const V9_ALTER: &str = "\
+ALTER TABLE clipboard_items ADD COLUMN thumb BLOB DEFAULT NULL;\n";
 
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
@@ -233,6 +251,14 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // with their rowid so they start in a stable insertion-order sequence.
         // Unpinned rows keep NULL — the column is only meaningful for pinned items.
         script.push_str(V8_ALTER_SQL);
+    }
+
+    if current_version < 9 {
+        // Migration v9 (Variant B image thumbnail): add `thumb BLOB DEFAULT
+        // NULL` so image rows can carry a small capture-time encrypted preview.
+        // `DEFAULT NULL` backfills existing rows with no thumbnail; this is safe
+        // — the column is optional and the daemon backfills lazily.
+        script.push_str(V9_ALTER);
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));
@@ -453,6 +479,82 @@ mod tests {
             .expect("v7 schema must include pinned column");
         assert_eq!(pinned_col.1.to_uppercase(), "INTEGER");
         assert_eq!(pinned_col.2, 1, "pinned must be NOT NULL");
+    }
+
+    #[test]
+    fn fresh_db_has_thumb_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_migrations(&conn).unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(clipboard_items)").unwrap();
+        let cols: Vec<(String, String)> = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(1)?, // column name
+                    r.get::<_, String>(2)?, // declared type
+                ))
+            })
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        let thumb = cols
+            .iter()
+            .find(|c| c.0 == "thumb")
+            .expect("v9 schema must include thumb column");
+        assert_eq!(thumb.1.to_uppercase(), "BLOB");
+    }
+
+    #[test]
+    fn v8_to_v9_migration_backfills_existing_rows_with_null_thumb() {
+        // Simulate a v8 database (no thumb column), run migrations, and verify
+        // existing rows land on thumb = NULL (the DEFAULT in V9_ALTER) and the
+        // user_version reaches the current SCHEMA_VERSION.
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Bring a fresh DB fully up to v8 by short-circuiting the v9 step: run
+        // the real migrator (it will go straight to 9), then we can't easily
+        // stop at 8 — so hand-build the v8 shape instead.
+        conn.execute_batch(V1_SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
+             ALTER TABLE clipboard_items ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';\n\
+             ALTER TABLE clipboard_items ADD COLUMN key_version INTEGER NOT NULL DEFAULT 1;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pin_order REAL DEFAULT NULL;\n\
+             CREATE TABLE IF NOT EXISTS migration_state (\
+               key TEXT PRIMARY KEY, key_version_in_progress INTEGER,\
+               last_processed_id INTEGER NOT NULL DEFAULT 0,\
+               started_at INTEGER, completed_at INTEGER);\n\
+             INSERT OR IGNORE INTO migration_state VALUES ('v4-key-version-sweep', 2, 0, 0, 0);",
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA user_version = 8;").unwrap();
+
+        // Insert a v8-era row (no thumb column yet).
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, lamport_ts, wall_time, origin_device_id, key_version, pinned) \
+             VALUES ('id-v8', 'item-v8', 'image', 1, 1000, '', 2, 0)",
+            [],
+        )
+        .unwrap();
+
+        // Run apply_migrations → must add thumb column, DEFAULT NULL backfills.
+        apply_migrations(&conn).unwrap();
+
+        let thumb: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT thumb FROM clipboard_items WHERE id = 'id-v8'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(thumb.is_none(), "pre-v9 rows must land on thumb = NULL");
+
+        let uv: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(uv, SCHEMA_VERSION);
     }
 
     #[test]
