@@ -123,14 +123,21 @@ class ClipboardRepository(context: Context) {
             val ids = storedIds().takeLast(limit)
             ids.mapNotNull { id ->
                 val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
-                val item = parseItem(id, raw, key) ?: return@mapNotNull null
-                // AB-8: do NOT eagerly attach decoded display bytes here. Attaching
-                // bytes for every image up front allocated the whole image working
-                // set on load → jank/OOM. The row now lazily fetches its thumbnail
-                // on demand (HistoryActivity, through a bounded LRU). We leave
-                // imagePng null; the row resolves it per-row, preferring the stored
-                // thumbnail over full-res.
-                val withImage = item
+                // A: serve from parse cache when the raw blob is unchanged — avoids a
+                // full AEAD decrypt + native isSensitive() for every row on every reload.
+                // Only decrypt when the blob has actually been written since last load.
+                val item = synchronized(parseCacheLock) {
+                    val entry = parseCache[id]
+                    if (entry != null && entry.rawBlob == raw) entry.item else null
+                } ?: run {
+                    val parsed = parseItem(id, raw, key) ?: return@mapNotNull null
+                    synchronized(parseCacheLock) {
+                        parseCache[id] = ParsedEntry(raw, parsed)
+                    }
+                    parsed
+                }
+                // AB-8: image bytes are fetched lazily per-row via the two-level LRU
+                // in HistoryActivity (cachedThumbnailBitmap). Never eager here.
                 val isPinned = id in pinnedSet
                 // For binary payloads the synced blob is the full-res image / raw file, NOT the
                 // thumbnail shown in the row. Measure its stored byte size cheaply from the
@@ -143,7 +150,7 @@ class ClipboardRepository(context: Context) {
                         (prefs.getString("item_file_$id", null)?.let { base64RawByteSize(it).toLong() } ?: 0L) > SYNC_MAX_BLOB_BYTES
                     else -> item.tooLargeToSync
                 }
-                withImage.copy(
+                item.copy(
                     pinned = isPinned,
                     pinnedSortIndex = if (isPinned) (pinnedIndex[id] ?: Int.MAX_VALUE) else -1,
                     tooLargeToSync = binaryTooLarge,
@@ -297,6 +304,7 @@ class ClipboardRepository(context: Context) {
         // 0) and re-issue the notification so the shown number matches the store.
         // Only fires when an item was actually removed.
         if (removed) {
+            evictParseCache(id) // A: evict stale decrypt cache entry
             ClipboardService.onItemsDeleted(appContext, 1)
         }
         removed
@@ -337,6 +345,8 @@ class ClipboardRepository(context: Context) {
             editor.apply()
         }
         if (deletedCount > 0) {
+            // A: evict deleted ids from the decrypt cache so stale entries don't linger.
+            for (id in toDelete) evictParseCache(id)
             ClipboardService.onItemsDeleted(appContext, deletedCount)
         }
         Log.d(TAG, "deleteItems: removed $deletedCount items")
@@ -379,6 +389,7 @@ class ClipboardRepository(context: Context) {
         // fresh row instead of being silently skipped as a duplicate.
         resetDedupState()
         if (deletedCount > 0) {
+            evictAllParseCache() // A: full cache wipe — most entries are now gone
             ClipboardService.onItemsDeleted(appContext, deletedCount)
         }
         Log.d(TAG, "clearAll: deleted $deletedCount unpinned items (pinned items preserved)")
@@ -414,6 +425,7 @@ class ClipboardRepository(context: Context) {
                 .apply()
         }
         if (deletedCount > 0) {
+            evictAllParseCache() // A: full cache wipe — most entries are now gone
             ClipboardService.onItemsDeleted(appContext, deletedCount)
         }
         Log.d(TAG, "clearUnpinned: all unpinned items deleted")
@@ -686,6 +698,7 @@ class ClipboardRepository(context: Context) {
             }
             val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs, wallTimeMs = wallTimeMs)
             prefs.edit().putString("item_$existingStorageId", encoded).apply()
+            evictParseCache(existingStorageId) // A: blob changed — evict stale decrypt entry
             Log.d(TAG, "LWW replaced item_id=$itemId storageId=$existingStorageId (lamport $storedTs→$incomingLamportTs)")
             true  // replaced successfully
         }
@@ -856,6 +869,7 @@ class ClipboardRepository(context: Context) {
                 editor.remove("item_filemeta_$evictId")
                 // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
                 editor.remove("item_id_ref_$evictId")
+                evictParseCache(evictId) // A: evict stale decrypt cache entry
                 didEvict = true
                 evictedCount++
                 Log.d(TAG, "pruneToLimits: evicted $evictId (blob ${sz}B, totalNow=${totalBytes}B)")
@@ -1385,6 +1399,48 @@ class ClipboardRepository(context: Context) {
          * it here avoids re-instantiation on every localAesEncrypt call.
          */
         private val secureRandom = java.security.SecureRandom()
+
+        // ── A: decrypt result cache ──────────────────────────────────────────────
+        //
+        // getItems() previously called parseItem()/decryptForPreview() for EVERY id
+        // on EVERY reload — a full AEAD decrypt + native isSensitive() per row.
+        // On a 200-item list this saturates Dispatchers.IO and produces Davey frames.
+        //
+        // We cache the parsed ClipboardItem keyed by storage id, invalidated only
+        // when the raw blob string changes (i.e. the item was actually written).
+        // getItems() reads the cheap prefs.getString("item_$id") and only decrypts
+        // when the raw blob differs from the cached entry; otherwise reuses the
+        // cached item. On a quiescent list (no new items since last load) this
+        // reduces decryptions from N→0.
+        //
+        // The cache stores (rawBlob, ClipboardItem) without imagePng (that field
+        // is removed). getItems() always applies cheap pinned/pinnedSortIndex/
+        // tooLargeToSync overrides via .copy() after the cache lookup.
+
+        private data class ParsedEntry(val rawBlob: String, val item: ClipboardItem)
+
+        /** Guards [parseCache] for concurrent IO reads. */
+        private val parseCacheLock = Any()
+
+        /**
+         * Maps storage id → (rawBlob, ClipboardItem). Process-wide so multiple
+         * ClipboardRepository instances (VM + searchRepository + filePickLauncher)
+         * share the same warm cache.
+         */
+        private val parseCache = HashMap<String, ParsedEntry>()
+
+        /**
+         * Evict a single id from the parse cache.
+         * Call on delete / LWW-replace paths alongside evictImageCaches.
+         */
+        fun evictParseCache(id: String) {
+            synchronized(parseCacheLock) { parseCache.remove(id) }
+        }
+
+        /** Evict ALL entries — call on clearAll / clearUnpinned. */
+        fun evictAllParseCache() {
+            synchronized(parseCacheLock) { parseCache.clear() }
+        }
 
         fun previewFromPlaintext(text: String): String {
             val collapsed = text.replace(Regex("\\s+"), " ").trim()

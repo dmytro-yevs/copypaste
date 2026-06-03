@@ -482,7 +482,12 @@ fun HistoryScreen(
     var fullMatchIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var fullMatchQuery by remember { mutableStateOf("") }
 
-    LaunchedEffect(searchQuery, sortedItems) {
+    // F: key only on searchQuery (not sortedItems) so the effect does not re-fire
+    // on every list re-emit when the query is empty — the common case after A+B
+    // eliminate no-op emits. When query is non-empty we also hash the id list so
+    // a new item appearing while searching still triggers a fresh full-content scan.
+    val idListHash = remember(sortedItems) { sortedItems.map { it.id }.hashCode() }
+    LaunchedEffect(searchQuery, if (searchQuery.isBlank()) 0 else idListHash) {
         val q = searchQuery.trim()
         if (q.isEmpty()) {
             fullMatchIds = emptySet()
@@ -1239,13 +1244,141 @@ private fun HistoryList(
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
-    // Read live on every recomposition so changes in SettingsActivity are reflected
-    // immediately without restarting the screen (fix P2: stale remember wrappers removed).
-    val maskSensitive = settings.maskSensitiveContent
-    val imageMaxHeightDp = settings.imageMaxHeight
-    val previewDelayMs = settings.previewDelay
     val repository = remember { ClipboardRepository(ctx) }
     val scope = rememberCoroutineScope()
+    // E: hoist settings reads via a version token so they're re-read once per
+    // settings-change event rather than on every recomposition frame.
+    // A DisposableEffect observes the settings SharedPreferences and increments
+    // settingsVersion whenever any key changes; the three remember(settingsVersion)
+    // blocks re-run only on that tick, not on list-scroll recompositions.
+    var settingsVersion by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    androidx.compose.runtime.DisposableEffect(ctx) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            settingsVersion++
+        }
+        val sp = ctx.getSharedPreferences("copypaste", android.content.Context.MODE_PRIVATE)
+        sp.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { sp.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+    val maskSensitive = remember(settingsVersion) { settings.maskSensitiveContent }
+    val imageMaxHeightDp = remember(settingsVersion) { settings.imageMaxHeight }
+    val previewDelayMs = remember(settingsVersion) { settings.previewDelay }
+
+    // D: hoist the per-item copy logic into a single stable lambda (copyItemById) that
+    // captures only stable screen-level values (ctx, repository, settings, scope).
+    // Previously the entire onCopy body was freshly allocated per row per recomposition,
+    // capturing `item` (a different object each time). Now every row shares the same
+    // function object; only the item is passed as a parameter at call time.
+    val copyItemById: (ClipboardItem) -> Unit = remember(ctx, repository, scope) {
+        { item ->
+            scope.launch {
+                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                when {
+                    item.isImage -> {
+                        // Image copy-back: write full-res bytes to a cache file
+                        // and expose via FileProvider so the system clipboard
+                        // receives a proper content:// URI instead of "[image]".
+                        val imageBytes = withContext(Dispatchers.IO) {
+                            repository.getImageBytes(item.id)
+                        }
+                        if (imageBytes != null) {
+                            val uri = withContext(Dispatchers.IO) {
+                                try {
+                                    val dir = File(ctx.cacheDir, "image_copy").also { it.mkdirs() }
+                                    val file = File(dir, "${item.id}.png")
+                                    file.writeBytes(imageBytes)
+                                    FileProvider.getUriForFile(
+                                        ctx,
+                                        "${ctx.packageName}.fileprovider",
+                                        file,
+                                    )
+                                } catch (e: Exception) {
+                                    android.util.Log.w("HistoryActivity", "image copy-back FileProvider failed: ${e.message}")
+                                    null
+                                }
+                            }
+                            if (uri != null) {
+                                val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
+                                clip.addItem(ClipData.Item(uri))
+                                // AB-12: broad URI read grant. Granting only to
+                                // "com.android.systemui" failed on OEMs where the
+                                // pasting app differs. Broaden the grant to every
+                                // package that can handle the URI so paste works
+                                // regardless of which app consumes the clip.
+                                grantUriToAll(ctx, uri)
+                                // Register the expected URI BEFORE setPrimaryClip so
+                                // the capture listeners recognise this as an internal
+                                // copy-from-history echo and do NOT re-store it as a
+                                // duplicate row (parity with the text expectClip guard).
+                                ClipboardRepository.expectImageUri(uri)
+                                cm.setPrimaryClip(clip)
+                            }
+                            // else: image bytes unavailable, nothing to copy
+                        }
+                    }
+                    item.isFile -> {
+                        // File copy-back: write bytes to a cache file and
+                        // expose via FileProvider as a content:// URI.
+                        val fileBytes = withContext(Dispatchers.IO) {
+                            repository.getFileBytes(item.id)
+                        }
+                        if (fileBytes != null) {
+                            val uri = withContext(Dispatchers.IO) {
+                                try {
+                                    val (fileName, mime) = repository.getFileMeta(item.id)
+                                    val safeName = fileName?.takeIf { it.isNotBlank() }
+                                        ?: "${item.id}.bin"
+                                    val dir = File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
+                                    val file = File(dir, safeName)
+                                    file.writeBytes(fileBytes)
+                                    FileProvider.getUriForFile(
+                                        ctx,
+                                        "${ctx.packageName}.fileprovider",
+                                        file,
+                                    )
+                                } catch (e: Exception) {
+                                    android.util.Log.w("HistoryActivity", "file copy-back FileProvider failed: ${e.message}")
+                                    null
+                                }
+                            }
+                            if (uri != null) {
+                                val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste file", uri)
+                                // AB-12: broad URI read grant (see image case above).
+                                grantUriToAll(ctx, uri)
+                                // Register the expected URI BEFORE setPrimaryClip (same
+                                // guard as image copy-back above and text expectClip).
+                                ClipboardRepository.expectImageUri(uri)
+                                cm.setPrimaryClip(clip)
+                            }
+                            // else: file bytes unavailable or FileProvider failed; nothing to copy
+                        }
+                    }
+                    else -> {
+                        val key = settings.encryptionKey
+                        val fullText = repository.loadFullPlaintext(item.id, key)
+                            ?: item.snippet
+                        // Register the expected content-hash BEFORE setting
+                        // the clip so the capture listeners recognise this
+                        // as an internal copy-from-history echo and do not
+                        // re-capture it as a duplicate row + cloud re-push.
+                        ClipboardRepository.expectClip(fullText)
+                        cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
+                    }
+                }
+                // Move the copied clip to the top of the recency section
+                // (no-op for pinned items). Mirrors macOS bump_item_recency.
+                onCopied(item.id)
+            }
+        }
+    }
+
+    // G: track already-mounted ids outside the LazyColumn so the remember {} is called
+    // in a proper @Composable context (LazyListScope does not expose remember{}).
+    // AnimatedVisibility only plays the entrance animation once per id; re-emitted rows
+    // (same id) skip the animation entirely. mutableSetOf is a plain MutableSet — mutations
+    // inside itemsIndexed are on the composition thread and do not need Compose state.
+    @Suppress("RememberReturnType")
+    val mountedIds = remember { mutableSetOf<String>() }
 
     LazyColumn(
         modifier = Modifier
@@ -1255,14 +1388,16 @@ private fun HistoryList(
         contentPadding = PaddingValues(0.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
-        // §8 mount fade/rise stagger — AnimatedVisibility per item, capped at 10 items
-        // to avoid stagger on large existing lists (only on initial appearance).
         val pinnedCount = items.count { it.pinned }
         itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
-            val mountDelay = (index * Motion.Fast).coerceAtMost(10 * Motion.Fast)
+            // G: only animate on the first appearance of this id; subsequent re-emits
+            // (same id, same data) are already mounted and should skip animation.
+            val isNewMount = !mountedIds.contains(item.id)
+            if (isNewMount) mountedIds.add(item.id)
+            val mountDelay = if (isNewMount) (index * Motion.Fast).coerceAtMost(10 * Motion.Fast) else 0
             AnimatedVisibility(
                 visible = true,
-                enter = fadeIn(
+                enter = if (isNewMount) fadeIn(
                     animationSpec = tween(
                         durationMillis = Motion.Base,
                         delayMillis = mountDelay,
@@ -1275,7 +1410,7 @@ private fun HistoryList(
                         easing = EaseOutExpo,
                     ),
                     initialOffsetY = { it / 8 },
-                ),
+                ) else androidx.compose.animation.EnterTransition.None,
             ) {
                 Column {
                     HistoryRow(
@@ -1293,106 +1428,7 @@ private fun HistoryList(
                         onSetPinned = onSetPinned,
                         onMoveUp = { onReorderPinned(item.id, -1) },
                         onMoveDown = { onReorderPinned(item.id, +1) },
-                        onCopy = {
-                            scope.launch {
-                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                when {
-                                    item.isImage -> {
-                                        // Image copy-back: write full-res bytes to a cache file
-                                        // and expose via FileProvider so the system clipboard
-                                        // receives a proper content:// URI instead of "[image]".
-                                        val imageBytes = withContext(Dispatchers.IO) {
-                                            repository.getImageBytes(item.id)
-                                        }
-                                        if (imageBytes != null) {
-                                            val uri = withContext(Dispatchers.IO) {
-                                                try {
-                                                    val dir = File(ctx.cacheDir, "image_copy").also { it.mkdirs() }
-                                                    val file = File(dir, "${item.id}.png")
-                                                    file.writeBytes(imageBytes)
-                                                    FileProvider.getUriForFile(
-                                                        ctx,
-                                                        "${ctx.packageName}.fileprovider",
-                                                        file,
-                                                    )
-                                                } catch (e: Exception) {
-                                                    android.util.Log.w("HistoryActivity", "image copy-back FileProvider failed: ${e.message}")
-                                                    null
-                                                }
-                                            }
-                                            if (uri != null) {
-                                                val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
-                                                clip.addItem(ClipData.Item(uri))
-                                                // AB-12: broad URI read grant. Granting only to
-                                                // "com.android.systemui" failed on OEMs where the
-                                                // pasting app differs. Broaden the grant to every
-                                                // package that can handle the URI so paste works
-                                                // regardless of which app consumes the clip.
-                                                grantUriToAll(ctx, uri)
-                                                // Register the expected URI BEFORE setPrimaryClip so
-                                                // the capture listeners recognise this as an internal
-                                                // copy-from-history echo and do NOT re-store it as a
-                                                // duplicate row (parity with the text expectClip guard).
-                                                ClipboardRepository.expectImageUri(uri)
-                                                cm.setPrimaryClip(clip)
-                                            }
-                                            // else: image bytes unavailable, nothing to copy
-                                        }
-                                    }
-                                    item.isFile -> {
-                                        // File copy-back: write bytes to a cache file and
-                                        // expose via FileProvider as a content:// URI.
-                                        val fileBytes = withContext(Dispatchers.IO) {
-                                            repository.getFileBytes(item.id)
-                                        }
-                                        if (fileBytes != null) {
-                                            val uri = withContext(Dispatchers.IO) {
-                                                try {
-                                                    val (fileName, mime) = repository.getFileMeta(item.id)
-                                                    val safeName = fileName?.takeIf { it.isNotBlank() }
-                                                        ?: "${item.id}.bin"
-                                                    val dir = File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
-                                                    val file = File(dir, safeName)
-                                                    file.writeBytes(fileBytes)
-                                                    FileProvider.getUriForFile(
-                                                        ctx,
-                                                        "${ctx.packageName}.fileprovider",
-                                                        file,
-                                                    )
-                                                } catch (e: Exception) {
-                                                    android.util.Log.w("HistoryActivity", "file copy-back FileProvider failed: ${e.message}")
-                                                    null
-                                                }
-                                            }
-                                            if (uri != null) {
-                                                val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste file", uri)
-                                                // AB-12: broad URI read grant (see image case above).
-                                                grantUriToAll(ctx, uri)
-                                                // Register the expected URI BEFORE setPrimaryClip (same
-                                                // guard as image copy-back above and text expectClip).
-                                                ClipboardRepository.expectImageUri(uri)
-                                                cm.setPrimaryClip(clip)
-                                            }
-                                            // else: file bytes unavailable or FileProvider failed; nothing to copy
-                                        }
-                                    }
-                                    else -> {
-                                        val key = settings.encryptionKey
-                                        val fullText = repository.loadFullPlaintext(item.id, key)
-                                            ?: item.snippet
-                                        // Register the expected content-hash BEFORE setting
-                                        // the clip so the capture listeners recognise this
-                                        // as an internal copy-from-history echo and do not
-                                        // re-capture it as a duplicate row + cloud re-push.
-                                        ClipboardRepository.expectClip(fullText)
-                                        cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
-                                    }
-                                }
-                                // Move the copied clip to the top of the recency section
-                                // (no-op for pinned items). Mirrors macOS bump_item_recency.
-                                onCopied(item.id)
-                            }
-                        },
+                        onCopy = { copyItemById(item) },
                         onLongPress = { onLongPress(item.id) },
                         onCheckboxTap = { onCheckboxTap(item.id) },
                         onSensitiveTap = onSensitiveTap,
