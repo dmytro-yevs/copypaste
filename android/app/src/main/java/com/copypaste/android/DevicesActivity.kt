@@ -34,7 +34,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -165,55 +164,19 @@ fun DevicesScreen(
         }
     }
 
-    // ── Start/stop mDNS discovery for the lifetime of this screen ─────────────
-    // Begin advertising + browsing when the screen opens (gated on P2P enabled),
-    // and stop on dispose. Uses the persisted device cert (peek, else generate)
-    // and the live inbound listener port; the bootstrap port is the fixed
-    // [SAS_BPORT] this device owns for SAS pairing.
-    DisposableEffect(p2pEnabled) {
-        val job = if (p2pEnabled) {
-            scope.launch {
-                try {
-                    val cert = withContext(Dispatchers.IO) {
-                        deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate()
-                    }
-                    val syncPort = ClipboardService.activeListenerPort.coerceAtLeast(0)
-                    withContext(Dispatchers.IO) {
-                        startDiscovery(
-                            deviceId = cert.deviceId,
-                            deviceName = android.os.Build.MODEL ?: "Android",
-                            syncPort = syncPort,
-                            bport = SAS_BPORT,
-                            certDer = cert.certDer,
-                            keyDer = cert.keyDer,
-                            // HB-1a (ABI 14): own metadata for the standing responder.
-                            deviceModel = android.os.Build.MODEL ?: "Android",
-                            osVersion = "Android " + android.os.Build.VERSION.RELEASE,
-                            appVersion = BuildConfig.VERSION_NAME,
-                            localIp = lanIpv4Address(),
-                        )
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "startDiscovery failed: ${e.message}", e)
-                    discoverError = "Could not start network discovery."
-                }
-            }
-        } else {
-            null
-        }
-        onDispose {
-            job?.cancel()
-            if (p2pEnabled) {
-                // Best-effort stop on the caller thread — stopDiscovery tolerates
-                // a stop without a completed start.
-                scope.launch(Dispatchers.IO) { stopDiscovery() }
-            }
-        }
-    }
+    // ── mDNS discovery lifecycle lives in ClipboardService (HB-2) ─────────────
+    // Discovery (the mDNS advert + the standing SAS-pairing responder on
+    // [SAS_BPORT]) is started/stopped by the always-on [ClipboardService] FGS,
+    // NOT here. Hosting it on this screen meant the responder died the moment the
+    // Devices screen closed, so a Mac→Android pair got "Connection refused". The
+    // FGS keeps it alive for the lifetime of the service; this screen only
+    // browses the resulting peer snapshot below.
 
     // ── Poll the discovered peer list every ~2 s ──────────────────────────────
-    // listDiscovered stamps `paired` by cross-referencing the supplied paired
-    // fingerprints; we additionally drop already-paired entries defensively.
+    // HB-4: listDiscovered marks `paired` by IP-correlation now (the mDNS
+    // device_id is a UUID, not a cert fingerprint, so the old fingerprint-compare
+    // never matched). We pass the set of IP hosts we have paired with — each
+    // peer's syncAddr host plus its peerLocalIp — and drop the matched entries.
     LaunchedEffect(p2pEnabled) {
         if (!p2pEnabled) {
             discovered = emptyList()
@@ -221,8 +184,15 @@ fun DevicesScreen(
         }
         while (true) {
             try {
-                val pairedFps = settings.pairedPeers.map { it.fingerprint }
-                val list = withContext(Dispatchers.IO) { listDiscovered(pairedFps) }
+                val pairedIps = settings.pairedPeers.flatMap { peer ->
+                    listOfNotNull(
+                        // host part of "host:port" (substringBeforeLast tolerates a
+                        // bare host with no port).
+                        peer.syncAddr.takeIf { it.isNotEmpty() }?.substringBeforeLast(':'),
+                        peer.peerLocalIp?.takeIf { it.isNotEmpty() },
+                    )
+                }.distinct()
+                val list = withContext(Dispatchers.IO) { listDiscovered(pairedIps) }
                 discovered = list.filterNot { it.paired }
             } catch (e: Exception) {
                 // Discovery is best-effort — keep the previous snapshot, log only.
@@ -263,6 +233,14 @@ fun DevicesScreen(
             } catch (e: Exception) {
                 Log.w(TAG, "pairWithDiscovered failed: ${e.message}", e)
                 discoverError = e.message ?: "Failed to start pairing."
+                // HB-8: pairWithDiscovered may have claimed the native SM (via
+                // try_begin) before failing — reset defensively so a retry is not
+                // refused with "a pairing is already in flight".
+                try {
+                    withContext(Dispatchers.IO) { pairReset() }
+                } catch (re: Exception) {
+                    Log.w(TAG, "pairReset after failed start failed: ${re.message}")
+                }
             } finally {
                 pairStarting = false
             }
@@ -889,10 +867,26 @@ private fun SasPairingDialog(
         }
     }
 
-    // Close: abort the pairing unless it already succeeded (exactly once).
+    // Close: abort the pairing unless it already succeeded (exactly once), then
+    // ALWAYS reset the native pairing state machine.
+    //
+    // HB-8: pairAbort() moves the SM to the terminal `Aborted` state but leaves
+    // `try_begin` claimed, so without a follow-up pairReset() every later pairing
+    // attempt failed with "a pairing is already in flight". pairReset() returns
+    // the SM to Idle. It is idempotent and safe whether we aborted, already hit a
+    // terminal state, or the pairing succeeded.
     fun handleClose() {
         if (!confirmedRef.value && !terminal) {
-            scope.launch(Dispatchers.IO) { pairAbort() }
+            // Abort branch: abort, then reset, on the same IO dispatcher so the
+            // reset is ordered AFTER the abort.
+            scope.launch(Dispatchers.IO) {
+                pairAbort()
+                pairReset()
+            }
+        } else {
+            // Already-terminal / confirmed branch: nothing to abort, but still
+            // clear the SM so the next pairing can claim it.
+            scope.launch(Dispatchers.IO) { pairReset() }
         }
         onClose()
     }
@@ -1077,4 +1071,6 @@ private const val SAS_POLL_MS = 500L
  * TXT record so peers can dial back to pair. A non-zero bport marks this device
  * SAS-pairing-capable (v2); the native discovery service binds/owns this port.
  */
-private const val SAS_BPORT = 47_654
+// `internal` so the always-on [ClipboardService] FGS owns the discovery
+// lifecycle with the SAME well-known bport (HB-2).
+internal const val SAS_BPORT = 47_654

@@ -1755,10 +1755,16 @@ pub fn stop_discovery() -> Result<(), CopypasteError> {
     })
 }
 
-/// Snapshot the peers currently discovered on the LAN. `paired_fingerprints` is
-/// the caller's set of already-paired device fingerprints; each returned peer's
-/// `paired` flag is `true` when its `device_id` matches one (canonicalized
-/// compare). Returns an empty list when discovery is not running.
+/// Snapshot the peers currently discovered on the LAN. Despite its legacy name
+/// (frozen for ABI 14), `paired_fingerprints` now carries the caller's set of
+/// already-paired IP HOSTS (a peer's `local_ip` / sync-address host) — NOT cert
+/// fingerprints.
+///
+/// HB-4: the mDNS `device_id` is a random UUID, not a cert fingerprint, so the
+/// old fingerprint-compare against `device_id` NEVER matched and paired devices
+/// kept showing "Pair". We now mark a peer `paired` when ANY of its resolved
+/// `ip_addrs` is in the caller-supplied set. Returns an empty list when
+/// discovery is not running.
 pub fn list_discovered(
     paired_fingerprints: Vec<String>,
 ) -> Result<Vec<DiscoveredPeer>, CopypasteError> {
@@ -1766,15 +1772,19 @@ pub fn list_discovered(
         let Some(discovery) = pairing::global().discovery() else {
             return Ok(Vec::new());
         };
-        let paired: std::collections::HashSet<String> = paired_fingerprints
-            .iter()
-            .map(|fp| canonicalize_fingerprint(fp))
+        // Param name is frozen at ABI 14; the values are paired IP hosts.
+        let paired_ips: std::collections::HashSet<String> = paired_fingerprints
+            .into_iter()
+            .filter(|s| !s.is_empty())
             .collect();
         let peers = discovery
             .peers()
             .into_iter()
             .map(|p| {
-                let is_paired = paired.contains(&canonicalize_fingerprint(&p.device_id));
+                let is_paired = p
+                    .ip_addrs
+                    .iter()
+                    .any(|ip| paired_ips.contains(&ip.to_string()));
                 DiscoveredPeer::from_peer_info(p, is_paired)
             })
             .collect();

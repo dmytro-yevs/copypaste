@@ -33,6 +33,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
 import java.util.Calendar
@@ -276,9 +277,57 @@ class ClipboardService : Service() {
         // listener is already running.
         if (settings.syncEnabled && settings.p2pSyncEnabled) {
             startInboundP2pListener()
+            // HB-2: host mDNS discovery (advert + standing SAS-pairing responder)
+            // in the always-on FGS, NOT on the Devices screen. The screen-scoped
+            // version died the moment Devices closed, so a Mac→Android pair hit
+            // "Connection refused". Started AFTER the listener so activeListenerPort
+            // is known and advertised as the peer's sync port.
+            startFgsDiscovery()
         }
 
         return START_STICKY
+    }
+
+    /**
+     * HB-2: start LAN discovery for the lifetime of the foreground service.
+     *
+     * Advertises this device over mDNS (sync port = the live inbound listener
+     * port; bootstrap port = the fixed [SAS_BPORT]) and runs the standing
+     * SAS-pairing responder so a macOS peer can dial back to pair AT ANY TIME —
+     * not only while the Devices screen is open. Uses the persisted device cert
+     * (peek, else generate). Idempotent on the native side (a second start while
+     * already running is a no-op). All failures are logged and non-fatal: the FGS
+     * must never crash because discovery could not start.
+     */
+    private fun startFgsDiscovery() {
+        scope.launch {
+            try {
+                val cert = withContext(Dispatchers.IO) {
+                    deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate()
+                }
+                val syncPort = activeListenerPort.coerceAtLeast(0)
+                withContext(Dispatchers.IO) {
+                    startDiscovery(
+                        deviceId = cert.deviceId,
+                        deviceName = Build.MODEL ?: "Android",
+                        syncPort = syncPort,
+                        bport = SAS_BPORT,
+                        certDer = cert.certDer,
+                        keyDer = cert.keyDer,
+                        // HB-1a (ABI 14): own metadata for the standing responder.
+                        deviceModel = Build.MODEL ?: "Android",
+                        osVersion = "Android " + Build.VERSION.RELEASE,
+                        appVersion = BuildConfig.VERSION_NAME,
+                        localIp = lanIpv4Address(),
+                    )
+                }
+                Log.i(TAG, "FGS discovery started (syncPort=$syncPort, bport=$SAS_BPORT)")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "FGS discovery failed to start (${e.javaClass.simpleName}: ${e.message})")
+            }
+        }
     }
 
     /**
@@ -398,6 +447,15 @@ class ClipboardService : Service() {
      * thrown — [onDestroy] must complete regardless.
      */
     private fun stopInboundP2pListener() {
+        // HB-2: tear down LAN discovery (mDNS advert + standing SAS responder)
+        // alongside the inbound listener. stopDiscovery() is idempotent and
+        // tolerates a stop without a completed start. Called here so both the
+        // P2P-toggle-off path and onDestroy stop advertising.
+        try {
+            stopDiscovery()
+        } catch (e: Exception) {
+            Log.w(TAG, "FGS discovery: stop failed (${e.javaClass.simpleName}: ${e.message})")
+        }
         p2pListenerJob?.cancel()
         p2pListenerJob = null
         val handle = p2pListener ?: return
