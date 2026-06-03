@@ -239,6 +239,11 @@ pub async fn start_p2p(
     incoming_tx: mpsc::Sender<WireItem>,
     outbound_rx: mpsc::Receiver<WireItem>,
     catchup: CatchupProvider,
+    // Shared `DiscoveryService` constructed once by the caller (daemon.rs) and
+    // also handed to the IPC server via `with_discovery`.  Injecting it here
+    // (instead of constructing a second instance) ensures discovered peers
+    // surface through the `list_discovered` IPC handler.
+    discovery: Arc<DiscoveryService>,
 ) -> anyhow::Result<P2pHandle> {
     let bind_addr = format!("0.0.0.0:{}", config.listen_port);
     let listener = TcpListener::bind(&bind_addr).await?;
@@ -280,7 +285,10 @@ pub async fn start_p2p(
     let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
 
     // ── discovery service ─────────────────────────────────────────────────────
-    let discovery = Arc::new(DiscoveryService::new());
+    // Use the injected instance (shared with the IPC server) so that discovered
+    // peers surface through the `list_discovered` handler.  The caller
+    // (daemon.rs) constructs the Arc once and passes clones to both start_p2p
+    // and `IpcServer::with_discovery`.
     let device_id_str = device_id.to_string();
     discovery
         .register(actual_port, &device_id_str, &config.device_name)
