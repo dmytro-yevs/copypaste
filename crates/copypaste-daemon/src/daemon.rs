@@ -1379,20 +1379,18 @@ async fn handle_tick(
                 // UNUserNotificationCenter) so the banner shows the app icon.
                 // Disabled in tests to avoid OS hangs and sound spam.
                 #[cfg(target_os = "macos")]
-                if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() {
-                    if config.sound_on_copy {
-                        // P1: reap the child in a detached thread so the capture
-                        // path is never blocked and no zombie process accumulates
-                        // (dropping a Child without wait() leaves a zombie entry
-                        // in the process table until the daemon exits).
-                        if let Ok(mut child) = std::process::Command::new("afplay")
-                            .arg("/System/Library/Sounds/Tink.aiff")
-                            .spawn()
-                        {
-                            std::thread::spawn(move || {
-                                let _ = child.wait();
-                            });
-                        }
+                if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() && config.sound_on_copy {
+                    // P1: reap the child in a detached thread so the capture
+                    // path is never blocked and no zombie process accumulates
+                    // (dropping a Child without wait() leaves a zombie entry
+                    // in the process table until the daemon exits).
+                    if let Ok(mut child) = std::process::Command::new("afplay")
+                        .arg("/System/Library/Sounds/Tink.aiff")
+                        .spawn()
+                    {
+                        std::thread::spawn(move || {
+                            let _ = child.wait();
+                        });
                     }
                 }
             }

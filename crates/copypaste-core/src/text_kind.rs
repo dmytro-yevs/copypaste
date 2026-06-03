@@ -221,7 +221,7 @@ fn is_file_path(s: &str) -> bool {
     // Must start with '/', '~/', or a Windows drive letter 'C:\'
     let is_unix = s.starts_with('/') || s.starts_with("~/");
     let is_windows = s.len() >= 3
-        && s.chars().next().map_or(false, |c| c.is_ascii_alphabetic())
+        && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
         && s[1..].starts_with(":\\");
 
     if !is_unix && !is_windows {

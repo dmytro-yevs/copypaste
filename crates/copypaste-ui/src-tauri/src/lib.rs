@@ -944,8 +944,8 @@ fn post_un_notification(title: String, body: String) {
             let content = UNMutableNotificationContent::new();
             let ns_title = NSString::from_str(&title);
             let ns_body = NSString::from_str(&body);
-            content.setTitle(&*ns_title);
-            content.setBody(&*ns_body);
+            content.setTitle(&ns_title);
+            content.setBody(&ns_body);
 
             // Unique identifier per notification so each fires independently.
             let req_id = NSString::from_str(&format!(
@@ -959,7 +959,7 @@ fn post_un_notification(title: String, body: String) {
             // trigger = None → deliver immediately.
             // req_id is Retained<NSString>; deref to &NSString for the call.
             let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
-                &*req_id, &content, None,
+                &req_id, &content, None,
             );
 
             // Completion block: dyn Fn(*mut NSError) — same NSError from 0.3.x.
@@ -1716,8 +1716,6 @@ fn build_text_preview_body(preview: &str) -> String {
 }
 
 /// Startup-race + periodic Recent submenu resync.
-///
-
 /// `setup_tray` runs at startup before the daemon socket is necessarily bound,
 /// so the Recent submenu often shows a placeholder. This function spawns a
 /// background thread that:
