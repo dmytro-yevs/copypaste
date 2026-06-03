@@ -453,6 +453,47 @@ fun HistoryScreen(
 
     BackHandler(enabled = reorderMode) { reorderMode = false }
 
+    // ── Long-press peek preview state ────────────────────────────────────────
+    // previewItemId + previewPhase are rememberSaveable so a pinned preview
+    // survives rotation.  The overlay re-triggers its lazy load on restore via
+    // key = item.id + phase in produceState inside PreviewOverlay.
+    var previewItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var previewPhase by rememberSaveable(
+        stateSaver = androidx.compose.runtime.saveable.Saver(
+            save    = { phase: PreviewPhase ->
+                when (phase) {
+                    PreviewPhase.Idle    -> 0
+                    PreviewPhase.Peeking -> 1
+                    PreviewPhase.Pinned  -> 2
+                }
+            },
+            restore = { ord: Int ->
+                when (ord) {
+                    1    -> PreviewPhase.Peeking
+                    2    -> PreviewPhase.Pinned
+                    else -> PreviewPhase.Idle
+                }
+            },
+        )
+    ) { mutableStateOf<PreviewPhase>(PreviewPhase.Idle) }
+
+    // Auto-dismiss when the previewed item is no longer in the list.
+    LaunchedEffect(items, previewItemId) {
+        val id = previewItemId ?: return@LaunchedEffect
+        if (items.none { it.id == id }) {
+            previewItemId = null
+            previewPhase = PreviewPhase.Idle
+        }
+    }
+
+    // Entering selection mode collapses any open preview.
+    LaunchedEffect(selectionMode) {
+        if (selectionMode && previewPhase != PreviewPhase.Idle) {
+            previewItemId = null
+            previewPhase = PreviewPhase.Idle
+        }
+    }
+
     // Sort: pinned first (by user-defined pinnedSortIndex), then unpinned by recency.
     // Pinned items are sorted by pinnedSortIndex (NOT wallTimeMs) so copying a pinned
     // clip does not move it — fixes HW-A15.
@@ -859,50 +900,186 @@ fun HistoryScreen(
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
     ) { innerPadding ->
-        when {
-            loading && sortedItems.isEmpty() -> LoadingBox(innerPadding)
-            // §9: history completely empty
-            sortedItems.isEmpty() -> EmptyHistoryState(innerPadding)
-            // §9: search returned no results
-            filteredItems.isEmpty() -> EmptySearchState(innerPadding, searchQuery.trim())
-            else -> HistoryList(
-                items = filteredItems,
-                padding = innerPadding,
-                selectionMode = selectionMode,
-                selectedIds = selectedIds,
-                reorderMode = reorderMode,
-                onDelete = { id -> viewModel.deleteItem(id) },
-                onSetPinned = { id, pinned -> viewModel.setPinned(id, pinned) },
-                onReorderPinned = { id, direction ->
-                    val pinnedItems = sortedItems.filter { it.pinned }
-                    val idx = pinnedItems.indexOfFirst { it.id == id }
-                    if (idx < 0) return@HistoryList
-                    val swapIdx = idx + direction
-                    if (swapIdx < 0 || swapIdx >= pinnedItems.size) return@HistoryList
-                    val newOrder = pinnedItems.toMutableList().also {
-                        val tmp = it[idx]; it[idx] = it[swapIdx]; it[swapIdx] = tmp
+        // The preview overlay must be a sibling of the list inside this Box so
+        // the long-press drag gesture remains one continuous pointer stream
+        // (not interrupted by a Dialog/Popup window boundary).
+        Box(modifier = Modifier.fillMaxSize()) {
+            when {
+                loading && sortedItems.isEmpty() -> LoadingBox(innerPadding)
+                // §9: history completely empty
+                sortedItems.isEmpty() -> EmptyHistoryState(innerPadding)
+                // §9: search returned no results
+                filteredItems.isEmpty() -> EmptySearchState(innerPadding, searchQuery.trim())
+                else -> HistoryList(
+                    items = filteredItems,
+                    padding = innerPadding,
+                    selectionMode = selectionMode,
+                    selectedIds = selectedIds,
+                    reorderMode = reorderMode,
+                    onDelete = { id -> viewModel.deleteItem(id) },
+                    onSetPinned = { id, pinned -> viewModel.setPinned(id, pinned) },
+                    onReorderPinned = { id, direction ->
+                        val pinnedItems = sortedItems.filter { it.pinned }
+                        val idx = pinnedItems.indexOfFirst { it.id == id }
+                        if (idx < 0) return@HistoryList
+                        val swapIdx = idx + direction
+                        if (swapIdx < 0 || swapIdx >= pinnedItems.size) return@HistoryList
+                        val newOrder = pinnedItems.toMutableList().also {
+                            val tmp = it[idx]; it[idx] = it[swapIdx]; it[swapIdx] = tmp
+                        }
+                        viewModel.reorderPinned(newOrder.map { it.id })
+                    },
+                    onCopied = { id -> viewModel.copyItem(id) },
+                    onLongPress = { id ->
+                        // Long-press repurposed for preview when NOT in selection mode.
+                        // (gesture gated in HistoryRow — this path is now selection-mode only)
+                        selectionMode = true
+                        selectedIds = setOf(id)
+                    },
+                    onCheckboxTap = { id ->
+                        if (!selectionMode) selectionMode = true
+                        selectedIds = if (selectedIds.contains(id)) {
+                            val next = selectedIds - id
+                            if (next.isEmpty()) { selectionMode = false }
+                            next
+                        } else {
+                            selectedIds + id
+                        }
+                    },
+                    onSensitiveTap = {
+                        scope.launch { snackbarHostState.showSnackbar(sensitiveTapMsg) }
+                    },
+                    onSaveFile = { id ->
+                        scope.launch {
+                            val repository = ClipboardRepository(ctx)
+                            val saved = withContext(Dispatchers.IO) {
+                                try {
+                                    val fileBytes = repository.getFileBytes(id) ?: return@withContext false
+                                    val (fileName, mime) = repository.getFileMeta(id)
+                                    val safeName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
+                                    val mimeType = mime ?: "application/octet-stream"
+                                    // API 29+: insert into MediaStore.Downloads (no WRITE_EXTERNAL_STORAGE needed)
+                                    val values = ContentValues().apply {
+                                        put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+                                        put(MediaStore.Downloads.MIME_TYPE, mimeType)
+                                        put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                                        put(MediaStore.Downloads.IS_PENDING, 1)
+                                    }
+                                    val resolver = ctx.contentResolver
+                                    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                                        ?: return@withContext false
+                                    resolver.openOutputStream(uri)?.use { it.write(fileBytes) }
+                                    values.clear()
+                                    values.put(MediaStore.Downloads.IS_PENDING, 0)
+                                    resolver.update(uri, values, null, null)
+                                    true
+                                } catch (e: Exception) {
+                                    android.util.Log.w("HistoryActivity", "saveFile failed for $id: ${e.message}")
+                                    false
+                                }
+                            }
+                            snackbarHostState.showSnackbar(
+                                if (saved) ctx.getString(R.string.file_saved_ok)
+                                else ctx.getString(R.string.file_save_failed)
+                            )
+                        }
+                    },
+                    onPreviewPeek = { id ->
+                        previewItemId = id
+                        previewPhase = PreviewPhase.Peeking
+                    },
+                    onPreviewPin = { id ->
+                        previewItemId = id
+                        previewPhase = PreviewPhase.Pinned
+                    },
+                    onPreviewDismiss = {
+                        previewItemId = null
+                        previewPhase = PreviewPhase.Idle
+                    },
+                )
+            }
+
+            // ── Overlay — in-tree sibling of the list, never a Dialog/Popup ──
+            val previewItem = remember(previewItemId, sortedItems) {
+                previewItemId?.let { id -> sortedItems.find { it.id == id } }
+            }
+            val previewRepository = remember { ClipboardRepository(ctx) }
+            PreviewOverlay(
+                phase = previewPhase,
+                item = previewItem,
+                repository = previewRepository,
+                settings = settings,
+                maskSensitive = settings.maskSensitiveContent,
+                onDismiss = {
+                    previewItemId = null
+                    previewPhase = PreviewPhase.Idle
+                },
+                onCopy = {
+                    val item = previewItem ?: return@PreviewOverlay
+                    scope.launch {
+                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        when {
+                            item.isImage -> {
+                                val imageBytes = withContext(Dispatchers.IO) { previewRepository.getImageBytes(item.id) }
+                                if (imageBytes != null) {
+                                    val uri = withContext(Dispatchers.IO) {
+                                        try {
+                                            val dir = java.io.File(ctx.cacheDir, "image_copy").also { it.mkdirs() }
+                                            val file = java.io.File(dir, "${item.id}.png")
+                                            file.writeBytes(imageBytes)
+                                            androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
+                                        } catch (_: Exception) { null }
+                                    }
+                                    if (uri != null) {
+                                        val clip = android.content.ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
+                                        ctx.grantUriPermission("com.android.systemui", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        cm.setPrimaryClip(clip)
+                                    }
+                                }
+                            }
+                            item.isFile -> {
+                                val fileBytes = withContext(Dispatchers.IO) { previewRepository.getFileBytes(item.id) }
+                                if (fileBytes != null) {
+                                    val uri = withContext(Dispatchers.IO) {
+                                        try {
+                                            val (fileName, _) = previewRepository.getFileMeta(item.id)
+                                            val safeName = fileName?.takeIf { it.isNotBlank() } ?: "${item.id}.bin"
+                                            val dir = java.io.File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
+                                            val file = java.io.File(dir, safeName)
+                                            file.writeBytes(fileBytes)
+                                            androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
+                                        } catch (_: Exception) { null }
+                                    }
+                                    if (uri != null) {
+                                        val clip = android.content.ClipData.newUri(ctx.contentResolver, "CopyPaste file", uri)
+                                        ctx.grantUriPermission("com.android.systemui", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        cm.setPrimaryClip(clip)
+                                    }
+                                }
+                            }
+                            else -> {
+                                val fullText = withContext(Dispatchers.IO) {
+                                    previewRepository.loadFullPlaintext(item.id, settings.encryptionKey)
+                                } ?: item.snippet
+                                ClipboardRepository.expectClip(fullText)
+                                cm.setPrimaryClip(android.content.ClipData.newPlainText("CopyPaste", fullText))
+                            }
+                        }
+                        viewModel.copyItem(item.id)
                     }
-                    viewModel.reorderPinned(newOrder.map { it.id })
                 },
-                onCopied = { id -> viewModel.copyItem(id) },
-                onLongPress = { id ->
-                    selectionMode = true
-                    selectedIds = setOf(id)
+                onSetPinned = { pinned ->
+                    val id = previewItemId ?: return@PreviewOverlay
+                    viewModel.setPinned(id, pinned)
                 },
-                onCheckboxTap = { id ->
-                    if (!selectionMode) selectionMode = true
-                    selectedIds = if (selectedIds.contains(id)) {
-                        val next = selectedIds - id
-                        if (next.isEmpty()) { selectionMode = false }
-                        next
-                    } else {
-                        selectedIds + id
-                    }
+                onDelete = {
+                    val id = previewItemId ?: return@PreviewOverlay
+                    previewItemId = null
+                    previewPhase = PreviewPhase.Idle
+                    viewModel.deleteItem(id)
                 },
-                onSensitiveTap = {
-                    scope.launch { snackbarHostState.showSnackbar(sensitiveTapMsg) }
-                },
-                onSaveFile = { id ->
+                onSaveFile = {
+                    val id = previewItemId ?: return@PreviewOverlay
                     scope.launch {
                         val repository = ClipboardRepository(ctx)
                         val saved = withContext(Dispatchers.IO) {
@@ -911,7 +1088,6 @@ fun HistoryScreen(
                                 val (fileName, mime) = repository.getFileMeta(id)
                                 val safeName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
                                 val mimeType = mime ?: "application/octet-stream"
-                                // API 29+: insert into MediaStore.Downloads (no WRITE_EXTERNAL_STORAGE needed)
                                 val values = ContentValues().apply {
                                     put(MediaStore.Downloads.DISPLAY_NAME, safeName)
                                     put(MediaStore.Downloads.MIME_TYPE, mimeType)
@@ -927,7 +1103,7 @@ fun HistoryScreen(
                                 resolver.update(uri, values, null, null)
                                 true
                             } catch (e: Exception) {
-                                android.util.Log.w("HistoryActivity", "saveFile failed for $id: ${e.message}")
+                                android.util.Log.w("HistoryActivity", "preview saveFile failed for $id: ${e.message}")
                                 false
                             }
                         }
@@ -1241,6 +1417,12 @@ private fun HistoryList(
     onSensitiveTap: () -> Unit = {},
     /** Called when the user taps Save on a file row; receives the item id. */
     onSaveFile: (String) -> Unit = {},
+    /** Called when a long-press hold starts on a row (not in selection mode). */
+    onPreviewPeek: (String) -> Unit = {},
+    /** Called when the drag-up commit gesture fires on a row. */
+    onPreviewPin: (String) -> Unit = {},
+    /** Called when a plain release without drag-up ends the peek. */
+    onPreviewDismiss: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -1433,6 +1615,9 @@ private fun HistoryList(
                         onCheckboxTap = { onCheckboxTap(item.id) },
                         onSensitiveTap = onSensitiveTap,
                         onSaveFile = { onSaveFile(item.id) },
+                        onPreviewPeek = onPreviewPeek,
+                        onPreviewPin = onPreviewPin,
+                        onPreviewDismiss = onPreviewDismiss,
                     )
                     HorizontalDivider(
                         color = IdeBorder.copy(alpha = 0.5f),
@@ -1477,6 +1662,12 @@ private fun HistoryRow(
     onCheckboxTap: () -> Unit,
     onSensitiveTap: () -> Unit = {},
     onSaveFile: () -> Unit = {},
+    /** Long-press peek: called when hold starts (not in selection mode). */
+    onPreviewPeek: (String) -> Unit = {},
+    /** Long-press commit: called when drag-up crosses the threshold. */
+    onPreviewPin: (String) -> Unit = {},
+    /** Called when a plain release without drag-up ends the peek. */
+    onPreviewDismiss: () -> Unit = {},
 ) {
     val detectedSensitive = item.isSensitive
 
@@ -1575,9 +1766,20 @@ private fun HistoryRow(
                         onCopy()
                     }
                 },
+                // Long-press in selection mode selects the row.
+                // Outside selection mode the previewPeekGesture modifier below
+                // intercepts the hold, so onLongPress here is selection-mode only.
                 onLongClick = {
-                    if (!selectionMode) onLongPress()
+                    if (selectionMode) onLongPress()
                 },
+            )
+            // Peek gesture — no-op when selectionMode is true (gated inside modifier).
+            .previewPeekGesture(
+                itemId = item.id,
+                selectionMode = selectionMode,
+                onPeeking = onPreviewPeek,
+                onPinned = onPreviewPin,
+                onDismissPeek = onPreviewDismiss,
             )
             .padding(horizontal = 12.dp, vertical = 0.dp),
     ) {
