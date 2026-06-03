@@ -557,10 +557,15 @@ class FgsSyncLoop(
                         "(stored $stored), sent ${result.itemsSent}",
                 )
             }
-            // Record a successful contact time on the roster entry (best-effort;
-            // a write failure here must not abort the remaining peers).
+            // E1: stamp a real-presence contact time on the roster entry so the
+            // Devices screen "online" dot reflects an ACTUAL successful P2P sync
+            // (not a Supabase poll-cursor proxy). Replace-in-place via the
+            // dedicated helper; best-effort — a write failure here must not abort
+            // the remaining peers.
             runCatching {
-                settings.upsertPeer(peer.copy(lastSyncMs = System.currentTimeMillis()))
+                settings.updatePeerLastSync(peerFingerprint, System.currentTimeMillis())
+            }.onFailure { e ->
+                Log.w(TAG, "Failed to stamp lastSyncMs for ${peerFingerprint.take(8)}: ${e.message}")
             }
             } catch (e: CancellationException) {
                 throw e

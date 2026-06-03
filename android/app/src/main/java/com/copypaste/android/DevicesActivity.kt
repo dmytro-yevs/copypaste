@@ -2,6 +2,7 @@ package com.copypaste.android
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -36,6 +37,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,89 +57,37 @@ import com.copypaste.android.ui.theme.IdeFaint
 import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeText
 import com.copypaste.android.ui.theme.SectionLabel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * View-model data class for a paired P2P peer.
+ * "Online" recency threshold for the per-peer green dot.
  *
- * Populated entirely from [Settings] — no new FFI bindings required. The three
- * fields persisted by [PairActivity] after a successful pairing are:
- *   • [Settings.pairedPeerFingerprint] — SHA-256 hex fingerprint of peer's cert
- *   • [Settings.pairedPeerSyncAddr]    — host:port for background P2P dialer
- *   • [Settings.lastSupabasePollWallTime] — used as a coarse "last-sync" proxy
- *
- * Multi-peer note: [Settings] stores only ONE peer (the most recently paired).
- * Supporting a roster of peers requires a new SharedPreferences list or an FFI
- * call — deferred as a follow-up.
+ * A peer that completed a successful P2P sync within the last [ONLINE_WINDOW_MS]
+ * is rendered online (green dot); otherwise offline (grey). This mirrors the
+ * macOS daemon's `ONLINE_THRESHOLD_SECS` (60 s) so both platforms agree on what
+ * "online" means. The presence signal is [PairedPeer.lastSyncMs], stamped by
+ * [FgsSyncLoop] (via [Settings.updatePeerLastSync]) on each successful dial —
+ * NOT the old `lastSupabasePollWallTime` poll-cursor proxy.
  */
-data class PairedPeerInfo(
-    val fingerprint: String,
-    val syncAddr: String,
-    /** Wall-clock ms of the most recent known sync event, or 0 if unknown. */
-    val lastSyncMs: Long = 0L,
-) {
-    /**
-     * True when [lastSyncMs] is within [ONLINE_WINDOW_MS] of [nowMs].
-     * Mirrors the macOS daemon's "green dot" recency check (last_sync_ms > now - 60s).
-     */
-    fun isOnline(nowMs: Long = System.currentTimeMillis()): Boolean =
-        lastSyncMs > 0L && (nowMs - lastSyncMs) <= ONLINE_WINDOW_MS
+internal const val ONLINE_WINDOW_MS = 60_000L
 
-    companion object {
-        /** 60-second window: a peer that synced within the last minute is "online". */
-        const val ONLINE_WINDOW_MS = 60_000L
-
-        /**
-         * Build a [PairedPeerInfo] from raw values (used in tests and from [fromSettings]).
-         * Returns null when [fingerprint] is blank — indicating no peer is paired.
-         */
-        fun fromRaw(fingerprint: String, syncAddr: String, lastSyncMs: Long = 0L): PairedPeerInfo? {
-            if (fingerprint.isBlank()) return null
-            return PairedPeerInfo(fingerprint = fingerprint, syncAddr = syncAddr, lastSyncMs = lastSyncMs)
-        }
-
-        /** Load the currently-paired peer from [settings], or null if not paired. */
-        fun fromSettings(settings: Settings): PairedPeerInfo? = fromRaw(
-            fingerprint = settings.pairedPeerFingerprint,
-            syncAddr = settings.pairedPeerSyncAddr,
-            // lastSupabasePollWallTime is the best available coarse "last seen" signal
-            // on Android: it advances whenever a Supabase row is processed. It is NOT
-            // a poll-completion clock, so a non-zero value only means "synced recently
-            // enough to have received at least one row". Zero means never synced.
-            lastSyncMs = settings.lastSupabasePollWallTime,
-        )
-    }
-}
+/** True when [peer] synced within [ONLINE_WINDOW_MS] of [nowMs]. */
+internal fun PairedPeer.isOnline(nowMs: Long = System.currentTimeMillis()): Boolean =
+    lastSyncMs > 0L && (nowMs - lastSyncMs) <= ONLINE_WINDOW_MS
 
 /**
- * Forget this device locally: clear the paired peer fingerprint, sync address,
- * and session key from SharedPreferences. The peer is NOT notified; it will
- * reject future connections from us because we no longer have a valid session
- * key, but it may still try to contact us until it is also unpaired.
+ * Forget a single paired peer locally: remove its roster entry (fingerprint,
+ * sync address, KEK-wrapped session key). The peer is NOT notified; it may keep
+ * trying to contact us until it is also unpaired on its side.
  *
- * Does NOT touch the P2P identity (cert/key) — we keep our own identity so
- * re-pairing with a new peer works without regenerating the cert.
+ * Does NOT touch this device's P2P identity (cert/key) — we keep our own
+ * identity so our OTHER pairings keep working and re-pairing needs no new cert.
  */
-fun unpairPeer(settings: Settings) {
-    settings.pairedPeerFingerprint = ""
-    settings.pairedPeerSyncAddr = ""
-    settings.pairedPeerSessionKey = ByteArray(0)
-}
-
-/**
- * Revoke the pairing: same as [unpairPeer] plus clear our own P2P mTLS identity
- * so the peer can no longer authenticate us even if it retains our old fingerprint.
- * The next pairing will generate a fresh cert.
- *
- * This is the "nuclear" option — use when the user suspects the peer device is
- * compromised or lost. After revocation the user must re-pair with a fresh QR scan.
- */
-fun revokePeer(settings: Settings) {
-    unpairPeer(settings)
-    // Clearing p2pIdentity forces a fresh cert on next pairing. The old cert's
-    // fingerprint was pinned on the peer side; a new cert means a new fingerprint,
-    // so even if the peer retains our old entry it will reject future connections.
-    settings.p2pIdentity = null
+fun unpairPeer(settings: Settings, fingerprint: String) {
+    settings.removePeer(fingerprint)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,8 +95,9 @@ fun revokePeer(settings: Settings) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Devices screen — shows the currently-paired P2P peer (if any) as a card with
- * an online status dot, sync address, fingerprint, and Unpair / Revoke actions.
+ * Devices screen — shows the full roster of paired P2P peers, each as a card
+ * with a real-presence online dot, sync address, fingerprint, last-sync time,
+ * and per-peer Unpair / Revoke actions. Parity with the macOS DevicesView.
  *
  * Navigation: launched from the DEVICES tab in [MainActivity] bottom nav, and
  * also accessible as a standalone activity from [SettingsActivity] (General tab
@@ -176,68 +127,112 @@ fun DevicesScreen(
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
+    val scope = rememberCoroutineScope()
 
-    // Refresh the peer state every poll interval so the online dot updates.
-    var peer by remember { mutableStateOf(PairedPeerInfo.fromSettings(settings)) }
+    // Refresh the roster every poll interval so the online dots and last-sync
+    // labels update as FgsSyncLoop stamps presence.
+    var peers by remember { mutableStateOf(settings.pairedPeers) }
     var ownIdentity by remember { mutableStateOf(settings.p2pIdentity) }
+
+    fun refresh() {
+        peers = settings.pairedPeers
+        ownIdentity = settings.p2pIdentity
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
             delay(PEER_POLL_MS)
-            peer = PairedPeerInfo.fromSettings(settings)
-            ownIdentity = settings.p2pIdentity
+            refresh()
         }
     }
 
-    var showUnpairDialog by remember { mutableStateOf(false) }
-    var showRevokeDialog by remember { mutableStateOf(false) }
+    // Per-peer dialog targets (null = no dialog showing).
+    var unpairTarget by remember { mutableStateOf<PairedPeer?>(null) }
+    var revokeTarget by remember { mutableStateOf<PairedPeer?>(null) }
+    // Non-null when an async revokeDeviceAudit IO call failed — surfaced to the user.
+    var revokeError by remember { mutableStateOf<String?>(null) }
 
     // ── Unpair confirmation ──────────────────────────────────────────────────
-    if (showUnpairDialog) {
+    unpairTarget?.let { target ->
         AlertDialog(
-            onDismissRequest = { showUnpairDialog = false },
+            onDismissRequest = { unpairTarget = null },
             title = { Text("Forget paired device?") },
             text = {
                 Text(
-                    "This device will no longer sync with the paired Mac over P2P. " +
+                    "This device will no longer sync with ${target.displayName()} over P2P. " +
                     "You can re-pair at any time by scanning a new QR code."
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    showUnpairDialog = false
-                    unpairPeer(settings)
-                    peer = PairedPeerInfo.fromSettings(settings)
+                    unpairTarget = null
+                    unpairPeer(settings, target.fingerprint)
+                    refresh()
                 }) { Text("Forget", color = IdeDanger) }
             },
             dismissButton = {
-                TextButton(onClick = { showUnpairDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { unpairTarget = null }) { Text("Cancel") }
             },
         )
     }
 
     // ── Revoke confirmation ──────────────────────────────────────────────────
-    if (showRevokeDialog) {
+    revokeTarget?.let { target ->
         AlertDialog(
-            onDismissRequest = { showRevokeDialog = false },
+            onDismissRequest = { revokeTarget = null },
             title = { Text("Revoke pairing?") },
             text = {
                 Text(
-                    "This will forget the paired device AND regenerate your P2P identity. " +
-                    "The peer will no longer be able to connect to you. " +
-                    "You will need to re-pair with a fresh QR scan."
+                    "This device will no longer connect to ${target.displayName()}. " +
+                    "A revocation record is kept."
                 )
             },
             confirmButton = {
                 TextButton(onClick = {
-                    showRevokeDialog = false
-                    revokePeer(settings)
-                    peer = PairedPeerInfo.fromSettings(settings)
-                    ownIdentity = settings.p2pIdentity
+                    revokeTarget = null
+                    // Forget the PEER locally (never our own p2pIdentity), then
+                    // write a durable audit/revocation record on the IO dispatcher.
+                    settings.removePeer(target.fingerprint)
+                    refresh()
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) {
+                            runCatching {
+                                revokeDeviceAudit(
+                                    dbPath = settings.dbPath,
+                                    key = settings.encryptionKey,
+                                    fingerprint = target.fingerprint,
+                                    name = target.displayName(),
+                                )
+                            }
+                        }.fold(
+                            onSuccess = { true },
+                            onFailure = { e ->
+                                Log.e(
+                                    TAG,
+                                    "revokeDeviceAudit failed for ${target.fingerprint.take(8)}: ${e.message}",
+                                    e,
+                                )
+                                false
+                            },
+                        )
+                        if (!ok) revokeError = "Failed to record revocation. The peer was unpaired locally."
+                    }
                 }) { Text("Revoke", color = IdeDanger) }
             },
             dismissButton = {
-                TextButton(onClick = { showRevokeDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { revokeTarget = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    // ── Revoke failure surface ────────────────────────────────────────────────
+    revokeError?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { revokeError = null },
+            title = { Text("Revocation incomplete") },
+            text = { Text(msg) },
+            confirmButton = {
+                TextButton(onClick = { revokeError = null }) { Text("OK") }
             },
         )
     }
@@ -263,15 +258,17 @@ fun DevicesScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
 
-            // ── Paired peer ─────────────────────────────────────────────────
-            SectionLabel("Paired Device")
+            // ── Paired peers ────────────────────────────────────────────────
+            SectionLabel("Paired Devices")
 
-            if (peer != null) {
-                PeerCard(
-                    peer = peer!!,
-                    onUnpair = { showUnpairDialog = true },
-                    onRevoke = { showRevokeDialog = true },
-                )
+            if (peers.isNotEmpty()) {
+                for (peer in peers) {
+                    PeerCard(
+                        peer = peer,
+                        onUnpair = { unpairTarget = peer },
+                        onRevoke = { revokeTarget = peer },
+                    )
+                }
             } else {
                 NoPeerCard(
                     onPair = {
@@ -291,13 +288,17 @@ fun DevicesScreen(
     }
 }
 
+/** Display label for a peer: its name when set, else a short fingerprint. */
+private fun PairedPeer.displayName(): String =
+    name.ifBlank { "device ${fingerprint.take(8)}" }
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Peer card
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun PeerCard(
-    peer: PairedPeerInfo,
+    peer: PairedPeer,
     onUnpair: () -> Unit,
     onRevoke: () -> Unit,
 ) {
@@ -311,7 +312,7 @@ private fun PeerCard(
         border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // ── Header row: dot + status ────────────────────────────────────
+            // ── Header row: dot + name + status ─────────────────────────────
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -323,6 +324,11 @@ private fun PeerCard(
                         .background(dotColor),
                 )
                 Text(
+                    text = peer.name.ifBlank { "Paired device" },
+                    color = IdeText,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
                     text = if (online) "Online" else "Offline",
                     color = dotColor,
                     style = MaterialTheme.typography.labelMedium,
@@ -331,8 +337,8 @@ private fun PeerCard(
 
             Spacer(Modifier.height(10.dp))
 
-            // ── Fingerprint ─────────────────────────────────────────────────
-            DeviceField(label = "Fingerprint", value = peer.fingerprint)
+            // ── Fingerprint (short) ─────────────────────────────────────────
+            DeviceField(label = "Fingerprint", value = peer.fingerprint.take(16))
 
             // ── Sync address ────────────────────────────────────────────────
             if (peer.syncAddr.isNotBlank()) {
@@ -453,6 +459,8 @@ private fun DeviceField(label: String, value: String) {
         )
     }
 }
+
+private const val TAG = "DevicesActivity"
 
 /** Poll cadence for refreshing peer state on the Devices screen. */
 private const val PEER_POLL_MS = 10_000L
