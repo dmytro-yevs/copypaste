@@ -68,7 +68,7 @@ class ClipboardRepository(context: Context) {
      * "same text copied again later" case — re-copying after the window stores
      * a fresh row as expected.
      *
-     * The dedup state ([lastStoredHash], [lastStoredAtMs], [dedupLock]) lives in
+     * The dedup state ([lastStoredKey], [lastStoredAtMs], [dedupLock]) lives in
      * the [companion object] so it is shared process-wide across every
      * repository instance. All three listener owners run in the same process and
      * each builds its own [ClipboardRepository]; per-instance state let the same
@@ -521,14 +521,18 @@ class ClipboardRepository(context: Context) {
         }
 
         // ── HIGH-3: cross-listener dedup (identical content within DEDUP_WINDOW_MS).
-        val hash = plaintext.hashCode()
+        // E7: key on content LENGTH + hash rather than a bare 32-bit hashCode().
+        // A length-prefix makes an accidental collision far less likely — a
+        // different clip would have to share both its length and its hashCode
+        // within the window to be wrongly dropped.
+        val dedupKey = "${plaintext.length}:${plaintext.hashCode()}"
         synchronized(dedupLock) {
             val now = System.currentTimeMillis()
-            if (hash == lastStoredHash && now - lastStoredAtMs < DEDUP_WINDOW_MS) {
+            if (dedupKey == lastStoredKey && now - lastStoredAtMs < DEDUP_WINDOW_MS) {
                 Log.d(TAG, "Duplicate clip within ${DEDUP_WINDOW_MS}ms — skipping")
                 return@withContext ""
             }
-            lastStoredHash = hash
+            lastStoredKey = dedupKey
             lastStoredAtMs = now
         }
 
@@ -987,7 +991,7 @@ class ClipboardRepository(context: Context) {
          * instance; per-instance state lets the same physical copy slip past all three
          * guards independently. All accesses must be under [dedupLock].
          */
-        @Volatile var lastStoredHash: Int = 0
+        @Volatile var lastStoredKey: String = ""
         @Volatile var lastStoredAtMs: Long = 0L
         val dedupLock = Any()
 
@@ -1077,7 +1081,7 @@ class ClipboardRepository(context: Context) {
          */
         fun resetDedupState() {
             synchronized(dedupLock) {
-                lastStoredHash = 0
+                lastStoredKey = ""
                 lastStoredAtMs = 0L
             }
             synchronized(expectedClipLock) {
