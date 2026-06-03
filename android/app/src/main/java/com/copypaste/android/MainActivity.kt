@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -196,11 +195,11 @@ class MainActivity : ComponentActivity() {
 
 // ── Navigation structure ───────────────────────────────────────────────────────
 
-private enum class NavTab(val label: String, val icon: ImageVector) {
+// Internal so NavTabTest (pure-JVM unit test) can verify the tab set.
+internal enum class NavTab(val label: String, val icon: ImageVector) {
     CLIPS("History", Icons.Filled.ContentPaste),
     DEVICES("Pair", Icons.Filled.Devices),
     SETTINGS("Settings", Icons.Filled.Settings),
-    ABOUT("About", Icons.Filled.Info),
 }
 
 @Composable
@@ -257,10 +256,6 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                         onBack = {}
                     )
                     NavTab.SETTINGS -> SettingsScreen(
-                        showBackButton = false,
-                        onBack = {}
-                    )
-                    NavTab.ABOUT -> AboutScreen(
                         showBackButton = false,
                         onBack = {}
                     )
