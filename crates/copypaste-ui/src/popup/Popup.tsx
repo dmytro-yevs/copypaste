@@ -7,12 +7,22 @@ import { api, HistoryEntry, IpcError, playCopySound, showCopyNotification, sourc
 import { applySpanMasking } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
 import { useUI } from "../store";
-import { ImageThumb } from "../components/ImageThumb";
+import { clearImageCache, ImageThumb } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
 
 // Max items fetched for the popup list. Intentionally compact — the popup is a
 // quick-access surface, not a full history browser.
 const MAX_ITEMS = 50;
+
+// M1: Global hook called by Rust's hide_popup_internal via popup.eval() to free
+// the JS heap (image LRU + item list) after the window is hidden without
+// navigating away from popup.html (which would force a full bundle re-parse on
+// the next show).  Registered/deregistered by the Popup component's useEffect.
+declare global {
+  interface Window {
+    __copypasteFreeMemory?: () => void;
+  }
+}
 
 // Brief delay (ms) before focusing the search input after the window is shown.
 // Needed because the native window activation and React render are not
@@ -305,6 +315,20 @@ export function Popup() {
   useEffect(() => {
     return () => {
       if (hideResetTimer.current !== null) clearTimeout(hideResetTimer.current);
+    };
+  }, []);
+
+  // M1: Register a global free-memory hook so the Rust hide path (hide_popup_internal)
+  // can call popup.eval("window.__copypasteFreeMemory()") after hiding to reclaim the
+  // JS heap (image LRU cache + history list) without navigating away from popup.html.
+  // Re-populating on next show is handled by the existing onFocusChanged → refresh().
+  useEffect(() => {
+    window.__copypasteFreeMemory = () => {
+      clearImageCache();
+      setItems([]);
+    };
+    return () => {
+      delete window.__copypasteFreeMemory;
     };
   }, []);
 

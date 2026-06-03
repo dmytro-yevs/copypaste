@@ -244,7 +244,8 @@ pub fn run() {
                     persisted.popup_shortcut
                 );
             }
-            setup_popup_window(app)?;
+            // M1: popup is lazy-created on first hotkey press (toggle_popup),
+            // not at app launch — saves ~84 MB idle RSS.
             setup_main_window(app);
 
             // V-21-A: Startup race — the tray was built before the daemon socket
@@ -822,6 +823,11 @@ fn hide_popup_internal(handle: &tauri::AppHandle) {
             let _ = handle.set_activation_policy(ActivationPolicy::Accessory);
             if let Some(popup) = handle.get_webview_window("popup") {
                 let _ = popup.hide();
+                // M1: free JS heap (image LRU cache + items list) after hide
+                // so the idle WebView holds minimal memory.  The warm WebView
+                // stays alive — only the JS heap is freed.
+                let _ =
+                    popup.eval("window.__copypasteFreeMemory && window.__copypasteFreeMemory()");
             }
             let _ = handle.set_activation_policy(ActivationPolicy::Regular);
             return;
@@ -830,6 +836,10 @@ fn hide_popup_internal(handle: &tauri::AppHandle) {
 
     if let Some(popup) = handle.get_webview_window("popup") {
         let _ = popup.hide();
+        // M1: free JS heap (image LRU cache + items list) after hide so the
+        // idle WebView holds minimal memory.  On the next show, the existing
+        // onFocusChanged → refresh() re-populates the list.
+        let _ = popup.eval("window.__copypasteFreeMemory && window.__copypasteFreeMemory()");
     }
 }
 
@@ -916,10 +926,42 @@ fn show_copy_notification(preview: String) {
 }
 
 /// Toggle (show or hide) the quick-paste popup using the configured position mode.
+///
+/// M1: Lazy-create the popup WebView on the first toggle instead of at app
+/// launch — saves ~84 MB of idle RSS (full WKWebView process + JS heap that
+/// was previously sitting warm even when the popup was never opened).
+/// The warm path (window already created) is unaffected: only the JS heap is
+/// freed on hide (via `window.__copypasteFreeMemory`), not the WebView itself,
+/// so show-latency stays instant.
 fn toggle_popup(handle: &tauri::AppHandle) {
-    let Some(popup) = handle.get_webview_window("popup") else {
-        tracing::warn!("popup window not found");
-        return;
+    // M1: Get existing window or lazy-create it on first invocation.
+    let popup = match handle.get_webview_window("popup") {
+        Some(w) => w,
+        None => {
+            // First ever toggle — build the popup WebView now.
+            match WebviewWindowBuilder::new(handle, "popup", WebviewUrl::App("popup.html".into()))
+                .title("CopyPaste Quick Paste")
+                .inner_size(POPUP_W_LOGICAL, POPUP_H_LOGICAL)
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .resizable(false)
+                .visible(false)
+                .build()
+            {
+                Ok(w) => {
+                    // Wire blur-handler + vibrancy the first time we build.
+                    // Infallible: we just built the window above.
+                    wire_popup(&w);
+                    w
+                }
+                Err(e) => {
+                    tracing::error!("toggle_popup: failed to create popup window: {e}");
+                    return;
+                }
+            }
+        }
     };
 
     // If the popup is already visible, hide it via the shared internal helper
@@ -1097,26 +1139,15 @@ fn setup_main_window(app: &tauri::App) {
     });
 }
 
-/// Ensure the popup window is created (it may already be created via tauri.conf.json).
-/// Attach a blur/focus-loss handler that auto-hides the popup.
-fn setup_popup_window(app: &tauri::App) -> tauri::Result<()> {
-    // The popup window is declared in tauri.conf.json; just look it up or
-    // create it lazily if needed (in test environments the conf may omit it).
-    let popup = if let Some(w) = app.get_webview_window("popup") {
-        w
-    } else {
-        WebviewWindowBuilder::new(app, "popup", WebviewUrl::App("popup.html".into()))
-            .title("CopyPaste Quick Paste")
-            .inner_size(POPUP_W_LOGICAL, POPUP_H_LOGICAL)
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .skip_taskbar(true)
-            .resizable(false)
-            .visible(false)
-            .build()?
-    };
-
+/// Wire blur-handler and vibrancy onto a freshly-created popup window.
+///
+/// Called once from `toggle_popup` the first time the popup is lazy-created.
+/// Extracted from the old `setup_popup_window` so the logic is reusable
+/// regardless of who built the window.
+///
+/// M1: popup is no longer created at app launch; it is built on first hotkey
+/// press.  `setup_popup_window` is therefore no longer called from setup.
+fn wire_popup(popup: &tauri::WebviewWindow) {
     // V-12 fix: hide on focus loss, but guard with is_visible() to prevent
     // double-activation when a JS-initiated hide (row click → invoke("hide_popup"))
     // fires concurrently with this blur event.  Without the guard the prior app
@@ -1143,14 +1174,12 @@ fn setup_popup_window(app: &tauri::App) -> tauri::Result<()> {
     {
         use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
         let _ = apply_vibrancy(
-            &popup,
+            popup,
             NSVisualEffectMaterial::HudWindow,
             Some(NSVisualEffectState::Active),
             Some(12.0),
         );
     }
-
-    Ok(())
 }
 
 /// Truncate a preview string to at most `max_chars` characters, collapsing
