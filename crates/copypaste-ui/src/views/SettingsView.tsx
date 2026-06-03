@@ -1354,6 +1354,22 @@ export function SettingsView() {
               />
             </div>
           </SettingsRow>
+          {/* Image preview height controls the thumbnail bounding box in both
+              the history list and the popup. Moved here from "Popup appearance"
+              so users looking for list image sizing find it in the list section. */}
+          <SettingsRow label="Image preview height">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Max height (px) of image thumbnails in the history list and the popup. The image scales to fit within 340 × height, aspect-preserving, never upscaled." />
+              <SliderRow
+                min={1}
+                max={200}
+                step={1}
+                value={prefs.imageMaxHeight}
+                onChange={(v) => setPrefs({ imageMaxHeight: v })}
+                formatValue={(v) => `${v}px`}
+              />
+            </div>
+          </SettingsRow>
           {/* M5: historySize removed — history uses lazy pagination now */}
           {/* M6: previewDelay removed — replaced by explicit Eye preview button */}
         </Panel>
@@ -1371,19 +1387,6 @@ export function SettingsView() {
                 value={prefs.previewLinesPopup}
                 onChange={(v) => setPrefs({ previewLinesPopup: v })}
                 formatValue={(v) => String(v)}
-              />
-            </div>
-          </SettingsRow>
-          <SettingsRow label="Image preview height">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Max image thumbnail height (1–200 px)" />
-              <SliderRow
-                min={1}
-                max={200}
-                step={1}
-                value={prefs.imageMaxHeight}
-                onChange={(v) => setPrefs({ imageMaxHeight: v })}
-                formatValue={(v) => `${v}px`}
               />
             </div>
           </SettingsRow>
