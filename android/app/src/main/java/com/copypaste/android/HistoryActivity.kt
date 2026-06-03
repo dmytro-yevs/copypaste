@@ -673,11 +673,39 @@ fun HistoryScreen(
                 Column(modifier = Modifier.background(IdePanel)) {
                     TopAppBar(
                         title = {
-                            Text(
-                                text = stringResource(R.string.title_history),
-                                style = MaterialTheme.typography.titleLarge,
-                                color = IdeText,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.title_history),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = IdeText,
+                                )
+                                // Clip count badge — updates reactively with the live list.
+                                // Shows total non-tombstone items (the full items list).
+                                if (items.isNotEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .background(
+                                                color = IdeElevated,
+                                                shape = RoundedCornerShape(10.dp),
+                                            )
+                                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    ) {
+                                        Text(
+                                            text = "${items.size}",
+                                            style = TextStyle(
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Normal,
+                                                fontFeatureSettings = "tnum",
+                                            ),
+                                            color = IdeFaint,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
+                            }
                         },
                         navigationIcon = {
                             if (showBackButton) {
@@ -1344,15 +1372,28 @@ private fun EmptySearchState(padding: PaddingValues, query: String) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun ContentTypeChip(contentType: String, isSensitive: Boolean) {
+private fun ContentTypeChip(
+    contentType: String,
+    isSensitive: Boolean,
+    /** Pre-classified text snippet used to pick a richer label for text-type rows. */
+    snippet: String = "",
+) {
     val (label, fg, bg) = when {
         isSensitive -> Triple("PRIVATE", IdeDanger, IdeDangerDim)
         contentType.startsWith("image/") || contentType == "image" ->
-            Triple("IMG", IdeViolet, IdeVioletDim)
-        contentType == "url" || contentType.startsWith("url") ->
-            Triple("URL", IdeInfo, IdeInfoDim)
-        contentType == "text" || contentType.startsWith("text/") ->
-            Triple("TEXT", IdeAccent, IdeAccentDim)
+            Triple("IMAGE", IdeViolet, IdeVioletDim)
+        contentType == "text" || contentType.startsWith("text/") -> {
+            // Richer label: classify the snippet text and show e.g. "URL", "EMAIL",
+            // "CODE", etc. instead of plain "TEXT" when the content matches.
+            val kind = if (snippet.isNotBlank()) TextKind.classify(snippet) else "TEXT"
+            val (chipFg, chipBg) = when (kind) {
+                "URL"   -> IdeInfo to IdeInfoDim
+                "EMAIL" -> IdeInfo to IdeInfoDim
+                "CODE"  -> IdeViolet to IdeVioletDim
+                else    -> IdeAccent to IdeAccentDim
+            }
+            Triple(kind, chipFg, chipBg)
+        }
         else -> Triple("FILE", IdeDim, IdeElevated)
     }
 
@@ -1813,7 +1854,7 @@ private fun HistoryRow(
                     Spacer(Modifier.width(4.dp))
                 }
                 // §5 content-type chip (violet for images)
-                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive)
+                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive, snippet = item.snippet)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(8.dp))
                 Image(
@@ -1915,7 +1956,7 @@ private fun HistoryRow(
                     Spacer(Modifier.width(4.dp))
                 }
                 // §3 content-type chip (file = dim/elevated)
-                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive)
+                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive, snippet = item.snippet)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(6.dp))
                 // File icon
@@ -2007,8 +2048,8 @@ private fun HistoryRow(
                     )
                     Spacer(Modifier.width(4.dp))
                 }
-                // §5 content-type chip (tinted by type)
-                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive)
+                // §5 content-type chip (tinted by type; text rows show richer kind label)
+                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive, snippet = item.snippet)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(8.dp))
                 // Preview text
