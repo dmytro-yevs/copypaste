@@ -1363,6 +1363,215 @@ impl IpcServer {
         }
     }
 
+    /// Build THIS device's [`SyncProvisioning`] to advertise over the
+    /// authenticated bootstrap tunnel ("QR fully provisions all sync").
+    ///
+    /// Populates the non-secret Supabase connection params from the persisted
+    /// [`AppConfig`] (env overrides applied, mirroring `get_sync_status`) and the
+    /// DERIVED 32-byte cloud sync key from the live `sync_key` slot — NOT the
+    /// passphrase. Returns `None` when nothing is configured (so an unconfigured
+    /// device, or a build without `cloud-sync`, sends an all-`None` value and the
+    /// peer learns nothing to apply).
+    ///
+    /// `relay_url` is always `None`: the daemon has no relay-URL config field
+    /// (relay is env-only today). The field is carried for wire/FFI symmetry.
+    ///
+    /// SECURITY: the returned struct's `derived_sync_key` is secret; it is never
+    /// logged here (and `SyncProvisioning`'s `Debug` redacts it).
+    /// Associated form so the detached QR responder task can call it with a
+    /// cloned `sync_key` Arc (it cannot borrow `&self`).
+    #[cfg(feature = "cloud-sync")]
+    async fn build_local_provisioning_from(
+        sync_key: &Arc<Mutex<Option<SyncKey>>>,
+    ) -> Option<copypaste_p2p::bootstrap::SyncProvisioning> {
+        // Read persisted config off the async worker (blocking fs I/O).
+        let app_cfg = tokio::task::spawn_blocking(read_config)
+            .await
+            .unwrap_or_default();
+        let supabase_url = std::env::var("SUPABASE_URL").ok().or(app_cfg.supabase_url);
+        let supabase_anon_key = std::env::var("SUPABASE_ANON_KEY")
+            .ok()
+            .or(app_cfg.supabase_anon_key);
+        // Snapshot the derived key bytes (the SyncKey itself is not Clone/Send-
+        // friendly across the wire); wrap in Zeroizing so the transient copy is
+        // scrubbed when this future's locals drop.
+        let derived_sync_key = sync_key
+            .lock()
+            .await
+            .as_ref()
+            .map(|k| zeroize::Zeroizing::new(k.as_bytes().to_vec()));
+
+        if supabase_url.is_none() && supabase_anon_key.is_none() && derived_sync_key.is_none() {
+            return None;
+        }
+        Some(copypaste_p2p::bootstrap::SyncProvisioning {
+            supabase_url,
+            supabase_anon_key,
+            relay_url: None,
+            // Unwrap the Zeroizing into the owned Vec the struct holds. The
+            // struct's own Debug redacts these bytes; they never hit a log.
+            derived_sync_key: derived_sync_key.map(|z| z.to_vec()),
+        })
+    }
+
+    /// `&self` convenience wrapper used by the (non-detached) initiator paths.
+    #[cfg(feature = "cloud-sync")]
+    async fn build_local_provisioning(&self) -> Option<copypaste_p2p::bootstrap::SyncProvisioning> {
+        Self::build_local_provisioning_from(&self.sync_key).await
+    }
+
+    /// `cloud-sync`-disabled stub: this build cannot source any sync account, so
+    /// it advertises nothing.
+    #[cfg(not(feature = "cloud-sync"))]
+    async fn build_local_provisioning(&self) -> Option<copypaste_p2p::bootstrap::SyncProvisioning> {
+        None
+    }
+
+    /// Apply a peer's received [`SyncProvisioning`] ("QR fully provisions all
+    /// sync"): fill in any sync-account field this device currently LACKS, but
+    /// NEVER overwrite an existing local value.
+    ///
+    /// * `supabase_url` / `supabase_anon_key` — written into `config.json` (via
+    ///   the same `merge_config` + `write_config` path `set_config` uses) only
+    ///   when the device has neither an env override nor a persisted value.
+    /// * `derived_sync_key` — when the device has no sync key yet, the 32-byte
+    ///   key is wrapped in a [`SyncKey`] and persisted via the SAME backend
+    ///   `set_sync_passphrase` uses (file store or Keychain), then installed in
+    ///   the live `sync_key` slot so the cloud loops pick it up immediately. We
+    ///   set the KEY directly — the passphrase is never transmitted.
+    /// * `relay_url` — no daemon config field exists yet; ignored (logged at
+    ///   debug). Carried only for wire/FFI symmetry.
+    ///
+    /// All steps are best-effort and idempotent; a persist failure is logged and
+    /// swallowed (pairing already succeeded).
+    #[cfg(feature = "cloud-sync")]
+    async fn apply_peer_provisioning(&self, prov: copypaste_p2p::bootstrap::SyncProvisioning) {
+        Self::apply_peer_provisioning_to(&self.sync_key, prov).await;
+    }
+
+    /// Associated form so the detached QR responder task can apply provisioning
+    /// with a cloned `sync_key` Arc (it cannot borrow `&self`). See
+    /// [`Self::apply_peer_provisioning`] for the full contract.
+    #[cfg(feature = "cloud-sync")]
+    async fn apply_peer_provisioning_to(
+        sync_key: &Arc<Mutex<Option<SyncKey>>>,
+        prov: copypaste_p2p::bootstrap::SyncProvisioning,
+    ) {
+        // ── 1. Non-secret Supabase connection params → config.json ──
+        // Read current config; only fill fields that are currently empty AND have
+        // no env override (env always wins and is not persisted here).
+        let current = tokio::task::spawn_blocking(read_config)
+            .await
+            .unwrap_or_default();
+        let env_has_url = std::env::var("SUPABASE_URL").is_ok();
+        let env_has_key = std::env::var("SUPABASE_ANON_KEY").is_ok();
+
+        let mut incoming = AppConfig::default();
+        let mut config_changed = false;
+        if current.supabase_url.is_none() && !env_has_url {
+            if let Some(url) = prov.supabase_url {
+                incoming.supabase_url = Some(url);
+                config_changed = true;
+            }
+        }
+        if current.supabase_anon_key.is_none() && !env_has_key {
+            if let Some(key) = prov.supabase_anon_key {
+                incoming.supabase_anon_key = Some(key);
+                config_changed = true;
+            }
+        }
+        if config_changed {
+            // merge_config keeps existing values for every field `incoming`
+            // leaves `None`, so this only ADDS the missing sync params.
+            let merged = merge_config(current, incoming);
+            match tokio::task::spawn_blocking(move || write_config(&merged)).await {
+                Ok(Ok(())) => {
+                    tracing::info!("applied peer sync provisioning: persisted Supabase config")
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!("apply_peer_provisioning: write_config failed: {e}")
+                }
+                Err(e) => tracing::warn!("apply_peer_provisioning: config task join failed: {e}"),
+            }
+        }
+
+        if prov.relay_url.is_some() {
+            tracing::debug!(
+                "apply_peer_provisioning: peer advertised a relay_url but this build has \
+                 no relay-URL config field; ignoring (relay is env-only)"
+            );
+        }
+
+        // ── 2. Derived cloud sync key → key store + live slot ──
+        // Only when this device has NO sync key yet (never overwrite an existing
+        // one — that would orphan locally-encrypted cloud blobs).
+        let Some(key_bytes) = prov.derived_sync_key else {
+            return;
+        };
+        if key_bytes.len() != 32 {
+            tracing::warn!(
+                "apply_peer_provisioning: ignoring sync key with wrong length ({} bytes)",
+                key_bytes.len()
+            );
+            return;
+        }
+        {
+            let guard = sync_key.lock().await;
+            if guard.is_some() {
+                tracing::debug!(
+                    "apply_peer_provisioning: device already has a sync key; not overwriting"
+                );
+                return;
+            }
+        }
+        // Wrap in Zeroizing so the transient byte buffer is scrubbed on drop.
+        let key_bytes = zeroize::Zeroizing::new(key_bytes);
+        let mut arr = zeroize::Zeroizing::new([0u8; 32]);
+        arr.copy_from_slice(&key_bytes);
+
+        // Persist via the SAME backend set_sync_passphrase uses, so an
+        // ad-hoc/unsigned install does not raise a Keychain prompt.
+        #[cfg(target_os = "macos")]
+        if crate::keychain::keychain_bypassed() {
+            tracing::debug!(
+                "apply_peer_provisioning: COPYPASTE_EPHEMERAL_KEY set; key in-memory only"
+            );
+        } else {
+            match crate::keychain::signing::choose_key_backend() {
+                crate::keychain::signing::KeyBackend::File => {
+                    // `&*arr` derefs Zeroizing<[u8; 32]> to &[u8; 32] (the exact
+                    // type store_cloud_sync_key expects) with no fallible cast.
+                    if let Err(e) = crate::keychain::file_store::store_cloud_sync_key(&arr) {
+                        tracing::warn!(
+                            "apply_peer_provisioning: file-store persist failed ({e}); \
+                             key active in-memory only until restart"
+                        );
+                    }
+                }
+                crate::keychain::signing::KeyBackend::Keychain => {
+                    use security_framework::passwords::set_generic_password;
+                    if let Err(e) = set_generic_password(
+                        crate::keychain::SERVICE,
+                        crate::keychain::CLOUD_SYNC_ACCOUNT,
+                        &arr[..],
+                    ) {
+                        tracing::warn!(
+                            "apply_peer_provisioning: keychain persist failed ({e}); \
+                             key active in-memory only until restart"
+                        );
+                    }
+                }
+            }
+        }
+
+        *sync_key.lock().await = Some(SyncKey::from_bytes(*arr));
+        tracing::info!("applied peer sync provisioning: installed derived cloud sync key");
+    }
+
+    /// `cloud-sync`-disabled stub: nothing to apply.
+    #[cfg(not(feature = "cloud-sync"))]
+    async fn apply_peer_provisioning(&self, _prov: copypaste_p2p::bootstrap::SyncProvisioning) {}
+
     /// Derive the base64-encoded shared content sync key for a peer from the
     /// PAKE [`SessionKey`](copypaste_p2p::pake::SessionKey).
     ///
@@ -1580,6 +1789,9 @@ impl IpcServer {
             tokio::task::spawn_blocking(move || Self::collect_own_peer_meta(own_public_ip))
                 .await
                 .unwrap_or_default();
+        // "QR fully provisions all sync": advertise our Supabase/relay config +
+        // derived sync key over the authenticated tunnel (None if unconfigured).
+        let own_provisioning = self.build_local_provisioning().await;
 
         let coordinator = Arc::clone(&self.pairing);
         // The confirm callback runs AFTER frame 9 (PAKE + channel binding), when
@@ -1609,6 +1821,7 @@ impl IpcServer {
             &password,
             &own_sync_addr,
             &own_meta,
+            own_provisioning,
             confirm,
         )
         .await;
@@ -1641,6 +1854,11 @@ impl IpcServer {
                     &outcome.session_key,
                     &peer_meta,
                 );
+                // "QR fully provisions all sync": apply any sync config the peer
+                // advertised that we currently lack (never overwrites existing).
+                if let Some(prov) = outcome.peer_provisioning {
+                    self.apply_peer_provisioning(prov).await;
+                }
                 self.pairing
                     .finish(crate::pairing_sm::PairingState::Confirmed);
                 let resp = Response::ok(
@@ -1708,6 +1926,10 @@ impl IpcServer {
         // B1: clone the public-IP cache Arc before the move so the detached task
         // can read our current STUN-discovered global IP to advertise in-band.
         let public_ip_cache = self.cached_public_ip.clone();
+        // "QR fully provisions all sync": clone the sync_key Arc so the detached
+        // task can BUILD our provisioning to advertise and APPLY the peer's.
+        #[cfg(feature = "cloud-sync")]
+        let sync_key = self.sync_key.clone();
         tokio::spawn(async move {
             // P2P Phase 4: collect our own device metadata to advertise in-band.
             // DeviceMeta::collect spawns child processes (up to ~2 s), so run it
@@ -1717,7 +1939,15 @@ impl IpcServer {
                 tokio::task::spawn_blocking(move || Self::collect_own_peer_meta(own_public_ip))
                     .await
                     .unwrap_or_default();
-            match responder.run(&password, &own_sync_addr, &own_meta).await {
+            // Build our SyncProvisioning to advertise (None without cloud-sync).
+            #[cfg(feature = "cloud-sync")]
+            let own_provisioning = Self::build_local_provisioning_from(&sync_key).await;
+            #[cfg(not(feature = "cloud-sync"))]
+            let own_provisioning: Option<copypaste_p2p::bootstrap::SyncProvisioning> = None;
+            match responder
+                .run(&password, &own_sync_addr, &own_meta, own_provisioning)
+                .await
+            {
                 Ok(outcome) => {
                     tracing::info!(
                         peer_fingerprint = %outcome.peer_fingerprint,
@@ -1752,6 +1982,12 @@ impl IpcServer {
                         &outcome.session_key,
                         &peer_meta,
                     );
+                    // "QR fully provisions all sync": apply any sync config the
+                    // scanning peer advertised that we currently lack.
+                    #[cfg(feature = "cloud-sync")]
+                    if let Some(prov) = outcome.peer_provisioning {
+                        Self::apply_peer_provisioning_to(&sync_key, prov).await;
+                    }
                 }
                 Err(e) => {
                     tracing::warn!("bootstrap PAKE responder failed: {e}");
@@ -1824,6 +2060,9 @@ impl IpcServer {
             tokio::task::spawn_blocking(move || Self::collect_own_peer_meta(own_public_ip))
                 .await
                 .unwrap_or_default();
+        // "QR fully provisions all sync": advertise our Supabase/relay config +
+        // derived sync key over the authenticated tunnel (None if unconfigured).
+        let own_provisioning = self.build_local_provisioning().await;
         match copypaste_p2p::bootstrap::run_initiator(
             addr,
             cert_der,
@@ -1831,6 +2070,7 @@ impl IpcServer {
             &password,
             &own_sync_addr,
             &own_meta,
+            own_provisioning,
         )
         .await
         {
@@ -1865,6 +2105,11 @@ impl IpcServer {
                     &outcome.session_key,
                     &peer_meta,
                 );
+                // "QR fully provisions all sync": apply any sync config the
+                // responder advertised that we currently lack.
+                if let Some(prov) = outcome.peer_provisioning {
+                    self.apply_peer_provisioning(prov).await;
+                }
                 Response::ok(
                     req_id,
                     serde_json::json!({
@@ -9568,6 +9813,112 @@ mod tests {
         let merged = merge_config(existing, incoming);
         assert_eq!(merged.supabase_password.as_deref(), Some("new-pw"));
         assert_eq!(merged.supabase_email.as_deref(), Some("new@example.com"));
+    }
+
+    // ── QR fully provisions all sync: apply_peer_provisioning ────────────────
+
+    /// On an UNCONFIGURED device, applying a peer's provisioning fills in the
+    /// missing Supabase config AND installs the derived sync key.
+    #[cfg(feature = "cloud-sync")]
+    #[tokio::test]
+    async fn apply_peer_provisioning_fills_missing_fields() {
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+                "SUPABASE_URL",
+                "SUPABASE_ANON_KEY",
+                "COPYPASTE_EPHEMERAL_KEY",
+            ],
+            &cfg_home,
+        );
+        // Ensure no env override / key persist interferes with the assertions.
+        // (EnvGuard set all of the above to the same path; explicitly clear the
+        // ones that must be UNSET for the "device lacks it" precondition.)
+        // SAFETY: single-threaded test scope; restored by EnvGuard on drop.
+        unsafe {
+            std::env::remove_var("SUPABASE_URL");
+            std::env::remove_var("SUPABASE_ANON_KEY");
+            std::env::set_var("COPYPASTE_EPHEMERAL_KEY", "1");
+        }
+
+        let sync_key: Arc<Mutex<Option<SyncKey>>> = Arc::new(Mutex::new(None));
+        let prov = copypaste_p2p::bootstrap::SyncProvisioning {
+            supabase_url: Some("https://new.supabase.co".into()),
+            supabase_anon_key: Some("new-anon".into()),
+            relay_url: None,
+            derived_sync_key: Some(vec![5u8; 32]),
+        };
+        IpcServer::apply_peer_provisioning_to(&sync_key, prov).await;
+
+        let cfg = read_config();
+        assert_eq!(cfg.supabase_url.as_deref(), Some("https://new.supabase.co"));
+        assert_eq!(cfg.supabase_anon_key.as_deref(), Some("new-anon"));
+        assert!(
+            sync_key.lock().await.is_some(),
+            "an unconfigured device must install the peer's derived sync key"
+        );
+    }
+
+    /// On a device that ALREADY has Supabase config + a sync key, applying a
+    /// peer's provisioning must NOT overwrite either.
+    #[cfg(feature = "cloud-sync")]
+    #[tokio::test]
+    async fn apply_peer_provisioning_never_overwrites_existing() {
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+                "SUPABASE_URL",
+                "SUPABASE_ANON_KEY",
+                "COPYPASTE_EPHEMERAL_KEY",
+            ],
+            &cfg_home,
+        );
+        // SAFETY: single-threaded test scope; restored by EnvGuard on drop.
+        unsafe {
+            std::env::remove_var("SUPABASE_URL");
+            std::env::remove_var("SUPABASE_ANON_KEY");
+            std::env::set_var("COPYPASTE_EPHEMERAL_KEY", "1");
+        }
+
+        // Seed an already-configured device.
+        write_config(&AppConfig {
+            supabase_url: Some("https://existing.supabase.co".into()),
+            supabase_anon_key: Some("existing-anon".into()),
+            ..Default::default()
+        })
+        .expect("seed config");
+        let sync_key: Arc<Mutex<Option<SyncKey>>> =
+            Arc::new(Mutex::new(Some(SyncKey::from_bytes([1u8; 32]))));
+
+        let prov = copypaste_p2p::bootstrap::SyncProvisioning {
+            supabase_url: Some("https://peer.supabase.co".into()),
+            supabase_anon_key: Some("peer-anon".into()),
+            relay_url: None,
+            derived_sync_key: Some(vec![9u8; 32]),
+        };
+        IpcServer::apply_peer_provisioning_to(&sync_key, prov).await;
+
+        let cfg = read_config();
+        assert_eq!(
+            cfg.supabase_url.as_deref(),
+            Some("https://existing.supabase.co"),
+            "existing supabase_url must not be overwritten"
+        );
+        assert_eq!(cfg.supabase_anon_key.as_deref(), Some("existing-anon"));
+        // The pre-existing key (all 1s) must be untouched.
+        assert_eq!(
+            sync_key.lock().await.as_ref().map(|k| *k.as_bytes()),
+            Some([1u8; 32]),
+            "existing sync key must not be overwritten by the peer's"
+        );
     }
 
     /// End-to-end: seed a config with a password, then run a `set_config` whose

@@ -1267,8 +1267,14 @@ async fn standing_pairing_responder_loop(
         // handshake against cancellation. On shutdown we drop the responder
         // future — cancelling the in-flight handshake (the confirm await resolves
         // to a rejection, keys drop/zeroize) — and exit the loop.
+        // "QR fully provisions all sync": this LAN/SAS *discovery* responder does
+        // not advertise sync provisioning (it has no `sync_key` handle here, and
+        // the feature is scoped to the QR pairing paths). Pass `None`; a future
+        // wave can plumb the sync_key Arc through `start_p2p` to enable it on the
+        // discovery path too. A peer's received provisioning is left unapplied on
+        // this path for the same reason.
         let run_result = tokio::select! {
-            r = responder.run_with_confirm(&password, &own_addr, &own_meta, confirm) => r,
+            r = responder.run_with_confirm(&password, &own_addr, &own_meta, None, confirm) => r,
             _ = shutdown.cancelled() => {
                 tracing::info!("LAN/SAS standing pairing responder shutting down (mid-accept)");
                 if pairing.snapshot().is_active() {

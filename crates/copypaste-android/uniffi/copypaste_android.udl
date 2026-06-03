@@ -108,9 +108,13 @@ namespace copypaste_android {
   /// `pake_password` comes from the scanned QR token; `sync_addr` is this
   /// device's own P2P sync-listener host:port. Returns the peer's pinned
   /// fingerprint, its sync address, and the 32-byte PAKE session key.
+  /// `local_provisioning` is the OPTIONAL sync-account setup THIS device offers
+  /// to the responder ("QR fully provisions all sync"); an Android device
+  /// scanning a configured PC passes `null` (nothing to offer). The provisioning
+  /// the PEER advertised comes back in `BootstrapResult.peer_provisioning`.
   /// Throws `P2pError` on a bad addr_hint or any transport/PAKE failure.
   [Throws=CopypasteError]
-  BootstrapResult bootstrap_pair_initiator(string addr_hint, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string pake_password, string sync_addr);
+  BootstrapResult bootstrap_pair_initiator(string addr_hint, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string pake_password, string sync_addr, SyncProvisioning? local_provisioning);
 
   /// Run ONE P2P clipboard sync session against an already-paired peer.
   ///
@@ -234,10 +238,27 @@ dictionary DeviceCert {
 // Result of `bootstrap_pair_initiator`: the outcome of one PAKE pairing.
 // `peer_fingerprint` is the responder's pinned cert fingerprint; `session_key`
 // is the 32-byte PAKE+channel-bound key both ends derived.
+// `peer_provisioning` is the sync-account setup the peer advertised over the
+// authenticated tunnel ("QR fully provisions all sync"); null when the peer
+// advertised nothing or is a legacy build. Kotlin persists it later.
 dictionary BootstrapResult {
   string peer_fingerprint;
   string peer_sync_addr;
   sequence<u8> session_key;
+  SyncProvisioning? peer_provisioning;
+};
+
+// Sync-account provisioning exchanged in-band over the AUTHENTICATED bootstrap
+// tunnel (never in the QR image). `supabase_url` / `supabase_anon_key` /
+// `relay_url` are non-secret connection params; `derived_sync_key` is the
+// 32-byte DERIVED cloud sync key (NOT the passphrase) and is SECRET — the
+// Kotlin caller MUST store it securely (AndroidKeystore), never log it, and
+// zero the ByteArray after use.
+dictionary SyncProvisioning {
+  string? supabase_url;
+  string? supabase_anon_key;
+  string? relay_url;
+  sequence<u8>? derived_sync_key;
 };
 
 // A local clipboard item (plaintext) Android offers to a peer during sync.
