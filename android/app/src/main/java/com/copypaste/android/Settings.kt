@@ -139,6 +139,50 @@ class Settings(context: Context) {
         )
 
     /**
+     * Directly-provisioned 32-byte cloud sync key, KEK-wrapped at rest.
+     *
+     * Set when a phone scans a configured PC's pairing QR: the macOS daemon
+     * carries its already-derived cross-device sync key in the pairing payload
+     * so the scanning device can decrypt cloud blobs WITHOUT the user typing the
+     * shared passphrase. Stored separately from [cloudSyncPassphrase] — a device
+     * may hold one, the other, or both.
+     *
+     * Returns null when unset. SyncManager prefers this over re-running Argon2id
+     * on the passphrase (see [SyncManager.Companion.resolveCloudSyncKey]).
+     *
+     * Security: raw bytes are NEVER persisted — wrapped via the AndroidKeyStore
+     * KEK (same path as the encryption key / session keys). DO NOT log the bytes.
+     */
+    var cloudSyncKeyDirect: ByteArray?
+        get() {
+            val wrappedB64 = prefs.getString(KEY_CLOUD_SYNC_KEY_DIRECT_WRAPPED_B64, null) ?: return null
+            val ivB64 = prefs.getString(KEY_CLOUD_SYNC_KEY_DIRECT_IV_B64, null) ?: return null
+            return runCatching {
+                unwrapKey(
+                    wrapped = Base64.decode(wrappedB64, Base64.NO_WRAP),
+                    iv = Base64.decode(ivB64, Base64.NO_WRAP),
+                )
+            }.getOrElse { e ->
+                Log.w(TAG, "Failed to unwrap direct cloud sync key (${e.javaClass.simpleName})", e)
+                null
+            }
+        }
+        set(v) {
+            if (v == null || v.isEmpty()) {
+                prefs.edit()
+                    .remove(KEY_CLOUD_SYNC_KEY_DIRECT_WRAPPED_B64)
+                    .remove(KEY_CLOUD_SYNC_KEY_DIRECT_IV_B64)
+                    .apply()
+                return
+            }
+            val (wrapped, iv) = wrapKey(v)
+            prefs.edit()
+                .putString(KEY_CLOUD_SYNC_KEY_DIRECT_WRAPPED_B64, Base64.encodeToString(wrapped, Base64.NO_WRAP))
+                .putString(KEY_CLOUD_SYNC_KEY_DIRECT_IV_B64, Base64.encodeToString(iv, Base64.NO_WRAP))
+                .apply()
+        }
+
+    /**
      * Which sync backend to use when [syncEnabled] is true.
      * - [SyncBackend.RELAY]    — custom relay server (original, local-network-friendly)
      * - [SyncBackend.SUPABASE] — Supabase PostgREST (cross-device, cloud-based)
@@ -187,11 +231,19 @@ class Settings(context: Context) {
             v,
         )
 
-    /** Returns true when Supabase sync is fully configured: URL, anon key, and passphrase. */
+    /**
+     * Returns true when Supabase sync is fully configured: URL, anon key, and a
+     * usable cross-device sync key.
+     *
+     * The key requirement is satisfied by EITHER a non-blank [cloudSyncPassphrase]
+     * (user-entered, Argon2id-derived) OR a directly-provisioned
+     * [cloudSyncKeyDirect] (carried over QR pairing) — a QR-provisioned phone has
+     * the derived key but never the passphrase, yet must still count as configured.
+     */
     val isSupabaseConfigured: Boolean
         get() = supabaseUrl.startsWith("https://") &&
                 supabaseAnonKey.isNotBlank() &&
-                cloudSyncPassphrase.isNotBlank()
+                (cloudSyncPassphrase.isNotBlank() || cloudSyncKeyDirect != null)
 
     /** Returns true when Supabase email+password are both non-empty. */
     val hasSupabaseCredentials: Boolean
@@ -1206,6 +1258,13 @@ class Settings(context: Context) {
         private const val KEY_LEGACY_SUPABASE_PW_PLAIN = "supabase_password"
         private const val KEY_SUPABASE_PW_WRAPPED_B64 = "supabase_password_wrapped_b64"
         private const val KEY_SUPABASE_PW_IV_B64 = "supabase_password_iv_b64"
+
+        // KEK-wrapped, directly-provisioned 32-byte cloud sync key. Carried over
+        // QR pairing (see PairActivity) so a scanning phone can decrypt cloud rows
+        // without the user re-typing the passphrase. Distinct from the
+        // passphrase-derived key path. Raw bytes are never persisted.
+        private const val KEY_CLOUD_SYNC_KEY_DIRECT_WRAPPED_B64 = "cloud_sync_key_direct_wrapped_b64"
+        private const val KEY_CLOUD_SYNC_KEY_DIRECT_IV_B64 = "cloud_sync_key_direct_iv_b64"
 
         // ── P2P sync ──────────────────────────────────────────────────────────
         const val KEY_P2P_SYNC_ENABLED = "p2p_sync_enabled"

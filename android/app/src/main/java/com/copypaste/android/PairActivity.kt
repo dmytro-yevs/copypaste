@@ -367,7 +367,63 @@ fun PairScreen(
                         keyDer = cert.keyDer,
                         pakePassword = peer.pakePassword,
                         syncAddr = "",
+                        // A phone scanning a configured PC carries nothing of its
+                        // own — it RECEIVES the PC's sync provisioning in the
+                        // response (bootstrap.peerProvisioning), applied below.
+                        localProvisioning = null,
                     )
+
+                    // QR full-provisioning: if the paired PC carried its sync
+                    // config in the pairing payload, fill any field this device
+                    // has not already configured. NEVER overwrite an existing
+                    // local value (mirror the daemon's fill-missing rule) — the
+                    // user may have set up their own Supabase/relay/passphrase.
+                    // Runs inside withContext(Dispatchers.IO) so the wrapped-key
+                    // write + SharedPreferences IO stay off the main thread.
+                    bootstrap.peerProvisioning?.let { prov ->
+                        val applied = mutableListOf<String>()
+                        prov.supabaseUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                            if (settings.supabaseUrl.isBlank()) {
+                                settings.supabaseUrl = url
+                                applied += "supabaseUrl"
+                            }
+                        }
+                        prov.supabaseAnonKey?.takeIf { it.isNotBlank() }?.let { anon ->
+                            if (settings.supabaseAnonKey.isBlank()) {
+                                settings.supabaseAnonKey = anon
+                                applied += "supabaseAnonKey"
+                            }
+                        }
+                        prov.relayUrl?.takeIf { it.isNotBlank() }?.let { relay ->
+                            if (settings.relayUrl.isBlank()) {
+                                settings.relayUrl = relay
+                                applied += "relayUrl"
+                            }
+                        }
+                        // The derived 32-byte cloud sync key: store via the direct
+                        // key path (KEK-wrapped) so the phone can decrypt cloud
+                        // rows without the passphrase. Only when none is set yet.
+                        // Convert the FFI List<UByte> to ByteArray.
+                        prov.derivedSyncKey?.takeIf { it.isNotEmpty() }?.let { keyUBytes ->
+                            if (settings.cloudSyncKeyDirect == null) {
+                                val keyBytes = ByteArray(keyUBytes.size) { keyUBytes[it].toByte() }
+                                settings.cloudSyncKeyDirect = keyBytes
+                                applied += "derivedSyncKey"
+                            }
+                        }
+                        // Log WHAT was provisioned, never the key bytes.
+                        if (applied.isNotEmpty()) {
+                            android.util.Log.i(
+                                "PairActivity",
+                                "QR provisioning applied (fill-missing): ${applied.joinToString(", ")}",
+                            )
+                        } else {
+                            android.util.Log.i(
+                                "PairActivity",
+                                "QR provisioning carried by peer but all fields already configured locally — nothing applied",
+                            )
+                        }
+                    }
                     val localItems = repository.localItemsForSync(key)
                     // Denylist: never ingest items from a peer this device revoked.
                     // Pass the local denylist into the ABI-9 syncWithPeer and skip a
