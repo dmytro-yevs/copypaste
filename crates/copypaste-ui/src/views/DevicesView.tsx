@@ -36,6 +36,42 @@ interface DeviceRowState {
 }
 
 // ---------------------------------------------------------------------------
+// StatusDot — small coloured circle indicating online/offline presence
+// ---------------------------------------------------------------------------
+
+/** Format seconds-ago into a human-readable string for the offline tooltip. */
+function formatLastSeen(secs: number | undefined): string {
+  if (secs === undefined || secs < 0) return "never";
+  if (secs < 60) return `${secs}s ago`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  return `${Math.floor(secs / 86400)}d ago`;
+}
+
+function StatusDot({
+  online,
+  lastSeenSecs,
+}: {
+  online: boolean;
+  lastSeenSecs?: number;
+}) {
+  const title = online
+    ? "Online"
+    : `Offline · last seen ${formatLastSeen(lastSeenSecs)}`;
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      className={[
+        "inline-block shrink-0 rounded-full",
+        "w-2 h-2",
+        online ? "bg-ide-success" : "bg-ide-faint/50",
+      ].join(" ")}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
 // MetaRow — one labelled line in the rich-info block, hidden when absent
 // ---------------------------------------------------------------------------
 
@@ -64,8 +100,9 @@ function ThisDeviceCard({
 }) {
   return (
     <div className="px-3 py-2.5">
-      {/* Name + "This Mac" badge */}
+      {/* Name + online dot + "This Mac" badge */}
       <div className="flex flex-wrap items-center gap-1.5 mb-1">
+        <StatusDot online={true} />
         <p className="truncate text-[13px] font-medium text-ide-text">
           {info.device_name ?? "This Device"}
         </p>
@@ -131,10 +168,13 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke }: PeerRowProps) {
     <div className="px-3 py-2.5 hover:bg-ide-hover">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          {/* Name */}
-          <p className="truncate text-[13px] font-medium text-ide-text">
-            {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
-          </p>
+          {/* Name + online dot */}
+          <div className="flex items-center gap-1.5">
+            <StatusDot online={peer.online === true} lastSeenSecs={peer.last_seen_secs} />
+            <p className="truncate text-[13px] font-medium text-ide-text">
+              {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
+            </p>
+          </div>
 
           <div className="mt-1 space-y-0.5">
             {/* Truncated fingerprint */}
@@ -445,6 +485,14 @@ export function DevicesView() {
 
   useEffect(() => {
     void loadPeers();
+  }, [loadPeers]);
+
+  // Poll peers every 10 s so the online dot refreshes without user interaction.
+  // Clears the interval on unmount to avoid timer leaks (matches existing pattern).
+  const PEERS_POLL_MS = 10_000;
+  useEffect(() => {
+    const id = setInterval(() => { void loadPeers(); }, PEERS_POLL_MS);
+    return () => { clearInterval(id); };
   }, [loadPeers]);
 
   // Unmount guard for handleUnpair / handleRevoke — prevents setState after
