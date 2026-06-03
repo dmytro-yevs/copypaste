@@ -107,8 +107,12 @@ class FgsSyncLoop(
         /** How many consecutive empty polls before we slow down to the idle interval. */
         private const val IDLE_THRESHOLD_POLLS = 3
 
-        /** Cap on local items pushed per background P2P dial (mirrors PairActivity). */
-        private const val P2P_LOCAL_ITEM_LIMIT = 200
+        /**
+         * Cap on local items pushed per background P2P dial (mirrors PairActivity).
+         * Also reused by the inbound listener ([ClipboardService]) so a peer that
+         * dials IN receives the same catch-up window the dialer would have sent.
+         */
+        const val P2P_LOCAL_ITEM_LIMIT = 200
 
         /**
          * Cadence for the background LAN P2P dial, DECOUPLED from the Supabase
@@ -117,8 +121,10 @@ class FgsSyncLoop(
          * dialed and established quickly so it can then deliver instantly over the
          * persistent mTLS link. So the dial fires on this fixed short cadence
          * regardless of how long the next poll is deferred.
+         *
+         * Also drives the inbound listener drain cadence in [ClipboardService].
          */
-        private const val P2P_DIAL_INTERVAL_MS = 3_000L
+        const val P2P_DIAL_INTERVAL_MS = 3_000L
 
         /**
          * WS-aware steady-state catch-up poll interval.
@@ -474,81 +480,10 @@ class FgsSyncLoop(
             )
             var stored = 0
             for (item in result.items) {
-                // Advance the local Lamport clock to stay causally after every
-                // received item — mirrors the SyncManager.kt:440 Supabase path.
-                // Without this the local clock lags behind the peer's, making
-                // future local pushes appear "older" and breaking LWW ordering.
-                settings.lamportClock.observe(item.wallTimeMs)
-
-                val isImage = item.contentType == "image" ||
-                    item.contentType.startsWith("image/")
-                val isFile = item.contentType == "file"
-
-                // UniFFI maps `sequence<u8>` to List<UByte>; storeImageBytes and
-                // the UTF-8 text decode below both want a ByteArray.
-                val plaintextBytes = ByteArray(item.plaintext.size) { item.plaintext[it].toByte() }
-
-                val didStore = when {
-                    isImage -> {
-                        // Image frame: mirror the cloud-poll branch (poll():299).
-                        // Store a placeholder row under the peer's STABLE item_id,
-                        // then persist the raw image bytes so HistoryActivity can
-                        // render them. Re-dials dedup via overrideId.
-                        if (plaintextBytes.isEmpty()) {
-                            false
-                        } else {
-                            val storedId = repository.storeItem(
-                                plaintext = "[image]",
-                                key = key,
-                                overrideId = item.itemId,
-                                contentType = item.contentType,
-                            )
-                            if (storedId.isNotEmpty()) {
-                                repository.storeImageBytes(storedId, plaintextBytes)
-                                // Generate thumbnail after full-res storage; non-fatal on failure.
-                                SyncThumbnailHelper.generateAndStore(plaintextBytes) { thumbBytes ->
-                                    repository.storeThumbnailBytes(storedId, thumbBytes)
-                                }
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                    }
-                    isFile -> {
-                        // File frame: store actual bytes so the user can save/copy them.
-                        // ABI 7 bindings carry file_name/mime; use them so the label
-                        // shows the real name ("[file: report.pdf]") instead of "[file]".
-                        if (plaintextBytes.isEmpty()) {
-                            false
-                        } else {
-                            val label = SyncFileHelper.buildFileLabel(item.fileName)
-                            val storedId = repository.storeItem(
-                                plaintext = label,
-                                key = key,
-                                overrideId = item.itemId,
-                                contentType = item.contentType,
-                            )
-                            if (storedId.isNotEmpty()) {
-                                repository.storeFileBytes(storedId, plaintextBytes)
-                                repository.storeFileMeta(storedId, item.fileName, item.mime)
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                    }
-                    else -> {
-                        // Text frame: persist under the peer's STABLE item_id
-                        // (overrideId) — dedups a re-dial AND lets a later
-                        // re-sync of this clip reuse the same cross-device id
-                        // instead of minting a fresh local UUID.
-                        val plaintext = String(plaintextBytes, Charsets.UTF_8)
-                        repository.storeItem(plaintext, key, overrideId = item.itemId)
-                            .isNotEmpty()
-                    }
-                }
-                if (didStore) stored += 1
+                // Store-mapping shared with the inbound listener poll (Android-as-
+                // responder). LWW dedup on item_id makes a re-dial / re-receipt a
+                // no-op, so no extra dedup is needed across the two paths.
+                if (storeSyncedItem(item)) stored += 1
             }
             if (result.itemsReceived > 0uL || result.itemsSent > 0uL) {
                 Log.i(
@@ -574,4 +509,97 @@ class FgsSyncLoop(
             }
         }
     }
+
+    /**
+     * Store one [SyncedItem] received over P2P, mapping it to the right local
+     * storage path by content type. Shared by BOTH the Android→macOS dialer
+     * ([dialPairedPeer]) and the macOS→Android inbound listener poll
+     * ([ClipboardService] → [pollP2pListener]).
+     *
+     * Persists under the peer's STABLE item_id ([SyncedItem.itemId]) as
+     * `overrideId`, so a re-dial or a re-receipt from the listener is deduped by
+     * [ClipboardRepository] (LWW on item_id) — no extra cross-path dedup needed.
+     *
+     * Advances the local Lamport clock past every received item (mirrors the
+     * Supabase path) so future local pushes order correctly under LWW.
+     *
+     * Returns true when a new (or replaced) row was stored, false on a dedup /
+     * empty / blank no-op.
+     */
+    suspend fun storeSyncedItem(item: uniffi.copypaste_android.SyncedItem): Boolean =
+        withContext(Dispatchers.IO) {
+            // Advance the local Lamport clock to stay causally after every received
+            // item — without this the local clock lags behind the peer's, making
+            // future local pushes appear "older" and breaking LWW ordering.
+            settings.lamportClock.observe(item.wallTimeMs)
+
+            val key = settings.encryptionKey
+            val isImage = item.contentType == "image" ||
+                item.contentType.startsWith("image/")
+            val isFile = item.contentType == "file"
+
+            // UniFFI maps `sequence<u8>` to List<UByte>; storeImageBytes and the
+            // UTF-8 text decode below both want a ByteArray.
+            val plaintextBytes = ByteArray(item.plaintext.size) { item.plaintext[it].toByte() }
+
+            when {
+                isImage -> {
+                    // Image frame: store a placeholder row under the peer's STABLE
+                    // item_id, then persist the raw image bytes so HistoryActivity
+                    // can render them. Re-dials dedup via overrideId.
+                    if (plaintextBytes.isEmpty()) {
+                        false
+                    } else {
+                        val storedId = repository.storeItem(
+                            plaintext = "[image]",
+                            key = key,
+                            overrideId = item.itemId,
+                            contentType = item.contentType,
+                        )
+                        if (storedId.isNotEmpty()) {
+                            repository.storeImageBytes(storedId, plaintextBytes)
+                            // Generate thumbnail after full-res storage; non-fatal on failure.
+                            SyncThumbnailHelper.generateAndStore(plaintextBytes) { thumbBytes ->
+                                repository.storeThumbnailBytes(storedId, thumbBytes)
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
+                isFile -> {
+                    // File frame: store actual bytes so the user can save/copy them.
+                    // file_name/mime are carried in-band so the label shows the real
+                    // name ("[file: report.pdf]") instead of "[file]".
+                    if (plaintextBytes.isEmpty()) {
+                        false
+                    } else {
+                        val label = SyncFileHelper.buildFileLabel(item.fileName)
+                        val storedId = repository.storeItem(
+                            plaintext = label,
+                            key = key,
+                            overrideId = item.itemId,
+                            contentType = item.contentType,
+                        )
+                        if (storedId.isNotEmpty()) {
+                            repository.storeFileBytes(storedId, plaintextBytes)
+                            repository.storeFileMeta(storedId, item.fileName, item.mime)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                }
+                else -> {
+                    // Text frame: persist under the peer's STABLE item_id
+                    // (overrideId) — dedups a re-dial AND lets a later re-sync of
+                    // this clip reuse the same cross-device id instead of minting a
+                    // fresh local UUID.
+                    val plaintext = String(plaintextBytes, Charsets.UTF_8)
+                    repository.storeItem(plaintext, key, overrideId = item.itemId)
+                        .isNotEmpty()
+                }
+            }
+        }
 }
