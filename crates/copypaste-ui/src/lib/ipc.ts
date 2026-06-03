@@ -263,6 +263,11 @@ export interface PairedDevice {
   app_version: string | null;
   /** Peer's best LAN-routable display IP, learned in-band. */
   local_ip: string | null;
+  /**
+   * Peer's public (WAN) IPv4 address, persisted + returned by the daemon
+   * (peers.rs + list_peers passthrough). Null/absent until learned.
+   */
+  public_ip?: string | null;
   /** Unix epoch seconds of the first successful sync, or null until the first sync. */
   first_sync_at: number | null;
   /** Unix epoch seconds of the most recent successful sync, or null. */
@@ -414,6 +419,12 @@ export const api = {
   /** List peers currently visible on the LAN via mDNS-SD. */
   listDiscovered: () =>
     ipcCall<{ devices: DiscoveredDevice[] }>("list_discovered", {}),
+  /**
+   * HB-9: force an mDNS-SD rescan (restart-in-place re-browse) and return the
+   * fresh discovered list. Same response shape as {@link listDiscovered}.
+   */
+  rescanDiscovered: () =>
+    ipcCall<{ devices: DiscoveredDevice[] }>("rescan_discovered", {}),
   /**
    * Begin a discovery-initiated SAS pairing with `deviceId` (the discovered
    * peer's `device_id`). Returns immediately; poll {@link pairGetSas} for the

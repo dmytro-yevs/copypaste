@@ -119,9 +119,8 @@ function ThisDeviceCard({
         <MetaRow label="OS" value={info.os_version} />
         <MetaRow label="Version" value={info.app_version} />
         <MetaRow label="Local IP" value={info.local_ip} />
-        {/* Public IP — shows WAN address from daemon relay probe; "—" when
-            null/absent. NOTE: peer cards do NOT yet show public IP (needs a
-            PeerMeta proto bump — daemon follow-up); only this card shows it. */}
+        {/* Public IP — WAN address from the daemon relay probe; "—" when
+            null/absent. */}
         <MetaRow label="Public IP" value={info.public_ip ?? "—"} />
 
         {/* Fingerprint — click to copy */}
@@ -200,6 +199,9 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke }: PeerRowProps) {
             <MetaRow label="OS" value={peer.os_version} />
             <MetaRow label="Version" value={peer.app_version} />
             <MetaRow label="Local IP" value={ip} />
+            {/* AB-10: peer public IP — daemon already persists + returns
+                peer.public_ip; MetaRow omits the row when absent. */}
+            <MetaRow label="Public IP" value={peer.public_ip} />
 
             {/* Paired / first-sync / last-sync timestamps. formatEpochSecs
                 returns "—" for null/0. */}
@@ -680,6 +682,8 @@ export function DevicesView() {
   const [pairStarting, setPairStarting] = useState(false);
   // Inline error shown beneath the discovered list (e.g. rate-limited).
   const [discoverError, setDiscoverError] = useState<string | null>(null);
+  // HB-9: true while a manual mDNS rescan is in flight (Refresh button).
+  const [rescanning, setRescanning] = useState(false);
 
   // --- QR pairing ---
   const [qrState, setQrState] = useState<QrState>({ status: "idle" });
@@ -913,6 +917,30 @@ export function DevicesView() {
     const id = setInterval(() => { void loadDiscovered(); }, DISCOVERED_POLL_MS);
     return () => { clearInterval(id); };
   }, [loadDiscovered]);
+
+  // HB-9: manual rescan — restart the daemon's mDNS browse in place and refresh
+  // the discovered list with the fresh snapshot it returns.
+  const handleRescan = useCallback(async () => {
+    if (rescanning) return;
+    setRescanning(true);
+    setDiscoverError(null);
+    try {
+      const { devices } = await api.rescanDiscovered();
+      const ownFp = ownFpRef.current;
+      const unpaired = devices.filter(
+        (d) => !d.paired && (ownFp === null || d.device_id !== ownFp)
+      );
+      setDiscovered(unpaired);
+    } catch (e) {
+      if (e instanceof IpcError && e.code === "daemon_offline") {
+        setDiscovered([]);
+      } else {
+        setDiscoverError(e instanceof Error ? e.message : "Rescan failed");
+      }
+    } finally {
+      setRescanning(false);
+    }
+  }, [rescanning]);
 
   // Begin a discovery-initiated SAS pairing, then open the SAS modal.
   const handlePairDiscovered = useCallback(async (device: DiscoveredDevice) => {
@@ -1256,25 +1284,38 @@ export function DevicesView() {
       </div>
 
       {/* ── Discovered on your network ─────────────────────────── */}
-      {discovered.length > 0 && (
-        <>
-          <p className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-wider text-ide-faint">
-            Discovered on your network
-          </p>
-          <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">
-            {discovered.map((device) => (
-              <DiscoveredRow
-                key={device.device_id}
-                device={device}
-                onPair={(d) => void handlePairDiscovered(d)}
-                busy={pairStarting || pairingDevice !== null}
-              />
-            ))}
-          </div>
-          {discoverError !== null && (
-            <p className="mt-2 text-[11px] text-ide-danger">{discoverError}</p>
-          )}
-        </>
+      {/* HB-9: header + Refresh button always render so a manual rescan is
+          reachable even when passive polling hasn't surfaced any peer yet. */}
+      <div className="mb-2 mt-5 flex items-center justify-between">
+        <p className="text-[11px] font-medium uppercase tracking-wider text-ide-faint">
+          Discovered on your network
+        </p>
+        <button
+          type="button"
+          onClick={() => void handleRescan()}
+          disabled={rescanning}
+          className="rounded-ide px-2 py-0.5 text-[11px] font-medium text-ide-accent hover:bg-ide-hover disabled:opacity-50 disabled:cursor-default"
+          title="Rescan the local network for devices"
+        >
+          {rescanning ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+      {discovered.length > 0 ? (
+        <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">
+          {discovered.map((device) => (
+            <DiscoveredRow
+              key={device.device_id}
+              device={device}
+              onPair={(d) => void handlePairDiscovered(d)}
+              busy={pairStarting || pairingDevice !== null}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="text-[11px] text-ide-faint">No devices found on the network yet.</p>
+      )}
+      {discoverError !== null && (
+        <p className="mt-2 text-[11px] text-ide-danger">{discoverError}</p>
       )}
 
       {/* ── Divider ────────────────────────────────────────────── */}

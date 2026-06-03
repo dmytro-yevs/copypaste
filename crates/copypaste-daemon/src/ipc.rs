@@ -4461,29 +4461,10 @@ impl IpcServer {
 
             "list_peers" => match load_peers() {
                 Ok(peers) => {
-                    // Snapshot the live mTLS allowlist fingerprints (canonical
-                    // colon-free lowercase hex) so we can check them O(1) per peer.
-                    // TODO: add live-mDNS signal once DiscoveryService exposes a
-                    // snapshot of known fingerprints (currently keyed by instance
-                    // fullname, not fingerprint).
-                    let live_fps: std::collections::HashSet<String> =
-                        if let Some(ref p2p) = self.p2p_peers {
-                            // PairedPeers::is_known is per-fingerprint; collect
-                            // active entries by snapping the peers from peers.json
-                            // and testing each against the allowlist.
-                            peers
-                                .iter()
-                                .filter_map(|p| {
-                                    p.get("fingerprint")
-                                        .and_then(|v| v.as_str())
-                                        .map(canonical_fingerprint)
-                                })
-                                .filter(|cfp| p2p.is_known(cfp))
-                                .collect()
-                        } else {
-                            std::collections::HashSet::new()
-                        };
-
+                    // HB-3: "online" is derived purely from sync recency below.
+                    // The mTLS allowlist (paired set) is deliberately NOT consulted
+                    // here — allowlist membership is not a live link and left a
+                    // paired-but-disconnected peer green forever.
                     let now_secs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         // SAFETY: now() is always after UNIX_EPOCH on any
@@ -4494,12 +4475,6 @@ impl IpcServer {
                     let enriched: Vec<serde_json::Value> = peers
                         .into_iter()
                         .map(|mut peer| {
-                            let fp_canonical = peer
-                                .get("fingerprint")
-                                .and_then(|v| v.as_str())
-                                .map(canonical_fingerprint)
-                                .unwrap_or_default();
-
                             // last_sync_at from the record (i64 or absent).
                             let last_sync_at: Option<i64> =
                                 peer.get("last_sync_at").and_then(|v| v.as_i64());
@@ -4511,15 +4486,14 @@ impl IpcServer {
                                 None => -1,
                             };
 
-                            // online = live mTLS session  OR
-                            //          last_sync_at within ONLINE_THRESHOLD_SECS
-                            // TODO: also wire live-mDNS signal when
+                            // HB-3: online = genuinely recent successful sync
+                            // (within ONLINE_THRESHOLD_SECS) only. Allowlist
+                            // membership is NOT consulted (see note above).
+                            // TODO: also wire a live-mDNS signal when
                             // DiscoveryService gains a fingerprint-keyed index.
-                            let mtls_online = live_fps.contains(&fp_canonical);
-                            let recency_online = matches!(last_sync_at,
+                            let online = matches!(last_sync_at,
                                 Some(t) if now_secs.saturating_sub(t) <= ONLINE_THRESHOLD_SECS
                             );
-                            let online = mtls_online || recency_online;
 
                             if let Some(obj) = peer.as_object_mut() {
                                 obj.insert("online".to_string(), serde_json::Value::Bool(online));
@@ -4582,6 +4556,71 @@ impl IpcServer {
                             "port":        peer.port,
                             // null when peer is v1 (no bport TXT key); UI
                             // disables "Pair" in that case.
+                            "bport":       peer.bport,
+                            "paired":      paired,
+                        })
+                    })
+                    .collect();
+
+                Response::ok(req.id, serde_json::json!({ "devices": devices }))
+            }
+
+            // HB-9: manual rescan. Restart the mDNS-SD browse in place
+            // (`DiscoveryService::start` tears down the prior browse task/socket
+            // first, then re-advertises + re-browses) and return the fresh peer
+            // snapshot. Used by the UI "Refresh" button next to the discovered
+            // list when passive polling hasn't surfaced a peer yet.
+            //
+            // Response: { devices: [...] } — same shape as `list_discovered`.
+            "rescan_discovered" => {
+                let disc = match self.discovery.as_ref() {
+                    Some(d) => d,
+                    None => return Response::err(req.id, "discovery not available (P2P disabled)"),
+                };
+
+                // Restart-in-place re-browse. `start()` returns a JoinHandle for
+                // the new browse loop; detach it onto the runtime so the rebrowse
+                // keeps running after this request returns (the handle would
+                // otherwise be dropped, cancelling the task). `start()` already
+                // shuts down any prior task internally, so this does not leak.
+                match disc.start().await {
+                    Ok(handle) => {
+                        tokio::spawn(async move {
+                            let _ = handle.await;
+                        });
+                    }
+                    Err(e) => {
+                        return Response::err(req.id, format!("rescan failed to start: {e}"));
+                    }
+                }
+
+                let paired_fps: std::collections::HashSet<String> = match load_peers() {
+                    Ok(stored) => stored
+                        .into_iter()
+                        .filter_map(|p| {
+                            p.get("fingerprint")
+                                .and_then(|v| v.as_str())
+                                .map(canonical_fingerprint)
+                        })
+                        .collect(),
+                    Err(e) => {
+                        tracing::warn!("rescan_discovered: failed to load peers.json: {e}");
+                        std::collections::HashSet::new()
+                    }
+                };
+
+                let devices: Vec<serde_json::Value> = disc
+                    .peers()
+                    .into_iter()
+                    .map(|peer| {
+                        let paired = paired_fps.contains(&canonical_fingerprint(&peer.device_id));
+                        let ip_strs: Vec<String> =
+                            peer.ip_addrs.iter().map(|a| a.to_string()).collect();
+                        serde_json::json!({
+                            "device_id":   peer.device_id,
+                            "device_name": peer.device_name,
+                            "ip_addrs":    ip_strs,
+                            "port":        peer.port,
                             "bport":       peer.bport,
                             "paired":      paired,
                         })
@@ -4741,10 +4780,21 @@ impl IpcServer {
                         let removed = peers.len() < before_len;
 
                         match save_peers(&peers) {
-                            Ok(_) => Response::ok(
-                                req.id,
-                                serde_json::json!({ "ok": true, "removed": removed }),
-                            ),
+                            Ok(_) => {
+                                // AB-9: unpair must also evict the live in-memory
+                                // mTLS allowlist (mirrors what revoke_peer does),
+                                // otherwise an existing mTLS session survives until
+                                // the next daemon restart. Normalise to canonical
+                                // lowercase hex (strip colons) to match
+                                // PairedPeers' key format.
+                                if let Some(ref peers) = self.p2p_peers {
+                                    peers.remove(&canonical_fingerprint(&fingerprint));
+                                }
+                                Response::ok(
+                                    req.id,
+                                    serde_json::json!({ "ok": true, "removed": removed }),
+                                )
+                            }
                             Err(e) => Response::err(req.id, format!("failed to save peers: {e}")),
                         }
                     }
