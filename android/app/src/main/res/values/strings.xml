@@ -215,6 +215,7 @@
     <string name="cd_image_thumbnail">Image thumbnail</string>
     <string name="cd_pin_item">Pin item</string>
     <string name="cd_unpin_item">Unpin item</string>
+    <string name="cd_too_large_sync">Too large to sync</string>
     <string name="cd_select_all">Select all</string>
     <string name="cd_close_selection">Close selection mode</string>
 

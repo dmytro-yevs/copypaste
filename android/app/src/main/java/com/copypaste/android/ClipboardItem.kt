@@ -39,6 +39,16 @@ data class ClipboardItem(
      * Display via [sourceAppLabel] to get a short human-readable name.
      */
     val sourceApp: String? = null,
+    /**
+     * True when this item's stored payload exceeds the sync size ceiling
+     * ([ClipboardRepository.SYNC_MAX_BLOB_BYTES], 8 MiB) and therefore will not be
+     * propagated to other devices. Unlike macOS — which receives this flag from the
+     * daemon over IPC — Android has no daemon and computes it locally in
+     * [ClipboardRepository] from the item's own stored byte size against the same
+     * 8 MiB ceiling the sync pipeline enforces. Drives the "won't sync — too large"
+     * badge in the history row. Defaults to false for back-compat.
+     */
+    val tooLargeToSync: Boolean = false,
 ) {
     /** True when this item carries an image payload that can be rendered as a thumbnail. */
     val isImage: Boolean get() = contentType.startsWith("image/") || contentType == "image"
@@ -58,7 +68,8 @@ data class ClipboardItem(
             imagePng.contentEquals(other.imagePng) &&
             pinned == other.pinned &&
             pinnedSortIndex == other.pinnedSortIndex &&
-            sourceApp == other.sourceApp
+            sourceApp == other.sourceApp &&
+            tooLargeToSync == other.tooLargeToSync
     }
 
     override fun hashCode(): Int {
@@ -71,6 +82,7 @@ data class ClipboardItem(
         result = 31 * result + pinned.hashCode()
         result = 31 * result + pinnedSortIndex
         result = 31 * result + (sourceApp?.hashCode() ?: 0)
+        result = 31 * result + tooLargeToSync.hashCode()
         return result
     }
 }
