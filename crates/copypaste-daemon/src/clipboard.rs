@@ -23,6 +23,14 @@ pub enum ClipboardContent {
     /// Raw image bytes (PNG or TIFF) read directly from NSPasteboard.
     /// Compression and encryption are performed downstream by the daemon.
     Image(Vec<u8>),
+    /// A file whose URL was on the clipboard (macOS `public.file-url`).
+    /// `bytes` is the raw file content; `filename` and `mime` are derived from
+    /// the URL at capture time. Encryption is performed downstream by the daemon.
+    File {
+        bytes: Vec<u8>,
+        filename: String,
+        mime: String,
+    },
     /// Emitted alongside the latest captured content when the pasteboard
     /// changeCount advanced by more than [`SKIPPED_BATCH_THRESHOLD`] since
     /// the previous poll. The inner value is the number of intermediate
@@ -37,6 +45,7 @@ impl ClipboardContent {
         match self {
             ClipboardContent::Text(s) => s.as_bytes(),
             ClipboardContent::Image(b) => b.as_slice(),
+            ClipboardContent::File { bytes, .. } => bytes.as_slice(),
             ClipboardContent::SkippedBatch(_) => &[],
         }
     }
@@ -46,6 +55,7 @@ impl ClipboardContent {
         match self {
             ClipboardContent::Text(_) => "text",
             ClipboardContent::Image(_) => "image",
+            ClipboardContent::File { .. } => "file",
             ClipboardContent::SkippedBatch(_) => "skipped_batch",
         }
     }
@@ -164,6 +174,82 @@ fn reset_unsupported_kinds_for_test() {
     }
 }
 
+/// Percent-decode a URL path component (e.g. `%20` → space).
+///
+/// Used to convert a `file://` URL string into a filesystem path using only
+/// the standard library (no `url` crate dependency). Only decodes sequences
+/// of the form `%HH` where `HH` is a valid two-digit hexadecimal byte value.
+/// Invalid sequences are passed through unchanged.
+///
+/// macOS only: gated on `cfg(target_os = "macos")` because it is only called
+/// from the macOS `poll` path. The `allow(dead_code)` on non-macOS keeps CI
+/// clean without removing the helper.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn percent_decode_path(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            // Parse the two hex digits following the '%'.
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push((h * 16 + l) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    // A valid UTF-8 file path should round-trip cleanly; fall back to lossy
+    // conversion on the (pathological) case of invalid UTF-8 after decoding.
+    String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned())
+}
+
+/// Derive a MIME type string from a file extension.
+///
+/// Covers common clipboard file types. Falls back to
+/// `application/octet-stream` for unrecognised extensions. This avoids
+/// pulling in the `mime_guess` crate as a new dependency.
+///
+/// macOS only: see [`percent_decode_path`].
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn mime_from_path(path: &std::path::Path) -> String {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "txt" | "text" => "text/plain",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "csv" => "text/csv",
+        "md" => "text/markdown",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "tiff" | "tif" => "image/tiff",
+        "ico" => "image/x-icon",
+        "pdf" => "application/pdf",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "zip" => "application/zip",
+        "gz" | "gzip" => "application/gzip",
+        "tar" => "application/x-tar",
+        "mp3" => "audio/mpeg",
+        "mp4" => "video/mp4",
+        "mov" => "video/quicktime",
+        "rs" | "py" | "js" | "ts" | "sh" | "rb" | "go" | "c" | "h" | "cpp" => "text/plain",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
 pub struct ClipboardMonitor {
     last_change_count: i64,
     max_text_bytes: u64,
@@ -173,6 +259,12 @@ pub struct ClipboardMonitor {
     /// overrides this with the user-configured `max_image_size_bytes` so the
     /// READ gate matches the encode gate rather than the hardcoded core const.
     max_image_bytes: usize,
+    /// Maximum raw file bytes accepted from a `public.file-url` clipboard entry
+    /// before the READ gate rejects the file. Defaults to
+    /// [`copypaste_core::MAX_FILE_BYTES`] (100 MiB); the daemon overrides this
+    /// with `AppConfig::max_file_size_bytes` so the READ gate matches the encode
+    /// gate rather than the hardcoded core const.
+    max_file_bytes: usize,
     /// changeCount recorded after a daemon self-write to NSPasteboard (copy_item /
     /// "copy" IPC handler). When the next poll sees this exact changeCount the daemon
     /// caused the change itself — skip recording to prevent a duplicate row.
@@ -182,11 +274,12 @@ pub struct ClipboardMonitor {
 
 impl ClipboardMonitor {
     pub fn new(max_text_bytes: u64) -> Self {
-        use copypaste_core::MAX_IMAGE_BYTES;
+        use copypaste_core::{MAX_FILE_BYTES, MAX_IMAGE_BYTES};
         Self {
             last_change_count: -1,
             max_text_bytes,
             max_image_bytes: MAX_IMAGE_BYTES,
+            max_file_bytes: MAX_FILE_BYTES,
             self_write_change_count: Arc::new(AtomicI64::new(-1)),
         }
     }
@@ -195,6 +288,12 @@ impl ClipboardMonitor {
     /// Call this after [`ClipboardMonitor::new`] when a non-default cap is set.
     pub fn set_max_image_bytes(&mut self, bytes: usize) {
         self.max_image_bytes = bytes;
+    }
+
+    /// Override the file-size READ gate with the user-configured cap.
+    /// Call this after [`ClipboardMonitor::new`] when a non-default cap is set.
+    pub fn set_max_file_bytes(&mut self, bytes: usize) {
+        self.max_file_bytes = bytes;
     }
 
     /// Override the text-size READ gate with the user-configured cap.
@@ -208,8 +307,9 @@ impl ClipboardMonitor {
 
     /// Poll for new clipboard content. Returns `Some` only if the pasteboard changed.
     ///
-    /// Priority: text > PNG > TIFF.  Image data is returned as raw bytes for
-    /// downstream compression + encryption.
+    /// Priority: text > image (PNG/TIFF) > file (public.file-url).
+    /// Image data and file data are returned as raw bytes for downstream
+    /// compression + encryption.
     ///
     /// Edge cases handled (Wave 2.1):
     /// - **Rapid changes (#5):** if the changeCount delta is ≥
@@ -217,8 +317,8 @@ impl ClipboardMonitor {
     ///   but emit telemetry; consumers can poll again immediately to drain.
     /// - **Mixed text+image (#6):** text wins; an INFO log records that an
     ///   image was silently dropped on that poll.
-    /// - **Unsupported types (#7):** RTF / file-URLs / custom UTIs are
-    ///   logged once per kind, never silently dropped.
+    /// - **Unsupported types (#7):** RTF / custom UTIs are logged once per
+    ///   kind, never silently dropped. `public.file-url` is now handled.
     pub fn poll(&mut self) -> Result<Option<ClipboardContent>, ClipboardError> {
         #[cfg(target_os = "macos")]
         {
@@ -269,7 +369,7 @@ impl ClipboardMonitor {
                     // Signal to the outer code that this changeCount should be
                     // advanced (skipped) but no content stored.  We return a
                     // sentinel tuple with `nspb_skip = true`.
-                    return Some((count, None, None, false, vec![], true));
+                    return Some((count, None, None, None, false, vec![], true));
                 }
 
                 let png_type = NSString::from_str("public.png");
@@ -302,18 +402,74 @@ impl ClipboardMonitor {
                     None
                 };
 
+                // File-URL branch: probe `public.file-url` only when text and
+                // image are both absent, to keep priority text > image > file.
+                // `stringForType` returns the file URL as a string (e.g.
+                // "file:///Users/alice/doc.pdf"). We resolve it to a path, read
+                // the bytes, and derive the filename + MIME from the path.
+                // `NSFilenamesPboardType` is the legacy (pre-UTI) name for the
+                // same data; we probe it as a fallback.
+                let file_content: Option<(Vec<u8>, String, String)> = if text.is_none()
+                    && image_bytes.is_none()
+                {
+                    let file_url_type = NSString::from_str("public.file-url");
+                    let filenames_type = NSString::from_str("NSFilenamesPboardType");
+                    // Prefer the UTI form; fall back to the legacy type.
+                    let url_str: Option<String> = unsafe {
+                        pb.stringForType(&file_url_type)
+                            .map(|s| s.to_string())
+                            .or_else(|| pb.stringForType(&filenames_type).map(|s| s.to_string()))
+                    };
+                    if let Some(url_str) = url_str {
+                        // Strip the "file://" scheme and percent-decode the
+                        // path using only std (no extra dependency needed).
+                        let raw_path = url_str.strip_prefix("file://").unwrap_or(url_str.as_str());
+                        let decoded = percent_decode_path(raw_path);
+                        let path = std::path::Path::new(&decoded);
+                        if path.is_absolute() {
+                            let filename = path
+                                .file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| "file".to_string());
+                            // Best-effort MIME from file extension; fall back to
+                            // application/octet-stream for unknown extensions.
+                            let mime = mime_from_path(path);
+                            match std::fs::read(path) {
+                                Ok(bytes) => Some((bytes, filename, mime)),
+                                Err(e) => {
+                                    tracing::warn!(
+                                        path = %path.display(),
+                                        "clipboard: file-url read failed: {e}"
+                                    );
+                                    None
+                                }
+                            }
+                        } else {
+                            tracing::debug!(
+                                url = %url_str,
+                                "clipboard: file-url is not a local absolute path — skipping"
+                            );
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 // Detect unsupported types — only matters when we have
-                // nothing else to surface (text + image both absent).
+                // nothing else to surface (text + image + file all absent).
                 // We probe a fixed allowlist of common unsupported UTIs
                 // rather than enumerating `pb.types()` so we don't need
                 // the `NSEnumerator` feature on objc2-foundation 0.2.
+                // `public.file-url` is now handled above; keep other types here.
                 let mut unsupported_kinds: Vec<String> = Vec::new();
-                if text.is_none() && image_bytes.is_none() {
+                if text.is_none() && image_bytes.is_none() && file_content.is_none() {
                     let probes: &[&str] = &[
                         "public.rtf",
                         "public.rtfd",
                         "public.html",
-                        "public.file-url",
                         "public.url",
                         "com.apple.pasteboard.promised-file-url",
                     ];
@@ -333,6 +489,7 @@ impl ClipboardMonitor {
                     count,
                     text,
                     image_bytes,
+                    file_content,
                     had_image_alongside_text,
                     unsupported_kinds,
                     false, // nspb_skip: not set on the normal content path
@@ -344,6 +501,7 @@ impl ClipboardMonitor {
                 count,
                 text,
                 image_bytes,
+                file_content,
                 had_image_alongside_text,
                 unsupported_kinds,
                 nspb_skip,
@@ -428,6 +586,23 @@ impl ClipboardMonitor {
                     });
                 }
                 return Ok(Some(ClipboardContent::Image(bytes)));
+            }
+
+            if let Some((bytes, filename, mime)) = file_content {
+                if bytes.len() > self.max_file_bytes {
+                    tracing::warn!(
+                        bytes = bytes.len(),
+                        max = self.max_file_bytes,
+                        filename = %filename,
+                        "clipboard: file too large — skipping"
+                    );
+                } else {
+                    return Ok(Some(ClipboardContent::File {
+                        bytes,
+                        filename,
+                        mime,
+                    }));
+                }
             }
 
             // No supported content — log any unknown kinds once each.
