@@ -32,9 +32,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use copypaste_core::{
-    build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2, encrypt_for_cloud,
-    encrypt_item_with_aad, prune_to_cap, ClipboardItem, Database, MigrationState, SyncKey,
-    AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
+    build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2,
+    encode_image_with_limit, encrypt_for_cloud, encrypt_item_with_aad, prune_to_cap, ClipboardItem,
+    Database, MigrationState, SyncKey, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
 use copypaste_sync::{
     merge::{local_to_wire, resolve, wire_to_local, MergeOutcome},
@@ -567,6 +567,105 @@ enum RekeyOutcome {
     Failed,
 }
 
+/// Maximum reassembled image/file plaintext we will re-key onto the wire.
+///
+/// The P2P transport frames at 16 MiB (`transport.rs`) and the cloud relay
+/// caps the request body, so an oversized blob would either be rejected by the
+/// transport or land undecryptable on the peer. We enforce the ceiling here so
+/// the item is *dropped with a warning* rather than silently corrupting sync.
+pub(crate) const SYNC_MAX_BLOB_BYTES: usize = 8 * 1024 * 1024;
+
+/// Reassemble an image/file item's at-rest chunk blob back into plaintext.
+///
+/// The chunks were encrypted under this device's LOCAL v1 seed (`crypto.v1_key`)
+/// with the 16-byte `file_id` as AEAD AAD — exactly as `daemon::handle_image`
+/// (and the file pipeline) writes them. We parse `file_id` out of the
+/// `blob_ref` meta JSON (shared parser for both image and file), deserialize the
+/// chunks, and decode:
+///   * image → [`copypaste_core::decode_image`] (PNG bytes)
+///   * file  → [`copypaste_core::decode_file`] (verbatim bytes)
+///
+/// Returns the recovered plaintext, or `None` on any parse/decrypt failure
+/// (logged). Callers map `None` to `RekeyOutcome::Failed` so a corrupt local
+/// row is dropped, never forwarded.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn recover_blob_plaintext(crypto: &SyncCrypto, wire: &WireItem) -> Option<Vec<u8>> {
+    let meta_json = wire.blob_ref.as_deref()?;
+    let file_id = match crate::ipc::parse_image_file_id(meta_json) {
+        Ok(id) => id,
+        Err(e) => {
+            warn!(item_id = %wire.item_id, "sync_orch: blob meta parse failed: {e}");
+            return None;
+        }
+    };
+    let content = wire.content.as_deref()?;
+    let chunks = match copypaste_core::chunks_from_blob(content) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(item_id = %wire.item_id, "sync_orch: chunks_from_blob failed: {e}");
+            return None;
+        }
+    };
+    // Decode under the LOCAL v1 seed — handle_image passes the raw local_key
+    // (NOT derive_v2) as the chunk-encryption key, so the v1 seed is correct
+    // here. Wrong key would surface as a silent AuthFailed.
+    let decoded = if wire.content_type == "image" {
+        copypaste_core::decode_image(&chunks, &crypto.v1_key, &file_id).map_err(|e| e.to_string())
+    } else {
+        copypaste_core::decode_file(&chunks, &crypto.v1_key, &file_id).map_err(|e| e.to_string())
+    };
+    match decoded {
+        Ok(pt) => Some(pt),
+        Err(e) => {
+            warn!(item_id = %wire.item_id, "sync_orch: blob decode failed: {e}");
+            None
+        }
+    }
+}
+
+/// Re-key an image/file wire item onto the shared sync key.
+///
+/// Reassembles the at-rest blob to plaintext ([`recover_blob_plaintext`]),
+/// enforces [`SYNC_MAX_BLOB_BYTES`], then replaces `content` with a single
+/// shared-key-wrapped blob (`encrypt_for_cloud`, same call the text arm uses),
+/// clears `content_nonce` (the unwrap marker) and `blob_ref`, and keeps
+/// `content_type`. Mirrors the text arm's `Failed`/`NotApplicable` contract.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn rekey_blob_outbound(crypto: &SyncCrypto, wire: &mut WireItem) -> RekeyOutcome {
+    let Some(shared) = crypto.shared_sync_key() else {
+        return RekeyOutcome::NotApplicable;
+    };
+    // A shared key IS present: from here any failure is `Failed` (drop), never
+    // a silent forward of an undecryptable at-rest blob (sync H2).
+    let Some(plaintext) = recover_blob_plaintext(crypto, wire) else {
+        return RekeyOutcome::Failed;
+    };
+    if plaintext.len() > SYNC_MAX_BLOB_BYTES {
+        warn!(
+            item_id = %wire.item_id,
+            size = plaintext.len(),
+            max = SYNC_MAX_BLOB_BYTES,
+            "sync_orch: blob exceeds sync ceiling, dropping (not forwarded)"
+        );
+        return RekeyOutcome::Failed;
+    }
+    match encrypt_for_cloud(&shared, &wire.item_id, &plaintext) {
+        Ok(blob) => {
+            wire.content = Some(blob);
+            // Self-framed blob → no item-level nonce; `None` is the receiver's
+            // sync-key-wrapped marker. blob_ref is rebuilt on the receiver from
+            // the recovered plaintext, so it must not travel on the wire.
+            wire.content_nonce = None;
+            wire.blob_ref = None;
+            RekeyOutcome::Rewrapped
+        }
+        Err(e) => {
+            warn!(item_id = %wire.item_id, "sync_orch: blob shared-encrypt failed: {e}");
+            RekeyOutcome::Failed
+        }
+    }
+}
+
 /// Re-encrypt an outgoing item's payload under the shared content sync key so a
 /// paired peer can decrypt it (P2P Phase 3).
 ///
@@ -585,9 +684,15 @@ enum RekeyOutcome {
 ///   failed; the wire still carries raw at-rest ciphertext the peer cannot
 ///   decrypt, so the caller must DROP it (sync H2).
 ///
-/// Only text items are re-keyed; image chunk blobs use a separate per-chunk
-/// scheme (deferred).
+/// Image and file items are re-keyed by reassembling the at-rest chunk blob
+/// into plaintext (decoded with the LOCAL v1 seed + `file_id` AAD), then
+/// re-wrapping that whole plaintext under the shared sync key — identical wire
+/// shape to text (`content_nonce = None`, `blob_ref = None`, `content_type`
+/// preserved). See [`recover_blob_plaintext`] / [`rekey_blob_outbound`].
 fn rekey_outbound(crypto: &SyncCrypto, wire: &mut WireItem) -> RekeyOutcome {
+    if wire.content_type == "image" || wire.content_type == "file" {
+        return rekey_blob_outbound(crypto, wire);
+    }
     if wire.content_type != "text" {
         return RekeyOutcome::NotApplicable;
     }
@@ -652,13 +757,20 @@ fn rekey_inbound(
     crypto: &SyncCrypto,
     wire: WireItem,
 ) -> Result<(ClipboardItem, Option<Vec<u8>>), Box<WireItem>> {
-    // Marker: a sync-key-wrapped text payload carries content but no nonce.
-    if wire.content_type != "text" || wire.content_nonce.is_some() || wire.content.is_none() {
+    // Marker: a sync-key-wrapped payload carries content but no nonce.
+    let is_blob = wire.content_type == "image" || wire.content_type == "file";
+    if (wire.content_type != "text" && !is_blob)
+        || wire.content_nonce.is_some()
+        || wire.content.is_none()
+    {
         return Err(Box::new(wire));
     }
     let Some(shared) = crypto.shared_sync_key() else {
         return Err(Box::new(wire));
     };
+    if is_blob {
+        return rewrap_inbound_blob(crypto, wire, &shared);
+    }
     let blob = match wire.content.as_ref() {
         Some(b) => b.clone(),
         None => return Err(Box::new(wire)),
@@ -687,6 +799,128 @@ fn rekey_inbound(
     local.content_nonce = Some(nonce.to_vec());
     local.key_version = 2;
     Ok((local, Some(plaintext)))
+}
+
+/// Inverse of [`rekey_blob_outbound`]: unwrap a sync-key-wrapped image/file
+/// payload and re-chunk it under THIS device's local v1 seed so the stored row
+/// reads back through the production image/file decode path.
+///
+/// 1. `decrypt_from_cloud(shared, item_id, content)` → plaintext (the original
+///    PNG / file bytes).
+/// 2. Re-derive `file_id` deterministically from the plaintext content hash so
+///    the AEAD AAD matches on both devices and item_id/dedup converge.
+/// 3. Re-encode under `crypto.v1_key` (image → [`encode_image_with_limit`],
+///    file → [`encode_file`]) → `chunks_to_blob` → `local.content`; rebuild the
+///    meta JSON; set `blob_ref`, `content_type`, `key_version = 1` (chunks are
+///    v1-keyed). `fts_plaintext = None` (blobs are not FTS-indexed).
+///
+/// Returns `Err(wire)` (hand back unchanged) on any failure so the caller can
+/// fall back to verbatim storage.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[allow(clippy::result_large_err)]
+fn rewrap_inbound_blob(
+    crypto: &SyncCrypto,
+    wire: WireItem,
+    shared: &SyncKey,
+) -> Result<(ClipboardItem, Option<Vec<u8>>), Box<WireItem>> {
+    let blob = match wire.content.as_ref() {
+        Some(b) => b.clone(),
+        None => return Err(Box::new(wire)),
+    };
+    let plaintext = match decrypt_from_cloud(shared, &wire.item_id, &blob) {
+        Ok(pt) => pt,
+        Err(e) => {
+            warn!(item_id = %wire.item_id, "sync_orch: inbound blob shared-decrypt failed: {e}");
+            return Err(Box::new(wire));
+        }
+    };
+
+    // Re-derive file_id deterministically from the recovered bytes (same hash
+    // the sender used at capture) so item_id and dedup converge across devices.
+    let file_id = crate::clipboard::image_content_hash(&plaintext);
+
+    let (chunks_blob, meta_json) = if wire.content_type == "image" {
+        match encode_image_with_limit(
+            &plaintext,
+            &crypto.v1_key,
+            &file_id,
+            copypaste_core::MAX_IMAGE_BYTES,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
+        ) {
+            Ok((meta, chunks)) => {
+                let blob = match copypaste_core::chunks_to_blob(&chunks) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        warn!(item_id = %wire.item_id, "sync_orch: inbound image chunks_to_blob failed: {e}");
+                        return Err(Box::new(wire));
+                    }
+                };
+                // No thumbnail is synced (regenerated on demand); record a
+                // distinct thumb_file_id with zero dims so the meta shape stays
+                // consistent and get_item_thumbnail returns the null sentinel.
+                let thumb_file_id = crate::clipboard::image_thumb_file_id(&file_id);
+                let meta_json =
+                    crate::clipboard::build_image_meta_json(&meta, &thumb_file_id, 0, 0);
+                (blob, meta_json)
+            }
+            Err(e) => {
+                warn!(item_id = %wire.item_id, "sync_orch: inbound image re-encode failed: {e}");
+                return Err(Box::new(wire));
+            }
+        }
+    } else {
+        // File: re-chunk verbatim. Carry over filename/mime from the sender's
+        // meta if present; otherwise fall back to neutral defaults.
+        let (filename, mime) = wire
+            .blob_ref
+            .as_deref()
+            .and_then(parse_file_name_mime)
+            .unwrap_or_else(|| ("file".to_string(), "application/octet-stream".to_string()));
+        match copypaste_core::encode_file(
+            &plaintext,
+            &filename,
+            &mime,
+            &crypto.v1_key,
+            &file_id,
+            copypaste_core::MAX_FILE_BYTES,
+        ) {
+            Ok((meta, chunks)) => {
+                let blob = match copypaste_core::chunks_to_blob(&chunks) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        warn!(item_id = %wire.item_id, "sync_orch: inbound file chunks_to_blob failed: {e}");
+                        return Err(Box::new(wire));
+                    }
+                };
+                let meta_json = crate::clipboard::build_file_meta_json(&meta);
+                (blob, meta_json)
+            }
+            Err(e) => {
+                warn!(item_id = %wire.item_id, "sync_orch: inbound file re-encode failed: {e}");
+                return Err(Box::new(wire));
+            }
+        }
+    };
+
+    let mut local = wire_to_local(wire);
+    local.content = Some(chunks_blob);
+    local.content_nonce = None;
+    local.blob_ref = Some(meta_json);
+    // Chunk content is keyed by the LOCAL v1 seed + file_id AAD, NOT the v2
+    // item-AAD scheme — the image/file read paths decode with v1.
+    local.key_version = 1;
+    Ok((local, None))
+}
+
+/// Parse `filename` / `mime` out of a file `blob_ref` meta JSON (the shape
+/// produced by `clipboard::build_file_meta_json`). Returns `None` if either
+/// field is absent so the caller can fall back to neutral defaults.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn parse_file_name_mime(meta_json: &str) -> Option<(String, String)> {
+    let value: serde_json::Value = serde_json::from_str(meta_json).ok()?;
+    let filename = value.get("filename")?.as_str()?.to_string();
+    let mime = value.get("mime")?.as_str()?.to_string();
+    Some((filename, mime))
 }
 
 #[cfg(test)]
@@ -830,6 +1064,200 @@ mod tests {
             read_back, plaintext,
             "synced item reads back as A's original plaintext on B"
         );
+    }
+
+    /// v0.6 image sync: an image stored at rest under device A's local v1 seed
+    /// (the chunk-encryption key handle, exactly as `handle_image` uses) must,
+    /// after `rekey_outbound` (image arm — reassembles plaintext, re-wraps under
+    /// the shared key) → `rekey_inbound` (re-chunks under device B's local key),
+    /// decode back to the ORIGINAL PNG bytes on B, with a re-derived
+    /// file_id/item_id that converges with A's (deterministic dedup).
+    #[test]
+    fn image_rekey_round_trip_decodes_back_to_original_png_on_peer() {
+        use base64::Engine as _;
+        use copypaste_core::{
+            chunks_from_blob, chunks_to_blob, decode_image, encode_image_with_limit,
+        };
+        use tempfile::tempdir;
+
+        let seed_a = [0x11u8; 32];
+        let seed_b = [0x22u8; 32];
+        let shared = [0x33u8; 32];
+        let shared_b64 = base64::engine::general_purpose::STANDARD.encode(shared);
+
+        // A real tiny PNG (2x2 RGB). Built via the image crate so encode/decode
+        // is exercised end-to-end.
+        let png = {
+            use image::ImageEncoder;
+            let mut buf = Vec::new();
+            let raw = vec![0xFFu8; 2 * 2 * 3];
+            image::codecs::png::PngEncoder::new(&mut buf)
+                .write_image(&raw, 2, 2, image::ExtendedColorType::Rgb8)
+                .expect("encode test png");
+            buf
+        };
+
+        // SENDER A: store the image under A's LOCAL v1 seed (handle_image path).
+        let file_id_a = crate::clipboard::image_content_hash(&png);
+        let (_meta_a, chunks_a) =
+            encode_image_with_limit(&png, &seed_a, &file_id_a, 0, 256).expect("A encode image");
+        let blob_a = chunks_to_blob(&chunks_a).expect("A blob");
+        let item_id = uuid::Uuid::from_bytes(file_id_a).to_string();
+        let meta_json_a = format!(r#"{{"file_id":{file_id_a:?}}}"#);
+
+        let mut wire = WireItem {
+            id: "img-row".to_string(),
+            item_id: item_id.clone(),
+            content_type: "image".to_string(),
+            content: Some(blob_a),
+            content_nonce: Some(vec![0u8; 24]),
+            blob_ref: Some(meta_json_a),
+            is_sensitive: false,
+            lamport_ts: 9,
+            wall_time: 1_700_000_000_000,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "device-A".to_string(),
+            key_version: 1,
+        };
+
+        let dir_a = tempdir().unwrap();
+        let peers_a = dir_a.path().join("peers.json");
+        std::fs::write(
+            &peers_a,
+            format!(
+                r#"[{{"fingerprint":"bb:bb","added_at":1,"address":"127.0.0.1:9","sync_key_b64":"{shared_b64}"}}]"#
+            ),
+        )
+        .unwrap();
+        let crypto_a = SyncCrypto::new(seed_a, peers_a);
+
+        // OUTBOUND image arm: reassemble + re-wrap under shared key.
+        assert_eq!(
+            rekey_outbound(&crypto_a, &mut wire),
+            RekeyOutcome::Rewrapped
+        );
+        assert!(wire.content_nonce.is_none(), "wrapped blob clears nonce");
+        assert!(wire.blob_ref.is_none(), "blob_ref dropped on the wire");
+        assert_eq!(wire.content_type, "image");
+
+        // RECEIVER B: different local seed, same shared key.
+        let dir_b = tempdir().unwrap();
+        let peers_b = dir_b.path().join("peers.json");
+        std::fs::write(
+            &peers_b,
+            format!(
+                r#"[{{"fingerprint":"aa:aa","added_at":1,"address":"127.0.0.1:9","sync_key_b64":"{shared_b64}"}}]"#
+            ),
+        )
+        .unwrap();
+        let crypto_b = SyncCrypto::new(seed_b, peers_b);
+
+        let (stored, fts) = rekey_inbound(&crypto_b, wire).expect("B must unwrap the synced image");
+        assert!(fts.is_none(), "images carry no FTS plaintext");
+        assert_eq!(stored.content_type, "image");
+        assert_eq!(
+            stored.item_id, item_id,
+            "item_id must converge across devices"
+        );
+
+        // B decodes its re-chunked blob under B's local seed → original PNG.
+        let meta_b = stored.blob_ref.expect("B meta json");
+        let file_id_b = crate::ipc::parse_image_file_id(&meta_b).expect("parse B file_id");
+        assert_eq!(file_id_b, file_id_a, "file_id must converge");
+        let b_chunks =
+            chunks_from_blob(&stored.content.expect("B content")).expect("B chunks_from_blob");
+        let recovered = decode_image(&b_chunks, &seed_b, &file_id_b).expect("B decode image");
+        assert_eq!(recovered, png, "B recovers A's exact PNG bytes");
+    }
+
+    /// v0.6 file sync: same as the image round-trip but for an arbitrary file
+    /// blob (`content_type = "file"`), chunked verbatim (no decode/re-encode).
+    #[test]
+    fn file_rekey_round_trip_decodes_back_to_original_bytes_on_peer() {
+        use base64::Engine as _;
+        use copypaste_core::{chunks_from_blob, chunks_to_blob, decode_file, encode_file};
+        use tempfile::tempdir;
+
+        let seed_a = [0x44u8; 32];
+        let seed_b = [0x55u8; 32];
+        let shared = [0x66u8; 32];
+        let shared_b64 = base64::engine::general_purpose::STANDARD.encode(shared);
+
+        let raw = b"arbitrary file bytes \x00\x01\x02 over P2P sync".to_vec();
+
+        let file_id_a = crate::clipboard::image_content_hash(&raw);
+        let (meta_a, chunks_a) = encode_file(
+            &raw,
+            "notes.bin",
+            "application/octet-stream",
+            &seed_a,
+            &file_id_a,
+            0,
+        )
+        .expect("A encode file");
+        let blob_a = chunks_to_blob(&chunks_a).expect("A blob");
+        let item_id = uuid::Uuid::from_bytes(file_id_a).to_string();
+        let meta_json_a = crate::clipboard::build_file_meta_json(&meta_a);
+
+        let mut wire = WireItem {
+            id: "file-row".to_string(),
+            item_id: item_id.clone(),
+            content_type: "file".to_string(),
+            content: Some(blob_a),
+            content_nonce: Some(vec![0u8; 24]),
+            blob_ref: Some(meta_json_a),
+            is_sensitive: false,
+            lamport_ts: 11,
+            wall_time: 1_700_000_000_000,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "device-A".to_string(),
+            key_version: 1,
+        };
+
+        let dir_a = tempdir().unwrap();
+        let peers_a = dir_a.path().join("peers.json");
+        std::fs::write(
+            &peers_a,
+            format!(
+                r#"[{{"fingerprint":"bb:bb","added_at":1,"address":"127.0.0.1:9","sync_key_b64":"{shared_b64}"}}]"#
+            ),
+        )
+        .unwrap();
+        let crypto_a = SyncCrypto::new(seed_a, peers_a);
+
+        assert_eq!(
+            rekey_outbound(&crypto_a, &mut wire),
+            RekeyOutcome::Rewrapped
+        );
+        assert!(wire.content_nonce.is_none());
+        assert!(wire.blob_ref.is_none());
+        assert_eq!(wire.content_type, "file");
+
+        let dir_b = tempdir().unwrap();
+        let peers_b = dir_b.path().join("peers.json");
+        std::fs::write(
+            &peers_b,
+            format!(
+                r#"[{{"fingerprint":"aa:aa","added_at":1,"address":"127.0.0.1:9","sync_key_b64":"{shared_b64}"}}]"#
+            ),
+        )
+        .unwrap();
+        let crypto_b = SyncCrypto::new(seed_b, peers_b);
+
+        let (stored, fts) = rekey_inbound(&crypto_b, wire).expect("B must unwrap the synced file");
+        assert!(fts.is_none());
+        assert_eq!(stored.content_type, "file");
+        assert_eq!(stored.item_id, item_id, "item_id converges");
+
+        let meta_b = stored.blob_ref.expect("B meta json");
+        let file_id_b = crate::ipc::parse_image_file_id(&meta_b).expect("parse B file_id");
+        assert_eq!(file_id_b, file_id_a);
+        let b_chunks =
+            chunks_from_blob(&stored.content.expect("B content")).expect("B chunks_from_blob");
+        let recovered = decode_file(&b_chunks, &seed_b, &file_id_b).expect("B decode file");
+        assert_eq!(recovered, raw, "B recovers A's exact file bytes");
     }
 
     /// W2.2: an incoming WireItem from the transport must be persisted to the
