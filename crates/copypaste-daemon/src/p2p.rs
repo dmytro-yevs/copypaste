@@ -566,16 +566,19 @@ async fn accept_loop(
                             sinks.insert(peer_key.clone(), peer_tx);
                         }
 
-                        // Sync-on-connect catch-up: push the current local history
-                        // ONCE into this peer's sink so items produced before the
-                        // link came up are delivered. Items are already re-keyed
-                        // under the shared sync key by the provider; LWW on the
-                        // receiver makes the replay idempotent.
-                        push_catchup(&catchup, &cleanup_tx).await;
-
                         // Stamp first/last sync times for this peer (once per
                         // established connection — see `stamp_peer_sync`).
                         stamp_peer_sync(&crate::ipc::peers_file_path(), &peer_fp);
+
+                        // Clone the sink sender for the catch-up replay BEFORE the
+                        // drainer task takes ownership of `cleanup_tx`. The drainer
+                        // MUST start first: `push_catchup` does a bounded
+                        // `send().await` over the ENTIRE local history (commonly far
+                        // more than the 64-slot channel capacity), so with no active
+                        // receiver draining `peer_rx` it deadlocks the moment the
+                        // buffer fills — the sink then stays full forever and the
+                        // peer receives nothing. (Mirror of the connector-path fix.)
+                        let catchup_tx = cleanup_tx.clone();
 
                         let incoming_tx = incoming_tx.clone();
                         let peer_sinks = Arc::clone(&peer_sinks);
@@ -594,6 +597,12 @@ async fn accept_loop(
                             drop(sinks);
                             tracing::debug!(%peer_addr, %peer_fp, "peer connection closed");
                         });
+
+                        // Drainer is now consuming `peer_rx`, so replaying the local
+                        // history (sync-on-connect) cannot deadlock on a full sink.
+                        // Items are re-keyed under the shared sync key by the
+                        // provider; LWW on the receiver makes the replay idempotent.
+                        push_catchup(&catchup, &catchup_tx).await;
                     }
                     Err(e) => {
                         tracing::warn!("P2P accept/handshake error: {e}");
@@ -647,6 +656,31 @@ fn resolve_addr_from_discovery(
         .find(|a| a.is_ipv4())
         .or_else(|| peer.ip_addrs.first())?;
     Some(SocketAddr::new(*ip, peer.port))
+}
+
+/// IP-correlated fallback for [`resolve_addr_from_discovery`].
+///
+/// The device_id-keyed lookup above never matches a real peer: mDNS advertises
+/// a per-device UUID as `device_id`, but a paired peer is keyed by its SHA-256
+/// cert fingerprint — the two are different strings, so `resolve_peer` returns
+/// `None` and the connector keeps dialing a stale persisted port forever.
+///
+/// On a LAN the host IP uniquely identifies a peer, so when the persisted dial
+/// address fails we correlate by IP instead: find the discovered peer that
+/// advertises the same IP as the address that just failed and adopt its freshly
+/// announced sync port. This is what self-heals the common failure mode — both
+/// peers bind an **ephemeral** sync-listener port that drifts on every
+/// daemon/app restart, leaving the port persisted at pairing time stale.
+fn resolve_addr_from_discovery_by_ip(
+    discovery: &DiscoveryService,
+    failed_addr: SocketAddr,
+) -> Option<SocketAddr> {
+    let want_ip = failed_addr.ip();
+    discovery
+        .peers()
+        .into_iter()
+        .find(|p| p.ip_addrs.contains(&want_ip))
+        .map(|p| SocketAddr::new(want_ip, p.port))
 }
 
 /// A dialable paired peer resolved from `peers.json`.
@@ -897,7 +931,12 @@ async fn peer_connector_loop(
                     // backoff already rate-limits how often we reach this
                     // branch, so no additional throttle is needed here.
                     if let Some(fresh_addr) =
-                        resolve_addr_from_discovery(&discovery, &peer.fingerprint)
+                        resolve_addr_from_discovery(&discovery, &peer.fingerprint).or_else(|| {
+                            // device_id match failed (mDNS device_id is a UUID,
+                            // not the cert fingerprint) — correlate by IP and
+                            // adopt the peer's freshly advertised port.
+                            resolve_addr_from_discovery_by_ip(&discovery, peer.addr)
+                        })
                     {
                         if fresh_addr != peer.addr {
                             tracing::info!(
