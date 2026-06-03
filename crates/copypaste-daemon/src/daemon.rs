@@ -434,7 +434,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // loops both observe the SAME Arcs. A `set_sync_passphrase` IPC call
     // writes to `cloud_sync_key`; the cloud push/poll loops read it. The
     // cloud loops write to `cloud_last_sync_ms`; `get_sync_status` reads it.
-    #[cfg(feature = "cloud-sync")]
+    #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
     let cloud_sync_key: std::sync::Arc<tokio::sync::Mutex<Option<copypaste_core::SyncKey>>> = {
         // Restore a previously-set sync passphrase key on startup so cloud
         // sync resumes without re-entering the passphrase. On ad-hoc/unsigned
@@ -468,7 +468,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         }
         std::sync::Arc::new(tokio::sync::Mutex::new(restored))
     };
-    #[cfg(feature = "cloud-sync")]
+    #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
     let cloud_last_sync_ms: std::sync::Arc<std::sync::atomic::AtomicI64> =
         std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
     // BUG 2: real GoTrue auth state, published by the cloud loops and read by the
@@ -476,7 +476,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // `start_cloud` resolves a bearer. Previously `get_sync_status` hardcoded
     // `signed_in = supabase_configured`, so it reported "signed in" even after a
     // `CloudError::AuthFailed` aborted cloud sync.
-    #[cfg(feature = "cloud-sync")]
+    #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
     let cloud_signed_in: std::sync::Arc<std::sync::atomic::AtomicBool> =
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
@@ -533,7 +533,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         if let Some(ref disc) = p2p_discovery {
             server = server.with_discovery(std::sync::Arc::clone(disc));
         }
-        #[cfg(feature = "cloud-sync")]
+        #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
         {
             server = server.with_cloud_sync_state(
                 cloud_sync_key.clone(),
@@ -836,6 +836,49 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
         } else {
             tracing::debug!("cloud-sync: SUPABASE_URL not set, skipping");
+            None
+        }
+    };
+
+    // Start the relay-as-database sync path iff `relay_url` is configured —
+    // INDEPENDENT of Supabase (mirrors the cloud start block above). All of an
+    // account's devices co-register one shared inbox (derived from the sync key)
+    // and push to / poll it. The reqwest client is built once and shared by both
+    // relay loops.
+    #[cfg(feature = "relay-sync")]
+    let _relay_handle = {
+        let relay_url = core_config_arc
+            .read()
+            .ok()
+            .and_then(|c| c.relay_url.clone());
+        if let Some(relay_url) = relay_url {
+            tracing::info!("relay-sync: relay_url configured, starting relay orchestrator");
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new());
+            match crate::relay::start_relay(
+                client,
+                relay_url,
+                resolve_device_name(),
+                db.clone(),
+                new_item_tx.subscribe(),
+                cloud_sync_key.clone(),
+                local_key_arc.clone(),
+                cloud_last_sync_ms.clone(),
+                core_config_arc.clone(),
+            ) {
+                Ok(handle) => {
+                    tracing::info!("relay-sync: orchestrator started");
+                    Some(handle)
+                }
+                Err(e) => {
+                    tracing::warn!("relay-sync: failed to start ({e}); continuing without relay");
+                    None
+                }
+            }
+        } else {
+            tracing::debug!("relay-sync: relay_url not set, skipping");
             None
         }
     };

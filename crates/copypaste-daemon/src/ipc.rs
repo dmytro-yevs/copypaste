@@ -3,6 +3,10 @@ use crate::protocol::{
     ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, ERR_CODE_NOT_FOUND, ERR_CODE_RATE_LIMITED,
     MIN_SUPPORTED_PROTOCOL_VERSION,
 };
+#[cfg(feature = "cloud-sync")]
+use copypaste_core::derive_sync_key;
+#[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
+use copypaste_core::SyncKey;
 use copypaste_core::{
     bump_item_recency, chunks_from_blob, count_items, decode_file, decode_image,
     decrypt_item_by_version, delete_fts, delete_item, derive_v2, encode_thumbnail_from_png,
@@ -10,8 +14,6 @@ use copypaste_core::{
     get_page_pinned_first, pin_item, reorder_pinned, revoke_device, revoke_devices, search_items,
     set_thumb, unpin_item, Database, EncryptError, FileMeta, SensitiveDetector,
 };
-#[cfg(feature = "cloud-sync")]
-use copypaste_core::{derive_sync_key, SyncKey};
 use copypaste_p2p::pake::{PakeInitiator, PakeResponder, PasswordFile};
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
@@ -946,19 +948,19 @@ pub struct IpcServer {
     /// `None` means the user has not yet configured a sync passphrase, so
     /// cloud upload/download is skipped. Set via `set_sync_passphrase`; shared
     /// with the cloud push/poll loops via `Arc<Mutex<Option<SyncKey>>>`.
-    #[cfg(feature = "cloud-sync")]
+    #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
     pub sync_key: Arc<Mutex<Option<SyncKey>>>,
     /// Monotonic timestamp (ms since UNIX epoch) of the last successful cloud
     /// sync round-trip. `0` means never synced. Shared with cloud loops so
     /// `get_sync_status` returns a live value.
-    #[cfg(feature = "cloud-sync")]
+    #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
     pub last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     /// Real GoTrue auth state, published by the cloud push/poll loops (BUG 2).
     /// `true` once `start_cloud` resolves a bearer, `false` on a bearer-resolution
     /// failure (`CloudError::AuthFailed`) or a failed 401-refresh. Read by
     /// `get_sync_status` so the UI reflects the actual signed-in state instead of
     /// the old hardcoded `signed_in = supabase_configured`.
-    #[cfg(feature = "cloud-sync")]
+    #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
     pub cloud_signed_in: Arc<AtomicBool>,
     /// Broadcast sender for newly-ingested clipboard items, shared with the
     /// clipboard monitor and the sync orchestrator (P2P Phase 3).
@@ -1053,11 +1055,11 @@ impl IpcServer {
             discovery: None,
             p2p_sync_addr: Arc::new(std::sync::Mutex::new(None)),
             self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
-            #[cfg(feature = "cloud-sync")]
+            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
             sync_key: Arc::new(Mutex::new(None)),
-            #[cfg(feature = "cloud-sync")]
+            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
-            #[cfg(feature = "cloud-sync")]
+            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
             cloud_signed_in: Arc::new(AtomicBool::new(false)),
             new_item_tx: None,
             degraded_reason: Arc::new(std::sync::Mutex::new(None)),
@@ -1174,7 +1176,7 @@ impl IpcServer {
     /// `sync_key` `Mutex` that the cloud push/poll loops read from, and the
     /// cloud loops write to the same `last_sync_ms` counter that
     /// `get_sync_status` reads.
-    #[cfg(feature = "cloud-sync")]
+    #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
     pub fn with_cloud_sync_state(
         mut self,
         sync_key: Arc<Mutex<Option<SyncKey>>>,
@@ -1223,11 +1225,11 @@ impl IpcServer {
             discovery: None,
             p2p_sync_addr: Arc::new(std::sync::Mutex::new(None)),
             self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
-            #[cfg(feature = "cloud-sync")]
+            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
             sync_key: Arc::new(Mutex::new(None)),
-            #[cfg(feature = "cloud-sync")]
+            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
-            #[cfg(feature = "cloud-sync")]
+            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
             cloud_signed_in: Arc::new(AtomicBool::new(false)),
             new_item_tx: None,
             degraded_reason: Arc::new(std::sync::Mutex::new(None)),

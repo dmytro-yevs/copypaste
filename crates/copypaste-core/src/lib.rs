@@ -3,6 +3,7 @@ pub mod crypto;
 pub mod file;
 pub mod image;
 pub mod logging;
+pub mod relay;
 pub mod sensitive;
 pub mod storage;
 
@@ -13,6 +14,7 @@ pub use crypto::encrypt::{
     build_item_aad, build_item_aad_v2, decrypt_item_by_version, decrypt_item_with_aad,
     encrypt_item_with_aad, EncryptError, AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
+pub use relay::{derive_relay_inbox_id, derive_relay_public_key};
 // `encrypt_item` / `decrypt_item` are deprecated (empty-AAD, replay-vulnerable)
 // but still re-exported because `copypaste-daemon` and integration tests rely on
 // them for legacy v1-key ciphertext handling during the migration sweep. The
