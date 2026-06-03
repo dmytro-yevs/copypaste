@@ -185,6 +185,21 @@ pub struct PeerMeta {
     /// Best LAN-routable display IP.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_ip: Option<String>,
+    /// Human-readable device name (e.g. `"Alice's MacBook"`), learned in-band
+    /// over the bootstrap channel during PAKE pairing. Populated by the daemon
+    /// from the OS hostname / device name before passing `PeerMeta` to the
+    /// bootstrap responder/initiator.
+    ///
+    /// `#[serde(default)]` keeps backward compat with older `PeerMeta` frames
+    /// that do not carry this field; they deserialise to `None`.
+    ///
+    /// TODO: carry device_name in the over-the-wire `PeerMeta` JSON frame so
+    /// discovery-initiated pairs (mDNS-only, no QR) also receive a name.
+    /// Requires a BOOTSTRAP_PROTO_VERSION bump + coordinated re-pair on all
+    /// existing devices (i.e. not done in this task to avoid breaking the
+    /// handshake).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
 }
 
 /// rustls verifier that accepts **any** peer certificate without pinning.
@@ -329,6 +344,10 @@ pub struct BootstrapPairing {
     pub peer_app_version: Option<String>,
     /// Peer's best LAN-routable display IP, learned over the metadata extension.
     pub peer_local_ip: Option<String>,
+    /// Peer's human-readable device name (e.g. `"Alice's MacBook"`), learned
+    /// over the post-handshake metadata extension. `None` for legacy peers or
+    /// when the field was not advertised.
+    pub peer_device_name: Option<String>,
 }
 
 /// A bootstrap TLS responder listener bound to an ephemeral port.
@@ -536,6 +555,7 @@ impl BootstrapResponder {
                 peer_os: peer_meta.os_version,
                 peer_app_version: peer_meta.app_version,
                 peer_local_ip: peer_meta.local_ip,
+                peer_device_name: peer_meta.device_name,
             })
         })
         .await
@@ -704,6 +724,7 @@ impl BootstrapResponder {
             peer_os: peer_meta.os_version,
             peer_app_version: peer_meta.app_version,
             peer_local_ip: peer_meta.local_ip,
+            peer_device_name: peer_meta.device_name,
         })
     }
 }
@@ -860,6 +881,7 @@ pub async fn run_initiator(
             peer_os: peer_meta.os_version,
             peer_app_version: peer_meta.app_version,
             peer_local_ip: peer_meta.local_ip,
+            peer_device_name: peer_meta.device_name,
         })
     })
     .await
@@ -1043,6 +1065,7 @@ where
         peer_os: peer_meta.os_version,
         peer_app_version: peer_meta.app_version,
         peer_local_ip: peer_meta.local_ip,
+        peer_device_name: peer_meta.device_name,
     })
 }
 
@@ -1269,6 +1292,7 @@ mod tests {
             os_version: Some("macOS 15.5".into()),
             app_version: Some("0.5.4".into()),
             local_ip: Some("192.168.1.10".into()),
+            device_name: None,
         };
         let resp_meta_task = resp_meta.clone();
         let responder_task =
@@ -1282,6 +1306,7 @@ mod tests {
             os_version: Some("macOS 14.4".into()),
             app_version: Some("0.5.4".into()),
             local_ip: Some("192.168.1.11".into()),
+            device_name: None,
         };
         let init_meta_task = init_meta.clone();
         let initiator_task = tokio::spawn(async move {
@@ -1586,6 +1611,7 @@ mod tests {
             os_version: Some("macOS 14.4".into()),
             app_version: Some("0.5.4".into()),
             local_ip: Some("10.0.0.1".into()),
+            device_name: None,
         };
         let meta_b = PeerMeta {
             model: Some("Mac mini".into()),

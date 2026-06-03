@@ -745,6 +745,13 @@ const PAKE_SESSION_TTL: std::time::Duration = std::time::Duration::from_secs(120
 /// allocating without limit.
 const MAX_PAKE_SESSIONS: usize = 64;
 
+/// A peer whose `last_sync_at` is within this many seconds of the current
+/// clock is considered **online** in the `list_peers` response, even if no
+/// live mTLS or mDNS signal is available.  60 s is chosen to survive a single
+/// missed polling cycle (the sync loop re-connects approximately every 30 s)
+/// while still marking a device offline quickly after it disconnects.
+const ONLINE_THRESHOLD_SECS: i64 = 60;
+
 /// In-progress PAKE handshake session stored between IPC round-trips.
 ///
 /// Because IPC is request-response (single turn), the 3-message OPAQUE
@@ -1252,6 +1259,10 @@ impl IpcServer {
             os_version: meta.os_version,
             app_version: Some(meta.app_version),
             local_ip: meta.local_ip,
+            // device_name is our own name — we advertise it over the bootstrap
+            // channel so the peer can persist it as our display name. Collected
+            // from the OS hostname via DeviceMeta.
+            device_name: meta.device_name,
         }
     }
 
@@ -1327,9 +1338,15 @@ impl IpcServer {
         // Drop any prior record for the same peer (canonical compare) so a
         // re-pair refreshes the address/name instead of duplicating the entry.
         peers.retain(|p| canonical_fingerprint(&p.fingerprint) != peer_fp_canonical);
+        // Populate `name` from the in-band device name received over the
+        // bootstrap channel. Falls back to empty string when not provided
+        // (e.g. discovery-initiated pairs that predate the device_name field).
+        // TODO: carry device_name in PeerMeta for discovery-initiated pairs
+        // (requires a BOOTSTRAP_PROTO_VERSION bump + re-pair).
+        let name = peer_meta.device_name.clone().unwrap_or_default();
         peers.push(crate::peers::PairedDevice {
             fingerprint: display,
-            name: String::new(),
+            name,
             added_at,
             address,
             sync_key_b64,
@@ -1408,6 +1425,7 @@ impl IpcServer {
                         os_version: outcome.peer_os.clone(),
                         app_version: outcome.peer_app_version.clone(),
                         local_ip: outcome.peer_local_ip.clone(),
+                        device_name: outcome.peer_device_name.clone(),
                     };
                     Self::persist_paired_peer(
                         &outcome.peer_fingerprint,
@@ -1515,6 +1533,7 @@ impl IpcServer {
                     os_version: outcome.peer_os.clone(),
                     app_version: outcome.peer_app_version.clone(),
                     local_ip: outcome.peer_local_ip.clone(),
+                    device_name: outcome.peer_device_name.clone(),
                 };
                 Self::persist_paired_peer(
                     &outcome.peer_fingerprint,
@@ -3380,7 +3399,80 @@ impl IpcServer {
             }
 
             "list_peers" => match load_peers() {
-                Ok(peers) => Response::ok(req.id, serde_json::json!({ "peers": peers })),
+                Ok(peers) => {
+                    // Snapshot the live mTLS allowlist fingerprints (canonical
+                    // colon-free lowercase hex) so we can check them O(1) per peer.
+                    // TODO: add live-mDNS signal once DiscoveryService exposes a
+                    // snapshot of known fingerprints (currently keyed by instance
+                    // fullname, not fingerprint).
+                    let live_fps: std::collections::HashSet<String> =
+                        if let Some(ref p2p) = self.p2p_peers {
+                            // PairedPeers::is_known is per-fingerprint; collect
+                            // active entries by snapping the peers from peers.json
+                            // and testing each against the allowlist.
+                            peers
+                                .iter()
+                                .filter_map(|p| {
+                                    p.get("fingerprint")
+                                        .and_then(|v| v.as_str())
+                                        .map(canonical_fingerprint)
+                                })
+                                .filter(|cfp| p2p.is_known(cfp))
+                                .collect()
+                        } else {
+                            std::collections::HashSet::new()
+                        };
+
+                    let now_secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        // SAFETY: now() is always after UNIX_EPOCH on any
+                        // supported platform (macOS, Linux, Android).
+                        .unwrap_or_default()
+                        .as_secs() as i64;
+
+                    let enriched: Vec<serde_json::Value> = peers
+                        .into_iter()
+                        .map(|mut peer| {
+                            let fp_canonical = peer
+                                .get("fingerprint")
+                                .and_then(|v| v.as_str())
+                                .map(canonical_fingerprint)
+                                .unwrap_or_default();
+
+                            // last_sync_at from the record (i64 or absent).
+                            let last_sync_at: Option<i64> =
+                                peer.get("last_sync_at").and_then(|v| v.as_i64());
+
+                            // last_seen_secs: seconds since the last successful
+                            // sync, or -1 when we have no stamp at all.
+                            let last_seen_secs: i64 = match last_sync_at {
+                                Some(t) => now_secs.saturating_sub(t),
+                                None => -1,
+                            };
+
+                            // online = live mTLS session  OR
+                            //          last_sync_at within ONLINE_THRESHOLD_SECS
+                            // TODO: also wire live-mDNS signal when
+                            // DiscoveryService gains a fingerprint-keyed index.
+                            let mtls_online = live_fps.contains(&fp_canonical);
+                            let recency_online = matches!(last_sync_at,
+                                Some(t) if now_secs.saturating_sub(t) <= ONLINE_THRESHOLD_SECS
+                            );
+                            let online = mtls_online || recency_online;
+
+                            if let Some(obj) = peer.as_object_mut() {
+                                obj.insert("online".to_string(), serde_json::Value::Bool(online));
+                                obj.insert(
+                                    "last_seen_secs".to_string(),
+                                    serde_json::Value::Number(last_seen_secs.into()),
+                                );
+                            }
+                            peer
+                        })
+                        .collect();
+
+                    Response::ok(req.id, serde_json::json!({ "peers": enriched }))
+                }
                 Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
             },
 
@@ -8796,6 +8888,262 @@ mod tests {
         assert!(
             null_data["thumbnail"].is_null(),
             "thumb-less item must return null sentinel: {null_data}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // list_peers: online status + last_seen_secs (B1 device-info feature)
+    // -----------------------------------------------------------------------
+
+    /// `list_peers` must include `online` (bool) and `last_seen_secs` (i64)
+    /// in every peer entry.  When `last_sync_at` is absent (never synced),
+    /// `online` must be `false` and `last_seen_secs` must be `-1`.
+    #[tokio::test]
+    async fn list_peers_response_includes_online_and_last_seen_fields() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("lp_online_fields.sock");
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+        std::fs::create_dir_all(&cfg_home).unwrap();
+
+        // Seed one peer that has never synced (no last_sync_at).
+        let peers_json = cfg_home.join("peers.json");
+        let peers = serde_json::json!([
+            {"name": "Laptop", "fingerprint": "a1:b2:c3:d4:e5:f6:07:18", "added_at": 1}
+        ]);
+        std::fs::write(&peers_json, serde_json::to_string(&peers).unwrap()).unwrap();
+
+        start_test_server(&sock).await;
+        let resp = call_one(&sock, r#"{"id":"lp1","method":"list_peers","params":{}}"#).await;
+        assert_eq!(resp["ok"], true, "list_peers must succeed: {resp}");
+        let peer_arr = resp["data"]["peers"]
+            .as_array()
+            .expect("data.peers must be array");
+        assert_eq!(peer_arr.len(), 1, "must have exactly one peer");
+
+        let peer = &peer_arr[0];
+        assert!(
+            peer.get("online").is_some(),
+            "peer entry must include 'online' field: {peer}"
+        );
+        assert!(
+            peer.get("last_seen_secs").is_some(),
+            "peer entry must include 'last_seen_secs' field: {peer}"
+        );
+
+        // No sync ever → offline, sentinel -1.
+        assert_eq!(
+            peer["online"].as_bool(),
+            Some(false),
+            "peer with no last_sync_at must be offline: {peer}"
+        );
+        assert_eq!(
+            peer["last_seen_secs"].as_i64(),
+            Some(-1),
+            "peer with no last_sync_at must have last_seen_secs=-1: {peer}"
+        );
+    }
+
+    /// When `last_sync_at` is recent (within ONLINE_THRESHOLD_SECS), the peer
+    /// must be marked `online = true`.
+    #[tokio::test]
+    async fn list_peers_online_true_when_last_sync_at_is_recent() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("lp_online_recent.sock");
+        let cfg_home = dir.path().join("cfg2");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+        std::fs::create_dir_all(&cfg_home).unwrap();
+
+        let peers_json = cfg_home.join("peers.json");
+        // last_sync_at = now − 30 s  → within the 60 s threshold.
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let recent = now_secs - 30;
+        let peers = serde_json::json!([
+            {
+                "name": "Phone",
+                "fingerprint": "f0:e1:d2:c3:b4:a5:96:87",
+                "added_at": 1,
+                "last_sync_at": recent
+            }
+        ]);
+        std::fs::write(&peers_json, serde_json::to_string(&peers).unwrap()).unwrap();
+
+        start_test_server(&sock).await;
+        let resp = call_one(&sock, r#"{"id":"lp2","method":"list_peers","params":{}}"#).await;
+        assert_eq!(resp["ok"], true, "list_peers must succeed: {resp}");
+        let peer_arr = resp["data"]["peers"].as_array().expect("data.peers array");
+        assert_eq!(peer_arr.len(), 1);
+
+        let peer = &peer_arr[0];
+        assert_eq!(
+            peer["online"].as_bool(),
+            Some(true),
+            "peer with recent last_sync_at must be online: {peer}"
+        );
+        let last_seen = peer["last_seen_secs"].as_i64().expect("last_seen_secs");
+        // last_seen_secs = now - last_sync_at ≈ 30, allow ±5 for clock skew.
+        assert!(
+            (25..=35).contains(&last_seen),
+            "last_seen_secs must be ~30, got {last_seen}"
+        );
+    }
+
+    /// When `last_sync_at` is stale (beyond ONLINE_THRESHOLD_SECS), the peer
+    /// must be marked `online = false`.
+    #[tokio::test]
+    async fn list_peers_online_false_when_last_sync_at_is_stale() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("lp_online_stale.sock");
+        let cfg_home = dir.path().join("cfg3");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+        std::fs::create_dir_all(&cfg_home).unwrap();
+
+        let peers_json = cfg_home.join("peers.json");
+        // last_sync_at = now − 120 s  → stale (threshold is 60 s).
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let stale = now_secs - 120;
+        let peers = serde_json::json!([
+            {
+                "name": "Tablet",
+                "fingerprint": "12:34:56:78:9a:bc:de:f0",
+                "added_at": 1,
+                "last_sync_at": stale
+            }
+        ]);
+        std::fs::write(&peers_json, serde_json::to_string(&peers).unwrap()).unwrap();
+
+        start_test_server(&sock).await;
+        let resp = call_one(&sock, r#"{"id":"lp3","method":"list_peers","params":{}}"#).await;
+        assert_eq!(resp["ok"], true, "list_peers must succeed: {resp}");
+        let peer_arr = resp["data"]["peers"].as_array().expect("data.peers array");
+        assert_eq!(peer_arr.len(), 1);
+
+        let peer = &peer_arr[0];
+        assert_eq!(
+            peer["online"].as_bool(),
+            Some(false),
+            "peer with stale last_sync_at must be offline: {peer}"
+        );
+    }
+
+    /// `list_peers` must mark a peer `online = true` when the peer's fingerprint
+    /// is in the live mTLS allowlist (PairedPeers), even if `last_sync_at` is
+    /// absent or stale.
+    #[tokio::test]
+    async fn list_peers_online_true_from_live_mtls_allowlist() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("lp_online_mtls.sock");
+        let cfg_home = dir.path().join("cfg4");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+        std::fs::create_dir_all(&cfg_home).unwrap();
+
+        // Peer fingerprint in colon-hex (as stored in peers.json).
+        let fp_display = "a1:b2:c3:d4:e5:f6:07:18";
+        // Canonical (colon-free, lowercase) form that PairedPeers uses.
+        let fp_canonical = canonical_fingerprint(fp_display);
+
+        let peers_json = cfg_home.join("peers.json");
+        // Peer has no last_sync_at — only the live mTLS allowlist signals online.
+        let peers = serde_json::json!([
+            {"name": "Desktop", "fingerprint": fp_display, "added_at": 1}
+        ]);
+        std::fs::write(&peers_json, serde_json::to_string(&peers).unwrap()).unwrap();
+
+        // Build a PairedPeers with the peer in the active allowlist.
+        let live_peers = copypaste_p2p::transport::PairedPeers::new();
+        live_peers.add(&fp_canonical, "Desktop");
+
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let cert = copypaste_p2p::cert::SelfSignedCert::generate("mtls-test").unwrap();
+        let server = IpcServer::new(
+            db,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+            Arc::new([0u8; 32]),
+        )
+        .with_cert_fingerprint(display_fingerprint(&cert.fingerprint()))
+        .with_p2p_peers(live_peers);
+
+        let path = sock.clone();
+        tokio::spawn(async move {
+            let _ = server.serve(&path, CancellationToken::new()).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let resp = call_one(&sock, r#"{"id":"lp4","method":"list_peers","params":{}}"#).await;
+        assert_eq!(resp["ok"], true, "list_peers must succeed: {resp}");
+        let peer_arr = resp["data"]["peers"].as_array().expect("data.peers array");
+        assert_eq!(peer_arr.len(), 1);
+
+        let peer = &peer_arr[0];
+        assert_eq!(
+            peer["online"].as_bool(),
+            Some(true),
+            "peer in live mTLS allowlist must be online even without last_sync_at: {peer}"
+        );
+    }
+
+    /// `persist_paired_peer` must populate the `name` field from `PeerMeta.device_name`
+    /// when provided, so `list_peers` returns a human-readable name rather than
+    /// an empty string.
+    #[tokio::test]
+    async fn persist_paired_peer_populates_name_from_peer_meta_device_name() {
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("cfg5");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+        std::fs::create_dir_all(&cfg_home).unwrap();
+
+        // Build a PeerMeta with device_name set.
+        let peer_meta = copypaste_p2p::bootstrap::PeerMeta {
+            model: Some("iPhone 15".to_string()),
+            os_version: Some("iOS 17".to_string()),
+            app_version: Some("0.6.0".to_string()),
+            local_ip: Some("192.168.1.42".to_string()),
+            device_name: Some("Alice's iPhone".to_string()),
+        };
+        // A dummy session key (all-zero is fine for this structural test).
+        // SessionKey is a newtype tuple-struct: SessionKey([u8; 32]).
+        let session_key = copypaste_p2p::pake::SessionKey([0u8; 32]);
+        let fp = "b3:c4:d5:e6:f7:08:19:2a";
+
+        IpcServer::persist_paired_peer(fp, "127.0.0.1:5001", &session_key, &peer_meta);
+
+        // Read back the written peers.json and check name.
+        let peers_path = peers_file_path();
+        let written = crate::peers::load_peers(&peers_path);
+        let record = written
+            .iter()
+            .find(|p| canonical_fingerprint(&p.fingerprint) == canonical_fingerprint(fp));
+        assert!(
+            record.is_some(),
+            "persist_paired_peer must write a record for {fp}"
+        );
+        let record = record.unwrap();
+        assert_eq!(
+            record.name, "Alice's iPhone",
+            "name must come from PeerMeta.device_name; got {:?}",
+            record.name
         );
     }
 
