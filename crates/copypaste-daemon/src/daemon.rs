@@ -761,6 +761,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // user configured a higher value (default 25 MiB), making configs above
     // 10 MiB silently ineffective.
     monitor.set_max_image_bytes(usize::try_from(config.max_image_size_bytes).unwrap_or(usize::MAX));
+    monitor.set_max_file_bytes(usize::try_from(config.max_file_size_bytes).unwrap_or(usize::MAX));
     // DUP-ON-COPY fix: share the self-write sentinel with the IpcServer so
     // write_to_pasteboard can stamp the post-write changeCount and the monitor
     // can suppress the immediately-following re-capture of that same write.
@@ -813,11 +814,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                         Some(live_config.sensitive_ttl_secs as i64 * 1000)
                     };
                     // Hot-reload the monitor's READ gate from the live config so
-                    // raising/lowering the text/image cap via set_config takes
-                    // effect without a restart (cheap: two field writes per tick).
+                    // raising/lowering the text/image/file cap via set_config
+                    // takes effect without a restart (cheap: three field writes per tick).
                     monitor.set_max_text_bytes(live_config.max_text_size_bytes);
                     monitor.set_max_image_bytes(
                         usize::try_from(live_config.max_image_size_bytes).unwrap_or(usize::MAX),
+                    );
+                    monitor.set_max_file_bytes(
+                        usize::try_from(live_config.max_file_size_bytes).unwrap_or(usize::MAX),
                     );
                     handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
@@ -885,11 +889,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                         Some(live_config.sensitive_ttl_secs as i64 * 1000)
                     };
                     // Hot-reload the monitor's READ gate from the live config so
-                    // raising/lowering the text/image cap via set_config takes
-                    // effect without a restart (cheap: two field writes per tick).
+                    // raising/lowering the text/image/file cap via set_config
+                    // takes effect without a restart (cheap: three field writes per tick).
                     monitor.set_max_text_bytes(live_config.max_text_size_bytes);
                     monitor.set_max_image_bytes(
                         usize::try_from(live_config.max_image_size_bytes).unwrap_or(usize::MAX),
+                    );
+                    monitor.set_max_file_bytes(
+                        usize::try_from(live_config.max_file_size_bytes).unwrap_or(usize::MAX),
                     );
                     handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
                     cleanup_ticks += 1;
@@ -1272,6 +1279,33 @@ async fn handle_tick(
                 }
             }
         }
+        Ok(Some(ClipboardContent::File {
+            bytes,
+            filename,
+            mime,
+        })) => {
+            tracing::info!(
+                bytes = bytes.len(),
+                filename = %filename,
+                mime = %mime,
+                "clipboard captured: file ({} bytes, {})",
+                bytes.len(),
+                filename
+            );
+            if let Some(item) = handle_file(
+                bytes,
+                filename,
+                mime,
+                db,
+                local_key,
+                config,
+                local_device_id,
+            )
+            .await
+            {
+                let _ = new_item_tx.send(item);
+            }
+        }
         Ok(Some(ClipboardContent::SkippedBatch(missed))) => {
             // Rapid clipboard burst — the monitor already logged the gap;
             // we just bump telemetry here and let the next poll capture
@@ -1649,6 +1683,103 @@ async fn handle_image(
         Ok(item) => item,
         Err(e) => {
             tracing::warn!("handle_image blocking task failed: {e}");
+            None
+        }
+    }
+}
+
+/// Encrypt and store a freshly-captured file for at-rest storage.
+///
+/// Mirrors [`handle_image`] but uses [`copypaste_core::encode_file`] (no
+/// decode/re-encode — the raw bytes are chunked verbatim). The `file_id` is
+/// derived from SHA-256(raw_bytes)[..16] so identical files dedup across
+/// devices. The `item_id` is set to `uuid::Uuid::from_bytes(file_id)` for the
+/// same reason (cross-device CRDT identity, mirrors the image path).
+///
+/// The meta JSON produced by [`crate::clipboard::build_file_meta_json`] uses
+/// the keys `filename`, `mime`, `original_size`, `chunk_count`, `file_id` —
+/// identical to the keys expected by `ipc::parse_file_meta` and
+/// `sync_orch::build_file_meta_json`.
+async fn handle_file(
+    raw_bytes: Vec<u8>,
+    filename: String,
+    mime: String,
+    db: &Arc<Mutex<Database>>,
+    local_key: &[u8; 32],
+    config: &AppConfig,
+    local_device_id: &str,
+) -> Option<ClipboardItem> {
+    let db = db.clone();
+    let config = config.clone();
+    let local_key = *local_key;
+    let local_device_id = local_device_id.to_string();
+    let join = tokio::task::spawn_blocking(move || {
+        // Content-hash file_id: deterministic so identical files dedup.
+        let file_id = crate::clipboard::image_content_hash(&raw_bytes);
+
+        let max_file_bytes = usize::try_from(config.max_file_size_bytes).unwrap_or(usize::MAX);
+
+        match copypaste_core::encode_file(
+            &raw_bytes,
+            &filename,
+            &mime,
+            &local_key,
+            &file_id,
+            max_file_bytes,
+        ) {
+            Ok((meta, chunks)) => {
+                let blob = match copypaste_core::chunks_to_blob(&chunks) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        tracing::error!(error = %e, "handle_file: chunks_to_blob failed");
+                        return None;
+                    }
+                };
+                let meta_json = crate::clipboard::build_file_meta_json(&meta);
+                let mut item = ClipboardItem::new_file(blob, meta_json, 0);
+                // Stable cross-device identity: derive item_id from the
+                // content-hash file_id (same pattern as handle_image).
+                item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+                item.origin_device_id = local_device_id;
+                tracing::debug!(
+                    "file encoded: {} chunks, original_size={}",
+                    meta.chunk_count,
+                    meta.original_size
+                );
+
+                let db_guard = db.blocking_lock();
+                // Files have no searchable text body; pass "" to skip FTS.
+                match insert_item_with_fts(&db_guard, &item, "") {
+                    Ok(stored_id) => {
+                        if stored_id != item.id {
+                            tracing::debug!(
+                                requested = %item.id,
+                                existing = %stored_id,
+                                "file item deduped against existing row"
+                            );
+                        } else {
+                            tracing::info!(id = %item.id, "stored file item id={}", item.id);
+                        }
+                        prune_history(&db_guard, &config);
+                        Some(item)
+                    }
+                    Err(e) => {
+                        tracing::warn!("failed to store file item: {e}");
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("file encode failed (skipping): {e}");
+                None
+            }
+        }
+    })
+    .await;
+    match join {
+        Ok(item) => item,
+        Err(e) => {
+            tracing::warn!("handle_file blocking task failed: {e}");
             None
         }
     }

@@ -4,10 +4,11 @@ use crate::protocol::{
     MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 use copypaste_core::{
-    bump_item_recency, chunks_from_blob, count_items, decode_image, decrypt_item_by_version,
-    delete_fts, delete_item, derive_v2, ensure_revoked_devices_table, fetch_text_preview,
-    get_item_by_id, get_page, get_page_pinned_first, pin_item, reorder_pinned, revoke_device,
-    revoke_devices, search_items, unpin_item, Database, EncryptError, SensitiveDetector,
+    bump_item_recency, chunks_from_blob, count_items, decode_file, decode_image,
+    decrypt_item_by_version, delete_fts, delete_item, derive_v2, ensure_revoked_devices_table,
+    fetch_text_preview, get_item_by_id, get_page, get_page_pinned_first, pin_item, reorder_pinned,
+    revoke_device, revoke_devices, search_items, unpin_item, Database, EncryptError, FileMeta,
+    SensitiveDetector,
 };
 #[cfg(feature = "cloud-sync")]
 use copypaste_core::{derive_sync_key, SyncKey};
@@ -1616,6 +1617,8 @@ impl IpcServer {
                 | "get_item_image"
                 // get_item_thumbnail decrypts the thumbnail blob — needs a ready DB.
                 | "get_item_thumbnail"
+                // get_item_file decrypts file chunks — needs a ready DB.
+                | "get_item_file"
                 | "revoke_peer"
                 | "revoke_all_peers"
         )
@@ -2680,6 +2683,128 @@ impl IpcServer {
                     ),
                 }
             }
+            // B. get_item_file — decrypt and return a FILE item as raw bytes.
+            //
+            // Params: {"id": "<uuid>"}
+            // Success: {"filename": "<name>", "mime": "<type>", "data_b64": "<b64>"}
+            // Error: item not found, non-file content_type, or decrypt failure.
+            //
+            // Mirrors `get_item_image` but uses `decode_file` (no decode/re-encode)
+            // and returns the raw bytes as base64 plus the filename and MIME type
+            // parsed from the `blob_ref` meta JSON.
+            "get_item_file" => {
+                let id = match req.params.get("id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
+                };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
+                }
+                let db_arc = self.db.clone();
+                let id_for_task = id.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    let item = get_item_by_id(&db, &id_for_task)?;
+                    Ok::<_, anyhow::Error>(item)
+                })
+                .await;
+                match join {
+                    Ok(Ok(Some(item))) => {
+                        if item.content_type != "file" {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                format!(
+                                    "item {} is not a file (content_type: {})",
+                                    id, item.content_type
+                                ),
+                            );
+                        }
+                        let content = match &item.content {
+                            Some(b) => b.clone(),
+                            None => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("file item {} has no content blob", id),
+                                )
+                            }
+                        };
+                        let meta_json = match item.blob_ref.as_deref() {
+                            Some(s) => s.to_owned(),
+                            None => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("file item {} missing blob_ref metadata", id),
+                                )
+                            }
+                        };
+                        let file_meta = match parse_file_meta(&meta_json) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("file item {id} blob_ref parse error: {e}"),
+                                )
+                            }
+                        };
+                        let chunks = match chunks_from_blob(&content) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("file item {id} chunks_from_blob failed: {e}"),
+                                )
+                            }
+                        };
+                        let local_key: [u8; 32] = **self.local_key;
+                        let raw_bytes = match decode_file(&chunks, &local_key, &file_meta.file_id) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_AUTH_FAILED,
+                                    format!("file item {id} decode failed: {e}"),
+                                )
+                            }
+                        };
+                        use base64::Engine as _;
+                        let data_b64 = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({
+                                "filename": file_meta.filename,
+                                "mime":     file_meta.mime,
+                                "data_b64": data_b64,
+                            }),
+                        )
+                    }
+                    Ok(Ok(None)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_NOT_FOUND,
+                        format!("item not found: {id}"),
+                    ),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
             "history_page" => {
                 // Paginated history with content preview — used by UI (HistoryWindow)
                 let raw_limit = req
@@ -2723,8 +2848,18 @@ impl IpcServer {
                                 fetch_text_preview(&db, &item.id)
                                     .unwrap_or(None)
                                     .unwrap_or_else(|| format!("[text — id:{}]", &item.id[..8]))
+                            } else if item.content_type == "file" {
+                                // Parse the filename from blob_ref for a useful preview;
+                                // fall back to a generic placeholder on parse failure.
+                                let name = item
+                                    .blob_ref
+                                    .as_deref()
+                                    .and_then(|j| parse_file_meta(j).ok())
+                                    .map(|m| m.filename)
+                                    .unwrap_or_else(|| format!("id:{}", &item.id[..8]));
+                                format!("[file: {name}]")
                             } else {
-                                // image (and any future non-text type)
+                                // image (and any other future non-text type)
                                 format!("[image — id:{}]", &item.id[..8])
                             };
 
@@ -5582,6 +5717,50 @@ fn parse_meta_id_array(meta_json: &str, key: &str) -> Result<[u8; 16], String> {
             .ok_or_else(|| format!("image meta_json '{key}[{i}]' not a u8"))?;
     }
     Ok(out)
+}
+
+/// Parse all file metadata fields out of the `blob_ref` JSON stored in a
+/// `content_type == "file"` item. The JSON is produced by
+/// [`crate::clipboard::build_file_meta_json`] and has the shape:
+/// `{"filename":"...","mime":"...","original_size":N,"chunk_count":N,"file_id":[u8;16]}`.
+///
+/// Returns a [`copypaste_core::FileMeta`] so the caller can pass `file_id` to
+/// `decode_file` and surface `filename`/`mime` over IPC. `pub(crate)` so it
+/// is reachable from the inline tests (`parse_file_meta_round_trips_build_file_meta_json`).
+pub(crate) fn parse_file_meta(meta_json: &str) -> Result<FileMeta, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(meta_json).map_err(|e| format!("file meta_json parse error: {e}"))?;
+
+    let filename = v
+        .get("filename")
+        .and_then(|s| s.as_str())
+        .ok_or("file meta_json missing 'filename'")?
+        .to_string();
+    let mime = v
+        .get("mime")
+        .and_then(|s| s.as_str())
+        .ok_or("file meta_json missing 'mime'")?
+        .to_string();
+    let original_size = v
+        .get("original_size")
+        .and_then(|n| n.as_u64())
+        .ok_or("file meta_json missing or invalid 'original_size'")?;
+    let chunk_count = v
+        .get("chunk_count")
+        .and_then(|n| n.as_u64())
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or("file meta_json missing or invalid 'chunk_count'")?;
+    // file_id is stored as a JSON array of u8 values (same shape as
+    // image meta's file_id, so parse_meta_id_array can be reused).
+    let file_id = parse_meta_id_array(meta_json, "file_id")?;
+
+    Ok(FileMeta {
+        filename,
+        mime,
+        original_size,
+        chunk_count,
+        file_id,
+    })
 }
 
 /// Map the daemon's internal `content_type` string to a macOS UTI suitable
@@ -9164,6 +9343,161 @@ mod tests {
             merged.p2p_enabled,
             Some(false),
             "explicit p2p_enabled=false must override existing true"
+        );
+    }
+
+    // --- get_item_file ---
+
+    /// `get_item_file` must decrypt and return a file item's raw bytes as
+    /// base64, along with the filename and MIME type stored at capture time.
+    /// The round-trip mirrors `get_item_image`: store via `ClipboardItem::new_file`
+    /// (chunks_to_blob-encoded), then retrieve via the IPC verb.
+    #[tokio::test]
+    async fn get_item_file_round_trips_bytes_and_meta() {
+        let dir = tempdir().unwrap();
+        let socket_path = dir.path().join("ipc.sock");
+        let (_pm, db) = start_test_server_returning_db(&socket_path, false).await;
+
+        // Build a file item and seed it into the DB.
+        let raw = b"hello clipboard file";
+        let key = [0u8; 32]; // matches dummy server key
+        let file_id = [0xAAu8; 16]; // fixed content-hash stand-in for test
+        let (meta, chunks) =
+            copypaste_core::encode_file(raw, "hello.txt", "text/plain", &key, &file_id, 0)
+                .expect("encode_file must succeed");
+        let blob = copypaste_core::chunks_to_blob(&chunks).expect("chunks_to_blob must succeed");
+        let meta_json = crate::clipboard::build_file_meta_json(&meta);
+        let mut item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
+        item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+
+        let item_id = item.id.clone();
+        {
+            let db_guard = db.lock().await;
+            copypaste_core::insert_item_with_fts(&db_guard, &item, "")
+                .expect("insert must succeed");
+        }
+
+        // Issue get_item_file over IPC.
+        let mut stream = UnixStream::connect(&socket_path).await.unwrap();
+        let req = format!(
+            "{{\"id\":\"gf1\",\"method\":\"get_item_file\",\"params\":{{\"id\":\"{item_id}\"}}}}\n"
+        );
+        stream.write_all(req.as_bytes()).await.unwrap();
+        let mut reader = BufReader::new(&mut stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let resp: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+
+        assert_eq!(resp["ok"], true, "get_item_file must succeed: {resp}");
+        assert_eq!(resp["data"]["filename"], "hello.txt");
+        assert_eq!(resp["data"]["mime"], "text/plain");
+        // Verify the raw bytes round-trip through base64.
+        use base64::Engine as _;
+        let returned_bytes = base64::engine::general_purpose::STANDARD
+            .decode(resp["data"]["data_b64"].as_str().unwrap())
+            .expect("data_b64 must be valid base64");
+        assert_eq!(returned_bytes, raw);
+    }
+
+    /// `get_item_file` must reject requests for non-file content_type items.
+    #[tokio::test]
+    async fn get_item_file_rejects_non_file_item() {
+        let dir = tempdir().unwrap();
+        let socket_path = dir.path().join("ipc2.sock");
+        let (_pm, db) = start_test_server_returning_db(&socket_path, false).await;
+
+        // Insert a text item. new_text(encrypted_content, nonce, lamport_ts).
+        let nonce = vec![0u8; copypaste_core::NONCE_SIZE];
+        let ciphertext = b"dummy-ciphertext".to_vec();
+        let item = copypaste_core::ClipboardItem::new_text(ciphertext, nonce, 0);
+        let item_id = item.id.clone();
+        {
+            let db_guard = db.lock().await;
+            copypaste_core::insert_item_with_fts(&db_guard, &item, "dummy text")
+                .expect("insert must succeed");
+        }
+
+        let mut stream = UnixStream::connect(&socket_path).await.unwrap();
+        let req = format!(
+            "{{\"id\":\"gf2\",\"method\":\"get_item_file\",\"params\":{{\"id\":\"{item_id}\"}}}}\n"
+        );
+        stream.write_all(req.as_bytes()).await.unwrap();
+        let mut reader = BufReader::new(&mut stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let resp: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+
+        assert_eq!(
+            resp["ok"], false,
+            "get_item_file must fail for a text item: {resp}"
+        );
+    }
+
+    /// `parse_file_meta` must extract filename, mime, original_size and
+    /// chunk_count from the JSON produced by `build_file_meta_json`.
+    #[test]
+    fn parse_file_meta_round_trips_build_file_meta_json() {
+        let meta = copypaste_core::FileMeta {
+            filename: "test.pdf".to_string(),
+            mime: "application/pdf".to_string(),
+            original_size: 12345,
+            chunk_count: 2,
+            file_id: [0xABu8; 16],
+        };
+        let json = crate::clipboard::build_file_meta_json(&meta);
+        let parsed = parse_file_meta(&json).expect("parse_file_meta must succeed");
+        assert_eq!(parsed.filename, "test.pdf");
+        assert_eq!(parsed.mime, "application/pdf");
+        assert_eq!(parsed.original_size, 12345);
+        assert_eq!(parsed.chunk_count, 2);
+        assert_eq!(parsed.file_id, [0xABu8; 16]);
+    }
+
+    /// `history_page` must return `[file: <name>]` as the preview for file items.
+    #[tokio::test]
+    async fn history_page_shows_file_preview() {
+        let dir = tempdir().unwrap();
+        let socket_path = dir.path().join("hp_file.sock");
+        let (_pm, db) = start_test_server_returning_db(&socket_path, false).await;
+
+        let raw = b"pdf content";
+        let key = [0u8; 32];
+        let file_id = [0x01u8; 16];
+        let (meta, chunks) =
+            copypaste_core::encode_file(raw, "doc.pdf", "application/pdf", &key, &file_id, 0)
+                .unwrap();
+        let blob = copypaste_core::chunks_to_blob(&chunks).unwrap();
+        let meta_json = crate::clipboard::build_file_meta_json(&meta);
+        let item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
+        {
+            let db_guard = db.lock().await;
+            copypaste_core::insert_item_with_fts(&db_guard, &item, "").unwrap();
+        }
+
+        let mut stream = UnixStream::connect(&socket_path).await.unwrap();
+        stream
+            .write_all(
+                b"{\"id\":\"hpf\",\"method\":\"history_page\",\"params\":{\"limit\":10,\"offset\":0}}\n",
+            )
+            .await
+            .unwrap();
+        let mut reader = BufReader::new(&mut stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let resp: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+
+        assert_eq!(resp["ok"], true, "history_page must succeed: {resp}");
+        let items = resp["data"]["items"].as_array().unwrap();
+        let file_item = items.iter().find(|it| it["content_type"] == "file");
+        assert!(file_item.is_some(), "must find a file item in history_page");
+        let preview = file_item.unwrap()["preview"].as_str().unwrap();
+        assert!(
+            preview.starts_with("[file:"),
+            "file item preview must start with '[file:'; got: {preview}"
+        );
+        assert!(
+            preview.contains("doc.pdf"),
+            "file item preview must include filename; got: {preview}"
         );
     }
 }
