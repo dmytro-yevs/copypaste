@@ -1320,6 +1320,9 @@ pub fn sync_with_peer(
                 // Text and image items never set these fields.
                 file_name: it.file_name.clone(),
                 mime: it.mime.clone(),
+                deleted: false,
+                pinned: false,
+                pin_order: None,
             });
         }
 
