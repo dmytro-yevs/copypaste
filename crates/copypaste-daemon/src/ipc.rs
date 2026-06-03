@@ -681,6 +681,42 @@ fn load_peers() -> anyhow::Result<Vec<serde_json::Value>> {
     Ok(filtered)
 }
 
+/// HB-4: build the set of IP HOSTS we have already paired with, for correlating
+/// mDNS-discovered peers against `peers.json`.
+///
+/// The mDNS `device_id` advertised by a peer is a random UUID, NOT its cert
+/// fingerprint, so a fingerprint-compare never matched a discovered peer to a
+/// paired record — already-paired devices kept showing "Pair". Instead we match
+/// on the network identity: a peer's `local_ip` and the HOST part of its
+/// `address` (`host:port`). A discovered peer is "paired" when any of its
+/// resolved `ip_addrs` is in this set.
+fn paired_ip_hosts(peers: &[serde_json::Value]) -> std::collections::HashSet<String> {
+    let mut hosts = std::collections::HashSet::new();
+    for p in peers {
+        if let Some(ip) = p.get("local_ip").and_then(|v| v.as_str()) {
+            if !ip.is_empty() {
+                hosts.insert(ip.to_string());
+            }
+        }
+        if let Some(addr) = p.get("address").and_then(|v| v.as_str()) {
+            // `address` is `host:port`; keep only the host. `rsplit_once(':')`
+            // tolerates bracketed IPv6 (`[::1]:9123`) by stripping the trailing
+            // `:port` and leaving the bracketed host, which still matches the
+            // bracket-free `ip_addrs` form below only for IPv4 — IPv6 hosts are
+            // matched via `local_ip` instead.
+            let host = match addr.rsplit_once(':') {
+                Some((h, _port)) => h,
+                None => addr,
+            };
+            let host = host.trim_start_matches('[').trim_end_matches(']');
+            if !host.is_empty() {
+                hosts.insert(host.to_string());
+            }
+        }
+    }
+    hosts
+}
+
 /// Persist peers list to peers.json atomically with mode 0600 from the first byte.
 ///
 /// # Security
@@ -2040,11 +2076,32 @@ impl IpcServer {
                         .finish(crate::pairing_sm::PairingState::Rejected);
                 }
                 tracing::warn!("discovery SAS pairing failed: {e}");
-                let resp = Response::err_with_code(
-                    req_id,
-                    ERR_CODE_AUTH_FAILED,
-                    format!("discovery SAS pairing failed: {e}"),
-                );
+                // HB-4: a raw TCP connect failure ("Connection refused", host
+                // unreachable, timeout) means the peer's bootstrap responder is
+                // not listening — almost always because the device is already
+                // paired (so it no longer advertises) or its Devices/pairing
+                // screen is closed. Map that to a friendly message instead of the
+                // raw os-error; genuine PAKE/SAS failures keep the auth message.
+                let lower = e.to_string().to_ascii_lowercase();
+                let is_connect_failure = lower.contains("connection refused")
+                    || lower.contains("connect")
+                    || lower.contains("unreachable")
+                    || lower.contains("timed out")
+                    || lower.contains("timeout")
+                    || lower.contains("os error 61")
+                    || lower.contains("os error 111");
+                let (code, message) = if is_connect_failure {
+                    (
+                        ERR_CODE_NOT_FOUND,
+                        "device not reachable (already paired or its screen is closed)".to_string(),
+                    )
+                } else {
+                    (
+                        ERR_CODE_AUTH_FAILED,
+                        format!("discovery SAS pairing failed: {e}"),
+                    )
+                };
+                let resp = Response::err_with_code(req_id, code, message);
                 // BUG A1: reset the SM to `Idle` on EVERY failure return path that
                 // reached here after `try_begin` succeeded, so the next pairing
                 // attempt is not refused as rate-limited. The terminal outcome is
@@ -4550,17 +4607,14 @@ impl IpcServer {
                     None => return Response::err(req.id, "discovery not available (P2P disabled)"),
                 };
 
-                // Snapshot known-peer fingerprints from peers.json (canonical
-                // colon-free lowercase hex) for O(1) membership test per peer.
-                let paired_fps: std::collections::HashSet<String> = match load_peers() {
-                    Ok(stored) => stored
-                        .into_iter()
-                        .filter_map(|p| {
-                            p.get("fingerprint")
-                                .and_then(|v| v.as_str())
-                                .map(canonical_fingerprint)
-                        })
-                        .collect(),
+                // HB-4: the mDNS `device_id` is a UUID, NOT a cert fingerprint, so
+                // a fingerprint-compare against peers.json never matched and paired
+                // devices kept showing "Pair". Instead snapshot the set of IP hosts
+                // we have paired with (`local_ip` + the host part of `address`) and
+                // mark a discovered peer `paired` when ANY of its resolved
+                // `ip_addrs` is in that set.
+                let paired_ips: std::collections::HashSet<String> = match load_peers() {
+                    Ok(stored) => paired_ip_hosts(&stored),
                     // Non-fatal: treat as empty — we just won't mark any peer paired.
                     Err(e) => {
                         tracing::warn!("list_discovered: failed to load peers.json: {e}");
@@ -4572,9 +4626,9 @@ impl IpcServer {
                     .peers()
                     .into_iter()
                     .map(|peer| {
-                        let paired = paired_fps.contains(&canonical_fingerprint(&peer.device_id));
                         let ip_strs: Vec<String> =
                             peer.ip_addrs.iter().map(|a| a.to_string()).collect();
+                        let paired = ip_strs.iter().any(|ip| paired_ips.contains(ip));
                         serde_json::json!({
                             "device_id":   peer.device_id,
                             "device_name": peer.device_name,
@@ -4620,15 +4674,9 @@ impl IpcServer {
                     }
                 }
 
-                let paired_fps: std::collections::HashSet<String> = match load_peers() {
-                    Ok(stored) => stored
-                        .into_iter()
-                        .filter_map(|p| {
-                            p.get("fingerprint")
-                                .and_then(|v| v.as_str())
-                                .map(canonical_fingerprint)
-                        })
-                        .collect(),
+                // HB-4: IP-correlate already-paired peers (see `list_discovered`).
+                let paired_ips: std::collections::HashSet<String> = match load_peers() {
+                    Ok(stored) => paired_ip_hosts(&stored),
                     Err(e) => {
                         tracing::warn!("rescan_discovered: failed to load peers.json: {e}");
                         std::collections::HashSet::new()
@@ -4639,9 +4687,9 @@ impl IpcServer {
                     .peers()
                     .into_iter()
                     .map(|peer| {
-                        let paired = paired_fps.contains(&canonical_fingerprint(&peer.device_id));
                         let ip_strs: Vec<String> =
                             peer.ip_addrs.iter().map(|a| a.to_string()).collect();
+                        let paired = ip_strs.iter().any(|ip| paired_ips.contains(ip));
                         serde_json::json!({
                             "device_id":   peer.device_id,
                             "device_name": peer.device_name,
