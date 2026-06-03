@@ -300,4 +300,9 @@
     <string name="file_saved_ok">File saved to Downloads</string>
     <string name="file_save_failed">Could not save file</string>
     <string name="file_copy_failed">Could not copy file</string>
+
+    <!-- HB-11: in-app file picker (history screen AttachFile button) -->
+    <string name="cd_attach_file">Pick file to send</string>
+    <string name="snackbar_file_captured">File added to clipboard — syncing…</string>
+    <string name="error_file_pick_failed">Could not capture file</string>
 </resources>
