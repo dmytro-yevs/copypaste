@@ -98,7 +98,28 @@
 /// Kotlin generated against ABI 9 lacks `SyncProvisioning`, constructs the old
 /// `bootstrap_pair_initiator` arity, and reads `BootstrapResult` with the wrong
 /// shape — it must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 10;
+///
+/// **ABI 11 (inbound P2P listener — so macOS can INITIATE to Android):** Added
+/// the persistent inbound mTLS accept loop at parity with the macOS daemon's
+/// `accept_loop`, exposed as four new FFI functions plus two new dictionaries:
+///   * `start_p2p_listener(listen_port, cert_der, key_der, allowed_fingerprints,
+///     revoked_fingerprints, session_keys, local_items, device_id)
+///     -> P2pListenerHandle` — binds `0.0.0.0:port` (0 = OS-assigned), registers
+///     a listener in a process-global registry, spawns its accept loop on the
+///     shared runtime, and returns immediately with the handle + actual port.
+///   * `poll_p2p_listener(listener_id) -> [SyncedItem]` — atomically drains the
+///     items decrypted from inbound frames since the last poll.
+///   * `update_p2p_listener_peers(listener_id, allowed, revoked, session_keys)` —
+///     live roster/denylist/session-key refresh without restarting.
+///   * `stop_p2p_listener(listener_id)` — cancel + deregister (idempotent).
+///   * New dictionary `PeerSessionKey { fingerprint, session_key }` — a peer's
+///     32-byte PAKE session key keyed by its pinned cert fingerprint (per-peer
+///     decryption, never a global key).
+///   * New dictionary `P2pListenerHandle { listener_id, actual_port }`.
+///
+/// Kotlin generated against ABI 10 lacks all four functions and both
+/// dictionaries and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 11;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

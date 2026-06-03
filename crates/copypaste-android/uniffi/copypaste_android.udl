@@ -133,6 +133,46 @@ namespace copypaste_android {
   [Throws=CopypasteError]
   P2pSyncResult sync_with_peer(string peer_addr, string peer_fingerprint, sequence<u8> session_key, sequence<u8> cert_der, sequence<u8> key_der, sequence<LocalItem> local_items, sequence<string> revoked_fingerprints, string device_id);
 
+  // ── Inbound P2P listener (ABI 11 — so macOS can INITIATE to Android) ──────
+  // Persistent, cancellable inbound mTLS accept loop at parity with the macOS
+  // daemon's accept_loop. Driven by a process-global registry; the FFI hands
+  // back a u64 handle because the UDL has no interface objects. The Kotlin FGS
+  // owns the lifecycle (start in onStartCommand, drain via poll on the dial
+  // cadence, stop in onDestroy).
+
+  /// Bind 0.0.0.0:listen_port (0 = OS-assigned), register an inbound mTLS
+  /// listener, and spawn its accept loop on the shared runtime. Returns
+  /// immediately with the registry handle + the actual bound port.
+  /// `cert_der`/`key_der` are this device's mTLS identity; `allowed_fingerprints`
+  /// is the pinned allowlist (pinning IS the authenticator); `revoked_fingerprints`
+  /// is re-checked AT ACCEPT before any catch-up/frame; `session_keys` carries
+  /// each peer's 32-byte PAKE session key (a frame from A is decrypted with A's
+  /// key, never a global key); `local_items` is the catch-up history pushed once
+  /// per accepted connection; `device_id` stamps the outbound origin.
+  /// key_der and each session_key are secret — the caller MUST zero the
+  /// ByteArrays after the call and never log them.
+  [Throws=CopypasteError]
+  P2pListenerHandle start_p2p_listener(u16 listen_port, sequence<u8> cert_der, sequence<u8> key_der, sequence<string> allowed_fingerprints, sequence<string> revoked_fingerprints, sequence<PeerSessionKey> session_keys, sequence<LocalItem> local_items, string device_id);
+
+  /// Atomically drain every item the listener decrypted from inbound frames
+  /// since the last poll. Kotlin stores these via the SAME LWW path the dialer
+  /// uses (the dial/listen overlap dedups). Empty list for an unknown id.
+  [Throws=CopypasteError]
+  sequence<SyncedItem> poll_p2p_listener(u64 listener_id);
+
+  /// Live roster/denylist/session-key refresh without restarting the listener.
+  /// Removes any no-longer-allowed or revoked fingerprint from the pinned
+  /// allowlist immediately (rejected at the next TLS handshake). No-op for an
+  /// unknown id.
+  [Throws=CopypasteError]
+  void update_p2p_listener_peers(u64 listener_id, sequence<string> allowed, sequence<string> revoked, sequence<PeerSessionKey> session_keys);
+
+  /// Cancel and deregister the listener. Idempotent (a second call or an
+  /// unknown id is a no-op). Fires the cancel token so the accept loop and its
+  /// per-connection tasks exit and the listener socket is dropped.
+  [Throws=CopypasteError]
+  void stop_p2p_listener(u64 listener_id);
+
   // ── AppConfig over UniFFI (single source of truth, shared with macOS) ─────
   // Android keeps its SharedPreferences store but SEEDS defaults from
   // `default_config()` and pipes every write through `clamp_config()` so it
@@ -294,6 +334,25 @@ dictionary SyncedItem {
   i64 wall_time_ms;
   string? file_name;
   string? mime;
+};
+
+// A peer's PAKE session key, keyed by its pinned cert fingerprint. Passed to
+// the inbound listener so each peer's frames are decrypted with THAT peer's key
+// (never a single global key). `session_key` is the 32-byte PAKE session key
+// from bootstrap pairing — the SAME value `sync_with_peer` consumes — and is
+// SECRET: the Kotlin caller MUST zero the ByteArray after the call and never
+// log it.
+dictionary PeerSessionKey {
+  string fingerprint;
+  sequence<u8> session_key;
+};
+
+// Result of `start_p2p_listener`: the registry handle plus the OS-assigned
+// bound port. When `listen_port == 0` was requested, `actual_port` reports the
+// real kernel-chosen port so Kotlin can advertise it (Path A sync_addr / NSD).
+dictionary P2pListenerHandle {
+  u64 listener_id;
+  u16 actual_port;
 };
 
 // Result of `sync_with_peer`: one completed sync session's outcome.

@@ -738,6 +738,14 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -793,14 +801,22 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_copypaste_android_fn_func_parse_pairing_qr(`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_poll_p2p_listener(`listenerId`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_revoke_device_audit(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     fun uniffi_copypaste_android_fn_func_sensitive_kind(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_start_p2p_listener(`listenPort`: Short,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`allowedFingerprints`: RustBuffer.ByValue,`revokedFingerprints`: RustBuffer.ByValue,`sessionKeys`: RustBuffer.ByValue,`localItems`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_stop_p2p_listener(`listenerId`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_copypaste_android_fn_func_sync_with_peer(`peerAddr`: RustBuffer.ByValue,`peerFingerprint`: RustBuffer.ByValue,`sessionKey`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`localItems`: RustBuffer.ByValue,`revokedFingerprints`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_uniffi_abi_version(uniffi_out_err: UniffiRustCallStatus, 
     ): Int
+    fun uniffi_copypaste_android_fn_func_update_p2p_listener_peers(`listenerId`: Long,`allowed`: RustBuffer.ByValue,`revoked`: RustBuffer.ByValue,`sessionKeys`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun ffi_copypaste_android_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun ffi_copypaste_android_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -953,13 +969,21 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_parse_pairing_qr(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_poll_p2p_listener(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_revoke_device_audit(
     ): Short
     fun uniffi_copypaste_android_checksum_func_sensitive_kind(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_start_p2p_listener(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_stop_p2p_listener(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_sync_with_peer(
     ): Short
     fun uniffi_copypaste_android_checksum_func_uniffi_abi_version(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_update_p2p_listener_peers(
     ): Short
     fun ffi_copypaste_android_uniffi_contract_version(
     ): Int
@@ -1038,16 +1062,28 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_parse_pairing_qr() != 38365.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_copypaste_android_checksum_func_poll_p2p_listener() != 4210.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_copypaste_android_checksum_func_revoke_device_audit() != 60588.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_sensitive_kind() != 9170.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_copypaste_android_checksum_func_start_p2p_listener() != 23086.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_stop_p2p_listener() != 15796.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_copypaste_android_checksum_func_sync_with_peer() != 60986.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_uniffi_abi_version() != 6036.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_update_p2p_listener_peers() != 17209.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
 }
@@ -1107,6 +1143,26 @@ public object FfiConverterUByte: FfiConverter<UByte, Byte> {
 
     override fun write(value: UByte, buf: ByteBuffer) {
         buf.put(value.toByte())
+    }
+}
+
+public object FfiConverterUShort: FfiConverter<UShort, Short> {
+    override fun lift(value: Short): UShort {
+        return value.toUShort()
+    }
+
+    override fun read(buf: ByteBuffer): UShort {
+        return lift(buf.getShort())
+    }
+
+    override fun lower(value: UShort): Short {
+        return value.toShort()
+    }
+
+    override fun allocationSize(value: UShort) = 2UL
+
+    override fun write(value: UShort, buf: ByteBuffer) {
+        buf.putShort(value.toShort())
     }
 }
 
@@ -1479,6 +1535,35 @@ public object FfiConverterTypeLocalItem: FfiConverterRustBuffer<LocalItem> {
 
 
 
+data class P2pListenerHandle (
+    var `listenerId`: kotlin.ULong, 
+    var `actualPort`: kotlin.UShort
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeP2pListenerHandle: FfiConverterRustBuffer<P2pListenerHandle> {
+    override fun read(buf: ByteBuffer): P2pListenerHandle {
+        return P2pListenerHandle(
+            FfiConverterULong.read(buf),
+            FfiConverterUShort.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: P2pListenerHandle) = (
+            FfiConverterULong.allocationSize(value.`listenerId`) +
+            FfiConverterUShort.allocationSize(value.`actualPort`)
+    )
+
+    override fun write(value: P2pListenerHandle, buf: ByteBuffer) {
+            FfiConverterULong.write(value.`listenerId`, buf)
+            FfiConverterUShort.write(value.`actualPort`, buf)
+    }
+}
+
+
+
 data class P2pSyncResult (
     var `itemsReceived`: kotlin.ULong, 
     var `itemsSent`: kotlin.ULong, 
@@ -1540,6 +1625,35 @@ public object FfiConverterTypePairingQrPayload: FfiConverterRustBuffer<PairingQr
     override fun write(value: PairingQrPayload, buf: ByteBuffer) {
             FfiConverterString.write(value.`qr`, buf)
             FfiConverterString.write(value.`pakePassword`, buf)
+    }
+}
+
+
+
+data class PeerSessionKey (
+    var `fingerprint`: kotlin.String, 
+    var `sessionKey`: List<kotlin.UByte>
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypePeerSessionKey: FfiConverterRustBuffer<PeerSessionKey> {
+    override fun read(buf: ByteBuffer): PeerSessionKey {
+        return PeerSessionKey(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceUByte.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PeerSessionKey) = (
+            FfiConverterString.allocationSize(value.`fingerprint`) +
+            FfiConverterSequenceUByte.allocationSize(value.`sessionKey`)
+    )
+
+    override fun write(value: PeerSessionKey, buf: ByteBuffer) {
+            FfiConverterString.write(value.`fingerprint`, buf)
+            FfiConverterSequenceUByte.write(value.`sessionKey`, buf)
     }
 }
 
@@ -2078,6 +2192,31 @@ public object FfiConverterSequenceTypeLocalItem: FfiConverterRustBuffer<List<Loc
 
 
 
+public object FfiConverterSequenceTypePeerSessionKey: FfiConverterRustBuffer<List<PeerSessionKey>> {
+    override fun read(buf: ByteBuffer): List<PeerSessionKey> {
+        val len = buf.getInt()
+        return List<PeerSessionKey>(len) {
+            FfiConverterTypePeerSessionKey.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<PeerSessionKey>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypePeerSessionKey.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<PeerSessionKey>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypePeerSessionKey.write(it, buf)
+        }
+    }
+}
+
+
+
+
 public object FfiConverterSequenceTypeRevokedPeer: FfiConverterRustBuffer<List<RevokedPeer>> {
     override fun read(buf: ByteBuffer): List<RevokedPeer> {
         val len = buf.getInt()
@@ -2384,6 +2523,21 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     
 
         /**
+         * Atomically drain every item the listener decrypted from inbound frames
+         * since the last poll. Kotlin stores these via the SAME LWW path the dialer
+         * uses (the dial/listen overlap dedups). Empty list for an unknown id.
+         */
+    @Throws(CopypasteException::class) fun `pollP2pListener`(`listenerId`: kotlin.ULong): List<SyncedItem> {
+            return FfiConverterSequenceTypeSyncedItem.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_poll_p2p_listener(
+        FfiConverterULong.lower(`listenerId`),_status)
+}
+    )
+    }
+    
+
+        /**
          * Record a manual peer revocation in the local `revoked_devices` audit
          * table and remove the matching `devices` row. Returns the unix-seconds
          * timestamp written to `revoked_at`. The caller (Kotlin) is responsible for
@@ -2407,6 +2561,43 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
 }
     )
     }
+    
+
+        /**
+         * Bind 0.0.0.0:listen_port (0 = OS-assigned), register an inbound mTLS
+         * listener, and spawn its accept loop on the shared runtime. Returns
+         * immediately with the registry handle + the actual bound port.
+         * `cert_der`/`key_der` are this device's mTLS identity; `allowed_fingerprints`
+         * is the pinned allowlist (pinning IS the authenticator); `revoked_fingerprints`
+         * is re-checked AT ACCEPT before any catch-up/frame; `session_keys` carries
+         * each peer's 32-byte PAKE session key (a frame from A is decrypted with A's
+         * key, never a global key); `local_items` is the catch-up history pushed once
+         * per accepted connection; `device_id` stamps the outbound origin.
+         * key_der and each session_key are secret — the caller MUST zero the
+         * ByteArrays after the call and never log them.
+         */
+    @Throws(CopypasteException::class) fun `startP2pListener`(`listenPort`: kotlin.UShort, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>, `allowedFingerprints`: List<kotlin.String>, `revokedFingerprints`: List<kotlin.String>, `sessionKeys`: List<PeerSessionKey>, `localItems`: List<LocalItem>, `deviceId`: kotlin.String): P2pListenerHandle {
+            return FfiConverterTypeP2pListenerHandle.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_start_p2p_listener(
+        FfiConverterUShort.lower(`listenPort`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),FfiConverterSequenceString.lower(`allowedFingerprints`),FfiConverterSequenceString.lower(`revokedFingerprints`),FfiConverterSequenceTypePeerSessionKey.lower(`sessionKeys`),FfiConverterSequenceTypeLocalItem.lower(`localItems`),FfiConverterString.lower(`deviceId`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Cancel and deregister the listener. Idempotent (a second call or an
+         * unknown id is a no-op). Fires the cancel token so the accept loop and its
+         * per-connection tasks exit and the listener socket is dropped.
+         */
+    @Throws(CopypasteException::class) fun `stopP2pListener`(`listenerId`: kotlin.ULong)
+        = 
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_stop_p2p_listener(
+        FfiConverterULong.lower(`listenerId`),_status)
+}
+    
     
 
         /**
@@ -2442,6 +2633,21 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
 }
     )
     }
+    
+
+        /**
+         * Live roster/denylist/session-key refresh without restarting the listener.
+         * Removes any no-longer-allowed or revoked fingerprint from the pinned
+         * allowlist immediately (rejected at the next TLS handshake). No-op for an
+         * unknown id.
+         */
+    @Throws(CopypasteException::class) fun `updateP2pListenerPeers`(`listenerId`: kotlin.ULong, `allowed`: List<kotlin.String>, `revoked`: List<kotlin.String>, `sessionKeys`: List<PeerSessionKey>)
+        = 
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_update_p2p_listener_peers(
+        FfiConverterULong.lower(`listenerId`),FfiConverterSequenceString.lower(`allowed`),FfiConverterSequenceString.lower(`revoked`),FfiConverterSequenceTypePeerSessionKey.lower(`sessionKeys`),_status)
+}
+    
     
 
 

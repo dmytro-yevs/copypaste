@@ -2,8 +2,10 @@
 
 uniffi::include_scaffolding!("copypaste_android");
 
+pub mod p2p_listener;
 pub mod panic_boundary;
 pub mod version;
+pub use p2p_listener::{P2pListenerHandle, PeerSessionKey};
 pub use panic_boundary::PanicError;
 pub use version::{
     check_compatibility, core_version, uniffi_abi_version, VersionError, UNIFFI_ABI_VERSION,
@@ -1291,6 +1293,88 @@ pub fn sync_with_peer(
             items_skipped_legacy,
         })
     })
+}
+
+// ── Inbound P2P listener FFI (ABI 11) ─────────────────────────────────────────
+//
+// These four functions expose the persistent inbound mTLS accept loop in
+// `p2p_listener.rs` so macOS can INITIATE a P2P session to Android (today
+// Android only dials out). The listener is a long-lived task driven by a
+// process-global registry; the FFI returns a `u64` handle (UDL has no interface
+// objects). Each wrapper is in a `panic_boundary::catch_result` so a Rust panic
+// is surfaced as `CopypasteError::Panicked` instead of killing the JVM.
+
+/// Bind `0.0.0.0:listen_port`, register an inbound mTLS listener, and spawn its
+/// accept loop on the shared runtime. Returns IMMEDIATELY with the registry
+/// handle and the OS-assigned bound port (pass `listen_port == 0` to let the
+/// kernel choose; the real port comes back in `actual_port`).
+///
+/// `cert_der`/`key_der` are this device's mTLS identity (`generate_device_cert`).
+/// `allowed_fingerprints` is the pinned allowlist — ONLY these complete the TLS
+/// handshake (pinning IS the authenticator). `revoked_fingerprints` is the
+/// denylist re-checked AT ACCEPT before any catch-up/frame (a revoked peer never
+/// gets the history push). `session_keys` carries each peer's 32-byte PAKE
+/// session key so a frame from peer A is decrypted with A's key (never a global
+/// key). `local_items` is the catch-up history pushed once per accepted
+/// connection; `device_id` stamps the origin on outbound frames.
+///
+/// # SECURITY NOTE — `key_der` and each `session_key` cross the FFI boundary
+/// unzeroized. The Kotlin layer MUST zero those `ByteArray`s after the call and
+/// never log them.
+#[allow(clippy::too_many_arguments)] // mirrors `sync_with_peer`'s FFI shape.
+pub fn start_p2p_listener(
+    listen_port: u16,
+    cert_der: Vec<u8>,
+    key_der: Vec<u8>,
+    allowed_fingerprints: Vec<String>,
+    revoked_fingerprints: Vec<String>,
+    session_keys: Vec<PeerSessionKey>,
+    local_items: Vec<LocalItem>,
+    device_id: String,
+) -> Result<P2pListenerHandle, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        p2p_listener::start(
+            runtime()?,
+            listen_port,
+            cert_der,
+            key_der,
+            allowed_fingerprints,
+            revoked_fingerprints,
+            session_keys,
+            local_items,
+            device_id,
+        )
+    })
+}
+
+/// Atomically drain every item the listener has decrypted from inbound frames
+/// since the last poll. Kotlin stores these via the SAME paths the dialer uses
+/// (`SyncedItem` → LWW store), so the dial/listen overlap dedups. Returns an
+/// empty list for an unknown/stopped `listener_id`.
+pub fn poll_p2p_listener(listener_id: u64) -> Result<Vec<SyncedItem>, CopypasteError> {
+    panic_boundary::catch_result(|| p2p_listener::poll(listener_id))
+}
+
+/// Live roster/denylist/session-key refresh without restarting the listener.
+/// Removes any no-longer-allowed or revoked fingerprint from the pinned
+/// allowlist immediately (rejected at the next TLS handshake) and replaces the
+/// denylist + per-peer session keys. No-op for an unknown `listener_id`.
+pub fn update_p2p_listener_peers(
+    listener_id: u64,
+    allowed: Vec<String>,
+    revoked: Vec<String>,
+    session_keys: Vec<PeerSessionKey>,
+) -> Result<(), CopypasteError> {
+    panic_boundary::catch_result(|| {
+        p2p_listener::update_peers(listener_id, allowed, revoked, session_keys)
+    })
+}
+
+/// Cancel and deregister the listener. Idempotent: a second call (or an unknown
+/// id) is a no-op. Fires the cancel token so the accept loop and its
+/// per-connection tasks exit and the listener socket is dropped.
+pub fn stop_p2p_listener(listener_id: u64) -> Result<(), CopypasteError> {
+    panic_boundary::catch_result(|| p2p_listener::stop(listener_id))
 }
 
 // Database handle table. OnceLock is stable on Rust 1.70+ (our MSRV is 1.75).

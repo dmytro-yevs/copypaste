@@ -53,7 +53,11 @@ uuid = { workspace = true }
 # length-delimited frames each carrying a JSON-serialised `WireItem`. These
 # mirror the exact deps the daemon's `run_peer_connection` uses (p2p.rs).
 futures-util = { workspace = true, features = ["sink"] }
-tokio-util = { version = "0.7", features = ["codec"] }
+# `codec` for the length-delimited framing; `rt` for `CancellationToken`,
+# which the inbound P2P listener (`p2p_listener.rs`) uses to drive a graceful
+# `select!`-based shutdown of its accept loop (mirrors the daemon's accept_loop,
+# which likewise enables tokio-util `rt` for the same type).
+tokio-util = { version = "0.7", features = ["codec", "rt"] }
 bytes = "1"
 serde_json = { workspace = true }
 
