@@ -147,8 +147,9 @@ echo "========================================================================"
 echo " STEP 1/2  BUILD SIGNED ARTIFACT (version: $VERSION)"
 echo "========================================================================"
 
-echo "==> [1a] cargo build --release -p copypaste-cli -p copypaste-daemon -p copypaste-relay"
-cargo build --release -p copypaste-cli -p copypaste-daemon -p copypaste-relay
+echo "==> [1a] cargo build --release -p copypaste-cli -p copypaste-daemon -p copypaste-relay (daemon: cloud-sync,relay-sync)"
+cargo build --release -p copypaste-cli -p copypaste-daemon -p copypaste-relay \
+    --features copypaste-daemon/cloud-sync,copypaste-daemon/relay-sync
 
 echo "==> [1b] Building Tauri UI bundle (pnpm install && pnpm tauri build)"
 (
