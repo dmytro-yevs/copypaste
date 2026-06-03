@@ -477,6 +477,9 @@ class Settings(context: Context) {
         maxFileSizeBytes: Long = this.maxFileSizeBytes,
         storageQuotaBytes: Long = this.storageQuotaBytes,
         sensitiveTtlSecs: Long = this.sensitiveTtlSecs,
+        collectPublicIp: Boolean = this.collectPublicIp,
+        pasteAsPlainText: Boolean = this.pasteAsPlainText,
+        excludedAppBundleIds: List<String> = this.excludedAppBundleIds,
     ): uniffi.copypaste_android.Config {
         val candidate = configDefaults.copy(
             maxTextSizeBytes = maxTextSizeBytes.coerceAtLeast(0L).toULong(),
@@ -484,6 +487,14 @@ class Settings(context: Context) {
             maxFileSizeBytes = maxFileSizeBytes.coerceAtLeast(0L).toULong(),
             storageQuotaBytes = storageQuotaBytes.coerceAtLeast(0L).toULong(),
             sensitiveTtlSecs = sensitiveTtlSecs.coerceAtLeast(0L).toULong(),
+            collectPublicIp = collectPublicIp,
+            pasteAsPlainText = pasteAsPlainText,
+            // Drop blank entries and de-dup so a clamped write never persists noise;
+            // the native clampConfig may further normalise the list.
+            excludedAppBundleIds = excludedAppBundleIds
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct(),
         )
         return clampConfig(candidate)
     }
@@ -546,6 +557,51 @@ class Settings(context: Context) {
         set(v) = prefs.edit()
             .putLong("sensitive_ttl_secs", clampSizeKnobs(sensitiveTtlSecs = v).sensitiveTtlSecs.toLong())
             .apply()
+
+    /**
+     * Whether the daemon may issue a one-off STUN request to learn this device's
+     * public IP (shown in the device-info card). Mirrors the macOS daemon's
+     * `collect_public_ip` config field and "Discover public IP" toggle. Default
+     * seeded from `defaultConfig()`. Writes go through the native `clampConfig`
+     * for full parity even though this flag is not range-clamped.
+     */
+    var collectPublicIp: Boolean
+        get() = prefs.getBoolean("collect_public_ip", configDefaults.collectPublicIp)
+        set(v) = prefs.edit()
+            .putBoolean("collect_public_ip", clampSizeKnobs(collectPublicIp = v).collectPublicIp)
+            .apply()
+
+    /**
+     * Whether pasting strips rich formatting (RTF/HTML) and writes plain text only.
+     * Mirrors the macOS daemon's `paste_as_plain_text` config field and the
+     * "Paste as plain text" toggle. Default seeded from `defaultConfig()`. Writes
+     * are routed through `clampConfig` for parity.
+     */
+    var pasteAsPlainText: Boolean
+        get() = prefs.getBoolean("paste_as_plain_text", configDefaults.pasteAsPlainText)
+        set(v) = prefs.edit()
+            .putBoolean("paste_as_plain_text", clampSizeKnobs(pasteAsPlainText = v).pasteAsPlainText)
+            .apply()
+
+    /**
+     * Bundle/package IDs of apps whose clipboard is never captured. Mirrors the
+     * macOS daemon's `excluded_app_bundle_ids` config field and the editable
+     * "Excluded apps" list. Persisted as a NUL-delimited string (NUL never occurs
+     * in a bundle id) so arbitrary ids round-trip safely. Default seeded from
+     * `defaultConfig()` (empty). Writes are trimmed/de-duped via `clampConfig`.
+     */
+    var excludedAppBundleIds: List<String>
+        get() {
+            val stored = prefs.getString(KEY_EXCLUDED_APP_BUNDLE_IDS, null)
+                ?: return configDefaults.excludedAppBundleIds
+            return stored.split(EXCLUDED_APP_DELIM).filter { it.isNotBlank() }
+        }
+        set(v) {
+            val clamped = clampSizeKnobs(excludedAppBundleIds = v).excludedAppBundleIds
+            prefs.edit()
+                .putString(KEY_EXCLUDED_APP_BUNDLE_IDS, clamped.joinToString(EXCLUDED_APP_DELIM))
+                .apply()
+        }
 
     /**
      * When true, the app operates in private mode: clipboard items are not
@@ -1324,6 +1380,15 @@ class Settings(context: Context) {
 
         // ── P2P sync ──────────────────────────────────────────────────────────
         const val KEY_P2P_SYNC_ENABLED = "p2p_sync_enabled"
+
+        // ── Excluded apps (privacy) ─────────────────────────────────────────────
+        private const val KEY_EXCLUDED_APP_BUNDLE_IDS = "excluded_app_bundle_ids"
+
+        /**
+         * NUL delimiter for the joined [excludedAppBundleIds] pref string. NUL never
+         * occurs in a package/bundle id, so it cannot collide with an entry.
+         */
+        private const val EXCLUDED_APP_DELIM = "\u0000"
 
         // ── Recent searches ─────────────────────────────────────────────────────
         private const val KEY_RECENT_SEARCHES = "recent_searches"
