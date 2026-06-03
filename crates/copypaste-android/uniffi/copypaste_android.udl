@@ -216,12 +216,16 @@ dictionary LocalItem {
 // `item_id` is the peer's STABLE cross-device identity — Kotlin MUST persist it
 // on the stored row and reuse it on any later re-sync so the same logical clip
 // is not re-minted (which would resurface as a duplicate).
+// `file_name` and `mime` are set for content_type=="file" items (task #21b);
+// both are absent (null in Kotlin) for text and image items.
 dictionary SyncedItem {
   string id;
   string item_id;
   string content_type;
   sequence<u8> plaintext;
   i64 wall_time_ms;
+  string? file_name;
+  string? mime;
 };
 
 // Result of `sync_with_peer`: one completed sync session's outcome.

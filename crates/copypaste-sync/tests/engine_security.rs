@@ -60,6 +60,8 @@ fn make_wire(id: &str, lamport: i64) -> WireItem {
         app_bundle_id: None,
         origin_device_id: format!("dev-{id}"),
         key_version: 2,
+        file_name: None,
+        mime: None,
     }
 }
 

@@ -42,6 +42,8 @@ fn sample_wire_item() -> WireItem {
         app_bundle_id: Some("com.example.app".to_string()),
         origin_device_id: "device-uuid-aaaa".to_string(),
         key_version: 2,
+        file_name: None,
+        mime: None,
     }
 }
 

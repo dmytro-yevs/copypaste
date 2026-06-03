@@ -67,6 +67,8 @@ fn mk_wire(id: &str, lamport: i64, wall: i64, device: &str, payload: u8) -> Wire
         app_bundle_id: None,
         origin_device_id: device.to_string(),
         key_version: 2,
+        file_name: None,
+        mime: None,
     }
 }
 

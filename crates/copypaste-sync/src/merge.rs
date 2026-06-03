@@ -118,6 +118,17 @@ pub fn local_to_wire(item: &ClipboardItem, local_device_id: &str) -> WireItem {
     } else {
         item.origin_device_id.clone()
     };
+
+    // For file items, extract filename + mime from the at-rest blob_ref meta
+    // JSON (produced by `build_file_meta_json`) so the receiver can reconstruct
+    // the correct file identity without having to inspect blob_ref (which the
+    // daemon's rekey path clears before forwarding — see `rekey_blob_outbound`).
+    let (file_name, mime) = if item.content_type == "file" {
+        parse_file_meta_name_mime(item.blob_ref.as_deref())
+    } else {
+        (None, None)
+    };
+
     WireItem {
         id: item.id.clone(),
         item_id: item.item_id.clone(),
@@ -134,7 +145,32 @@ pub fn local_to_wire(item: &ClipboardItem, local_device_id: &str) -> WireItem {
         // Carry the row's real key_version so the receiver can select the
         // correct key + AAD when decrypting `content` (see wire_to_local).
         key_version: item.key_version,
+        file_name,
+        mime,
     }
+}
+
+/// Parse `filename` and `mime` from a file blob_ref meta JSON string.
+///
+/// The meta JSON is produced by `clipboard::build_file_meta_json`; its shape
+/// carries a `"filename"` and a `"mime"` field at the top level.  Returns
+/// `(None, None)` on any parse failure so callers degrade gracefully.
+fn parse_file_meta_name_mime(meta_json: Option<&str>) -> (Option<String>, Option<String>) {
+    let Some(json) = meta_json else {
+        return (None, None);
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return (None, None);
+    };
+    let filename = value
+        .get("filename")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let mime = value
+        .get("mime")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    (filename, mime)
 }
 
 #[cfg(test)]
@@ -180,6 +216,8 @@ mod tests {
             app_bundle_id: None,
             origin_device_id: device_id.to_string(),
             key_version: 2,
+            file_name: None,
+            mime: None,
         }
     }
 
@@ -361,5 +399,45 @@ mod tests {
             recovered, plaintext,
             "synced item must read back as the original plaintext on the receiver"
         );
+    }
+
+    // --- file_name / mime population (#21b) ---
+
+    /// `local_to_wire` must extract filename and mime from the at-rest blob_ref
+    /// meta JSON for `content_type = "file"` items, so `rekey_blob_outbound`
+    /// can stamp them on the wire before clearing blob_ref.
+    #[test]
+    fn local_to_wire_file_item_extracts_filename_and_mime_from_blob_ref() {
+        // Minimal file meta JSON produced by `build_file_meta_json`.
+        let meta_json = r#"{"file_id":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"filename":"report.pdf","mime":"application/pdf","size":1024}"#;
+
+        let mut item = make_local(5, 1000);
+        item.content_type = "file".to_string();
+        item.blob_ref = Some(meta_json.to_string());
+
+        let wire = local_to_wire(&item, "my-device");
+
+        assert_eq!(
+            wire.file_name.as_deref(),
+            Some("report.pdf"),
+            "local_to_wire must extract filename from file blob_ref meta JSON"
+        );
+        assert_eq!(
+            wire.mime.as_deref(),
+            Some("application/pdf"),
+            "local_to_wire must extract mime from file blob_ref meta JSON"
+        );
+    }
+
+    /// For non-file items (`content_type = "text"`) the new wire fields must stay None.
+    #[test]
+    fn local_to_wire_text_item_leaves_filename_mime_none() {
+        let item = make_local(1, 100);
+        let wire = local_to_wire(&item, "my-device");
+        assert!(
+            wire.file_name.is_none(),
+            "text items must not set file_name"
+        );
+        assert!(wire.mime.is_none(), "text items must not set mime");
     }
 }
