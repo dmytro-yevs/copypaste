@@ -41,3 +41,15 @@ core-foundation = "0.10"
 objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSString"] }
 objc2-app-kit = { version = "0.2", features = ["NSWorkspace", "NSRunningApplication", "NSSound"] }
+# Native UNUserNotificationCenter — lets the Tauri bundle post notifications
+# that automatically show the app icon (CopyPaste.app) and rich preview text.
+# Requires objc2 0.6.x + block2 0.6.x (different from the 0.5.x used by the
+# older objc2-app-kit bindings; both versions coexist in the Cargo graph).
+objc2-user-notifications = { version = "0.3", features = [
+    "UNUserNotificationCenter",
+    "UNNotificationContent",
+    "UNNotificationRequest",
+    "UNNotificationTrigger",
+    "block2",
+] }
+block2 = ">=0.6.1, <0.8.0"

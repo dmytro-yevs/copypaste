@@ -366,6 +366,10 @@ export function Popup() {
           typeof copied === "object" && copied !== null && "preview" in copied
             ? String((copied as { preview: string }).preview)
             : "";
+        const contentType =
+          typeof copied === "object" && copied !== null && "content_type" in copied
+            ? String((copied as { content_type: string }).content_type)
+            : "";
         // Copy succeeded — now hide (activates prior app) and paste.
         await hide();
         await invoke("paste_to_frontmost");
@@ -373,8 +377,7 @@ export function Popup() {
           void playCopySound();
         }
         if (notifyOnCopy) {
-          const title = preview.replace(/\s+/g, " ").trim().slice(0, 60) || "Copied";
-          void showCopyNotification(title);
+          void showCopyNotification(contentType, preview);
         }
       } catch (e) {
         const msg = e instanceof IpcError ? e.message : String(e);

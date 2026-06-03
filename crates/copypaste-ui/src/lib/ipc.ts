@@ -471,18 +471,62 @@ export async function playCopySound(): Promise<void> {
 }
 
 /**
- * Show a macOS notification banner on copy — Maccy-style feedback.
- * Calls the `show_copy_notification` Tauri command which posts a
- * user-notification via osascript. Non-blocking and failure-safe: any error
- * (missing entitlement, user denied notifications, etc.) is swallowed.
- * @param preview A short one-line preview of the copied item (may be empty).
+ * Show a rich macOS notification banner on copy via UNUserNotificationCenter.
+ * Derives a human-readable title ("Text Copied" / "Image Copied" / "File
+ * Copied") and a preview body (first ~160 chars of text, filename for files,
+ * "Image" for images) from the item's content type and preview string, then
+ * calls the `show_copy_notification` Tauri command which posts it from inside
+ * the CopyPaste.app bundle so the banner shows the app icon.
+ *
+ * Non-blocking and failure-safe: any error is swallowed.
+ *
+ * @param contentType The daemon content type: "text" | "image" | "file" | "".
+ * @param preview     The raw preview string from the daemon (may be empty).
  */
-export async function showCopyNotification(preview: string): Promise<void> {
+export async function showCopyNotification(
+  contentType: string,
+  preview: string
+): Promise<void> {
+  const { title, body } = buildNotificationContent(contentType, preview);
   try {
-    await invoke<void>("show_copy_notification", { preview });
+    await invoke<void>("show_copy_notification", { title, body });
   } catch {
     // Notification is best-effort; never block the copy flow on a notify failure.
   }
+}
+
+/** Build notification title + body from daemon content_type + preview. */
+function buildNotificationContent(
+  contentType: string,
+  preview: string
+): { title: string; body: string } {
+  if (contentType === "text") {
+    return { title: "Text Copied", body: truncatePreviewBody(preview) || "Copied" };
+  }
+  if (contentType === "image" || contentType.startsWith("image/")) {
+    return { title: "Image Copied", body: "Image" };
+  }
+  if (contentType === "file") {
+    // Daemon preview is "[file: <filename>]" — strip the wrapper.
+    const inner = preview.replace(/^\[file:\s*/, "").replace(/\]$/, "").trim();
+    return { title: "File Copied", body: inner || "File" };
+  }
+  // Fallback / unknown content type.
+  return { title: "Copied", body: truncatePreviewBody(preview) || "Copied" };
+}
+
+/**
+ * Truncate a raw text preview to ~160 chars at a word boundary with a
+ * trailing `…`.  Preserves newlines so multi-line text reads naturally.
+ */
+function truncatePreviewBody(preview: string): string {
+  const MAX = 160;
+  const s = preview.trim();
+  if (s.length <= MAX) return s;
+  const cut = s.slice(0, MAX);
+  const wordBoundary = Math.max(cut.lastIndexOf(" "), cut.lastIndexOf("\n"));
+  const chopped = wordBoundary > 0 ? cut.slice(0, wordBoundary).trimEnd() : cut.trimEnd();
+  return chopped + "…";
 }
 
 /**

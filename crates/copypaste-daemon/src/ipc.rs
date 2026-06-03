@@ -3103,11 +3103,25 @@ impl IpcServer {
                     // (data-loss for power users). `get_item_by_id` is a single
                     // indexed `SELECT ... WHERE id = ?1` with no window cap.
                     let item = get_item_by_id(&db, &id_for_task)?;
-                    Ok::<_, anyhow::Error>(item)
+                    // Also fetch the short text preview while we hold the db
+                    // lock; this is used by the UI to build a rich notification.
+                    let preview: Option<String> = item.as_ref().and_then(|it| {
+                        if it.content_type == "text" && !it.is_sensitive {
+                            fetch_text_preview(&db, &it.id).ok().flatten()
+                        } else if it.content_type == "file" {
+                            it.blob_ref
+                                .as_deref()
+                                .and_then(|j| parse_file_meta(j).ok())
+                                .map(|m| format!("[file: {}]", m.filename))
+                        } else {
+                            None // image and unknown: body is set by the UI
+                        }
+                    });
+                    Ok::<_, anyhow::Error>((item, preview))
                 })
                 .await;
                 match join {
-                    Ok(Ok(Some(item))) => match self.write_to_pasteboard(&item) {
+                    Ok(Ok((Some(item), preview))) => match self.write_to_pasteboard(&item) {
                         Ok(()) => {
                             // C. PROMOTE-ON-COPY: bump wall_time/lamport so this
                             // item sorts to the top of history_page on the next
@@ -3145,6 +3159,10 @@ impl IpcServer {
                                 serde_json::json!({
                                     "id": item.id,
                                     "content_type": item.content_type,
+                                    // Short preview for rich notifications — text
+                                    // items get plaintext; files get "[file: name]";
+                                    // images are null (the UI uses "Image" fallback).
+                                    "preview": preview,
                                     "written": true,
                                 }),
                             )
@@ -3158,7 +3176,7 @@ impl IpcServer {
                             Response::err(req.id, format!("pasteboard write failed: {msg}"))
                         }
                     },
-                    Ok(Ok(None)) => Response::err_with_code(
+                    Ok(Ok((None, _))) => Response::err_with_code(
                         req.id,
                         ERR_CODE_NOT_FOUND,
                         format!("item not found: {id}"),
