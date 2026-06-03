@@ -222,35 +222,165 @@ class SyncManager(
 
     private var lastLamportTs: Long = 0
 
-    // ── Relay backend (disabled) ──────────────────────────────────────────────
+    // ── Relay backend — incoming (SSE, 3rd transport) ─────────────────────────
 
     /**
-     * DEAD CODE — relay incoming poll is disabled.
+     * The relay's `content_b64` is an opaque ciphertext envelope the relay never
+     * inspects. The relay wire (id/content_type/content_b64/wall_time) carries NO
+     * item_id, yet cross-device decryption needs it to rebuild the AEAD AAD. So
+     * the producer wraps the cloud-encrypted blob in this self-describing JSON
+     * envelope, base64-std encoded as `content_b64`:
      *
-     * This function polled the relay server for items encrypted with the
-     * sender's local per-device AES key, which no other device holds.
-     * Every payload it fetched was undecryptable. Additionally, nothing in
-     * any active code path ever called this function — the relay backend
-     * was write-only from day one.
+     *   {"item_id": "<uuid>", "lamport_ts": <long>, "ct_b64": "<base64 blob>"}
      *
-     * Decision: cloud sync = Supabase only (see [ClipboardService.notifySyncManager]).
-     * This function is retained only to avoid breaking any external reference
-     * but MUST NOT be called. Use [pollFromSupabase] instead.
-     *
-     * @throws UnsupportedOperationException always — to surface accidental callers.
+     * - [itemId]    — STABLE cross-device id, bound into the AEAD AAD ("{id}|5")
+     *                 AND used for LWW dedup so a row already seen over P2P or
+     *                 Supabase is not duplicated.
+     * - [lamportTs] — logical clock for LWW ordering (observed into the local clock).
+     * - [ctB64]     — the same [cloud_encrypt] blob the Supabase path produces,
+     *                 so [cloud_decrypt] + the shared sync key decode it with zero
+     *                 duplicated crypto.
      */
-    @Deprecated(
-        message = "Relay incoming poll is disabled: items were encrypted with the local " +
-            "per-device key that no other device holds, making every fetched payload " +
-            "undecryptable. Use pollFromSupabase() for cross-device cloud sync.",
-        replaceWith = ReplaceWith("pollFromSupabase()"),
-        level = DeprecationLevel.ERROR,
-    )
-    @Suppress("UnusedParameter") // params kept for binary-compat; function is intentionally dead
-    suspend fun syncIncoming(encryptionKey: ByteArray): List<String> {
-        throw UnsupportedOperationException(
-            "relay cloud backend is disabled — use Supabase for cross-device cloud sync"
-        )
+    data class RelayEnvelope(
+        val itemId: String,
+        val lamportTs: Long,
+        val ctB64: String,
+    ) {
+        companion object {
+            /** Parse the JSON envelope decoded from `content_b64`. Null on malformed. */
+            fun parse(json: String): RelayEnvelope? {
+                return try {
+                    val o = org.json.JSONObject(json)
+                    val itemId = o.optString("item_id").takeIf { it.isNotBlank() } ?: return null
+                    val ctB64 = o.optString("ct_b64").takeIf { it.isNotBlank() } ?: return null
+                    RelayEnvelope(itemId = itemId, lamportTs = o.optLong("lamport_ts", 0L), ctB64 = ctB64)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }
+
+    /**
+     * Decrypt one relay SSE item and store it via the shared LWW path.
+     *
+     * Reuses the EXACT cross-device crypto + storage the Supabase path uses
+     * ([resolveSyncContext] for the sync key, [cloud_decrypt] for the AEAD blob,
+     * [ClipboardRepository.storeItemWithLww] for item_id dedup) — no crypto and
+     * no store logic is duplicated here. Because dedup keys on the STABLE item_id,
+     * a row already ingested over P2P or Supabase is a silent no-op (the
+     * 3-path-convergence guarantee).
+     *
+     * The legacy per-device-key relay path was undecryptable cross-device and
+     * always threw; this is its working replacement against the shipped relay SSE
+     * contract (issue #26).
+     *
+     * @return true iff a new/replaced item was stored (for caller stats). Never
+     *   throws; logs failures at WARN and never logs ciphertext or keys.
+     */
+    suspend fun ingestRelaySseItem(
+        item: RelayClient.SseItem,
+        repository: ClipboardRepository,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val s = settings ?: run {
+            Log.w(TAG, "ingestRelaySseItem: no Settings instance provided")
+            return@withContext false
+        }
+        val ctx = resolveSyncContext() ?: run {
+            Log.w(TAG, "ingestRelaySseItem: no sync context (no key/credentials)")
+            return@withContext false
+        }
+
+        val envelopeJson = try {
+            String(Base64.decode(item.contentB64, Base64.DEFAULT), Charsets.UTF_8)
+        } catch (e: Exception) {
+            Log.w(TAG, "ingestRelaySseItem: content_b64 not valid base64 (id=${item.id})")
+            return@withContext false
+        }
+        val envelope = RelayEnvelope.parse(envelopeJson) ?: run {
+            Log.w(TAG, "ingestRelaySseItem: malformed envelope (id=${item.id})")
+            return@withContext false
+        }
+
+        // Advance the Lamport clock past this row (observe rule) — mirrors poll.
+        s.lamportClock.observe(envelope.lamportTs)
+
+        val blob = try {
+            Base64.decode(envelope.ctB64, Base64.DEFAULT)
+        } catch (e: Exception) {
+            Log.w(TAG, "ingestRelaySseItem: ct_b64 not valid base64 (id=${item.id})")
+            return@withContext false
+        }
+        val plaintext = try {
+            cloud_decrypt(envelope.itemId, blob, ctx.syncKey)
+        } catch (e: Exception) {
+            // Wrong key, tampered blob, or wrong item_id AAD — expected for items
+            // encrypted under a different passphrase; not fatal.
+            Log.w(TAG, "ingestRelaySseItem: cloud_decrypt failed (id=${item.id}) — wrong key or tampered")
+            return@withContext false
+        }
+
+        val isImage = item.contentType == "image" || item.contentType.startsWith("image/")
+        val isFile = item.contentType == "file"
+        val stored = if (isImage) {
+            if (plaintext.isEmpty()) {
+                false
+            } else {
+                val storedId = repository.storeItem(
+                    plaintext = "[image]",
+                    key = s.encryptionKey,
+                    overrideId = envelope.itemId,
+                    contentType = item.contentType,
+                    lamportTs = envelope.lamportTs,
+                )
+                if (storedId.isNotEmpty()) {
+                    repository.storeImageBytes(storedId, plaintext)
+                    SyncThumbnailHelper.generateAndStore(plaintext) { thumbBytes ->
+                        repository.storeThumbnailBytes(storedId, thumbBytes)
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+        } else if (isFile) {
+            if (plaintext.isEmpty()) {
+                false
+            } else {
+                val label = SyncFileHelper.buildFileLabel(null)
+                val storedId = repository.storeItem(
+                    plaintext = label,
+                    key = s.encryptionKey,
+                    overrideId = envelope.itemId,
+                    contentType = item.contentType,
+                    lamportTs = envelope.lamportTs,
+                )
+                if (storedId.isNotEmpty()) {
+                    repository.storeFileBytes(storedId, plaintext)
+                    repository.storeFileMeta(storedId, null, null)
+                    true
+                } else {
+                    false
+                }
+            }
+        } else {
+            val text = plaintext.toString(Charsets.UTF_8)
+            if (text.isBlank()) {
+                false
+            } else {
+                repository.storeItemWithLww(
+                    plaintext = text,
+                    key = s.encryptionKey,
+                    itemId = envelope.itemId,
+                    incomingLamportTs = envelope.lamportTs,
+                )
+            }
+        }
+
+        if (stored) {
+            Log.d(TAG, "relay SSE: stored itemId=${envelope.itemId.take(8)}… contentType=${item.contentType}")
+        }
+        stored
     }
 
     /**

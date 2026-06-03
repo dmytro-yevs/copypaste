@@ -66,6 +66,62 @@ class Settings(context: Context) {
                 !relayUrl.contains("localhost") &&
                 !relayUrl.contains("127.0.0.1")
 
+    /**
+     * Server-issued relay bearer token (32 hex chars), persisted after a
+     * successful [RelayClient.registerDevice]. The relay issues this from random
+     * bytes — it is NOT derivable from any key — so we must register once and
+     * cache the result. Blank means "not yet registered with this relay".
+     *
+     * Used as the `Authorization: Bearer <token>` for the relay poll/subscribe
+     * routes. Never logged.
+     */
+    var relayToken: String
+        get() = prefs.getString("relay_token", "") ?: ""
+        set(v) = prefs.edit().putString("relay_token", v).apply()
+
+    /**
+     * The `relayUrl` that [relayToken] was issued for. When the configured
+     * [relayUrl] changes (different relay server), the cached token is no longer
+     * valid and must be discarded so the subscription re-registers. Blank until
+     * the first successful registration.
+     */
+    var relayTokenUrl: String
+        get() = prefs.getString("relay_token_url", "") ?: ""
+        set(v) = prefs.edit().putString("relay_token_url", v).apply()
+
+    /**
+     * Relay SSE subscribe cursor — sender wall-clock time (Unix epoch ms) of the
+     * last relay item ingested. Forms a compound `(wall_time, id)` keyset cursor
+     * with [lastRelaySubscribeId], passed back as `?since=&since_id=` on each
+     * (re)connect so an at-least-once SSE stream resumes without gaps or dupes.
+     *
+     * This is the RELAY transport's own cursor — fully independent of the
+     * Supabase poll cursor ([lastSupabasePollWallTime]/[lastSupabasePollId]) so
+     * the 3-path architecture (P2P / Supabase / relay) advances each path
+     * separately. The relay inbox `id` is a per-device ascending integer (NOT a
+     * UUID), hence the Long type.
+     */
+    var lastRelaySubscribeWallTime: Long
+        get() = prefs.getLong("relay_last_subscribe_wall_time", 0L)
+        set(v) = prefs.edit().putLong("relay_last_subscribe_wall_time", v).apply()
+
+    /** Relay inbox `id` companion to [lastRelaySubscribeWallTime] (0 = none yet). */
+    var lastRelaySubscribeId: Long
+        get() = prefs.getLong("relay_last_subscribe_id", 0L)
+        set(v) = prefs.edit().putLong("relay_last_subscribe_id", v).apply()
+
+    /**
+     * Base64 of a stable 32-byte registration public-key value sent to the relay
+     * at [RelayClient.registerDevice]. The relay requires a 32-byte key per device
+     * (X25519 size) but in CopyPaste's 3-path model it only STORES it — actual
+     * payload crypto uses the cross-device cloud sync key, not relay ECDH — so a
+     * persisted random 32-byte value is sufficient and stable across launches.
+     * Minted lazily on first relay registration. Never used as encryption key.
+     */
+    var relayRegistrationKeyB64: String
+        get() = prefs.getString("relay_registration_key_b64", "") ?: ""
+        set(v) = prefs.edit().putString("relay_registration_key_b64", v).apply()
+
     var syncEnabled: Boolean
         get() = prefs.getBoolean("sync_enabled", true)
         set(v) = prefs.edit().putBoolean("sync_enabled", v).apply()

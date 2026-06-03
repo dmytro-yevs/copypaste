@@ -97,6 +97,14 @@ class ClipboardService : Service() {
     private var realtimeClient: SupabaseRealtimeClient? = null
 
     /**
+     * Relay SSE subscription — the THIRD independent receive transport (alongside
+     * P2P and Supabase WS). Gated only on a configured relayUrl + sync enabled,
+     * NOT on Supabase. Owned by this FGS: started in [onStartCommand], closed in
+     * [onDestroy]. See [RelaySubscriptionClient].
+     */
+    private var relayClient: RelaySubscriptionClient? = null
+
+    /**
      * The 1×1 px invisible overlay view that gives this process a WindowManager
      * token, lifting the Android 10+ clipboard restriction so
      * getPrimaryClip() returns non-null from background.
@@ -174,13 +182,17 @@ class ClipboardService : Service() {
         settings = Settings(this)
         repository = ClipboardRepository(this)
 
-        val relayClient = RelayClient(settings.relayUrl)
-        syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
+        val relayHttp = RelayClient(settings.relayUrl)
+        syncManager = SyncManager(relayHttp, settings.deviceId, token = "", settings = settings)
 
         // P1.2/P1.4: Supabase Realtime WS client — constructed here so it can be
         // passed to FgsSyncLoop as the wsConnected gate.
         realtimeClient = SupabaseRealtimeClient(settings, syncManager, repository, scope)
         fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager, DeviceKeyStore(this), realtimeClient)
+
+        // Relay SSE subscription — the third independent receive transport.
+        // Reuses the same syncManager (relay decrypt + LWW) and FGS scope.
+        relayClient = RelaySubscriptionClient(settings, syncManager, repository, scope)
 
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         ensureChannel(this)
@@ -230,6 +242,10 @@ class ClipboardService : Service() {
         // P1.4: start Supabase Realtime WS push channel (~1 s latency).
         // The WS client owns its own reconnect loop inside `scope`.
         realtimeClient?.start()
+
+        // Start the relay SSE subscription (3rd transport). Owns its own reconnect
+        // loop inside `scope`; no-ops while relayUrl is unconfigured.
+        relayClient?.start()
 
         // Start the catch-up poll loop (WS-aware intervals: 120s connected / 60s down).
         fgsSyncLoop.start(scope)
@@ -355,6 +371,8 @@ class ClipboardService : Service() {
         // scope is cancelled — avoids an abrupt TCP close that Supabase would
         // count against the connection quota.
         realtimeClient?.close()
+        // Stop the relay SSE subscription before the scope is cancelled.
+        relayClient?.close()
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         settings.stopObserving(prefsListener)
         removeCaptureOverlay()
