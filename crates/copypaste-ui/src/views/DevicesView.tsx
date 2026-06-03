@@ -117,6 +117,10 @@ function ThisDeviceCard({
         <MetaRow label="OS" value={info.os_version} />
         <MetaRow label="Version" value={info.app_version} />
         <MetaRow label="Local IP" value={info.local_ip} />
+        {/* Public IP — shows WAN address from daemon relay probe; "—" when
+            null/absent. NOTE: peer cards do NOT yet show public IP (needs a
+            PeerMeta proto bump — daemon follow-up); only this card shows it. */}
+        <MetaRow label="Public IP" value={info.public_ip ?? "—"} />
 
         {/* Fingerprint — click to copy */}
         {info.fingerprint !== null && (

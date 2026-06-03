@@ -241,6 +241,13 @@ export interface OwnDeviceInfo {
   app_version: string;
   /** Best LAN-routable IPv4 address; absent when no real LAN interface. */
   local_ip: string | null;
+  /**
+   * Public (WAN) IPv4 address as seen by the relay, e.g. "203.0.113.42".
+   * Null when the daemon hasn't fetched it yet or the lookup failed.
+   * NOTE: peer cards do NOT yet show public IP — needs a PeerMeta proto bump
+   * (daemon follow-up); only the "This device" card shows it for now.
+   */
+  public_ip?: string | null;
 }
 
 /** Result of `cloud_test_connection` — an end-to-end Supabase probe. */
