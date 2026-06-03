@@ -36,6 +36,10 @@ fn make_wire_item(i: usize) -> WireItem {
         app_bundle_id: Some("com.example.app".to_string()),
         origin_device_id: "device-bench".to_string(),
         key_version: 2,
+        // 21b: text item carries no file metadata; keep framing measured on the
+        // base case so bench numbers stay comparable across versions.
+        file_name: None,
+        mime: None,
     }
 }
 
