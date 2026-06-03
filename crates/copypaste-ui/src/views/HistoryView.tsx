@@ -1330,12 +1330,12 @@ export function HistoryView() {
           void playCopySound();
         }
         if (notifyOnCopy) {
-          // Build a short preview from the current items list for the notification.
+          // Use content_type + preview from HistoryEntry for rich notification.
           const item = items.find((it) => it.id === id);
-          const preview = item
-            ? item.preview.replace(/\s+/g, " ").trim().slice(0, 60) || "Copied"
-            : "Copied";
-          void showCopyNotification(preview);
+          void showCopyNotification(
+            item?.content_type ?? "",
+            item?.preview ?? ""
+          );
         }
         // Optimistically move the copied item to the top — but only for
         // unpinned items. Pinned items keep their pin_order position; the daemon
@@ -1618,11 +1618,12 @@ export function HistoryView() {
         void playCopySound();
       }
       if (notifyOnCopy) {
+        // Use content_type + preview from the first selected item for the banner.
         const firstItem = selectedItems[0];
-        const preview = firstItem
-          ? firstItem.preview.replace(/\s+/g, " ").trim().slice(0, 60) || "Copied"
-          : "Copied";
-        void showCopyNotification(preview);
+        void showCopyNotification(
+          firstItem?.content_type ?? "",
+          firstItem?.preview ?? ""
+        );
       }
       showToast(`Copied ${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`, "success");
     } finally {

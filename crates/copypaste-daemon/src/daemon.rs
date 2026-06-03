@@ -1373,9 +1373,11 @@ async fn handle_tick(
                 // A send error only means there are no active receivers —
                 // that is normal when both P2P and cloud-sync are disabled.
                 let _ = new_item_tx.send(item);
-                // M12: play sound / show notification on macOS when the daemon
-                // captures a new item from another app in the background.
-                // Disabled in tests to avoid OS hangs and sound/notification spam.
+                // M12: play sound on macOS when the daemon captures a new item.
+                // Notifications are now posted by the Tauri UI bundle
+                // (spawn_tray_recent_resync polls history_page and fires
+                // UNUserNotificationCenter) so the banner shows the app icon.
+                // Disabled in tests to avoid OS hangs and sound spam.
                 #[cfg(target_os = "macos")]
                 if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() {
                     if config.sound_on_copy {
@@ -1385,19 +1387,6 @@ async fn handle_tick(
                         // in the process table until the daemon exits).
                         if let Ok(mut child) = std::process::Command::new("afplay")
                             .arg("/System/Library/Sounds/Tink.aiff")
-                            .spawn()
-                        {
-                            std::thread::spawn(move || {
-                                let _ = child.wait();
-                            });
-                        }
-                    }
-                    if config.notify_on_copy {
-                        if let Ok(mut child) = std::process::Command::new("osascript")
-                            .args([
-                                "-e",
-                                r#"display notification "Text item copied" with title "CopyPaste""#,
-                            ])
                             .spawn()
                         {
                             std::thread::spawn(move || {
@@ -1418,30 +1407,17 @@ async fn handle_tick(
                 handle_image(raw_bytes, db, local_key, config, local_device_id).await
             {
                 let _ = new_item_tx.send(item);
-                // M12: play sound / show notification for image captures too.
-                // Disabled in tests to avoid OS hangs and sound/notification spam.
+                // M12: play sound for image captures too.
+                // Notifications handled by Tauri UI (same as text above).
                 #[cfg(target_os = "macos")]
-                if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() {
-                    if config.sound_on_copy {
-                        if let Ok(mut child) = std::process::Command::new("afplay")
-                            .arg("/System/Library/Sounds/Tink.aiff")
-                            .spawn()
-                        {
-                            std::thread::spawn(move || {
-                                let _ = child.wait();
-                            });
-                        }
-                    }
-                    if config.notify_on_copy {
-                        if let Ok(mut child) = std::process::Command::new("osascript")
-                            .args([
-                                "-e",
-                                r#"display notification "Image item copied" with title "CopyPaste""#,
-                            ])
-                            .spawn()
-                        {
-                            std::thread::spawn(move || { let _ = child.wait(); });
-                        }
+                if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() && config.sound_on_copy {
+                    if let Ok(mut child) = std::process::Command::new("afplay")
+                        .arg("/System/Library/Sounds/Tink.aiff")
+                        .spawn()
+                    {
+                        std::thread::spawn(move || {
+                            let _ = child.wait();
+                        });
                     }
                 }
             }
