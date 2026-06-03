@@ -73,7 +73,13 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
                 // the list respects the user's configured max without requiring a
                 // separate trim pass. The on-disk retention cap (maxHistoryItems) is
                 // enforced at write time by the capture pipeline.
-                _items.value = repository.getItems(settings.encryptionKey, settings.historySize)
+                val next = repository.getItems(settings.encryptionKey, settings.historySize)
+                // B: skip the assignment (and the whole recomposition cascade) when the list is
+                // structurally equal. On no-op sync ticks the decrypt cache (A) returns identical
+                // ClipboardItem values, equals() is true, and the LiveData observer never fires.
+                if (next != _items.value) {
+                    _items.value = next
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "loadItems failed", e)
                 _errors.value = e.message ?: e.javaClass.simpleName

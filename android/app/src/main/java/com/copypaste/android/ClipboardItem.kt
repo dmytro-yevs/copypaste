@@ -1,21 +1,28 @@
 package com.copypaste.android
 
+import androidx.compose.runtime.Immutable
+
+/**
+ * Immutable value type for a single clipboard history row.
+ *
+ * @Immutable tells the Compose compiler that all public properties are stable
+ * and will never change after construction, enabling it to skip recomposing
+ * rows whose inputs have not changed.  This is safe because every field is a
+ * val of a stable Kotlin primitive type (String, Long, Boolean, Int, or null).
+ *
+ * imagePng has been REMOVED.  Image bytes are fetched lazily per-row through
+ * the process-wide two-level LRU in HistoryActivity (cachedThumbnailBitmap),
+ * so they never need to live in this value type.  The prior ByteArray field
+ * forced a custom equals/hashCode AND made Compose treat the type as *unstable*
+ * (arrays use identity equality), defeating per-row skipping entirely.
+ */
+@Immutable
 data class ClipboardItem(
     val id: String,
     val contentType: String,
     val isSensitive: Boolean,
     val wallTimeMs: Long,
     val snippet: String = "",
-    /**
-     * Raw PNG/JPEG bytes of the image thumbnail, non-null only when [contentType]
-     * is an image MIME type (e.g. "image/png", "image/jpeg").
-     *
-     * Populated by [ClipboardRepository.getItems] when image data is stored
-     * under the separate "item_img_<id>" SharedPreferences key. Images are kept
-     * out of the main pipe-delimited item blob to avoid ballooning the index
-     * string. When null the row shows a generic image-type icon instead.
-     */
-    val imagePng: ByteArray? = null,
     /**
      * True when the user has explicitly pinned this item. Pinned items are:
      *  - never pruned by the retention/quota pass
@@ -56,35 +63,9 @@ data class ClipboardItem(
     /** True when this item is a synced file (content_type == "file"). */
     val isFile: Boolean get() = contentType == "file"
 
-    // ByteArray in a data class requires manual equals/hashCode to avoid identity comparison.
-    override fun equals(other: Any?): Boolean {
-        if (this === other) return true
-        if (other !is ClipboardItem) return false
-        return id == other.id &&
-            contentType == other.contentType &&
-            isSensitive == other.isSensitive &&
-            wallTimeMs == other.wallTimeMs &&
-            snippet == other.snippet &&
-            imagePng.contentEquals(other.imagePng) &&
-            pinned == other.pinned &&
-            pinnedSortIndex == other.pinnedSortIndex &&
-            sourceApp == other.sourceApp &&
-            tooLargeToSync == other.tooLargeToSync
-    }
-
-    override fun hashCode(): Int {
-        var result = id.hashCode()
-        result = 31 * result + contentType.hashCode()
-        result = 31 * result + isSensitive.hashCode()
-        result = 31 * result + wallTimeMs.hashCode()
-        result = 31 * result + snippet.hashCode()
-        result = 31 * result + (imagePng?.contentHashCode() ?: 0)
-        result = 31 * result + pinned.hashCode()
-        result = 31 * result + pinnedSortIndex
-        result = 31 * result + (sourceApp?.hashCode() ?: 0)
-        result = 31 * result + tooLargeToSync.hashCode()
-        return result
-    }
+    // No custom equals/hashCode: all fields are val primitives, String, Boolean, or Int
+    // (stable Kotlin value types) so data-class structural equality is correct and the
+    // Compose compiler can trust @Immutable for per-row skip decisions.
 }
 
 /**
@@ -97,9 +78,3 @@ fun sourceAppLabel(bundleId: String?): String? {
     val last = bundleId.split(".").lastOrNull() ?: return null
     return last.replaceFirstChar { it.uppercaseChar() }
 }
-
-/** Returns null-safe contentEquals for nullable ByteArrays. */
-private fun ByteArray?.contentEquals(other: ByteArray?): Boolean =
-    if (this == null && other == null) true
-    else if (this == null || other == null) false
-    else this.contentEquals(other)
