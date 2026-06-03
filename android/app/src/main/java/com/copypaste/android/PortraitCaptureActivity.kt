@@ -2,7 +2,11 @@ package com.copypaste.android
 
 import android.content.pm.ActivityInfo
 import android.os.Bundle
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.DecodeHintType
 import com.journeyapps.barcodescanner.CaptureActivity
+import com.journeyapps.barcodescanner.DecoratedBarcodeView
+import com.journeyapps.barcodescanner.DefaultDecoderFactory
 
 /**
  * Portrait-locked ZXing capture screen for QR pairing.
@@ -33,5 +37,39 @@ class PortraitCaptureActivity : CaptureActivity() {
         // Lock before super so the preview surface is created in portrait.
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         super.onCreate(savedInstanceState)
+    }
+
+    /**
+     * HB-5: scanner speed. CaptureActivity's default decoder scans EVERY barcode
+     * symbology and the camera uses its default (one-shot) focus, which makes
+     * pairing-QR acquisition sluggish. We tune the view here — the documented,
+     * public extension point — instead of touching the private `barcodeScannerView`
+     * field:
+     *  - continuous autofocus so the QR stays sharp as the phone moves;
+     *  - a QR-only DecoderFactory with TRY_HARDER so ZXing spends its decode
+     *    budget on the one format we care about.
+     *
+     * The cppair:// Google-Lens fallback (PairActivity.handleDeepLinkIntent) is a
+     * separate deep-link path and is unaffected by this in-app scanner tuning.
+     */
+    override fun initializeContent(): DecoratedBarcodeView {
+        val view = super.initializeContent()
+        runCatching {
+            view.cameraSettings.isContinuousFocusEnabled = true
+            view.setDecoderFactory(
+                DefaultDecoderFactory(
+                    listOf(BarcodeFormat.QR_CODE),
+                    mapOf(DecodeHintType.TRY_HARDER to true),
+                    null,
+                    0,
+                )
+            )
+        }.onFailure {
+            android.util.Log.w(
+                "PortraitCapture",
+                "scanner tune failed (using defaults): ${it.message}",
+            )
+        }
+        return view
     }
 }

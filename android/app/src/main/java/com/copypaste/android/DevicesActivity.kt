@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -357,7 +358,7 @@ fun DevicesScreen(
         containerColor = IdeBg,
         topBar = {
             CopyPasteTopBar(
-                title = "Devices",
+                title = stringResource(R.string.title_devices),
                 showBackButton = showBackButton,
                 onBack = onBack,
                 backContentDescription = "Back",
@@ -390,6 +391,21 @@ fun DevicesScreen(
                         ctx.startActivity(Intent(ctx, PairActivity::class.java))
                     }
                 )
+            }
+
+            // HB-6: scanning a device's QR lives HERE now (was on the Pair screen).
+            // Launch PairActivity with mode=scan so it auto-opens its camera scan
+            // flow; the Pair screen otherwise shows only THIS device's own QR.
+            OutlinedButton(
+                onClick = {
+                    ctx.startActivity(
+                        Intent(ctx, PairActivity::class.java)
+                            .putExtra("mode", "scan")
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.btn_scan_qr))
             }
 
             Spacer(Modifier.height(8.dp))
@@ -430,6 +446,7 @@ fun DevicesScreen(
                 SectionLabel("This Device")
                 OwnDeviceCard(identity = identity)
             }
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
@@ -485,6 +502,31 @@ private fun PeerCard(
 
             // ── Fingerprint (short) ─────────────────────────────────────────
             DeviceField(label = "Fingerprint", value = peer.fingerprint.take(16))
+
+            // ── Device info (HB-1c) ─────────────────────────────────────────
+            // Peer metadata learned in-band during pairing (ABI 14, persisted on
+            // PairedPeer.peer*). Each row is omitted when the field is absent — a
+            // legacy / pre-ABI-14 roster entry simply shows none of them.
+            peer.peerModel?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.height(6.dp))
+                DeviceField(label = "Model", value = it)
+            }
+            peer.peerOs?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.height(6.dp))
+                DeviceField(label = "OS", value = it)
+            }
+            peer.peerAppVersion?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.height(6.dp))
+                DeviceField(label = "App version", value = it)
+            }
+            peer.peerLocalIp?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.height(6.dp))
+                DeviceField(label = "Local IP", value = it)
+            }
+            peer.peerPublicIp?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.height(6.dp))
+                DeviceField(label = "Public IP", value = it)
+            }
 
             // ── Sync address ────────────────────────────────────────────────
             if (peer.syncAddr.isNotBlank()) {
@@ -571,6 +613,18 @@ private fun NoPeerCard(onPair: () -> Unit) {
 
 @Composable
 private fun OwnDeviceCard(identity: P2pIdentity) {
+    // HB-1c: render THIS device's info at parity with the macOS "This Mac" card.
+    // ABI 14 sends these same fields to peers (own gather in PairActivity /
+    // DevicesActivity startPairing); we surface them locally too. Gathered live —
+    // P2pIdentity only carries the id/fingerprint, the rest comes from the
+    // platform (Build/BuildConfig) and a LAN-IPv4 enumeration. No synchronous
+    // public-IP source on-device, so that row is omitted (matches the bootstrap
+    // path, which sends public_ip = None for this device).
+    val model = android.os.Build.MODEL ?: "Android"
+    val osVersion = "Android " + android.os.Build.VERSION.RELEASE
+    val appVersion = BuildConfig.VERSION_NAME
+    val localIp = remember { lanIpv4Address() }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -578,6 +632,40 @@ private fun OwnDeviceCard(identity: P2pIdentity) {
         border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
+            // Header: online dot (this device is by definition online) + model.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(IdeSuccess),
+                )
+                Text(
+                    text = model,
+                    color = IdeText,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = "Online",
+                    color = IdeSuccess,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+            DeviceField(label = "Model", value = model)
+            Spacer(Modifier.height(6.dp))
+            DeviceField(label = "OS", value = osVersion)
+            Spacer(Modifier.height(6.dp))
+            DeviceField(label = "App version", value = appVersion)
+            localIp?.let {
+                Spacer(Modifier.height(6.dp))
+                DeviceField(label = "Local IP", value = it)
+            }
+            Spacer(Modifier.height(6.dp))
             DeviceField(label = "Device ID", value = identity.deviceId)
             Spacer(Modifier.height(6.dp))
             DeviceField(label = "My fingerprint", value = identity.fingerprint)
