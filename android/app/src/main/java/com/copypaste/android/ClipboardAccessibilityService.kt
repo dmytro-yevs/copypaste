@@ -59,6 +59,28 @@ class ClipboardAccessibilityService : AccessibilityService() {
             return@OnPrimaryClipChangedListener
         }
 
+        // File branch: non-text, non-image URI → real file (PDF, ZIP, etc.).
+        val itemUri = clip.getItemAt(0)?.uri
+        if (itemUri != null) {
+            val mimeTypes = (0 until clip.description.mimeTypeCount)
+                .map { clip.description.getMimeType(it) }
+            val fileMime = mimeTypes.firstOrNull { mime ->
+                mime != null && !mime.startsWith("text/") && !mime.startsWith("image/")
+            }
+            if (fileMime != null) {
+                scope.launch {
+                    ClipboardService.captureFileClip(
+                        this@ClipboardAccessibilityService,
+                        itemUri,
+                        fileMime,
+                        settings,
+                        repository,
+                    )
+                }
+                return@OnPrimaryClipChangedListener
+            }
+        }
+
         val text = clip.getItemAt(0)?.text?.toString() ?: return@OnPrimaryClipChangedListener
         if (text.isBlank()) return@OnPrimaryClipChangedListener
         scope.launch { handleClip(text) }

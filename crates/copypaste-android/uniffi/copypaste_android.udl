@@ -210,6 +210,10 @@ dictionary LocalItem {
   i64 wall_time_ms;
   string content_type;
   sequence<u8> plaintext;
+  // ABI 8: set for content_type=="file" items so the macOS daemon can
+  // reconstruct the filename and MIME on receive. None for text/image.
+  string? file_name;
+  string? mime;
 };
 
 // An item received from the peer during sync, decrypted back to plaintext.
