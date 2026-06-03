@@ -101,7 +101,7 @@ jobs:
           # so it must be present in target/release/ before build-dmg-ci.sh runs.
           cargo build --release \
             -p copypaste-cli \
-            -p copypaste-daemon --features copypaste-daemon/cloud-sync \
+            -p copypaste-daemon --features copypaste-daemon/cloud-sync,copypaste-daemon/relay-sync \
             -p copypaste-relay
 
       - name: Sync tauri.conf.json version to release version

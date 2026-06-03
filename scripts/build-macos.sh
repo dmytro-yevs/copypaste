@@ -22,7 +22,8 @@ build_target() {
   fi
 
   cargo build --release --target "$rust_target" \
-    -p copypaste-daemon -p copypaste-cli
+    -p copypaste-daemon -p copypaste-cli \
+    --features copypaste-daemon/cloud-sync,copypaste-daemon/relay-sync
 
   mkdir -p "$out_dir"
   cp "target/${rust_target}/release/copypaste-daemon" "$out_dir/"
