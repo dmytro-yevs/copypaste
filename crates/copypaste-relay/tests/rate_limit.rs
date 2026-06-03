@@ -33,6 +33,9 @@
 #![allow(dead_code, unused_imports, unused_variables)]
 
 #[allow(dead_code)]
+#[path = "../src/db.rs"]
+mod db;
+#[allow(dead_code)]
 #[path = "../src/error.rs"]
 mod error;
 #[allow(dead_code)]

@@ -1,7 +1,13 @@
-//! Background TTL eviction for the in-memory relay store.
+//! Background TTL eviction for the relay store.
 //!
 //! See [ADR-009](../../../docs/adr/ADR-009-relay-storage-choice.md) for the
-//! decision rationale (in-memory `HashMap` over SQLite).
+//! original in-memory `HashMap` rationale. As of R1b the store is additionally
+//! backed by a SQLite database (see `db.rs` / `state.rs`): the in-memory maps
+//! remain the hot read path, and every mutation — including the TTL eviction
+//! and inactive-device reclamation driven by this task — is written through to
+//! SQLite so durable state survives a process restart. This task is unchanged;
+//! `prune_expired` / `cleanup_inactive_devices` now mirror their deletions into
+//! the database internally.
 //!
 //! ## Behaviour
 //!

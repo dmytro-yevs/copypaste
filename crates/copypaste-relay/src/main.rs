@@ -9,6 +9,7 @@
 mod api;
 mod auth;
 mod config;
+mod db;
 mod error;
 mod governor_cleanup;
 mod middleware;
@@ -35,7 +36,19 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = RelayConfig::from_env();
-    let relay_store = RelayStore::new_with_cap(config.sync_ttl_secs, config.max_items_per_device);
+    // R1b: open the durable store and rehydrate any persisted state. With the
+    // default `:memory:` db_path nothing is loaded (empty in-memory db); with a
+    // file path the relay survives restart. A failure to open/load the store is
+    // fatal — better to refuse to start than to silently serve an empty inbox
+    // and lose every device's history.
+    let relay_store = RelayStore::new_persistent(
+        config.sync_ttl_secs,
+        config.max_items_per_device,
+        &config.db_path,
+    )?;
+    if config.db_path != db::IN_MEMORY_PATH {
+        tracing::info!(db_path = %config.db_path, "relay persistence enabled (SQLite)");
+    }
     let state = Arc::new(Mutex::new(relay_store));
 
     // Background TTL evictor — see ADR-009 (in-memory store + periodic prune).

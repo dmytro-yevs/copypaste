@@ -26,6 +26,8 @@ use tower::ServiceExt;
 mod auth;
 #[path = "../src/config.rs"]
 mod config;
+#[path = "../src/db.rs"]
+mod db;
 #[path = "../src/error.rs"]
 mod error;
 #[path = "../src/models.rs"]

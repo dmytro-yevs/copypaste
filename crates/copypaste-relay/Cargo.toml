@@ -22,6 +22,14 @@ tracing-subscriber.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 subtle = { workspace = true }  # S5: pinned to >=2.5 via workspace
+# R1b persistence: back the relay store with PLAIN bundled SQLite so device
+# records, token sets and inbox items survive a process restart. We deliberately
+# use the `bundled` feature (vendored plain SQLite), NOT `bundled-sqlcipher`
+# (which copypaste-core uses): the relay handles only opaque, already-encrypted
+# ciphertext blobs and must never hold keys or call `PRAGMA key`. Version pinned
+# to the workspace's rusqlite (0.32) so libsqlite3-sys feature-unifies cleanly
+# across the workspace. See db.rs for the feature-unification note.
+rusqlite = { version = "0.32", features = ["bundled"] }
 tower_governor = { version = "0.8", features = ["axum"] }
 # Required to name RateLimitingMiddleware / QuantaInstant in spawn_governor_cleanup
 # bounds. Already in the dependency graph transitively via tower_governor 0.8.
@@ -36,3 +44,7 @@ tokio = { workspace = true, features = ["test-util"] }
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["full"] }
+# R1b persistence tests: a temp dir for the on-disk SQLite db that is removed
+# when the test ends. Pinned `>=3.0, <3.14` to match every other crate's
+# tempfile dev-dep so the workspace Cargo.lock stays unified on one version.
+tempfile = ">=3.0, <3.14"
