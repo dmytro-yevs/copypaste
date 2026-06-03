@@ -24,6 +24,7 @@ ruflo-setup-log.md
 
 # Claude config
 .claude/
+.claude/worktrees/
 CLAUDE.md
 
 # OS
