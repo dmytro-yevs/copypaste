@@ -226,6 +226,33 @@ function PinIndicator() {
 }
 
 // ---------------------------------------------------------------------------
+// "Won't sync — too large" indicator (warning triangle)
+// ---------------------------------------------------------------------------
+// Mirrors PinIndicator's markup: a tiny currentColor SVG tinted with the same
+// amber `text-ide-warning` token. Shown on rows the daemon flagged as exceeding
+// the configured sync size cap — kept locally but not synced to other devices.
+
+function SyncBlockedIndicator() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="11"
+      height="11"
+      fill="currentColor"
+      aria-label="Too large to sync"
+      className="shrink-0 text-ide-warning"
+    >
+      {/* Warning triangle with an exclamation mark */}
+      <path
+        fillRule="evenodd"
+        clipRule="evenodd"
+        d="M7.13 1.7a1 1 0 0 1 1.74 0l6.1 11A1 1 0 0 1 14.1 14.2H1.9A1 1 0 0 1 1.03 12.7l6.1-11ZM8 5a.75.75 0 0 0-.75.75v3.5a.75.75 0 0 0 1.5 0v-3.5A.75.75 0 0 0 8 5Zm0 7a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+      />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Row height model (shared by the row and the virtualizer)
 // ---------------------------------------------------------------------------
 
@@ -468,6 +495,16 @@ function HistoryRow({
       {entry.pinned && (
         <span className="flex w-3 shrink-0 items-center justify-center">
           <PinIndicator />
+        </span>
+      )}
+
+      {/* "Won't sync — too large" indicator (only on flagged rows) */}
+      {entry.too_large_to_sync && (
+        <span
+          className="flex w-3 shrink-0 items-center justify-center"
+          title="Too large to sync"
+        >
+          <SyncBlockedIndicator />
         </span>
       )}
 

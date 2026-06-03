@@ -67,6 +67,13 @@ export interface HistoryEntry {
    * The UI derives a short readable label via `sourceAppLabel()`.
    */
   app_bundle_id?: string | null;
+  /**
+   * True when the daemon flagged this item as exceeding the configured sync
+   * size cap, so it is kept locally but will not be synced to other devices.
+   * Optional for back-compat with older daemon builds that don't emit it.
+   * Arrives as snake_case `too_large_to_sync` in the daemon JSON.
+   */
+  too_large_to_sync?: boolean;
 }
 
 /**
