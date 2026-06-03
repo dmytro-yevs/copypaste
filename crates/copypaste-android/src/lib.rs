@@ -929,9 +929,11 @@ pub struct Config {
 /// Default for the Android-only `mask_sensitive_content` knob. Mirrors the
 /// macOS UI default of masking detected secrets in the history list.
 const DEFAULT_MASK_SENSITIVE_CONTENT: bool = true;
-/// Default for the Android-only `p2p_enabled` runtime toggle. P2P is opt-in on
-/// the daemon (`COPYPASTE_P2P=1`), so Android mirrors "off by default".
-const DEFAULT_P2P_ENABLED: bool = false;
+/// Default for the Android-only `p2p_enabled` runtime toggle. macOS now defaults
+/// P2P ON (the daemon is launched with `COPYPASTE_P2P=1` by the app), so a fresh
+/// Android install mirrors that "on by default" behaviour for cross-platform
+/// parity — scanning the pairing QR yields P2P sync without flipping a toggle.
+const DEFAULT_P2P_ENABLED: bool = true;
 /// Default for the Android-only `image_max_height` display knob (px). Matches
 /// the Maccy-style preview cap used by the history list.
 const DEFAULT_IMAGE_MAX_HEIGHT: u32 = 680;

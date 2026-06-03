@@ -347,12 +347,13 @@ class FgsSyncLoop(
                     }
                 } else if (isFile) {
                     // File row: store actual bytes so the user can save/copy them.
-                    // Cloud-poll (DecryptedItem) has no file_name/mime columns in the
-                    // SELECT — those live in the encrypted payload, not separate columns.
+                    // AB-3: decryptRow already STRIPPED the cloud file-identity header
+                    // from item.plaintext and recovered the original name/MIME into
+                    // item.fileName/item.fileMime — store the real body + identity.
                     if (item.plaintext.isEmpty()) {
                         false
                     } else {
-                        val label = SyncFileHelper.buildFileLabel(null)
+                        val label = SyncFileHelper.buildFileLabel(item.fileName)
                         val storedId = repository.storeItem(
                             plaintext = label,
                             key = settings.encryptionKey,
@@ -362,7 +363,7 @@ class FgsSyncLoop(
                         )
                         if (storedId.isNotEmpty()) {
                             repository.storeFileBytes(storedId, item.plaintext)
-                            repository.storeFileMeta(storedId, null, null)
+                            repository.storeFileMeta(storedId, item.fileName, item.fileMime)
                             true
                         } else {
                             false
@@ -592,13 +593,21 @@ class FgsSyncLoop(
                     }
                 }
                 else -> {
-                    // Text frame: persist under the peer's STABLE item_id
-                    // (overrideId) — dedups a re-dial AND lets a later re-sync of
-                    // this clip reuse the same cross-device id instead of minting a
-                    // fresh local UUID.
+                    // Text frame: LWW-replace under the peer's STABLE item_id so an
+                    // EDITED clip replaces the prior local row instead of being
+                    // deduped/dropped (AB-17 — parity with the cloud/relay paths,
+                    // which already use storeItemWithLww). SyncedItem carries no
+                    // lamport field over the frozen P2P ABI, so wall_time_ms is the
+                    // causal basis — the same value already observed into the local
+                    // Lamport clock above (line ~535) and the same basis the macOS
+                    // daemon's P2P LWW uses.
                     val plaintext = String(plaintextBytes, Charsets.UTF_8)
-                    repository.storeItem(plaintext, key, overrideId = item.itemId)
-                        .isNotEmpty()
+                    repository.storeItemWithLww(
+                        plaintext = plaintext,
+                        key = key,
+                        itemId = item.itemId,
+                        incomingLamportTs = item.wallTimeMs,
+                    )
                 }
             }
         }
