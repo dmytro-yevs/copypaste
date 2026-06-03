@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhonelinkSetup
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -60,6 +59,10 @@ import com.copypaste.android.ui.theme.IdeDanger
 import com.copypaste.android.ui.theme.IdeDim
 import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeText
+import android.content.ClipData
+import android.content.ClipboardManager
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.text.font.FontFamily
 
 /**
  * First-run permission onboarding screen.
@@ -71,7 +74,7 @@ import com.copypaste.android.ui.theme.IdeText
  *
  * Permissions covered:
  *  1. POST_NOTIFICATIONS (Android 13+)       — runtime request
- *  2. Accessibility Service                  — open ACTION_ACCESSIBILITY_SETTINGS
+ *  2. Background Capture (ADB)               — tap-to-copy ADB commands + overlay request
  *  3. Battery Optimization exemption         — ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
  *  4. OEM autostart / protected apps         — OemAutoStartHelper (manufacturer-specific)
  *
@@ -139,7 +142,7 @@ class OnboardingActivity : ComponentActivity() {
 
                 OnboardingScreen(
                     onRequestNotification = { requestNotificationPermission() },
-                    onOpenAccessibility = { openAccessibilitySettings() },
+                    onRequestOverlay = { requestOverlayPermission() },
                     onRequestBattery = { requestBatteryOptimizationExemption() },
                     onOpenOemAutoStart = { openOemAutoStart() },
                     onExportLogs = { LogExportHelper.shareLogsZip(this@OnboardingActivity) },
@@ -195,11 +198,14 @@ class OnboardingActivity : ComponentActivity() {
         notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    private fun openAccessibilitySettings() {
+    private fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         launchGated(
             listOf(
-                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:\${packageName}")
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
         )
     }
@@ -243,17 +249,19 @@ class OnboardingActivity : ComponentActivity() {
     companion object {
         private const val TAG = "OnboardingActivity"
 
-        /** True when all permissions that affect core functionality are satisfied. */
+        /**
+         * True when the minimum required permissions for core functionality are granted.
+         * Only POST_NOTIFICATIONS is required. Background capture (READ_LOGS + overlay)
+         * is set up via ADB — not blockable at this gate.
+         */
         fun allCriticalGranted(context: android.content.Context): Boolean {
             val notifOk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 ContextCompat.checkSelfPermission(
                     context, Manifest.permission.POST_NOTIFICATIONS
                 ) == PackageManager.PERMISSION_GRANTED
             } else true
-
-            val a11yOk = ClipboardAccessibilityService.isEnabled(context)
-            // Battery exemption is nice-to-have; don't block navigation on it.
-            return notifOk && a11yOk
+            // Battery/overlay/READ_LOGS are opt-in; only POST_NOTIFICATIONS blocks onboarding.
+            return notifOk
         }
     }
 }
@@ -284,7 +292,7 @@ private fun CrashDetectedDialog(
 @Composable
 fun OnboardingScreen(
     onRequestNotification: () -> Unit,
-    onOpenAccessibility: () -> Unit,
+    onRequestOverlay: () -> Unit,
     onRequestBattery: () -> Unit,
     onOpenOemAutoStart: () -> Unit,
     onExportLogs: () -> Unit,
@@ -298,7 +306,11 @@ fun OnboardingScreen(
                 PackageManager.PERMISSION_GRANTED
     } else true
 
-    val a11yEnabled = ClipboardAccessibilityService.isEnabled(ctx)
+    val overlayGranted: Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        android.provider.Settings.canDrawOverlays(ctx)
+    } else true
+
+    val readLogsGranted = LogcatCaptureService.hasReadLogsPermission(ctx)
 
     // Not memoized: must re-read on every recomposition so it reflects changes
     // made in the system battery-optimisation screen (mirrors PermissionsSettingsActivity:232).
@@ -313,7 +325,7 @@ fun OnboardingScreen(
     val hasOemScreen = OemAutoStartHelper.hasOemScreen(ctx)
     val oemLabel = OemAutoStartHelper.oemSettingsLabel(ctx)
 
-    val allDone = notifGranted && a11yEnabled
+    val allDone = notifGranted
 
     Scaffold(
         containerColor = IdeBg,
@@ -348,23 +360,12 @@ fun OnboardingScreen(
                 required = true,
             )
 
-            // 2. Accessibility Service
-            PermissionCard(
-                icon = Icons.Filled.Visibility,
-                title = "Clipboard Access (Accessibility)",
-                description = "Android 10+ blocks background clipboard reads unless an " +
-                        "AccessibilityService is enabled. CopyPaste's service ONLY monitors " +
-                        "clipboard changes — it does NOT read screen content or intercept inputs.",
-                granted = a11yEnabled,
-                buttonLabel = if (a11yEnabled) "Enabled" else "Enable in Settings",
-                onClick = onOpenAccessibility,
-                required = true,
-            )
-            // HW-A11: tap-to-copy ADB command for power users / testers.
-            AdbCommandBlock(
-                label = stringResource(R.string.a11y_adb_label),
-                command = stringResource(R.string.a11y_adb_command),
-                toastText = stringResource(R.string.a11y_adb_copied),
+            // 2. Background Capture (ADB)
+            AdbBackgroundCaptureCard(
+                readLogsGranted = readLogsGranted,
+                overlayGranted = overlayGranted,
+                onRequestOverlay = onRequestOverlay,
+                ctx = ctx,
             )
 
             // 3. Battery Optimization
@@ -537,5 +538,128 @@ private fun PermissionCard(
                 Text(buttonLabel)
             }
         }
+    }
+}
+
+/**
+ * Onboarding card for the ADB-based background capture setup.
+ *
+ * Shows:
+ *  - Short explainer about the Android clipboard restriction.
+ *  - Three tap-to-copy ADB commands (grant READ_LOGS, grant overlay, force-stop).
+ *  - Live status: READ_LOGS granted? Overlay allowed?
+ *  - Button to open the overlay permission Settings screen (can be done without ADB).
+ */
+@Composable
+private fun AdbBackgroundCaptureCard(
+    readLogsGranted: Boolean,
+    overlayGranted: Boolean,
+    onRequestOverlay: () -> Unit,
+    ctx: android.content.Context,
+) {
+    val borderColor = if (readLogsGranted && overlayGranted) IdeSuccess else IdeBorder
+    CopyPasteCard(accent = borderColor) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.bg_adb_section_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = IdeText,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.bg_adb_explainer),
+                style = MaterialTheme.typography.bodyMedium,
+                color = IdeDim,
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Status row
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = if (readLogsGranted)
+                        stringResource(R.string.bg_adb_status_read_logs_ok)
+                    else
+                        stringResource(R.string.bg_adb_status_read_logs_no),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (readLogsGranted) IdeSuccess else IdeDim,
+                )
+                Text(
+                    text = if (overlayGranted)
+                        stringResource(R.string.bg_adb_status_overlay_ok)
+                    else
+                        stringResource(R.string.bg_adb_status_overlay_no),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (overlayGranted) IdeSuccess else IdeDim,
+                )
+            }
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Command 1
+            AdbCommandRow(
+                label = stringResource(R.string.bg_adb_cmd1_label),
+                command = stringResource(R.string.bg_adb_cmd1),
+                toastText = stringResource(R.string.bg_adb_cmd_copied),
+                ctx = ctx,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            // Command 2
+            AdbCommandRow(
+                label = stringResource(R.string.bg_adb_cmd2_label),
+                command = stringResource(R.string.bg_adb_cmd2),
+                toastText = stringResource(R.string.bg_adb_cmd_copied),
+                ctx = ctx,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            // Command 3
+            AdbCommandRow(
+                label = stringResource(R.string.bg_adb_cmd3_label),
+                command = stringResource(R.string.bg_adb_cmd3),
+                toastText = stringResource(R.string.bg_adb_cmd_copied),
+                ctx = ctx,
+            )
+
+            Spacer(modifier = Modifier.height(10.dp))
+            // Overlay button — can be granted without ADB on Android M+
+            if (!overlayGranted) {
+                Button(
+                    onClick = onRequestOverlay,
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    Text("Grant Overlay Permission")
+                }
+            }
+        }
+    }
+}
+
+/** Single tap-to-copy ADB command row: label + monospaced command text. */
+@Composable
+private fun AdbCommandRow(
+    label: String,
+    command: String,
+    toastText: String,
+    ctx: android.content.Context,
+) {
+    Column {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = IdeDim,
+        )
+        Text(
+            text = command,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            color = IdeText,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                        as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("adb_cmd", command))
+                    android.widget.Toast.makeText(ctx, toastText, android.widget.Toast.LENGTH_SHORT)
+                        .show()
+                }
+                .padding(vertical = 4.dp),
+        )
     }
 }

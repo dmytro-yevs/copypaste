@@ -248,21 +248,6 @@
                 android:value="Encrypted clipboard sync between user's paired devices" />
         </service>
 
-        <!-- AccessibilityService: enables background clipboard reading on Android 10+.
-             User must manually enable in Settings > Accessibility. OnboardingActivity
-             prompts them with ACTION_ACCESSIBILITY_SETTINGS and explains why. -->
-        <service
-            android:name=".ClipboardAccessibilityService"
-            android:exported="true"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
-        </service>
-
         <!--
             BootReceiver: restarts the foreground service after device boot and
             after OEM "quick-boot" / warm-boot cycles.
@@ -305,7 +290,7 @@
             Reads clipboard-change events from the system logcat stream when
             android.permission.READ_LOGS has been granted via adb. This is a
             best-effort fallback — the primary background capture mechanism is
-            ClipboardAccessibilityService. See LogcatCaptureService.kt for
+            the adb READ_LOGS path. See LogcatCaptureService.kt for
             full documentation of capabilities and limitations per Android version.
         -->
         <service

@@ -29,9 +29,9 @@ class CopyPasteApp : Application() {
         // Restore the Supabase background poll worker after a process restart
         // (WorkManager persists the request but we need to re-evaluate it on boot).
         SupabasePollWorker.syncWithSettings(this)
-        // Restore the logcat capture service if it was previously enabled and
-        // READ_LOGS is still granted (adb grants survive app updates but not
-        // factory reset or data clear).
+        // Restore (or auto-enable) the logcat capture service.
+        // syncState auto-enables when READ_LOGS is granted and the user has not
+        // explicitly disabled the toggle (survives app updates; reset on factory reset/data clear).
         val settings = Settings(this)
         LogcatCaptureService.syncState(this, settings)
     }

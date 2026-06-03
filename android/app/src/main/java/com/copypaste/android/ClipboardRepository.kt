@@ -65,7 +65,7 @@ class ClipboardRepository(context: Context) {
 
     /**
      * In-memory dedup window. Multiple OnPrimaryClipChangedListener owners
-     * (ClipboardService, ClipboardAccessibilityService, MainActivity) each fire
+     * (ClipboardService, LogcatCaptureService, MainActivity) each fire
      * on the same copy, so without this guard one copy creates 2-3 duplicate
      * rows (HIGH-3). We skip a store when an identical-content item was stored
      * within [DEDUP_WINDOW_MS]. The time window preserves the legitimate
@@ -1238,7 +1238,7 @@ class ClipboardRepository(context: Context) {
          *
          * When the user taps a row in [HistoryActivity] to copy it, the UI calls
          * setPrimaryClip with that text. The capture listeners
-         * ([ClipboardService] / [ClipboardAccessibilityService]) then observe the
+         * ([ClipboardService] / [LogcatCaptureService]) then observe the
          * SAME text as a fresh clipboard change and would re-capture it as a NEW
          * row (outside the [DEDUP_WINDOW_MS] window when the original was copied
          * long ago) — producing a duplicate row AND a redundant cloud re-push.
@@ -1268,7 +1268,7 @@ class ClipboardRepository(context: Context) {
         // from the history list.  The capture listeners see an image/file MIME
         // clip whose URI is our own FileProvider URI — we must not re-store it.
         // 5-second window (same as text); does NOT clear on first match so that
-        // concurrent ClipboardService + ClipboardAccessibilityService callbacks
+        // concurrent ClipboardService + LogcatCaptureService callbacks
         // for the same user tap are both suppressed.
         @Volatile private var expectedImageUri: String = ""
         @Volatile private var expectedImageUriAtMs: Long = 0L
@@ -1332,7 +1332,7 @@ class ClipboardRepository(context: Context) {
          *
          * The expectation is NOT cleared on a match — it stays active for the
          * full window so that all concurrent listeners (ClipboardService,
-         * ClipboardAccessibilityService, MainActivity) that fire for the same
+         * LogcatCaptureService, MainActivity) that fire for the same
          * user tap are all suppressed, not just the first one.  Without this,
          * the second listener would see [expectedClipHasValue] already cleared
          * and store a duplicate row.
