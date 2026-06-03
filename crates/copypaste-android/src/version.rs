@@ -78,7 +78,27 @@
 ///
 /// Kotlin generated against ABI 8 is missing all of the above (and constructs
 /// the old `sync_with_peer` arity) and must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 9;
+///
+/// **ABI 10 (QR fully provisions all sync):** Added the `SyncProvisioning`
+/// dictionary and threaded it through the QR pairing FFI so scanning the
+/// pairing QR on a new device also sets up Supabase + relay (not just P2P),
+/// transmitted over the ALREADY-AUTHENTICATED mTLS+PAKE bootstrap tunnel —
+/// never in the QR image. Concretely:
+///   * New `SyncProvisioning` dictionary `{ supabase_url?, supabase_anon_key?,
+///     relay_url?, derived_sync_key? }` — mirrors
+///     `copypaste_p2p::bootstrap::SyncProvisioning`. `derived_sync_key` is the
+///     32-byte DERIVED cloud sync key (NOT the passphrase) and is secret.
+///   * `bootstrap_pair_initiator` gained a trailing optional param
+///     `local_provisioning: SyncProvisioning?` (the setup THIS device offers;
+///     Android scanning a configured PC passes `null`).
+///   * `BootstrapResult` gained a trailing optional field `peer_provisioning:
+///     SyncProvisioning?` carrying what the peer advertised, for Kotlin to
+///     persist later.
+///
+/// Kotlin generated against ABI 9 lacks `SyncProvisioning`, constructs the old
+/// `bootstrap_pair_initiator` arity, and reads `BootstrapResult` with the wrong
+/// shape — it must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 10;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

@@ -75,14 +75,26 @@
 //! ```text
 //!   | --- 10. BOOTSTRAP_PROTO_VERSION byte  -->  (and the mirror <-- )
 //!   | --- 11. compact JSON {model,os_version,app_version,local_ip}  --> (mirror <--)
+//!   | --- 12. (proto >= 2) SyncProvisioning JSON  --> (mirror <--)
 //! ```
 //!
 //! Each side first sends its own version byte then reads the peer's. If the
 //! peer's version frame is absent (connection closed → old peer) the metadata
-//! step is skipped entirely and `peer_*` fields are left `None`. If the peer's
-//! version is `< BOOTSTRAP_PROTO_VERSION` the metadata frame is likewise
-//! skipped. All metadata send/receive errors are swallowed: the pairing is
-//! already authenticated and complete, so a metadata hiccup must never fail it.
+//! step is skipped entirely and `peer_*` fields are left `None`. The metadata
+//! frame (11) is read whenever a version byte was received.
+//!
+//! ## Sync-provisioning extension (frame 12, proto version 2)
+//!
+//! Proto version 2 appends ONE further OPTIONAL frame after the metadata frame:
+//! a [`SyncProvisioning`] JSON ("QR fully provisions all sync" — carry the
+//! Supabase/relay config + the DERIVED cloud sync key over the already
+//! authenticated tunnel, NEVER in the QR image). It is version-gated by the
+//! frame-10 version byte: a side advertising `>= 2` sends frame 12 and, when the
+//! PEER also advertised `>= 2`, reads the peer's frame 12; a side talking to a
+//! version-1 peer neither expects nor reads it (so the stream never desyncs).
+//! An unconfigured side sends an all-`None` `SyncProvisioning`. All
+//! send/receive errors are swallowed: the pairing is already authenticated and
+//! complete, so a provisioning hiccup must never fail it.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -151,7 +163,28 @@ const MAX_FRAME_BYTES: usize = 64 * 1024;
 /// extension (frame 10). Bumped when the metadata frame layout changes. A peer
 /// that does not send a version frame at all is treated as a pre-extension
 /// (legacy) peer and the metadata step is skipped.
-pub const BOOTSTRAP_PROTO_VERSION: u8 = 1;
+///
+/// History:
+/// * `1` — device-metadata extension (`PeerMeta`, frames 10/11).
+/// * `2` — sync-provisioning extension (`SyncProvisioning`, frames 12/13),
+///   exchanged AFTER the `PeerMeta` frames. The version byte sent in frame 10
+///   gates whether the peer also sends/expects the provisioning frames: a peer
+///   advertising `>= 2` participates; a peer advertising `1` (or no version
+///   frame at all) neither sends nor reads them, so pairing still succeeds with
+///   `peer_provisioning = None` on both sides.
+pub const BOOTSTRAP_PROTO_VERSION: u8 = 2;
+
+/// Minimum protocol version a peer must advertise (in the frame-10 version byte)
+/// to participate in the [`SyncProvisioning`] exchange (frames 12/13). A peer
+/// advertising less than this — or no version frame at all — is treated as
+/// not-provisioning-capable and the step is skipped with `peer_provisioning =
+/// None` (back-compat).
+const SYNC_PROVISIONING_MIN_VERSION: u8 = 2;
+
+/// Upper bound on the sync-provisioning JSON frame. Two URLs plus a base64-ish
+/// anon key and a 32-byte key (base64 ≈ 44 chars) total well under 4 KiB; the
+/// ceiling still rejects a desynced peer flooding this slot.
+const MAX_PROVISIONING_BYTES: usize = 4 * 1024;
 
 /// SAS-confirm wire bytes (frame 10a, LAN/SAS pairing path only).
 ///
@@ -225,6 +258,73 @@ pub struct PeerMeta {
     /// an old peer's frame.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_ip: Option<String>,
+}
+
+/// Sync-account provisioning exchanged in-band over the bootstrap channel AFTER
+/// the PAKE handshake AND the [`PeerMeta`] frames complete (proto version >= 2).
+///
+/// This is the payload behind "QR fully provisions all sync": scanning the
+/// pairing QR on a new device also configures Supabase + relay (not just P2P).
+/// The data travels ONLY on the authenticated, mutually-confirmed, encrypted
+/// bootstrap tunnel — it is NEVER placed in the QR image (see `pairing_qr.rs`,
+/// which is left untouched).
+///
+/// # What is (and is NOT) transmitted
+/// * `supabase_url` / `supabase_anon_key` — non-secret connection params (the
+///   anon key is a publishable JWT).
+/// * `relay_url` — non-secret relay endpoint.
+/// * `derived_sync_key` — the 32-byte DERIVED cloud sync key (Argon2id output).
+///   This is secret. The account passphrase / email / password are NEVER
+///   transmitted — only the already-derived key, so the receiving device can
+///   decrypt cloud blobs without ever learning the human passphrase.
+///
+/// All fields are optional: an unconfigured side sends an all-`None` value.
+/// Each side decides what to APPLY (apply a field only if it currently lacks
+/// it) — the bootstrap layer just carries the value across.
+///
+/// # Security
+/// `derived_sync_key` is secret: it is NEVER logged (no field is `Debug`-printed
+/// with its bytes — see the manual `Debug` impl), and the daemon wraps transient
+/// copies in `Zeroizing` on the apply path. `serde(skip_serializing_if)` keeps
+/// the frame minimal and a legacy reader simply ignores unknown keys.
+#[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SyncProvisioning {
+    /// Supabase project URL (e.g. `https://xxxx.supabase.co`). Non-secret.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supabase_url: Option<String>,
+    /// Supabase publishable anon/public JWT. Safe to share (publishable key).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supabase_anon_key: Option<String>,
+    /// Relay endpoint URL. Non-secret. Currently no daemon config field sources
+    /// this (relay is env-only), so the daemon sends `None`; the field exists so
+    /// the wire form and FFI surface are symmetric and forward-compatible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay_url: Option<String>,
+    /// The 32-byte DERIVED cloud sync key (Argon2id output), NOT the passphrase.
+    /// Secret — never logged. The receiving device wraps it in `SyncKey` and
+    /// persists it via the same backend `set_sync_passphrase` uses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub derived_sync_key: Option<Vec<u8>>,
+}
+
+impl std::fmt::Debug for SyncProvisioning {
+    /// Custom `Debug` that NEVER prints the secret `derived_sync_key` bytes — it
+    /// reports only whether the key is present and its length. The URLs/anon key
+    /// are non-secret and shown verbatim.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SyncProvisioning")
+            .field("supabase_url", &self.supabase_url)
+            .field("supabase_anon_key", &self.supabase_anon_key)
+            .field("relay_url", &self.relay_url)
+            .field(
+                "derived_sync_key",
+                &self
+                    .derived_sync_key
+                    .as_ref()
+                    .map(|k| format!("<{} bytes redacted>", k.len())),
+            )
+            .finish()
+    }
 }
 
 /// rustls verifier that accepts **any** peer certificate without pinning.
@@ -378,6 +478,12 @@ pub struct BootstrapPairing {
     /// the peer opted out of public-IP collection / STUN had not yet resolved.
     /// Informational only — never used for auth or trust.
     pub peer_public_ip: Option<String>,
+    /// Sync-account provisioning the peer advertised over the post-handshake
+    /// extension (proto version >= 2). `None` when the peer is a legacy
+    /// (pre-version-2) build, when it advertised an all-`None` value, or when the
+    /// provisioning exchange was skipped. The caller decides what to APPLY (only
+    /// fields it currently lacks). See [`SyncProvisioning`].
+    pub peer_provisioning: Option<SyncProvisioning>,
 }
 
 /// A bootstrap TLS responder listener bound to an ephemeral port.
@@ -478,6 +584,7 @@ impl BootstrapResponder {
         password: &str,
         sync_addr: &str,
         own_meta: &PeerMeta,
+        own_provisioning: Option<SyncProvisioning>,
     ) -> Result<BootstrapPairing, TransportError> {
         // Accept exactly one inbound TCP connection within the window.
         let (tcp_stream, peer_addr) =
@@ -593,10 +700,12 @@ impl BootstrapResponder {
             // surfaces it in the returned struct without exchanging frame 10a.
             let sas = derive_sas(&bound_key);
 
-            // P2P Phase 4 (optional, post-handshake): exchange device metadata.
-            // The pairing is already complete and authenticated at this point;
-            // any failure here is swallowed (legacy peer closed, etc.).
-            let peer_meta = exchange_peer_meta(&mut framed, &own_meta).await;
+            // P2P Phase 4 (optional, post-handshake): exchange device metadata
+            // and (proto >= 2) sync provisioning. The pairing is already complete
+            // and authenticated at this point; any failure here is swallowed
+            // (legacy peer closed, etc.).
+            let (peer_meta, peer_provisioning) =
+                exchange_peer_meta(&mut framed, &own_meta, own_provisioning.as_ref()).await;
 
             Ok::<BootstrapPairing, TransportError>(BootstrapPairing {
                 peer_fingerprint: tls_peer_fp,
@@ -609,6 +718,7 @@ impl BootstrapResponder {
                 peer_local_ip: peer_meta.local_ip,
                 peer_device_name: peer_meta.device_name,
                 peer_public_ip: peer_meta.public_ip,
+                peer_provisioning,
             })
         })
         .await
@@ -635,11 +745,13 @@ impl BootstrapResponder {
     ///
     /// This is a separate method so the QR `run` transcript stays byte-compatible
     /// (frame 10a is never sent there).
+    #[allow(clippy::too_many_arguments)] // mirrors `run` + confirm cb + provisioning
     pub async fn run_with_confirm<F, Fut>(
         self,
         password: &str,
         sync_addr: &str,
         own_meta: &PeerMeta,
+        own_provisioning: Option<SyncProvisioning>,
         confirm: F,
     ) -> Result<BootstrapPairing, TransportError>
     where
@@ -765,8 +877,9 @@ impl BootstrapResponder {
             return Err(io_other("SAS rejected by user — pairing aborted".into()));
         }
 
-        // Both confirmed: optional post-handshake metadata exchange.
-        let peer_meta = exchange_peer_meta(&mut framed, own_meta).await;
+        // Both confirmed: optional post-handshake metadata + provisioning.
+        let (peer_meta, peer_provisioning) =
+            exchange_peer_meta(&mut framed, own_meta, own_provisioning.as_ref()).await;
 
         Ok(BootstrapPairing {
             peer_fingerprint,
@@ -779,6 +892,7 @@ impl BootstrapResponder {
             peer_local_ip: peer_meta.local_ip,
             peer_device_name: peer_meta.device_name,
             peer_public_ip: peer_meta.public_ip,
+            peer_provisioning,
         })
     }
 }
@@ -795,6 +909,7 @@ impl BootstrapResponder {
 /// # Errors
 /// Mirrors [`BootstrapResponder::run`] — TLS / socket / framing errors and PAKE
 /// failures (including a wrong password, surfaced from `client.finish`).
+#[allow(clippy::too_many_arguments)] // additive provisioning param mirrors `run`
 pub async fn run_initiator(
     addr: SocketAddr,
     cert_der: Vec<u8>,
@@ -802,6 +917,7 @@ pub async fn run_initiator(
     password: &str,
     sync_addr: &str,
     own_meta: &PeerMeta,
+    own_provisioning: Option<SyncProvisioning>,
 ) -> Result<BootstrapPairing, TransportError> {
     let own_fingerprint = fingerprint_of(&cert_der);
 
@@ -922,9 +1038,11 @@ pub async fn run_initiator(
         // the wire transcript; the legacy path just surfaces it.
         let sas = derive_sas(&bound_key);
 
-        // P2P Phase 4 (optional, post-handshake): exchange device metadata.
-        // Pairing is already complete and authenticated; failures are swallowed.
-        let peer_meta = exchange_peer_meta(&mut framed, &own_meta).await;
+        // P2P Phase 4 (optional, post-handshake): exchange device metadata and
+        // (proto >= 2) sync provisioning. Pairing is already complete and
+        // authenticated; failures are swallowed.
+        let (peer_meta, peer_provisioning) =
+            exchange_peer_meta(&mut framed, &own_meta, own_provisioning.as_ref()).await;
 
         Ok::<BootstrapPairing, TransportError>(BootstrapPairing {
             peer_fingerprint: tls_peer_fp,
@@ -937,6 +1055,7 @@ pub async fn run_initiator(
             peer_local_ip: peer_meta.local_ip,
             peer_device_name: peer_meta.device_name,
             peer_public_ip: peer_meta.public_ip,
+            peer_provisioning,
         })
     })
     .await
@@ -962,7 +1081,7 @@ pub async fn run_initiator(
 /// are [`SAS_ACCEPT`].
 ///
 /// Separate from [`run_initiator`] so the QR transcript stays byte-compatible.
-#[allow(clippy::too_many_arguments)] // mirrors `run_initiator` + one confirm cb
+#[allow(clippy::too_many_arguments)] // mirrors `run_initiator` + confirm cb + provisioning
 pub async fn run_initiator_with_confirm<F, Fut>(
     addr: SocketAddr,
     cert_der: Vec<u8>,
@@ -970,6 +1089,7 @@ pub async fn run_initiator_with_confirm<F, Fut>(
     password: &str,
     sync_addr: &str,
     own_meta: &PeerMeta,
+    own_provisioning: Option<SyncProvisioning>,
     confirm: F,
 ) -> Result<BootstrapPairing, TransportError>
 where
@@ -1109,7 +1229,8 @@ where
         return Err(io_other("SAS rejected by user — pairing aborted".into()));
     }
 
-    let peer_meta = exchange_peer_meta(&mut framed, own_meta).await;
+    let (peer_meta, peer_provisioning) =
+        exchange_peer_meta(&mut framed, own_meta, own_provisioning.as_ref()).await;
 
     Ok(BootstrapPairing {
         peer_fingerprint,
@@ -1122,6 +1243,7 @@ where
         peer_local_ip: peer_meta.local_ip,
         peer_device_name: peer_meta.device_name,
         peer_public_ip: peer_meta.public_ip,
+        peer_provisioning,
     })
 }
 
@@ -1144,39 +1266,79 @@ where
 async fn exchange_peer_meta<S>(
     framed: &mut Framed<S, LengthDelimitedCodec>,
     own_meta: &PeerMeta,
-) -> PeerMeta
+    own_provisioning: Option<&SyncProvisioning>,
+) -> (PeerMeta, Option<SyncProvisioning>)
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    // Send our version byte, then our metadata JSON. Swallow send errors (a
-    // legacy peer may have already closed the read half).
+    // ── Send half (always send-first to stay in lock-step over the duplex) ──
+    //
+    // Frame 10: our version byte. Frame 11: our metadata JSON. When we advertise
+    // proto >= 2 we ALSO send frame 12: our sync-provisioning JSON. The version
+    // byte tells the peer whether to expect frame 12, so a v1 peer never reads
+    // it. Swallow send errors (a legacy peer may have closed the read half).
     if send_frame(framed, &[BOOTSTRAP_PROTO_VERSION])
         .await
         .is_err()
     {
-        return PeerMeta::default();
+        return (PeerMeta::default(), None);
     }
     let own_json = serde_json::to_vec(own_meta).unwrap_or_default();
     if send_frame(framed, &own_json).await.is_err() {
-        return PeerMeta::default();
+        return (PeerMeta::default(), None);
+    }
+    // Frame 12 (proto >= 2): our sync-provisioning JSON. We always send a frame
+    // when our advertised version supports it — an unconfigured side sends an
+    // all-`None` value so the peer's read stays in lock-step. NOTE: the JSON is
+    // produced via serde; `serde_json::to_vec` does not log field values, so the
+    // secret `derived_sync_key` is never written to a log here.
+    if BOOTSTRAP_PROTO_VERSION >= SYNC_PROVISIONING_MIN_VERSION {
+        let prov = own_provisioning.cloned().unwrap_or_default();
+        let prov_json = serde_json::to_vec(&prov).unwrap_or_default();
+        if send_frame(framed, &prov_json).await.is_err() {
+            // We already sent meta; treat a provisioning send failure as "no
+            // provisioning exchange" but still return whatever meta we read.
+            // Fall through to the receive half so we can still learn peer meta.
+        }
     }
 
-    // Receive the peer's version byte. Absent / malformed → legacy peer.
+    // ── Receive half ──
+    //
+    // Frame 10 ← peer version byte. Absent / malformed → legacy peer.
     let peer_version = match recv_frame(framed).await {
         Ok(bytes) if bytes.len() == 1 => bytes[0],
-        _ => return PeerMeta::default(),
+        _ => return (PeerMeta::default(), None),
     };
-    if peer_version < BOOTSTRAP_PROTO_VERSION {
-        // Older metadata layout we do not understand — skip the metadata frame.
-        return PeerMeta::default();
+    if peer_version < 1 {
+        // Should not happen (version 0 is never advertised); be defensive.
+        return (PeerMeta::default(), None);
     }
 
-    // Receive the peer's metadata JSON frame.
-    let bytes = match recv_frame(framed).await {
-        Ok(b) if b.len() <= MAX_META_BYTES => b,
-        _ => return PeerMeta::default(),
+    // Frame 11 ← peer metadata JSON.
+    let peer_meta = match recv_frame(framed).await {
+        Ok(b) if b.len() <= MAX_META_BYTES => {
+            serde_json::from_slice::<PeerMeta>(&b).unwrap_or_default()
+        }
+        _ => return (PeerMeta::default(), None),
     };
-    serde_json::from_slice::<PeerMeta>(&bytes).unwrap_or_default()
+
+    // Frame 12 ← peer sync-provisioning JSON — ONLY when the peer advertised a
+    // version that includes it. A v1 (or unknown-lower) peer never sent it, so
+    // we must NOT try to read it (that would desync the stream); we return
+    // `None` for provisioning and the meta we already learned. This is the
+    // version-gated back-compat, mirroring the additive `PeerMeta` pattern.
+    if peer_version < SYNC_PROVISIONING_MIN_VERSION {
+        return (peer_meta, None);
+    }
+    let peer_provisioning = match recv_frame(framed).await {
+        Ok(b) if b.len() <= MAX_PROVISIONING_BYTES => {
+            serde_json::from_slice::<SyncProvisioning>(&b).ok()
+        }
+        // A missing/oversized/garbled provisioning frame must not fail the
+        // already-complete pairing — just yield no provisioning.
+        _ => None,
+    };
+    (peer_meta, peer_provisioning)
 }
 
 // ── framing helpers ───────────────────────────────────────────────────────────
@@ -1380,8 +1542,20 @@ mod tests {
             public_ip: Some("198.51.100.10".into()),
         };
         let resp_meta_task = resp_meta.clone();
-        let responder_task =
-            tokio::spawn(async move { responder.run(&pw, resp_sync_addr, &resp_meta_task).await });
+        // The responder advertises a full SyncProvisioning ("the configured PC");
+        // the initiator advertises None ("a fresh device scanning the QR").
+        let resp_prov = SyncProvisioning {
+            supabase_url: Some("https://proj.supabase.co".into()),
+            supabase_anon_key: Some("anon-key-123".into()),
+            relay_url: Some("https://relay.example".into()),
+            derived_sync_key: Some(vec![7u8; 32]),
+        };
+        let resp_prov_task = resp_prov.clone();
+        let responder_task = tokio::spawn(async move {
+            responder
+                .run(&pw, resp_sync_addr, &resp_meta_task, Some(resp_prov_task))
+                .await
+        });
 
         let addr: SocketAddr = ([127, 0, 0, 1], port).into();
         let init_pw = password.to_string();
@@ -1403,6 +1577,7 @@ mod tests {
                 &init_pw,
                 init_sync_addr,
                 &init_meta_task,
+                None,
             )
             .await
         });
@@ -1438,6 +1613,20 @@ mod tests {
         assert_eq!(init.peer_app_version, resp_meta.app_version);
         assert_eq!(init.peer_local_ip, resp_meta.local_ip);
         assert_eq!(init.peer_public_ip, resp_meta.public_ip);
+
+        // Proto v2: the initiator (which sent None) RECEIVES the responder's
+        // full SyncProvisioning. The responder (initiator sent None) receives an
+        // all-None provisioning, i.e. the default value carrying nothing.
+        assert_eq!(
+            init.peer_provisioning,
+            Some(resp_prov),
+            "initiator must receive the responder's advertised provisioning"
+        );
+        assert_eq!(
+            resp.peer_provisioning,
+            Some(SyncProvisioning::default()),
+            "responder must receive an all-None provisioning from a fresh device"
+        );
     }
 
     /// Wrong password: the initiator's PAKE finish must fail, and the responder
@@ -1457,7 +1646,12 @@ mod tests {
 
         let responder_task = tokio::spawn(async move {
             responder
-                .run("the-right-password", "127.0.0.1:7003", &PeerMeta::default())
+                .run(
+                    "the-right-password",
+                    "127.0.0.1:7003",
+                    &PeerMeta::default(),
+                    None,
+                )
                 .await
         });
 
@@ -1470,6 +1664,7 @@ mod tests {
                 "the-WRONG-password",
                 "127.0.0.1:7004",
                 &PeerMeta::default(),
+                None,
             )
             .await
         });
@@ -1514,7 +1709,7 @@ mod tests {
         let pw = password.to_string();
         let responder_task = tokio::spawn(async move {
             responder
-                .run(&pw, "127.0.0.1:7005", &PeerMeta::default())
+                .run(&pw, "127.0.0.1:7005", &PeerMeta::default(), None)
                 .await
         });
 
@@ -1588,6 +1783,7 @@ mod tests {
                 &init_pw,
                 "127.0.0.1:7006",
                 &PeerMeta::default(),
+                None,
             )
             .await
         });
@@ -1633,7 +1829,7 @@ mod tests {
         // Run the responder; it must time out because we'll stall after frame 1.
         let responder_task = tokio::spawn(async move {
             responder
-                .run("any-password", "127.0.0.1:9000", &PeerMeta::default())
+                .run("any-password", "127.0.0.1:9000", &PeerMeta::default(), None)
                 .await
         });
 
@@ -1708,15 +1904,28 @@ mod tests {
             ..Default::default()
         };
 
+        // Side A advertises provisioning; side B advertises None.
+        let prov_a = SyncProvisioning {
+            supabase_url: Some("https://a.supabase.co".into()),
+            derived_sync_key: Some(vec![9u8; 32]),
+            ..Default::default()
+        };
+
         let ma = meta_a.clone();
         let mb = meta_b.clone();
-        let ta = tokio::spawn(async move { exchange_peer_meta(&mut fa, &ma).await });
-        let tb = tokio::spawn(async move { exchange_peer_meta(&mut fb, &mb).await });
+        let pa = prov_a.clone();
+        let ta = tokio::spawn(async move { exchange_peer_meta(&mut fa, &ma, Some(&pa)).await });
+        let tb = tokio::spawn(async move { exchange_peer_meta(&mut fb, &mb, None).await });
         let (got_a, got_b) = tokio::join!(ta, tb);
 
         // Side A learned B's metadata; side B learned A's.
-        assert_eq!(got_a.unwrap(), meta_b);
-        assert_eq!(got_b.unwrap(), meta_a);
+        let (meta_from_b, prov_from_b) = got_a.unwrap();
+        let (meta_from_a, prov_from_a) = got_b.unwrap();
+        assert_eq!(meta_from_b, meta_b);
+        assert_eq!(meta_from_a, meta_a);
+        // Side B learned A's provisioning; side A learned B's all-None default.
+        assert_eq!(prov_from_a, Some(prov_a));
+        assert_eq!(prov_from_b, Some(SyncProvisioning::default()));
     }
 
     /// Back-compat: when the peer is LEGACY (closes the stream without sending a
@@ -1736,11 +1945,115 @@ mod tests {
             model: Some("MacBook Air".into()),
             ..Default::default()
         };
-        let got = exchange_peer_meta(&mut fa, &meta_a).await;
+        let (got_meta, got_prov) = exchange_peer_meta(&mut fa, &meta_a, None).await;
         assert_eq!(
-            got,
+            got_meta,
             PeerMeta::default(),
             "a legacy peer that sends no metadata must yield all-None"
+        );
+        assert_eq!(
+            got_prov, None,
+            "a legacy peer that sends no provisioning must yield None"
+        );
+    }
+
+    // ── proto v2: SyncProvisioning exchange + back-compat ─────────────────────
+
+    /// A v1 (proto-version-1) peer participates in the metadata exchange but does
+    /// NOT send a provisioning frame. The v2 side must learn the peer's metadata
+    /// and return `None` for provisioning WITHOUT desyncing the stream — this is
+    /// the version-gated back-compat. We simulate a v1 peer by hand-writing only
+    /// frames 10 (version byte = 1) and 11 (metadata JSON), then closing.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn exchange_with_v1_peer_yields_none_provisioning() {
+        let (a, b) = tokio::io::duplex(4096);
+        let mut fa = Framed::new(a, length_codec());
+        let mut fb = Framed::new(b, length_codec());
+
+        // Side A is the modern (v2) side advertising provisioning.
+        let meta_a = PeerMeta {
+            model: Some("Modern Mac".into()),
+            ..Default::default()
+        };
+        let prov_a = SyncProvisioning {
+            supabase_url: Some("https://a.supabase.co".into()),
+            ..Default::default()
+        };
+
+        // Side B emulates a v1 peer: send version byte 1, then a metadata JSON,
+        // then drop — it never sends or reads a provisioning frame.
+        let peer_meta_b = PeerMeta {
+            model: Some("Legacy Mac".into()),
+            ..Default::default()
+        };
+        let b_task = tokio::spawn(async move {
+            send_frame(&mut fb, &[1u8]).await.unwrap();
+            let json = serde_json::to_vec(&peer_meta_b).unwrap();
+            send_frame(&mut fb, &json).await.unwrap();
+            // Read A's frames so A's sends don't block, but never send frame 12.
+            let _ = recv_frame(&mut fb).await; // A version byte
+            let _ = recv_frame(&mut fb).await; // A metadata
+            let _ = recv_frame(&mut fb).await; // A provisioning (A sends it; B ignores)
+            peer_meta_b
+        });
+
+        let (got_meta, got_prov) = exchange_peer_meta(&mut fa, &meta_a, Some(&prov_a)).await;
+        let sent_b = b_task.await.unwrap();
+
+        assert_eq!(
+            got_meta, sent_b,
+            "v2 side must learn the v1 peer's metadata"
+        );
+        assert_eq!(
+            got_prov, None,
+            "a v1 peer that sends no provisioning frame must yield None (back-compat)"
+        );
+    }
+
+    /// `SyncProvisioning` round-trips through its JSON wire form, including the
+    /// secret derived key bytes.
+    #[test]
+    fn sync_provisioning_round_trips() {
+        let prov = SyncProvisioning {
+            supabase_url: Some("https://x.supabase.co".into()),
+            supabase_anon_key: Some("anon-jwt".into()),
+            relay_url: Some("https://relay.example".into()),
+            derived_sync_key: Some(vec![1u8; 32]),
+        };
+        let json = serde_json::to_vec(&prov).expect("serialize");
+        let back: SyncProvisioning = serde_json::from_slice(&json).expect("deserialize");
+        assert_eq!(back, prov, "SyncProvisioning must round-trip");
+    }
+
+    /// An all-`None` `SyncProvisioning` serialises to an empty object and round
+    /// -trips back to the default (every field omitted via skip_serializing_if).
+    #[test]
+    fn sync_provisioning_all_none_is_empty_object() {
+        let prov = SyncProvisioning::default();
+        let json = serde_json::to_string(&prov).expect("serialize");
+        assert_eq!(json, "{}", "all-None provisioning must serialise to {{}}");
+        let back: SyncProvisioning = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, SyncProvisioning::default());
+    }
+
+    /// The custom `Debug` impl must NOT print the secret key bytes — only a
+    /// redacted length marker — while still showing the non-secret URLs.
+    #[test]
+    fn sync_provisioning_debug_redacts_key() {
+        let prov = SyncProvisioning {
+            supabase_url: Some("https://x.supabase.co".into()),
+            derived_sync_key: Some(vec![0xABu8; 32]),
+            ..Default::default()
+        };
+        let dbg = format!("{prov:?}");
+        assert!(dbg.contains("redacted"), "Debug must redact the key: {dbg}");
+        assert!(
+            !dbg.contains("171") && !dbg.contains("0xab") && !dbg.contains("AB, AB"),
+            "Debug must not contain raw key bytes: {dbg}"
+        );
+        assert!(
+            dbg.contains("x.supabase.co"),
+            "Debug must still show the non-secret URL: {dbg}"
         );
     }
 
@@ -1842,6 +2155,7 @@ mod tests {
                     "sas-confirm-loopback",
                     "127.0.0.1:7101",
                     &PeerMeta::default(),
+                    None,
                     move |sas| {
                         let slot = resp_seen_cb.clone();
                         let sas = sas.to_string();
@@ -1864,6 +2178,7 @@ mod tests {
                 "sas-confirm-loopback",
                 "127.0.0.1:7102",
                 &PeerMeta::default(),
+                None,
                 move |sas| {
                     let slot = init_seen_cb.clone();
                     let sas = sas.to_string();
@@ -1925,6 +2240,7 @@ mod tests {
                     "sas-confirm-reject",
                     "127.0.0.1:7103",
                     &PeerMeta::default(),
+                    None,
                     |_sas| async { true },
                 )
                 .await
@@ -1939,6 +2255,7 @@ mod tests {
                 "sas-confirm-reject",
                 "127.0.0.1:7104",
                 &PeerMeta::default(),
+                None,
                 |_sas| async { false },
             )
             .await
@@ -1991,6 +2308,7 @@ mod tests {
                     "sas-relay-secret",
                     "127.0.0.1:7105",
                     &PeerMeta::default(),
+                    None,
                     move |sas| {
                         let slot = resp_seen_cb.clone();
                         let sas = sas.to_string();
@@ -2066,6 +2384,7 @@ mod tests {
                 "sas-relay-secret",
                 "127.0.0.1:7106",
                 &PeerMeta::default(),
+                None,
                 move |sas| {
                     let slot = init_seen_cb.clone();
                     let sas = sas.to_string();

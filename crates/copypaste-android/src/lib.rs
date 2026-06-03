@@ -423,6 +423,72 @@ pub struct BootstrapResult {
     pub peer_fingerprint: String,
     pub peer_sync_addr: String,
     pub session_key: Vec<u8>,
+    /// Sync-account provisioning the PEER advertised over the authenticated
+    /// bootstrap tunnel ("QR fully provisions all sync"). `None` when the peer
+    /// advertised nothing or is a legacy build. Kotlin persists these later
+    /// (Supabase URL/anon key + the derived cloud sync key) so scanning a
+    /// configured PC also sets up cloud sync, not just P2P. See
+    /// [`SyncProvisioning`].
+    pub peer_provisioning: Option<SyncProvisioning>,
+}
+
+/// FFI mirror of [`copypaste_p2p::bootstrap::SyncProvisioning`].
+///
+/// Carries the sync-account setup exchanged in-band over the authenticated
+/// bootstrap tunnel. The URLs and anon key are non-secret; `derived_sync_key`
+/// is the 32-byte DERIVED cloud sync key (NOT the passphrase) and is secret.
+///
+/// # SECURITY NOTE — `derived_sync_key` crosses the FFI boundary unzeroized.
+/// UniFFI copies it into a Kotlin `ByteArray`. The Kotlin layer MUST zero that
+/// array after persisting the key (store in AndroidKeystore; never log it) —
+/// a load-bearing contract, otherwise raw key material lingers on the JVM heap.
+pub struct SyncProvisioning {
+    pub supabase_url: Option<String>,
+    pub supabase_anon_key: Option<String>,
+    pub relay_url: Option<String>,
+    pub derived_sync_key: Option<Vec<u8>>,
+}
+
+impl std::fmt::Debug for SyncProvisioning {
+    /// NEVER prints the secret `derived_sync_key` bytes — only a redacted length
+    /// marker. The URLs/anon key are non-secret and shown verbatim. Required so
+    /// `BootstrapResult`'s `#[derive(Debug)]` does not leak the key.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SyncProvisioning")
+            .field("supabase_url", &self.supabase_url)
+            .field("supabase_anon_key", &self.supabase_anon_key)
+            .field("relay_url", &self.relay_url)
+            .field(
+                "derived_sync_key",
+                &self
+                    .derived_sync_key
+                    .as_ref()
+                    .map(|k| format!("<{} bytes redacted>", k.len())),
+            )
+            .finish()
+    }
+}
+
+impl From<copypaste_p2p::bootstrap::SyncProvisioning> for SyncProvisioning {
+    fn from(p: copypaste_p2p::bootstrap::SyncProvisioning) -> Self {
+        SyncProvisioning {
+            supabase_url: p.supabase_url,
+            supabase_anon_key: p.supabase_anon_key,
+            relay_url: p.relay_url,
+            derived_sync_key: p.derived_sync_key,
+        }
+    }
+}
+
+impl From<SyncProvisioning> for copypaste_p2p::bootstrap::SyncProvisioning {
+    fn from(p: SyncProvisioning) -> Self {
+        copypaste_p2p::bootstrap::SyncProvisioning {
+            supabase_url: p.supabase_url,
+            supabase_anon_key: p.supabase_anon_key,
+            relay_url: p.relay_url,
+            derived_sync_key: p.derived_sync_key,
+        }
+    }
 }
 
 /// Generate a fresh self-signed ECDSA P-256 mTLS certificate for this device,
@@ -467,6 +533,11 @@ pub fn bootstrap_pair_initiator(
     key_der: &[u8],
     pake_password: String,
     sync_addr: String,
+    // "QR fully provisions all sync": optional provisioning THIS device sends to
+    // the responder. An Android device scanning a configured PC passes `None`
+    // (it has nothing to offer yet); the received provisioning comes back in the
+    // result's `peer_provisioning`.
+    local_provisioning: Option<SyncProvisioning>,
 ) -> Result<BootstrapResult, CopypasteError> {
     panic_boundary::catch_result(|| {
         let addr: std::net::SocketAddr =
@@ -487,6 +558,7 @@ pub fn bootstrap_pair_initiator(
                 // separately; send an empty meta frame so the responder still
                 // gets a well-formed Phase-4 bootstrap exchange.
                 &copypaste_p2p::bootstrap::PeerMeta::default(),
+                local_provisioning.map(Into::into),
             ))
             .map_err(|e| CopypasteError::P2pError {
                 reason: e.to_string(),
@@ -496,6 +568,7 @@ pub fn bootstrap_pair_initiator(
             peer_fingerprint: pairing.peer_fingerprint,
             peer_sync_addr: pairing.peer_sync_addr,
             session_key: pairing.session_key.as_bytes().to_vec(),
+            peer_provisioning: pairing.peer_provisioning.map(Into::into),
         })
     })
 }
@@ -1781,6 +1854,14 @@ mod tests {
                         &pw,
                         resp_sync_addr,
                         &copypaste_p2p::bootstrap::PeerMeta::default(),
+                        // Responder advertises provisioning so the FFI initiator
+                        // receives it in `peer_provisioning`.
+                        Some(copypaste_p2p::bootstrap::SyncProvisioning {
+                            supabase_url: Some("https://proj.supabase.co".into()),
+                            supabase_anon_key: Some("anon-key".into()),
+                            relay_url: None,
+                            derived_sync_key: Some(vec![3u8; 32]),
+                        }),
                     )
                     .await
             })
@@ -1795,8 +1876,21 @@ mod tests {
             &initiator_cert.key_der,
             password.to_string(),
             init_sync_addr.to_string(),
+            None,
         )
         .expect("FFI bootstrap pairing must succeed over loopback");
+
+        // QR-provisions-all-sync: the FFI initiator received the responder's
+        // advertised provisioning, including the derived sync key bytes.
+        let prov = result
+            .peer_provisioning
+            .as_ref()
+            .expect("initiator must receive peer provisioning");
+        assert_eq!(
+            prov.supabase_url.as_deref(),
+            Some("https://proj.supabase.co")
+        );
+        assert_eq!(prov.derived_sync_key.as_deref(), Some(&[3u8; 32][..]));
 
         // The FFI wrapper learned the responder's REAL pinned cert fingerprint.
         assert_eq!(
@@ -1873,6 +1967,7 @@ mod tests {
                         &pw,
                         resp_sync_addr,
                         &copypaste_p2p::bootstrap::PeerMeta::default(),
+                        None,
                     )
                     .await
             })
@@ -1887,6 +1982,7 @@ mod tests {
             &initiator_cert.key_der,
             password.to_string(),
             init_sync_addr.to_string(),
+            None,
         )
         .expect("FFI bootstrap pairing must succeed over loopback");
 
@@ -1940,6 +2036,7 @@ mod tests {
             &cert.key_der,
             "pw".into(),
             "127.0.0.1:7000".into(),
+            None,
         )
         .expect_err("malformed addr_hint must error");
         assert!(

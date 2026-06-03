@@ -755,7 +755,7 @@ internal interface UniffiLib : Library {
 
     fun uniffi_copypaste_android_fn_func_add_clipboard_item(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_copypaste_android_fn_func_bootstrap_pair_initiator(`addrHint`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`pakePassword`: RustBuffer.ByValue,`syncAddr`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_bootstrap_pair_initiator(`addrHint`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`pakePassword`: RustBuffer.ByValue,`syncAddr`: RustBuffer.ByValue,`localProvisioning`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_build_pairing_qr(`fingerprint`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`addrHint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -981,7 +981,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_add_clipboard_item() != 1001.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_bootstrap_pair_initiator() != 51343.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_bootstrap_pair_initiator() != 39326.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_build_pairing_qr() != 8917.toShort()) {
@@ -1249,7 +1249,8 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 data class BootstrapResult (
     var `peerFingerprint`: kotlin.String, 
     var `peerSyncAddr`: kotlin.String, 
-    var `sessionKey`: List<kotlin.UByte>
+    var `sessionKey`: List<kotlin.UByte>, 
+    var `peerProvisioning`: SyncProvisioning?
 ) {
     
     companion object
@@ -1261,19 +1262,22 @@ public object FfiConverterTypeBootstrapResult: FfiConverterRustBuffer<BootstrapR
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterSequenceUByte.read(buf),
+            FfiConverterOptionalTypeSyncProvisioning.read(buf),
         )
     }
 
     override fun allocationSize(value: BootstrapResult) = (
             FfiConverterString.allocationSize(value.`peerFingerprint`) +
             FfiConverterString.allocationSize(value.`peerSyncAddr`) +
-            FfiConverterSequenceUByte.allocationSize(value.`sessionKey`)
+            FfiConverterSequenceUByte.allocationSize(value.`sessionKey`) +
+            FfiConverterOptionalTypeSyncProvisioning.allocationSize(value.`peerProvisioning`)
     )
 
     override fun write(value: BootstrapResult, buf: ByteBuffer) {
             FfiConverterString.write(value.`peerFingerprint`, buf)
             FfiConverterString.write(value.`peerSyncAddr`, buf)
             FfiConverterSequenceUByte.write(value.`sessionKey`, buf)
+            FfiConverterOptionalTypeSyncProvisioning.write(value.`peerProvisioning`, buf)
     }
 }
 
@@ -1615,6 +1619,43 @@ public object FfiConverterTypeScannedPairing: FfiConverterRustBuffer<ScannedPair
 
 
 
+data class SyncProvisioning (
+    var `supabaseUrl`: kotlin.String?, 
+    var `supabaseAnonKey`: kotlin.String?, 
+    var `relayUrl`: kotlin.String?, 
+    var `derivedSyncKey`: List<kotlin.UByte>?
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeSyncProvisioning: FfiConverterRustBuffer<SyncProvisioning> {
+    override fun read(buf: ByteBuffer): SyncProvisioning {
+        return SyncProvisioning(
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalSequenceUByte.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: SyncProvisioning) = (
+            FfiConverterOptionalString.allocationSize(value.`supabaseUrl`) +
+            FfiConverterOptionalString.allocationSize(value.`supabaseAnonKey`) +
+            FfiConverterOptionalString.allocationSize(value.`relayUrl`) +
+            FfiConverterOptionalSequenceUByte.allocationSize(value.`derivedSyncKey`)
+    )
+
+    override fun write(value: SyncProvisioning, buf: ByteBuffer) {
+            FfiConverterOptionalString.write(value.`supabaseUrl`, buf)
+            FfiConverterOptionalString.write(value.`supabaseAnonKey`, buf)
+            FfiConverterOptionalString.write(value.`relayUrl`, buf)
+            FfiConverterOptionalSequenceUByte.write(value.`derivedSyncKey`, buf)
+    }
+}
+
+
+
 data class SyncedItem (
     var `id`: kotlin.String, 
     var `itemId`: kotlin.String, 
@@ -1904,6 +1945,64 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
 
 
 
+public object FfiConverterOptionalTypeSyncProvisioning: FfiConverterRustBuffer<SyncProvisioning?> {
+    override fun read(buf: ByteBuffer): SyncProvisioning? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeSyncProvisioning.read(buf)
+    }
+
+    override fun allocationSize(value: SyncProvisioning?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeSyncProvisioning.allocationSize(value)
+        }
+    }
+
+    override fun write(value: SyncProvisioning?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeSyncProvisioning.write(value, buf)
+        }
+    }
+}
+
+
+
+
+public object FfiConverterOptionalSequenceUByte: FfiConverterRustBuffer<List<kotlin.UByte>?> {
+    override fun read(buf: ByteBuffer): List<kotlin.UByte>? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterSequenceUByte.read(buf)
+    }
+
+    override fun allocationSize(value: List<kotlin.UByte>?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterSequenceUByte.allocationSize(value)
+        }
+    }
+
+    override fun write(value: List<kotlin.UByte>?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterSequenceUByte.write(value, buf)
+        }
+    }
+}
+
+
+
+
 public object FfiConverterSequenceUByte: FfiConverterRustBuffer<List<kotlin.UByte>> {
     override fun read(buf: ByteBuffer): List<kotlin.UByte> {
         val len = buf.getInt()
@@ -2042,13 +2141,17 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
          * `pake_password` comes from the scanned QR token; `sync_addr` is this
          * device's own P2P sync-listener host:port. Returns the peer's pinned
          * fingerprint, its sync address, and the 32-byte PAKE session key.
+         * `local_provisioning` is the OPTIONAL sync-account setup THIS device offers
+         * to the responder ("QR fully provisions all sync"); an Android device
+         * scanning a configured PC passes `null` (nothing to offer). The provisioning
+         * the PEER advertised comes back in `BootstrapResult.peer_provisioning`.
          * Throws `P2pError` on a bad addr_hint or any transport/PAKE failure.
          */
-    @Throws(CopypasteException::class) fun `bootstrapPairInitiator`(`addrHint`: kotlin.String, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>, `pakePassword`: kotlin.String, `syncAddr`: kotlin.String): BootstrapResult {
+    @Throws(CopypasteException::class) fun `bootstrapPairInitiator`(`addrHint`: kotlin.String, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>, `pakePassword`: kotlin.String, `syncAddr`: kotlin.String, `localProvisioning`: SyncProvisioning?): BootstrapResult {
             return FfiConverterTypeBootstrapResult.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_bootstrap_pair_initiator(
-        FfiConverterString.lower(`addrHint`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),FfiConverterString.lower(`pakePassword`),FfiConverterString.lower(`syncAddr`),_status)
+        FfiConverterString.lower(`addrHint`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),FfiConverterString.lower(`pakePassword`),FfiConverterString.lower(`syncAddr`),FfiConverterOptionalTypeSyncProvisioning.lower(`localProvisioning`),_status)
 }
     )
     }
