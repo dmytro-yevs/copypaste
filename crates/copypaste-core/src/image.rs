@@ -27,10 +27,15 @@ pub const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
 ///
 /// The thumbnail is generated once at capture from the SAME decoded
 /// `DynamicImage` as the full-resolution blob (see [`encode_image_full`]) and
-/// stored encrypted in the `thumb` column (schema v9). 680 px matches the
-/// design-system preview cap so the UI can render a crisp inline preview
-/// without ever decrypting/decoding the multi-hundred-KB full image.
-pub const THUMBNAIL_MAX_DIM: u32 = 680;
+/// stored encrypted in the `thumb` column (schema v9). The UI renders this in a
+/// ~40 px list row, so a 192 px longest side stays crisp at 2× retina while
+/// keeping the *decoded* bitmap area small: a WebView decodes the data URI to
+/// an RGBA bitmap whose RSS scales with dim² (192² is ≈ 12.5× less decoded
+/// memory than the previous 680² source). This is the dominant fix for HB-10
+/// (350 MB image-memory) — the UI LRU caps compressed data-URI string bytes,
+/// not the decoded bitmaps, so the source dimension is what actually bounds
+/// RSS. See [`thumb_dims_exceed_cap`] for the backfill regeneration gate.
+pub const THUMBNAIL_MAX_DIM: u32 = 192;
 
 #[derive(Debug, Error)]
 pub enum ImageError {
@@ -415,6 +420,25 @@ pub fn encode_thumbnail_from_png(
     let chunks = encrypt_chunks(&bytes, key, thumb_file_id, IMAGE_CHUNK_SIZE)?;
     let blob = chunks_to_blob(&chunks)?;
     Ok((blob, w, h))
+}
+
+/// True when a *stored* thumbnail whose recorded dimensions are
+/// `(thumb_w, thumb_h)` is larger than the current [`THUMBNAIL_MAX_DIM`] cap on
+/// its longest side and should therefore be regenerated.
+///
+/// Used by the lazy-backfill path: a thumbnail persisted under an older, larger
+/// cap (e.g. 680 px) must be re-shrunk to the current cap so the UI never
+/// decodes an oversized bitmap (HB-10). Returns `false` for an already-conformant
+/// thumbnail so conformant rows are never needlessly re-encoded.
+///
+/// Zero dimensions (missing/corrupt meta) return `false`: there is nothing
+/// trustworthy to compare against, and the caller's normal NULL-thumb backfill
+/// path already handles genuinely absent thumbnails.
+pub fn thumb_dims_exceed_cap(thumb_w: u32, thumb_h: u32) -> bool {
+    if thumb_w == 0 || thumb_h == 0 {
+        return false;
+    }
+    thumb_w.max(thumb_h) > THUMBNAIL_MAX_DIM
 }
 
 /// Full capture-time encode producing BOTH the full-resolution encrypted
@@ -953,7 +977,7 @@ mod tests {
 
     #[test]
     fn thumbnail_is_smaller_or_equal_dimensions_than_original() {
-        // 1000x500 source bounded to 680 → longest side hits 680, aspect kept.
+        // 1000x500 source bounded to 192 → longest side hits 192, aspect kept.
         let png = synthetic_png(1000, 500);
         let key = test_key();
         let thumb_id = test_thumb_file_id();
@@ -971,13 +995,13 @@ mod tests {
             orig_w,
             orig_h
         );
-        assert_eq!(thumb.width(), 680, "longest side must hit the 680 bound");
-        assert_eq!(thumb.height(), 340, "aspect ratio (2:1) must be preserved");
+        assert_eq!(thumb.width(), 192, "longest side must hit the 192 bound");
+        assert_eq!(thumb.height(), 96, "aspect ratio (2:1) must be preserved");
     }
 
     #[test]
     fn thumbnail_never_upscales_small_source() {
-        // 64x32 source is already under 680 → thumbnail must keep its dimensions.
+        // 64x32 source is already under the cap → thumbnail keeps its dimensions.
         let png = synthetic_png(64, 32);
         let key = test_key();
         let thumb_id = test_thumb_file_id();
@@ -988,6 +1012,24 @@ mod tests {
             decode_clipboard_image(&decode_thumbnail(&blob, &key, &thumb_id).unwrap()).unwrap();
         assert_eq!(thumb.width(), 64, "must not upscale width");
         assert_eq!(thumb.height(), 32, "must not upscale height");
+    }
+
+    #[test]
+    fn thumb_dims_exceed_cap_flags_oversized_only() {
+        // A thumbnail stored under the old 680 cap exceeds the new 192 cap.
+        assert!(
+            thumb_dims_exceed_cap(680, 340),
+            "680 longest side > 192 cap"
+        );
+        assert!(thumb_dims_exceed_cap(340, 680), "tall variant also exceeds");
+        // Exactly at the cap is conformant (not regenerated).
+        assert!(!thumb_dims_exceed_cap(192, 96), "192 == cap is conformant");
+        assert!(!thumb_dims_exceed_cap(96, 192), "tall-at-cap is conformant");
+        // Smaller than the cap is conformant.
+        assert!(!thumb_dims_exceed_cap(64, 32), "under cap is conformant");
+        // Zero dims (missing/corrupt meta) → never flagged.
+        assert!(!thumb_dims_exceed_cap(0, 0), "zero dims are not flagged");
+        assert!(!thumb_dims_exceed_cap(0, 800), "partial-zero not flagged");
     }
 
     #[test]
@@ -1029,9 +1071,9 @@ mod tests {
         assert_eq!(meta.chunk_count as usize, chunks.len());
         assert!(meta.chunk_count >= 1);
 
-        // Thumbnail is the downscaled 2:1 → 680x340.
-        assert_eq!(thumb_w, 680);
-        assert_eq!(thumb_h, 340);
+        // Thumbnail is the downscaled 2:1 → 192x96.
+        assert_eq!(thumb_w, 192);
+        assert_eq!(thumb_h, 96);
 
         // Full blob decodes (via file_id) to the original dimensions.
         let full = decode_clipboard_image(&decode_image(&chunks, &key, &file_id).unwrap()).unwrap();
@@ -1041,7 +1083,7 @@ mod tests {
         let thumb =
             decode_clipboard_image(&decode_thumbnail(&thumb_blob, &key, &thumb_id).unwrap())
                 .unwrap();
-        assert_eq!(thumb.dimensions(), (680, 340));
+        assert_eq!(thumb.dimensions(), (192, 96));
     }
 
     #[test]
