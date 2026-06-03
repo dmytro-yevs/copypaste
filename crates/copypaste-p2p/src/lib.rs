@@ -79,6 +79,7 @@ pub use pake::{
 // Convenient top-level re-exports — unauthenticated bootstrap channel (P2P Phase 1).
 pub use bootstrap::{
     run_initiator, BootstrapPairing, BootstrapResponder, BOOTSTRAP_ACCEPT_TIMEOUT,
+    DISCOVERY_PAIRING_PASSWORD,
 };
 
 /// Default TCP port for P2P direct connections.

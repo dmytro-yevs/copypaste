@@ -174,6 +174,27 @@ const MAX_FRAME_BYTES: usize = 64 * 1024;
 ///   `peer_provisioning = None` on both sides.
 pub const BOOTSTRAP_PROTO_VERSION: u8 = 2;
 
+/// Fixed, well-known PAKE password for the QR-less LAN/SAS *discovery* pairing
+/// path — shared by every initiator and responder (macOS daemon and Android).
+///
+/// The discovery path has NO pre-shared secret, so PAKE alone cannot
+/// authenticate — the human SAS comparison does. opaque-ke is an ASYMMETRIC
+/// PAKE: the initiator's `ClientLogin` only `finish`es against a `PasswordFile`
+/// registered for the IDENTICAL password (a mismatch fails at frame 7, before
+/// any SAS is derived). Both ends therefore agree on this constant up front and
+/// rely ENTIRELY on the post-channel-binding SAS compare for authentication
+/// (Bluetooth numeric-comparison / Magic-Wormhole verifier pattern): a MitM
+/// substituting its own per-leg session yields a different `bound_key` → a
+/// different SAS → the two humans see a mismatch and abort.
+///
+/// This is NON-SECRET by design — publishing it changes nothing, because the
+/// SAS, not the password, gates trust and persistence. It MUST NOT be logged
+/// (not for secrecy, but to keep pairing logs clean), and it MUST be byte-equal
+/// across all platforms so the OPAQUE inputs / channel-binding checksums match.
+/// QR pairing does NOT use this — that path derives its password from the QR
+/// token (`PairingToken::to_pake_password`) and is unaffected.
+pub const DISCOVERY_PAIRING_PASSWORD: &str = "copypaste/p2p/lan-sas-discovery/v1";
+
 /// Minimum protocol version a peer must advertise (in the frame-10 version byte)
 /// to participate in the [`SyncProvisioning`] exchange (frames 12/13). A peer
 /// advertising less than this — or no version frame at all — is treated as
@@ -2213,6 +2234,97 @@ mod tests {
         assert_eq!(resp_sas, init_sas, "both sides must see the same SAS");
         assert_eq!(resp.sas, resp_sas, "returned sas matches confirmed sas");
         assert_eq!(init.sas, init_sas, "returned sas matches confirmed sas");
+        assert_eq!(resp.sas, init.sas);
+        assert_eq!(resp.session_key.as_bytes(), init.session_key.as_bytes());
+    }
+
+    /// Regression for the discovery-pairing P0: when BOTH the initiator and the
+    /// responder use the fixed, well-known [`DISCOVERY_PAIRING_PASSWORD`] (the
+    /// QR-less LAN/SAS path), the asymmetric OPAQUE PAKE `finish`es (no
+    /// `InvalidPassword` at frame 7) and both sides derive the SAME SAS. The old
+    /// daemon discovery path generated an INDEPENDENT random password per side,
+    /// which would fail here. Mirrors `confirm_variants_loopback_sas_matches_and_accepts`
+    /// but pins the shared constant.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn discovery_shared_password_pake_completes_and_sas_matches() {
+        use std::sync::{Arc, Mutex};
+
+        let responder_cert = SelfSignedCert::generate("responder-device").unwrap();
+        let initiator_cert = SelfSignedCert::generate("initiator-device").unwrap();
+
+        let responder = BootstrapResponder::bind(
+            responder_cert.cert_der.clone(),
+            responder_cert.key_der.clone(),
+        )
+        .await
+        .expect("bind responder");
+        let port = responder.local_addr().expect("local addr").port();
+
+        let resp_seen: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let init_seen: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+        let resp_seen_cb = resp_seen.clone();
+        let responder_task = tokio::spawn(async move {
+            responder
+                .run_with_confirm(
+                    DISCOVERY_PAIRING_PASSWORD,
+                    "127.0.0.1:7111",
+                    &PeerMeta::default(),
+                    None,
+                    move |sas| {
+                        let slot = resp_seen_cb.clone();
+                        let sas = sas.to_string();
+                        async move {
+                            *slot.lock().unwrap() = Some(sas);
+                            true
+                        }
+                    },
+                )
+                .await
+        });
+
+        let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+        let init_seen_cb = init_seen.clone();
+        let initiator_task = tokio::spawn(async move {
+            run_initiator_with_confirm(
+                addr,
+                initiator_cert.cert_der,
+                initiator_cert.key_der,
+                DISCOVERY_PAIRING_PASSWORD,
+                "127.0.0.1:7112",
+                &PeerMeta::default(),
+                None,
+                move |sas| {
+                    let slot = init_seen_cb.clone();
+                    let sas = sas.to_string();
+                    async move {
+                        *slot.lock().unwrap() = Some(sas);
+                        true
+                    }
+                },
+            )
+            .await
+        });
+
+        let (resp_res, init_res) = tokio::join!(responder_task, initiator_task);
+        let resp = resp_res
+            .expect("responder join")
+            .expect("responder pairing (PAKE must finish with the shared password)");
+        let init = init_res
+            .expect("initiator join")
+            .expect("initiator pairing (PAKE must finish with the shared password)");
+
+        let resp_sas = resp_seen
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("responder saw sas");
+        let init_sas = init_seen
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("initiator saw sas");
+        assert_eq!(resp_sas, init_sas, "both sides must derive the same SAS");
         assert_eq!(resp.sas, init.sas);
         assert_eq!(resp.session_key.as_bytes(), init.session_key.as_bytes());
     }
