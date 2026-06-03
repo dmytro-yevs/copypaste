@@ -288,6 +288,14 @@ export const api = {
   getItemImage: (id: string) => ipcCall<{ data_uri: string }>("get_item_image", { id }),
 
   /**
+   * Fetch the full binary payload for a `content_type === "file"` clipboard item.
+   * Returns `{ filename, mime, data_b64 }` where `data_b64` is standard base64.
+   * Throws `IpcError` when the item is not found or is not a file item.
+   */
+  getItemFile: (id: string) =>
+    ipcCall<{ filename: string; mime: string; data_b64: string }>("get_item_file", { id }),
+
+  /**
    * Fetch the pre-computed thumbnail for a clipboard image item. Returns
    * `{ thumbnail: "data:image/webp;base64,…" }` when the daemon has a thumb,
    * or `{ thumbnail: null }` when thumbnails are not available for this item

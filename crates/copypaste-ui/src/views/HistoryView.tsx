@@ -15,6 +15,7 @@ import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
 import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
+import { FileChip } from "../components/FileChip";
 
 // ---------------------------------------------------------------------------
 // Toast — §8 slide-up, neutral panel + 6px semantic dot, one at a time
@@ -70,6 +71,15 @@ function Toast({ message, kind }: { message: string; kind: ToastKind }) {
  */
 function itemsSignature(items: HistoryEntry[]): string {
   return items.map((it) => `${it.id}:${it.pinned ? 1 : 0}:${it.wall_time}`).join("|");
+}
+
+/**
+ * Extract the filename from the daemon's "[file: <name>]" preview placeholder.
+ * Falls back to "file" when the format doesn't match (e.g. older daemon builds).
+ */
+function parseFilename(preview: string): string {
+  const m = preview.match(/^\[file:\s*(.+)\]$/);
+  return m ? m[1].trim() : preview || "file";
 }
 
 function relativeTime(ms: number): string {
@@ -131,6 +141,29 @@ function ContentIcon({ type }: { type: string }) {
         <path d="M7 3H3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V9" />
         <path d="M10 2h4v4" />
         <path d="M14 2 8 8" />
+      </svg>
+    );
+  }
+
+  if (type === "file") {
+    // Amber document icon — mirrors FileChip's FileIcon colour.
+    return (
+      <svg
+        viewBox="0 0 16 16"
+        width="14"
+        height="14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        className="shrink-0 text-[#e5c07b]"
+      >
+        <path d="M9.5 1.5H3.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V5.5L9.5 1.5Z" />
+        <path d="M9.5 1.5v4h4" />
+        <line x1="5" y1="8" x2="11" y2="8" />
+        <line x1="5" y1="10.5" x2="11" y2="10.5" />
       </svg>
     );
   }
@@ -214,7 +247,11 @@ export function rowHeightFor(
 ): number {
   const isImage =
     entry.content_type === "image" || entry.content_type.startsWith("image/");
-  return isImage ? Math.max(imageMaxHeight + 10, 34) : Math.max(previewSize, 22);
+  // File rows get a fixed height that fits the FileChip (icon + filename + buttons).
+  const isFile = entry.content_type === "file";
+  if (isImage) return Math.max(imageMaxHeight + 10, 34);
+  if (isFile) return 44; // FileChip is taller than a single-line text row
+  return Math.max(previewSize, 22);
 }
 
 // ---------------------------------------------------------------------------
@@ -327,6 +364,7 @@ function HistoryRow({
 }: RowProps) {
   // Bare "image" content_type (legacy) or MIME-typed "image/*" future rows.
   const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
+  const isFile = entry.content_type === "file";
 
   let preview: string;
   if (entry.is_sensitive) {
@@ -435,7 +473,7 @@ function HistoryRow({
 
       {/* Type glyph */}
       <span className="flex w-4 shrink-0 items-center justify-center">
-        <ContentIcon type={isImage ? "image" : entry.content_type} />
+        <ContentIcon type={isImage ? "image" : isFile ? "file" : entry.content_type} />
       </span>
 
       {isImage ? (
@@ -443,6 +481,15 @@ function HistoryRow({
         // Wrapped in flex-1 min-w-0 so images align in the same column as text rows.
         <span className="flex-1 min-w-0 flex items-center">
           <ImageThumb id={entry.id} maxHeight={imageMaxHeight} />
+        </span>
+      ) : isFile ? (
+        // File rows: show a FileChip with filename parsed from the "[file: name]" preview.
+        <span className="flex-1 min-w-0 flex items-center py-0.5">
+          <FileChip
+            id={entry.id}
+            filename={parseFilename(entry.preview)}
+            mime="application/octet-stream"
+          />
         </span>
       ) : (
         // Text / URL rows: multi-line preview clamped with webkit-line-clamp.
@@ -721,6 +768,7 @@ function DetailsModal({
   onClose: () => void;
 }) {
   const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
+  const isFile = entry.content_type === "file";
 
   // Close on Escape
   useEffect(() => {
@@ -730,6 +778,8 @@ function DetailsModal({
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  const modalTitle = isImage ? "Image preview" : isFile ? "File details" : "Text preview";
 
   return (
     <div
@@ -747,7 +797,7 @@ function DetailsModal({
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-ide-border px-4 py-2.5">
           <span className="text-[13px] font-medium text-ide-text">
-            {isImage ? "Image preview" : "Text preview"}
+            {modalTitle}
           </span>
           <button
             type="button"
@@ -766,6 +816,38 @@ function DetailsModal({
           {isImage ? (
             // Full-res for detail modal — one image at a time, no shared cache.
             <FullResImage id={entry.id} maxHeight={600} />
+          ) : isFile ? (
+            // File detail: show a full-width FileChip (with Save As + Copy actions)
+            // plus metadata rows. No raw binary preview — that's not useful.
+            <div className="flex flex-col gap-3">
+              <FileChip
+                id={entry.id}
+                filename={parseFilename(entry.preview)}
+                mime="application/octet-stream"
+              />
+              <table className="text-[12px] text-ide-dim w-full border-collapse">
+                <tbody>
+                  <tr>
+                    <td className="py-0.5 pr-3 text-ide-faint font-medium w-20">Name</td>
+                    <td className="py-0.5 break-all">{parseFilename(entry.preview)}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-0.5 pr-3 text-ide-faint font-medium">Type</td>
+                    <td className="py-0.5">{entry.content_type}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-0.5 pr-3 text-ide-faint font-medium">Copied</td>
+                    <td className="py-0.5">{new Date(entry.wall_time).toLocaleString()}</td>
+                  </tr>
+                  {entry.app_bundle_id && (
+                    <tr>
+                      <td className="py-0.5 pr-3 text-ide-faint font-medium">Source</td>
+                      <td className="py-0.5">{entry.app_bundle_id}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <pre
               className="whitespace-pre-wrap break-words text-[13px] text-ide-text font-mono leading-relaxed select-text"
@@ -779,7 +861,7 @@ function DetailsModal({
         {/* Footer: metadata */}
         <div className="shrink-0 border-t border-ide-border px-4 py-2 text-[11px] text-ide-faint flex items-center gap-3">
           <span>{entry.content_type}</span>
-          {entry.app_bundle_id && <span>{entry.app_bundle_id}</span>}
+          {entry.app_bundle_id && !isFile && <span>{entry.app_bundle_id}</span>}
           <span className="ml-auto">{new Date(entry.wall_time).toLocaleString()}</span>
         </div>
       </div>
