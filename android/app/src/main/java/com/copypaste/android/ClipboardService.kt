@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
 import java.util.Calendar
 
@@ -142,6 +143,24 @@ class ClipboardService : Service() {
                 Log.w(TAG, "Image clip has no URI — skipping")
             }
             return@OnPrimaryClipChangedListener
+        }
+
+        // File branch: a URI whose MIME is not text/* and not image/* is a real
+        // file (PDF, ZIP, DOCX, etc.). Capture bytes + metadata and store as a
+        // "file" content-type item so it can sync to macOS via P2P.
+        val itemUri = clip.getItemAt(0)?.uri
+        if (itemUri != null) {
+            val mimeTypes = (0 until clip.description.mimeTypeCount)
+                .map { clip.description.getMimeType(it) }
+            val fileMime = mimeTypes.firstOrNull { mime ->
+                mime != null && !mime.startsWith("text/") && !mime.startsWith("image/")
+            }
+            if (fileMime != null) {
+                scope.launch {
+                    captureFileClip(this@ClipboardService, itemUri, fileMime, settings, repository)
+                }
+                return@OnPrimaryClipChangedListener
+            }
         }
 
         val text = clip.getItemAt(0)?.text?.toString()
@@ -593,6 +612,96 @@ class ClipboardService : Service() {
             if (settings.notifyOnCopy) postCopyNotification(context)
             if (settings.soundOnCopy) playCopySound(context)
             // Image sync is not wired in this version — text sync only for now.
+        }
+
+        /**
+         * Capture a file clipboard item from a content:// or file:// [uri].
+         *
+         * Called when the clipboard item has a non-text, non-image MIME type
+         * (e.g. application/pdf, application/zip). Reads the raw bytes via
+         * [contentResolver], derives the filename from [OpenableColumns.DISPLAY_NAME]
+         * (falling back to the last URI path segment), and stores the item as
+         * `content_type="file"` with a "[file: <name>]" label.
+         *
+         * The stored item is included in the next P2P sync push via
+         * [ClipboardRepository.localItemsForSync], which attaches the bytes and
+         * metadata through [getFileBytes]/[getFileMeta].
+         *
+         * Size is gated by [ClipboardRepository.storeFileBytes]'s internal cap.
+         * Private-mode and capture-paused guards mirror [captureImageClip].
+         */
+        suspend fun captureFileClip(
+            context: Context,
+            uri: android.net.Uri,
+            mimeType: String,
+            settings: Settings,
+            repository: ClipboardRepository,
+        ) {
+            if (!settings.captureEnabled) {
+                Log.d(TAG, "captureFileClip: capture paused — dropping file clipboard change")
+                return
+            }
+            if (settings.privateMode) {
+                Log.d(TAG, "captureFileClip: private mode — dropping file clipboard change")
+                return
+            }
+
+            // Read raw bytes from the content provider.
+            val fileBytes: ByteArray = try {
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: run {
+                        Log.w(TAG, "captureFileClip: openInputStream returned null for $uri")
+                        return
+                    }
+            } catch (t: Throwable) {
+                Log.w(TAG, "captureFileClip: failed to read bytes from $uri: ${t.message}")
+                return
+            }
+
+            if (fileBytes.isEmpty()) {
+                Log.d(TAG, "captureFileClip: empty byte array for $uri — skipping")
+                return
+            }
+
+            // Derive filename: prefer OpenableColumns.DISPLAY_NAME, fall back to
+            // the last path segment of the URI (common for file:// URIs).
+            val fileName: String? = try {
+                context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val col = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            if (col >= 0) cursor.getString(col) else null
+                        } else null
+                    }
+                    ?: uri.lastPathSegment
+            } catch (_: Exception) {
+                uri.lastPathSegment
+            }
+
+            val key = settings.encryptionKey
+            val label = SyncFileHelper.buildFileLabel(fileName)
+            val storedId = repository.storeItem(
+                plaintext = label,
+                key = key,
+                contentType = "file",
+            )
+            if (storedId.isEmpty()) {
+                Log.d(TAG, "captureFileClip: storeItem returned empty (dedup/sensitive) — skipping")
+                return
+            }
+
+            repository.storeFileBytes(storedId, fileBytes)
+            repository.storeFileMeta(storedId, fileName, mimeType)
+            Log.d(
+                TAG,
+                "captureFileClip: stored $storedId (${fileBytes.size} bytes, " +
+                    "name=$fileName, mime=$mimeType)",
+            )
+
+            bumpTodayCounter(context)
+            refreshNotification(context)
+            if (settings.notifyOnCopy) postCopyNotification(context)
+            if (settings.soundOnCopy) playCopySound(context)
         }
 
         /** Path to the app-private encrypted SQLite DB used by the UniFFI live binding. */

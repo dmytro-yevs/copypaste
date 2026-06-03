@@ -48,7 +48,15 @@
 /// original filename and MIME type without having to parse the at-rest
 /// `blob_ref` meta JSON. Kotlin generated against ABI 6 reads `SyncedItem`
 /// with the wrong shape (missing two fields) and must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 7;
+///
+/// **ABI 8 (Android→macOS file send):** `LocalItem` gained two optional
+/// fields: `file_name: String?` and `mime: String?`. These are set by the
+/// Kotlin capture path for `content_type == "file"` items and forwarded
+/// verbatim onto the outbound `WireItem` so the macOS daemon's
+/// `rewrap_inbound_blob` can reconstruct the original filename and MIME type.
+/// Kotlin generated against ABI 7 constructs `LocalItem` without these fields
+/// and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 8;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

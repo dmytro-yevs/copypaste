@@ -1140,6 +1140,13 @@ class ClipboardRepository(context: Context) {
     /**
      * Decrypt all locally stored items into [uniffi.copypaste_android.LocalItem]
      * values for a P2P sync push.
+     *
+     * For `content_type == "file"` items: the stored plaintext is a human-readable
+     * label (e.g. "[file: report.pdf]"). The actual bytes are loaded from the
+     * file-bytes sidecar store ([getFileBytes]) and used as the FFI `plaintext`
+     * so the peer receives the real file content. File metadata is attached via
+     * [getFileMeta] into the new ABI-8 `fileName`/`mime` fields. Items whose
+     * file-bytes sidecar is missing (e.g. storage failure at capture) are skipped.
      */
     suspend fun localItemsForSync(
         key: ByteArray,
@@ -1155,17 +1162,40 @@ class ClipboardRepository(context: Context) {
                 val nonce = Base64.decode(parts[3], Base64.NO_WRAP)
                 val ciphertext = Base64.decode(parts[4], Base64.NO_WRAP)
                 val plain = decryptText(id, ciphertext, nonce, key)
-                uniffi.copypaste_android.LocalItem(
-                    id = id,
-                    // STABLE cross-device identity. The row id is minted ONCE at
-                    // capture (or carried from an incoming item) and persisted,
-                    // so reusing it as item_id lets the daemon dedup/LWW-merge
-                    // this clip instead of seeing a fresh item on every dial.
-                    itemId = id,
-                    wallTimeMs = wallTimeMs,
-                    contentType = contentType,
-                    plaintext = plain.map { it.toUByte() },
-                )
+
+                if (contentType == "file") {
+                    // For file items the raw plaintext is just a label; the peer
+                    // needs the actual file bytes. Fetch from the sidecar store.
+                    val fileBytes = getFileBytes(id)
+                    if (fileBytes == null || fileBytes.isEmpty()) {
+                        Log.d(TAG, "Skipping file item $id for sync: bytes missing or empty")
+                        return@mapNotNull null
+                    }
+                    val (fileName, mime) = getFileMeta(id)
+                    uniffi.copypaste_android.LocalItem(
+                        id = id,
+                        itemId = id,
+                        wallTimeMs = wallTimeMs,
+                        contentType = contentType,
+                        plaintext = fileBytes.map { it.toUByte() },
+                        fileName = fileName,
+                        mime = mime,
+                    )
+                } else {
+                    uniffi.copypaste_android.LocalItem(
+                        id = id,
+                        // STABLE cross-device identity. The row id is minted ONCE at
+                        // capture (or carried from an incoming item) and persisted,
+                        // so reusing it as item_id lets the daemon dedup/LWW-merge
+                        // this clip instead of seeing a fresh item on every dial.
+                        itemId = id,
+                        wallTimeMs = wallTimeMs,
+                        contentType = contentType,
+                        plaintext = plain.map { it.toUByte() },
+                        fileName = null,
+                        mime = null,
+                    )
+                }
             } catch (e: Exception) {
                 Log.d(TAG, "Skipping item $id for sync (decrypt/parse failed): ${e.message}")
                 null

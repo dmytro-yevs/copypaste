@@ -1305,7 +1305,9 @@ data class LocalItem (
     var `itemId`: kotlin.String, 
     var `wallTimeMs`: kotlin.Long, 
     var `contentType`: kotlin.String, 
-    var `plaintext`: List<kotlin.UByte>
+    var `plaintext`: List<kotlin.UByte>, 
+    var `fileName`: kotlin.String?, 
+    var `mime`: kotlin.String?
 ) {
     
     companion object
@@ -1319,6 +1321,8 @@ public object FfiConverterTypeLocalItem: FfiConverterRustBuffer<LocalItem> {
             FfiConverterLong.read(buf),
             FfiConverterString.read(buf),
             FfiConverterSequenceUByte.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -1327,7 +1331,9 @@ public object FfiConverterTypeLocalItem: FfiConverterRustBuffer<LocalItem> {
             FfiConverterString.allocationSize(value.`itemId`) +
             FfiConverterLong.allocationSize(value.`wallTimeMs`) +
             FfiConverterString.allocationSize(value.`contentType`) +
-            FfiConverterSequenceUByte.allocationSize(value.`plaintext`)
+            FfiConverterSequenceUByte.allocationSize(value.`plaintext`) +
+            FfiConverterOptionalString.allocationSize(value.`fileName`) +
+            FfiConverterOptionalString.allocationSize(value.`mime`)
     )
 
     override fun write(value: LocalItem, buf: ByteBuffer) {
@@ -1336,6 +1342,8 @@ public object FfiConverterTypeLocalItem: FfiConverterRustBuffer<LocalItem> {
             FfiConverterLong.write(value.`wallTimeMs`, buf)
             FfiConverterString.write(value.`contentType`, buf)
             FfiConverterSequenceUByte.write(value.`plaintext`, buf)
+            FfiConverterOptionalString.write(value.`fileName`, buf)
+            FfiConverterOptionalString.write(value.`mime`, buf)
     }
 }
 

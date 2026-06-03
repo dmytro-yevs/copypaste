@@ -555,6 +555,12 @@ pub struct LocalItem {
     pub wall_time_ms: i64,
     pub content_type: String,
     pub plaintext: Vec<u8>,
+    /// Original filename for file items (e.g. `"report.pdf"`). `None` for text/image items.
+    /// Added in ABI 8 to mirror `SyncedItem::file_name` on the outbound side.
+    pub file_name: Option<String>,
+    /// MIME type for file items (e.g. `"application/pdf"`). `None` for text/image items.
+    /// Added in ABI 8 to enable Android→macOS file metadata forwarding.
+    pub mime: Option<String>,
 }
 
 /// An item received from the peer during sync, decrypted back to plaintext.
@@ -731,10 +737,12 @@ pub fn sync_with_peer(
                 // Sync-key-wrapped blobs are version-independent on the wire;
                 // the daemon stamps the same default for re-keyed items.
                 key_version: P2P_WIRE_KEY_VERSION,
-                // Android send path does not carry file items today; these are
-                // always None on the outbound side until file-send is added.
-                file_name: None,
-                mime: None,
+                // For file items, forward the caller-supplied file_name and mime
+                // so the macOS daemon can reconstruct the original filename and
+                // MIME type on receive (rewrap_inbound_blob already handles them).
+                // Text and image items never set these fields.
+                file_name: it.file_name.clone(),
+                mime: it.mime.clone(),
             });
         }
 
@@ -1777,6 +1785,8 @@ mod tests {
             wall_time_ms: 7,
             content_type: offered_content_type.to_string(),
             plaintext: offered_plaintext.clone(),
+            file_name: None,
+            mime: None,
         }];
 
         let result = sync_with_peer(
@@ -1930,6 +1940,8 @@ mod tests {
             wall_time_ms: 11,
             content_type: "image".to_string(),
             plaintext: offered_plaintext.clone(),
+            file_name: None,
+            mime: None,
         }];
 
         let result = sync_with_peer(
@@ -2035,6 +2047,8 @@ mod tests {
             wall_time_ms: 11,
             content_type: "text".to_string(),
             plaintext: b"stable-id body".to_vec(),
+            file_name: None,
+            mime: None,
         }];
 
         let result = sync_with_peer(
@@ -2185,6 +2199,122 @@ mod tests {
             24 + plaintext.len() + 16,
             "blob must be nonce(24) + plaintext + tag(16)"
         );
+    }
+
+    // ── Part A: LocalItem file_name + mime outbound wiring (ABI 8) ──────────
+
+    /// A `LocalItem` with `content_type == "file"` and populated `file_name` /
+    /// `mime` fields MUST have those fields forwarded onto the outbound
+    /// `WireItem` (Android→macOS file-send, ABI 8).
+    ///
+    /// The peer is a loopback listener that captures the first inbound frame and
+    /// reports its `file_name` / `mime` back via a channel.
+    #[test]
+    fn sync_with_peer_sends_file_item_with_file_name_and_mime() {
+        use copypaste_p2p::transport::{PairedPeers, PeerTransport};
+        use copypaste_sync::protocol::WireItem;
+        use futures_util::StreamExt;
+        use std::sync::mpsc;
+        use tokio::net::TcpListener;
+
+        let session_key = [0x7Bu8; 32];
+
+        let peer_cert = generate_device_cert().expect("peer cert");
+        let init_cert = generate_device_cert().expect("initiator cert");
+        let peer_fp = peer_cert.fingerprint.clone();
+        let init_fp = init_cert.fingerprint.clone();
+
+        // Side-channel: first recv = port, second recv = captured (file_name, mime).
+        let (name_tx, name_rx) = mpsc::channel::<(Option<String>, Option<String>)>();
+
+        let peer_cert_der = peer_cert.cert_der.clone();
+        let peer_key_der = peer_cert.key_der.clone();
+        let init_fp_for_peer = init_fp.clone();
+        let name_tx_peer = name_tx.clone();
+        let peer_thread = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("peer runtime");
+            rt.block_on(async move {
+                let peers = PairedPeers::new();
+                peers.add(init_fp_for_peer, "android-initiator");
+                let transport = PeerTransport::from_cert(peer_cert_der, peer_key_der, peers);
+
+                let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+                let port = listener.local_addr().expect("addr").port();
+                // Port is signalled as (None, Some("<port>")).
+                name_tx_peer
+                    .send((None, Some(port.to_string())))
+                    .expect("send port");
+
+                let (_addr, _fp, mut framed) = transport.accept(&listener).await.expect("accept");
+
+                // Drain inbound frames; capture the first "file" frame's metadata.
+                let mut captured: Option<(Option<String>, Option<String>)> = None;
+                while let Ok(Some(Ok(frame))) =
+                    tokio::time::timeout(std::time::Duration::from_secs(5), framed.next()).await
+                {
+                    if let Ok(w) = serde_json::from_slice::<WireItem>(&frame) {
+                        if w.content_type == "file" && captured.is_none() {
+                            captured = Some((w.file_name, w.mime));
+                        }
+                    }
+                }
+                if let Some(pair) = captured {
+                    name_tx_peer.send(pair).expect("send captured fields");
+                }
+            })
+        });
+
+        // First receive is the port signal.
+        let (_, port_opt) = name_rx.recv().expect("recv port signal");
+        let addr = format!("127.0.0.1:{}", port_opt.expect("port string"));
+
+        let file_bytes: Vec<u8> = b"fake pdf content".to_vec();
+        let file_item_id = uuid::Uuid::new_v4().to_string();
+        let local_items = vec![LocalItem {
+            id: String::new(),
+            item_id: file_item_id.clone(),
+            wall_time_ms: 42,
+            content_type: "file".to_string(),
+            plaintext: file_bytes.clone(),
+            file_name: Some("report.pdf".to_string()),
+            mime: Some("application/pdf".to_string()),
+        }];
+
+        let result = sync_with_peer(
+            addr,
+            peer_fp,
+            session_key.to_vec(),
+            init_cert.cert_der.clone(),
+            init_cert.key_der.clone(),
+            local_items,
+        )
+        .expect("FFI sync_with_peer must succeed over loopback");
+
+        assert_eq!(
+            result.items_sent, 1,
+            "FFI must report its one offered file item as sent"
+        );
+
+        // Second receive is the captured (file_name, mime) from the peer.
+        let (got_name, got_mime) = name_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("peer must report the file_name/mime it observed");
+
+        assert_eq!(
+            got_name,
+            Some("report.pdf".to_string()),
+            "outbound WireItem.file_name must carry the LocalItem.file_name"
+        );
+        assert_eq!(
+            got_mime,
+            Some("application/pdf".to_string()),
+            "outbound WireItem.mime must carry the LocalItem.mime"
+        );
+
+        peer_thread.join().expect("peer thread join");
     }
 
     // ── Fix #3: derive_cloud_sync_key PassphraseTooShort surface ────────────
