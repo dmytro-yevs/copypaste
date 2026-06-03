@@ -818,153 +818,39 @@ async fn push_loop(
     let mut retry_queue: VecDeque<(ClipboardItem, String)> = VecDeque::new();
 
     // ── Startup backlog push (fix #33) ────────────────────────────────────────
-    // Load all text items that have not yet been synced (`is_synced = 0`).
-    // We only need to queue them here; the main loop below will drain the
-    // retry queue before accepting new broadcast items, so existing history
-    // flows to Supabase first, in chronological order.
+    // Load all syncable items that have not yet been synced (`is_synced = 0`)
+    // and queue them; the main loop below drains the retry queue before
+    // accepting new broadcast items, so existing history flows to Supabase
+    // first, in chronological order.
     //
-    // We snapshot the sync key now — if it is not set yet the backlog items
-    // are NOT encrypted/queued (they'd be skipped anyway in the main loop).
-    // They will be picked up by the next `set_sync_passphrase` call only
-    // indirectly (via re-capture or manual re-sync); a future enhancement
-    // could re-trigger the backlog sweep on key-set. For now this is
-    // consistent with the existing no-key warning behaviour.
-    {
+    // BUG C2: if no sync passphrase is set at startup the sweep is a no-op here,
+    // but we re-run it inside the loop on the first None→Some key transition
+    // (see `prev_key_present` below), so the "start daemon, then enter
+    // passphrase" flow no longer strands the existing history.
+    let key_present_at_start = {
         let key_snapshot: Option<Vec<u8>> = {
             let guard = sync_key.lock().await;
             guard.as_ref().map(|k| k.as_bytes().to_vec())
         };
-        if let Some(ref key_bytes) = key_snapshot {
-            // v0.6: text, image, and file items all sync to the cloud now. We
-            // still mark any OTHER (unknown) non-syncable content_type synced so
-            // it does not linger in the unsynced count forever.
-            {
-                let db_arc2 = db.clone();
-                let _ = tokio::task::spawn_blocking(move || {
-                    let db = db_arc2.blocking_lock();
-                    match db.conn().execute(
-                        "UPDATE clipboard_items SET is_synced = 1 \
-                         WHERE is_synced = 0 \
-                           AND content_type NOT IN ('text', 'image', 'file')",
-                        [],
-                    ) {
-                        Ok(0) => {}
-                        Ok(n) => tracing::warn!(
-                            "cloud-sync backlog: marked {n} unsupported-type item(s) is_synced=1"
-                        ),
-                        Err(e) => tracing::warn!(
-                            "cloud-sync backlog: failed to mark unsupported items synced: {e}"
-                        ),
-                    }
-                })
-                .await;
+        match key_snapshot {
+            Some(key_bytes) => {
+                run_backlog_sweep(&db, &local_key, &key_bytes, &mut retry_queue).await;
+                true
             }
-
-            let db_arc = db.clone();
-            let local_key_clone = local_key.clone();
-            let mut key_arr = [0u8; 32];
-            key_arr.copy_from_slice(key_bytes);
-            // Load unsynced items on the blocking pool (rusqlite is sync).
-            let backlog_items: Vec<ClipboardItem> = tokio::task::spawn_blocking(move || {
-                let db = db_arc.blocking_lock();
-                // Fetch up to PUSH_RETRY_QUEUE_CAP unsynced syncable items
-                // (text/image/file), oldest first, so the Supabase timeline is
-                // chronological.
-                let mut stmt = match db.conn().prepare(
-                    "SELECT id, item_id, content_type, content, content_nonce, \
-                     blob_ref, is_sensitive, is_synced, lamport_ts, wall_time, \
-                     expires_at, app_bundle_id, content_hash, origin_device_id, \
-                     key_version, pinned \
-                     FROM clipboard_items \
-                     WHERE is_synced = 0 \
-                       AND content_type IN ('text', 'image', 'file') \
-                     ORDER BY wall_time ASC \
-                     LIMIT ?1",
-                ) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::warn!("cloud-sync backlog query prepare failed: {e}");
-                        return vec![];
-                    }
-                };
-                let _ = local_key_clone; // keep the Arc alive
-                stmt.query_map(rusqlite::params![PUSH_RETRY_QUEUE_CAP as i64], |row| {
-                    Ok(ClipboardItem {
-                        id: row.get(0)?,
-                        item_id: row.get(1)?,
-                        content_type: row.get(2)?,
-                        content: row.get(3)?,
-                        content_nonce: row.get(4)?,
-                        blob_ref: row.get(5)?,
-                        is_sensitive: row.get(6)?,
-                        is_synced: row.get(7)?,
-                        lamport_ts: row.get(8)?,
-                        wall_time: row.get(9)?,
-                        expires_at: row.get(10)?,
-                        app_bundle_id: row.get(11)?,
-                        content_hash: row.get(12)?,
-                        origin_device_id: row.get(13).unwrap_or_default(),
-                        key_version: row.get::<_, i64>(14).unwrap_or(2) as u8,
-                        pinned: row.get(15).unwrap_or(false),
-                        // pin_order is a local-only ordering field, not synced.
-                        pin_order: None,
-                        // text backlog query selects no thumb column; text items
-                        // never carry a thumbnail (schema v9, local-only field).
-                        thumb: None,
-                    })
-                })
-                .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
-                .unwrap_or_default()
-            })
-            .await
-            .unwrap_or_default();
-
-            let count = backlog_items.len();
-            if count > 0 {
-                tracing::info!(
-                    "cloud-sync backlog: found {count} unsynced text items — queuing for push"
+            None => {
+                tracing::debug!(
+                    "cloud-sync backlog: no sync passphrase set at startup — \
+                     skipping backlog pre-load (will re-sweep when a passphrase is set)"
                 );
-                let tmp_key = SyncKey::from_bytes(key_arr);
-                for item in backlog_items {
-                    let plaintext = match decrypt_item_plaintext(&item, &local_key) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            tracing::warn!(
-                                "cloud-sync backlog: decrypt failed for id={}: {e}; skipping",
-                                item.id
-                            );
-                            continue;
-                        }
-                    };
-                    match encrypt_for_cloud(&tmp_key, &item.item_id, &plaintext) {
-                        Ok(blob) => {
-                            use base64::Engine as _;
-                            let payload_ct_b64 =
-                                base64::engine::general_purpose::STANDARD.encode(&blob);
-                            enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "cloud-sync backlog: encrypt failed for id={}: {e}; skipping",
-                                item.id
-                            );
-                        }
-                    }
-                }
-                // Zero the key bytes.
-                zeroize::Zeroize::zeroize(&mut key_arr);
-                tracing::info!(
-                    "cloud-sync backlog: {} items queued for upload",
-                    retry_queue.len()
-                );
+                false
             }
-        } else {
-            tracing::debug!(
-                "cloud-sync backlog: no sync passphrase set at startup — \
-                 skipping backlog pre-load (call set_sync_passphrase first)"
-            );
         }
-    }
+    };
+
+    // BUG C2: track sync-key presence across iterations so we can detect a
+    // None→Some transition (passphrase entered after startup) and run the
+    // backlog sweep exactly once on that edge, rather than every tick.
+    let mut prev_key_present = key_present_at_start;
 
     // Audit-concurrency HIGH #1 — `broadcast::Receiver::recv` is documented
     // cancellation-safe. We park each item in the retry queue immediately upon
@@ -972,6 +858,30 @@ async fn push_loop(
     // between dequeue and push the item is visible in the retry-queue log and
     // not silently dropped.
     loop {
+        // BUG C2: detect a None→Some sync-key transition (passphrase entered
+        // after the daemon started) and run the backlog sweep ONCE on that edge.
+        // Without this, history captured before the passphrase was set never
+        // uploads until each item is re-copied. We snapshot the key bytes under
+        // the lock, then release it before the (awaiting) sweep.
+        let key_now: Option<Vec<u8>> = {
+            let guard = sync_key.lock().await;
+            guard.as_ref().map(|k| k.as_bytes().to_vec())
+        };
+        let key_present_now = key_now.is_some();
+        if key_present_now && !prev_key_present {
+            if let Some(key_bytes) = key_now.as_ref() {
+                tracing::info!(
+                    "cloud-sync: sync passphrase became available after startup — \
+                     running backlog sweep once"
+                );
+                run_backlog_sweep(&db, &local_key, key_bytes, &mut retry_queue).await;
+            }
+        }
+        // Update the edge tracker every tick (covers both →true and →false) so
+        // a later None→Some flip (e.g. clear then re-enter) sweeps again, but a
+        // steady Some state never re-sweeps.
+        prev_key_present = key_present_now;
+
         // A-SET-2 hot-reload: read sync_on_wifi_only from the live config on
         // every iteration so a runtime change via set_config takes effect
         // immediately without a daemon restart.  Items remain in the retry
@@ -1096,8 +1006,13 @@ async fn push_loop(
                                             continue;
                                         }
                                     };
+                                    // BUG C1: for files, embed name+MIME inside
+                                    // the encrypted plaintext (Supabase schema
+                                    // carries none). No-op for text/image.
+                                    let cloud_plaintext =
+                                        wrap_cloud_upload_plaintext(&item, plaintext);
                                     // Re-encrypt for cloud with sync key + item_id AAD.
-                                    match encrypt_for_cloud(key, &item.item_id, &plaintext) {
+                                    match encrypt_for_cloud(key, &item.item_id, &cloud_plaintext) {
                                         Ok(blob) => {
                                             use base64::Engine as _;
                                             base64::engine::general_purpose::STANDARD.encode(&blob)
@@ -1166,6 +1081,151 @@ async fn push_loop(
             }
         }
     }
+}
+
+/// Sweep the local DB for unsynced syncable items, re-encrypt each under the
+/// supplied sync key, and enqueue it for upload.
+///
+/// Shared by the startup pre-load and the BUG C2 None→Some key-transition path
+/// so both follow the identical `is_synced = 0 AND content_type IN (...)` query
+/// and chronological ordering. `key_bytes` MUST be exactly 32 bytes (the
+/// `SyncKey` width); a wrong length is logged and the sweep is skipped. The
+/// derived key material is zeroized before return.
+async fn run_backlog_sweep(
+    db: &Arc<Mutex<Database>>,
+    local_key: &Arc<zeroize::Zeroizing<[u8; 32]>>,
+    key_bytes: &[u8],
+    retry_queue: &mut VecDeque<(ClipboardItem, String)>,
+) {
+    let mut key_arr = [0u8; 32];
+    if key_bytes.len() != key_arr.len() {
+        tracing::warn!(
+            "cloud-sync backlog: sync key wrong length ({} != 32); skipping sweep",
+            key_bytes.len()
+        );
+        return;
+    }
+    key_arr.copy_from_slice(key_bytes);
+
+    // v0.6: text, image, and file items all sync to the cloud now. Mark any
+    // OTHER (unknown) non-syncable content_type synced so it does not linger in
+    // the unsynced count forever.
+    {
+        let db_arc2 = db.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let db = db_arc2.blocking_lock();
+            match db.conn().execute(
+                "UPDATE clipboard_items SET is_synced = 1 \
+                 WHERE is_synced = 0 \
+                   AND content_type NOT IN ('text', 'image', 'file')",
+                [],
+            ) {
+                Ok(0) => {}
+                Ok(n) => tracing::warn!(
+                    "cloud-sync backlog: marked {n} unsupported-type item(s) is_synced=1"
+                ),
+                Err(e) => tracing::warn!(
+                    "cloud-sync backlog: failed to mark unsupported items synced: {e}"
+                ),
+            }
+        })
+        .await;
+    }
+
+    let db_arc = db.clone();
+    // Load unsynced items on the blocking pool (rusqlite is sync).
+    let backlog_items: Vec<ClipboardItem> = tokio::task::spawn_blocking(move || {
+        let db = db_arc.blocking_lock();
+        // Fetch up to PUSH_RETRY_QUEUE_CAP unsynced syncable items
+        // (text/image/file), oldest first, so the Supabase timeline is
+        // chronological.
+        let mut stmt = match db.conn().prepare(
+            "SELECT id, item_id, content_type, content, content_nonce, \
+             blob_ref, is_sensitive, is_synced, lamport_ts, wall_time, \
+             expires_at, app_bundle_id, content_hash, origin_device_id, \
+             key_version, pinned \
+             FROM clipboard_items \
+             WHERE is_synced = 0 \
+               AND content_type IN ('text', 'image', 'file') \
+             ORDER BY wall_time ASC \
+             LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("cloud-sync backlog query prepare failed: {e}");
+                return vec![];
+            }
+        };
+        stmt.query_map(rusqlite::params![PUSH_RETRY_QUEUE_CAP as i64], |row| {
+            Ok(ClipboardItem {
+                id: row.get(0)?,
+                item_id: row.get(1)?,
+                content_type: row.get(2)?,
+                content: row.get(3)?,
+                content_nonce: row.get(4)?,
+                blob_ref: row.get(5)?,
+                is_sensitive: row.get(6)?,
+                is_synced: row.get(7)?,
+                lamport_ts: row.get(8)?,
+                wall_time: row.get(9)?,
+                expires_at: row.get(10)?,
+                app_bundle_id: row.get(11)?,
+                content_hash: row.get(12)?,
+                origin_device_id: row.get(13).unwrap_or_default(),
+                key_version: row.get::<_, i64>(14).unwrap_or(2) as u8,
+                pinned: row.get(15).unwrap_or(false),
+                // pin_order is a local-only ordering field, not synced.
+                pin_order: None,
+                // backlog query selects no thumb column; thumbnails are a
+                // local-only field (schema v9) and never synced.
+                thumb: None,
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
+        .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
+
+    let count = backlog_items.len();
+    if count > 0 {
+        tracing::info!("cloud-sync backlog: found {count} unsynced item(s) — queuing for push");
+        let tmp_key = SyncKey::from_bytes(key_arr);
+        for item in backlog_items {
+            let plaintext = match decrypt_item_plaintext(&item, local_key) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(
+                        "cloud-sync backlog: decrypt failed for id={}: {e}; skipping",
+                        item.id
+                    );
+                    continue;
+                }
+            };
+            // BUG C1: for files, embed name+MIME inside the encrypted plaintext
+            // so cloud sync preserves file identity. No-op for text/image.
+            let cloud_plaintext = wrap_cloud_upload_plaintext(&item, plaintext);
+            match encrypt_for_cloud(&tmp_key, &item.item_id, &cloud_plaintext) {
+                Ok(blob) => {
+                    use base64::Engine as _;
+                    let payload_ct_b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
+                    enqueue_for_retry(retry_queue, item, payload_ct_b64);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "cloud-sync backlog: encrypt failed for id={}: {e}; skipping",
+                        item.id
+                    );
+                }
+            }
+        }
+        tracing::info!(
+            "cloud-sync backlog: {} item(s) queued for upload",
+            retry_queue.len()
+        );
+    }
+    // Zero the derived key bytes regardless of whether any items were queued.
+    zeroize::Zeroize::zeroize(&mut key_arr);
 }
 
 /// Append `(item, payload_ct_b64)` to the retry queue, evicting the oldest
@@ -2805,9 +2865,28 @@ fn build_local_blob_item(
         ));
     }
     let v1_key: [u8; 32] = **local_key;
-    // Re-derive file_id from the plaintext so item_id/dedup converge with the
-    // sender (the chunk AEAD binds file_id as AAD).
-    let file_id = crate::clipboard::image_content_hash(plaintext);
+
+    // BUG C1: a downloaded FILE payload may carry a self-describing header
+    // (version + name + mime) prepended by the sender before cloud encryption.
+    // Strip it and recover the original name/MIME; a headerless (old-daemon)
+    // payload decodes as raw bytes with the legacy name/MIME. We re-bind file_id
+    // and the meta to the header-STRIPPED bytes so the local row reads back as
+    // the true file content.
+    let (file_plaintext, file_name, file_mime) = if content_type == "file" {
+        decode_cloud_file_payload(plaintext)
+    } else {
+        // Images carry no header; keep the plaintext as-is (owned for a uniform
+        // type below).
+        (
+            plaintext.to_vec(),
+            CLOUD_FILE_LEGACY_NAME.to_string(),
+            CLOUD_FILE_LEGACY_MIME.to_string(),
+        )
+    };
+
+    // Re-derive file_id from the (header-stripped) plaintext so item_id/dedup
+    // converge with the sender (the chunk AEAD binds file_id as AAD).
+    let file_id = crate::clipboard::image_content_hash(&file_plaintext);
 
     let (content, blob_ref) = if content_type == "image" {
         let (meta, chunks) = copypaste_core::encode_image_with_limit(
@@ -2823,10 +2902,24 @@ fn build_local_blob_item(
         let meta_json = crate::clipboard::build_image_meta_json(&meta, &thumb_file_id, 0, 0);
         (blob, meta_json)
     } else {
+        // BUG C1: re-chunk the header-STRIPPED bytes and restore the original
+        // name/MIME recovered from the envelope (legacy fallback for headerless
+        // payloads). encode_file rejects an empty filename, so the legacy "file"
+        // default also guards the empty-name edge.
+        let name = if file_name.is_empty() {
+            CLOUD_FILE_LEGACY_NAME
+        } else {
+            &file_name
+        };
+        let mime = if file_mime.is_empty() {
+            CLOUD_FILE_LEGACY_MIME
+        } else {
+            &file_mime
+        };
         let (meta, chunks) = copypaste_core::encode_file(
-            plaintext,
-            "file",
-            "application/octet-stream",
+            &file_plaintext,
+            name,
+            mime,
             &v1_key,
             &file_id,
             copypaste_core::MAX_FILE_BYTES,
@@ -3075,6 +3168,153 @@ fn decode_payload_ct(payload_ct: &str) -> Result<Vec<u8>, String> {
     base64::engine::general_purpose::STANDARD
         .decode(payload_ct)
         .map_err(|e| format!("base64 decode: {e}"))
+}
+
+// ── Cloud file-identity envelope (BUG C1) ──────────────────────────────────────
+//
+// Cloud sync re-wraps a file's raw bytes under the sync key, but the Supabase
+// schema carries only `content_type` — NOT the file's name/MIME (unlike the P2P
+// `WireItem`, which has dedicated fields). To preserve file identity end-to-end
+// WITHOUT a schema change, we prepend a small self-describing header to the file
+// bytes *before* `encrypt_for_cloud`, so name+MIME live INSIDE the encrypted
+// plaintext (the relay/cloud only ever sees opaque ciphertext).
+//
+// Wire format (all multi-byte integers big-endian):
+//   [1 byte  version = CLOUD_FILE_HEADER_VERSION]
+//   [2 bytes name_len][name_len bytes UTF-8 file name]
+//   [2 bytes mime_len][mime_len bytes UTF-8 MIME type]
+//   [file bytes ...]
+//
+// Back-compat: a file uploaded by an OLD daemon has no header. On download we
+// validate the version byte and both length fields against the buffer; if any
+// check fails we treat the ENTIRE plaintext as raw file bytes with the legacy
+// name="file" / mime="application/octet-stream" (the pre-fix behaviour).
+
+/// Version byte for the cloud file-identity header. Bump only with a matching
+/// decoder branch.
+const CLOUD_FILE_HEADER_VERSION: u8 = 1;
+
+/// Legacy fallback file name for headerless (old-daemon) file payloads.
+const CLOUD_FILE_LEGACY_NAME: &str = "file";
+
+/// Legacy fallback MIME for headerless (old-daemon) file payloads.
+const CLOUD_FILE_LEGACY_MIME: &str = "application/octet-stream";
+
+/// Prepend the cloud file-identity header to `file_bytes`.
+///
+/// `name`/`mime` longer than `u16::MAX` bytes are truncated on a UTF-8 char
+/// boundary — these come from a captured file path / sniffed MIME and are in
+/// practice far shorter, so the cap only guards the 2-byte length field.
+fn encode_cloud_file_payload(name: &str, mime: &str, file_bytes: &[u8]) -> Vec<u8> {
+    let name_b = truncate_utf8(name, u16::MAX as usize).as_bytes();
+    let mime_b = truncate_utf8(mime, u16::MAX as usize).as_bytes();
+    let mut out = Vec::with_capacity(1 + 2 + name_b.len() + 2 + mime_b.len() + file_bytes.len());
+    out.push(CLOUD_FILE_HEADER_VERSION);
+    // Lengths fit u16 by construction (truncate_utf8 bounds them).
+    out.extend_from_slice(&(name_b.len() as u16).to_be_bytes());
+    out.extend_from_slice(name_b);
+    out.extend_from_slice(&(mime_b.len() as u16).to_be_bytes());
+    out.extend_from_slice(mime_b);
+    out.extend_from_slice(file_bytes);
+    out
+}
+
+/// Truncate `s` to at most `max` bytes on a UTF-8 char boundary.
+fn truncate_utf8(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// Parse a cloud file payload into `(file_bytes, name, mime)`.
+///
+/// Returns the embedded name/MIME when a valid header is present; otherwise
+/// (old-daemon payload, or any malformed/overrunning header) treats the WHOLE
+/// buffer as raw file bytes with the legacy name/MIME — never panics.
+fn decode_cloud_file_payload(payload: &[u8]) -> (Vec<u8>, String, String) {
+    let legacy = || {
+        (
+            payload.to_vec(),
+            CLOUD_FILE_LEGACY_NAME.to_string(),
+            CLOUD_FILE_LEGACY_MIME.to_string(),
+        )
+    };
+    // Smallest valid header: version + 2 zero-len fields = 5 bytes.
+    if payload.len() < 5 || payload[0] != CLOUD_FILE_HEADER_VERSION {
+        return legacy();
+    }
+    let mut pos = 1usize;
+    let read_field = |buf: &[u8], pos: &mut usize| -> Option<String> {
+        if *pos + 2 > buf.len() {
+            return None;
+        }
+        let len = u16::from_be_bytes([buf[*pos], buf[*pos + 1]]) as usize;
+        *pos += 2;
+        if *pos + len > buf.len() {
+            return None;
+        }
+        let s = std::str::from_utf8(&buf[*pos..*pos + len])
+            .ok()?
+            .to_string();
+        *pos += len;
+        Some(s)
+    };
+    let name = match read_field(payload, &mut pos) {
+        Some(s) => s,
+        None => return legacy(),
+    };
+    let mime = match read_field(payload, &mut pos) {
+        Some(s) => s,
+        None => return legacy(),
+    };
+    (payload[pos..].to_vec(), name, mime)
+}
+
+/// Read a file item's `(file_name, mime)` from its local `blob_ref` meta JSON.
+///
+/// Mirrors the source the P2P / IPC paths use (`parse_file_meta`). Falls back to
+/// the legacy name/MIME if the meta is missing or unparseable so a malformed row
+/// still uploads (just without identity) rather than being dropped.
+fn file_identity_from_item(item: &ClipboardItem) -> (String, String) {
+    match item.blob_ref.as_deref() {
+        Some(meta_json) => match crate::ipc::parse_file_meta(meta_json) {
+            Ok(meta) => (meta.filename, meta.mime),
+            Err(e) => {
+                tracing::warn!(
+                    "cloud-sync: file id={} blob_ref meta unparseable ({e}); \
+                     uploading with legacy name/mime",
+                    item.id
+                );
+                (
+                    CLOUD_FILE_LEGACY_NAME.to_string(),
+                    CLOUD_FILE_LEGACY_MIME.to_string(),
+                )
+            }
+        },
+        None => (
+            CLOUD_FILE_LEGACY_NAME.to_string(),
+            CLOUD_FILE_LEGACY_MIME.to_string(),
+        ),
+    }
+}
+
+/// Wrap a decrypted plaintext for cloud upload.
+///
+/// For `content_type == "file"` this prepends the [`encode_cloud_file_payload`]
+/// header (name+MIME read from the item's local `blob_ref`). For every other
+/// type the plaintext is returned unchanged.
+fn wrap_cloud_upload_plaintext(item: &ClipboardItem, plaintext: Vec<u8>) -> Vec<u8> {
+    if item.content_type == "file" {
+        let (name, mime) = file_identity_from_item(item);
+        encode_cloud_file_payload(&name, &mime, &plaintext)
+    } else {
+        plaintext
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -5466,5 +5706,83 @@ mod bytea_e2e {
         let decoded = decode_payload_ct(row["payload_ct"].as_str().unwrap()).expect("decode");
         let recovered = decrypt_from_cloud(&sync_key, &item_id, &decoded).expect("decrypt");
         assert_eq!(recovered, plaintext, "poll-path round-trip mismatch");
+    }
+
+    // ── BUG C1: cloud file-identity envelope ──────────────────────────────────
+
+    /// Upload-encode → download-decode preserves the file name and MIME embedded
+    /// in the encrypted plaintext (the Supabase schema carries neither).
+    #[test]
+    fn cloud_file_header_round_trips_name_and_mime() {
+        let name = "Q1 report (final).pdf";
+        let mime = "application/pdf";
+        let file_bytes = b"%PDF-1.7\n...binary file contents...\x00\xff".to_vec();
+
+        let wrapped = encode_cloud_file_payload(name, mime, &file_bytes);
+        // Header must actually prepend bytes (version + 2 len fields + strings).
+        assert!(wrapped.len() > file_bytes.len());
+        assert_eq!(wrapped[0], CLOUD_FILE_HEADER_VERSION);
+
+        let (recovered_bytes, recovered_name, recovered_mime) = decode_cloud_file_payload(&wrapped);
+        assert_eq!(recovered_bytes, file_bytes, "file bytes must survive");
+        assert_eq!(recovered_name, name, "file name must survive");
+        assert_eq!(recovered_mime, mime, "mime must survive");
+    }
+
+    /// A non-ASCII (UTF-8) file name round-trips intact through the header.
+    #[test]
+    fn cloud_file_header_handles_utf8_name() {
+        let name = "résumé — 履歴書.txt";
+        let mime = "text/plain";
+        let file_bytes = b"hello".to_vec();
+        let wrapped = encode_cloud_file_payload(name, mime, &file_bytes);
+        let (rb, rn, rm) = decode_cloud_file_payload(&wrapped);
+        assert_eq!(rb, file_bytes);
+        assert_eq!(rn, name);
+        assert_eq!(rm, mime);
+    }
+
+    /// BUG C1 back-compat: a payload uploaded by an OLD daemon has no header.
+    /// It must decode as raw file bytes with the legacy name/MIME, never panic.
+    #[test]
+    fn cloud_file_legacy_headerless_payload_decodes_as_raw() {
+        // Bytes whose first byte is NOT the header version → treated as raw.
+        let raw = b"\x99 arbitrary legacy file bytes with no envelope".to_vec();
+        let (bytes, name, mime) = decode_cloud_file_payload(&raw);
+        assert_eq!(bytes, raw, "entire buffer is the file");
+        assert_eq!(name, CLOUD_FILE_LEGACY_NAME);
+        assert_eq!(mime, CLOUD_FILE_LEGACY_MIME);
+    }
+
+    /// A payload that starts with the version byte but whose length fields
+    /// overrun the buffer is treated as legacy raw bytes, not parsed past the
+    /// end (no panic).
+    #[test]
+    fn cloud_file_malformed_header_falls_back_to_legacy() {
+        // version=1, name_len declares 0xFFFF bytes but none follow.
+        let malformed = vec![CLOUD_FILE_HEADER_VERSION, 0xFF, 0xFF, 0x00];
+        let (bytes, name, mime) = decode_cloud_file_payload(&malformed);
+        assert_eq!(bytes, malformed);
+        assert_eq!(name, CLOUD_FILE_LEGACY_NAME);
+        assert_eq!(mime, CLOUD_FILE_LEGACY_MIME);
+
+        // Too short to even hold the minimal 5-byte header.
+        let tiny = vec![CLOUD_FILE_HEADER_VERSION, 0x00];
+        let (b2, n2, _) = decode_cloud_file_payload(&tiny);
+        assert_eq!(b2, tiny);
+        assert_eq!(n2, CLOUD_FILE_LEGACY_NAME);
+    }
+
+    /// Empty name/mime (zero-length fields) form a valid header and round-trip
+    /// to empty strings — the smallest legal envelope.
+    #[test]
+    fn cloud_file_empty_fields_form_valid_header() {
+        let file_bytes = b"x".to_vec();
+        let wrapped = encode_cloud_file_payload("", "", &file_bytes);
+        assert_eq!(wrapped.len(), 5 + file_bytes.len());
+        let (rb, rn, rm) = decode_cloud_file_payload(&wrapped);
+        assert_eq!(rb, file_bytes);
+        assert_eq!(rn, "");
+        assert_eq!(rm, "");
     }
 }
