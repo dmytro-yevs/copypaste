@@ -57,6 +57,17 @@ create table if not exists public.clipboard_items (
     -- Provenance
     app_bundle_id     text,
 
+    -- Op-propagation state (schema v10+)
+    -- `deleted`  — soft-delete tombstone; true means the item was deleted on
+    --              the originating device. Receiving devices must apply a local
+    --              hard-delete and must NOT resurrect the row on future syncs.
+    -- `pinned`   — whether the item is explicitly pinned on the origin device.
+    -- `pin_order` — drag-to-reorder sort key among pinned items (NULL for
+    --               unpinned rows).  f64 so fractional positions are valid.
+    deleted           boolean        not null default false,
+    pinned            boolean        not null default false,
+    pin_order         double precision,
+
     -- Server bookkeeping
     created_at        timestamptz    not null default now(),
     updated_at        timestamptz    not null default now()
@@ -108,3 +119,23 @@ create trigger clipboard_items_set_updated_at
     before update on public.clipboard_items
     for each row
     execute function public.set_updated_at();
+
+-- ── Migration: add op-propagation columns (idempotent) ───────────────────────
+--
+-- Run this block against an existing Supabase project that was provisioned
+-- before schema v10 (i.e. the CREATE TABLE above did not yet include these
+-- columns). The IF NOT EXISTS guard makes it safe to re-run on a fresh schema
+-- that already has them.
+--
+-- After applying: existing rows get the column defaults (deleted=false,
+-- pinned=false, pin_order=NULL), which is correct — legacy rows are live,
+-- unpinned, and unordered until a client pushes an updated row.
+
+alter table public.clipboard_items
+    add column if not exists deleted   boolean          not null default false;
+
+alter table public.clipboard_items
+    add column if not exists pinned    boolean          not null default false;
+
+alter table public.clipboard_items
+    add column if not exists pin_order double precision;
