@@ -2935,9 +2935,9 @@ pub fn exists_item(db: &Database, id: &str) -> Result<bool, anyhow::Error> {
 ///   * `app_bundle_id`    — origin app (nullable)
 ///   * `device_id`        — maps to `origin_device_id`
 ///   * `deleted`          — soft-delete tombstone flag; false for live items.
-///                          When true the receiving device must call delete_item
-///                          rather than inserting/updating. Tombstone rows still
-///                          carry the item_id so the receiver can locate the row.
+///     When true the receiving device must call delete_item rather than
+///     inserting/updating. Tombstone rows still carry the item_id so the
+///     receiver can locate the row.
 ///   * `pinned`           — whether the item is explicitly pinned on the source device.
 ///   * `pin_order`        — drag-to-reorder sort key for pinned items (nullable).
 ///
