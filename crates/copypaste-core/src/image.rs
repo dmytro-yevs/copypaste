@@ -500,15 +500,30 @@ pub fn encode_image_full(
 /// enforces the same bound, but avoids a panic on a direct call with an
 /// oversized slice).
 pub fn chunks_to_blob(chunks: &[EncryptedChunk]) -> Result<Vec<u8>, ImageError> {
-    let mut out = Vec::new();
     let count =
         u32::try_from(chunks.len()).map_err(|_| ImageError::Chunk(ChunkError::TooManyChunks))?;
+    // F3: pre-size the output so the repeated `extend_from_slice` below never
+    // reallocs (which, for a multi-MiB blob, spikes peak memory to ~2x). The
+    // exact layout is:
+    //   4 (count) + Σ over chunks of [ 4 (wire-len prefix) + wire_len ]
+    // where wire_len = 34 header bytes ([version:1][index:4][is_final:1]
+    // [nonce:24][ct_len:4]) + ciphertext.len(). Computed from `ciphertext.len()`
+    // directly so we do NOT allocate a throwaway `to_wire()` just to measure it.
+    // `usize` math cannot overflow in practice: `count` fits in u32 and each
+    // ciphertext is bounded by the chunk size, so the sum is far below usize::MAX.
+    const WIRE_HEADER_LEN: usize = 1 + 4 + 1 + 24 + 4; // = 34
+    let total: usize = 4 + chunks
+        .iter()
+        .map(|c| 4 + WIRE_HEADER_LEN + c.ciphertext.len())
+        .sum::<usize>();
+    let mut out = Vec::with_capacity(total);
     out.extend_from_slice(&count.to_be_bytes());
     for chunk in chunks {
         let wire = chunk.to_wire();
         out.extend_from_slice(&(wire.len() as u32).to_be_bytes());
         out.extend_from_slice(&wire);
     }
+    debug_assert_eq!(out.len(), total, "chunks_to_blob presize must be exact");
     Ok(out)
 }
 
@@ -731,6 +746,33 @@ mod tests {
 
         let plaintext = decrypt_chunks(&recovered_chunks, &key, &file_id).unwrap();
         assert_eq!(plaintext, data);
+    }
+
+    #[test]
+    fn chunks_to_blob_presize_is_exact_and_byte_identical() {
+        // F3: the pre-sized buffer must hold the blob with no realloc (capacity
+        // == length) and produce byte-for-byte the same layout the unsized
+        // version did. We reconstruct the expected bytes manually from the wire
+        // encoding to prove the output is unchanged by the presize optimisation.
+        let key = test_key();
+        let file_id = test_file_id();
+        let data = b"presize exactness across several chunks of clipboard data";
+        let chunks = encrypt_chunks(data, &key, &file_id, 8).unwrap();
+        assert!(chunks.len() > 1);
+
+        let blob = chunks_to_blob(&chunks).unwrap();
+        // No spare capacity: the presize was exact.
+        assert_eq!(blob.capacity(), blob.len(), "presize must allocate exactly");
+
+        // Rebuild the expected layout independently of the function under test.
+        let mut expected = Vec::new();
+        expected.extend_from_slice(&(chunks.len() as u32).to_be_bytes());
+        for chunk in &chunks {
+            let wire = chunk.to_wire();
+            expected.extend_from_slice(&(wire.len() as u32).to_be_bytes());
+            expected.extend_from_slice(&wire);
+        }
+        assert_eq!(blob, expected, "presized blob must be byte-identical");
     }
 
     #[test]
