@@ -132,3 +132,56 @@ fn relay_derivation_fns_present_in_kotlin_binding() {
          Regenerate with ./scripts/generate-android-bindings.sh"
     );
 }
+
+/// ABI 14 (HB-1 / HB-7): the committed Kotlin binding must expose the PeerMeta
+/// send params, the received peer_* fields on BootstrapResult / PairStatus, and
+/// the three P2pSyncResult drop counters. Fails if the binding was not
+/// regenerated against the ABI-14 UDL.
+#[test]
+fn abi14_peer_meta_and_drop_counters_present_in_kotlin_binding() {
+    let path = kotlin_binding_path();
+    assert!(
+        path.exists(),
+        "Kotlin binding not found at {}: run ./scripts/generate-android-bindings.sh",
+        path.display()
+    );
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+
+    // HB-1a: bootstrapPairInitiator gained the device-meta send params. The
+    // generated Kotlin camelCases UDL `device_model` → `deviceModel`. A binding
+    // generated against ABI 13 lacks this param on bootstrapPairInitiator.
+    assert!(
+        src.contains("fun `bootstrapPairInitiator`") && src.contains("`deviceModel`"),
+        "Kotlin binding is STALE: bootstrapPairInitiator missing `deviceModel` (ABI 14 HB-1a). \
+         Regenerate with ./scripts/generate-android-bindings.sh"
+    );
+
+    // HB-1b: BootstrapResult / PairStatus gained the received peer_* fields.
+    for field in [
+        "peerModel",
+        "peerOs",
+        "peerAppVersion",
+        "peerLocalIp",
+        "peerPublicIp",
+    ] {
+        assert!(
+            src.contains(&format!("var `{field}`")),
+            "Kotlin binding is STALE: missing `{field}` (ABI 14 HB-1b). \
+             Regenerate with ./scripts/generate-android-bindings.sh"
+        );
+    }
+
+    // HB-7a: P2pSyncResult gained three per-reason drop counters.
+    for field in [
+        "itemsSkippedDecryptFail",
+        "itemsSkippedUnknownType",
+        "itemsSkippedMissingBlob",
+    ] {
+        assert!(
+            src.contains(&format!("var `{field}`")),
+            "Kotlin binding is STALE: missing `{field}` (ABI 14 HB-7a). \
+             Regenerate with ./scripts/generate-android-bindings.sh"
+        );
+    }
+}

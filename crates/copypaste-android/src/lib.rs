@@ -15,8 +15,8 @@ pub use version::{
 
 use copypaste_core::{
     build_item_aad, decrypt_from_cloud, decrypt_item_with_aad, derive_sync_key, detect,
-    encrypt_for_cloud, encrypt_item_with_aad, SyncKeyError, AAD_SCHEMA_VERSION,
-    ITEM_KEY_VERSION_CURRENT, NONCE_SIZE,
+    encrypt_for_cloud, encrypt_item_with_aad, is_sensitive_for_autowipe, SyncKeyError,
+    AAD_SCHEMA_VERSION, ITEM_KEY_VERSION_CURRENT, NONCE_SIZE,
 };
 // Only used by the feature-gated `add_clipboard_item` live binding below.
 #[cfg(feature = "android-uniffi-live")]
@@ -124,14 +124,23 @@ pub fn decrypt_text(
     })
 }
 
-/// Returns `true` if `text` matches a sensitive pattern.
+/// Returns `true` if `text` is sensitive at the HIGH-confidence threshold.
 ///
-/// Wrapped in [`panic_boundary::catch`] because `copypaste_core::detect`
-/// runs regex/allocation that could panic; an unwound panic across the JNI
-/// boundary aborts the JVM. This export returns a plain `bool`, so a caught
-/// panic recovers to `false` (treat as "not sensitive" rather than crash).
+/// AB-6a (v0.6.1 threshold parity): this used to flag on `detect(&text).is_some()`
+/// — i.e. ANY pattern match, including low-confidence heuristics (phone 0.55,
+/// passport 0.55, email 0.60). macOS gates on confidence >= 0.70
+/// (`is_sensitive_for_autowipe`), so the two platforms disagreed: mildly-sensitive
+/// text that macOS keeps was dropped on Android. We now call the SAME core gate
+/// (`is_sensitive_for_autowipe`, the >= 0.70 floor) so the sensitivity verdict is
+/// byte-for-byte identical to the daemon's. The Kotlin store policy (store+mask
+/// vs drop) is changed in a LATER wave — here we only align the threshold.
+///
+/// Wrapped in [`panic_boundary::catch`] because the detector runs regex/allocation
+/// that could panic; an unwound panic across the JNI boundary aborts the JVM. This
+/// export returns a plain `bool`, so a caught panic recovers to `false` (treat as
+/// "not sensitive" rather than crash).
 pub fn is_sensitive(text: String) -> bool {
-    panic_boundary::catch(|| detect(&text).is_some()).unwrap_or(false)
+    panic_boundary::catch(|| is_sensitive_for_autowipe(&text)).unwrap_or(false)
 }
 
 /// Returns the sensitive-kind label for `text`, or `None` if not sensitive.
@@ -498,6 +507,17 @@ pub struct BootstrapResult {
     /// configured PC also sets up cloud sync, not just P2P. See
     /// [`SyncProvisioning`].
     pub peer_provisioning: Option<SyncProvisioning>,
+    /// HB-1b (ABI 14): the PEER's device metadata, learned in-band over the
+    /// authenticated bootstrap tunnel and sourced from `BootstrapPairing.peer_*`.
+    /// All `None` when the peer is a legacy build or advertised nothing. Kotlin
+    /// persists these on the `PairedPeer` so Wave 3 renders a device card at
+    /// parity with macOS. `peer_public_ip` is informational metadata only — never
+    /// used for authentication or trust decisions.
+    pub peer_model: Option<String>,
+    pub peer_os: Option<String>,
+    pub peer_app_version: Option<String>,
+    pub peer_local_ip: Option<String>,
+    pub peer_public_ip: Option<String>,
 }
 
 /// FFI mirror of [`copypaste_p2p::bootstrap::SyncProvisioning`].
@@ -596,6 +616,7 @@ pub fn generate_device_cert() -> Result<DeviceCert, CopypasteError> {
 /// Errors: [`CopypasteError::P2pError`] for a malformed `addr_hint`, or any
 /// `TransportError` (TLS / socket / framing / PAKE failure, wrong password, or
 /// a channel-binding MitM abort).
+#[allow(clippy::too_many_arguments)] // FFI contract: identity + addr + 5 meta fields.
 pub fn bootstrap_pair_initiator(
     addr_hint: String,
     cert_der: &[u8],
@@ -607,6 +628,15 @@ pub fn bootstrap_pair_initiator(
     // (it has nothing to offer yet); the received provisioning comes back in the
     // result's `peer_provisioning`.
     local_provisioning: Option<SyncProvisioning>,
+    // HB-1a (ABI 14): THIS device's own metadata, gathered in Kotlin
+    // (`Build.MODEL`, "Android <release>", BuildConfig.VERSION_NAME, device name,
+    // LAN IP) and sent in-band so the peer's device card shows real Android info
+    // instead of a bare entry. `public_ip` is intentionally not collected here.
+    device_name: Option<String>,
+    device_model: Option<String>,
+    os_version: Option<String>,
+    app_version: Option<String>,
+    local_ip: Option<String>,
 ) -> Result<BootstrapResult, CopypasteError> {
     panic_boundary::catch_result(|| {
         let addr: std::net::SocketAddr =
@@ -623,23 +653,88 @@ pub fn bootstrap_pair_initiator(
                 key_der.to_vec(),
                 &pake_password,
                 &sync_addr,
-                // Android-side device metadata is gathered in Kotlin and synced
-                // separately; send an empty meta frame so the responder still
-                // gets a well-formed Phase-4 bootstrap exchange.
-                &copypaste_p2p::bootstrap::PeerMeta::default(),
+                // HB-1a: build a real PeerMeta from the Kotlin-gathered fields so
+                // the responder records this Android device's name/model/OS/app/IP
+                // (was `PeerMeta::default()` — all None — before ABI 14).
+                &build_android_peer_meta(
+                    device_name,
+                    device_model,
+                    os_version,
+                    app_version,
+                    local_ip,
+                ),
                 local_provisioning.map(Into::into),
             ))
             .map_err(|e| CopypasteError::P2pError {
                 reason: e.to_string(),
             })?;
 
-        Ok(BootstrapResult {
-            peer_fingerprint: pairing.peer_fingerprint,
-            peer_sync_addr: pairing.peer_sync_addr,
-            session_key: pairing.session_key.as_bytes().to_vec(),
-            peer_provisioning: pairing.peer_provisioning.map(Into::into),
-        })
+        Ok(bootstrap_result_from_pairing(pairing))
     })
+}
+
+/// HB-1a (ABI 14): assemble a `copypaste_p2p::bootstrap::PeerMeta` from the
+/// optional device-metadata fields Kotlin gathers and passes across the FFI.
+/// `public_ip` is left `None` — Android does not run STUN here. Used by every
+/// Android pairing path (initiator, discovery initiator, standing responder) so
+/// the peer always sees real Android device info instead of `PeerMeta::default()`.
+fn build_android_peer_meta(
+    device_name: Option<String>,
+    device_model: Option<String>,
+    os_version: Option<String>,
+    app_version: Option<String>,
+    local_ip: Option<String>,
+) -> copypaste_p2p::bootstrap::PeerMeta {
+    copypaste_p2p::bootstrap::PeerMeta {
+        model: device_model,
+        os_version,
+        app_version,
+        local_ip,
+        device_name,
+        // Android does not collect its own public IP during pairing; the peer's
+        // public_ip still flows back to us via `BootstrapResult.peer_public_ip`.
+        public_ip: None,
+    }
+}
+
+/// HB-1b (ABI 14): map a completed `BootstrapPairing` into the FFI
+/// [`BootstrapResult`], carrying the PEER's `peer_*` metadata through so Kotlin
+/// can persist + render it. Shared by the QR-initiator path (the discovery paths
+/// build a [`pairing::ConfirmedPairing`] instead).
+fn bootstrap_result_from_pairing(
+    pairing: copypaste_p2p::bootstrap::BootstrapPairing,
+) -> BootstrapResult {
+    BootstrapResult {
+        peer_fingerprint: pairing.peer_fingerprint,
+        peer_sync_addr: pairing.peer_sync_addr,
+        session_key: pairing.session_key.as_bytes().to_vec(),
+        peer_provisioning: pairing.peer_provisioning.map(Into::into),
+        peer_model: pairing.peer_model,
+        peer_os: pairing.peer_os,
+        peer_app_version: pairing.peer_app_version,
+        peer_local_ip: pairing.peer_local_ip,
+        peer_public_ip: pairing.peer_public_ip,
+    }
+}
+
+/// HB-1b (ABI 14): map a completed `BootstrapPairing` into the discovery-path
+/// [`pairing::ConfirmedPairing`], carrying the PEER's `peer_*` metadata through
+/// so the polled [`pairing::PairStatus`] surfaces it to Kotlin on `confirmed`.
+/// Shared by both discovery paths (standing responder + `pair_with_discovered`).
+fn confirmed_pairing_from(
+    p: copypaste_p2p::bootstrap::BootstrapPairing,
+) -> pairing::ConfirmedPairing {
+    pairing::ConfirmedPairing {
+        peer_fingerprint: p.peer_fingerprint,
+        peer_sync_addr: p.peer_sync_addr,
+        session_key: p.session_key.as_bytes().to_vec(),
+        peer_provisioning: p.peer_provisioning.map(Into::into),
+        peer_model: p.peer_model,
+        peer_os: p.peer_os,
+        peer_app_version: p.peer_app_version,
+        peer_local_ip: p.peer_local_ip,
+        peer_public_ip: p.peer_public_ip,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -741,6 +836,17 @@ pub struct P2pSyncResult {
     /// peer no longer makes items vanish silently. See the
     /// "decrypt 7/7 build-skew" investigation.
     pub items_skipped_legacy: u32,
+    /// HB-7a (ABI 14): inbound frames whose shared-key `decrypt_from_cloud`
+    /// FAILED (wrong key / corrupt blob / tampered tag). Previously a silent
+    /// `continue` — now counted so "received N stored 0" reveals a decrypt
+    /// problem rather than vanishing items.
+    pub items_skipped_decrypt_fail: u32,
+    /// HB-7a (ABI 14): inbound frames whose `content_type` is none of
+    /// text/image/file (unknown to this build). Previously a silent `continue`.
+    pub items_skipped_unknown_type: u32,
+    /// HB-7a (ABI 14): inbound frames of a known type that carried NO `content`
+    /// blob to decrypt. Previously a silent `continue`.
+    pub items_skipped_missing_blob: u32,
 }
 
 /// Derive the shared content [`SyncKey`](copypaste_core::SyncKey) from a 32-byte
@@ -1302,6 +1408,11 @@ pub fn sync_with_peer(
         // with `decrypt_from_cloud` exactly like text.
         let mut items: Vec<SyncedItem> = Vec::with_capacity(received.len());
         let mut items_skipped_legacy: u32 = 0;
+        // HB-7a (ABI 14): per-reason drop counters surfaced to Kotlin so a
+        // "received N stored 0" pairing status can show WHY frames dropped.
+        let mut items_skipped_decrypt_fail: u32 = 0;
+        let mut items_skipped_unknown_type: u32 = 0;
+        let mut items_skipped_missing_blob: u32 = 0;
         for wire in &received {
             // A text frame that still carries a `content_nonce` is a legacy /
             // non-rekeyed frame (e.g. a stale daemon that predates the sync-key
@@ -1336,9 +1447,11 @@ pub fn sync_with_peer(
             let is_image = wire.content_type == "image" || wire.content_type.starts_with("image/");
             let is_file = wire.content_type == "file";
             if !(is_text || is_image || is_file) {
+                items_skipped_unknown_type = items_skipped_unknown_type.saturating_add(1);
                 continue;
             }
             let Some(blob) = wire.content.as_ref() else {
+                items_skipped_missing_blob = items_skipped_missing_blob.saturating_add(1);
                 continue;
             };
             match decrypt_from_cloud(&shared, &wire.item_id, blob) {
@@ -1356,7 +1469,10 @@ pub fn sync_with_peer(
                     file_name: wire.file_name.clone(),
                     mime: wire.mime.clone(),
                 }),
-                Err(_) => continue,
+                Err(_) => {
+                    items_skipped_decrypt_fail = items_skipped_decrypt_fail.saturating_add(1);
+                    continue;
+                }
             }
         }
 
@@ -1365,6 +1481,9 @@ pub fn sync_with_peer(
             items_sent: outbound.len() as u64,
             items,
             items_skipped_legacy,
+            items_skipped_decrypt_fail,
+            items_skipped_unknown_type,
+            items_skipped_missing_blob,
         })
     })
 }
@@ -1487,11 +1606,28 @@ pub fn start_discovery(
     bport: u16,
     cert_der: &[u8],
     key_der: &[u8],
+    // HB-1a (ABI 14): THIS device's own metadata, threaded into the standing
+    // responder loop so a macOS-INITIATED discovery pair records real Android
+    // device info (was `PeerMeta::default()`). `device_name` is already a param;
+    // the standing responder reuses it for `PeerMeta.device_name`.
+    device_model: Option<String>,
+    os_version: Option<String>,
+    app_version: Option<String>,
+    local_ip: Option<String>,
 ) -> Result<(), CopypasteError> {
     panic_boundary::catch_result(|| {
         let rt = runtime()?;
         let cert_der = cert_der.to_vec();
         let key_der = key_der.to_vec();
+        // Assemble the responder's PeerMeta once; reuse `device_name` (already a
+        // param) for the friendly name field.
+        let own_meta = build_android_peer_meta(
+            Some(device_name.clone()),
+            device_model,
+            os_version,
+            app_version,
+            local_ip,
+        );
 
         // Build + register the discovery service (advertise with bport so we are
         // a v2 peer macOS can pair with) and start its browse task.
@@ -1512,7 +1648,7 @@ pub fn start_discovery(
         // Spawn the standing bootstrap responder: re-bind `bport`, accept ONE
         // inbound discovery-pair connection per iteration, run `run_with_confirm`
         // wired to the SAME coordinator with the Responder role.
-        let responder_task = rt.spawn(standing_responder_loop(bport, cert_der, key_der));
+        let responder_task = rt.spawn(standing_responder_loop(bport, cert_der, key_der, own_meta));
 
         pairing::global().install(discovery, browse_task, responder_task);
         Ok(())
@@ -1522,8 +1658,15 @@ pub fn start_discovery(
 /// The standing-responder accept loop (Responder role). Re-binds `bport` for
 /// each inbound pairing attempt and runs the confirm-gated responder handshake
 /// wired to the global coordinator. Never logs key/SAS bytes.
-async fn standing_responder_loop(bport: u16, cert_der: Vec<u8>, key_der: Vec<u8>) {
-    use copypaste_p2p::bootstrap::{BootstrapResponder, PeerMeta};
+async fn standing_responder_loop(
+    bport: u16,
+    cert_der: Vec<u8>,
+    key_der: Vec<u8>,
+    // HB-1a (ABI 14): this device's own metadata, advertised to the macOS
+    // initiator on every accepted pairing (was `PeerMeta::default()`).
+    own_meta: copypaste_p2p::bootstrap::PeerMeta,
+) {
+    use copypaste_p2p::bootstrap::BootstrapResponder;
 
     let coordinator = std::sync::Arc::clone(&pairing::global().coordinator);
     loop {
@@ -1564,7 +1707,8 @@ async fn standing_responder_loop(bport: u16, cert_der: Vec<u8>, key_der: Vec<u8>
             .run_with_confirm(
                 pairing::DISCOVERY_PAIRING_PASSWORD,
                 "",
-                &PeerMeta::default(),
+                // HB-1a: advertise this Android device's real metadata.
+                &own_meta,
                 None,
                 move |sas: &str| {
                     let coord = std::sync::Arc::clone(&confirm_coord);
@@ -1583,14 +1727,9 @@ async fn standing_responder_loop(bport: u16, cert_der: Vec<u8>, key_der: Vec<u8>
             .await;
 
         match result {
-            Ok(p) => coordinator.finish(pairing::PairingState::Confirmed(
-                pairing::ConfirmedPairing {
-                    peer_fingerprint: p.peer_fingerprint,
-                    peer_sync_addr: p.peer_sync_addr,
-                    session_key: p.session_key.as_bytes().to_vec(),
-                    peer_provisioning: p.peer_provisioning.map(Into::into),
-                },
-            )),
+            Ok(p) => {
+                coordinator.finish(pairing::PairingState::Confirmed(confirmed_pairing_from(p)))
+            }
             Err(_e) => {
                 // A confirm-rejected SAS, a timeout, an abort, or a network/PAKE
                 // failure all land here. Only move out of an active state — if
@@ -1653,12 +1792,20 @@ pub fn list_discovered(
 /// is the OPTIONAL sync-account setup this device offers (typically `null` on
 /// Android). Errors: [`CopypasteError::P2pError`] if the peer is unknown, lacks a
 /// `bport` (v1 peer), advertises no address, or a pairing is already in flight.
+#[allow(clippy::too_many_arguments)] // FFI contract: peer id + identity + 5 meta fields.
 pub fn pair_with_discovered(
     device_id: String,
     cert_der: &[u8],
     key_der: &[u8],
     sync_addr: String,
     local_provisioning: Option<SyncProvisioning>,
+    // HB-1a (ABI 14): THIS device's own metadata, advertised to the discovered
+    // peer during the initiator handshake (was `PeerMeta::default()`).
+    device_name: Option<String>,
+    device_model: Option<String>,
+    os_version: Option<String>,
+    app_version: Option<String>,
+    local_ip: Option<String>,
 ) -> Result<(), CopypasteError> {
     panic_boundary::catch_result(|| {
         let rt = runtime()?;
@@ -1692,9 +1839,12 @@ pub fn pair_with_discovered(
         let cert_der = cert_der.to_vec();
         let key_der = key_der.to_vec();
         let provisioning = local_provisioning.map(Into::into);
+        // HB-1a: build this device's PeerMeta before moving into the task.
+        let own_meta =
+            build_android_peer_meta(device_name, device_model, os_version, app_version, local_ip);
 
         let task = rt.spawn(async move {
-            use copypaste_p2p::bootstrap::{run_initiator_with_confirm, PeerMeta};
+            use copypaste_p2p::bootstrap::run_initiator_with_confirm;
             let confirm_coord = std::sync::Arc::clone(&coordinator);
             let result = run_initiator_with_confirm(
                 addr,
@@ -1704,7 +1854,8 @@ pub fn pair_with_discovered(
                 // real authenticator (see `pairing::DISCOVERY_PAIRING_PASSWORD`).
                 pairing::DISCOVERY_PAIRING_PASSWORD,
                 &sync_addr,
-                &PeerMeta::default(),
+                // HB-1a: advertise this Android device's real metadata.
+                &own_meta,
                 provisioning,
                 move |sas: &str| {
                     let coord = std::sync::Arc::clone(&confirm_coord);
@@ -1721,14 +1872,9 @@ pub fn pair_with_discovered(
             .await;
 
             match result {
-                Ok(p) => coordinator.finish(pairing::PairingState::Confirmed(
-                    pairing::ConfirmedPairing {
-                        peer_fingerprint: p.peer_fingerprint,
-                        peer_sync_addr: p.peer_sync_addr,
-                        session_key: p.session_key.as_bytes().to_vec(),
-                        peer_provisioning: p.peer_provisioning.map(Into::into),
-                    },
-                )),
+                Ok(p) => {
+                    coordinator.finish(pairing::PairingState::Confirmed(confirmed_pairing_from(p)))
+                }
                 Err(_e) => {
                     // Reject/timeout/abort/network failure: keys drop/zeroize,
                     // nothing persisted. Only move out of an active state so an
@@ -2117,6 +2263,41 @@ mod tests {
         );
     }
 
+    /// AB-6a (ABI 14): `is_sensitive` now gates on the SAME >= 0.70 confidence
+    /// floor macOS uses (`is_sensitive_for_autowipe`) instead of flagging on ANY
+    /// `detect()` match. A low-confidence heuristic (a bare US phone number,
+    /// confidence 0.55) must NOT be flagged on Android anymore — otherwise such
+    /// items vanish at capture/sync-in while macOS keeps them. High-confidence
+    /// credentials (a GitHub PAT) must still flag.
+    #[test]
+    fn is_sensitive_uses_high_confidence_threshold_parity() {
+        // High-confidence credential: still flagged.
+        let pat = format!("ghp_{}", "A".repeat(36));
+        assert!(
+            is_sensitive(pat),
+            "high-confidence credential (PAT) must remain sensitive"
+        );
+
+        // Low-confidence heuristic (bare US phone, 0.55) is below the 0.70 floor:
+        // detect() still matches it, but is_sensitive must now return false so the
+        // verdict matches the macOS daemon's is_sensitive_for_autowipe gate.
+        let phone = "555-123-4567";
+        assert!(
+            detect(phone).is_some(),
+            "precondition: detector matches a US phone (low confidence)"
+        );
+        assert!(
+            !is_sensitive(phone.into()),
+            "low-confidence phone match must NOT be flagged (>= 0.70 parity with macOS)"
+        );
+        // Cross-check: agrees byte-for-byte with the core gate macOS uses.
+        assert_eq!(
+            is_sensitive(phone.into()),
+            is_sensitive_for_autowipe(phone),
+            "Android is_sensitive must equal the core >= 0.70 gate"
+        );
+    }
+
     #[test]
     fn add_clipboard_item_rejects_bad_key() {
         let err = add_clipboard_item("/tmp/copypaste-test.db".into(), &[0u8; 16], "x".into())
@@ -2348,7 +2529,16 @@ mod tests {
                     .run(
                         &pw,
                         resp_sync_addr,
-                        &copypaste_p2p::bootstrap::PeerMeta::default(),
+                        // HB-1b: responder advertises real PeerMeta so the FFI
+                        // initiator receives it in BootstrapResult.peer_*.
+                        &copypaste_p2p::bootstrap::PeerMeta {
+                            model: Some("MacBook Pro".into()),
+                            os_version: Some("macOS 15.5".into()),
+                            app_version: Some("0.6.1".into()),
+                            local_ip: Some("127.0.0.1".into()),
+                            device_name: Some("Test Mac".into()),
+                            public_ip: Some("203.0.113.9".into()),
+                        },
                         // Responder advertises provisioning so the FFI initiator
                         // receives it in `peer_provisioning`.
                         Some(copypaste_p2p::bootstrap::SyncProvisioning {
@@ -2372,8 +2562,21 @@ mod tests {
             password.to_string(),
             init_sync_addr.to_string(),
             None,
+            // HB-1a: this device's own metadata, sent in-band to the responder.
+            Some("Pixel 8".into()),
+            Some("Pixel 8".into()),
+            Some("Android 15".into()),
+            Some("0.6.1".into()),
+            Some("127.0.0.1".into()),
         )
         .expect("FFI bootstrap pairing must succeed over loopback");
+
+        // HB-1b: the FFI initiator received the responder's device metadata.
+        assert_eq!(result.peer_model.as_deref(), Some("MacBook Pro"));
+        assert_eq!(result.peer_os.as_deref(), Some("macOS 15.5"));
+        assert_eq!(result.peer_app_version.as_deref(), Some("0.6.1"));
+        assert_eq!(result.peer_local_ip.as_deref(), Some("127.0.0.1"));
+        assert_eq!(result.peer_public_ip.as_deref(), Some("203.0.113.9"));
 
         // QR-provisions-all-sync: the FFI initiator received the responder's
         // advertised provisioning, including the derived sync key bytes.
@@ -2410,6 +2613,12 @@ mod tests {
             result.session_key.as_slice(),
             "both endpoints must derive the same PAKE session key via the FFI path"
         );
+        // HB-1a: the responder (macOS side) learned this Android device's real
+        // metadata that the FFI initiator sent in-band — was None before ABI 14.
+        assert_eq!(resp_pairing.peer_model.as_deref(), Some("Pixel 8"));
+        assert_eq!(resp_pairing.peer_os.as_deref(), Some("Android 15"));
+        assert_eq!(resp_pairing.peer_app_version.as_deref(), Some("0.6.1"));
+        assert_eq!(resp_pairing.peer_local_ip.as_deref(), Some("127.0.0.1"));
     }
 
     /// REGRESSION (live emulator↔macOS divergence): after a real network PAKE
@@ -2478,6 +2687,12 @@ mod tests {
             password.to_string(),
             init_sync_addr.to_string(),
             None,
+            // ABI 14 device-meta params — not exercised in this key-derivation test.
+            None,
+            None,
+            None,
+            None,
+            None,
         )
         .expect("FFI bootstrap pairing must succeed over loopback");
 
@@ -2531,6 +2746,12 @@ mod tests {
             &cert.key_der,
             "pw".into(),
             "127.0.0.1:7000".into(),
+            None,
+            // ABI 14 device-meta params — irrelevant to the addr-parse error path.
+            None,
+            None,
+            None,
+            None,
             None,
         )
         .expect_err("malformed addr_hint must error");

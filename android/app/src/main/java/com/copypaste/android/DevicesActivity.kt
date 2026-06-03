@@ -186,6 +186,11 @@ fun DevicesScreen(
                             bport = SAS_BPORT,
                             certDer = cert.certDer,
                             keyDer = cert.keyDer,
+                            // HB-1a (ABI 14): own metadata for the standing responder.
+                            deviceModel = android.os.Build.MODEL ?: "Android",
+                            osVersion = "Android " + android.os.Build.VERSION.RELEASE,
+                            appVersion = BuildConfig.VERSION_NAME,
+                            localIp = lanIpv4Address(),
                         )
                     }
                 } catch (e: Exception) {
@@ -246,6 +251,12 @@ fun DevicesScreen(
                         // phone advertises no sync address / carries no config.
                         syncAddr = "",
                         localProvisioning = null,
+                        // HB-1a (ABI 14): advertise this device's own metadata.
+                        deviceName = android.os.Build.MODEL ?: "Android",
+                        deviceModel = android.os.Build.MODEL ?: "Android",
+                        osVersion = "Android " + android.os.Build.VERSION.RELEASE,
+                        appVersion = BuildConfig.VERSION_NAME,
+                        localIp = lanIpv4Address(),
                     )
                 }
                 pairingPeer = peer
@@ -702,7 +713,25 @@ private fun SasPairingDialog(
     val scope = rememberCoroutineScope()
 
     // Current pairing status; starts optimistically at "initiating".
-    var status by remember { mutableStateOf(PairStatus("initiating", null, null, null, null, null, null)) }
+    var status by remember {
+        mutableStateOf(
+            PairStatus(
+                state = "initiating",
+                sas = null,
+                role = null,
+                peerFingerprint = null,
+                peerSyncAddr = null,
+                sessionKey = null,
+                peerProvisioning = null,
+                // ABI 14 (HB-1b): peer metadata, populated by the native side on confirm.
+                peerModel = null,
+                peerOs = null,
+                peerAppVersion = null,
+                peerLocalIp = null,
+                peerPublicIp = null,
+            )
+        )
+    }
     // Transient (non-terminal) poll/confirm error.
     var error by remember { mutableStateOf<String?>(null) }
     // True while a pairConfirmSas call is in flight (disables the buttons).
@@ -740,6 +769,13 @@ private fun SasPairingDialog(
                         sessionKeyWrappedB64 = wrappedB64,
                         sessionKeyIvB64 = ivB64,
                         lastSyncMs = System.currentTimeMillis(),
+                        // HB-1b (ABI 14): persist the peer's device metadata received
+                        // over the discovery/SAS pairing for the Wave-3 device card.
+                        peerModel = st.peerModel,
+                        peerOs = st.peerOs,
+                        peerAppVersion = st.peerAppVersion,
+                        peerLocalIp = st.peerLocalIp,
+                        peerPublicIp = st.peerPublicIp,
                     )
                 )
 
@@ -823,7 +859,21 @@ private fun SasPairingDialog(
                             confirmedRef.value = true
                             // Persist from the last status we held the keys on.
                             persistConfirmed(status)
-                            status = PairStatus("confirmed", null, null, status.peerFingerprint, status.peerSyncAddr, null, null)
+                            status = PairStatus(
+                                state = "confirmed",
+                                sas = null,
+                                role = null,
+                                peerFingerprint = status.peerFingerprint,
+                                peerSyncAddr = status.peerSyncAddr,
+                                sessionKey = null,
+                                peerProvisioning = null,
+                                // HB-1b: carry forward the peer metadata we last held.
+                                peerModel = status.peerModel,
+                                peerOs = status.peerOs,
+                                peerAppVersion = status.peerAppVersion,
+                                peerLocalIp = status.peerLocalIp,
+                                peerPublicIp = status.peerPublicIp,
+                            )
                             onPaired()
                         } else {
                             ended = true
