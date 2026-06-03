@@ -157,6 +157,18 @@ pub struct AppConfig {
     /// `None` = not specified (preserve existing). macOS only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notify_on_copy: Option<bool>,
+    /// Whether the daemon may make a one-off STUN request to discover this
+    /// device's public IP. `None` = not specified (preserve existing).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collect_public_ip: Option<bool>,
+    /// When `true`, paste-back strips all rich types and writes plain text only.
+    /// `None` = not specified (preserve existing).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paste_as_plain_text: Option<bool>,
+    /// Bundle IDs of apps whose clipboard copies are silently skipped (macOS).
+    /// `None` = not specified (preserve existing); `Some(vec)` replaces the list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excluded_app_bundle_ids: Option<Vec<String>>,
 }
 
 /// Strip account credentials from a serialised [`AppConfig`] before it leaves
@@ -265,6 +277,9 @@ pub(crate) fn read_config() -> AppConfig {
             sensitive_ttl_secs: Some(core.sensitive_ttl_secs),
             image_quality: Some(core.image_quality),
             sync_on_wifi_only: Some(core.sync_on_wifi_only),
+            collect_public_ip: Some(core.collect_public_ip),
+            paste_as_plain_text: Some(core.paste_as_plain_text),
+            excluded_app_bundle_ids: Some(core.excluded_app_bundle_ids.clone()),
             ..AppConfig::default()
         };
     };
@@ -309,6 +324,9 @@ pub(crate) fn read_config() -> AppConfig {
     cfg.sync_on_wifi_only = Some(core.sync_on_wifi_only);
     cfg.sound_on_copy = Some(core.sound_on_copy);
     cfg.notify_on_copy = Some(core.notify_on_copy);
+    cfg.collect_public_ip = Some(core.collect_public_ip);
+    cfg.paste_as_plain_text = Some(core.paste_as_plain_text);
+    cfg.excluded_app_bundle_ids = Some(core.excluded_app_bundle_ids.clone());
     cfg
 }
 
@@ -347,6 +365,15 @@ pub(crate) fn update_core_config(
     }
     if let Some(v) = incoming.notify_on_copy {
         core.notify_on_copy = v;
+    }
+    if let Some(v) = incoming.collect_public_ip {
+        core.collect_public_ip = v;
+    }
+    if let Some(v) = incoming.paste_as_plain_text {
+        core.paste_as_plain_text = v;
+    }
+    if let Some(ref v) = incoming.excluded_app_bundle_ids {
+        core.excluded_app_bundle_ids = v.clone();
     }
     // Clamp the merged config into valid ranges ONCE, here, before both the
     // disk write and the returned (hot-loaded) value — otherwise an unclamped
@@ -393,6 +420,13 @@ fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfig {
         supabase_password: incoming.supabase_password.or(existing.supabase_password),
         sound_on_copy: incoming.sound_on_copy.or(existing.sound_on_copy),
         notify_on_copy: incoming.notify_on_copy.or(existing.notify_on_copy),
+        collect_public_ip: incoming.collect_public_ip.or(existing.collect_public_ip),
+        paste_as_plain_text: incoming
+            .paste_as_plain_text
+            .or(existing.paste_as_plain_text),
+        excluded_app_bundle_ids: incoming
+            .excluded_app_bundle_ids
+            .or(existing.excluded_app_bundle_ids),
         ..incoming
     }
 }
