@@ -812,6 +812,7 @@ dependencies = [
 name = "copypaste-android"
 version = "0.5.5"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
  "copypaste-core",
  "copypaste-p2p",

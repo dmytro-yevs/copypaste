@@ -21,6 +21,8 @@ use copypaste_core::{
 // Only used by the feature-gated `add_clipboard_item` live binding below.
 #[cfg(feature = "android-uniffi-live")]
 use copypaste_core::{build_item_aad_v2, AAD_SCHEMA_VERSION_V4};
+// Brings `Engine::encode` into scope for `relay_public_key_b64` (STANDARD base64).
+use base64::Engine as _;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use zeroize::Zeroizing;
@@ -280,6 +282,68 @@ pub fn cloud_decrypt(
                 reason: e.to_string(),
             }
         })
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Shared-account relay inbox derivation (R3b — relay-as-database sync path)
+//
+// The relay sync path uses a SINGLE inbox per account that every device
+// co-registers, pushes to, and subscribes to. Both the inbox `device_id` and
+// the registration `public_key_b64` are derived DETERMINISTICALLY from the
+// shared sync key so Android shares the macOS daemon's inbox without any
+// coordination through the relay. These wrappers expose the EXACT core
+// functions (`derive_relay_inbox_id` / `derive_relay_public_key`) so the value
+// is byte-identical to the daemon's — Kotlin must NEVER re-derive in-app.
+//
+// SECURITY: the inbox id is SECRET-derived (anyone who learns it can read/write
+// the account's still-E2E-encrypted inbox). Kotlin MUST NOT log it or the
+// public key. See crates/copypaste-core/src/relay.rs.
+// ---------------------------------------------------------------------------
+
+/// Derive the deterministic shared relay inbox `device_id` from the account's
+/// 32-byte sync key (the bytes returned by `derive_cloud_sync_key`).
+///
+/// Returns a canonical lowercase hyphenated UUID string, byte-identical to the
+/// macOS daemon's `copypaste_core::derive_relay_inbox_id`, so Android registers
+/// and subscribes to the SAME inbox the daemon uses.
+///
+/// Errors: `InvalidKeyLength` if `sync_key` is not exactly 32 bytes.
+///
+/// # Security
+/// The returned id is derived from secret key material; Kotlin MUST NOT log it.
+pub fn relay_inbox_id(sync_key: &[u8]) -> Result<String, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            sync_key
+                .try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        Ok(copypaste_core::derive_relay_inbox_id(&key_arr))
+    })
+}
+
+/// Derive the relay registration `public_key_b64` from the account's 32-byte
+/// sync key.
+///
+/// Returns `base64(derive_relay_public_key(sync_key))` using the STANDARD
+/// alphabet, byte-identical to what the macOS daemon presents at registration
+/// (`base64::engine::general_purpose::STANDARD.encode(pubkey)`), so all of the
+/// account's devices co-register with a consistent value.
+///
+/// Errors: `InvalidKeyLength` if `sync_key` is not exactly 32 bytes.
+///
+/// # Security
+/// Derived from secret key material; Kotlin MUST NOT log it.
+pub fn relay_public_key_b64(sync_key: &[u8]) -> Result<String, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            sync_key
+                .try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        let pubkey = copypaste_core::derive_relay_public_key(&key_arr);
+        Ok(base64::engine::general_purpose::STANDARD.encode(pubkey))
     })
 }
 
@@ -3064,6 +3128,48 @@ mod tests {
             24 + plaintext.len() + 16,
             "blob must be nonce(24) + plaintext + tag(16)"
         );
+    }
+
+    // ── R3b: shared-account relay inbox derivation (ABI 13) ─────────────────
+
+    /// The FFI `relay_inbox_id` MUST be byte-identical to the core function it
+    /// wraps — that equality is the cross-device agreement property that lets
+    /// Android share the macOS daemon's relay inbox.
+    #[test]
+    fn relay_inbox_id_matches_core() {
+        let key = derive_cloud_sync_key("relay-inbox-match".into()).expect("derive");
+        let key_arr: [u8; 32] = key.as_slice().try_into().expect("32-byte key");
+        let ffi = relay_inbox_id(&key).expect("inbox id");
+        assert_eq!(ffi, copypaste_core::derive_relay_inbox_id(&key_arr));
+        // Deterministic across calls.
+        assert_eq!(ffi, relay_inbox_id(&key).expect("inbox id again"));
+    }
+
+    /// The FFI `relay_public_key_b64` MUST equal STANDARD-base64 of the core
+    /// `derive_relay_public_key`, matching the daemon's registration value.
+    #[test]
+    fn relay_public_key_b64_matches_core() {
+        let key = derive_cloud_sync_key("relay-pubkey-match".into()).expect("derive");
+        let key_arr: [u8; 32] = key.as_slice().try_into().expect("32-byte key");
+        let ffi = relay_public_key_b64(&key).expect("pubkey b64");
+        let expected = base64::engine::general_purpose::STANDARD
+            .encode(copypaste_core::derive_relay_public_key(&key_arr));
+        assert_eq!(ffi, expected);
+    }
+
+    /// Both relay derivations reject a non-32-byte key with `InvalidKeyLength`
+    /// rather than panicking across the FFI boundary.
+    #[test]
+    fn relay_derivations_reject_wrong_key_length() {
+        let short = vec![0u8; 16];
+        assert!(matches!(
+            relay_inbox_id(&short),
+            Err(CopypasteError::InvalidKeyLength)
+        ));
+        assert!(matches!(
+            relay_public_key_b64(&short),
+            Err(CopypasteError::InvalidKeyLength)
+        ));
     }
 
     // ── Part A: LocalItem file_name + mime outbound wiring (ABI 8) ──────────

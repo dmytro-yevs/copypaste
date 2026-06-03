@@ -103,3 +103,32 @@ fn local_item_kotlin_binding_has_abi8_file_fields() {
          Regenerate with ./scripts/generate-android-bindings.sh"
     );
 }
+
+/// ABI 13: the committed Kotlin binding must expose the two relay-derivation
+/// functions so the Android relay producer can co-register / subscribe / push to
+/// the daemon's shared inbox. Fails if the binding was not regenerated.
+#[test]
+fn relay_derivation_fns_present_in_kotlin_binding() {
+    let path = kotlin_binding_path();
+    assert!(
+        path.exists(),
+        "Kotlin binding not found at {}: run ./scripts/generate-android-bindings.sh",
+        path.display()
+    );
+
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+
+    // UDL `relay_inbox_id` → Kotlin `relayInboxId`; `relay_public_key_b64` →
+    // `relayPublicKeyB64`. A stale binding (generated against ABI 12) lacks both.
+    assert!(
+        src.contains("fun `relayInboxId`"),
+        "Kotlin binding is STALE: missing `relayInboxId` (ABI 13). \
+         Regenerate with ./scripts/generate-android-bindings.sh"
+    );
+    assert!(
+        src.contains("fun `relayPublicKeyB64`"),
+        "Kotlin binding is STALE: missing `relayPublicKeyB64` (ABI 13). \
+         Regenerate with ./scripts/generate-android-bindings.sh"
+    );
+}

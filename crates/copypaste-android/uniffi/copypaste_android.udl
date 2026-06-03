@@ -57,6 +57,26 @@ namespace copypaste_android {
   [Throws=CopypasteError]
   sequence<u8> cloud_decrypt(string item_id, [ByRef] sequence<u8> blob, [ByRef] sequence<u8> sync_key_bytes);
 
+  // ── Shared-account relay inbox derivation (R3b) ──────────────────────────
+  // The relay sync path uses a SINGLE inbox per account that every device
+  // co-registers / pushes to / subscribes to. Both the inbox `device_id` and
+  // the registration `public_key_b64` are derived DETERMINISTICALLY from the
+  // shared sync key, so Android shares the macOS daemon's inbox. These wrap the
+  // EXACT core functions for a guaranteed byte-match — never re-derive in Kotlin.
+  // SECURITY: both returned values are SECRET-derived; Kotlin MUST NOT log them.
+
+  /// Derive the deterministic shared relay inbox `device_id` (canonical
+  /// lowercase UUID) from the 32-byte sync key. Byte-identical to the macOS
+  /// daemon's `derive_relay_inbox_id`. Throws `InvalidKeyLength` if not 32 bytes.
+  [Throws=CopypasteError]
+  string relay_inbox_id([ByRef] sequence<u8> sync_key);
+
+  /// Derive the relay registration `public_key_b64` (STANDARD base64 of
+  /// `derive_relay_public_key`) from the 32-byte sync key. Matches the daemon's
+  /// registration value. Throws `InvalidKeyLength` if not 32 bytes.
+  [Throws=CopypasteError]
+  string relay_public_key_b64([ByRef] sequence<u8> sync_key);
+
   // ── QR device pairing ─────────────────────────────────────────────────────
   // The QR code is a transport for the EXISTING PAKE pairing material — it is
   // NOT a new crypto scheme. The payload carries this device's fingerprint, a

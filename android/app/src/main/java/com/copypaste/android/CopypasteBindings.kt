@@ -43,9 +43,11 @@ private const val TAG = "CopypasteBindings"
  * `localProvisioning` param on `bootstrapPairInitiator`). Bumped 11 → 12 for the
  * LAN discovery + SAS pairing surface (`startDiscovery`/`stopDiscovery`/
  * `listDiscovered`/`pairWithDiscovered`/`pairGetSas`/`pairConfirmSas`/`pairAbort`/
- * `pairReset`, plus the `DiscoveredPeer` / `PairStatus` records).
+ * `pairReset`, plus the `DiscoveredPeer` / `PairStatus` records). Bumped 12 → 13
+ * for the relay-as-database producer surface (`relayInboxId` /
+ * `relayPublicKeyB64` — the shared-account inbox derivation, R3b).
  */
-const val APP_ABI_VERSION: UInt = 12u
+const val APP_ABI_VERSION: UInt = 13u
 
 /** Mirrors `EncryptedBlob` in copypaste_android.udl — uses ByteArray for callers. */
 data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {
@@ -374,6 +376,66 @@ fun cloud_decrypt(itemId: String, blob: ByteArray, syncKeyBytes: ByteArray): Byt
         throw CopypasteException.DecryptionFailed(e.message ?: "cloud_decrypt failed")
     } catch (e: Exception) {
         throw CopypasteException.DecryptionFailed(e.message ?: "cloud_decrypt failed")
+    }
+}
+
+// ── Shared-account relay inbox derivation (R3b) ───────────────────────────────
+// Both values are derived DETERMINISTICALLY from the 32-byte sync key by the
+// native core, so Android co-registers / subscribes / pushes to the SAME relay
+// inbox the macOS daemon uses. Never re-derive in Kotlin — call these wrappers.
+//
+// SECURITY: both returned strings are SECRET-derived (the inbox id is a
+// credential to the account's encrypted inbox). MUST NEVER be logged.
+
+/**
+ * Derive the deterministic shared relay inbox `device_id` (canonical lowercase
+ * UUID) from [syncKeyBytes] (the 32 bytes from [derive_cloud_sync_key]).
+ *
+ * Byte-identical to the macOS daemon's `derive_relay_inbox_id`, so Android
+ * registers and subscribes to the SAME inbox.
+ *
+ * SECURITY: the returned id is secret-derived; do NOT log it.
+ *
+ * Throws [CopypasteException] if [syncKeyBytes] is not 32 bytes.
+ * Throws [IllegalStateException] if the native library is not loaded.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun relay_inbox_id(syncKeyBytes: ByteArray): String {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; relay_inbox_id is unavailable")
+    }
+    return try {
+        uniffi.copypaste_android.relayInboxId(syncKey = syncKeyBytes.toUByteList())
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.EncryptionFailed(e.message ?: "relay_inbox_id failed")
+    } catch (e: Exception) {
+        throw CopypasteException.EncryptionFailed(e.message ?: "relay_inbox_id failed")
+    }
+}
+
+/**
+ * Derive the relay registration `public_key_b64` (STANDARD base64) from
+ * [syncKeyBytes] (the 32 bytes from [derive_cloud_sync_key]).
+ *
+ * Matches the macOS daemon's registration value so all of the account's devices
+ * co-register with a consistent public key.
+ *
+ * SECURITY: derived from secret key material; do NOT log it.
+ *
+ * Throws [CopypasteException] if [syncKeyBytes] is not 32 bytes.
+ * Throws [IllegalStateException] if the native library is not loaded.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun relay_public_key_b64(syncKeyBytes: ByteArray): String {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; relay_public_key_b64 is unavailable")
+    }
+    return try {
+        uniffi.copypaste_android.relayPublicKeyB64(syncKey = syncKeyBytes.toUByteList())
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.EncryptionFailed(e.message ?: "relay_public_key_b64 failed")
+    } catch (e: Exception) {
+        throw CopypasteException.EncryptionFailed(e.message ?: "relay_public_key_b64 failed")
     }
 }
 
