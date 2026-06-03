@@ -3359,14 +3359,40 @@ impl IpcServer {
                         })?
                         .to_owned();
 
-                    // Resolve the thumbnail blob: use the stored one when present,
-                    // or attempt a Phase-4 lazy backfill for legacy rows with
-                    // thumb IS NULL.
-                    let thumb_blob: Vec<u8> = match item.thumb {
+                    // Resolve the thumbnail blob: use the stored one when present
+                    // AND it conforms to the current THUMBNAIL_MAX_DIM cap.
+                    // Regenerate (Phase-4 backfill path) when either:
+                    //   * thumb IS NULL (legacy row, never had a thumbnail), or
+                    //   * the stored thumbnail was encoded under an older, larger
+                    //     cap (e.g. 680 px) and its recorded dims exceed the new
+                    //     cap — otherwise the UI would decode an oversized bitmap
+                    //     (HB-10, 350 MB image-memory regression).
+                    let stored_thumb: Option<Vec<u8>> = match item.thumb {
+                        Some(b) => {
+                            let (tw, th) = parse_image_thumb_dims(&meta_json);
+                            if copypaste_core::thumb_dims_exceed_cap(tw, th) {
+                                tracing::debug!(
+                                    item_id = %id_for_task,
+                                    thumb_w = tw,
+                                    thumb_h = th,
+                                    "stored thumbnail exceeds current cap; regenerating"
+                                );
+                                None // fall through to regeneration below
+                            } else {
+                                Some(b)
+                            }
+                        }
+                        None => None,
+                    };
+                    let thumb_blob: Vec<u8> = match stored_thumb {
                         Some(b) => b,
                         None => {
                             // Phase 4 lazy backfill: generate + persist a
-                            // thumbnail on first display.  Returns both the
+                            // thumbnail on first display (NULL thumb) OR
+                            // regenerate an oversized one at the current cap.
+                            // `set_thumb` overwrites any existing row, so an
+                            // oversized stored thumbnail is replaced in place.
+                            // Returns both the
                             // encrypted blob and the updated meta_json (which
                             // now includes thumb_file_id / thumb_w / thumb_h)
                             // so the subsequent decode path reads the right AAD.
@@ -6839,6 +6865,31 @@ pub(crate) fn parse_image_file_id(meta_json: &str) -> Result<[u8; 16], String> {
 /// `get_item_thumbnail` IPC verb.
 pub(crate) fn parse_image_thumb_file_id(meta_json: &str) -> Result<[u8; 16], String> {
     parse_meta_id_array(meta_json, "thumb_file_id")
+}
+
+/// Parse the recorded `(thumb_w, thumb_h)` pixel dimensions out of an image
+/// `blob_ref` meta JSON. Returns `(0, 0)` when either field is absent — legacy
+/// rows written before the thumb-dim fields existed have no dims to compare,
+/// so the caller treats `(0, 0)` as "unknown / do not regenerate on size".
+///
+/// Used to decide whether a *stored* thumbnail was encoded under an older,
+/// larger [`copypaste_core::THUMBNAIL_MAX_DIM`] cap and must be regenerated
+/// (HB-10). See [`copypaste_core::thumb_dims_exceed_cap`].
+fn parse_image_thumb_dims(meta_json: &str) -> (u32, u32) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(meta_json) else {
+        return (0, 0);
+    };
+    let w = v
+        .get("thumb_w")
+        .and_then(|x| x.as_u64())
+        .and_then(|n| u32::try_from(n).ok())
+        .unwrap_or(0);
+    let h = v
+        .get("thumb_h")
+        .and_then(|x| x.as_u64())
+        .and_then(|n| u32::try_from(n).ok())
+        .unwrap_or(0);
+    (w, h)
 }
 
 /// Parse a named 16-byte array (e.g. `"file_id"` / `"thumb_file_id"`) out of an
@@ -10792,7 +10843,7 @@ mod tests {
         );
         let key = [0u8; 32];
 
-        // A 1000×1000 image: larger than THUMBNAIL_MAX_DIM (680) so the
+        // A 1000×1000 image: larger than THUMBNAIL_MAX_DIM (192) so the
         // thumbnail is genuinely downscaled and its PNG is smaller than the
         // full-res PNG. A per-pixel gradient keeps PNG compression honest (a
         // flat color would compress so well the size gap could vanish).

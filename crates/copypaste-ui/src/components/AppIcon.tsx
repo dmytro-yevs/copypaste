@@ -4,16 +4,44 @@ import { api } from "../lib/ipc";
 // ---------------------------------------------------------------------------
 // Module-level cache: bundleId → base64 PNG string or null (null = no icon).
 // Shared across all AppIcon instances so each bundle id is fetched exactly once.
+//
+// Bounded LRU (HB-10): previously unbounded, so over a long session every
+// distinct source app's icon PNG accumulated forever. Cap at MAX_ICON_ENTRIES
+// using Map insertion-order LRU — on access we delete-then-re-insert so the
+// Map tail is the most-recently-used key and the head is the eviction
+// candidate, mirroring the daemon-side icon cache and the ImageThumb cache.
 // ---------------------------------------------------------------------------
+const MAX_ICON_ENTRIES = 128;
 const iconCache = new Map<string, string | null>();
 
 // In-flight promise cache — prevents parallel duplicate fetches for the same id.
 const inflight = new Map<string, Promise<string | null>>();
 
+/** Read with LRU touch: move the entry to the MRU tail when present. */
+function iconCacheGet(bundleId: string): string | null | undefined {
+  if (!iconCache.has(bundleId)) return undefined;
+  const value = iconCache.get(bundleId) ?? null;
+  iconCache.delete(bundleId);
+  iconCache.set(bundleId, value);
+  return value;
+}
+
+/** Insert/update and evict the LRU head until within MAX_ICON_ENTRIES. */
+function iconCacheSet(bundleId: string, value: string | null): void {
+  if (iconCache.has(bundleId)) iconCache.delete(bundleId);
+  iconCache.set(bundleId, value);
+  while (iconCache.size > MAX_ICON_ENTRIES) {
+    const oldest = iconCache.keys().next().value;
+    if (oldest === undefined) break;
+    iconCache.delete(oldest);
+  }
+}
+
 function fetchIcon(bundleId: string): Promise<string | null> {
   // Return from the resolved cache first (fastest path).
-  if (iconCache.has(bundleId)) {
-    return Promise.resolve(iconCache.get(bundleId) ?? null);
+  const cached = iconCacheGet(bundleId);
+  if (cached !== undefined) {
+    return Promise.resolve(cached);
   }
   // Coalesce concurrent fetches for the same bundle id.
   const existing = inflight.get(bundleId);
@@ -24,7 +52,7 @@ function fetchIcon(bundleId: string): Promise<string | null> {
     .then((r) => r.png_b64 ?? null)
     .catch(() => null)
     .then((result) => {
-      iconCache.set(bundleId, result);
+      iconCacheSet(bundleId, result);
       inflight.delete(bundleId);
       return result;
     });
