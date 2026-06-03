@@ -160,6 +160,7 @@ fn merge_observed_remote_clock_takes_max_plus_one() {
 
 fn make_local(id: &str, lamport: i64, wall: i64) -> ClipboardItem {
     ClipboardItem {
+        deleted: false,
         id: id.to_string(),
         item_id: format!("iid-{id}"),
         content_type: "text".to_string(),
@@ -184,6 +185,9 @@ fn make_local(id: &str, lamport: i64, wall: i64) -> ClipboardItem {
 
 fn make_remote(id: &str, lamport: i64, wall: i64, device_id: &str) -> WireItem {
     WireItem {
+        deleted: false,
+        pinned: false,
+        pin_order: None,
         id: id.to_string(),
         item_id: format!("iid-{id}"),
         content_type: "text".to_string(),

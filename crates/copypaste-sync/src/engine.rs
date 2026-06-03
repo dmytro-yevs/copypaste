@@ -533,6 +533,7 @@ mod tests {
 
     fn make_item(id: &str, lamport: i64) -> ClipboardItem {
         ClipboardItem {
+            deleted: false,
             id: id.to_string(),
             item_id: format!("{id}-item"),
             content_type: "text".to_string(),
@@ -777,6 +778,7 @@ mod tests {
         // edge-cases LOW #34: a malicious/buggy peer sends a wire item with
         // negative lamport_ts; engine must clamp and not panic from the cast.
         let item = ClipboardItem {
+            deleted: false,
             id: "neg".to_string(),
             item_id: "neg-item".to_string(),
             content_type: "text".to_string(),
