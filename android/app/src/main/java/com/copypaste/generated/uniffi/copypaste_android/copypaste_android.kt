@@ -1316,6 +1316,26 @@ public object FfiConverterLong: FfiConverter<Long, Long> {
     }
 }
 
+public object FfiConverterDouble: FfiConverter<Double, Double> {
+    override fun lift(value: Double): Double {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Double {
+        return buf.getDouble()
+    }
+
+    override fun lower(value: Double): Double {
+        return value
+    }
+
+    override fun allocationSize(value: Double) = 8UL
+
+    override fun write(value: Double, buf: ByteBuffer) {
+        buf.putDouble(value)
+    }
+}
+
 public object FfiConverterBoolean: FfiConverter<Boolean, Byte> {
     override fun lift(value: Byte): Boolean {
         return value.toInt() != 0
@@ -1652,7 +1672,10 @@ data class LocalItem (
     var `contentType`: kotlin.String, 
     var `plaintext`: List<kotlin.UByte>, 
     var `fileName`: kotlin.String?, 
-    var `mime`: kotlin.String?
+    var `mime`: kotlin.String?, 
+    var `deleted`: kotlin.Boolean, 
+    var `pinned`: kotlin.Boolean, 
+    var `pinOrder`: kotlin.Double?
 ) {
     
     companion object
@@ -1668,6 +1691,9 @@ public object FfiConverterTypeLocalItem: FfiConverterRustBuffer<LocalItem> {
             FfiConverterSequenceUByte.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalDouble.read(buf),
         )
     }
 
@@ -1678,7 +1704,10 @@ public object FfiConverterTypeLocalItem: FfiConverterRustBuffer<LocalItem> {
             FfiConverterString.allocationSize(value.`contentType`) +
             FfiConverterSequenceUByte.allocationSize(value.`plaintext`) +
             FfiConverterOptionalString.allocationSize(value.`fileName`) +
-            FfiConverterOptionalString.allocationSize(value.`mime`)
+            FfiConverterOptionalString.allocationSize(value.`mime`) +
+            FfiConverterBoolean.allocationSize(value.`deleted`) +
+            FfiConverterBoolean.allocationSize(value.`pinned`) +
+            FfiConverterOptionalDouble.allocationSize(value.`pinOrder`)
     )
 
     override fun write(value: LocalItem, buf: ByteBuffer) {
@@ -1689,6 +1718,9 @@ public object FfiConverterTypeLocalItem: FfiConverterRustBuffer<LocalItem> {
             FfiConverterSequenceUByte.write(value.`plaintext`, buf)
             FfiConverterOptionalString.write(value.`fileName`, buf)
             FfiConverterOptionalString.write(value.`mime`, buf)
+            FfiConverterBoolean.write(value.`deleted`, buf)
+            FfiConverterBoolean.write(value.`pinned`, buf)
+            FfiConverterOptionalDouble.write(value.`pinOrder`, buf)
     }
 }
 
@@ -2017,7 +2049,10 @@ data class SyncedItem (
     var `plaintext`: List<kotlin.UByte>, 
     var `wallTimeMs`: kotlin.Long, 
     var `fileName`: kotlin.String?, 
-    var `mime`: kotlin.String?
+    var `mime`: kotlin.String?, 
+    var `deleted`: kotlin.Boolean, 
+    var `pinned`: kotlin.Boolean, 
+    var `pinOrder`: kotlin.Double?
 ) {
     
     companion object
@@ -2033,6 +2068,9 @@ public object FfiConverterTypeSyncedItem: FfiConverterRustBuffer<SyncedItem> {
             FfiConverterLong.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterOptionalDouble.read(buf),
         )
     }
 
@@ -2043,7 +2081,10 @@ public object FfiConverterTypeSyncedItem: FfiConverterRustBuffer<SyncedItem> {
             FfiConverterSequenceUByte.allocationSize(value.`plaintext`) +
             FfiConverterLong.allocationSize(value.`wallTimeMs`) +
             FfiConverterOptionalString.allocationSize(value.`fileName`) +
-            FfiConverterOptionalString.allocationSize(value.`mime`)
+            FfiConverterOptionalString.allocationSize(value.`mime`) +
+            FfiConverterBoolean.allocationSize(value.`deleted`) +
+            FfiConverterBoolean.allocationSize(value.`pinned`) +
+            FfiConverterOptionalDouble.allocationSize(value.`pinOrder`)
     )
 
     override fun write(value: SyncedItem, buf: ByteBuffer) {
@@ -2054,6 +2095,9 @@ public object FfiConverterTypeSyncedItem: FfiConverterRustBuffer<SyncedItem> {
             FfiConverterLong.write(value.`wallTimeMs`, buf)
             FfiConverterOptionalString.write(value.`fileName`, buf)
             FfiConverterOptionalString.write(value.`mime`, buf)
+            FfiConverterBoolean.write(value.`deleted`, buf)
+            FfiConverterBoolean.write(value.`pinned`, buf)
+            FfiConverterOptionalDouble.write(value.`pinOrder`, buf)
     }
 }
 
@@ -2292,6 +2336,35 @@ public object FfiConverterOptionalUShort: FfiConverterRustBuffer<kotlin.UShort?>
         } else {
             buf.put(1)
             FfiConverterUShort.write(value, buf)
+        }
+    }
+}
+
+
+
+
+public object FfiConverterOptionalDouble: FfiConverterRustBuffer<kotlin.Double?> {
+    override fun read(buf: ByteBuffer): kotlin.Double? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterDouble.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.Double?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterDouble.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.Double?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterDouble.write(value, buf)
         }
     }
 }
