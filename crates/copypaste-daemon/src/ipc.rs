@@ -554,6 +554,34 @@ fn byte_to_char_offset(s: &str, byte: usize) -> usize {
     s[..idx].chars().count()
 }
 
+/// Whether a stored item would be dropped by the local sync pipeline for being
+/// too large, so the UIs can badge it. This is the single source of truth —
+/// the desktop/Android UIs just read the `too_large_to_sync` boolean.
+///
+/// Threshold: [`crate::sync_orch::SYNC_MAX_BLOB_BYTES`] (8 MiB). This is the
+/// ceiling the *local* sync pipeline actually enforces on the wrapped plaintext
+/// for ALL content types — text via
+/// [`crate::sync_common::wrap_and_check_cloud_upload_plaintext`] and image/file
+/// via `crate::sync_orch::rekey_blob_outbound`. An item above this size is kept
+/// locally but never forwarded, regardless of the relay's nominal 10 MiB
+/// image/file tier (a higher transport cap, not what drops the item). Using the
+/// same constant keeps the badge faithful to what really won't sync.
+///
+/// Size source: the stored `content` blob length. `content` is the at-rest
+/// CIPHERTEXT (text: XChaCha20-Poly1305 ct = plaintext + 16-byte tag, nonce
+/// stored separately; image/file: chunked self-framed blob), whereas the sync
+/// path measures the recovered PLAINTEXT. Ciphertext is always >= plaintext, so
+/// comparing the stored blob length against the ceiling is a safe, conservative
+/// proxy: it never under-reports an oversized item, and the only inaccuracy is
+/// a thin band just under 8 MiB where AEAD/chunk overhead tips the ciphertext
+/// over. Decrypting every row purely to measure exact plaintext is not worth
+/// the cost for a list-view badge, so we use the cheaply-available blob length.
+fn too_large_to_sync(item: &copypaste_core::ClipboardItem) -> bool {
+    item.content
+        .as_ref()
+        .is_some_and(|c| c.len() > crate::sync_orch::SYNC_MAX_BLOB_BYTES)
+}
+
 fn format_fingerprint(bytes: &[u8]) -> String {
     let encoded = hex::encode(bytes);
     encoded
@@ -2590,6 +2618,10 @@ impl IpcServer {
                                     "is_sensitive": item.is_sensitive,
                                     "wall_time": item.wall_time,
                                     "lamport_ts": item.lamport_ts,
+                                    // Daemon-computed single source of truth: true when
+                                    // this item exceeds the local sync size ceiling and
+                                    // therefore won't be synced. UIs badge it.
+                                    "too_large_to_sync": too_large_to_sync(item),
                                 })
                             })
                             .collect();
@@ -9306,6 +9338,66 @@ mod tests {
             Arc::new(zeroize::Zeroizing::new([0u8; 32])),
             Arc::new([0u8; 32]),
         )
+    }
+
+    /// The `list` IPC response must carry a daemon-computed `too_large_to_sync`
+    /// flag per item: `true` for an item whose stored blob exceeds the local
+    /// sync ceiling (`SYNC_MAX_BLOB_BYTES`, 8 MiB), `false` for a normal item.
+    /// This is the single source of truth the UIs read to badge un-syncable
+    /// items. `IpcServer::new` starts ready, so `list` dispatches against the DB.
+    #[tokio::test]
+    async fn list_reports_too_large_to_sync_per_item() {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let server = IpcServer::new(
+            db.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+            Arc::new([0u8; 32]),
+        );
+
+        // Seed a normal small item and an oversized one. `content` is the
+        // at-rest ciphertext blob; the badge compares its length to 8 MiB.
+        {
+            let guard = db.lock().await;
+            let small = copypaste_core::ClipboardItem::new_text(vec![0xAB; 16], vec![0u8; 24], 1);
+            copypaste_core::insert_item(&guard, &small).unwrap();
+            // One byte over the ceiling guarantees too_large_to_sync == true.
+            let oversized = copypaste_core::ClipboardItem::new_text(
+                vec![0xCD; crate::sync_orch::SYNC_MAX_BLOB_BYTES + 1],
+                vec![0u8; 24],
+                2,
+            );
+            copypaste_core::insert_item(&guard, &oversized).unwrap();
+        }
+
+        let resp = server
+            .dispatch(r#"{"id":"1","method":"list","params":{"limit":50,"offset":0}}"#)
+            .await;
+        assert!(resp.ok, "list must succeed: {resp:?}");
+        let data = resp.data.expect("list returns data");
+        let items = data["items"].as_array().expect("items array");
+        assert_eq!(items.len(), 2, "two seeded items expected");
+
+        // Items are ordered newest-first (oversized has the larger lamport/wall
+        // time), but assert by flag content rather than position.
+        let flags: Vec<bool> = items
+            .iter()
+            .map(|it| {
+                it["too_large_to_sync"]
+                    .as_bool()
+                    .expect("too_large_to_sync must be a bool on every item")
+            })
+            .collect();
+        assert_eq!(
+            flags.iter().filter(|&&f| f).count(),
+            1,
+            "exactly one item must be flagged too_large_to_sync: {items:?}"
+        );
+        assert_eq!(
+            flags.iter().filter(|&&f| !f).count(),
+            1,
+            "exactly one item must be under the sync ceiling: {items:?}"
+        );
     }
 
     /// CRITICAL-1: `display_fingerprint` renders the mTLS canonical fingerprint
