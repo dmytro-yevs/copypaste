@@ -5,10 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -31,6 +33,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.SyncStatusBadge
@@ -103,6 +106,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // AB-7: FLAG_SECURE. This window hosts the clipboard history (Clips tab),
+        // which can contain passwords, tokens, and other sensitive copied text.
+        // Block screenshots and keep the contents out of the recents/overview
+        // thumbnail. Set before setContent so the flag covers the whole lifetime
+        // (PairActivity already does the same for its QR screen).
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE,
+        )
         // Edge-to-edge: the bottom NavigationBar and each tab's TopAppBar apply
         // their own system-bar insets so nothing is clipped on notched phones.
         enableEdgeToEdge()
@@ -196,10 +208,13 @@ class MainActivity : ComponentActivity() {
 // ── Navigation structure ───────────────────────────────────────────────────────
 
 // Internal so NavTabTest (pure-JVM unit test) can verify the tab set.
-internal enum class NavTab(val label: String, val icon: ImageVector) {
-    CLIPS("History", Icons.Filled.ContentPaste),
-    DEVICES("Pair", Icons.Filled.Devices),
-    SETTINGS("Settings", Icons.Filled.Settings),
+// `labelRes` is the bottom-nav label string resource. HB-6: the DEVICES tab now
+// reads R.string.title_devices ("Devices") instead of the old hardcoded "Pair",
+// matching the Devices screen title — pairing lives INSIDE that screen now.
+internal enum class NavTab(@StringRes val labelRes: Int, val icon: ImageVector) {
+    CLIPS(R.string.title_history, Icons.Filled.ContentPaste),
+    DEVICES(R.string.title_devices, Icons.Filled.Devices),
+    SETTINGS(R.string.title_settings, Icons.Filled.Settings),
 }
 
 @Composable
@@ -221,11 +236,12 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                 containerColor = IdePanel,
             ) {
                 NavTab.entries.forEachIndexed { index, tab ->
+                    val label = stringResource(tab.labelRes)
                     NavigationBarItem(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label) },
+                        icon = { Icon(tab.icon, contentDescription = label) },
+                        label = { Text(label) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor       = IdeAccent,
                             selectedTextColor       = IdeAccent,

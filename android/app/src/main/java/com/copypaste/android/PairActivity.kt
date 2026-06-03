@@ -33,7 +33,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -139,6 +138,11 @@ class PairActivity : ComponentActivity() {
     // instead of silently ignoring the malformed link.
     private val deepLinkError = mutableStateOf<String?>(null)
 
+    // HB-6: when launched from the Devices screen's "Scan a device's QR" button
+    // (Intent extra mode=scan), auto-open the camera scan flow on first compose.
+    // Without the extra (e.g. opened to show this device's own QR) it stays false.
+    private val autoScan = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // FLAG_SECURE: this screen renders the pairing QR, which encodes the PAKE
@@ -153,6 +157,8 @@ class PairActivity : ComponentActivity() {
         enableEdgeToEdge()
         // Extract payload from a cold-start deep-link intent, if present.
         handleDeepLinkIntent(intent)
+        // HB-6: honor mode=scan from the Devices screen to auto-open the scanner.
+        if (intent?.getStringExtra("mode") == "scan") autoScan.value = true
         setContent {
             CopyPasteTheme {
                 PairScreen(
@@ -161,6 +167,8 @@ class PairActivity : ComponentActivity() {
                     onDeepLinkConsumed = { deepLinkPayload.value = null },
                     incomingDeepLinkError = deepLinkError.value,
                     onDeepLinkErrorConsumed = { deepLinkError.value = null },
+                    autoScan = autoScan.value,
+                    onAutoScanConsumed = { autoScan.value = false },
                 )
             }
         }
@@ -221,6 +229,8 @@ fun PairScreen(
     onDeepLinkConsumed: () -> Unit = {},
     incomingDeepLinkError: String? = null,
     onDeepLinkErrorConsumed: () -> Unit = {},
+    autoScan: Boolean = false,
+    onAutoScanConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
@@ -481,20 +491,68 @@ fun PairScreen(
                         revokedFingerprints = revoked,
                         deviceId = settings.deviceId,
                     )
+                    // HB-7b: route each received item BY CONTENT TYPE, mirroring
+                    // FgsSyncLoop.storeSyncedItem. The old code force-decoded EVERY
+                    // item as UTF-8 text, so image/file frames became garbage and
+                    // were dropped (a cause of "received N stored 0"). All items
+                    // persist under the peer's STABLE item_id (overrideId) so a
+                    // later re-sync reuses it instead of minting a duplicate.
                     var stored = 0
                     for (item in result.items) {
-                        val plaintext = String(
-                            ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
-                            Charsets.UTF_8,
-                        )
-                        // Persist under the peer's STABLE item_id so a later
-                        // re-sync of this clip reuses it (no duplicate on the
-                        // originating device). itemId doubles as the dedup key.
-                        if (repository.storeItem(plaintext, key, overrideId = item.itemId)
-                                .isNotEmpty()
-                        ) {
-                            stored += 1
+                        val plaintextBytes =
+                            ByteArray(item.plaintext.size) { item.plaintext[it].toByte() }
+                        val isImage = item.contentType == "image" ||
+                            item.contentType.startsWith("image/")
+                        val isFile = item.contentType == "file"
+                        val didStore = when {
+                            isImage -> {
+                                if (plaintextBytes.isEmpty()) {
+                                    false
+                                } else {
+                                    val storedId = repository.storeItem(
+                                        plaintext = "[image]",
+                                        key = key,
+                                        overrideId = item.itemId,
+                                        contentType = item.contentType,
+                                    )
+                                    if (storedId.isNotEmpty()) {
+                                        repository.storeImageBytes(storedId, plaintextBytes)
+                                        SyncThumbnailHelper.generateAndStore(plaintextBytes) { thumb ->
+                                            repository.storeThumbnailBytes(storedId, thumb)
+                                        }
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                            }
+                            isFile -> {
+                                if (plaintextBytes.isEmpty()) {
+                                    false
+                                } else {
+                                    val label = SyncFileHelper.buildFileLabel(item.fileName)
+                                    val storedId = repository.storeItem(
+                                        plaintext = label,
+                                        key = key,
+                                        overrideId = item.itemId,
+                                        contentType = item.contentType,
+                                    )
+                                    if (storedId.isNotEmpty()) {
+                                        repository.storeFileBytes(storedId, plaintextBytes)
+                                        repository.storeFileMeta(storedId, item.fileName, item.mime)
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                            }
+                            else -> {
+                                val plaintext = String(plaintextBytes, Charsets.UTF_8)
+                                repository.storeItem(plaintext, key, overrideId = item.itemId)
+                                    .isNotEmpty()
+                            }
                         }
+                        if (didStore) stored += 1
                     }
                     // Persist (APPEND) the peer into the multi-peer roster for
                     // future syncs — a second pairing must NOT discard the first.
@@ -614,6 +672,16 @@ fun PairScreen(
             actionLabel = dismissLabel,
         )
         errorMessage = null
+    }
+
+    // HB-6: auto-open the scanner when launched in scan mode (from the Devices
+    // screen "Scan a device's QR" button). Consumed once so a recomposition does
+    // not re-launch it; the QR-display flow above still runs in parallel so this
+    // device's own QR is ready behind the scanner.
+    LaunchedEffect(autoScan) {
+        if (!autoScan) return@LaunchedEffect
+        startScanFlow()
+        onAutoScanConsumed()
     }
 
     Scaffold(
@@ -775,12 +843,10 @@ fun PairScreen(
                 }
             }
 
-            OutlinedButton(
-                onClick = { startScanFlow() },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(text = stringResource(R.string.btn_scan_qr))
-            }
+            // HB-6: the "Scan a device's QR" button moved to the Devices screen.
+            // This screen now shows ONLY this device's own QR. The scan flow is
+            // still reachable here when launched with mode=scan (auto-invoked
+            // above) or via a cppair:// deep link; startScanFlow() remains used.
 
             // ── Paired device display ─────────────────────────────────────
             // Show the persisted paired peer (fingerprint + sync address) so the
