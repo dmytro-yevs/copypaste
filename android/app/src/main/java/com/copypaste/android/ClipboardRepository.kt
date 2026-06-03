@@ -522,6 +522,7 @@ class ClipboardRepository(context: Context) {
         overrideId: String? = null,
         contentType: String = "text/plain",
         lamportTs: Long = 0L,
+        wallTimeMs: Long = System.currentTimeMillis(),
     ): String = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext ""
 
@@ -588,7 +589,7 @@ class ClipboardRepository(context: Context) {
             localAesEncrypt(textBytes, key)
         }
 
-        val encoded = encodeItem(blob, textBytes.size, contentType = contentType, lamportTs = lamportTs)
+        val encoded = encodeItem(blob, textBytes.size, contentType = contentType, lamportTs = lamportTs, wallTimeMs = wallTimeMs)
         synchronized(idsWriteLock) {
             // Append the id, removing any prior occurrence first so the index
             // stays canonical (no duplicate ids). A synced item re-stored under
@@ -635,6 +636,7 @@ class ClipboardRepository(context: Context) {
         key: ByteArray,
         itemId: String,
         incomingLamportTs: Long,
+        wallTimeMs: Long = System.currentTimeMillis(),
     ): Boolean = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext false
 
@@ -682,7 +684,7 @@ class ClipboardRepository(context: Context) {
                 Log.w(TAG, "LWW replace: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
                 localAesEncrypt(plaintextBytes, key)
             }
-            val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs)
+            val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs, wallTimeMs = wallTimeMs)
             prefs.edit().putString("item_$existingStorageId", encoded).apply()
             Log.d(TAG, "LWW replaced item_id=$itemId storageId=$existingStorageId (lamport $storedTs→$incomingLamportTs)")
             true  // replaced successfully
@@ -713,7 +715,7 @@ class ClipboardRepository(context: Context) {
             Log.w(TAG, "storeItemWithLww: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
             localAesEncrypt(plaintextBytes, key)
         }
-        val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs)
+        val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs, wallTimeMs = wallTimeMs)
 
         synchronized(idsWriteLock) {
             // TOCTOU guard: re-check inside the lock. A concurrent caller (FgsSyncLoop
@@ -1077,11 +1079,11 @@ class ClipboardRepository(context: Context) {
         plaintextLen: Int,
         contentType: String = "text/plain",
         lamportTs: Long = 0L,
+        wallTimeMs: Long = System.currentTimeMillis(),
     ): String {
         val nonce64 = Base64.encodeToString(blob.nonce, Base64.NO_WRAP)
         val ct64 = Base64.encodeToString(blob.ciphertext, Base64.NO_WRAP)
-        val ts = System.currentTimeMillis()
-        return "$ts|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs"
+        return "$wallTimeMs|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs"
     }
 
     private fun parseItem(id: String, raw: String, key: ByteArray): ClipboardItem? {
