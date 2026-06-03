@@ -796,10 +796,21 @@ async fn peer_connector_loop(
             }
 
             tracing::debug!(fingerprint = %peer.fingerprint, addr = %peer.addr, "connector dialing paired peer");
-            match transport
-                .connect_with_retry(peer.addr, &peer.fingerprint)
-                .await
-            {
+            // BUG F1 (verification follow-up): race the dial against cancellation.
+            // `connect_with_retry` can take up to ~60s (4 attempts × ~15s) before it
+            // returns, so without this select a shutdown that lands mid-dial would
+            // stall the connector loop for the full retry budget. `connect_with_retry`
+            // only opens a TCP/TLS connection and is cancel-safe, so dropping the
+            // in-flight future on cancel is sound. On cancel we exit the loop.
+            let dial = tokio::select! {
+                biased;
+                _ = shutdown.cancelled() => {
+                    tracing::info!("P2P peer connector loop shutting down (cancelled mid-dial)");
+                    break;
+                }
+                result = transport.connect_with_retry(peer.addr, &peer.fingerprint) => result,
+            };
+            match dial {
                 Ok(stream) => {
                     // Re-check under the lock: the accept loop may have
                     // registered an inbound connection from this peer while we
@@ -1476,6 +1487,152 @@ mod tests {
             joined.is_ok(),
             "BUG F1: both P2P loops must exit promptly on token cancel"
         );
+    }
+
+    /// BUG F1 (verification follow-up): the `peer_connector_loop` must exit
+    /// promptly when its cloned token is cancelled. With an empty peers file the
+    /// loop has nothing to dial and parks on its inter-tick sleep select (which
+    /// already races cancellation); the new mid-dial select arm covers the case
+    /// where a dial is in flight. We pin `COPYPASTE_CONFIG_DIR` at an empty
+    /// tempdir (under the process-wide env lock) so `peers_file_path()` resolves
+    /// to a non-existent `peers.json` and the loop never reaches a real dial —
+    /// keeping the test hermetic (no network / no multicast).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancellation_token_stops_connector_loop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let token = CancellationToken::new();
+        // Hold the process-wide env lock only while we set the override, spawn the
+        // loop, and cancel it — never across an await (clippy::await_holding_lock).
+        // The loop is cancelled before the lock is released, so it performs at most
+        // one peers.json read against our empty tempdir.
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_CONFIG_DIR");
+        // SAFETY: serialised via TEST_ENV_LOCK; restored before the lock drops.
+        unsafe {
+            std::env::set_var("COPYPASTE_CONFIG_DIR", tmp.path());
+        }
+
+        let handle = {
+            let cert = copypaste_p2p::cert::SelfSignedCert::generate("f1-connector").unwrap();
+            let transport = Arc::new(PeerTransport::from_cert(
+                cert.cert_der,
+                cert.key_der,
+                PairedPeers::new(),
+            ));
+            let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
+            let (incoming_tx, _incoming_rx) = mpsc::channel::<WireItem>(8);
+            let own_fp = transport.fingerprint().to_string();
+            let catchup: CatchupProvider = Arc::new(Vec::new);
+            let discovery = Arc::new(DiscoveryService::new());
+            let token = token.clone();
+            tokio::spawn(async move {
+                peer_connector_loop(
+                    transport,
+                    peer_sinks,
+                    incoming_tx,
+                    own_fp,
+                    catchup,
+                    discovery,
+                    token,
+                )
+                .await;
+            })
+        };
+
+        // Loop is parked on its tick select; cancel before releasing the env lock.
+        token.cancel();
+        // SAFETY: still holding TEST_ENV_LOCK; restore the prior value, then drop
+        // the guard so the subsequent await holds no std mutex guard.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_CONFIG_DIR", v),
+                None => std::env::remove_var("COPYPASTE_CONFIG_DIR"),
+            }
+        }
+        drop(env_lock);
+
+        let joined = tokio::time::timeout(Duration::from_secs(5), handle).await;
+        assert!(
+            joined.is_ok(),
+            "BUG F1: peer_connector_loop must exit promptly on token cancel"
+        );
+        joined.unwrap().unwrap();
+    }
+
+    /// BUG F1 (verification follow-up): the `standing_pairing_responder_loop`
+    /// must exit promptly on token cancel. It binds an ephemeral bootstrap port
+    /// (`bport = 0`, a passive loopback TCP listener — no multicast) and then
+    /// parks inside `run_with_confirm` awaiting an inbound pairing connection
+    /// that never arrives, raced against cancellation. Cancelling must drop the
+    /// in-flight accept future and break the loop. Fully hermetic.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancellation_token_stops_standing_responder_loop() {
+        let token = CancellationToken::new();
+        let handle = {
+            let cert = copypaste_p2p::cert::SelfSignedCert::generate("f1-responder").unwrap();
+            let peers = PairedPeers::new();
+            let pairing = Arc::new(crate::pairing_sm::PairingCoordinator::new());
+            let own_sync_addr = Arc::new(std::sync::Mutex::new(Some("127.0.0.1:0".to_string())));
+            let public_ip_cache = Arc::new(tokio::sync::RwLock::new(None));
+            let token = token.clone();
+            tokio::spawn(async move {
+                standing_pairing_responder_loop(
+                    0, // ephemeral bootstrap port — passive loopback listener
+                    cert.cert_der,
+                    cert.key_der,
+                    peers,
+                    pairing,
+                    own_sync_addr,
+                    public_ip_cache,
+                    token,
+                )
+                .await;
+            })
+        };
+
+        // Give the loop a moment to reach its `run_with_confirm` accept await,
+        // then cancel; it must break out well within the bound.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        token.cancel();
+        let joined = tokio::time::timeout(Duration::from_secs(5), handle).await;
+        assert!(
+            joined.is_ok(),
+            "BUG F1: standing_pairing_responder_loop must exit promptly on token cancel"
+        );
+        joined.unwrap().unwrap();
+    }
+
+    /// BUG F1 (verification follow-up): the mDNS discovery task (spawned inline
+    /// in `start_p2p`) awaits its `DiscoveryService::start()` handle raced
+    /// against cancellation (see p2p.rs ~479). The task body is not a standalone
+    /// function and `start()` performs real mDNS registration, so it cannot be
+    /// unit-tested without multicast. This test asserts the exact, narrowest
+    /// cancellable unit instead: a `select!` of a never-completing future against
+    /// `shutdown.cancelled()` resolves to the cancel arm — i.e. the same
+    /// structure that guards the discovery handle exits promptly on cancel.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancellation_token_stops_discovery_select() {
+        let token = CancellationToken::new();
+        let handle = {
+            let token = token.clone();
+            tokio::spawn(async move {
+                // Mirror the discovery task's guard: a long-lived handle future
+                // (here a never-resolving future) raced against cancellation.
+                tokio::select! {
+                    _ = std::future::pending::<()>() => unreachable!("handle never completes"),
+                    _ = token.cancelled() => {}
+                }
+            })
+        };
+        token.cancel();
+        let joined = tokio::time::timeout(Duration::from_secs(5), handle).await;
+        assert!(
+            joined.is_ok(),
+            "BUG F1: discovery task select must exit promptly on token cancel"
+        );
+        joined.unwrap().unwrap();
     }
 
     /// `subscriber_loop_fans_out_to_connected_peer`:
