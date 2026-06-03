@@ -3024,6 +3024,9 @@ mod tests {
         let offered_plaintext = b"hello from android initiator".to_vec();
         let offered_item_id = uuid::Uuid::new_v4().to_string();
         let local_items = vec![LocalItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: String::new(),
             item_id: offered_item_id.clone(),
             wall_time_ms: 7,
@@ -3184,6 +3187,9 @@ mod tests {
         let offered_plaintext: Vec<u8> = vec![0x89, b'P', b'N', b'G', 9, 8, 7];
         let offered_item_id = uuid::Uuid::new_v4().to_string();
         let local_items = vec![LocalItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: String::new(),
             item_id: offered_item_id.clone(),
             wall_time_ms: 11,
@@ -3293,6 +3299,9 @@ mod tests {
 
         let stable_id = uuid::Uuid::new_v4().to_string();
         let local_items = vec![LocalItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: "local-row-1".to_string(),
             item_id: stable_id.clone(),
             wall_time_ms: 11,
@@ -3574,6 +3583,9 @@ mod tests {
         let file_bytes: Vec<u8> = b"fake pdf content".to_vec();
         let file_item_id = uuid::Uuid::new_v4().to_string();
         let local_items = vec![LocalItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: String::new(),
             item_id: file_item_id.clone(),
             wall_time_ms: 42,

@@ -11587,7 +11587,6 @@ mod tests {
     /// map, even if `last_sync_at` is absent or stale.
     #[tokio::test]
     async fn list_peers_online_true_from_live_mtls_allowlist() {
-        use tokio::sync::mpsc;
 
         let dir = tempdir().unwrap();
         let sock = dir.path().join("lp_online_mtls.sock");
