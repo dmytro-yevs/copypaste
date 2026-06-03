@@ -26,6 +26,10 @@ tower_governor = { version = "0.8", features = ["axum"] }
 # Required to name RateLimitingMiddleware / QuantaInstant in spawn_governor_cleanup
 # bounds. Already in the dependency graph transitively via tower_governor 0.8.
 governor = "0.10"
+# SSE push (issue #26): ReceiverStream wraps the mpsc that feeds the SSE
+# response body. A spawned producer task owns the broadcast receiver + cursor
+# and pushes axum `sse::Event`s into the mpsc as items arrive.
+tokio-stream = "0.1"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

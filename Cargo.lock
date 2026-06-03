@@ -993,6 +993,7 @@ dependencies = [
  "subtle",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-stream",
  "tower 0.4.13",
  "tower_governor",
  "tracing",

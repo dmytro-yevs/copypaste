@@ -10,6 +10,7 @@ use base64::Engine;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use subtle::ConstantTimeEq;
+use tokio::sync::broadcast;
 
 use crate::error::RelayError;
 use crate::models::PullItem;
@@ -178,7 +179,30 @@ pub struct RelayStore {
     /// The per-tier `effective_history_cap` still applies as a further
     /// tightener — this field is the *upper* ceiling over all tiers.
     max_items_per_device: usize,
+
+    /// Per-device SSE notification channels (issue #26). Each
+    /// `broadcast::Sender<()>` is a *wake* signal: when an item is pushed into a
+    /// device's inbox we `send(())` on that device's channel, waking every open
+    /// `GET /devices/:id/subscribe` SSE stream so it re-reads the inbox from its
+    /// own cursor and flushes the new item(s). Created lazily on first subscribe
+    /// (see [`Self::subscribe_notifier`]). The relay never sends item *data*
+    /// over this channel — only a wake tick — so the broadcast value carries no
+    /// plaintext and a lagged receiver simply re-reads the inbox (no data loss).
+    /// Reclaimed alongside the device in `cleanup_inactive_devices` /
+    /// `prune_expired` so the map stays bounded by the live device set.
+    sync_notifiers: HashMap<String, broadcast::Sender<()>>,
 }
+
+/// Capacity of each per-device SSE wake channel. A small ring buffer is
+/// sufficient because the payload is a contentless wake tick: if a burst of
+/// pushes overflows it, the receiver observes `RecvError::Lagged` and simply
+/// re-reads the inbox from its cursor, picking up every missed item. Sized to
+/// absorb a modest burst without forcing a lag-driven full re-read on every push.
+// Used by `subscribe_notifier`, which is only reached via the SSE route; the
+// standalone `#[path]`-include test binaries don't exercise it, so the const is
+// dead there — mirror the `new()` allow pattern.
+#[allow(dead_code)]
+const SYNC_NOTIFY_CHANNEL_CAP: usize = 64;
 
 impl RelayStore {
     /// Create a store with the default `MAX_PUSH_ITEMS_PER_DEVICE` inbox cap.
@@ -203,6 +227,44 @@ impl RelayStore {
             items_total: Arc::new(AtomicU64::new(0)),
             evictions_total: Arc::new(AtomicU64::new(0)),
             max_items_per_device,
+            sync_notifiers: HashMap::new(),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // SSE push notifications (issue #26)
+    // -----------------------------------------------------------------------
+
+    /// Subscribe to `device_id`'s SSE wake channel, creating it lazily on the
+    /// first subscribe. Returns a fresh `broadcast::Receiver<()>`; each open SSE
+    /// stream holds its own receiver. The wake channel is a signal-only
+    /// primitive (see [`Self::sync_notifiers`]) — the SSE handler re-reads the
+    /// inbox from its cursor on every wake, so a missed/lagged tick can never
+    /// drop an item.
+    // Reached only via the SSE `subscribe` route; the standalone
+    // `#[path]`-include test binaries don't mount it, so it reads as dead there.
+    #[allow(dead_code)]
+    pub fn subscribe_notifier(&mut self, device_id: &str) -> broadcast::Receiver<()> {
+        match self.sync_notifiers.get(device_id) {
+            Some(tx) => tx.subscribe(),
+            None => {
+                let (tx, rx) = broadcast::channel(SYNC_NOTIFY_CHANNEL_CAP);
+                self.sync_notifiers.insert(device_id.to_string(), tx);
+                rx
+            }
+        }
+    }
+
+    /// Fire a wake tick on `device_id`'s SSE channel, if any stream is
+    /// subscribed. A no-op when there are no subscribers (the lazily-created
+    /// `Sender` is retained for the device's lifetime so re-subscribes reuse it).
+    /// `send` returning `Err` means there are currently zero live receivers,
+    /// which is benign — the next subscriber backfills from its cursor.
+    fn notify_subscribers(&self, device_id: &str) {
+        if let Some(tx) = self.sync_notifiers.get(device_id) {
+            // Ignore the receiver count / send error: zero receivers is normal
+            // (no device is currently subscribed) and not an error condition.
+            let _ = tx.send(());
         }
     }
 
@@ -697,6 +759,14 @@ impl RelayStore {
         // pushes regardless of later eviction (counter semantics).
         self.items_total.fetch_add(1, Ordering::Relaxed);
 
+        // SSE push (issue #26): wake any open `GET /devices/:id/subscribe`
+        // stream for this RECIPIENT device now that the inbox write has
+        // committed (the item is in `self.sync_items[device_id]` above). The
+        // woken stream re-reads the inbox from its cursor and flushes the new
+        // item. Fired here (still under the store mutex, after the write) so a
+        // subscriber can never be woken before the item is visible.
+        self.notify_subscribers(device_id);
+
         Ok(id)
     }
 
@@ -843,6 +913,11 @@ impl RelayStore {
             self.devices.remove(id);
             self.sync_items.remove(id);
             self.next_sync_id_per_device.remove(id);
+            // Drop the SSE wake channel too (issue #26): the device record is
+            // gone, so any open subscription would already have failed auth on
+            // re-read; dropping the `Sender` here closes its receivers and keeps
+            // the notifier map bounded by the live device set.
+            self.sync_notifiers.remove(id);
         }
         count
     }
@@ -896,6 +971,9 @@ impl RelayStore {
         self.sync_items
             .retain(|device_id, _| devices.contains_key(device_id));
         self.next_sync_id_per_device
+            .retain(|device_id, _| devices.contains_key(device_id));
+        // Reclaim SSE wake channels orphaned by a gone device record (issue #26).
+        self.sync_notifiers
             .retain(|device_id, _| devices.contains_key(device_id));
 
         if ttl_secs == 0 {

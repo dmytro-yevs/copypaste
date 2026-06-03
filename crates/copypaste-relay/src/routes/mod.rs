@@ -195,6 +195,10 @@ where
             "/devices/{device_id}/items/{item_id}",
             delete(items::delete_item),
         )
+        // SSE push (issue #26): real-time stream of new inbox items, additive
+        // to the GET .../items poll backstop. Shares the per-device + per-IP
+        // rate limits applied to this sub-router below.
+        .route("/devices/{device_id}/subscribe", get(items::subscribe))
         .with_state(state.clone())
         // In 0.8 GovernorLayer fields are private; use GovernorLayer::new() instead of
         // struct literal syntax.
