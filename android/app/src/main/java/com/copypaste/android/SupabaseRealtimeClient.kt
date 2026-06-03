@@ -511,6 +511,10 @@ class SupabaseRealtimeClient(
                 )
                 if (storedId.isNotEmpty()) {
                     repository.storeImageBytes(storedId, item.plaintext)
+                    // Generate thumbnail after full-res storage; non-fatal on failure.
+                    SyncThumbnailHelper.generateAndStore(item.plaintext) { thumbBytes ->
+                        repository.storeThumbnailBytes(storedId, thumbBytes)
+                    }
                     true
                 } else {
                     false

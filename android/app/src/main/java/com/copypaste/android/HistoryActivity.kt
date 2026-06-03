@@ -105,6 +105,9 @@ import androidx.compose.ui.graphics.Color
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -996,16 +999,54 @@ private fun HistoryList(
                         onMoveDown = { onReorderPinned(item.id, +1) },
                         onCopy = {
                             scope.launch {
-                                val key = settings.encryptionKey
-                                val fullText = repository.loadFullPlaintext(item.id, key)
-                                    ?: item.snippet
-                                // Register the expected content-hash BEFORE setting
-                                // the clip so the capture listeners recognise this
-                                // as an internal copy-from-history echo and do not
-                                // re-capture it as a duplicate row + cloud re-push.
-                                ClipboardRepository.expectClip(fullText)
                                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
+                                if (item.isImage) {
+                                    // Image copy-back: write full-res bytes to a cache file
+                                    // and expose via FileProvider so the system clipboard
+                                    // receives a proper content:// URI instead of "[image]".
+                                    val imageBytes = withContext(Dispatchers.IO) {
+                                        repository.getImageBytes(item.id)
+                                    }
+                                    if (imageBytes != null) {
+                                        val uri = withContext(Dispatchers.IO) {
+                                            try {
+                                                val dir = File(ctx.cacheDir, "image_copy").also { it.mkdirs() }
+                                                val file = File(dir, "${item.id}.png")
+                                                file.writeBytes(imageBytes)
+                                                FileProvider.getUriForFile(
+                                                    ctx,
+                                                    "${ctx.packageName}.fileprovider",
+                                                    file,
+                                                )
+                                            } catch (e: Exception) {
+                                                android.util.Log.w("HistoryActivity", "image copy-back FileProvider failed: ${e.message}")
+                                                null
+                                            }
+                                        }
+                                        if (uri != null) {
+                                            val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
+                                            clip.addItem(ClipData.Item(uri))
+                                            // Grant read permission so the receiving app can read the URI.
+                                            ctx.grantUriPermission(
+                                                "com.android.systemui",
+                                                uri,
+                                                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                                            )
+                                            cm.setPrimaryClip(clip)
+                                        }
+                                        // else: fall through; image bytes unavailable, nothing to copy
+                                    }
+                                } else {
+                                    val key = settings.encryptionKey
+                                    val fullText = repository.loadFullPlaintext(item.id, key)
+                                        ?: item.snippet
+                                    // Register the expected content-hash BEFORE setting
+                                    // the clip so the capture listeners recognise this
+                                    // as an internal copy-from-history echo and do not
+                                    // re-capture it as a duplicate row + cloud re-push.
+                                    ClipboardRepository.expectClip(fullText)
+                                    cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
+                                }
                                 // Move the copied clip to the top of the recency section
                                 // (no-op for pinned items). Mirrors macOS bump_item_recency.
                                 onCopied(item.id)
