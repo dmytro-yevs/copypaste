@@ -3,9 +3,11 @@
 uniffi::include_scaffolding!("copypaste_android");
 
 pub mod p2p_listener;
+pub mod pairing;
 pub mod panic_boundary;
 pub mod version;
 pub use p2p_listener::{P2pListenerHandle, PeerSessionKey};
+pub use pairing::{DiscoveredPeer, PairStatus};
 pub use panic_boundary::PanicError;
 pub use version::{
     check_compatibility, core_version, uniffi_abi_version, VersionError, UNIFFI_ABI_VERSION,
@@ -444,6 +446,7 @@ pub struct BootstrapResult {
 /// UniFFI copies it into a Kotlin `ByteArray`. The Kotlin layer MUST zero that
 /// array after persisting the key (store in AndroidKeystore; never log it) —
 /// a load-bearing contract, otherwise raw key material lingers on the JVM heap.
+#[derive(Clone)]
 pub struct SyncProvisioning {
     pub supabase_url: Option<String>,
     pub supabase_anon_key: Option<String>,
@@ -746,6 +749,11 @@ pub struct Config {
     pub image_max_height: u32,
     pub collect_public_ip: bool,
     pub paste_as_plain_text: bool,
+    /// Bundle ids / package names excluded from clipboard capture. Maps directly
+    /// to `AppConfig::excluded_app_bundle_ids` (round-trips losslessly through
+    /// the mappers — `clamp_values()` does not touch this list). Lets the Android
+    /// settings UI render + edit the excluded-apps list at parity with macOS.
+    pub excluded_app_bundle_ids: Vec<String>,
 }
 
 /// Default for the Android-only `mask_sensitive_content` knob. Mirrors the
@@ -785,6 +793,7 @@ fn config_from_appconfig(
         image_max_height,
         collect_public_ip: ac.collect_public_ip,
         paste_as_plain_text: ac.paste_as_plain_text,
+        excluded_app_bundle_ids: ac.excluded_app_bundle_ids.clone(),
     }
 }
 
@@ -808,6 +817,7 @@ fn appconfig_from_config(cfg: &Config) -> copypaste_core::AppConfig {
         image_quality: cfg.image_quality.clamp(1, 100) as u8,
         collect_public_ip: cfg.collect_public_ip,
         paste_as_plain_text: cfg.paste_as_plain_text,
+        excluded_app_bundle_ids: cfg.excluded_app_bundle_ids.clone(),
         ..copypaste_core::AppConfig::default()
     }
 }
@@ -1375,6 +1385,343 @@ pub fn update_p2p_listener_peers(
 /// per-connection tasks exit and the listener socket is dropped.
 pub fn stop_p2p_listener(listener_id: u64) -> Result<(), CopypasteError> {
     panic_boundary::catch_result(|| p2p_listener::stop(listener_id))
+}
+
+// ── Discovery + SAS pairing (ABI 12 — Android parity for LAN discovery) ──────
+//
+// The Android analog of the macOS daemon's discovery-pairing path. Drives the
+// SAME `copypaste_p2p` discovery (mDNS browse/advertise) + bootstrap PAKE stack
+// the desktop uses, wired to a POLLED state machine (UniFFI cannot pass an async
+// Rust callback). Kotlin starts discovery once, polls `list_discovered`, calls
+// `pair_with_discovered` to initiate, polls `pair_get_sas` for the SAS, then
+// confirms/aborts. The standing responder bound on `bport` makes the Android
+// device pairable FROM macOS. See `pairing.rs` for the full security contract.
+
+/// Start LAN discovery + the standing SAS-pairing responder. Idempotent: a
+/// second call tears down and replaces the previous discovery/responder tasks
+/// (restart-in-place after a roster / port change).
+///
+/// Advertises this device over mDNS with the v2 `bport` TXT key (so macOS peers
+/// can dial it for SAS pairing) and browses for peers. ALSO binds a standing
+/// `BootstrapResponder` on `bport` that accepts inbound discovery-pair
+/// connections and runs `run_with_confirm` wired to the SAME coordinator with
+/// the `Responder` role — this is what makes Android pairable FROM macOS.
+///
+/// `cert_der`/`key_der` are this device's mTLS identity (`generate_device_cert`);
+/// `sync_port` is the P2P sync-listener port advertised in mDNS; `bport` is the
+/// fixed TCP port the standing bootstrap responder binds (advertised so
+/// initiators know where to dial). `key_der` is secret — the caller must zero
+/// the ByteArray after the call and never log it.
+///
+/// Errors: [`CopypasteError::P2pError`] if the discovery registration, mDNS
+/// daemon, or the standing responder bind fails.
+#[allow(clippy::too_many_arguments)] // FFI contract: identity + ports + names.
+pub fn start_discovery(
+    device_id: String,
+    device_name: String,
+    sync_port: u16,
+    bport: u16,
+    cert_der: &[u8],
+    key_der: &[u8],
+) -> Result<(), CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let rt = runtime()?;
+        let cert_der = cert_der.to_vec();
+        let key_der = key_der.to_vec();
+
+        // Build + register the discovery service (advertise with bport so we are
+        // a v2 peer macOS can pair with) and start its browse task.
+        let discovery = std::sync::Arc::new(copypaste_p2p::discovery::DiscoveryService::new());
+        discovery
+            .register_with_bport(sync_port, device_id.clone(), device_name.clone(), bport)
+            .map_err(|e| pairing::p2p_err(format!("discovery register failed: {e}")))?;
+        let discovery_for_start = std::sync::Arc::clone(&discovery);
+        let browse_task = rt.spawn(async move {
+            // `start` returns a JoinHandle for the internal browse loop; await it
+            // so this task lives as long as discovery is running. A start error
+            // just ends the task (discovery simply yields no peers).
+            if let Ok(handle) = discovery_for_start.start().await {
+                let _ = handle.await;
+            }
+        });
+
+        // Spawn the standing bootstrap responder: re-bind `bport`, accept ONE
+        // inbound discovery-pair connection per iteration, run `run_with_confirm`
+        // wired to the SAME coordinator with the Responder role.
+        let responder_task = rt.spawn(standing_responder_loop(bport, cert_der, key_der));
+
+        pairing::global().install(discovery, browse_task, responder_task);
+        Ok(())
+    })
+}
+
+/// The standing-responder accept loop (Responder role). Re-binds `bport` for
+/// each inbound pairing attempt and runs the confirm-gated responder handshake
+/// wired to the global coordinator. Never logs key/SAS bytes.
+async fn standing_responder_loop(bport: u16, cert_der: Vec<u8>, key_der: Vec<u8>) {
+    use copypaste_p2p::bootstrap::{BootstrapResponder, PeerMeta};
+
+    let coordinator = std::sync::Arc::clone(&pairing::global().coordinator);
+    loop {
+        // Bind the fixed bport afresh each iteration. A *listening* socket that
+        // is dropped (not connected) never enters TIME_WAIT, so re-binding the
+        // same port succeeds immediately (mirrors the macOS standing responder).
+        let responder =
+            match BootstrapResponder::bind_on(bport, cert_der.clone(), key_der.clone()).await {
+                Ok(r) => r,
+                Err(_e) => {
+                    // Bind failed (port busy / transient). Back off briefly and retry
+                    // so a momentary conflict does not permanently disable inbound
+                    // pairing. Never log the error verbatim (no secrets, but keep it
+                    // quiet — this loop is hot).
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    continue;
+                }
+            };
+
+        // Only accept an inbound pairing when idle (single active pairing). If a
+        // pairing is already in flight, drop this responder and loop; the next
+        // bind happens once the previous one finishes.
+        if !coordinator.try_begin(pairing::PairingRole::Responder) {
+            drop(responder);
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            continue;
+        }
+
+        let confirm_coord = std::sync::Arc::clone(&coordinator);
+        // The discovery path uses a FIXED well-known PAKE password
+        // (`DISCOVERY_PAIRING_PASSWORD`): opaque-ke is asymmetric, so both ends
+        // must register the IDENTICAL password or the handshake fails at frame 7
+        // before any SAS is derived. Authentication is ENTIRELY via the SAS
+        // compare (see `pairing::DISCOVERY_PAIRING_PASSWORD` docs + plan
+        // §"SAS design rationale"). The responder advertises no sync_addr here
+        // (Android learns the peer's address from the inbound frames / discovery).
+        let result = responder
+            .run_with_confirm(
+                pairing::DISCOVERY_PAIRING_PASSWORD,
+                "",
+                &PeerMeta::default(),
+                None,
+                move |sas: &str| {
+                    let coord = std::sync::Arc::clone(&confirm_coord);
+                    let sas = sas.to_string();
+                    async move {
+                        // Park on the user's decision, bounded by the SAS window.
+                        let rx = coord.enter_awaiting_sas(sas, pairing::PairingRole::Responder);
+                        match tokio::time::timeout(pairing::SAS_CONFIRM_TIMEOUT, rx).await {
+                            Ok(Ok(accept)) => accept,
+                            // Timeout or sender dropped (abort) → reject.
+                            _ => false,
+                        }
+                    }
+                },
+            )
+            .await;
+
+        match result {
+            Ok(p) => coordinator.finish(pairing::PairingState::Confirmed(
+                pairing::ConfirmedPairing {
+                    peer_fingerprint: p.peer_fingerprint,
+                    peer_sync_addr: p.peer_sync_addr,
+                    session_key: p.session_key.as_bytes().to_vec(),
+                    peer_provisioning: p.peer_provisioning.map(Into::into),
+                },
+            )),
+            Err(_e) => {
+                // A confirm-rejected SAS, a timeout, an abort, or a network/PAKE
+                // failure all land here. Only move out of an active state — if
+                // `pair_abort` already set Aborted, leave it. Keys drop/zeroize
+                // (nothing persisted). Distinguish timeout vs reject is not
+                // observable from the Err alone, so report Aborted unless the
+                // coordinator already recorded a terminal state.
+                if coordinator.snapshot().is_active() {
+                    coordinator.finish(pairing::PairingState::Aborted);
+                }
+            }
+        }
+    }
+}
+
+/// Stop LAN discovery + the standing responder. Idempotent. Aborts the browse,
+/// responder, and any in-flight initiator task and drops the discovery service
+/// (releasing the mDNS socket). Any in-flight confirmation is aborted.
+pub fn stop_discovery() -> Result<(), CopypasteError> {
+    panic_boundary::catch_result(|| {
+        pairing::global().stop();
+        Ok(())
+    })
+}
+
+/// Snapshot the peers currently discovered on the LAN. `paired_fingerprints` is
+/// the caller's set of already-paired device fingerprints; each returned peer's
+/// `paired` flag is `true` when its `device_id` matches one (canonicalized
+/// compare). Returns an empty list when discovery is not running.
+pub fn list_discovered(
+    paired_fingerprints: Vec<String>,
+) -> Result<Vec<DiscoveredPeer>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let Some(discovery) = pairing::global().discovery() else {
+            return Ok(Vec::new());
+        };
+        let paired: std::collections::HashSet<String> = paired_fingerprints
+            .iter()
+            .map(|fp| canonicalize_fingerprint(fp))
+            .collect();
+        let peers = discovery
+            .peers()
+            .into_iter()
+            .map(|p| {
+                let is_paired = paired.contains(&canonicalize_fingerprint(&p.device_id));
+                DiscoveredPeer::from_peer_info(p, is_paired)
+            })
+            .collect();
+        Ok(peers)
+    })
+}
+
+/// Begin pairing (Initiator role) with a discovered peer. Resolves the peer's
+/// `bport` + IPv4-first address from discovery, claims the coordinator, and
+/// SPAWNS the bootstrap initiator on the shared runtime (does NOT block). Kotlin
+/// then polls `pair_get_sas` for the SAS and calls `pair_confirm_sas`.
+///
+/// `cert_der`/`key_der` are this device's mTLS identity; `sync_addr` is this
+/// device's own P2P sync-listener `host:port` (sent in-band); `local_provisioning`
+/// is the OPTIONAL sync-account setup this device offers (typically `null` on
+/// Android). Errors: [`CopypasteError::P2pError`] if the peer is unknown, lacks a
+/// `bport` (v1 peer), advertises no address, or a pairing is already in flight.
+pub fn pair_with_discovered(
+    device_id: String,
+    cert_der: &[u8],
+    key_der: &[u8],
+    sync_addr: String,
+    local_provisioning: Option<SyncProvisioning>,
+) -> Result<(), CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let rt = runtime()?;
+        let global = pairing::global();
+
+        let Some(discovery) = global.discovery() else {
+            return Err(pairing::p2p_err("discovery is not running"));
+        };
+        let peer = discovery
+            .resolve_peer(&device_id)
+            .ok_or_else(|| pairing::p2p_err(format!("peer {device_id} not found in discovery")))?;
+        if peer.bport.is_none() {
+            return Err(pairing::p2p_err(
+                "peer is a v1 build (no bport) and cannot SAS-pair",
+            ));
+        }
+        let addr = pairing::ipv4_first_addr(&peer)
+            .ok_or_else(|| pairing::p2p_err("peer advertised no routable address"))?;
+
+        // Claim the machine (single active pairing). The standing responder uses
+        // the same coordinator, so this also refuses while an inbound pairing is
+        // in flight.
+        if !global
+            .coordinator
+            .try_begin(pairing::PairingRole::Initiator)
+        {
+            return Err(pairing::p2p_err("a pairing is already in flight"));
+        }
+
+        let coordinator = std::sync::Arc::clone(&global.coordinator);
+        let cert_der = cert_der.to_vec();
+        let key_der = key_der.to_vec();
+        let provisioning = local_provisioning.map(Into::into);
+
+        let task = rt.spawn(async move {
+            use copypaste_p2p::bootstrap::{run_initiator_with_confirm, PeerMeta};
+            let confirm_coord = std::sync::Arc::clone(&coordinator);
+            let result = run_initiator_with_confirm(
+                addr,
+                cert_der,
+                key_der,
+                // Discovery path: fixed well-known PAKE password; the SAS is the
+                // real authenticator (see `pairing::DISCOVERY_PAIRING_PASSWORD`).
+                pairing::DISCOVERY_PAIRING_PASSWORD,
+                &sync_addr,
+                &PeerMeta::default(),
+                provisioning,
+                move |sas: &str| {
+                    let coord = std::sync::Arc::clone(&confirm_coord);
+                    let sas = sas.to_string();
+                    async move {
+                        let rx = coord.enter_awaiting_sas(sas, pairing::PairingRole::Initiator);
+                        match tokio::time::timeout(pairing::SAS_CONFIRM_TIMEOUT, rx).await {
+                            Ok(Ok(accept)) => accept,
+                            _ => false,
+                        }
+                    }
+                },
+            )
+            .await;
+
+            match result {
+                Ok(p) => coordinator.finish(pairing::PairingState::Confirmed(
+                    pairing::ConfirmedPairing {
+                        peer_fingerprint: p.peer_fingerprint,
+                        peer_sync_addr: p.peer_sync_addr,
+                        session_key: p.session_key.as_bytes().to_vec(),
+                        peer_provisioning: p.peer_provisioning.map(Into::into),
+                    },
+                )),
+                Err(_e) => {
+                    // Reject/timeout/abort/network failure: keys drop/zeroize,
+                    // nothing persisted. Only move out of an active state so an
+                    // explicit `pair_abort` (Aborted) is not clobbered.
+                    if coordinator.snapshot().is_active() {
+                        coordinator.finish(pairing::PairingState::Aborted);
+                    }
+                }
+            }
+        });
+        global.set_initiator_task(task);
+        Ok(())
+    })
+}
+
+/// Poll the current pairing status. While active, `sas` + `role` are populated;
+/// the `peer_*` outputs (incl. the 32-byte `session_key`) are populated ONLY
+/// when `state == "confirmed"`. Kotlin persists those then calls `pair_reset`.
+/// The `session_key` is secret — zero the ByteArray after KEK-wrapping it.
+pub fn pair_get_sas() -> Result<PairStatus, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let state = pairing::global().coordinator.snapshot();
+        Ok(PairStatus::from_state(&state))
+    })
+}
+
+/// Deliver the local user's accept(`true`)/reject(`false`) SAS decision into the
+/// in-flight handshake. A reject drops/zeroizes the session key (nothing
+/// persisted). No-op (returns Ok) when no pairing is awaiting confirmation.
+pub fn pair_confirm_sas(accept: bool) -> Result<(), CopypasteError> {
+    panic_boundary::catch_result(|| {
+        pairing::global().coordinator.deliver_decision(accept);
+        Ok(())
+    })
+}
+
+/// Abort the in-flight pairing: cancel the initiator task, drop the confirmation
+/// channel (the handshake's confirm await resolves to a rejection → keys
+/// drop/zeroize), and move the machine to `aborted`. Idempotent.
+pub fn pair_abort() -> Result<(), CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let global = pairing::global();
+        global.abort_initiator();
+        global.coordinator.abort();
+        Ok(())
+    })
+}
+
+/// Reset the pairing machine to `idle` (call after observing a terminal state so
+/// a fresh pairing may begin). Also aborts any lingering initiator task.
+pub fn pair_reset() -> Result<(), CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let global = pairing::global();
+        global.abort_initiator();
+        global.coordinator.reset();
+        Ok(())
+    })
 }
 
 // Database handle table. OnceLock is stable on Rust 1.70+ (our MSRV is 1.75).
@@ -2991,6 +3338,35 @@ mod tests {
         assert_eq!(cfg.mask_sensitive_content, DEFAULT_MASK_SENSITIVE_CONTENT);
         assert_eq!(cfg.p2p_enabled, DEFAULT_P2P_ENABLED);
         assert_eq!(cfg.image_max_height, DEFAULT_IMAGE_MAX_HEIGHT);
+
+        // ABI 12: the excluded-apps list mirrors AppConfig (empty by default).
+        assert_eq!(cfg.excluded_app_bundle_ids, ac.excluded_app_bundle_ids);
+        assert!(cfg.excluded_app_bundle_ids.is_empty());
+    }
+
+    #[test]
+    fn clamp_config_round_trips_excluded_app_bundle_ids() {
+        // ABI 12: the excluded-apps list maps directly to/from
+        // AppConfig::excluded_app_bundle_ids and survives clamp unchanged
+        // (clamp_values does not touch it). Order + contents preserved.
+        let mut cfg = default_config();
+        cfg.excluded_app_bundle_ids = vec![
+            "com.apple.keychainaccess".to_string(),
+            "org.keepassxc.keepassxc".to_string(),
+            "1password.desktop".to_string(),
+        ];
+        let original = cfg.excluded_app_bundle_ids.clone();
+
+        let clamped = clamp_config(cfg);
+
+        assert_eq!(
+            clamped.excluded_app_bundle_ids, original,
+            "excluded_app_bundle_ids must round-trip through clamp verbatim"
+        );
+
+        // And the mapping onto AppConfig carries the same list.
+        let ac = appconfig_from_config(&clamped);
+        assert_eq!(ac.excluded_app_bundle_ids, original);
     }
 
     #[test]

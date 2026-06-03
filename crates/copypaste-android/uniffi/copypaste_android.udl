@@ -173,6 +173,73 @@ namespace copypaste_android {
   [Throws=CopypasteError]
   void stop_p2p_listener(u64 listener_id);
 
+  // ── Discovery + SAS pairing (ABI 12 — Android parity) ─────────────────────
+  // POLLED state machine (UniFFI cannot pass an async Rust callback). Kotlin
+  // starts discovery once, polls `list_discovered`, calls `pair_with_discovered`
+  // to initiate, then polls `pair_get_sas` for the SAS and confirms/aborts. The
+  // standing responder bound on `bport` makes Android pairable FROM macOS.
+  // SAS derives from the post-channel-binding bound_key; both sides ACCEPT
+  // before the key is trusted; reject/abort/timeout zeroizes (persists nothing).
+  // session_key crosses the FFI ONLY in the `confirmed` state — Kotlin zeroes it
+  // after KEK-wrapping. Key/SAS bytes are never logged.
+
+  /// Start LAN discovery + the standing SAS-pairing responder. Idempotent (a
+  /// second call replaces the previous discovery/responder). Advertises this
+  /// device over mDNS with the v2 `bport` TXT key and browses for peers; ALSO
+  /// binds a standing BootstrapResponder on `bport` (Responder role) so macOS
+  /// can INITIATE pairing to this device. `cert_der`/`key_der` are this device's
+  /// mTLS identity; `sync_port` is the advertised P2P sync-listener port; `bport`
+  /// is the fixed bootstrap-listener port. key_der is secret — zero it after.
+  [Throws=CopypasteError]
+  void start_discovery(string device_id, string device_name, u16 sync_port, u16 bport, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der);
+
+  /// Stop LAN discovery + the standing responder. Idempotent. Aborts the
+  /// browse/responder/initiator tasks, drops the mDNS service, and aborts any
+  /// in-flight confirmation.
+  [Throws=CopypasteError]
+  void stop_discovery();
+
+  /// Snapshot the peers currently discovered on the LAN. `paired_fingerprints`
+  /// is the caller's already-paired set; each peer's `paired` flag is set when
+  /// its device_id matches one (canonicalized). Empty when discovery is off.
+  [Throws=CopypasteError]
+  sequence<DiscoveredPeer> list_discovered(sequence<string> paired_fingerprints);
+
+  /// Begin pairing (Initiator role) with a discovered peer. Resolves the peer's
+  /// bport + IPv4-first address, claims the single-active-pairing slot, and
+  /// SPAWNS the bootstrap initiator on the shared runtime (does NOT block).
+  /// Kotlin then polls `pair_get_sas`. `cert_der`/`key_der` are this device's
+  /// mTLS identity; `sync_addr` is this device's own sync host:port (sent
+  /// in-band); `local_provisioning` is the optional sync-account setup to offer
+  /// (typically null on Android). Throws P2pError if the peer is unknown, is a
+  /// v1 peer (no bport), has no routable address, or a pairing is in flight.
+  [Throws=CopypasteError]
+  void pair_with_discovered(string device_id, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string sync_addr, SyncProvisioning? local_provisioning);
+
+  /// Poll the current pairing status. While active, `sas`+`role` are populated;
+  /// the peer_* outputs (incl. the 32-byte `session_key`) are populated ONLY
+  /// when state=="confirmed". The session_key is secret — zero the ByteArray
+  /// after KEK-wrapping it; never log it.
+  [Throws=CopypasteError]
+  PairStatus pair_get_sas();
+
+  /// Deliver the local user's accept(true)/reject(false) SAS decision. A reject
+  /// drops/zeroizes the session key (nothing persisted). No-op when no pairing
+  /// is awaiting confirmation.
+  [Throws=CopypasteError]
+  void pair_confirm_sas(boolean accept);
+
+  /// Abort the in-flight pairing: cancel the initiator task, drop the confirm
+  /// channel (handshake await resolves to rejection → keys zeroize), move to
+  /// `aborted`. Idempotent.
+  [Throws=CopypasteError]
+  void pair_abort();
+
+  /// Reset the pairing machine to `idle` (call after observing a terminal state
+  /// so a fresh pairing may begin). Also aborts any lingering initiator task.
+  [Throws=CopypasteError]
+  void pair_reset();
+
   // ── AppConfig over UniFFI (single source of truth, shared with macOS) ─────
   // Android keeps its SharedPreferences store but SEEDS defaults from
   // `default_config()` and pipes every write through `clamp_config()` so it
@@ -405,6 +472,11 @@ dictionary Config {
   u32 image_max_height;
   boolean collect_public_ip;
   boolean paste_as_plain_text;
+  // ABI 12: bundle ids / package names excluded from clipboard capture. Maps
+  // directly to AppConfig::excluded_app_bundle_ids and round-trips through
+  // clamp verbatim (clamp_values does not touch it). Lets the Android settings
+  // UI render + edit the excluded-apps list at parity with macOS.
+  sequence<string> excluded_app_bundle_ids;
 };
 
 // A single revoked-device audit row (mirror of
@@ -414,4 +486,35 @@ dictionary RevokedPeer {
   string fingerprint;
   string name;
   i64 revoked_at;
+};
+
+// ABI 12: a peer discovered on the LAN (mirror of
+// `copypaste_p2p::discovery::PeerInfo` + a `paired` flag the FFI computes by
+// cross-referencing the caller's persisted fingerprints). `bport` is the PAKE
+// bootstrap port; null for v1 peers (the UI must disable "Pair" — SAS pairing
+// needs it). `ip_addrs` are string forms of the resolved addresses.
+dictionary DiscoveredPeer {
+  string device_id;
+  string device_name;
+  sequence<string> ip_addrs;
+  u16 port;
+  u16? bport;
+  boolean paired;
+};
+
+// ABI 12: polled pairing status. `state` is one of: idle, initiating,
+// awaiting_sas, confirmed, rejected, aborted, timed_out. `sas`+`role` are set
+// while active. The peer_* outputs are set ONLY when state=="confirmed":
+// `session_key` is the 32-byte PAKE+channel-bound key and is SECRET — the Kotlin
+// caller MUST zero the ByteArray after KEK-wrapping it into the AndroidKeystore
+// and never log it. `peer_provisioning` is the sync-account setup the peer
+// advertised (null if none / legacy).
+dictionary PairStatus {
+  string state;
+  string? sas;
+  string? role;
+  string? peer_fingerprint;
+  string? peer_sync_addr;
+  sequence<u8>? session_key;
+  SyncProvisioning? peer_provisioning;
 };
