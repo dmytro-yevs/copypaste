@@ -12,6 +12,7 @@ use rand::RngCore;
 use subtle::ConstantTimeEq;
 use tokio::sync::broadcast;
 
+use crate::db::Db;
 use crate::error::RelayError;
 use crate::models::PullItem;
 use crate::quota::{self, QuotaViolation, Tier};
@@ -253,6 +254,40 @@ pub struct RelayStore {
     /// Reclaimed alongside the device in `cleanup_inactive_devices` /
     /// `prune_expired` so the map stays bounded by the live device set.
     sync_notifiers: HashMap<String, broadcast::Sender<()>>,
+
+    /// Durable backing store (R1b). Every mutation to `devices` / their token
+    /// sets / `sync_items` is written through to this SQLite database, and on
+    /// construction (`new_persistent`) the in-memory maps above are rehydrated
+    /// from it — so device records, token sets and inbox items survive a
+    /// process restart. With the default `:memory:` path this is a private
+    /// in-memory database (nothing persists across restart), preserving the
+    /// pre-R1b behaviour for tests and ephemeral deploys.
+    ///
+    /// The connection lives inside this struct, which is itself behind the
+    /// crate's `std::sync::Mutex<RelayStore>` ([`AppState`]); `Connection` is
+    /// `Send` (not `Sync`), so the single shared `Mutex` serialises all access.
+    /// Reads are served from memory, so the only SQLite work on the request
+    /// path is a small bounded row write under the lock — matching the store's
+    /// existing short-critical-section model. See `db.rs` for the full
+    /// blocking/feature-unification rationale.
+    db: Db,
+}
+
+/// Map a [`Tier`] to its persisted string form.
+fn tier_to_str(tier: Tier) -> &'static str {
+    match tier {
+        Tier::Free => "free",
+        Tier::Pro => "pro",
+    }
+}
+
+/// Parse a persisted tier string back to a [`Tier`]. Unknown values fall back
+/// to `Free` (the conservative default — never grant a wider quota than stored).
+fn tier_from_str(s: &str) -> Tier {
+    match s {
+        "pro" => Tier::Pro,
+        _ => Tier::Free,
+    }
 }
 
 /// Capacity of each per-device SSE wake channel. A small ring buffer is
@@ -277,11 +312,39 @@ impl RelayStore {
         Self::new_with_cap(_sync_ttl_secs, MAX_PUSH_ITEMS_PER_DEVICE)
     }
 
-    /// Create a store with an explicit inbox cap (`max_items_per_device`).
-    /// Used by `main` to wire the operator-configured value from
-    /// `RelayConfig`, and by tests that verify the cap is honoured.
-    pub fn new_with_cap(_sync_ttl_secs: u64, max_items_per_device: usize) -> Self {
-        Self {
+    /// Create a store with an explicit inbox cap (`max_items_per_device`),
+    /// backed by an in-memory SQLite database (`:memory:`) — nothing persists
+    /// across restart. Used by tests that verify the cap is honoured and by any
+    /// caller that does not need durability. Opening an in-memory database is
+    /// infallible in practice; a failure here is unrecoverable, so it panics
+    /// with context (this constructor has no `Result` return for backward
+    /// compatibility with the existing test call-sites). Production uses
+    /// [`Self::new_persistent`], which surfaces open errors as `Result`.
+    pub fn new_with_cap(sync_ttl_secs: u64, max_items_per_device: usize) -> Self {
+        Self::new_persistent(
+            sync_ttl_secs,
+            max_items_per_device,
+            crate::db::IN_MEMORY_PATH,
+        )
+        .expect("opening an in-memory relay database must not fail")
+    }
+
+    /// Create a store with an explicit inbox cap, backed by the SQLite database
+    /// at `db_path`, rehydrating any persisted state into the in-memory maps
+    /// (R1b). `":memory:"` selects a private in-memory database (no
+    /// persistence); a file path makes device records, token sets and inbox
+    /// items survive a process restart.
+    ///
+    /// Returns an error if the database cannot be opened or its existing
+    /// contents cannot be loaded — callers (e.g. `main`) treat this as fatal
+    /// rather than silently starting with an empty store.
+    pub fn new_persistent(
+        _sync_ttl_secs: u64,
+        max_items_per_device: usize,
+        db_path: &str,
+    ) -> Result<Self, RelayError> {
+        let db = Db::open(db_path)?;
+        let mut store = Self {
             devices: HashMap::new(),
             sync_items: HashMap::new(),
             next_sync_id_per_device: HashMap::new(),
@@ -290,7 +353,85 @@ impl RelayStore {
             evictions_total: Arc::new(AtomicU64::new(0)),
             max_items_per_device,
             sync_notifiers: HashMap::new(),
+            db,
+        };
+        store.rehydrate_from_db()?;
+        Ok(store)
+    }
+
+    /// Load every persisted device, token set and inbox from the backing
+    /// database into the in-memory maps. Called once at construction.
+    ///
+    /// Stored Unix timestamps (`registered_at_unix`, `last_seen_unix`) are
+    /// converted back to `Instant`s relative to the current monotonic clock:
+    /// `instant = now - (now_unix - stored_unix)`, saturating at `now` for any
+    /// timestamp that is in the future (clock skew). This preserves the
+    /// inactivity-age semantics of `cleanup_inactive_devices` across restart —
+    /// a device idle for N seconds before shutdown is still N seconds idle
+    /// after reload (modulo downtime, which legitimately counts as idle).
+    fn rehydrate_from_db(&mut self) -> Result<(), RelayError> {
+        let loaded = self.db.load_all()?;
+        if loaded.is_empty() {
+            return Ok(());
         }
+        let now_instant = Instant::now();
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        let to_instant = |stored_unix: i64| -> Instant {
+            let age = now_unix.saturating_sub(stored_unix).max(0) as u64;
+            now_instant
+                .checked_sub(Duration::from_secs(age))
+                .unwrap_or(now_instant)
+        };
+
+        for d in loaded {
+            let device_id = d.device_id.clone();
+            let registered_from_ip = d
+                .registered_from_ip
+                .as_deref()
+                .and_then(|s| s.parse::<IpAddr>().ok());
+            let tokens = d
+                .tokens
+                .into_iter()
+                .map(|(token, expires_at_unix)| TokenEntry {
+                    token,
+                    expires_at_unix,
+                })
+                .collect();
+            self.devices.insert(
+                device_id.clone(),
+                DeviceRecord {
+                    device_id: device_id.clone(),
+                    device_name: d.device_name,
+                    public_key_b64: d.public_key_b64,
+                    tokens,
+                    registered_at: to_instant(d.registered_at_unix),
+                    last_seen: to_instant(d.last_seen_unix),
+                    tier: tier_from_str(&d.tier),
+                    registered_from_ip,
+                },
+            );
+            let inbox: Vec<SyncItem> = d
+                .items
+                .into_iter()
+                .map(|it| SyncItem {
+                    id: it.id,
+                    content_type: it.content_type,
+                    content_b64: it.content_b64,
+                    wall_time: it.wall_time,
+                    inserted_at_unix: it.inserted_at_unix,
+                })
+                .collect();
+            self.sync_items.insert(device_id.clone(), inbox);
+            // next_sync_id is persisted; seed the in-memory counter from it so
+            // restart never re-issues an id (security HIGH #3) even if the inbox
+            // was fully drained before shutdown.
+            self.next_sync_id_per_device
+                .insert(device_id, d.next_sync_id.max(1));
+        }
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -581,15 +722,25 @@ impl RelayStore {
             // authenticated push/pull/subscribe traffic via `update_last_seen`.
             Some(record) => {
                 record.add_token(bearer_token.clone(), expires_at_unix, now_unix);
+                // R1b write-through: the token set may have been pruned/FIFO-
+                // evicted by `add_token`, so persist the full current set so the
+                // on-disk order + membership stays byte-identical to memory.
+                let tokens: Vec<(String, i64)> = record
+                    .tokens
+                    .iter()
+                    .map(|t| (t.token.clone(), t.expires_at_unix))
+                    .collect();
+                self.db.replace_tokens(&device_id, &tokens)?;
             }
             // First registration of this id: insert a fresh record.
             None => {
+                let ip_str = client_ip.map(|ip| ip.to_string());
                 self.devices.insert(
                     device_id.clone(),
                     DeviceRecord {
                         device_id: device_id.clone(),
-                        device_name,
-                        public_key_b64,
+                        device_name: device_name.clone(),
+                        public_key_b64: public_key_b64.clone(),
                         tokens: vec![TokenEntry {
                             token: bearer_token.clone(),
                             expires_at_unix,
@@ -602,7 +753,22 @@ impl RelayStore {
                 );
                 // Pre-create an empty inbox so pull works without a separate
                 // device-check.
-                self.sync_items.entry(device_id).or_default();
+                self.sync_items.entry(device_id.clone()).or_default();
+                // R1b write-through: persist the new device record + its first
+                // token. `registered_at`/`last_seen` are stored as Unix seconds
+                // (`now_unix`) so they can be rehydrated relative to the
+                // monotonic clock on restart.
+                self.db.insert_device(
+                    &device_id,
+                    &device_name,
+                    &public_key_b64,
+                    tier_to_str(tier),
+                    ip_str.as_deref(),
+                    now_unix,
+                    now_unix,
+                )?;
+                self.db
+                    .replace_tokens(&device_id, &[(bearer_token.clone(), expires_at_unix)])?;
             }
         }
 
@@ -666,8 +832,25 @@ impl RelayStore {
     // Called from routes/items.rs after every successful verify_token in the
     // push, pull, and delete_item handlers.
     pub fn update_last_seen(&mut self, device_id: &str) {
-        if let Some(record) = self.devices.get_mut(device_id) {
-            record.last_seen = Instant::now();
+        if self.devices.get_mut(device_id).is_some() {
+            // Borrow ends before the DB call below (NLL): set the in-memory
+            // Instant first, then persist the wall-clock equivalent.
+            if let Some(record) = self.devices.get_mut(device_id) {
+                record.last_seen = Instant::now();
+            }
+            // R1b write-through: persist last_seen as Unix seconds so restart
+            // preserves inactivity age. A persistence failure here must NOT
+            // abort the request (the in-memory state is authoritative for the
+            // live process and the signature is infallible) — log and continue.
+            // Worst case a crash before the next successful write loses a few
+            // seconds of last_seen freshness, which only affects 30-day idle
+            // eviction timing, never correctness.
+            if let Ok(d) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+                let now_unix = d.as_secs() as i64;
+                if let Err(e) = self.db.update_last_seen(device_id, now_unix) {
+                    tracing::warn!(device_id, error = %e, "relay: failed to persist last_seen");
+                }
+            }
         }
     }
 
@@ -834,10 +1017,14 @@ impl RelayStore {
         let id = *counter;
         // `checked_add` so an id-counter overflow returns a server error
         // instead of an unchecked-arithmetic panic (security HIGH #3).
-        *counter = counter.checked_add(1).ok_or_else(|| {
+        let next_counter = counter.checked_add(1).ok_or_else(|| {
             tracing::warn!(device_id, "sync id counter overflow");
             RelayError::Internal("sync id counter exhausted".into())
         })?;
+        *counter = next_counter;
+        // Copy out the new counter value so the `&mut` borrow of
+        // `next_sync_id_per_device` ends here, before we mutably borrow
+        // `sync_items` (the inbox) below. `next_counter` is a plain `i64`.
 
         // Fail closed on clock error: a stored inserted_at=0 would be treated as
         // epoch and pruned immediately by prune_expired (cutoff = now - ttl > 0),
@@ -856,8 +1043,8 @@ impl RelayStore {
         let inbox = self.sync_items.entry(device_id.to_string()).or_default();
         let item = SyncItem {
             id,
-            content_type,
-            content_b64,
+            content_type: content_type.clone(),
+            content_b64: content_b64.clone(),
             wall_time,
             inserted_at_unix,
         };
@@ -884,9 +1071,36 @@ impl RelayStore {
         // cannot know which recipient inboxes are full — see relay v2 quotas
         // plan).
         let cap = effective_history_cap(tier).min(self.max_items_per_device);
-        if inbox.len() > cap {
-            inbox.drain(..inbox.len() - cap);
+        let pruned = if inbox.len() > cap {
+            let n = inbox.len() - cap;
+            inbox.drain(..n);
+            n
+        } else {
+            0
+        };
+        // End the mutable borrow of `inbox` before touching `self.db` (disjoint
+        // fields, but keep the sequence explicit).
+
+        // R1b write-through (after all in-memory mutations so the persisted
+        // state mirrors memory): insert the new item, prune the same oldest
+        // items in SQL, and persist the advanced per-device id counter.
+        // Propagated via `?` — this method already returns Result, and a
+        // persistence failure means the durable store would diverge from
+        // memory, so the push must fail (500) rather than silently lose
+        // durability. Ciphertext (`content_b64`) is written verbatim and never
+        // logged.
+        self.db.insert_item(
+            device_id,
+            id,
+            &content_type,
+            &content_b64,
+            wall_time,
+            inserted_at_unix,
+        )?;
+        if pruned > 0 {
+            self.db.delete_oldest_items(device_id, pruned)?;
         }
+        self.db.set_next_sync_id(device_id, next_counter)?;
 
         // Increment Prometheus counter — items_total tracks all accepted
         // pushes regardless of later eviction (counter semantics).
@@ -1007,6 +1221,10 @@ impl RelayStore {
         if inbox.len() == before {
             return Err(RelayError::ItemNotFound);
         }
+        // R1b write-through: remove the same row from the durable store. The
+        // in-memory removal already succeeded (we only reach here when the item
+        // existed), so propagate any persistence failure as 500.
+        self.db.delete_item(device_id, parsed_id)?;
         Ok(())
     }
 
@@ -1051,6 +1269,17 @@ impl RelayStore {
             // re-read; dropping the `Sender` here closes its receivers and keeps
             // the notifier map bounded by the live device set.
             self.sync_notifiers.remove(id);
+            // R1b write-through: delete the device row; the FK `ON DELETE
+            // CASCADE` reclaims its tokens + inbox atomically. This runs on the
+            // background evictor, not a request, and the signature is infallible,
+            // so a persistence failure is logged and skipped rather than
+            // aborting the sweep — the in-memory removal already happened, and
+            // the row will be re-reclaimed on the next sweep / next restart's
+            // rehydrate (a stale row only re-loads a device with an empty inbox,
+            // which the very next sweep evicts again).
+            if let Err(e) = self.db.delete_device(id) {
+                tracing::warn!(device_id = %id, error = %e, "relay: failed to delete inactive device from store");
+            }
         }
         count
     }
@@ -1122,6 +1351,16 @@ impl RelayStore {
         if evicted > 0 {
             self.evictions_total
                 .fetch_add(evicted as u64, Ordering::Relaxed);
+        }
+        // R1b write-through: mirror the TTL eviction in SQL. The in-memory
+        // sweep keeps items with `inserted_at_unix > cutoff`, i.e. evicts
+        // `inserted_at_unix <= cutoff` — `Db::prune_expired(cutoff)` deletes
+        // exactly that set, so memory and disk stay consistent. Runs on the
+        // background evictor with an infallible signature, so a persistence
+        // failure is logged and skipped; the same rows are deleted on the next
+        // tick / re-evicted after a restart's rehydrate.
+        if let Err(e) = self.db.prune_expired(cutoff) {
+            tracing::warn!(error = %e, "relay: failed to prune expired items from store");
         }
         evicted
     }

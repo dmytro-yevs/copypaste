@@ -44,6 +44,20 @@ pub enum RelayError {
     /// the request.
     #[error("internal server error: {0}")]
     Internal(String),
+    /// A persistence-layer (SQLite) failure. Maps to 500 — the durable store
+    /// could not be read/written. The message is the rusqlite error rendered
+    /// to a string; it never contains ciphertext (only SQL/IO failure context),
+    /// so it is safe to surface in the 500 body and logs.
+    #[error("storage error: {0}")]
+    Storage(String),
+}
+
+impl From<rusqlite::Error> for RelayError {
+    fn from(e: rusqlite::Error) -> Self {
+        // rusqlite errors describe SQL/IO failures (constraint, type, IO), never
+        // payload bytes — safe to stringify. Map to 500 via the `Storage` arm.
+        RelayError::Storage(e.to_string())
+    }
 }
 
 impl RelayError {
@@ -65,6 +79,7 @@ impl RelayError {
                 (StatusCode::FORBIDDEN, "HISTORY_QUOTA_EXCEEDED")
             }
             RelayError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL"),
+            RelayError::Storage(_) => (StatusCode::INTERNAL_SERVER_ERROR, "STORAGE"),
         }
     }
 }

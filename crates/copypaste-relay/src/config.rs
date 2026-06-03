@@ -29,6 +29,15 @@ pub struct RelayConfig {
     /// default is `false` (key strictly on the untrusted-but-unspoofable TCP
     /// peer IP). Documented opt-in closes M3 without changing the safe default.
     pub trust_proxy_headers: bool,
+    /// On-disk path for the persistent SQLite store (R1b). When set to a file
+    /// path, device records, token sets and inbox items survive a process
+    /// restart. Sourced from `RELAY_DB_PATH`.
+    ///
+    /// Defaults to `:memory:` so existing tests and ephemeral deploys behave
+    /// exactly as the pre-R1b in-memory store did (nothing persists across
+    /// restart). The relay always uses **plain** SQLite here — it never holds
+    /// keys and never calls `PRAGMA key` (see `db.rs`).
+    pub db_path: String,
 }
 
 impl Default for RelayConfig {
@@ -40,6 +49,7 @@ impl Default for RelayConfig {
             max_item_bytes: 10 * 1024 * 1024,
             max_items_per_device: 500,
             trust_proxy_headers: false,
+            db_path: crate::db::IN_MEMORY_PATH.to_string(),
         }
     }
 }
@@ -55,6 +65,7 @@ impl RelayConfig {
     /// - `RELAY_MAX_ITEM_BYTES`        — max ciphertext size in bytes (usize)
     /// - `RELAY_MAX_ITEMS_PER_DEVICE`  — per-device inbox cap (usize, default 500)
     /// - `RELAY_TRUST_PROXY_HEADERS`   — `1`/`true` to honor XFF/X-Real-IP/Forwarded
+    /// - `RELAY_DB_PATH`               — on-disk SQLite path (default `:memory:`)
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
 
@@ -94,6 +105,12 @@ impl RelayConfig {
         }
         if let Ok(v) = std::env::var("RELAY_TRUST_PROXY_HEADERS") {
             cfg.trust_proxy_headers = matches!(v.trim(), "1" | "true" | "TRUE" | "yes" | "on");
+        }
+        if let Ok(v) = std::env::var("RELAY_DB_PATH") {
+            let v = v.trim();
+            if !v.is_empty() {
+                cfg.db_path = v.to_string();
+            }
         }
 
         cfg
