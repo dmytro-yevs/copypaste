@@ -550,6 +550,13 @@ export function SettingsView() {
   // Sync parity — p2p toggle + wifi-only
   const [syncOnWifiOnly, setSyncOnWifiOnly] = useState(false);
 
+  // Privacy & capture — daemon AppConfig fields (config.toml).
+  const [collectPublicIp, setCollectPublicIp] = useState(true);
+  const [pasteAsPlainText, setPasteAsPlainText] = useState(false);
+  const [excludedApps, setExcludedApps] = useState<string[]>([]);
+  // Text buffer for the "add excluded app" input.
+  const [newExcludedApp, setNewExcludedApp] = useState("");
+
   // Sync-path restart guard: true while restart_daemon is in flight after a
   // sync-path toggle (P2P/relay/Supabase). Disables the control so rapid
   // double-toggles can't queue two restarts.
@@ -687,6 +694,18 @@ export function SettingsView() {
         // Sync parity
         setSyncOnWifiOnly(rawCfg.sync_on_wifi_only ?? false);
 
+        // Privacy & capture — these AppConfig fields are not in the AppSettings
+        // interface (kept in lib/ipc.ts), so read them off the raw response with
+        // a narrow typed view rather than `any`.
+        const privacyCfg = rawCfg as {
+          collect_public_ip?: boolean | null;
+          paste_as_plain_text?: boolean | null;
+          excluded_app_bundle_ids?: string[] | null;
+        };
+        setCollectPublicIp(privacyCfg.collect_public_ip ?? true);
+        setPasteAsPlainText(privacyCfg.paste_as_plain_text ?? false);
+        setExcludedApps(privacyCfg.excluded_app_bundle_ids ?? []);
+
         // Guard again — a second reloadKey bump that fired while we were
         // awaiting could have set cancelled=true between the check above and
         // the Zustand setPrefs calls below.  Without this, two in-flight loads
@@ -780,9 +799,18 @@ export function SettingsView() {
     }
   }
 
+  // Privacy & capture fields that are not (yet) in the AppSettings interface in
+  // lib/ipc.ts. set_config accepts them; we attach them via this typed shape so
+  // every patch round-trips the current privacy state without using `any`.
+  type PrivacyPatch = {
+    collect_public_ip?: boolean | null;
+    paste_as_plain_text?: boolean | null;
+    excluded_app_bundle_ids?: string[] | null;
+  };
+
   // Build the full AppSettings patch for set_config, merging current config
   // with any updated limits fields. Slider values are already raw bytes/counts/secs.
-  function buildConfigPatch(overrides: Partial<AppSettings>): AppSettings {
+  function buildConfigPatch(overrides: Partial<AppSettings> & PrivacyPatch): AppSettings & PrivacyPatch {
     return {
       p2p_enabled: config.p2p_enabled,
       supabase_url: supabaseUrl.trim() || null,
@@ -796,8 +824,49 @@ export function SettingsView() {
       sync_on_wifi_only: syncOnWifiOnly,
       sound_on_copy: prefs.playSoundOnCopy,
       notify_on_copy: prefs.notifyOnCopy,
+      collect_public_ip: collectPublicIp,
+      paste_as_plain_text: pasteAsPlainText,
+      excluded_app_bundle_ids: excludedApps,
       ...overrides,
     };
+  }
+
+  // Add a bundle ID to the excluded-apps list and persist immediately. Computes
+  // the next list explicitly (React state updates are async) so the set_config
+  // patch carries the new value, not the stale one. Reverts on failure.
+  async function addExcludedApp() {
+    const id = newExcludedApp.trim();
+    if (id === "" || excludedApps.includes(id)) {
+      setNewExcludedApp("");
+      return;
+    }
+    const next = [...excludedApps, id];
+    const prev = excludedApps;
+    setExcludedApps(next);
+    setNewExcludedApp("");
+    if (loadState !== "ready") return;
+    try {
+      await api.setConfig(
+        buildConfigPatch({ excluded_app_bundle_ids: next }) as unknown as Parameters<typeof api.setConfig>[0],
+      );
+    } catch {
+      setExcludedApps(prev);
+    }
+  }
+
+  // Remove a bundle ID from the excluded-apps list and persist. Reverts on failure.
+  async function removeExcludedApp(bundleId: string) {
+    const next = excludedApps.filter((b) => b !== bundleId);
+    const prev = excludedApps;
+    setExcludedApps(next);
+    if (loadState !== "ready") return;
+    try {
+      await api.setConfig(
+        buildConfigPatch({ excluded_app_bundle_ids: next }) as unknown as Parameters<typeof api.setConfig>[0],
+      );
+    } catch {
+      setExcludedApps(prev);
+    }
   }
 
   // P1 fix: saveLimitsField now accepts an optional per-field revert callback so
@@ -1151,6 +1220,99 @@ export function SettingsView() {
               onChange={(v) => setPrefs({ maskSensitive: v })}
             />
           </SettingsRow>
+        </Panel>
+
+        <SubsectionHeader
+          label="Privacy & capture"
+          hint="Control public-IP lookup, paste formatting, and which apps are never captured."
+        />
+        <Panel>
+          <SettingsRow label="Discover public IP">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Allow a one-off STUN request to learn this device's public IP, shown in the device-info card. No data is sent to analytics." />
+              <Toggle
+                checked={collectPublicIp}
+                onChange={(v) => {
+                  // Mirror sound/notify: persist only once fully loaded, revert on failure.
+                  setCollectPublicIp(v);
+                  if (loadState === "ready") {
+                    void api
+                      .setConfig(buildConfigPatch({ collect_public_ip: v }) as unknown as Parameters<typeof api.setConfig>[0])
+                      .catch(() => setCollectPublicIp(!v));
+                  }
+                }}
+                disabled={offline}
+              />
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Paste as plain text">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Strip rich formatting (RTF/HTML) when pasting — writes plain text only." />
+              <Toggle
+                checked={pasteAsPlainText}
+                onChange={(v) => {
+                  setPasteAsPlainText(v);
+                  if (loadState === "ready") {
+                    void api
+                      .setConfig(buildConfigPatch({ paste_as_plain_text: v }) as unknown as Parameters<typeof api.setConfig>[0])
+                      .catch(() => setPasteAsPlainText(!v));
+                  }
+                }}
+                disabled={offline}
+              />
+            </div>
+          </SettingsRow>
+          <div className="border-b border-ide-divider/70 px-3 py-2 last:border-b-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[13px] text-ide-text">Excluded apps</span>
+              <InfoPopover text="Bundle IDs of apps whose clipboard is never captured, e.g. com.1password.1password (macOS)." />
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="text"
+                value={newExcludedApp}
+                placeholder="com.example.app"
+                disabled={offline}
+                onChange={(e) => setNewExcludedApp(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void addExcludedApp();
+                  }
+                }}
+                className="flex-1 rounded-ide border border-ide-border bg-ide-bg px-2.5 py-1.5 text-[13px] text-ide-text outline-none focus:border-ide-accent focus:ring-1 focus:ring-ide-accent disabled:cursor-not-allowed disabled:opacity-40"
+              />
+              <button
+                type="button"
+                disabled={offline || newExcludedApp.trim() === ""}
+                onClick={() => void addExcludedApp()}
+                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Add
+              </button>
+            </div>
+            {excludedApps.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {excludedApps.map((bundleId) => (
+                  <span
+                    key={bundleId}
+                    className="inline-flex items-center gap-1 rounded-ide border border-ide-border bg-ide-bg px-2 py-1 text-[12px] text-ide-dim"
+                  >
+                    {bundleId}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${bundleId}`}
+                      disabled={offline}
+                      onClick={() => void removeExcludedApp(bundleId)}
+                      className="text-ide-faint hover:text-ide-danger disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </Panel>
 
         <SubsectionHeader label="Daemon" />
