@@ -12,39 +12,34 @@ import kotlinx.coroutines.withContext
 import uniffi.copypaste_android.syncWithPeer
 
 /**
- * Runs an incoming-sync poll loop inside the always-alive foreground service,
- * providing near-real-time incoming sync from Supabase during normal use.
+ * Runs an incoming-sync catch-up poll loop inside the always-alive foreground
+ * service, complementing the [SupabaseRealtimeClient] WebSocket push channel.
  *
- * ## Architecture decision: long-poll loop vs Supabase Realtime websocket
+ * ## Sync architecture (WS-primary, poll-as-catch-up)
  *
- * **Why not Supabase Realtime (websocket)?**
- * The Android app uses `HttpURLConnection` for all networking — there is no
- * `supabase-kt` or OkHttp dependency in the Gradle build. Implementing a
- * WebSocket from scratch with Doze-safe heartbeating would require either adding
- * a heavyweight SDK or writing a 400-line RFC-6455 client. The added complexity
- * outweighs the ~60-second latency benefit for a clipboard tool.
+ * Clips arrive primarily via the Supabase Realtime WebSocket push channel
+ * ([SupabaseRealtimeClient]), which delivers new rows in ~1 s after they land
+ * in the database.  This poll loop is the **catch-up safety net** that heals
+ * any rows missed while the WS was down (Doze, OEM kills, network flap):
  *
- * **Chosen approach: short-cadence poll loop in the FGS (stopgap)**
- * - The foreground service holds a WakeLock implicitly (via the notification),
- *   so Doze does not cut network access *while the FGS is running*.
- * - STOPGAP: the active interval is 3 s so a clip copied on macOS (which lands
- *   in Supabase in <1 s) reaches an active/foreground Android app within ~3 s
- *   instead of up to a minute. This is a band-aid until the Android Supabase
- *   Realtime-WS receive channel lands; once that push channel exists this active
- *   poll cadence can be relaxed again. The 3 s rate applies ONLY while the
- *   FGS/app is alive — an idle backoff still engages (see below) and the loop
- *   pauses entirely under deep Doze, so battery stays sane.
- * - P2P LAN dialing runs on its own per-tick cadence (decoupled from the poll
- *   delay) so the priority mTLS transport establishes quickly and then delivers
- *   instantly over the persistent link.
- * - Doze *does* defer the loop when the device enters deep Doze (screen off +
- *   stationary for >1h), but at that point the user is not actively switching
- *   between devices, so the 15-minute WorkManager catch-up worker covers the gap.
+ *   - WS connected   → poll every 120 s (catch-up only; WS is the fast path)
+ *   - WS disconnected→ poll every 60 s  (more frequent while the push channel
+ *                       is down so incoming clips are not delayed too long)
+ *   - Idle           → poll every 300 s (both states, after [IDLE_THRESHOLD_POLLS]
+ *                       consecutive empty polls while the FGS is alive)
+ *   - On each WS (re)connect → one immediate catch-up poll (triggered by the
+ *     WS client itself via [SupabaseRealtimeClient])
  *
- * **Why keep SupabasePollWorker?**
- * When the process is dead (after OEM kill, Doze eviction, or low-memory),
- * WorkManager restarts the poll on a 15-minute cadence. This is the safety net.
- * The FGS loop is the fast path; WorkManager is the fallback.
+ * The WS and the poll share the same `(wall_time, id)` cursor persisted in
+ * [Settings] and the same [ClipboardRepository.storeItemWithLww] dedup gate,
+ * so a row delivered by the WS and later re-seen by the catch-up poll is a
+ * silent no-op.
+ *
+ * ## P2P LAN dial
+ * The background P2P dial runs on its own [P2P_DIAL_INTERVAL_MS] cadence,
+ * decoupled from the Supabase poll interval.  The poll delay can grow to the
+ * idle cap, but P2P dials still fire frequently so the mTLS link is established
+ * quickly.
  *
  * ## Cursor strategy (Tasks 4/5/6)
  * Uses an ascending compound keyset cursor (wall_time, id) that mirrors the
@@ -57,14 +52,10 @@ import uniffi.copypaste_android.syncWithPeer
  * lamport_ts is compared to the stored row's. If strictly newer, the local
  * row is replaced (last-writer-wins), mirroring the daemon's cloud.rs LWW.
  *
- * ## Interval tuning
- * - POLL_INTERVAL_MS = 3_000 (3 s, stopgap) while the FGS is alive and network
- *   is up — see the stopgap note above.
+ * ## Retry backoff
  * - RETRY_BACKOFF_BASE_MS = 30_000 (30 s) — first retry after a transient error;
  *   doubles each consecutive failure up to RETRY_BACKOFF_MAX_MS (real exponential
  *   backoff, reset to 0 failures on the first success).
- * - IDLE_POLL_INTERVAL_MS = 15_000 (15 s) after IDLE_THRESHOLD_POLLS empty polls
- *   (battery courtesy for idle periods, but still responsive while alive).
  *
  * Note: this class does NOT hold an explicit WakeLock. Foreground services
  * on Android 8+ implicitly prevent CPU sleep while the FGS notification is
@@ -75,6 +66,9 @@ class FgsSyncLoop(
     private val repository: ClipboardRepository,
     private val syncManager: SyncManager,
     private val deviceKeyStore: DeviceKeyStore,
+    /** WS client whose [SupabaseRealtimeClient.isConnected] gate drives the
+     *  catch-up poll interval. Null-safe: when absent the loop treats WS as down. */
+    private val wsClient: SupabaseRealtimeClient? = null,
 ) {
     private var job: Job? = null
 
@@ -82,22 +76,24 @@ class FgsSyncLoop(
         private const val TAG = "FgsSyncLoop"
 
         /**
-         * Active poll interval when the FGS is running and network is available.
-         *
-         * STOPGAP: 3 s (was 60 s). A clip copied on macOS reaches Supabase in
-         * <1 s, but Android only sees it on its next active poll. Dropping this
-         * to 3 s makes a foreground/FGS-active app receive clips within ~3 s.
-         * This is a band-aid until the Android Supabase Realtime-WS push receive
-         * channel lands; once that exists this cadence can be relaxed. The 3 s
-         * rate applies ONLY while the FGS/app is alive — the idle backoff below
-         * still engages, and deep Doze pauses the loop entirely.
+         * Catch-up poll interval while the Supabase Realtime WS is **connected**.
+         * WS is the primary receive path; polling is only a safety net here.
          */
-        private const val POLL_INTERVAL_MS = 3_000L
+        private const val POLL_INTERVAL_WS_CONNECTED_MS = 120_000L  // 2 min
 
-        /** Reduced poll interval after several consecutive empty polls — save
-         *  battery when nothing is changing. Kept responsive (15 s, was 5 min)
-         *  so the loop stays snappy while the FGS is alive but still backs off. */
-        private const val IDLE_POLL_INTERVAL_MS = 15_000L
+        /**
+         * Catch-up poll interval while the WS is **disconnected** (or not yet
+         * joined). More frequent so incoming clips are not delayed while the WS
+         * reconnects.
+         */
+        private const val POLL_INTERVAL_WS_DOWN_MS = 60_000L  // 1 min
+
+        /**
+         * Idle catch-up interval after [IDLE_THRESHOLD_POLLS] consecutive empty
+         * polls. Applied regardless of WS state — battery courtesy when nothing
+         * is changing.
+         */
+        private const val IDLE_POLL_INTERVAL_MS = 300_000L  // 5 min
 
         /** First retry delay after a transient network failure; doubled per
          *  consecutive failure up to [RETRY_BACKOFF_MAX_MS]. */
@@ -106,7 +102,7 @@ class FgsSyncLoop(
         /** Upper bound on the exponential retry backoff. */
         private const val RETRY_BACKOFF_MAX_MS = 480_000L // 8 min
 
-        /** How many consecutive empty polls before we slow down to IDLE interval. */
+        /** How many consecutive empty polls before we slow down to the idle interval. */
         private const val IDLE_THRESHOLD_POLLS = 3
 
         /** Cap on local items pushed per background P2P dial (mirrors PairActivity). */
@@ -121,6 +117,20 @@ class FgsSyncLoop(
          * regardless of how long the next poll is deferred.
          */
         private const val P2P_DIAL_INTERVAL_MS = 3_000L
+
+        /**
+         * WS-aware steady-state catch-up poll interval.
+         *
+         * - WS connected + active streak   → [POLL_INTERVAL_WS_CONNECTED_MS] (120 s)
+         * - WS disconnected + active streak → [POLL_INTERVAL_WS_DOWN_MS] (60 s)
+         * - Either state + idle streak      → [IDLE_POLL_INTERVAL_MS] (300 s)
+         *
+         * Pure for unit testing.
+         */
+        fun pollIntervalMs(wsConnected: Boolean, consecutiveEmpty: Int): Long {
+            if (consecutiveEmpty >= IDLE_THRESHOLD_POLLS) return IDLE_POLL_INTERVAL_MS
+            return if (wsConnected) POLL_INTERVAL_WS_CONNECTED_MS else POLL_INTERVAL_WS_DOWN_MS
+        }
 
         /**
          * M6: pure exponential-backoff computation, extracted so it can be unit
@@ -144,11 +154,11 @@ class FgsSyncLoop(
         }
 
         /**
-         * M6: the steady-state poll interval given a run of [consecutiveEmpty]
-         * polls that produced no new items. Pure for unit testing.
+         * Legacy shim used by existing [FgsSyncLoopBackoffTest].
+         * Returns [pollIntervalMs] with wsConnected=false for backward compat.
          */
         fun intervalForEmptyStreak(consecutiveEmpty: Int): Long =
-            if (consecutiveEmpty >= IDLE_THRESHOLD_POLLS) IDLE_POLL_INTERVAL_MS else POLL_INTERVAL_MS
+            pollIntervalMs(wsConnected = false, consecutiveEmpty = consecutiveEmpty)
     }
 
     /**
@@ -177,7 +187,10 @@ class FgsSyncLoop(
                 if (!enabled) {
                     consecutiveEmpty++
                     consecutiveFailures = 0
-                    nextDelay = intervalForEmptyStreak(consecutiveEmpty)
+                    nextDelay = pollIntervalMs(
+                        wsConnected = wsClient?.isConnected ?: false,
+                        consecutiveEmpty = consecutiveEmpty,
+                    )
                 } else {
                     val newCount = try {
                         poll()
@@ -202,7 +215,10 @@ class FgsSyncLoop(
                     if (newCount > 0) {
                         Log.d(TAG, "FgsSyncLoop: $newCount new item(s) stored")
                     }
-                    nextDelay = intervalForEmptyStreak(consecutiveEmpty)
+                    nextDelay = pollIntervalMs(
+                        wsConnected = wsClient?.isConnected ?: false,
+                        consecutiveEmpty = consecutiveEmpty,
+                    )
                 }
 
                 // Background Android→macOS LAN P2P dial, DECOUPLED from the poll
