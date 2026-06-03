@@ -200,6 +200,25 @@ pub struct PeerMeta {
     /// handshake).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_name: Option<String>,
+    /// This device's STUN-discovered public / global IP (e.g. `"203.0.113.42"`),
+    /// learned in-band over the bootstrap channel during PAKE pairing (B1: full
+    /// device info on both platforms). Populated by the daemon from its own cached
+    /// STUN value — `copypaste-p2p` does not collect it. `None` when the peer opted
+    /// out of public-IP collection (`collect_public_ip = false`), STUN has not yet
+    /// resolved, or the peer is a legacy build.
+    ///
+    /// Informational metadata ONLY — never used for authentication, fingerprint
+    /// pinning, or any trust decision. A public IP is non-secret, mirroring what
+    /// the device already reports for its own `get_own_device_info`.
+    ///
+    /// `#[serde(default)]` keeps backward compat with older `PeerMeta` frames that
+    /// do not carry this field; they deserialise to `None`. Because it is an
+    /// additive optional field (omitted on the wire when `None` via
+    /// `skip_serializing_if`), NO `BOOTSTRAP_PROTO_VERSION` bump is required — an
+    /// old peer simply ignores the unknown key, and a new peer reads `None` from
+    /// an old peer's frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub public_ip: Option<String>,
 }
 
 /// rustls verifier that accepts **any** peer certificate without pinning.
@@ -348,6 +367,11 @@ pub struct BootstrapPairing {
     /// over the post-handshake metadata extension. `None` for legacy peers or
     /// when the field was not advertised.
     pub peer_device_name: Option<String>,
+    /// Peer's STUN-discovered public / global IP, learned over the post-handshake
+    /// metadata extension (B1: full device info). `None` for legacy peers, or when
+    /// the peer opted out of public-IP collection / STUN had not yet resolved.
+    /// Informational only — never used for auth or trust.
+    pub peer_public_ip: Option<String>,
 }
 
 /// A bootstrap TLS responder listener bound to an ephemeral port.
@@ -578,6 +602,7 @@ impl BootstrapResponder {
                 peer_app_version: peer_meta.app_version,
                 peer_local_ip: peer_meta.local_ip,
                 peer_device_name: peer_meta.device_name,
+                peer_public_ip: peer_meta.public_ip,
             })
         })
         .await
@@ -747,6 +772,7 @@ impl BootstrapResponder {
             peer_app_version: peer_meta.app_version,
             peer_local_ip: peer_meta.local_ip,
             peer_device_name: peer_meta.device_name,
+            peer_public_ip: peer_meta.public_ip,
         })
     }
 }
@@ -904,6 +930,7 @@ pub async fn run_initiator(
             peer_app_version: peer_meta.app_version,
             peer_local_ip: peer_meta.local_ip,
             peer_device_name: peer_meta.device_name,
+            peer_public_ip: peer_meta.public_ip,
         })
     })
     .await
@@ -1088,6 +1115,7 @@ where
         peer_app_version: peer_meta.app_version,
         peer_local_ip: peer_meta.local_ip,
         peer_device_name: peer_meta.device_name,
+        peer_public_ip: peer_meta.public_ip,
     })
 }
 
@@ -1343,6 +1371,7 @@ mod tests {
             app_version: Some("0.5.4".into()),
             local_ip: Some("192.168.1.10".into()),
             device_name: None,
+            public_ip: Some("198.51.100.10".into()),
         };
         let resp_meta_task = resp_meta.clone();
         let responder_task =
@@ -1357,6 +1386,7 @@ mod tests {
             app_version: Some("0.5.4".into()),
             local_ip: Some("192.168.1.11".into()),
             device_name: None,
+            public_ip: Some("198.51.100.11".into()),
         };
         let init_meta_task = init_meta.clone();
         let initiator_task = tokio::spawn(async move {
@@ -1396,10 +1426,12 @@ mod tests {
         assert_eq!(resp.peer_os, init_meta.os_version);
         assert_eq!(resp.peer_app_version, init_meta.app_version);
         assert_eq!(resp.peer_local_ip, init_meta.local_ip);
+        assert_eq!(resp.peer_public_ip, init_meta.public_ip);
         assert_eq!(init.peer_model, resp_meta.model);
         assert_eq!(init.peer_os, resp_meta.os_version);
         assert_eq!(init.peer_app_version, resp_meta.app_version);
         assert_eq!(init.peer_local_ip, resp_meta.local_ip);
+        assert_eq!(init.peer_public_ip, resp_meta.public_ip);
     }
 
     /// Wrong password: the initiator's PAKE finish must fail, and the responder
@@ -1662,9 +1694,11 @@ mod tests {
             app_version: Some("0.5.4".into()),
             local_ip: Some("10.0.0.1".into()),
             device_name: None,
+            public_ip: Some("203.0.113.7".into()),
         };
         let meta_b = PeerMeta {
             model: Some("Mac mini".into()),
+            public_ip: Some("203.0.113.8".into()),
             ..Default::default()
         };
 
@@ -1702,6 +1736,72 @@ mod tests {
             PeerMeta::default(),
             "a legacy peer that sends no metadata must yield all-None"
         );
+    }
+
+    // ── PeerMeta.public_ip serde (B1: peer public/global IP exchange) ─────────
+
+    /// Round-trip: a `PeerMeta` carrying `public_ip` serialises and deserialises
+    /// back to an equal value (the new field survives the JSON wire form).
+    #[test]
+    fn peer_meta_public_ip_round_trips() {
+        let meta = PeerMeta {
+            model: Some("MacBook Air".into()),
+            os_version: Some("macOS 15.5".into()),
+            app_version: Some("0.6.0".into()),
+            local_ip: Some("192.168.1.5".into()),
+            device_name: Some("Alice's MacBook".into()),
+            public_ip: Some("203.0.113.42".into()),
+        };
+        let json = serde_json::to_string(&meta).expect("serialize PeerMeta");
+        assert!(
+            json.contains("\"public_ip\":\"203.0.113.42\""),
+            "public_ip must appear in the serialised PeerMeta JSON: {json}"
+        );
+        let back: PeerMeta = serde_json::from_str(&json).expect("deserialize PeerMeta");
+        assert_eq!(back, meta, "PeerMeta must round-trip with public_ip set");
+    }
+
+    /// When `public_ip` is `None`, it is omitted from the wire form
+    /// (`skip_serializing_if`) — keeping the frame minimal and back-compat with a
+    /// legacy reader that does not know the key.
+    #[test]
+    fn peer_meta_public_ip_none_is_omitted() {
+        let meta = PeerMeta {
+            model: Some("Mac mini".into()),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&meta).expect("serialize PeerMeta");
+        assert!(
+            !json.contains("public_ip"),
+            "public_ip must be absent from JSON when None: {json}"
+        );
+    }
+
+    /// Back-compat: an OLD-format `PeerMeta` payload that predates `public_ip`
+    /// (the key is entirely absent) must deserialise cleanly with `public_ip ==
+    /// None`. This is the wire form an older peer sends; it must NOT error, so
+    /// pairing/connecting/syncing with a legacy peer keeps working.
+    #[test]
+    fn peer_meta_legacy_payload_without_public_ip_deserialises_to_none() {
+        // Exactly the JSON an older build emits (model/os/app/local_ip/device_name,
+        // NO public_ip key).
+        let legacy_json = r#"{
+            "model": "MacBook Air",
+            "os_version": "macOS 14.4",
+            "app_version": "0.5.4",
+            "local_ip": "192.168.1.11",
+            "device_name": "Bob's Mac"
+        }"#;
+        let meta: PeerMeta =
+            serde_json::from_str(legacy_json).expect("legacy PeerMeta must deserialise");
+        assert_eq!(
+            meta.public_ip, None,
+            "a legacy payload missing public_ip must deserialise to None"
+        );
+        // The other fields still populate, proving the additive field did not
+        // disturb the existing wire contract.
+        assert_eq!(meta.model.as_deref(), Some("MacBook Air"));
+        assert_eq!(meta.device_name.as_deref(), Some("Bob's Mac"));
     }
 
     // ── LAN/SAS phase 1: confirm-gated handshake variants ────────────────────

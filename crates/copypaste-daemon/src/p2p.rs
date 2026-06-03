@@ -255,6 +255,10 @@ pub async fn start_p2p(
     // initiator can persist where to dial us for sync. Same Arc the IPC server
     // populates via `set_p2p_sync_addr`.
     own_sync_addr: Arc<std::sync::Mutex<Option<String>>>,
+    // B1: the SAME public-IP cache the IPC server reads and the STUN refresh task
+    // writes (daemon.rs constructs it once). The standing LAN/SAS responder reads
+    // it so it advertises our own global IP in-band, exactly like the IPC paths.
+    public_ip_cache: Arc<tokio::sync::RwLock<Option<String>>>,
 ) -> anyhow::Result<P2pHandle> {
     let bind_addr = format!("0.0.0.0:{}", config.listen_port);
     let listener = TcpListener::bind(&bind_addr).await?;
@@ -367,6 +371,7 @@ pub async fn start_p2p(
         let peers_for_responder = peers.clone();
         let pairing_for_responder = Arc::clone(&pairing);
         let own_sync_addr_for_responder = Arc::clone(&own_sync_addr);
+        let public_ip_cache_for_responder = Arc::clone(&public_ip_cache);
         let cert_der = bootstrap_cert_der;
         let key_der = bootstrap_key_der;
         tokio::spawn(async move {
@@ -377,6 +382,7 @@ pub async fn start_p2p(
                 peers_for_responder,
                 pairing_for_responder,
                 own_sync_addr_for_responder,
+                public_ip_cache_for_responder,
             )
             .await;
         });
@@ -1142,6 +1148,9 @@ async fn standing_pairing_responder_loop(
     peers: PairedPeers,
     pairing: Arc<crate::pairing_sm::PairingCoordinator>,
     own_sync_addr: Arc<std::sync::Mutex<Option<String>>>,
+    // B1: shared public-IP cache (the daemon's single STUN source). Read each
+    // iteration so our own current global IP is advertised in-band to the peer.
+    public_ip_cache: Arc<tokio::sync::RwLock<Option<String>>>,
 ) {
     tracing::info!(bport, "LAN/SAS standing pairing responder running");
     loop {
@@ -1169,9 +1178,12 @@ async fn standing_pairing_responder_loop(
             .lock()
             .map(|s| s.clone().unwrap_or_default())
             .unwrap_or_else(|p| p.into_inner().clone().unwrap_or_default());
-        let own_meta = tokio::task::spawn_blocking(crate::ipc::IpcServer::collect_own_peer_meta)
-            .await
-            .unwrap_or_default();
+        let own_public_ip = public_ip_cache.read().await.clone();
+        let own_meta = tokio::task::spawn_blocking(move || {
+            crate::ipc::IpcServer::collect_own_peer_meta(own_public_ip)
+        })
+        .await
+        .unwrap_or_default();
 
         // EPHEMERAL random password. The initiator sends its own random password
         // in-band; the responder side of `run_with_confirm` reconstructs the
@@ -1223,6 +1235,7 @@ async fn standing_pairing_responder_loop(
                     app_version: outcome.peer_app_version.clone(),
                     local_ip: outcome.peer_local_ip.clone(),
                     device_name: outcome.peer_device_name.clone(),
+                    public_ip: outcome.peer_public_ip.clone(),
                 };
                 crate::ipc::IpcServer::persist_paired_peer(
                     &outcome.peer_fingerprint,
@@ -1715,6 +1728,7 @@ mod tests {
                     os_version: None,
                     app_version: None,
                     local_ip: None,
+                    public_ip: None,
                     first_sync_at: Some(500),
                     last_sync_at: Some(999),
                 },
@@ -1728,6 +1742,7 @@ mod tests {
                     os_version: None,
                     app_version: None,
                     local_ip: None,
+                    public_ip: None,
                     first_sync_at: None,
                     last_sync_at: None,
                 },
@@ -1780,6 +1795,7 @@ mod tests {
                 os_version: None,
                 app_version: None,
                 local_ip: None,
+                public_ip: None,
                 first_sync_at: None,
                 last_sync_at: None,
             }],

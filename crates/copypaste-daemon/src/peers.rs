@@ -62,6 +62,15 @@ pub struct PairedDevice {
     /// parsing the `host:port` `address` field for UI display.
     #[serde(default)]
     pub local_ip: Option<String>,
+    /// Peer's STUN-discovered public / global IP (e.g. `"203.0.113.42"`), learned
+    /// in-band over the bootstrap channel during pairing (B1: full device info).
+    /// Surfaced verbatim in the `list_peers` IPC response so the Devices UI can
+    /// show the remote peer's global IP. `None` when the peer opted out of
+    /// public-IP collection, STUN had not resolved, or the record predates this
+    /// field. Informational only — never used for auth/trust. `#[serde(default)]`
+    /// keeps backward compatibility with older `peers.json` records.
+    #[serde(default)]
+    pub public_ip: Option<String>,
     /// Unix timestamp (seconds) of the FIRST successful sync connection with
     /// this peer. Set once and never overwritten. `None` until the first sync.
     #[serde(default)]
@@ -247,6 +256,7 @@ mod tests {
             os_version: None,
             app_version: None,
             local_ip: None,
+            public_ip: None,
             first_sync_at: None,
             last_sync_at: None,
         }
