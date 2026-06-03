@@ -2864,6 +2864,9 @@ mod tests {
         let known_blob = encrypt_for_cloud(&shared, &known_item_id, &known_plaintext)
             .expect("peer wraps its item under the shared key");
         let peer_wire = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: known_item_id.clone(),
             item_id: known_item_id.clone(),
             content_type: "text".to_string(),
@@ -3029,6 +3032,9 @@ mod tests {
         let known_blob = encrypt_for_cloud(&shared, &known_item_id, &known_plaintext)
             .expect("peer wraps its image under the shared key");
         let peer_wire = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: known_item_id.clone(),
             item_id: known_item_id.clone(),
             content_type: "image".to_string(),
@@ -3263,6 +3269,9 @@ mod tests {
         // silent `continue`.
         let legacy_item_id = uuid::Uuid::new_v4().to_string();
         let legacy_wire = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: legacy_item_id.clone(),
             item_id: legacy_item_id.clone(),
             content_type: "text".to_string(),

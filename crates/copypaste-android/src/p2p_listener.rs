@@ -596,6 +596,9 @@ mod tests {
         let item_id = uuid::Uuid::new_v4().to_string();
         let blob = encrypt_for_cloud(shared, &item_id, plaintext).expect("wrap item");
         WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: item_id.clone(),
             item_id,
             content_type: "text".to_string(),
