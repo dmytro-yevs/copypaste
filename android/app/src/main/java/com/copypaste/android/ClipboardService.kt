@@ -24,11 +24,15 @@ import android.view.WindowManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
 import java.util.Calendar
@@ -89,6 +93,21 @@ class ClipboardService : Service() {
     private lateinit var clipboardManager: ClipboardManager
     private lateinit var syncManager: SyncManager
     private lateinit var fgsSyncLoop: FgsSyncLoop
+    private lateinit var deviceKeyStore: DeviceKeyStore
+
+    /**
+     * Inbound mTLS P2P listener handle (macOS→Android direction). Bound in
+     * [onStartCommand] when `syncEnabled && p2pSyncEnabled`, drained by
+     * [p2pListenerJob], released in [onDestroy]. Null while not running.
+     *
+     * The companion [activeListenerPort] mirrors [P2pListenerHandleInfo.actualPort]
+     * so [PairActivity] can advertise this device's dialable address at pair time.
+     */
+    private var p2pListener: P2pListenerHandleInfo? = null
+
+    /** Coroutine draining [pollP2pListener] on the dial cadence. Cancelled in [onDestroy]. */
+    private var p2pListenerJob: kotlinx.coroutines.Job? = null
+
     /**
      * Supabase Realtime WS client — primary push-receive channel (~1 s latency).
      * Owned by this FGS: started in [onStartCommand], closed in [onDestroy].
@@ -188,7 +207,8 @@ class ClipboardService : Service() {
         // P1.2/P1.4: Supabase Realtime WS client — constructed here so it can be
         // passed to FgsSyncLoop as the wsConnected gate.
         realtimeClient = SupabaseRealtimeClient(settings, syncManager, repository, scope)
-        fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager, DeviceKeyStore(this), realtimeClient)
+        deviceKeyStore = DeviceKeyStore(this)
+        fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager, deviceKeyStore, realtimeClient)
 
         // Relay SSE subscription — the third independent receive transport.
         // Reuses the same syncManager (relay decrypt + LWW) and FGS scope.
@@ -250,7 +270,145 @@ class ClipboardService : Service() {
         // Start the catch-up poll loop (WS-aware intervals: 120s connected / 60s down).
         fgsSyncLoop.start(scope)
 
+        // Inbound mTLS P2P listener (macOS→Android direction). Gated on the same
+        // toggles as the dialer so the user's P2P switch governs BOTH directions.
+        // Idempotent across sticky restarts: startP2pListener is a no-op while a
+        // listener is already running.
+        if (settings.syncEnabled && settings.p2pSyncEnabled) {
+            startInboundP2pListener()
+        }
+
         return START_STICKY
+    }
+
+    /**
+     * Bind the inbound mTLS P2P listener and launch a coroutine that drains it on
+     * the dial cadence, storing each received item via the SAME store-mapping the
+     * dialer uses ([FgsSyncLoop.storeSyncedItem]) — LWW dedup on item_id makes a
+     * re-receipt (already delivered by the dialer or a previous tick) a no-op.
+     *
+     * Idempotent: a no-op while [p2pListener] is already bound (sticky restart).
+     * All failures are logged and non-fatal — a listener that cannot bind must
+     * never crash the foreground service; the Android→macOS dialer still runs.
+     */
+    private fun startInboundP2pListener() {
+        if (p2pListener != null) return // already running — idempotent
+
+        // mTLS identity is mandatory; if pairing never generated one there is
+        // nothing to listen with (a peer could not authenticate us anyway).
+        val cert = deviceKeyStore.peek() ?: run {
+            Log.i(TAG, "P2P listener not started: no device cert (never paired?)")
+            return
+        }
+
+        val key = settings.encryptionKey
+        val peers = settings.pairedPeers
+        val allowed = peers.map { it.fingerprint }
+        val revoked = try {
+            listRevokedFingerprints(settings.dbPath, key)
+        } catch (e: Exception) {
+            Log.w(TAG, "P2P listener: listRevokedFingerprints failed, using empty denylist: ${e.message}")
+            emptyList()
+        }
+        val sessionKeys = peers.map {
+            PeerSessionKeyInfo(it.fingerprint, settings.sessionKeyFor(it.fingerprint))
+        }
+        val localItems = runBlocking {
+            repository.localItemsForSync(key, limit = FgsSyncLoop.P2P_LOCAL_ITEM_LIMIT)
+        }
+
+        val handle = try {
+            startP2pListener(
+                listenPort = 0, // OS-assigned free port; read back from actualPort
+                certDer = cert.certDer,
+                keyDer = cert.keyDer,
+                allowedFingerprints = allowed,
+                revokedFingerprints = revoked,
+                sessionKeys = sessionKeys,
+                localItems = localItems,
+                deviceId = settings.deviceId,
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "P2P listener failed to start (${e.javaClass.simpleName}: ${e.message}) — macOS→Android dial-in disabled this session")
+            return
+        }
+
+        p2pListener = handle
+        activeListenerPort = handle.actualPort
+        Log.i(TAG, "P2P listener bound on port ${handle.actualPort} (id=${handle.listenerId})")
+
+        p2pListenerJob = scope.launch {
+            val listenerId = handle.listenerId
+            while (isActive) {
+                // Refresh the roster/denylist/session-keys each tick so a pairing
+                // change or revocation is honoured without restarting the listener.
+                try {
+                    val freshPeers = settings.pairedPeers
+                    val freshRevoked = try {
+                        listRevokedFingerprints(settings.dbPath, settings.encryptionKey)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "P2P listener: denylist refresh failed: ${e.message}")
+                        emptyList()
+                    }
+                    updateP2pListenerPeers(
+                        listenerId = listenerId,
+                        allowed = freshPeers.map { it.fingerprint },
+                        revoked = freshRevoked,
+                        sessionKeys = freshPeers.map {
+                            PeerSessionKeyInfo(it.fingerprint, settings.sessionKeyFor(it.fingerprint))
+                        },
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "P2P listener: updateP2pListenerPeers failed: ${e.message}")
+                }
+
+                // Drain received items; store each via the shared mapping. Per-item
+                // try/catch so one malformed item does not stall the rest.
+                try {
+                    val items = pollP2pListener(listenerId)
+                    var stored = 0
+                    for (item in items) {
+                        try {
+                            if (fgsSyncLoop.storeSyncedItem(item)) stored += 1
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            Log.w(TAG, "P2P listener: failed to store item ${item.itemId.take(8)}: ${e.message}")
+                        }
+                    }
+                    if (stored > 0) {
+                        Log.i(TAG, "P2P listener: stored $stored inbound item(s)")
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "P2P listener: poll failed: ${e.message}")
+                }
+
+                delay(FgsSyncLoop.P2P_DIAL_INTERVAL_MS)
+            }
+        }
+    }
+
+    /**
+     * Stop the inbound listener and cancel its drain coroutine. Idempotent and
+     * safe to call when the listener was never started. Errors are logged, not
+     * thrown — [onDestroy] must complete regardless.
+     */
+    private fun stopInboundP2pListener() {
+        p2pListenerJob?.cancel()
+        p2pListenerJob = null
+        val handle = p2pListener ?: return
+        p2pListener = null
+        activeListenerPort = 0
+        try {
+            stopP2pListener(handle.listenerId)
+            Log.i(TAG, "P2P listener stopped (id=${handle.listenerId})")
+        } catch (e: Exception) {
+            Log.w(TAG, "P2P listener: stop failed (${e.javaClass.simpleName}: ${e.message})")
+        }
     }
 
     /**
@@ -366,6 +524,10 @@ class ClipboardService : Service() {
     }
 
     override fun onDestroy() {
+        // Stop the inbound listener (cancels its drain job + releases the bound
+        // port) BEFORE scope.cancel() so the native accept loop is torn down
+        // cleanly rather than left dangling on an orphaned coroutine.
+        stopInboundP2pListener()
         fgsSyncLoop.stop()
         // P1.4: close the WS channel gracefully (sends phx_leave) before the
         // scope is cancelled — avoids an abrupt TCP close that Supabase would
@@ -386,6 +548,17 @@ class ClipboardService : Service() {
         private const val TAG = "ClipboardService"
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "copypaste_service"
+
+        /**
+         * Port the inbound mTLS P2P listener is currently bound to (OS-assigned),
+         * or 0 when no listener is running. Published by [startInboundP2pListener]
+         * / cleared by [stopInboundP2pListener] so [PairActivity] can advertise
+         * `"<lan-ip>:<port>"` to a peer at pair time (Path A: the peer persists it
+         * and dials back). @Volatile — read cross-thread from the pairing flow.
+         */
+        @Volatile
+        var activeListenerPort: Int = 0
+            private set
 
         /** Separate notification channel for the one-time "enable Accessibility" action prompt. */
         private const val CHANNEL_A11Y_WARN = "copypaste_a11y_warn"

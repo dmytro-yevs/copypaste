@@ -361,12 +361,32 @@ fun PairScreen(
                 val key = settings.encryptionKey
                 val message = withContext(Dispatchers.IO) {
                     val cert = deviceKeyStore.getOrCreate()
+                    // Path A: advertise THIS device's inbound mTLS listener address
+                    // so the macOS peer persists it and can dial back (macOS→Android
+                    // direction). The listener is bound by [ClipboardService]; its
+                    // OS-assigned port is published in [ClipboardService.activeListenerPort].
+                    // When the listener is not running yet (port == 0) or this device
+                    // has no LAN IPv4, fall back to "" — the old behavior, where only
+                    // the Android→macOS dial works until the listener comes up.
+                    val listenerPort = ClipboardService.activeListenerPort
+                    val lanIp = lanIpv4Address()
+                    val ownSyncAddr = if (listenerPort > 0 && lanIp != null) {
+                        "$lanIp:$listenerPort"
+                    } else {
+                        android.util.Log.i(
+                            "PairActivity",
+                            "Not advertising listener sync_addr (port=$listenerPort, lanIp=${lanIp ?: "none"}) — " +
+                                "falling back to Android→macOS dial only until the listener is up",
+                        )
+                        ""
+                    }
                     val bootstrap = bootstrapPairInitiator(
                         addrHint = peer.addrHint,
                         certDer = cert.certDer,
                         keyDer = cert.keyDer,
                         pakePassword = peer.pakePassword,
-                        syncAddr = "",
+                        // Advertise our dialable listener address so the peer dials back.
+                        syncAddr = ownSyncAddr,
                         // A phone scanning a configured PC carries nothing of its
                         // own — it RECEIVES the PC's sync provisioning in the
                         // response (bootstrap.peerProvisioning), applied below.
@@ -813,5 +833,33 @@ fun PairScreen(
                 )
             }
         }
+    }
+}
+
+/**
+ * Best-effort lookup of this device's site-local IPv4 address (e.g. 192.168.x.x,
+ * 10.x.x.x), used to build the inbound listener's advertised `sync_addr` at pair
+ * time so the macOS peer can dial back over the LAN.
+ *
+ * Enumerates active, non-loopback interfaces and returns the first site-local
+ * IPv4 (skipping link-local 169.254.x.x and IPv6). Returns null when no such
+ * address exists (no Wi-Fi / cellular-only), in which case the caller falls back
+ * to advertising no address (Android→macOS dial only).
+ *
+ * No WifiManager dependency: NetworkInterface enumeration works for both Wi-Fi
+ * and other LAN interfaces without the ACCESS_WIFI_STATE permission.
+ */
+private fun lanIpv4Address(): String? {
+    return try {
+        java.net.NetworkInterface.getNetworkInterfaces()?.toList()
+            ?.asSequence()
+            ?.filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) }
+            ?.flatMap { it.inetAddresses.toList().asSequence() }
+            ?.filterIsInstance<java.net.Inet4Address>()
+            ?.firstOrNull { it.isSiteLocalAddress }
+            ?.hostAddress
+    } catch (e: Exception) {
+        android.util.Log.w("PairActivity", "lanIpv4Address lookup failed: ${e.message}")
+        null
     }
 }

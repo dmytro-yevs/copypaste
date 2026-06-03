@@ -690,3 +690,165 @@ fun syncWithPeer(
         deviceId = deviceId,
     )
 }
+
+// ── Inbound P2P mTLS listener (ABI-11 surface) ─────────────────────────────────
+//
+// The listener is the macOS→Android direction's counterpart to the
+// Android→macOS dialer ([syncWithPeer]): instead of dialing a peer, we bind a
+// local mTLS server so a paired macOS daemon can initiate a sync TO this device.
+// The native side owns the accept loop on a background thread; incoming items
+// are buffered and drained on the app's cadence via [pollP2pListener].
+//
+// Both directions store received items through the SAME path
+// (FgsSyncLoop.storeSyncedItem → storeItemWithLww / storeImageBytes /
+// storeFileBytes) so LWW dedup on item_id makes re-receipt a no-op.
+
+/**
+ * Mirror of [uniffi.copypaste_android.PeerSessionKey] for app-side callers: a
+ * paired peer's fingerprint plus its 32-byte PAKE session key (ByteArray).
+ *
+ * Converted to the generated `List<UByte>`-backed type at the FFI boundary by
+ * [startP2pListener] / [updateP2pListenerPeers]. NEVER log [sessionKey].
+ */
+data class PeerSessionKeyInfo(val fingerprint: String, val sessionKey: ByteArray) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is PeerSessionKeyInfo) return false
+        return fingerprint == other.fingerprint && sessionKey.contentEquals(other.sessionKey)
+    }
+
+    override fun hashCode(): Int = 31 * fingerprint.hashCode() + sessionKey.contentHashCode()
+}
+
+/**
+ * Handle to a running inbound listener: the native [listenerId] used by
+ * [pollP2pListener] / [updateP2pListenerPeers] / [stopP2pListener], and the
+ * [actualPort] the OS actually bound (resolved when [startP2pListener] is called
+ * with `listenPort = 0`). [actualPort] is what this device advertises to a peer
+ * as its dialable `sync_addr`.
+ */
+data class P2pListenerHandleInfo(val listenerId: Long, val actualPort: Int)
+
+/** Build the generated `PeerSessionKey` list from app-side [PeerSessionKeyInfo]. */
+private fun List<PeerSessionKeyInfo>.toGeneratedSessionKeys(): List<uniffi.copypaste_android.PeerSessionKey> =
+    map {
+        uniffi.copypaste_android.PeerSessionKey(
+            fingerprint = it.fingerprint,
+            sessionKey = it.sessionKey.toUByteList(),
+        )
+    }
+
+/**
+ * Start the inbound mTLS P2P listener so a paired peer (e.g. the macOS daemon)
+ * can dial THIS device and push items. Delegates to the generated
+ * `uniffi.copypaste_android.startP2pListener` (ABI 11).
+ *
+ *  - [listenPort]: 0 to let the OS pick a free port (read it back from
+ *    [P2pListenerHandleInfo.actualPort]).
+ *  - [certDer]/[keyDer]: this device's mTLS identity (already `List<UByte>`, as
+ *    held by [uniffi.copypaste_android.DeviceCert]).
+ *  - [allowedFingerprints]: the mTLS allowlist (paired peers' fingerprints).
+ *  - [revokedFingerprints]: the local denylist; the native side refuses items
+ *    from any of these.
+ *  - [sessionKeys]: per-peer PAKE session keys, keyed by fingerprint.
+ *  - [localItems]: the same catch-up set the dialer sends, so a peer that dials
+ *    in also receives our recent items in the same exchange.
+ *  - [deviceId]: this device's stable id, stamped onto items we serve.
+ *
+ * Throws [CopypasteException] / [IllegalStateException] mirroring the native call.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun startP2pListener(
+    listenPort: Int,
+    certDer: List<UByte>,
+    keyDer: List<UByte>,
+    allowedFingerprints: List<String>,
+    revokedFingerprints: List<String>,
+    sessionKeys: List<PeerSessionKeyInfo>,
+    localItems: List<uniffi.copypaste_android.LocalItem>,
+    deviceId: String,
+): P2pListenerHandleInfo {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; startP2pListener is unavailable")
+    }
+    return try {
+        val handle = uniffi.copypaste_android.startP2pListener(
+            listenPort = listenPort.toUShort(),
+            certDer = certDer,
+            keyDer = keyDer,
+            allowedFingerprints = allowedFingerprints,
+            revokedFingerprints = revokedFingerprints,
+            sessionKeys = sessionKeys.toGeneratedSessionKeys(),
+            localItems = localItems,
+            deviceId = deviceId,
+        )
+        P2pListenerHandleInfo(
+            listenerId = handle.listenerId.toLong(),
+            actualPort = handle.actualPort.toInt(),
+        )
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "startP2pListener failed")
+    }
+}
+
+/**
+ * Drain items received by the listener since the previous call. Returns the
+ * generated [uniffi.copypaste_android.SyncedItem] list directly (callers feed
+ * each into `FgsSyncLoop.storeSyncedItem`). Returns an empty list in stub mode.
+ *
+ * Throws [CopypasteException] on a native error (caller decides whether to
+ * keep polling).
+ */
+@Throws(CopypasteException::class)
+fun pollP2pListener(listenerId: Long): List<uniffi.copypaste_android.SyncedItem> {
+    if (!isNativeLibraryLoaded) return emptyList()
+    return try {
+        uniffi.copypaste_android.pollP2pListener(listenerId.toULong())
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "pollP2pListener failed")
+    }
+}
+
+/**
+ * Update the running listener's mTLS allowlist, denylist, and per-peer session
+ * keys without restarting it — called when the roster or revoked set changes
+ * (or defensively each poll tick). No-op in stub mode.
+ *
+ * Throws [CopypasteException] on a native error.
+ */
+@Throws(CopypasteException::class)
+fun updateP2pListenerPeers(
+    listenerId: Long,
+    allowed: List<String>,
+    revoked: List<String>,
+    sessionKeys: List<PeerSessionKeyInfo>,
+) {
+    if (!isNativeLibraryLoaded) return
+    try {
+        uniffi.copypaste_android.updateP2pListenerPeers(
+            listenerId = listenerId.toULong(),
+            allowed = allowed,
+            revoked = revoked,
+            sessionKeys = sessionKeys.toGeneratedSessionKeys(),
+        )
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "updateP2pListenerPeers failed")
+    }
+}
+
+/**
+ * Stop the inbound listener and release its bound port + accept thread. No-op in
+ * stub mode. Errors are surfaced so the caller can log; double-stop is tolerated
+ * by the native side (best-effort cleanup).
+ *
+ * Throws [CopypasteException] on a native error.
+ */
+@Throws(CopypasteException::class)
+fun stopP2pListener(listenerId: Long) {
+    if (!isNativeLibraryLoaded) return
+    try {
+        uniffi.copypaste_android.stopP2pListener(listenerId.toULong())
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "stopP2pListener failed")
+    }
+}
