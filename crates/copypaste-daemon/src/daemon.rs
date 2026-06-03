@@ -533,6 +533,39 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 cloud_signed_in.clone(),
             );
         }
+        // Public-IP cache: shared between the IPC server (read path) and the
+        // STUN refresh task (write path).  Created here so both can hold an
+        // `Arc` clone before `server` is consumed by `tokio::spawn`.
+        let public_ip_cache: Arc<tokio::sync::RwLock<Option<String>>> =
+            Arc::new(tokio::sync::RwLock::new(None));
+        server = server.with_public_ip_cache(public_ip_cache.clone());
+        // Spawn the STUN refresh loop if the user has not opted out.
+        // The loop resolves once immediately, then re-resolves every 15 minutes.
+        // All failures are best-effort: logged at debug and silently skipped.
+        if config.collect_public_ip {
+            let cache_for_task = public_ip_cache.clone();
+            let stun_shutdown = shutdown_token.clone();
+            tokio::spawn(async move {
+                const REFRESH_INTERVAL: Duration = Duration::from_secs(15 * 60);
+                loop {
+                    // spawn_blocking so the blocking UDP socket call does not
+                    // occupy an async worker thread.
+                    let resolved = tokio::task::spawn_blocking(crate::public_ip::resolve_public_ip)
+                        .await
+                        .unwrap_or(None); // JoinError (panic in blocking task) → None
+                    {
+                        let mut slot = cache_for_task.write().await;
+                        *slot = resolved;
+                    }
+                    tokio::select! {
+                        _ = tokio::time::sleep(REFRESH_INTERVAL) => {},
+                        _ = stun_shutdown.cancelled() => break,
+                    }
+                }
+                tracing::debug!("public_ip: STUN refresh task shut down");
+            });
+        }
+
         let swcc = server.self_write_change_count.clone();
         // P2P Phase 2: grab a handle to the shared slot holding this daemon's
         // own P2P sync-listener address. `start_p2p` (below) binds an

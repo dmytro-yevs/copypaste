@@ -60,6 +60,19 @@ pub struct AppConfig {
     /// clipboard item. macOS only. Default: `true`.
     #[serde(default = "default_true")]
     pub notify_on_copy: bool,
+
+    /// Whether the daemon may make a one-off UDP request to a public STUN
+    /// server to discover this device's public / WAN IP address.
+    ///
+    /// The collected IP is shown in the device-info card and is never sent
+    /// to any analytics service.  The only external contact is a single STUN
+    /// binding request to `stun.l.google.com:19302` to learn the reflexive
+    /// address; no personal data is included in that request.
+    ///
+    /// Set to `false` to disable the lookup entirely — `public_ip` will then
+    /// always be `null` in `get_own_device_info`.  Default: `true`.
+    #[serde(default = "default_true")]
+    pub collect_public_ip: bool,
 }
 
 impl Default for AppConfig {
@@ -86,6 +99,7 @@ impl Default for AppConfig {
             paste_as_plain_text: false,
             sound_on_copy: true,
             notify_on_copy: true,
+            collect_public_ip: true,
         }
     }
 }

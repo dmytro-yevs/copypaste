@@ -26,6 +26,7 @@ pub mod paths;
 pub mod peers;
 pub mod platform;
 pub mod protocol;
+pub mod public_ip;
 pub mod sync_orch;
 
 #[cfg(feature = "cloud-sync")]
