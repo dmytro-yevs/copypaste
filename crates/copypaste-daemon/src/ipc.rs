@@ -3476,6 +3476,60 @@ impl IpcServer {
                 Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
             },
 
+            // LAN/SAS Phase 0: return discovered peers (mDNS) cross-referenced
+            // against peers.json to flag already-paired devices.
+            //
+            // Response: { devices: [{ device_id, device_name, ip_addrs, port,
+            //                         bport, paired }] }
+            // `paired` = true when canonical fingerprint matches peers.json.
+            // `bport`  = null on v1 peers (UI disables "Pair" button).
+            "list_discovered" => {
+                let disc = match self.discovery.as_ref() {
+                    Some(d) => d,
+                    None => return Response::err(req.id, "discovery not available (P2P disabled)"),
+                };
+
+                // Snapshot known-peer fingerprints from peers.json (canonical
+                // colon-free lowercase hex) for O(1) membership test per peer.
+                let paired_fps: std::collections::HashSet<String> = match load_peers() {
+                    Ok(stored) => stored
+                        .into_iter()
+                        .filter_map(|p| {
+                            p.get("fingerprint")
+                                .and_then(|v| v.as_str())
+                                .map(canonical_fingerprint)
+                        })
+                        .collect(),
+                    // Non-fatal: treat as empty — we just won't mark any peer paired.
+                    Err(e) => {
+                        tracing::warn!("list_discovered: failed to load peers.json: {e}");
+                        std::collections::HashSet::new()
+                    }
+                };
+
+                let devices: Vec<serde_json::Value> = disc
+                    .peers()
+                    .into_iter()
+                    .map(|peer| {
+                        let paired = paired_fps.contains(&canonical_fingerprint(&peer.device_id));
+                        let ip_strs: Vec<String> =
+                            peer.ip_addrs.iter().map(|a| a.to_string()).collect();
+                        serde_json::json!({
+                            "device_id":   peer.device_id,
+                            "device_name": peer.device_name,
+                            "ip_addrs":    ip_strs,
+                            "port":        peer.port,
+                            // null when peer is v1 (no bport TXT key); UI
+                            // disables "Pair" in that case.
+                            "bport":       peer.bport,
+                            "paired":      paired,
+                        })
+                    })
+                    .collect();
+
+                Response::ok(req.id, serde_json::json!({ "devices": devices }))
+            }
+
             "pair_peer" => {
                 let fingerprint = match req.params.get("fingerprint").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),

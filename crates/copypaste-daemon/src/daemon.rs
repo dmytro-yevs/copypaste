@@ -363,6 +363,20 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         None
     };
 
+    // LAN/SAS Phase 0: construct ONE DiscoveryService here, before both the IPC
+    // server and `start_p2p`, so both share the same instance.  The IPC
+    // `list_discovered` handler reads peers from this Arc; `start_p2p` calls
+    // `register()` + `start()` on it.  `None` when P2P is disabled — discovery
+    // makes no sense without the P2P stack.
+    let p2p_discovery: Option<std::sync::Arc<copypaste_p2p::discovery::DiscoveryService>> =
+        if p2p_enabled {
+            Some(std::sync::Arc::new(
+                copypaste_p2p::discovery::DiscoveryService::new(),
+            ))
+        } else {
+            None
+        };
+
     // CRITICAL-1: generate the mTLS self-signed cert ONCE, here, before both the
     // IPC server and `start_p2p`. The IPC pairing handlers advertise this cert's
     // fingerprint (in colon-hex user-facing form) and `start_p2p` makes the
@@ -506,6 +520,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         if let Some(ref cert) = p2p_cert {
             server = server.with_p2p_cert(cert.cert_der.clone(), cert.key_der.clone());
         }
+        // LAN/SAS Phase 0: hand the IPC server the SAME DiscoveryService that
+        // start_p2p will use, so list_discovered sees live mDNS peers.
+        if let Some(ref disc) = p2p_discovery {
+            server = server.with_discovery(std::sync::Arc::clone(disc));
+        }
         #[cfg(feature = "cloud-sync")]
         {
             server = server.with_cloud_sync_state(
@@ -562,109 +581,115 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let (sync_incoming_tx, sync_incoming_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
 
     // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
-    // Both the live allowlist and the cert must be present: the cert is the
-    // identity the transport presents and that pairing advertises, so without
-    // it there is nothing for peers to pin (CRITICAL-1).
-    let _p2p_handle: Option<p2p::P2pHandle> = if let (Some(p2p_peers), Some(p2p_cert)) =
-        (p2p_peers, p2p_cert)
-    {
-        // Reuse the persistent device_id loaded above (load_or_create_device_id
-        // was called once already; parsing it back to Uuid is cheap).
-        let device_id =
-            uuid::Uuid::parse_str(&local_device_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
-        let device_name = resolve_device_name();
-
-        let p2p_config = p2p::P2pConfig {
-            listen_port: 0,
-            device_name,
-            enabled: true,
-        };
-
-        // P2P Phase 3 (sync-on-connect catch-up): build a provider that
-        // replays the current local history — already re-keyed under the
-        // shared sync key, exactly like normal outbound — into each peer the
-        // instant a link is established. Without this, an item produced
-        // before the link came up is never delivered (fanout is
-        // fire-and-forget to currently-connected sinks). Uses the same
-        // `SyncCrypto` construction as the orchestrator below.
-        let catchup: p2p::CatchupProvider = {
-            let catchup_db = db.clone();
-            let catchup_device_id = local_device_id.clone();
-            let catchup_seed: [u8; 32] = **local_key_arc;
-            Arc::new(move || {
-                let crypto =
-                    sync_orch::SyncCrypto::new(catchup_seed, crate::ipc::peers_file_path());
-                // The closure is `Fn` (sync) but the DB sits behind a tokio
-                // Mutex; `block_in_place` + `blocking_lock` safely acquires
-                // it on the multi-thread runtime without blocking the worker.
-                tokio::task::block_in_place(|| {
-                    let db = catchup_db.blocking_lock();
-                    sync_orch::catchup_items(&db, &catchup_device_id, &crypto)
-                })
-            })
-        };
-
-        // Hand the SAME live allowlist already shared with the IPC server
-        // (fix/p2p-c-review #2) and the SAME cert whose fingerprint the IPC
-        // pairing handlers advertise (CRITICAL-1). `start_p2p` seeds the
-        // allowlist from peers.json.
-        match p2p::start_p2p(
-            p2p_config,
-            db.clone(),
-            device_id,
-            (*local_key_arc).clone(),
-            p2p_cert,
-            p2p_peers,
-            new_item_tx.subscribe(),
-            sync_incoming_tx.clone(),
-            sync_outbound_rx,
-            catchup,
-        )
-        .await
+    // The live allowlist, cert, and shared DiscoveryService must all be present:
+    // the cert is the identity the transport presents and that pairing advertises,
+    // and the DiscoveryService must be the SAME Arc handed to the IPC server so
+    // list_discovered sees live peers (LAN/SAS Phase 0, CRITICAL-1).
+    let _p2p_handle: Option<p2p::P2pHandle> =
+        if let (Some(p2p_peers), Some(p2p_cert), Some(p2p_disc)) =
+            (p2p_peers, p2p_cert, p2p_discovery)
         {
-            Ok(handle) => {
-                tracing::info!(port = handle.actual_port, "P2P subsystem running");
-                // P2P Phase 2: publish this daemon's now-bound sync-listener
-                // address into the shared slot the IPC pairing handlers read.
-                //
-                // The listener binds `0.0.0.0:actual_port`, so it is reachable
-                // on every interface — but the address we ADVERTISE to a peer
-                // (sent in-band during pairing and persisted into the peer's
-                // `peers.json`) must be a concrete LAN-routable host, never
-                // `127.0.0.1`. A loopback advertisement is why background sync
-                // only worked in the emulator / loopback case: a real phone on
-                // Wi-Fi cannot route to 127.0.0.1. `advertise_sync_addr`
-                // selects a real LAN address via the same interface filter the
-                // QR `addr_hint` uses, falling back to loopback only when no
-                // LAN interface exists (single-host / loopback test).
-                #[cfg(unix)]
-                {
-                    let addr = copypaste_p2p::interfaces::advertise_sync_addr(handle.actual_port)
-                        .to_string();
-                    tracing::info!(
-                        sync_addr = %addr,
-                        "P2P advertising LAN-routable sync-listener address"
-                    );
-                    let mut slot = p2p_sync_addr_slot
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                    *slot = Some(addr);
+            // Reuse the persistent device_id loaded above (load_or_create_device_id
+            // was called once already; parsing it back to Uuid is cheap).
+            let device_id =
+                uuid::Uuid::parse_str(&local_device_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
+            let device_name = resolve_device_name();
+
+            let p2p_config = p2p::P2pConfig {
+                listen_port: 0,
+                device_name,
+                enabled: true,
+            };
+
+            // P2P Phase 3 (sync-on-connect catch-up): build a provider that
+            // replays the current local history — already re-keyed under the
+            // shared sync key, exactly like normal outbound — into each peer the
+            // instant a link is established. Without this, an item produced
+            // before the link came up is never delivered (fanout is
+            // fire-and-forget to currently-connected sinks). Uses the same
+            // `SyncCrypto` construction as the orchestrator below.
+            let catchup: p2p::CatchupProvider = {
+                let catchup_db = db.clone();
+                let catchup_device_id = local_device_id.clone();
+                let catchup_seed: [u8; 32] = **local_key_arc;
+                Arc::new(move || {
+                    let crypto =
+                        sync_orch::SyncCrypto::new(catchup_seed, crate::ipc::peers_file_path());
+                    // The closure is `Fn` (sync) but the DB sits behind a tokio
+                    // Mutex; `block_in_place` + `blocking_lock` safely acquires
+                    // it on the multi-thread runtime without blocking the worker.
+                    tokio::task::block_in_place(|| {
+                        let db = catchup_db.blocking_lock();
+                        sync_orch::catchup_items(&db, &catchup_device_id, &crypto)
+                    })
+                })
+            };
+
+            // Hand the SAME live allowlist already shared with the IPC server
+            // (fix/p2p-c-review #2), the SAME cert whose fingerprint the IPC
+            // pairing handlers advertise (CRITICAL-1), and the SAME
+            // DiscoveryService handed to the IPC server so list_discovered sees
+            // live peers (LAN/SAS Phase 0). `start_p2p` seeds the allowlist
+            // from peers.json.
+            match p2p::start_p2p(
+                p2p_config,
+                db.clone(),
+                device_id,
+                (*local_key_arc).clone(),
+                p2p_cert,
+                p2p_peers,
+                new_item_tx.subscribe(),
+                sync_incoming_tx.clone(),
+                sync_outbound_rx,
+                catchup,
+                p2p_disc,
+            )
+            .await
+            {
+                Ok(handle) => {
+                    tracing::info!(port = handle.actual_port, "P2P subsystem running");
+                    // P2P Phase 2: publish this daemon's now-bound sync-listener
+                    // address into the shared slot the IPC pairing handlers read.
+                    //
+                    // The listener binds `0.0.0.0:actual_port`, so it is reachable
+                    // on every interface — but the address we ADVERTISE to a peer
+                    // (sent in-band during pairing and persisted into the peer's
+                    // `peers.json`) must be a concrete LAN-routable host, never
+                    // `127.0.0.1`. A loopback advertisement is why background sync
+                    // only worked in the emulator / loopback case: a real phone on
+                    // Wi-Fi cannot route to 127.0.0.1. `advertise_sync_addr`
+                    // selects a real LAN address via the same interface filter the
+                    // QR `addr_hint` uses, falling back to loopback only when no
+                    // LAN interface exists (single-host / loopback test).
+                    #[cfg(unix)]
+                    {
+                        let addr =
+                            copypaste_p2p::interfaces::advertise_sync_addr(handle.actual_port)
+                                .to_string();
+                        tracing::info!(
+                            sync_addr = %addr,
+                            "P2P advertising LAN-routable sync-listener address"
+                        );
+                        let mut slot = p2p_sync_addr_slot
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        *slot = Some(addr);
+                    }
+                    Some(handle)
                 }
-                Some(handle)
+                Err(e) => {
+                    tracing::warn!("Failed to start P2P subsystem: {e}");
+                    None
+                }
             }
-            Err(e) => {
-                tracing::warn!("Failed to start P2P subsystem: {e}");
-                None
-            }
-        }
-    } else {
-        tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
-        // Drop sync_outbound_rx — no consumer. sync_orch will log debug
-        // on each outbound send (harmless: closed receiver just means no
-        // peers are connected).
-        drop(sync_outbound_rx);
-        None
-    };
+        } else {
+            tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
+            // Drop sync_outbound_rx — no consumer. sync_orch will log debug
+            // on each outbound send (harmless: closed receiver just means no
+            // peers are connected).
+            drop(sync_outbound_rx);
+            None
+        };
 
     // Beta W2.2 (arch-1): start the sync orchestrator.
     //

@@ -77,6 +77,18 @@ pub const METHOD_CLOUD_TEST_CONNECTION: &str = "cloud_test_connection";
 /// Generate a short-lived QR pairing payload.
 pub const METHOD_PAIR_GENERATE_QR: &str = "pair_generate_qr";
 
+// ── LAN/SAS discovery ────────────────────────────────────────────────────────
+
+/// Return the list of peers currently visible via mDNS-SD, cross-referenced
+/// against `peers.json` to mark each as paired or not.
+///
+/// Response shape: `{ devices: [{ device_id, device_name, ip_addrs, port,
+/// bport, paired }] }`.  `paired` is `true` when the device's canonical
+/// fingerprint matches an entry in `peers.json`.  `bport` is the bootstrap
+/// port for SAS pairing (null on v1 peers); the UI should disable "Pair" when
+/// `bport` is null.
+pub const METHOD_LIST_DISCOVERED: &str = "list_discovered";
+
 // ── Database maintenance ────────────────────────────────────────────────────
 
 /// Method name for the destructive "reset database" recovery operation.
@@ -126,6 +138,11 @@ pub struct ResetDatabaseResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn method_list_discovered_has_correct_wire_name() {
+        assert_eq!(METHOD_LIST_DISCOVERED, "list_discovered");
+    }
 
     #[test]
     fn reset_request_defaults_confirm_false() {

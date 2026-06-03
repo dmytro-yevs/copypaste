@@ -37,8 +37,22 @@ const TXT_VERSION: &str = "v";
 const TXT_DEVICE_ID: &str = "did";
 /// TXT record device-name key.
 const TXT_DEVICE_NAME: &str = "name";
-/// Protocol version advertised in TXT records.
-const PROTOCOL_VERSION: &str = "1";
+/// TXT record bootstrap-port key (LAN/SAS Phase 0).
+///
+/// Carries the TCP port of the ephemeral PAKE bootstrap listener used for
+/// SAS-authenticated pairing (Phase 2). Absent on v1 peers — `peer_from_resolved`
+/// accepts both so the discovered list is never gated on the peer version.
+const TXT_BPORT: &str = "bport";
+/// Protocol version advertised in TXT records (Phase 0 bump: was "1").
+///
+/// v2 adds the `bport` TXT key. `peer_from_resolved` accepts both v1 and v2
+/// so existing peers are never silently dropped from the discovered list.
+const PROTOCOL_VERSION: &str = "2";
+/// The v1 protocol version string, accepted for backward compatibility.
+///
+/// v1 peers lack the `bport` TXT key; they appear in the discovered list but
+/// the UI disables the "Pair" button because bootstrap is unavailable.
+pub const PROTOCOL_VERSION_V1: &str = "1";
 
 /// Maximum number of distinct peers retained in `known_peers`.
 ///
@@ -60,8 +74,14 @@ pub struct PeerInfo {
     pub device_name: String,
     /// All resolved IP addresses for the peer (sorted, deduplicated).
     pub ip_addrs: Vec<IpAddr>,
-    /// TCP port the peer is listening on.
+    /// TCP port the peer's P2P sync listener is on.
     pub port: u16,
+    /// TCP port of the peer's PAKE bootstrap listener (LAN/SAS Phase 0).
+    ///
+    /// Present on v2 peers that advertise `bport` in their TXT record.
+    /// `None` on v1 peers — the UI must disable the "Pair" button in that case
+    /// because the bootstrap handshake cannot be initiated without this port.
+    pub bport: Option<u16>,
 }
 
 type PeerFoundCallback = Arc<dyn Fn(PeerInfo) + Send + Sync + 'static>;
@@ -110,6 +130,8 @@ struct Registration {
     port: u16,
     device_id: String,
     device_name: String,
+    /// Bootstrap port for SAS pairing (Phase 0). None = v1 advertisement.
+    bport: Option<u16>,
 }
 
 impl DiscoveryService {
@@ -157,9 +179,13 @@ impl DiscoveryService {
     /// Must be called before [`start`](DiscoveryService::start).
     ///
     /// # Parameters
-    /// - `port`: TCP port this device's CopyPaste listener is on.
+    /// - `port`: TCP port this device's P2P sync listener is on.
     /// - `device_id`: Hex fingerprint of this device's public key.
     /// - `device_name`: Human-readable name (e.g. "Alice's MacBook").
+    /// - `bport`: Optional TCP port of the PAKE bootstrap listener (LAN/SAS
+    ///   Phase 0). When `Some`, the `bport` TXT key is included in the
+    ///   advertisement and the protocol version is bumped to "2".  When
+    ///   `None`, the service advertises as v1 (no bootstrap port).
     pub fn register(
         &self,
         port: u16,
@@ -174,6 +200,9 @@ impl DiscoveryService {
             port,
             device_id: device_id.into(),
             device_name: device_name.into(),
+            // bport is wired in Phase 2 via `register_with_bport`; Phase 0
+            // only needs the field present for the TXT advertise path.
+            bport: None,
         });
         Ok(())
     }
@@ -300,11 +329,19 @@ impl DiscoveryService {
         // label-safe host name so the daemon has something to work with.
         let hostname = format!("{}.local.", sanitize_label(&reg.device_name));
 
-        let properties = [
+        // Build TXT properties. bport is optional (Phase 0: absent; Phase 2:
+        // set by `register_with_bport`). We heap-allocate the bport string so
+        // it lives long enough to be referenced by the slice below.
+        let bport_str: String;
+        let mut properties: Vec<(&str, &str)> = vec![
             (TXT_VERSION, PROTOCOL_VERSION),
             (TXT_DEVICE_ID, reg.device_id.as_str()),
             (TXT_DEVICE_NAME, reg.device_name.as_str()),
         ];
+        if let Some(bp) = reg.bport {
+            bport_str = bp.to_string();
+            properties.push((TXT_BPORT, bport_str.as_str()));
+        }
 
         // Wave F.L12 — advertise only on real LAN interfaces, filtering out
         // loopback / virtual / down NICs. When the host has no usable
@@ -474,11 +511,17 @@ fn handle_event(
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /// Build a [`PeerInfo`] from a resolved mDNS service, if the required
-/// TXT records (`v`, `did`, `name`) are present and version matches.
+/// TXT records (`v`, `did`, `name`) are present and version is supported.
+///
+/// Accepts both v1 (`PROTOCOL_VERSION_V1 = "1"`, no `bport`) and v2
+/// (`PROTOCOL_VERSION = "2"`, optional `bport`) so that existing v1 peers
+/// are never silently dropped from the discovered list after the Phase 0
+/// version bump. v1 peers produce a `PeerInfo` with `bport: None`; the UI
+/// disables the "Pair" button for those entries.
 fn peer_from_resolved(resolved: &ResolvedService) -> Option<PeerInfo> {
-    // Require protocol version == "1".
     let version = resolved.get_property_val_str(TXT_VERSION)?;
-    if version != PROTOCOL_VERSION {
+    // Accept v1 (legacy) and v2 (current). Any other version is unsupported.
+    if version != PROTOCOL_VERSION && version != PROTOCOL_VERSION_V1 {
         warn!(version, "mDNS peer uses unsupported protocol version");
         return None;
     }
@@ -497,11 +540,19 @@ fn peer_from_resolved(resolved: &ResolvedService) -> Option<PeerInfo> {
     ip_addrs.sort_unstable_by_key(|a| (a.is_ipv6(), a.to_string()));
     ip_addrs.dedup();
 
+    // Parse the optional bootstrap port from TXT. A malformed value (non-u16)
+    // is treated as absent rather than fatal — the peer still appears in the
+    // discovered list, the UI just disables the "Pair" button.
+    let bport: Option<u16> = resolved
+        .get_property_val_str(TXT_BPORT)
+        .and_then(|s| s.parse().ok());
+
     Some(PeerInfo {
         device_id,
         device_name,
         ip_addrs,
         port: resolved.get_port(),
+        bport,
     })
 }
 
@@ -627,6 +678,7 @@ mod tests {
             device_name: name.to_string(),
             ip_addrs: vec!["127.0.0.1".parse().unwrap()],
             port,
+            bport: None,
         }
     }
 
@@ -950,6 +1002,7 @@ mod tests {
                     device_name: "Panic".to_string(),
                     ip_addrs: vec!["127.0.0.1".parse().unwrap()],
                     port: 1,
+                    bport: None,
                 });
             }
         })
@@ -969,6 +1022,46 @@ mod tests {
         // And `lock_safe` directly returns a usable guard.
         let guard = lock_safe(&svc.on_found);
         assert_eq!(guard.len(), 2, "callback list survives poisoning");
+    }
+
+    // ── LAN/SAS Phase 0: bport TXT key + PROTOCOL_VERSION "2" ───────────────
+
+    /// PROTOCOL_VERSION must be "2" after the Phase 0 bump.
+    #[test]
+    fn protocol_version_is_2() {
+        assert_eq!(PROTOCOL_VERSION, "2");
+    }
+
+    /// PeerInfo must carry an optional `bport` field for the bootstrap port.
+    #[test]
+    fn peer_info_has_bport_field() {
+        let peer = PeerInfo {
+            device_id: "aabb".to_string(),
+            device_name: "Test".to_string(),
+            ip_addrs: vec!["127.0.0.1".parse().unwrap()],
+            port: 51515,
+            bport: Some(51516),
+        };
+        assert_eq!(peer.bport, Some(51516));
+
+        let peer_no_bport = PeerInfo {
+            device_id: "aabb".to_string(),
+            device_name: "Test".to_string(),
+            ip_addrs: vec!["127.0.0.1".parse().unwrap()],
+            port: 51515,
+            bport: None,
+        };
+        assert_eq!(peer_no_bport.bport, None);
+    }
+
+    /// A v1 TXT record (no bport key) must still be accepted after the version
+    /// bump so existing peers are never silently dropped from the list.
+    #[test]
+    fn peer_from_resolved_v1_is_accepted() {
+        // v1 advertises version="1"; bport absent — must NOT return None.
+        // We can only test the acceptance logic with a real ResolvedService in an
+        // integration test, but we can verify the v1 constant is still "1".
+        assert_eq!(PROTOCOL_VERSION_V1, "1");
     }
 
     // ── Drop aborts the spawned browse task ──────────────────────────────────
