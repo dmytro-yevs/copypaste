@@ -229,6 +229,97 @@ async fn sse_backfills_preexisting_item_on_connect() {
     );
 }
 
+/// Resource-leak regression (P1/High): when an SSE producer is parked on an
+/// idle inbox (blocked on the broadcast `rx.recv()`), a client TCP disconnect
+/// must tear the producer task down promptly. Previously the producer only
+/// noticed disconnect when `tx.send` failed during a drain, so with an empty
+/// inbox it stayed parked — leaking the task, the broadcast receiver, and the
+/// cloned `Arc<AppState>` until the next push or the 30-day eviction. The fix
+/// `select!`s the broadcast wake against `tx.closed()`.
+///
+/// Observable: each open subscription's producer owns exactly one receiver of
+/// the device's wake channel, so `notifier_receiver_count` == live producer
+/// count. After the client drops, it must fall back to 0.
+#[tokio::test]
+async fn sse_producer_tears_down_on_client_disconnect_idle_inbox() {
+    let (addr, state) = spawn_relay().await;
+
+    let b_token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key())
+            .unwrap()
+            .0
+    };
+
+    // Open the subscription against an EMPTY inbox: the producer backfills
+    // nothing and parks on the broadcast wake — the exact leak scenario.
+    let mut sse = open_sse(
+        addr,
+        &format!("/devices/{DEVICE_B}/subscribe?since=0"),
+        &b_token,
+    )
+    .await;
+    let _headers = read_until(&mut sse, "\r\n\r\n", Duration::from_secs(2)).await;
+
+    // Wait until the producer has registered its broadcast receiver (count==1),
+    // i.e. it is parked on the wake channel with an idle inbox.
+    let parked = wait_for_count(&state, DEVICE_B, 1, Duration::from_secs(5)).await;
+    assert!(
+        parked,
+        "SSE producer should hold exactly one wake-channel receiver once parked; \
+         got {}",
+        state.lock().unwrap().notifier_receiver_count(DEVICE_B)
+    );
+
+    // Client disconnects: dropping the socket closes the TCP connection, which
+    // drops the SSE response body (the ReceiverStream) and thus the last `tx`
+    // receiver. `tx.closed()` must wake the producer and end the task, dropping
+    // its `rx` — receiver count falls to 0.
+    drop(sse);
+
+    let torn_down = wait_for_count(&state, DEVICE_B, 0, Duration::from_secs(5)).await;
+    assert!(
+        torn_down,
+        "SSE producer must tear down (drop its wake receiver) on client \
+         disconnect even with an idle inbox; receiver count stuck at {}",
+        state.lock().unwrap().notifier_receiver_count(DEVICE_B)
+    );
+
+    // Server must remain responsive afterward: a subsequent push to the same
+    // (now subscriber-less) device must not panic and must succeed.
+    {
+        let mut s = state.lock().unwrap();
+        s.push_item(
+            DEVICE_B,
+            "text".to_string(),
+            sample_content_b64(b"post-disconnect"),
+            6000,
+            10 * 1024 * 1024,
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        state.lock().unwrap().notifier_receiver_count(DEVICE_B),
+        0,
+        "no producer should be revived by a push after the client disconnected"
+    );
+}
+
+/// Poll the device's SSE wake-channel receiver count until it equals `want` or
+/// the deadline elapses. Deterministic: bounded by `overall`, short backoff.
+async fn wait_for_count(state: &AppState, device_id: &str, want: usize, overall: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + overall;
+    loop {
+        if state.lock().unwrap().notifier_receiver_count(device_id) == want {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 /// SSE must require auth via the same BearerToken contract as /poll.
 #[tokio::test]
 async fn sse_rejects_missing_auth() {

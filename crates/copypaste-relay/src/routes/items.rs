@@ -296,15 +296,30 @@ pub async fn subscribe(
                 }
             }
 
-            // Park until the next push wakes us (or the channel closes).
-            match rx.recv().await {
-                Ok(()) => {} // re-drain
-                // Lagged: we missed N wake ticks under a push burst, but ticks
-                // are contentless — a single re-drain from the cursor recovers
-                // every missed item, so just loop and re-read.
-                Err(RecvError::Lagged(_)) => {}
-                // Sender dropped (device evicted / store shut down) — end stream.
-                Err(RecvError::Closed) => return,
+            // Park until the next push wakes us (or the channel closes), while
+            // ALSO watching for client disconnect. When the inbox is empty the
+            // producer would otherwise block forever on `rx.recv()`: a client
+            // TCP disconnect drops the `ReceiverStream` (and thus all `tx`
+            // receivers) but does NOT wake the broadcast `rx`, so the task +
+            // broadcast receiver + Arc<AppState> would leak until the next push
+            // to this device or the 30-day eviction. `tx.closed()` resolves as
+            // soon as every receiver of `tx` is dropped, letting us tear the
+            // producer down promptly and release `rx` and the cloned state
+            // (resource leak P1/High).
+            tokio::select! {
+                r = rx.recv() => match r {
+                    Ok(()) => {} // re-drain
+                    // Lagged: we missed N wake ticks under a push burst, but ticks
+                    // are contentless — a single re-drain from the cursor recovers
+                    // every missed item, so just loop and re-read.
+                    Err(RecvError::Lagged(_)) => {}
+                    // Sender dropped (device evicted / store shut down) — end stream.
+                    Err(RecvError::Closed) => return,
+                },
+                // Client disconnected: the SSE body (ReceiverStream) was dropped,
+                // so `tx` has no receivers left. End the producer task, dropping
+                // `rx` and the cloned `Arc<AppState>`.
+                _ = tx.closed() => return,
             }
         }
     });

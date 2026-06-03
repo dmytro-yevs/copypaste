@@ -255,6 +255,21 @@ impl RelayStore {
         }
     }
 
+    /// Number of live SSE wake-channel receivers currently held for
+    /// `device_id` (0 if no channel exists yet). Each open `subscribe` stream's
+    /// producer task owns exactly one receiver, so this is the count of live
+    /// SSE producer tasks for the device — used to assert that a producer tears
+    /// down (drops its `rx`) on client disconnect (SSE leak regression test).
+    // Reached only via the SSE-aware test binary; the standalone
+    // `#[path]`-include test binaries don't exercise it, so it reads as dead
+    // there — same pattern as `subscribe_notifier`.
+    #[allow(dead_code)]
+    pub fn notifier_receiver_count(&self, device_id: &str) -> usize {
+        self.sync_notifiers
+            .get(device_id)
+            .map_or(0, broadcast::Sender::receiver_count)
+    }
+
     /// Fire a wake tick on `device_id`'s SSE channel, if any stream is
     /// subscribed. A no-op when there are no subscribers (the lazily-created
     /// `Sender` is retained for the device's lifetime so re-subscribes reuse it).
