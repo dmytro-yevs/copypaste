@@ -10,6 +10,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -374,9 +376,18 @@ fun DevicesScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
 
-            // ── Paired peers ────────────────────────────────────────────────
-            SectionLabel("Paired Devices")
+            // ── Single unified device list ───────────────────────────────────
+            // Parity with macOS DevicesView: this device first, then every
+            // paired peer, then discovered (unpaired) LAN peers — all in one
+            // continuous column, no separate section headers per list.
+            SectionLabel("Devices")
 
+            // This device — always first.
+            ownIdentity?.let { identity ->
+                OwnDeviceCard(identity = identity)
+            }
+
+            // Paired peers.
             if (peers.isNotEmpty()) {
                 for (peer in peers) {
                     PeerCard(
@@ -385,7 +396,10 @@ fun DevicesScreen(
                         onRevoke = { revokeTarget = peer },
                     )
                 }
-            } else {
+            } else if (ownIdentity == null) {
+                // Show the empty state only when we also have no own-device card
+                // to anchor the list (avoids a redundant prompt when the own
+                // card is already present).
                 NoPeerCard(
                     onPair = {
                         ctx.startActivity(Intent(ctx, PairActivity::class.java))
@@ -393,9 +407,31 @@ fun DevicesScreen(
                 )
             }
 
-            // HB-6: scanning a device's QR lives HERE now (was on the Pair screen).
-            // Launch PairActivity with mode=scan so it auto-opens its camera scan
-            // flow; the Pair screen otherwise shows only THIS device's own QR.
+            // Discovered on your network (unpaired LAN peers).
+            // Only shown when P2P is enabled (discovery is gated on it).
+            if (p2pEnabled) {
+                if (discovered.isNotEmpty()) {
+                    for (peer in discovered) {
+                        DiscoveredPeerCard(
+                            peer = peer,
+                            busy = pairStarting || pairingPeer != null,
+                            onPair = { startPairing(peer) },
+                        )
+                    }
+                }
+                discoverError?.let { msg ->
+                    Text(
+                        text = msg,
+                        color = IdeDanger,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+
+            // ── Scan / pair action ───────────────────────────────────────────
+            // HB-6: scanning a device's QR lives HERE now (was on the Pair
+            // screen). Launch PairActivity with mode=scan so it auto-opens
+            // its camera scan flow.
             OutlinedButton(
                 onClick = {
                     ctx.startActivity(
@@ -408,44 +444,6 @@ fun DevicesScreen(
                 Text(stringResource(R.string.btn_scan_qr))
             }
 
-            Spacer(Modifier.height(8.dp))
-
-            // ── Discovered on your network ───────────────────────────────────
-            // Parity with the macOS DevicesView "Devices on your network" list:
-            // unpaired, SAS-capable LAN peers with a Pair button. Only shown when
-            // P2P is enabled (discovery is gated on it).
-            if (p2pEnabled) {
-                SectionLabel("Discovered on Your Network")
-                if (discovered.isNotEmpty()) {
-                    for (peer in discovered) {
-                        DiscoveredPeerCard(
-                            peer = peer,
-                            busy = pairStarting || pairingPeer != null,
-                            onPair = { startPairing(peer) },
-                        )
-                    }
-                } else {
-                    Text(
-                        text = "Searching for nearby devices…",
-                        color = IdeFaint,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                discoverError?.let { msg ->
-                    Text(
-                        text = msg,
-                        color = IdeDanger,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-            }
-
-            // ── This device ──────────────────────────────────────────────────
-            ownIdentity?.let { identity ->
-                SectionLabel("This Device")
-                OwnDeviceCard(identity = identity)
-            }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -459,6 +457,7 @@ private fun PairedPeer.displayName(): String =
 // Peer card
 // ─────────────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PeerCard(
     peer: PairedPeer,
@@ -500,50 +499,45 @@ private fun PeerCard(
 
             Spacer(Modifier.height(10.dp))
 
-            // ── Fingerprint (short) ─────────────────────────────────────────
-            DeviceField(label = "Fingerprint", value = peer.fingerprint.take(16))
-
-            // ── Device info (HB-1c) ─────────────────────────────────────────
-            // Peer metadata learned in-band during pairing (ABI 14, persisted on
-            // PairedPeer.peer*). Each row is omitted when the field is absent — a
-            // legacy / pre-ABI-14 roster entry simply shows none of them.
-            peer.peerModel?.takeIf { it.isNotBlank() }?.let {
-                Spacer(Modifier.height(6.dp))
-                DeviceField(label = "Model", value = it)
-            }
-            peer.peerOs?.takeIf { it.isNotBlank() }?.let {
-                Spacer(Modifier.height(6.dp))
-                DeviceField(label = "OS", value = it)
-            }
-            peer.peerAppVersion?.takeIf { it.isNotBlank() }?.let {
-                Spacer(Modifier.height(6.dp))
-                DeviceField(label = "App version", value = it)
-            }
-            peer.peerLocalIp?.takeIf { it.isNotBlank() }?.let {
-                Spacer(Modifier.height(6.dp))
-                DeviceField(label = "Local IP", value = it)
-            }
-            peer.peerPublicIp?.takeIf { it.isNotBlank() }?.let {
-                Spacer(Modifier.height(6.dp))
-                DeviceField(label = "Public IP", value = it)
-            }
-
-            // ── Sync address ────────────────────────────────────────────────
-            if (peer.syncAddr.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
-                DeviceField(label = "Sync address", value = peer.syncAddr)
-            }
-
-            // ── Last sync ───────────────────────────────────────────────────
-            if (peer.lastSyncMs > 0L) {
-                Spacer(Modifier.height(6.dp))
+            // ── Compact metadata chip row (FlowRow wraps on narrow screens) ──
+            // Fingerprint is intentionally omitted from display (kept in the
+            // data model for crypto/pairing use). Each chip is only rendered
+            // when the corresponding field is non-blank — legacy pre-ABI-14
+            // roster entries simply show no chips.
+            val lastSyncText: String? = if (peer.lastSyncMs > 0L) {
                 val elapsed = (System.currentTimeMillis() - peer.lastSyncMs) / 1_000L
-                val lastSyncText = when {
+                when {
                     elapsed < 60 -> "${elapsed}s ago"
                     elapsed < 3600 -> "${elapsed / 60}m ago"
                     else -> "${elapsed / 3600}h ago"
                 }
-                DeviceField(label = "Last sync", value = lastSyncText)
+            } else null
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                peer.peerModel?.takeIf { it.isNotBlank() }?.let {
+                    MetaChip(label = "Model", value = it)
+                }
+                peer.peerOs?.takeIf { it.isNotBlank() }?.let {
+                    MetaChip(label = "OS", value = it)
+                }
+                peer.peerAppVersion?.takeIf { it.isNotBlank() }?.let {
+                    MetaChip(label = "Version", value = it)
+                }
+                peer.peerLocalIp?.takeIf { it.isNotBlank() }?.let {
+                    MetaChip(label = "Local IP", value = it)
+                }
+                peer.peerPublicIp?.takeIf { it.isNotBlank() }?.let {
+                    MetaChip(label = "Public IP", value = it)
+                }
+                if (peer.syncAddr.isNotBlank()) {
+                    MetaChip(label = "Sync", value = peer.syncAddr)
+                }
+                lastSyncText?.let {
+                    MetaChip(label = "Last sync", value = it)
+                }
             }
 
             HorizontalDivider(
@@ -611,6 +605,7 @@ private fun NoPeerCard(onPair: () -> Unit) {
 // Own-device card
 // ─────────────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun OwnDeviceCard(identity: P2pIdentity) {
     // HB-1c: render THIS device's info at parity with the macOS "This Mac" card.
@@ -620,6 +615,7 @@ private fun OwnDeviceCard(identity: P2pIdentity) {
     // platform (Build/BuildConfig) and a LAN-IPv4 enumeration. No synchronous
     // public-IP source on-device, so that row is omitted (matches the bootstrap
     // path, which sends public_ip = None for this device).
+    // Fingerprint is intentionally omitted from display (kept in data model).
     val model = android.os.Build.MODEL ?: "Android"
     val osVersion = "Android " + android.os.Build.VERSION.RELEASE
     val appVersion = BuildConfig.VERSION_NAME
@@ -632,7 +628,8 @@ private fun OwnDeviceCard(identity: P2pIdentity) {
         border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header: online dot (this device is by definition online) + model.
+            // Header: online dot (this device is always online) + model name
+            // + "This Device" badge mirroring macOS "This Mac".
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -656,19 +653,18 @@ private fun OwnDeviceCard(identity: P2pIdentity) {
             }
 
             Spacer(Modifier.height(10.dp))
-            DeviceField(label = "Model", value = model)
-            Spacer(Modifier.height(6.dp))
-            DeviceField(label = "OS", value = osVersion)
-            Spacer(Modifier.height(6.dp))
-            DeviceField(label = "App version", value = appVersion)
-            localIp?.let {
-                Spacer(Modifier.height(6.dp))
-                DeviceField(label = "Local IP", value = it)
+
+            // Compact FlowRow — all metadata on one wrapping line.
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                MetaChip(label = "Model", value = model)
+                MetaChip(label = "OS", value = osVersion)
+                MetaChip(label = "Version", value = appVersion)
+                localIp?.let { MetaChip(label = "Local IP", value = it) }
+                MetaChip(label = "Device ID", value = identity.deviceId)
             }
-            Spacer(Modifier.height(6.dp))
-            DeviceField(label = "Device ID", value = identity.deviceId)
-            Spacer(Modifier.height(6.dp))
-            DeviceField(label = "My fingerprint", value = identity.fingerprint)
         }
     }
 }
@@ -687,6 +683,7 @@ private fun DiscoveredPeer.displayName(): String =
  * bootstrap port ([DiscoveredPeer.bport] == null) — a v1 peer that cannot do SAS
  * pairing — or while another pairing is in flight ([busy]).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DiscoveredPeerCard(
     peer: DiscoveredPeer,
@@ -717,13 +714,13 @@ private fun DiscoveredPeerCard(
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Spacer(Modifier.height(4.dp))
-                DeviceField(
-                    label = "Fingerprint",
-                    value = peer.deviceId.take(16),
-                )
-                if (ip != null) {
-                    Spacer(Modifier.height(4.dp))
-                    DeviceField(label = "Local IP", value = ip)
+                // Fingerprint omitted from display; device ID and IP shown
+                // in compact FlowRow. Device ID kept short for readability.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    ip?.let { MetaChip(label = "Local IP", value = it) }
                 }
             }
             Button(
@@ -1125,6 +1122,29 @@ private fun SasPairingDialog(
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Compact inline "label value" chip used inside [FlowRow] metadata blocks.
+ * Mirrors the macOS MetaRow pattern: dim label + faint value, monospace, 11 sp.
+ * Rendered horizontally; FlowRow wraps onto the next line when the card is narrow.
+ */
+@Composable
+private fun MetaChip(label: String, value: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = IdeDim,
+            fontSize = 11.sp,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            color = IdeText,
+            fontSize = 11.sp,
+        )
+    }
+}
 
 @Composable
 private fun DeviceField(label: String, value: String) {
