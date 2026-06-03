@@ -52,7 +52,8 @@ async fn test_schema_rollback_v5_mid_batch() {
 /// v6: adds migration_state table for resumable v4 key-rotation tracking.
 /// v7: adds pinned column on clipboard table (TTL prune respects pin).
 /// v8: adds pin_order column for user-controlled pinned-item ordering.
-const CURRENT_SCHEMA_VERSION: i64 = 8;
+/// v9: adds thumb BLOB column for capture-time image thumbnail previews.
+const CURRENT_SCHEMA_VERSION: i64 = 9;
 
 /// v1 schema (the exact contents of src/storage/schema_v1.sql, inlined because
 /// the file is `include_str!`'d into the crate and not accessible from
@@ -592,5 +593,53 @@ fn migrate_v3_to_v4_adds_dedup_unique_indexes() {
     assert!(
         dup_err.is_err(),
         "second insert with the same item_id must be rejected by idx_clipboard_item_id"
+    );
+}
+
+/// v8 → v9: adds the `thumb BLOB DEFAULT NULL` column to `clipboard_items`
+/// (Variant B image thumbnails — `schema.rs::V9_ALTER`). The column is
+/// optional: text rows and legacy image rows surface with `thumb = NULL`,
+/// and image rows captured after the migration store a small
+/// XChaCha20-Poly1305-encrypted preview blob.
+///
+/// We exercise the schema migration via `Database::open_in_memory` (which
+/// lands fresh DBs at the current version) and assert the v9 column is
+/// present and defaults to NULL on rows inserted without it.
+#[test]
+fn migrate_v8_to_v9_adds_thumb_column_defaulting_null() {
+    let db = Database::open_in_memory().expect("fresh v9 in-memory DB");
+    assert_eq!(user_version(&db), CURRENT_SCHEMA_VERSION);
+
+    assert!(
+        column_exists(&db, "clipboard_items", "thumb"),
+        "v9 schema must include the thumb BLOB column"
+    );
+
+    // A row inserted without a thumb (the state every legacy row and every
+    // text row is in) must surface with thumb = NULL — the V9_ALTER default.
+    db.conn()
+        .execute(
+            "INSERT INTO clipboard_items
+                 (id, item_id, content_type, content, content_nonce,
+                  is_sensitive, is_synced, lamport_ts, wall_time,
+                  origin_device_id)
+             VALUES ('row-v9', 'i-row-v9', 'text', X'AA', X'00',
+                     0, 0, 1, 1000, '')",
+            [],
+        )
+        .unwrap();
+
+    let thumb: Option<Vec<u8>> = db
+        .conn()
+        .query_row(
+            "SELECT thumb FROM clipboard_items WHERE id = 'row-v9'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        thumb.is_none(),
+        "row inserted without a thumbnail must surface with thumb = NULL \
+         (the V9_ALTER … DEFAULT NULL sentinel)"
     );
 }
