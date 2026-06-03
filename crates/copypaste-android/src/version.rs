@@ -56,7 +56,29 @@
 /// `rewrap_inbound_blob` can reconstruct the original filename and MIME type.
 /// Kotlin generated against ABI 7 constructs `LocalItem` without these fields
 /// and must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 8;
+///
+/// **ABI 9 (Android settings-SSOT + device-management parity):** A batch of
+/// related FFI additions, all breaking the binding surface:
+///   * `Config` dictionary + `default_config()` + `clamp_config(Config)` — the
+///     canonical user-tunable config mirrored from `copypaste_core::AppConfig`
+///     so Android seeds defaults and enforces the SAME floors/ceilings as the
+///     macOS daemon (triage B2/B6/B7) instead of hand-mirroring with divergent
+///     defaults. Both functions are pure (no I/O).
+///   * `revoke_device_audit(db_path, key, fingerprint, name) -> u64` — records
+///     a peer revocation in the SQLCipher `revoked_devices` audit table (via
+///     `copypaste_core::revoke_device`); feature-gated stub off-live.
+///   * `list_revoked_fingerprints(db_path, key) -> [string]` and
+///     `list_revoked_peers(db_path, key) -> [RevokedPeer]` — read the audit
+///     table newest-first to drive the dialer fast-skip and the audit UI.
+///   * `sync_with_peer` gained TWO trailing params: `revoked_fingerprints:
+///     [string]` (the load-bearing transport-layer denylist — a revoked peer's
+///     dial is refused at the trust layer before any socket opens) and
+///     `device_id: string` (stable origin identity, folding in the queued
+///     origin_device_id fixwave).
+///
+/// Kotlin generated against ABI 8 is missing all of the above (and constructs
+/// the old `sync_with_peer` arity) and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 9;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

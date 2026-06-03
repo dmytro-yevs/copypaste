@@ -615,6 +615,310 @@ fn shared_sync_key_from_session(
     Ok(copypaste_core::SyncKey::from_bytes(content_key))
 }
 
+/// Canonicalize a cert fingerprint for denylist comparison: lowercase and
+/// strip any `:` separators so a colon-grouped hex string (`AB:CD:…`) matches a
+/// bare-hex denylist entry (`abcd…`) and vice versa.
+fn canonicalize_fingerprint(fp: &str) -> String {
+    fp.chars()
+        .filter(|c| *c != ':')
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+/// Returns `true` if `fingerprint` is present in `revoked` after canonicalizing
+/// both sides. This is the security predicate enforced at the top of
+/// [`sync_with_peer`]; it is unit-tested directly so the refusal can be
+/// verified without a live socket.
+fn is_fingerprint_revoked(fingerprint: &str, revoked: &[String]) -> bool {
+    let target = canonicalize_fingerprint(fingerprint);
+    revoked
+        .iter()
+        .any(|r| canonicalize_fingerprint(r) == target)
+}
+
+// ── AppConfig over UniFFI (W6 — single source of truth shared with macOS) ────
+//
+// `Config` mirrors the USER-TUNABLE subset of `copypaste_core::AppConfig`.
+// Android keeps its SharedPreferences store but seeds defaults from
+// `default_config()` and routes every write through `clamp_config()`, so the
+// floors/ceilings/defaults match the macOS daemon exactly (triage B2/B6/B7).
+//
+// A few fields are Android-only display/runtime knobs with NO `AppConfig`
+// counterpart (`mask_sensitive_content`, `p2p_enabled`, `image_max_height`).
+// They are carried verbatim through the mappers (no clamp) so the round-trip is
+// lossless; the canonical AppConfig fields are the ones actually clamped.
+
+/// Canonical user-tunable configuration shared with the macOS daemon. Mirrors
+/// `copypaste_core::AppConfig`'s user-tunable subset; see the UDL `Config`
+/// dictionary for per-field clamp ranges.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Config {
+    pub max_text_size_bytes: u64,
+    pub max_image_size_bytes: u64,
+    pub max_file_size_bytes: u64,
+    pub storage_quota_bytes: u64,
+    pub sensitive_ttl_secs: u64,
+    pub poll_interval_ms: u64,
+    pub sound_on_copy: bool,
+    pub notify_on_copy: bool,
+    /// Android-only display knob (no `AppConfig` field). Preserved verbatim.
+    pub mask_sensitive_content: bool,
+    pub sync_on_wifi_only: bool,
+    /// Android-only runtime toggle (no `AppConfig` field). Preserved verbatim.
+    pub p2p_enabled: bool,
+    pub image_quality: u32,
+    /// Android-only display knob (no `AppConfig` field). Preserved verbatim.
+    pub image_max_height: u32,
+    pub collect_public_ip: bool,
+    pub paste_as_plain_text: bool,
+}
+
+/// Default for the Android-only `mask_sensitive_content` knob. Mirrors the
+/// macOS UI default of masking detected secrets in the history list.
+const DEFAULT_MASK_SENSITIVE_CONTENT: bool = true;
+/// Default for the Android-only `p2p_enabled` runtime toggle. P2P is opt-in on
+/// the daemon (`COPYPASTE_P2P=1`), so Android mirrors "off by default".
+const DEFAULT_P2P_ENABLED: bool = false;
+/// Default for the Android-only `image_max_height` display knob (px). Matches
+/// the Maccy-style preview cap used by the history list.
+const DEFAULT_IMAGE_MAX_HEIGHT: u32 = 680;
+
+/// Map a `copypaste_core::AppConfig` onto the FFI `Config` dictionary. The
+/// Android-only knobs (no AppConfig field) take the supplied carry-through
+/// values so the round-trip in `clamp_config` is lossless.
+fn config_from_appconfig(
+    ac: &copypaste_core::AppConfig,
+    mask_sensitive_content: bool,
+    p2p_enabled: bool,
+    image_max_height: u32,
+) -> Config {
+    Config {
+        max_text_size_bytes: ac.max_text_size_bytes,
+        max_image_size_bytes: ac.max_image_size_bytes,
+        max_file_size_bytes: ac.max_file_size_bytes,
+        storage_quota_bytes: ac.storage_quota_bytes,
+        sensitive_ttl_secs: ac.sensitive_ttl_secs,
+        poll_interval_ms: ac.poll_interval_ms,
+        sound_on_copy: ac.sound_on_copy,
+        notify_on_copy: ac.notify_on_copy,
+        mask_sensitive_content,
+        sync_on_wifi_only: ac.sync_on_wifi_only,
+        p2p_enabled,
+        // `image_quality` is `u8` in AppConfig (1..=100); widen to `u32` for
+        // the FFI dict. Always in range, so the cast is lossless.
+        image_quality: ac.image_quality as u32,
+        image_max_height,
+        collect_public_ip: ac.collect_public_ip,
+        paste_as_plain_text: ac.paste_as_plain_text,
+    }
+}
+
+/// Overlay a `Config`'s AppConfig-backed fields onto `AppConfig::default()`.
+/// Fields with no AppConfig counterpart are ignored here (they are clamped/kept
+/// by the caller). `image_quality` is narrowed back to `u8` with a clamp so an
+/// out-of-range FFI value cannot wrap.
+fn appconfig_from_config(cfg: &Config) -> copypaste_core::AppConfig {
+    copypaste_core::AppConfig {
+        max_text_size_bytes: cfg.max_text_size_bytes,
+        max_image_size_bytes: cfg.max_image_size_bytes,
+        max_file_size_bytes: cfg.max_file_size_bytes,
+        storage_quota_bytes: cfg.storage_quota_bytes,
+        sensitive_ttl_secs: cfg.sensitive_ttl_secs,
+        poll_interval_ms: cfg.poll_interval_ms,
+        sound_on_copy: cfg.sound_on_copy,
+        notify_on_copy: cfg.notify_on_copy,
+        sync_on_wifi_only: cfg.sync_on_wifi_only,
+        // Narrow u32 → u8 safely: clamp into the valid quality range first so a
+        // hostile/garbage value can never wrap on the `as u8` cast.
+        image_quality: cfg.image_quality.clamp(1, 100) as u8,
+        collect_public_ip: cfg.collect_public_ip,
+        paste_as_plain_text: cfg.paste_as_plain_text,
+        ..copypaste_core::AppConfig::default()
+    }
+}
+
+/// Canonical default configuration: `AppConfig::default()` mapped to `Config`,
+/// plus the Android-only knob defaults. PURE — performs no I/O.
+pub fn default_config() -> Config {
+    // Pure mapping over `AppConfig::default()` — cannot panic in practice; the
+    // `catch` is defensive (panics must never cross the JNI boundary). The
+    // fallback recomputes the same value so it can never diverge.
+    panic_boundary::catch(build_default_config).unwrap_or_else(|_| build_default_config())
+}
+
+fn build_default_config() -> Config {
+    config_from_appconfig(
+        &copypaste_core::AppConfig::default(),
+        DEFAULT_MASK_SENSITIVE_CONTENT,
+        DEFAULT_P2P_ENABLED,
+        DEFAULT_IMAGE_MAX_HEIGHT,
+    )
+}
+
+/// Clamp a `Config` to the SAME floors/ceilings the macOS daemon enforces, by
+/// mapping it onto `AppConfig`, running `AppConfig::clamp_values()`, and mapping
+/// back. Android-only knobs (`mask_sensitive_content`, `p2p_enabled`,
+/// `image_max_height`) are carried through verbatim. PURE — performs no I/O.
+pub fn clamp_config(cfg: Config) -> Config {
+    // Pure arithmetic clamp — cannot panic in practice; the `catch` is
+    // defensive. On the impossible panic path we return the caller's input
+    // unchanged (better than fabricating a value), since clamping is a
+    // best-effort tightening, never a correctness invariant the caller relies
+    // on for safety.
+    let fallback = cfg.clone();
+    panic_boundary::catch(move || {
+        let mut ac = appconfig_from_config(&cfg);
+        ac.clamp_values();
+        config_from_appconfig(
+            &ac,
+            cfg.mask_sensitive_content,
+            cfg.p2p_enabled,
+            cfg.image_max_height,
+        )
+    })
+    .unwrap_or(fallback)
+}
+
+// ── Device-management parity (W7 — revoke / audit) ───────────────────────────
+//
+// `RevokedPeer` mirrors `copypaste_core::RevokedDevice`. The audit table lives
+// in the SQLCipher `copypaste.db` under the same key as the rest of the Android
+// store, so these calls are feature-gated exactly like `add_clipboard_item` /
+// `get_history_count`: with `android-uniffi-live` off they are pure stubs.
+
+/// One revoked-device audit row (mirror of `copypaste_core::RevokedDevice`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevokedPeer {
+    pub fingerprint: String,
+    pub name: String,
+    pub revoked_at: i64,
+}
+
+/// Record a manual peer revocation in the local `revoked_devices` audit table
+/// (and remove the matching `devices` row), returning the `revoked_at`
+/// timestamp. Live build: writes through `with_cached_db` →
+/// `copypaste_core::revoke_device`.
+#[cfg(feature = "android-uniffi-live")]
+pub fn revoke_device_audit(
+    db_path: String,
+    key: &[u8],
+    fingerprint: String,
+    name: String,
+) -> Result<u64, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        with_cached_db(&db_path, &key_arr, |db| {
+            copypaste_core::revoke_device(db.conn(), &fingerprint, &name).map_err(|e| {
+                CopypasteError::DatabaseError {
+                    reason: e.to_string(),
+                }
+            })
+        })
+    })
+}
+
+/// Stub revoke (feature off): no DB I/O; returns a current unix-seconds
+/// timestamp so the Kotlin caller's UI can still echo a revoke time. The peer
+/// removal from the roster and the denylist enforcement happen Kotlin-side.
+#[cfg(not(feature = "android-uniffi-live"))]
+pub fn revoke_device_audit(
+    _db_path: String,
+    key: &[u8],
+    _fingerprint: String,
+    _name: String,
+) -> Result<u64, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let _: [u8; 32] = key
+            .try_into()
+            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        Ok(now)
+    })
+}
+
+/// List the fingerprints of all revoked devices, newest first (live build).
+#[cfg(feature = "android-uniffi-live")]
+pub fn list_revoked_fingerprints(
+    db_path: String,
+    key: &[u8],
+) -> Result<Vec<String>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        with_cached_db(&db_path, &key_arr, |db| {
+            let rows = copypaste_core::list_revoked_devices(db.conn()).map_err(|e| {
+                CopypasteError::DatabaseError {
+                    reason: e.to_string(),
+                }
+            })?;
+            Ok(rows.into_iter().map(|r| r.fingerprint).collect())
+        })
+    })
+}
+
+/// Stub (feature off): no revoked devices to report.
+#[cfg(not(feature = "android-uniffi-live"))]
+pub fn list_revoked_fingerprints(
+    _db_path: String,
+    key: &[u8],
+) -> Result<Vec<String>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let _: [u8; 32] = key
+            .try_into()
+            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        Ok(Vec::new())
+    })
+}
+
+/// Richer revoked-device listing (fingerprint + name + revoked_at), newest
+/// first (live build).
+#[cfg(feature = "android-uniffi-live")]
+pub fn list_revoked_peers(db_path: String, key: &[u8]) -> Result<Vec<RevokedPeer>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        with_cached_db(&db_path, &key_arr, |db| {
+            let rows = copypaste_core::list_revoked_devices(db.conn()).map_err(|e| {
+                CopypasteError::DatabaseError {
+                    reason: e.to_string(),
+                }
+            })?;
+            Ok(rows
+                .into_iter()
+                .map(|r| RevokedPeer {
+                    fingerprint: r.fingerprint,
+                    name: r.name,
+                    revoked_at: r.revoked_at,
+                })
+                .collect())
+        })
+    })
+}
+
+/// Stub (feature off): no revoked devices to report.
+#[cfg(not(feature = "android-uniffi-live"))]
+pub fn list_revoked_peers(
+    _db_path: String,
+    key: &[u8],
+) -> Result<Vec<RevokedPeer>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let _: [u8; 32] = key
+            .try_into()
+            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        Ok(Vec::new())
+    })
+}
+
 /// Run ONE clipboard sync exchange against an already-paired peer over mTLS.
 ///
 /// **Wire protocol — matches the daemon, NOT `SyncEngine::run_session`.** The
@@ -651,12 +955,27 @@ pub fn sync_with_peer(
     cert_der: Vec<u8>,
     key_der: Vec<u8>,
     local_items: Vec<LocalItem>,
+    revoked_fingerprints: Vec<String>,
+    device_id: String,
 ) -> Result<P2pSyncResult, CopypasteError> {
     panic_boundary::catch_result(|| {
         use bytes::Bytes;
         use copypaste_p2p::transport::{PairedPeers, PeerTransport};
         use copypaste_sync::protocol::WireItem;
         use futures_util::{SinkExt, StreamExt};
+
+        // SECURITY (load-bearing): refuse to dial a revoked peer at the TRUST
+        // layer, BEFORE building `PairedPeers` or opening any socket. This is
+        // the Android analog of the daemon's live-allowlist eviction
+        // (transport.rs `PairedPeers::remove`): even if a stale roster entry or
+        // a queued sync still references this fingerprint, revocation wins.
+        // Canonicalize both sides (lowercase, strip ':') so a fingerprint
+        // stored colon-separated still matches a bare-hex denylist entry.
+        if is_fingerprint_revoked(&peer_fingerprint, &revoked_fingerprints) {
+            return Err(CopypasteError::P2pError {
+                reason: format!("peer {peer_fingerprint} is revoked"),
+            });
+        }
 
         let addr: std::net::SocketAddr =
             peer_addr
@@ -666,15 +985,16 @@ pub fn sync_with_peer(
                 })?;
 
         let shared = shared_sync_key_from_session(&session_key)?;
-        // FIXWAVE: `origin_device_id` below is stamped with a fresh random UUID
-        // on every sync call, so the peer sees a different "device" each time and
-        // cannot deduplicate by origin. The FFI signature is UDL-exported and
-        // changing it would break the Kotlin ABI, so this is deferred. The correct
-        // fix is to pass the caller's stable `device_id` (from `generate_device_cert`)
-        // into `sync_with_peer` as an extra parameter and use it here. Track as
-        // FIXWAVE(android/origin_device_id): add `device_id: String` param to
-        // `sync_with_peer` in the UDL and regenerate Kotlin bindings.
-        let device_id = uuid::Uuid::new_v4().to_string();
+        // Stable per-device origin identity (from `generate_device_cert`,
+        // threaded by the caller). Stamped on every outbound `WireItem` so the
+        // peer can deduplicate by origin across sync calls. Empty `device_id`
+        // (transitional callers) falls back to a fresh UUID to preserve the
+        // pre-existing behaviour rather than emitting a blank origin.
+        let device_id = if device_id.is_empty() {
+            uuid::Uuid::new_v4().to_string()
+        } else {
+            device_id
+        };
 
         // Build the outbound `WireItem`s in the SAME sync-key-wrapped wire form
         // the daemon's `rekey_outbound` produces: the cloud blob (self-framed,
@@ -921,12 +1241,19 @@ fn db_handles() -> &'static Mutex<HashMap<u64, copypaste_core::Database>> {
 //
 // `Database` wraps a `rusqlite::Connection` (Send, !Sync) — serialising all
 // access behind this `Mutex` keeps it sound, exactly like the handle table.
+// Path+key keyed map of open `Database` connections. Aliased to keep the
+// `static`/accessor signatures readable (and to satisfy clippy::type_complexity
+// under newer toolchains). Keyed on (db_path, raw 32-byte key) so a different
+// key for the same path opens a fresh connection rather than reusing one
+// authenticated under another key.
 #[cfg(feature = "android-uniffi-live")]
-static DB_BY_PATH: OnceLock<Mutex<HashMap<(String, [u8; 32]), copypaste_core::Database>>> =
-    OnceLock::new();
+type DbByPathMap = Mutex<HashMap<(String, [u8; 32]), copypaste_core::Database>>;
 
 #[cfg(feature = "android-uniffi-live")]
-fn db_by_path() -> &'static Mutex<HashMap<(String, [u8; 32]), copypaste_core::Database>> {
+static DB_BY_PATH: OnceLock<DbByPathMap> = OnceLock::new();
+
+#[cfg(feature = "android-uniffi-live")]
+fn db_by_path() -> &'static DbByPathMap {
     DB_BY_PATH.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -1632,6 +1959,8 @@ mod tests {
             cert.cert_der.clone(),
             cert.key_der.clone(),
             Vec::new(),
+            Vec::new(),
+            "test-device".into(),
         )
         .expect_err("16-byte session key must error");
         assert!(
@@ -1796,6 +2125,8 @@ mod tests {
             init_cert.cert_der.clone(),
             init_cert.key_der.clone(),
             local_items,
+            Vec::new(),
+            "test-device".into(),
         )
         .expect("FFI sync_with_peer must succeed over loopback");
 
@@ -1951,6 +2282,8 @@ mod tests {
             init_cert.cert_der.clone(),
             init_cert.key_der.clone(),
             local_items,
+            Vec::new(),
+            "test-device".into(),
         )
         .expect("FFI sync_with_peer must succeed over loopback");
 
@@ -2058,6 +2391,8 @@ mod tests {
             init_cert.cert_der.clone(),
             init_cert.key_der.clone(),
             local_items,
+            Vec::new(),
+            "test-device".into(),
         )
         .expect("FFI sync_with_peer must succeed over loopback");
         assert_eq!(result.items_sent, 1);
@@ -2164,6 +2499,8 @@ mod tests {
             init_cert.cert_der.clone(),
             init_cert.key_der.clone(),
             Vec::new(),
+            Vec::new(),
+            "test-device".into(),
         )
         .expect("FFI sync_with_peer must succeed over loopback");
 
@@ -2290,6 +2627,8 @@ mod tests {
             init_cert.cert_der.clone(),
             init_cert.key_der.clone(),
             local_items,
+            Vec::new(),
+            "test-device".into(),
         )
         .expect("FFI sync_with_peer must succeed over loopback");
 
@@ -2444,5 +2783,147 @@ mod tests {
             !map.contains_key(&(path.clone(), key_a)),
             "stale (path, key_a) entry must be evicted after inserting (path, key_b)"
         );
+    }
+
+    // ── W6: AppConfig over UniFFI ────────────────────────────────────────────
+
+    #[test]
+    fn default_config_matches_appconfig_default_mapping() {
+        let ac = copypaste_core::AppConfig::default();
+        let cfg = default_config();
+
+        // Every AppConfig-backed field must equal AppConfig::default().
+        assert_eq!(cfg.max_text_size_bytes, ac.max_text_size_bytes);
+        assert_eq!(cfg.max_image_size_bytes, ac.max_image_size_bytes);
+        assert_eq!(cfg.max_file_size_bytes, ac.max_file_size_bytes);
+        assert_eq!(cfg.storage_quota_bytes, ac.storage_quota_bytes);
+        assert_eq!(cfg.sensitive_ttl_secs, ac.sensitive_ttl_secs);
+        assert_eq!(cfg.poll_interval_ms, ac.poll_interval_ms);
+        assert_eq!(cfg.sound_on_copy, ac.sound_on_copy);
+        assert_eq!(cfg.notify_on_copy, ac.notify_on_copy);
+        assert_eq!(cfg.sync_on_wifi_only, ac.sync_on_wifi_only);
+        assert_eq!(cfg.image_quality, ac.image_quality as u32);
+        assert_eq!(cfg.collect_public_ip, ac.collect_public_ip);
+        assert_eq!(cfg.paste_as_plain_text, ac.paste_as_plain_text);
+
+        // Android-only knobs take their documented defaults.
+        assert_eq!(cfg.mask_sensitive_content, DEFAULT_MASK_SENSITIVE_CONTENT);
+        assert_eq!(cfg.p2p_enabled, DEFAULT_P2P_ENABLED);
+        assert_eq!(cfg.image_max_height, DEFAULT_IMAGE_MAX_HEIGHT);
+    }
+
+    #[test]
+    fn clamp_config_enforces_file_ceiling_and_quota_floor() {
+        // A hostile config: file size 8 GiB (above the 100 MiB library hard
+        // cap) and storage quota 200 bytes (the historical self-clearing-history
+        // bug, below the 50 MiB floor). clamp_config must enforce the SAME
+        // bounds as the macOS daemon's AppConfig::clamp_values.
+        let mut cfg = default_config();
+        cfg.max_file_size_bytes = 8 * 1024 * 1024 * 1024; // 8 GiB
+        cfg.storage_quota_bytes = 200;
+
+        let clamped = clamp_config(cfg);
+
+        // File cap clamps DOWN to the 100 MiB library hard cap.
+        assert_eq!(
+            clamped.max_file_size_bytes,
+            100 * 1024 * 1024,
+            "max_file_size_bytes must clamp to the 100 MiB ceiling"
+        );
+        // Storage quota floors UP to MIN_STORAGE_QUOTA_BYTES (50 MiB).
+        assert_eq!(
+            clamped.storage_quota_bytes,
+            50 * 1024 * 1024,
+            "storage_quota_bytes must floor to MIN_STORAGE_QUOTA_BYTES"
+        );
+    }
+
+    #[test]
+    fn clamp_config_floors_size_caps_and_poll_interval() {
+        let mut cfg = default_config();
+        cfg.max_text_size_bytes = 1;
+        cfg.max_image_size_bytes = 1;
+        cfg.poll_interval_ms = 1; // below the 100 ms floor
+
+        let clamped = clamp_config(cfg);
+
+        assert_eq!(clamped.max_text_size_bytes, 64 * 1024); // MIN_TEXT_SIZE_BYTES
+        assert_eq!(clamped.max_image_size_bytes, 1024 * 1024); // MIN_IMAGE_SIZE_BYTES
+        assert_eq!(clamped.poll_interval_ms, 100); // POLL_INTERVAL_MIN_MS
+    }
+
+    #[test]
+    fn clamp_config_preserves_android_only_knobs_verbatim() {
+        // The Android-only knobs have no AppConfig counterpart and must survive
+        // the round-trip unchanged (not reset to a default).
+        let mut cfg = default_config();
+        cfg.mask_sensitive_content = false;
+        cfg.p2p_enabled = true;
+        cfg.image_max_height = 1234;
+
+        let clamped = clamp_config(cfg);
+
+        assert!(!clamped.mask_sensitive_content);
+        assert!(clamped.p2p_enabled);
+        assert_eq!(clamped.image_max_height, 1234);
+    }
+
+    #[test]
+    fn clamp_config_does_not_floor_sensitive_ttl_zero_sentinel() {
+        // 0 = "auto-wipe disabled" sentinel; clamp must NOT lift it to 1.
+        let mut cfg = default_config();
+        cfg.sensitive_ttl_secs = 0;
+        let clamped = clamp_config(cfg);
+        assert_eq!(clamped.sensitive_ttl_secs, 0);
+    }
+
+    // ── W7: revoked-fingerprint denylist predicate ───────────────────────────
+
+    #[test]
+    fn is_fingerprint_revoked_matches_canonicalized_forms() {
+        // Colon-grouped, mixed-case fingerprint vs a bare-hex lowercase denylist
+        // entry (and vice versa) must match after canonicalization.
+        let revoked = vec!["abcd1234ef".to_string()];
+        assert!(is_fingerprint_revoked("AB:CD:12:34:EF", &revoked));
+        assert!(is_fingerprint_revoked("abcd1234ef", &revoked));
+
+        let revoked_colon = vec!["AB:CD:12:34:EF".to_string()];
+        assert!(is_fingerprint_revoked("abcd1234ef", &revoked_colon));
+    }
+
+    #[test]
+    fn is_fingerprint_revoked_rejects_non_member_and_empty() {
+        let revoked = vec!["abcd1234ef".to_string()];
+        assert!(!is_fingerprint_revoked("deadbeef", &revoked));
+        assert!(!is_fingerprint_revoked("abcd1234ef", &[]));
+    }
+
+    #[test]
+    fn sync_with_peer_refuses_revoked_peer_without_network() {
+        // The revoke check runs at the TOP of sync_with_peer, before the addr
+        // is parsed or any socket opens. A revoked fingerprint must therefore
+        // return P2pError("… is revoked") even with a bogus address and empty
+        // identity material — proving the refusal is enforced at the trust
+        // layer, not merely in the UI.
+        let err = sync_with_peer(
+            "not-a-valid-addr".to_string(),
+            "AB:CD:EF".to_string(),
+            vec![0u8; 32],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            vec!["abcdef".to_string()], // denylist (canonicalizes to match)
+            "device-1".to_string(),
+        )
+        .expect_err("revoked peer must be refused");
+        match err {
+            CopypasteError::P2pError { reason } => {
+                assert!(
+                    reason.contains("revoked"),
+                    "expected a 'revoked' refusal, got: {reason}"
+                );
+            }
+            other => panic!("expected P2pError, got {other:?}"),
+        }
     }
 }

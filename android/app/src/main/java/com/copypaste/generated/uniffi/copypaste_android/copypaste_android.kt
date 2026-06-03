@@ -728,6 +728,16 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -751,6 +761,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_check_compatibility(`kotlinAbiVersion`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_copypaste_android_fn_func_clamp_config(`cfg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_close_database(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_copypaste_android_fn_func_cloud_decrypt(`itemId`: RustBuffer.ByValue,`blob`: RustBuffer.ByValue,`syncKeyBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -760,6 +772,8 @@ internal interface UniffiLib : Library {
     fun uniffi_copypaste_android_fn_func_core_version(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_decrypt_text(`itemId`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_default_config(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_derive_cloud_sync_key(`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -771,13 +785,19 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_copypaste_android_fn_func_is_sensitive(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_copypaste_android_fn_func_list_revoked_fingerprints(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_list_revoked_peers(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_open_database(`path`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
     fun uniffi_copypaste_android_fn_func_parse_pairing_qr(`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_revoke_device_audit(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     fun uniffi_copypaste_android_fn_func_sensitive_kind(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_copypaste_android_fn_func_sync_with_peer(`peerAddr`: RustBuffer.ByValue,`peerFingerprint`: RustBuffer.ByValue,`sessionKey`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`localItems`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_sync_with_peer(`peerAddr`: RustBuffer.ByValue,`peerFingerprint`: RustBuffer.ByValue,`sessionKey`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`localItems`: RustBuffer.ByValue,`revokedFingerprints`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_uniffi_abi_version(uniffi_out_err: UniffiRustCallStatus, 
     ): Int
@@ -901,6 +921,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_check_compatibility(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_clamp_config(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_close_database(
     ): Short
     fun uniffi_copypaste_android_checksum_func_cloud_decrypt(
@@ -910,6 +932,8 @@ internal interface UniffiLib : Library {
     fun uniffi_copypaste_android_checksum_func_core_version(
     ): Short
     fun uniffi_copypaste_android_checksum_func_decrypt_text(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_default_config(
     ): Short
     fun uniffi_copypaste_android_checksum_func_derive_cloud_sync_key(
     ): Short
@@ -921,9 +945,15 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_is_sensitive(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_list_revoked_fingerprints(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_list_revoked_peers(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_open_database(
     ): Short
     fun uniffi_copypaste_android_checksum_func_parse_pairing_qr(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_revoke_device_audit(
     ): Short
     fun uniffi_copypaste_android_checksum_func_sensitive_kind(
     ): Short
@@ -960,6 +990,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_check_compatibility() != 4328.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_copypaste_android_checksum_func_clamp_config() != 24891.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_copypaste_android_checksum_func_close_database() != 50151.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -973,6 +1006,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_decrypt_text() != 62492.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_default_config() != 9299.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_derive_cloud_sync_key() != 34994.toShort()) {
@@ -990,16 +1026,25 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_is_sensitive() != 38750.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_copypaste_android_checksum_func_list_revoked_fingerprints() != 27245.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_list_revoked_peers() != 7373.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_copypaste_android_checksum_func_open_database() != 37477.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_parse_pairing_qr() != 38365.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_copypaste_android_checksum_func_revoke_device_audit() != 60588.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_copypaste_android_checksum_func_sensitive_kind() != 9170.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_sync_with_peer() != 60142.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_sync_with_peer() != 60986.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_uniffi_abi_version() != 6036.toShort()) {
@@ -1234,6 +1279,87 @@ public object FfiConverterTypeBootstrapResult: FfiConverterRustBuffer<BootstrapR
 
 
 
+data class Config (
+    var `maxTextSizeBytes`: kotlin.ULong, 
+    var `maxImageSizeBytes`: kotlin.ULong, 
+    var `maxFileSizeBytes`: kotlin.ULong, 
+    var `storageQuotaBytes`: kotlin.ULong, 
+    var `sensitiveTtlSecs`: kotlin.ULong, 
+    var `pollIntervalMs`: kotlin.ULong, 
+    var `soundOnCopy`: kotlin.Boolean, 
+    var `notifyOnCopy`: kotlin.Boolean, 
+    var `maskSensitiveContent`: kotlin.Boolean, 
+    var `syncOnWifiOnly`: kotlin.Boolean, 
+    var `p2pEnabled`: kotlin.Boolean, 
+    var `imageQuality`: kotlin.UInt, 
+    var `imageMaxHeight`: kotlin.UInt, 
+    var `collectPublicIp`: kotlin.Boolean, 
+    var `pasteAsPlainText`: kotlin.Boolean
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
+    override fun read(buf: ByteBuffer): Config {
+        return Config(
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: Config) = (
+            FfiConverterULong.allocationSize(value.`maxTextSizeBytes`) +
+            FfiConverterULong.allocationSize(value.`maxImageSizeBytes`) +
+            FfiConverterULong.allocationSize(value.`maxFileSizeBytes`) +
+            FfiConverterULong.allocationSize(value.`storageQuotaBytes`) +
+            FfiConverterULong.allocationSize(value.`sensitiveTtlSecs`) +
+            FfiConverterULong.allocationSize(value.`pollIntervalMs`) +
+            FfiConverterBoolean.allocationSize(value.`soundOnCopy`) +
+            FfiConverterBoolean.allocationSize(value.`notifyOnCopy`) +
+            FfiConverterBoolean.allocationSize(value.`maskSensitiveContent`) +
+            FfiConverterBoolean.allocationSize(value.`syncOnWifiOnly`) +
+            FfiConverterBoolean.allocationSize(value.`p2pEnabled`) +
+            FfiConverterUInt.allocationSize(value.`imageQuality`) +
+            FfiConverterUInt.allocationSize(value.`imageMaxHeight`) +
+            FfiConverterBoolean.allocationSize(value.`collectPublicIp`) +
+            FfiConverterBoolean.allocationSize(value.`pasteAsPlainText`)
+    )
+
+    override fun write(value: Config, buf: ByteBuffer) {
+            FfiConverterULong.write(value.`maxTextSizeBytes`, buf)
+            FfiConverterULong.write(value.`maxImageSizeBytes`, buf)
+            FfiConverterULong.write(value.`maxFileSizeBytes`, buf)
+            FfiConverterULong.write(value.`storageQuotaBytes`, buf)
+            FfiConverterULong.write(value.`sensitiveTtlSecs`, buf)
+            FfiConverterULong.write(value.`pollIntervalMs`, buf)
+            FfiConverterBoolean.write(value.`soundOnCopy`, buf)
+            FfiConverterBoolean.write(value.`notifyOnCopy`, buf)
+            FfiConverterBoolean.write(value.`maskSensitiveContent`, buf)
+            FfiConverterBoolean.write(value.`syncOnWifiOnly`, buf)
+            FfiConverterBoolean.write(value.`p2pEnabled`, buf)
+            FfiConverterUInt.write(value.`imageQuality`, buf)
+            FfiConverterUInt.write(value.`imageMaxHeight`, buf)
+            FfiConverterBoolean.write(value.`collectPublicIp`, buf)
+            FfiConverterBoolean.write(value.`pasteAsPlainText`, buf)
+    }
+}
+
+
+
 data class DeviceCert (
     var `deviceId`: kotlin.String, 
     var `fingerprint`: kotlin.String, 
@@ -1410,6 +1536,39 @@ public object FfiConverterTypePairingQrPayload: FfiConverterRustBuffer<PairingQr
     override fun write(value: PairingQrPayload, buf: ByteBuffer) {
             FfiConverterString.write(value.`qr`, buf)
             FfiConverterString.write(value.`pakePassword`, buf)
+    }
+}
+
+
+
+data class RevokedPeer (
+    var `fingerprint`: kotlin.String, 
+    var `name`: kotlin.String, 
+    var `revokedAt`: kotlin.Long
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeRevokedPeer: FfiConverterRustBuffer<RevokedPeer> {
+    override fun read(buf: ByteBuffer): RevokedPeer {
+        return RevokedPeer(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: RevokedPeer) = (
+            FfiConverterString.allocationSize(value.`fingerprint`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterLong.allocationSize(value.`revokedAt`)
+    )
+
+    override fun write(value: RevokedPeer, buf: ByteBuffer) {
+            FfiConverterString.write(value.`fingerprint`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterLong.write(value.`revokedAt`, buf)
     }
 }
 
@@ -1770,6 +1929,31 @@ public object FfiConverterSequenceUByte: FfiConverterRustBuffer<List<kotlin.UByt
 
 
 
+public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
+    override fun read(buf: ByteBuffer): List<kotlin.String> {
+        val len = buf.getInt()
+        return List<kotlin.String>(len) {
+            FfiConverterString.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<kotlin.String>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterString.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<kotlin.String>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
 public object FfiConverterSequenceTypeLocalItem: FfiConverterRustBuffer<List<LocalItem>> {
     override fun read(buf: ByteBuffer): List<LocalItem> {
         val len = buf.getInt()
@@ -1788,6 +1972,31 @@ public object FfiConverterSequenceTypeLocalItem: FfiConverterRustBuffer<List<Loc
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeLocalItem.write(it, buf)
+        }
+    }
+}
+
+
+
+
+public object FfiConverterSequenceTypeRevokedPeer: FfiConverterRustBuffer<List<RevokedPeer>> {
+    override fun read(buf: ByteBuffer): List<RevokedPeer> {
+        val len = buf.getInt()
+        return List<RevokedPeer>(len) {
+            FfiConverterTypeRevokedPeer.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<RevokedPeer>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeRevokedPeer.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<RevokedPeer>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeRevokedPeer.write(it, buf)
         }
     }
 }
@@ -1870,6 +2079,20 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
 }
     
     
+
+        /**
+         * Clamp a `Config` into its valid ranges by mapping it onto `AppConfig`,
+         * running `AppConfig::clamp_values()` (the SAME floors/ceilings the macOS
+         * daemon enforces), and mapping back. PURE — performs no I/O.
+         */ fun `clampConfig`(`cfg`: Config): Config {
+            return FfiConverterTypeConfig.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_clamp_config(
+        FfiConverterTypeConfig.lower(`cfg`),_status)
+}
+    )
+    }
+    
  fun `closeDatabase`(`handle`: kotlin.ULong)
         = 
     uniffiRustCall() { _status ->
@@ -1923,6 +2146,20 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_decrypt_text(
         FfiConverterString.lower(`itemId`),FfiConverterSequenceUByte.lower(`ciphertext`),FfiConverterSequenceUByte.lower(`nonce`),FfiConverterSequenceUByte.lower(`key`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Canonical default configuration: `AppConfig::default()` mapped to the
+         * `Config` dictionary, with the same default values the macOS daemon uses.
+         * PURE — performs no I/O.
+         */ fun `defaultConfig`(): Config {
+            return FfiConverterTypeConfig.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_default_config(
+        _status)
 }
     )
     }
@@ -1988,6 +2225,35 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     }
     
 
+        /**
+         * List the fingerprints of all revoked devices, newest first. Drives the
+         * local fast-skip in the dialer and the `revoked_fingerprints` denylist
+         * passed to `sync_with_peer`.
+         */
+    @Throws(CopypasteException::class) fun `listRevokedFingerprints`(`dbPath`: kotlin.String, `key`: List<kotlin.UByte>): List<kotlin.String> {
+            return FfiConverterSequenceString.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_list_revoked_fingerprints(
+        FfiConverterString.lower(`dbPath`),FfiConverterSequenceUByte.lower(`key`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Richer audit listing (fingerprint + name + revoked_at), newest first, for
+         * a device-management UI. Same data source as `list_revoked_fingerprints`.
+         */
+    @Throws(CopypasteException::class) fun `listRevokedPeers`(`dbPath`: kotlin.String, `key`: List<kotlin.UByte>): List<RevokedPeer> {
+            return FfiConverterSequenceTypeRevokedPeer.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_list_revoked_peers(
+        FfiConverterString.lower(`dbPath`),FfiConverterSequenceUByte.lower(`key`),_status)
+}
+    )
+    }
+    
+
     @Throws(CopypasteException::class) fun `openDatabase`(`path`: kotlin.String, `key`: List<kotlin.UByte>): kotlin.ULong {
             return FfiConverterULong.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
@@ -2009,6 +2275,23 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_parse_pairing_qr(
         FfiConverterString.lower(`payload`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Record a manual peer revocation in the local `revoked_devices` audit
+         * table and remove the matching `devices` row. Returns the unix-seconds
+         * timestamp written to `revoked_at`. The caller (Kotlin) is responsible for
+         * removing the peer from its roster and for passing the fingerprint into
+         * `sync_with_peer`'s `revoked_fingerprints` so the trust layer refuses it.
+         */
+    @Throws(CopypasteException::class) fun `revokeDeviceAudit`(`dbPath`: kotlin.String, `key`: List<kotlin.UByte>, `fingerprint`: kotlin.String, `name`: kotlin.String): kotlin.ULong {
+            return FfiConverterULong.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_revoke_device_audit(
+        FfiConverterString.lower(`dbPath`),FfiConverterSequenceUByte.lower(`key`),FfiConverterString.lower(`fingerprint`),FfiConverterString.lower(`name`),_status)
 }
     )
     }
@@ -2039,11 +2322,11 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
          * back to plaintext. Throws `P2pError` on a bad address, connect/TLS
          * failure, or any sync-protocol error.
          */
-    @Throws(CopypasteException::class) fun `syncWithPeer`(`peerAddr`: kotlin.String, `peerFingerprint`: kotlin.String, `sessionKey`: List<kotlin.UByte>, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>, `localItems`: List<LocalItem>): P2pSyncResult {
+    @Throws(CopypasteException::class) fun `syncWithPeer`(`peerAddr`: kotlin.String, `peerFingerprint`: kotlin.String, `sessionKey`: List<kotlin.UByte>, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>, `localItems`: List<LocalItem>, `revokedFingerprints`: List<kotlin.String>, `deviceId`: kotlin.String): P2pSyncResult {
             return FfiConverterTypeP2pSyncResult.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_sync_with_peer(
-        FfiConverterString.lower(`peerAddr`),FfiConverterString.lower(`peerFingerprint`),FfiConverterSequenceUByte.lower(`sessionKey`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),FfiConverterSequenceTypeLocalItem.lower(`localItems`),_status)
+        FfiConverterString.lower(`peerAddr`),FfiConverterString.lower(`peerFingerprint`),FfiConverterSequenceUByte.lower(`sessionKey`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),FfiConverterSequenceTypeLocalItem.lower(`localItems`),FfiConverterSequenceString.lower(`revokedFingerprints`),FfiConverterString.lower(`deviceId`),_status)
 }
     )
     }
