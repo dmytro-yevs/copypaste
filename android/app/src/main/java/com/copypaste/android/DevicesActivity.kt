@@ -10,8 +10,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.CopyPasteTheme
@@ -64,6 +65,9 @@ import com.copypaste.android.ui.theme.IdeText
 import com.copypaste.android.ui.theme.SectionLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -82,6 +86,31 @@ internal const val ONLINE_WINDOW_MS = 60_000L
 /** True when [peer] synced within [ONLINE_WINDOW_MS] of [nowMs]. */
 internal fun PairedPeer.isOnline(nowMs: Long = System.currentTimeMillis()): Boolean =
     lastSyncMs > 0L && (nowMs - lastSyncMs) <= ONLINE_WINDOW_MS
+
+/**
+ * Shared online-count state published by [DevicesScreen] and consumed by
+ * [com.copypaste.android.ui.SyncStatusBadge] so both the footer dot+count AND
+ * every PeerCard dot are driven by the SAME single computation.
+ *
+ * A paired peer is ONLINE iff its IP host appears in the current live mDNS
+ * `discovered` set (IP-correlation — mDNS device_id is a UUID, NOT a cert
+ * fingerprint, so we match on IP only), OR its lastSyncMs falls within
+ * [ONLINE_WINDOW_MS] as a fallback.
+ *
+ * [DevicesScreen] updates this every ~1 s via [publish]. When the Devices tab
+ * is not visible, [SyncStatusBadge] falls back to its own configured-target
+ * count (value stays at whatever was last published).
+ */
+object DevicesOnlineState {
+    private val _onlineCount = MutableStateFlow(-1)
+
+    /** -1 = not yet computed (badge may fall back to its own logic). */
+    val onlineCount: StateFlow<Int> = _onlineCount.asStateFlow()
+
+    internal fun publish(count: Int) {
+        _onlineCount.value = count
+    }
+}
 
 /**
  * Forget a single paired peer locally: remove its roster entry (fingerprint,
@@ -140,6 +169,18 @@ fun DevicesScreen(
     var peers by remember { mutableStateOf(settings.pairedPeers) }
     var ownIdentity by remember { mutableStateOf(settings.p2pIdentity) }
 
+    // ── 1-second clock tick ───────────────────────────────────────────────────
+    // Drives smooth "Xm ago" / "Xs ago" updates and the online dot recomputation
+    // without a separate per-card timer. Also used to re-read the local IP on a
+    // coarser cadence (every ~5 s) so a Wi-Fi handoff is reflected promptly.
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+
     // ── LAN discovery + SAS pairing state ─────────────────────────────────────
     // P2P must be enabled for discovery (parity with the daemon gating discovery
     // behind start_p2p). When disabled we neither advertise nor browse.
@@ -166,6 +207,39 @@ fun DevicesScreen(
             refresh()
         }
     }
+
+    // ── SINGLE SOURCE OF TRUTH: online map keyed by fingerprint ───────────────
+    //
+    // A paired peer is ONLINE iff:
+    //   (a) its IP host (from syncAddr or peerLocalIp) appears in the live mDNS
+    //       `discovered` set (IP-correlation — mDNS device_id is a UUID, NOT a
+    //       cert fingerprint, so we match on IP only), OR
+    //   (b) its lastSyncMs falls within ONLINE_WINDOW_MS of nowMs (fallback for
+    //       peers not currently advertising on mDNS, e.g. were online recently).
+    //
+    // Computed ONCE here and threaded to every site that shows an online
+    // indicator: PeerCard dot AND the footer count via [DevicesOnlineState].
+    // Removes the prior divergence where the footer counted configured targets
+    // while each card independently called peer.isOnline().
+    val discoveredIps: Set<String> = remember(discovered) {
+        discovered.flatMap { it.ipAddrs }.toHashSet()
+    }
+    val onlineByFingerprint: Map<String, Boolean> = remember(peers, discoveredIps, nowMs) {
+        peers.associate { peer ->
+            val peerIpHosts = listOfNotNull(
+                // host part of "host:port" (substringBeforeLast tolerates bare host).
+                peer.syncAddr.takeIf { it.isNotEmpty() }?.substringBeforeLast(':'),
+                peer.peerLocalIp?.takeIf { it.isNotEmpty() },
+            )
+            val viaMdns = peerIpHosts.any { host -> discoveredIps.contains(host) }
+            val viaRecent = peer.isOnline(nowMs)
+            peer.fingerprint to (viaMdns || viaRecent)
+        }
+    }
+
+    // Publish live count so SyncStatusBadge (footer) reads the SAME value as the
+    // peer cards — single source, zero divergence.
+    DevicesOnlineState.publish(onlineByFingerprint.count { it.value })
 
     // ── mDNS discovery lifecycle lives in ClipboardService (HB-2) ─────────────
     // Discovery (the mDNS advert + the standing SAS-pairing responder on
@@ -384,14 +458,17 @@ fun DevicesScreen(
 
             // This device — always first.
             ownIdentity?.let { identity ->
-                OwnDeviceCard(identity = identity)
+                OwnDeviceCard(identity = identity, nowMs = nowMs)
             }
 
-            // Paired peers.
+            // Paired peers — pass the pre-computed online flag so the card dot
+            // and the footer badge are always in sync.
             if (peers.isNotEmpty()) {
                 for (peer in peers) {
                     PeerCard(
                         peer = peer,
+                        online = onlineByFingerprint[peer.fingerprint] ?: false,
+                        nowMs = nowMs,
                         onUnpair = { unpairTarget = peer },
                         onRevoke = { revokeTarget = peer },
                     )
@@ -457,14 +534,28 @@ private fun PairedPeer.displayName(): String =
 // Peer card
 // ─────────────────────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * Fixed width of the label column in the two-column metadata table.
+ * Sized to fit the longest label ("Local IP" / "Public IP") at 11 sp so
+ * values in all three card types (Own, Peer, Discovered) start at the same
+ * horizontal position regardless of which card they appear in.
+ */
+private val META_LABEL_WIDTH: Dp = 72.dp
+
 @Composable
 private fun PeerCard(
     peer: PairedPeer,
+    /**
+     * Pre-computed online flag from [DevicesScreen] — the SINGLE source of truth
+     * for this peer's online/offline state. Replaces the former per-card call to
+     * [PairedPeer.isOnline] which diverged from the footer badge computation.
+     */
+    online: Boolean,
+    /** Current epoch millis from the 1-second ticker in [DevicesScreen]. */
+    nowMs: Long,
     onUnpair: () -> Unit,
     onRevoke: () -> Unit,
 ) {
-    val online = peer.isOnline()
     val dotColor = if (online) IdeSuccess else IdeFaint
 
     Card(
@@ -499,13 +590,15 @@ private fun PeerCard(
 
             Spacer(Modifier.height(10.dp))
 
-            // ── Compact metadata chip row (FlowRow wraps on narrow screens) ──
-            // Fingerprint is intentionally omitted from display (kept in the
-            // data model for crypto/pairing use). Each chip is only rendered
-            // when the corresponding field is non-blank — legacy pre-ABI-14
-            // roster entries simply show no chips.
+            // ── Two-column aligned table ─────────────────────────────────────
+            // Label column is [META_LABEL_WIDTH] wide; value column takes the
+            // rest. Each row uses verticalAlignment = CenterVertically so
+            // multi-line values don't cause the label to sit misaligned.
+            // Fingerprint intentionally omitted from display (kept in data model
+            // for crypto/pairing use). Only rows with non-blank values rendered
+            // — legacy pre-ABI-14 roster entries simply show fewer rows.
             val lastSyncText: String? = if (peer.lastSyncMs > 0L) {
-                val elapsed = (System.currentTimeMillis() - peer.lastSyncMs) / 1_000L
+                val elapsed = (nowMs - peer.lastSyncMs) / 1_000L
                 when {
                     elapsed < 60 -> "${elapsed}s ago"
                     elapsed < 3600 -> "${elapsed / 60}m ago"
@@ -513,30 +606,27 @@ private fun PeerCard(
                 }
             } else null
 
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 peer.peerModel?.takeIf { it.isNotBlank() }?.let {
-                    MetaChip(label = "Model", value = it)
+                    MetaRow(label = "Model", value = it)
                 }
                 peer.peerOs?.takeIf { it.isNotBlank() }?.let {
-                    MetaChip(label = "OS", value = it)
+                    MetaRow(label = "OS", value = it)
                 }
                 peer.peerAppVersion?.takeIf { it.isNotBlank() }?.let {
-                    MetaChip(label = "Version", value = it)
+                    MetaRow(label = "Version", value = it)
                 }
                 peer.peerLocalIp?.takeIf { it.isNotBlank() }?.let {
-                    MetaChip(label = "Local IP", value = it)
+                    MetaRow(label = "Local IP", value = it)
                 }
                 peer.peerPublicIp?.takeIf { it.isNotBlank() }?.let {
-                    MetaChip(label = "Public IP", value = it)
+                    MetaRow(label = "Public IP", value = it)
                 }
                 if (peer.syncAddr.isNotBlank()) {
-                    MetaChip(label = "Sync", value = peer.syncAddr)
+                    MetaRow(label = "Sync", value = peer.syncAddr)
                 }
                 lastSyncText?.let {
-                    MetaChip(label = "Last sync", value = it)
+                    MetaRow(label = "Last sync", value = it)
                 }
             }
 
@@ -605,9 +695,12 @@ private fun NoPeerCard(onPair: () -> Unit) {
 // Own-device card
 // ─────────────────────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun OwnDeviceCard(identity: P2pIdentity) {
+private fun OwnDeviceCard(
+    identity: P2pIdentity,
+    /** Current epoch millis from the 1-second ticker — drives live IP refresh. */
+    nowMs: Long,
+) {
     // HB-1c: render THIS device's info at parity with the macOS "This Mac" card.
     // ABI 14 sends these same fields to peers (own gather in PairActivity /
     // DevicesActivity startPairing); we surface them locally too. Gathered live —
@@ -619,7 +712,12 @@ private fun OwnDeviceCard(identity: P2pIdentity) {
     val model = android.os.Build.MODEL ?: "Android"
     val osVersion = "Android " + android.os.Build.VERSION.RELEASE
     val appVersion = BuildConfig.VERSION_NAME
-    val localIp = remember { lanIpv4Address() }
+
+    // Live local IP — re-read every ~5 s (keyed on nowMs / 5000) so a network
+    // change (Wi-Fi handoff, VPN connect) is reflected promptly.
+    // The bare `remember { lanIpv4Address() }` snapshot was stale on network
+    // change because it was only evaluated once at first composition.
+    val localIp = remember(nowMs / 5_000L) { lanIpv4Address() }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -654,16 +752,13 @@ private fun OwnDeviceCard(identity: P2pIdentity) {
 
             Spacer(Modifier.height(10.dp))
 
-            // Compact FlowRow — all metadata on one wrapping line.
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                MetaChip(label = "Model", value = model)
-                MetaChip(label = "OS", value = osVersion)
-                MetaChip(label = "Version", value = appVersion)
-                localIp?.let { MetaChip(label = "Local IP", value = it) }
-                MetaChip(label = "Device ID", value = identity.deviceId)
+            // Two-column aligned table — same [META_LABEL_WIDTH] as PeerCard.
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                MetaRow(label = "Model", value = model)
+                MetaRow(label = "OS", value = osVersion)
+                MetaRow(label = "Version", value = appVersion)
+                localIp?.let { MetaRow(label = "Local IP", value = it) }
+                MetaRow(label = "Device ID", value = identity.deviceId)
             }
         }
     }
@@ -683,7 +778,6 @@ private fun DiscoveredPeer.displayName(): String =
  * bootstrap port ([DiscoveredPeer.bport] == null) — a v1 peer that cannot do SAS
  * pairing — or while another pairing is in flight ([busy]).
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DiscoveredPeerCard(
     peer: DiscoveredPeer,
@@ -714,13 +808,10 @@ private fun DiscoveredPeerCard(
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Spacer(Modifier.height(4.dp))
-                // Fingerprint omitted from display; device ID and IP shown
-                // in compact FlowRow. Device ID kept short for readability.
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    ip?.let { MetaChip(label = "Local IP", value = it) }
+                // Fingerprint omitted; IP shown as an aligned table row matching
+                // the layout of OwnDeviceCard and PeerCard.
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ip?.let { MetaRow(label = "Local IP", value = it) }
                 }
             }
             Button(
@@ -1124,24 +1215,34 @@ private fun SasPairingDialog(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Compact inline "label value" chip used inside [FlowRow] metadata blocks.
- * Mirrors the macOS MetaRow pattern: dim label + faint value, monospace, 11 sp.
- * Rendered horizontally; FlowRow wraps onto the next line when the card is narrow.
+ * Two-column aligned table row used in device cards.
+ *
+ * The label column is [META_LABEL_WIDTH] wide (fixed) so all labels in
+ * OwnDeviceCard, PeerCard, and DiscoveredPeerCard start at the same horizontal
+ * offset. Both text nodes are vertically centred within the row
+ * (verticalAlignment = Alignment.CenterVertically) so multi-line values don't
+ * cause the label to sit misaligned — fixing the former "Mac" misalignment in
+ * the Model row.
  */
 @Composable
-private fun MetaChip(label: String, value: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+private fun MetaRow(label: String, value: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = IdeDim,
             fontSize = 11.sp,
+            modifier = Modifier.width(META_LABEL_WIDTH),
         )
         Text(
             text = value,
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             color = IdeText,
             fontSize = 11.sp,
+            modifier = Modifier.weight(1f),
         )
     }
 }
