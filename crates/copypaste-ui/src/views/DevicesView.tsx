@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   api,
   IpcError,
@@ -74,16 +74,34 @@ function StatusDot({
 }
 
 // ---------------------------------------------------------------------------
-// MetaChip — inline "label: value" segment for compact flex rows, hidden when absent
+// MetaRow — aligned two-column table row for device metadata
+//
+// Renders as a CSS-grid row so labels always line up vertically across all
+// rows in the card. Hidden when value is absent/empty.
 // ---------------------------------------------------------------------------
 
-function MetaChip({ label, value }: { label: string; value: string | null | undefined }) {
+function MetaRow({ label, value }: { label: string; value: string | null | undefined }) {
   if (!value) return null;
   return (
-    <span className="text-[11px] text-ide-faint whitespace-nowrap">
-      <span className="text-ide-dim">{label}</span>{" "}
-      <span>{value}</span>
-    </span>
+    <>
+      <span className="text-[11px] text-ide-dim whitespace-nowrap">{label}</span>
+      <span className="text-[11px] text-ide-faint break-all">{value}</span>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DeviceMetaGrid — wrapper that establishes the aligned two-column grid
+// ---------------------------------------------------------------------------
+
+function DeviceMetaGrid({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="mt-1.5 grid gap-x-3 gap-y-0.5 items-baseline"
+      style={{ gridTemplateColumns: "auto 1fr" }}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -99,7 +117,7 @@ function ThisDeviceCard({
   return (
     <div className="px-3 py-2.5">
       {/* Name + online dot + "This Mac" badge */}
-      <div className="flex flex-wrap items-center gap-1.5 mb-1">
+      <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
         <StatusDot online={true} />
         <p className="truncate text-[13px] font-medium text-ide-text">
           {info.device_name ?? "This Device"}
@@ -109,15 +127,14 @@ function ThisDeviceCard({
         </span>
       </div>
 
-      {/* Compact flex-wrap row of metadata chips — each omitted when absent */}
-      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-        <MetaChip label="Model" value={info.device_model} />
-        <MetaChip label="OS" value={info.os_version} />
-        <MetaChip label="Version" value={info.app_version} />
-        <MetaChip label="Local IP" value={info.local_ip} />
-        {/* Public IP — WAN address from the daemon relay probe */}
-        <MetaChip label="Public IP" value={info.public_ip ?? undefined} />
-      </div>
+      {/* Aligned two-column metadata grid */}
+      <DeviceMetaGrid>
+        <MetaRow label="Model" value={info.device_model} />
+        <MetaRow label="OS" value={info.os_version} />
+        <MetaRow label="Version" value={info.app_version} />
+        <MetaRow label="Local IP" value={info.local_ip} />
+        <MetaRow label="Public IP" value={info.public_ip ?? undefined} />
+      </DeviceMetaGrid>
     </div>
   );
 }
@@ -142,38 +159,34 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke }: PeerRowProps) {
   // "host:port" P2P address field.
   const ip = peer.local_ip ?? extractIp(peer.address);
 
+  // Format timestamps only when they have a real value.
+  const pairedStr = (peer.added_at ?? 0) > 0 ? formatEpochSecs(peer.added_at) : null;
+  const firstSyncStr = formatEpochSecs(peer.first_sync_at);
+  const lastSyncStr = formatEpochSecs(peer.last_sync_at);
+
   return (
     <div className="px-3 py-2.5 hover:bg-ide-hover">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           {/* Name + online dot */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 mb-0.5">
             <StatusDot online={peer.online === true} lastSeenSecs={peer.last_seen_secs} />
             <p className="truncate text-[13px] font-medium text-ide-text">
               {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
             </p>
           </div>
 
-          {/* Compact flex-wrap chips — metadata + timestamps on two wrapped rows */}
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
-            {/* Rich peer metadata — each chip omitted when absent, mirroring
-                the "This device" card. Learned in-band over the bootstrap
-                channel during pairing. */}
-            <MetaChip label="Model" value={peer.model} />
-            <MetaChip label="OS" value={peer.os_version} />
-            <MetaChip label="Version" value={peer.app_version} />
-            <MetaChip label="Local IP" value={ip} />
-            {/* AB-10: peer public IP — daemon already persists + returns peer.public_ip */}
-            <MetaChip label="Public IP" value={peer.public_ip} />
-            {/* Timestamps — formatEpochSecs returns "—" for null/0 */}
-            {(peer.added_at ?? 0) > 0 && (
-              <span className="text-[11px] text-ide-faint whitespace-nowrap">
-                Paired {formatEpochSecs(peer.added_at)}
-              </span>
-            )}
-            <MetaChip label="First sync" value={formatEpochSecs(peer.first_sync_at)} />
-            <MetaChip label="Last sync" value={formatEpochSecs(peer.last_sync_at)} />
-          </div>
+          {/* Aligned two-column metadata grid — labels line up vertically */}
+          <DeviceMetaGrid>
+            <MetaRow label="Model" value={peer.model} />
+            <MetaRow label="OS" value={peer.os_version} />
+            <MetaRow label="Version" value={peer.app_version} />
+            <MetaRow label="Local IP" value={ip} />
+            <MetaRow label="Public IP" value={peer.public_ip} />
+            <MetaRow label="Paired" value={pairedStr} />
+            <MetaRow label="First sync" value={firstSyncStr} />
+            <MetaRow label="Last sync" value={lastSyncStr} />
+          </DeviceMetaGrid>
 
           {/* Revoked / error states — kept on their own line for visual weight */}
           {revokedAt !== null && (
@@ -574,7 +587,11 @@ function DiscoveredRow({
           <p className="truncate text-[13px] font-medium text-ide-text">
             {device.device_name || `Device ${device.device_id.slice(0, 8)}`}
           </p>
-          <MetaChip label="Local IP" value={ip} />
+          {ip && (
+            <span className="text-[11px] text-ide-faint">
+              <span className="text-ide-dim">Local IP</span>{" "}{ip}
+            </span>
+          )}
         </div>
         <button
           onClick={() => onPair(device)}
@@ -688,32 +705,43 @@ export function DevicesView() {
   }, [qrRevealed, generateQr]);
 
   // --- Load own device info ---
-  useEffect(() => {
-    let cancelled = false;
-    setOwnState({ status: "loading" });
-    api.getOwnDeviceInfo().then(
-      (info) => {
-        if (!cancelled) {
-          // Keep the ref in sync so loadPeers always reads the latest fingerprint
-          // without closing over a stale ownState snapshot.
-          ownFpRef.current = info.fingerprint ?? null;
-          setOwnState({ status: "ready", info });
-        }
-      },
-      (err: unknown) => {
-        if (cancelled) return;
-        const code = err instanceof IpcError ? err.code : null;
-        if (code === "daemon_offline") {
-          setOwnState({ status: "offline" });
-        } else {
-          // Daemon is up but method may not exist on older daemon builds —
-          // treat as offline so the UI still shows the fingerprint section.
-          setOwnState({ status: "offline" });
-        }
+  // A2: extracted to a stable useCallback so it can be called both on mount
+  // and on the 10 s polling interval (same cadence as loadPeers) so that
+  // Public IP (resolved async via STUN after mount) and Local IP (may change
+  // on network switch) stay fresh without requiring a manual refresh.
+  const loadOwnInfo = useCallback(async () => {
+    try {
+      const info = await api.getOwnDeviceInfo();
+      // Keep the ref in sync so loadPeers always reads the latest fingerprint
+      // without closing over a stale ownState snapshot.
+      ownFpRef.current = info.fingerprint ?? null;
+      setOwnState({ status: "ready", info });
+    } catch (err: unknown) {
+      const code = err instanceof IpcError ? err.code : null;
+      if (code === "daemon_offline") {
+        setOwnState({ status: "offline" });
+      } else {
+        // Daemon is up but method may not exist on older daemon builds —
+        // treat as offline so the UI still shows the fingerprint section.
+        setOwnState({ status: "offline" });
       }
-    );
-    return () => { cancelled = true; };
+    }
   }, []);
+
+  // Initial load on mount — sets "loading" first, then resolves via loadOwnInfo.
+  useEffect(() => {
+    setOwnState({ status: "loading" });
+    void loadOwnInfo();
+  }, [loadOwnInfo]);
+
+  // Poll own-device info every 10 s (same interval as loadPeers) so Public IP
+  // (resolved async via STUN) and Local IP (may change on network switch)
+  // stay fresh without user interaction.
+  const OWN_INFO_POLL_MS = 10_000;
+  useEffect(() => {
+    const id = setInterval(() => { void loadOwnInfo(); }, OWN_INFO_POLL_MS);
+    return () => { clearInterval(id); };
+  }, [loadOwnInfo]);
 
   // Auto-generate QR on mount, auto-refresh before expiry.
   //
@@ -1146,10 +1174,21 @@ export function DevicesView() {
 
   return (
     <ViewShell title="Devices" actions={actions}>
-      {/* ── Devices section header ──────────────────────────────── */}
-      <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ide-faint">
-        Devices
-      </p>
+      {/* ── Devices section header — with online count ──────────── */}
+      {/* The online count is derived SOLELY from peer.online (single source of
+          truth from the daemon live-connection table), so the footer and each
+          card dot always agree. */}
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[11px] font-medium uppercase tracking-wider text-ide-faint">
+          Devices
+        </p>
+        {loadState === "ready" && peers.length > 0 && (
+          <span className="text-[11px] text-ide-faint">
+            <span className="inline-block w-2 h-2 rounded-full bg-ide-success mr-1 align-middle" />
+            {peers.filter((p) => p.online === true).length} online
+          </span>
+        )}
+      </div>
 
       {/* ── Single unified device list (this Mac first, then peers) ── */}
       <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">

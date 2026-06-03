@@ -1081,6 +1081,18 @@ pub struct IpcServer {
     /// inbound pair routes its SAS through the SAME machine the IPC handlers
     /// observe. Always present (the machine is `Idle` when nothing is pairing).
     pairing: Arc<crate::pairing_sm::PairingCoordinator>,
+
+    /// SINGLE SOURCE OF TRUTH for peer online status — the live P2P connection
+    /// table from the running P2P subsystem.
+    ///
+    /// Populated via [`live_peer_sinks_slot`](Self::live_peer_sinks_slot) after
+    /// `start_p2p` returns (the server is already spawned at that point, so a
+    /// shared slot is used — matching the `p2p_sync_addr` pattern). The
+    /// `list_peers` handler locks this slot, and if an inner `LivePeerSinks`
+    /// is present, snapshots the key-set: a peer is online iff its canonical
+    /// fingerprint maps to a non-closed sender. Falls back to `last_sync_at`
+    /// recency only when the inner value is `None` (P2P disabled).
+    live_peer_sinks: Arc<std::sync::Mutex<Option<crate::p2p::LivePeerSinks>>>,
 }
 
 /// Canonical `status.degraded_reason` value for the keychain-locked /
@@ -1130,6 +1142,7 @@ impl IpcServer {
             core_config: None,
             cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
             pairing: Arc::new(crate::pairing_sm::PairingCoordinator::new()),
+            live_peer_sinks: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -1300,6 +1313,7 @@ impl IpcServer {
             core_config: None,
             cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
             pairing: Arc::new(crate::pairing_sm::PairingCoordinator::new()),
+            live_peer_sinks: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -1325,6 +1339,17 @@ impl IpcServer {
     pub fn with_public_ip_cache(mut self, cache: Arc<tokio::sync::RwLock<Option<String>>>) -> Self {
         self.cached_public_ip = cache;
         self
+    }
+
+    /// Return the shared live-peer-sinks slot so the daemon can populate it
+    /// after `start_p2p` completes (the server is already spawned by then —
+    /// matching the `p2p_sync_addr_slot` pattern).
+    ///
+    /// The caller stores the returned `Arc` clone, calls `start_p2p`, and then
+    /// writes the returned `P2pHandle::live_sinks` into the slot so subsequent
+    /// `list_peers` calls use the live connection table as the online source.
+    pub fn live_peer_sinks_slot(&self) -> Arc<std::sync::Mutex<Option<crate::p2p::LivePeerSinks>>> {
+        Arc::clone(&self.live_peer_sinks)
     }
 
     /// Insert a PAKE session under `session_id`, first evicting stale and
@@ -4546,16 +4571,46 @@ impl IpcServer {
 
             "list_peers" => match load_peers() {
                 Ok(peers) => {
-                    // HB-3: "online" is derived purely from sync recency below.
-                    // The mTLS allowlist (paired set) is deliberately NOT consulted
-                    // here — allowlist membership is not a live link and left a
-                    // paired-but-disconnected peer green forever.
                     let now_secs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         // SAFETY: now() is always after UNIX_EPOCH on any
                         // supported platform (macOS, Linux, Android).
                         .unwrap_or_default()
                         .as_secs() as i64;
+
+                    // SINGLE SOURCE OF TRUTH for online status: snapshot the
+                    // live P2P peer-sinks map (set of fingerprints with a
+                    // non-closed mpsc sender = currently-connected peers).
+                    // Falls back to `last_sync_at` recency only when P2P is
+                    // disabled (inner slot is None).
+                    //
+                    // The outer std::sync::Mutex is locked briefly to clone
+                    // the inner Arc (no .await while holding it). The inner
+                    // tokio Mutex is then locked with .await so we don't block
+                    // the executor.
+                    let live_fps: Option<std::collections::HashSet<String>> = {
+                        // Clone the Arc while holding the std::sync lock, then
+                        // drop the lock before awaiting.
+                        let maybe_sinks_arc: Option<crate::p2p::LivePeerSinks> = {
+                            let slot = self
+                                .live_peer_sinks
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner());
+                            slot.as_ref().map(Arc::clone)
+                        };
+                        if let Some(sinks_arc) = maybe_sinks_arc {
+                            let sinks = sinks_arc.lock().await;
+                            Some(
+                                sinks
+                                    .iter()
+                                    .filter(|(_, tx)| !tx.is_closed())
+                                    .map(|(fp, _)| fp.clone())
+                                    .collect(),
+                            )
+                        } else {
+                            None
+                        }
+                    };
 
                     let enriched: Vec<serde_json::Value> = peers
                         .into_iter()
@@ -4571,14 +4626,24 @@ impl IpcServer {
                                 None => -1,
                             };
 
-                            // HB-3: online = genuinely recent successful sync
-                            // (within ONLINE_THRESHOLD_SECS) only. Allowlist
-                            // membership is NOT consulted (see note above).
-                            // TODO: also wire a live-mDNS signal when
-                            // DiscoveryService gains a fingerprint-keyed index.
-                            let online = matches!(last_sync_at,
-                                Some(t) if now_secs.saturating_sub(t) <= ONLINE_THRESHOLD_SECS
-                            );
+                            // Compute online from the authoritative source:
+                            // 1. If live_fps is available (P2P running): peer is
+                            //    online iff its canonical fingerprint has a live
+                            //    non-closed sink in the connection table.
+                            // 2. Fallback (P2P disabled): recent last_sync_at
+                            //    within ONLINE_THRESHOLD_SECS.
+                            let peer_fp_canonical = peer
+                                .get("fingerprint")
+                                .and_then(|v| v.as_str())
+                                .map(canonical_fingerprint)
+                                .unwrap_or_default();
+
+                            let online = match &live_fps {
+                                Some(fps) => fps.contains(&peer_fp_canonical),
+                                None => matches!(last_sync_at,
+                                    Some(t) if now_secs.saturating_sub(t) <= ONLINE_THRESHOLD_SECS
+                                ),
+                            };
 
                             if let Some(obj) = peer.as_object_mut() {
                                 obj.insert("online".to_string(), serde_json::Value::Bool(online));
@@ -11409,8 +11474,8 @@ mod tests {
     }
 
     /// `list_peers` must mark a peer `online = true` when the peer's fingerprint
-    /// is in the live mTLS allowlist (PairedPeers), even if `last_sync_at` is
-    /// absent or stale.
+    /// is present with a live (non-closed) sender in the live P2P peer-sinks
+    /// map, even if `last_sync_at` is absent or stale.
     #[tokio::test]
     async fn list_peers_online_true_from_live_mtls_allowlist() {
         let dir = tempdir().unwrap();
@@ -11424,19 +11489,25 @@ mod tests {
 
         // Peer fingerprint in colon-hex (as stored in peers.json).
         let fp_display = "a1:b2:c3:d4:e5:f6:07:18";
-        // Canonical (colon-free, lowercase) form that PairedPeers uses.
+        // Canonical (colon-free, lowercase) form used as the sinks-map key.
         let fp_canonical = canonical_fingerprint(fp_display);
 
         let peers_json = cfg_home.join("peers.json");
-        // Peer has no last_sync_at — only the live mTLS allowlist signals online.
+        // Peer has no last_sync_at — only the live sinks map signals online.
         let peers = serde_json::json!([
             {"name": "Desktop", "fingerprint": fp_display, "added_at": 1}
         ]);
         std::fs::write(&peers_json, serde_json::to_string(&peers).unwrap()).unwrap();
 
-        // Build a PairedPeers with the peer in the active allowlist.
-        let live_peers = copypaste_p2p::transport::PairedPeers::new();
-        live_peers.add(&fp_canonical, "Desktop");
+        // Build a live sinks map with a non-closed sender for the peer.
+        // The receiver is kept alive for the duration of the test so the
+        // sender's `is_closed()` returns false (the channel is open).
+        let (peer_tx, _peer_rx) =
+            tokio::sync::mpsc::channel::<copypaste_sync::protocol::WireItem>(1);
+        let sinks_map: crate::p2p::LivePeerSinks =
+            Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::from([
+                (fp_canonical.clone(), peer_tx),
+            ])));
 
         let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
         let cert = copypaste_p2p::cert::SelfSignedCert::generate("mtls-test").unwrap();
@@ -11446,8 +11517,15 @@ mod tests {
             Arc::new(zeroize::Zeroizing::new([0u8; 32])),
             Arc::new([0u8; 32]),
         )
-        .with_cert_fingerprint(display_fingerprint(&cert.fingerprint()))
-        .with_p2p_peers(live_peers);
+        .with_cert_fingerprint(display_fingerprint(&cert.fingerprint()));
+
+        // Populate the live-sinks slot (simulates what daemon.rs does after
+        // start_p2p returns).
+        {
+            let slot = server.live_peer_sinks_slot();
+            let mut guard = slot.lock().unwrap();
+            *guard = Some(Arc::clone(&sinks_map));
+        }
 
         let path = sock.clone();
         tokio::spawn(async move {
@@ -11464,8 +11542,11 @@ mod tests {
         assert_eq!(
             peer["online"].as_bool(),
             Some(true),
-            "peer in live mTLS allowlist must be online even without last_sync_at: {peer}"
+            "peer in live sinks map must be online even without last_sync_at: {peer}"
         );
+        // Ensure the receiver stays alive until after the assertion so the
+        // sender is not marked closed prematurely.
+        drop(_peer_rx);
     }
 
     /// `persist_paired_peer` must populate the `name` field from `PeerMeta.device_name`

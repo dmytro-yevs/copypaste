@@ -59,6 +59,17 @@ pub struct P2pConfig {
     pub enabled: bool,
 }
 
+/// Shared map of currently-connected peer sinks, exported for IPC use.
+///
+/// Keyed by the peer's verified **certificate fingerprint** in canonical
+/// lowercase, colon-free hex form (matching
+/// [`crate::ipc::canonical_fingerprint`]). The IPC `list_peers` handler reads
+/// this map to compute the authoritative `online` flag — a peer is online iff
+/// it has a live, non-closed sender here.  The `last_sync_at` heuristic acts
+/// as a fallback when P2P is disabled or not yet connected.
+pub type LivePeerSinks =
+    Arc<Mutex<HashMap<copypaste_p2p::transport::DeviceFingerprint, mpsc::Sender<WireItem>>>>;
+
 /// Live handle to a running P2P subsystem (returned from [`start_p2p`]).
 pub struct P2pHandle {
     /// The actual TCP port bound by the listener (useful when `listen_port` was 0).
@@ -70,6 +81,11 @@ pub struct P2pHandle {
     /// tasks on an in-process P2P restart. A [`CancellationToken`] is cloned into
     /// every long-running task instead, so one `cancel()` stops them all.
     pub shutdown_token: CancellationToken,
+    /// Shared map of currently-connected peer sinks (SINGLE SOURCE OF TRUTH for
+    /// online status). The IPC `list_peers` handler receives this via
+    /// `IpcServer::with_live_peer_sinks` and checks each peer's canonical
+    /// fingerprint: present + non-closed = online.
+    pub live_sinks: LivePeerSinks,
 }
 
 /// Lightweight, synchronously-constructed P2P state used by the IPC layer.
@@ -492,6 +508,7 @@ pub async fn start_p2p(
     Ok(P2pHandle {
         actual_port,
         shutdown_token,
+        live_sinks: Arc::clone(&peer_sinks),
     })
 }
 
