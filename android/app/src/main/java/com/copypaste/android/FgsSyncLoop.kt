@@ -327,6 +327,10 @@ class FgsSyncLoop(
                         )
                         if (storedId.isNotEmpty()) {
                             repository.storeImageBytes(storedId, item.plaintext)
+                            // Generate thumbnail after full-res storage; non-fatal on failure.
+                            SyncThumbnailHelper.generateAndStore(item.plaintext) { thumbBytes ->
+                                repository.storeThumbnailBytes(storedId, thumbBytes)
+                            }
                             true
                         } else {
                             false
@@ -449,6 +453,10 @@ class FgsSyncLoop(
                             )
                             if (storedId.isNotEmpty()) {
                                 repository.storeImageBytes(storedId, plaintextBytes)
+                                // Generate thumbnail after full-res storage; non-fatal on failure.
+                                SyncThumbnailHelper.generateAndStore(plaintextBytes) { thumbBytes ->
+                                    repository.storeThumbnailBytes(storedId, thumbBytes)
+                                }
                                 true
                             } else {
                                 false

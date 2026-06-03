@@ -17,4 +17,10 @@
     <cache-path
         name="log_export_cache"
         path="log_export/" />
+    <!-- Temporary image files written by HistoryActivity when copying an image
+         item back to the system clipboard via a FileProvider content:// URI.
+         Files live at cacheDir/image_copy/<id>.png and are written transiently. -->
+    <cache-path
+        name="image_copy_cache"
+        path="image_copy/" />
 </paths>
