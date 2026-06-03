@@ -111,24 +111,30 @@ use crate::transport::{
     P2P_SNI_SENTINEL, TCP_CONNECT_TIMEOUT, TLS_HANDSHAKE_TIMEOUT,
 };
 
+/// QR-pairing token lifetime / bootstrap accept window, in seconds.
+///
+/// This is the single source of truth for the pairing window *within this
+/// crate*. It is intentionally kept equal to `copypaste_ipc::QR_PAIRING_TTL_SECS`
+/// (the project-wide source of truth, consumed by the daemon's
+/// `generate_pairing_qr` handler which stamps `expires_at = now + this`).
+///
+/// `copypaste-p2p` does not depend on `copypaste-ipc` (and adding that
+/// cross-crate dependency for a single scalar is not worth the coupling), so we
+/// cannot reference `copypaste_ipc::QR_PAIRING_TTL_SECS` directly here. The two
+/// constants must therefore be kept numerically identical by hand.
+//
+// TODO(shared-const): if `copypaste-p2p` ever gains a `copypaste-ipc`
+// dependency, replace this with
+// `copypaste_ipc::QR_PAIRING_TTL_SECS` so the two values cannot drift.
+const QR_PAIRING_TTL_SECS: u64 = 120;
+
 /// Maximum time the responder bootstrap listener waits for the single inbound
 /// pairing connection before giving up.
 ///
-/// # Drift guard — keep in sync with the QR TTL
-///
-/// This timeout is intentionally coupled to the QR code's time-to-live: the
-/// user scans the QR, confirms on their device, and the initiator connects —
-/// all within this window. The QR TTL is currently 120 s (set by the daemon's
-/// `generate_pairing_qr` handler which stamps `expires_at = now + 120s`).
-///
-/// There is no shared const yet (the QR TTL lives in `copypaste-daemon`'s IPC
-/// handler, not in `copypaste-core` or `copypaste-ipc`). Until one is
-/// extracted, keep this value equal to the daemon's QR TTL (120 s). When the
-/// QR TTL changes, update this const in the same commit.
-///
-/// TODO: extract a `QR_TTL: Duration` const into `copypaste-ipc` and reference
-/// it here so the two values cannot drift independently.
-pub const BOOTSTRAP_ACCEPT_TIMEOUT: Duration = Duration::from_secs(120);
+/// Derived from [`QR_PAIRING_TTL_SECS`] so it cannot drift from the QR token's
+/// time-to-live: the user scans the QR, confirms on their device, and the
+/// initiator connects — all within this window.
+pub const BOOTSTRAP_ACCEPT_TIMEOUT: Duration = Duration::from_secs(QR_PAIRING_TTL_SECS);
 
 /// Maximum total time allowed for the 9-frame post-TLS PAKE exchange (both
 /// sides). A peer that completes TLS but then dribbles frames would otherwise

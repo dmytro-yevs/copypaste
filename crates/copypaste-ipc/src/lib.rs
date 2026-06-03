@@ -56,3 +56,19 @@ pub use response::{
 /// [`Response::protocol_version`] to this value; peers that receive a higher
 /// value should reject the message with `error_code = "invalid_argument"`.
 pub const PROTOCOL_VERSION: u32 = 1;
+
+/// Lifetime of a QR-pairing token, in seconds — the single source of truth for
+/// the pairing window.
+///
+/// The daemon's `generate_pairing_qr` handler stamps the QR code's
+/// `expires_at = now + QR_PAIRING_TTL_SECS`, and the P2P bootstrap responder's
+/// accept timeout (`copypaste_p2p::bootstrap::BOOTSTRAP_ACCEPT_TIMEOUT`) must
+/// match it: the user scans the QR, confirms, and the initiator connects all
+/// within this window. Both values previously hard-coded `120`; this constant
+/// exists so they cannot drift independently.
+///
+/// Note: `copypaste-p2p` does not (and should not) depend on `copypaste-ipc`,
+/// so its `BOOTSTRAP_ACCEPT_TIMEOUT` carries a `TODO(shared-const)` pointing
+/// here rather than referencing this directly. Any consumer that *does* depend
+/// on this crate (the daemon) should derive the QR TTL from this constant.
+pub const QR_PAIRING_TTL_SECS: u64 = 120;
