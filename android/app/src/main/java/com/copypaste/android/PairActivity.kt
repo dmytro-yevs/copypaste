@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -140,6 +141,15 @@ class PairActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // FLAG_SECURE: this screen renders the pairing QR, which encodes the PAKE
+        // password + sync provisioning material (Supabase/relay creds, derived
+        // sync key). Block screenshots and screen-recording so that secret cannot
+        // be captured off-screen. Set before setContent so the window carries the
+        // flag for its entire lifetime.
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE,
+        )
         enableEdgeToEdge()
         // Extract payload from a cold-start deep-link intent, if present.
         handleDeepLinkIntent(intent)
