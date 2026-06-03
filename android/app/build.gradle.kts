@@ -86,13 +86,18 @@ android {
         applicationId = "com.copypaste.android"
         minSdk = 26
         targetSdk = 35
-        // MAINTENANCE: versionCode and versionName must be kept in sync with
-        // [workspace.package] version in the root Cargo.toml. There is no
-        // automated wiring — bump both manually on every release to avoid drift.
+        // Version is TAG-authoritative at release time: CI passes the values
+        // derived from the pushed git tag via Gradle properties
+        //   -PversionName=<bare tag, e.g. 0.6.0>
+        //   -PversionCode=<monotonic int derived from the tag>
+        // (see .github/workflows/release.yml, Android job). The literals below are
+        // only DEV defaults for local builds with no -P override; they MUST stay
+        // monotonically non-decreasing relative to the last shipped release so a
+        // local build never produces a lower versionCode than a published one.
         // versionCode must be a monotonically increasing integer; increment it
         // with every Play Store / sideload release regardless of version string.
-        versionCode = 8
-        versionName = "0.5.3"
+        versionName = (project.findProperty("versionName") as String?) ?: "0.6.0"
+        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 9
         // Instrumented (androidTest) runner for the cross-language crypto
         // conformance test (CryptoConformanceTest.kt). Runs on the emulator via
         // `./gradlew connectedDebugAndroidTest`.
@@ -120,6 +125,39 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+
+        // Release signing — values supplied by CI from GitHub secrets and passed
+        // through to Gradle as project properties (or environment variables):
+        //   ANDROID_KEYSTORE_FILE     — path to the decoded keystore (.jks/.keystore)
+        //   ANDROID_KEYSTORE_PASSWORD — keystore (store) password
+        //   ANDROID_KEY_ALIAS         — signing key alias
+        //   ANDROID_KEY_PASSWORD      — key password
+        // CI decodes ANDROID_KEYSTORE_BASE64 to a file and points
+        // ANDROID_KEYSTORE_FILE at it (see .github/workflows/release.yml).
+        //
+        // GRACEFUL ABSENCE: forks and local builds have no secrets. When the
+        // keystore path/credentials are missing we DO NOT create this config; the
+        // release buildType then falls back to debug-signing below so the build
+        // still succeeds (debug-signed). Never hard-fail a secretless build.
+        // Secret values are never echoed by Gradle.
+        val releaseStoreFile = (project.findProperty("ANDROID_KEYSTORE_FILE") as String?)
+            ?: System.getenv("ANDROID_KEYSTORE_FILE")
+        val releaseStorePassword = (project.findProperty("ANDROID_KEYSTORE_PASSWORD") as String?)
+            ?: System.getenv("ANDROID_KEYSTORE_PASSWORD")
+        val releaseKeyAlias = (project.findProperty("ANDROID_KEY_ALIAS") as String?)
+            ?: System.getenv("ANDROID_KEY_ALIAS")
+        val releaseKeyPassword = (project.findProperty("ANDROID_KEY_PASSWORD") as String?)
+            ?: System.getenv("ANDROID_KEY_PASSWORD")
+        if (releaseStoreFile != null && file(releaseStoreFile).exists() &&
+            releaseStorePassword != null && releaseKeyAlias != null && releaseKeyPassword != null
+        ) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
     }
 
     buildTypes {
@@ -138,15 +176,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // NOTE: a release APK is not actually shippable yet — no `signingConfig`
-            // is configured (the project has no release keystore/secrets). CI builds
-            // the DEBUG variant. These keep-rules exist so that IF/when a signed
-            // release variant is built, the native crypto path survives minification.
-            //
-            // For LOCAL release testing WITHOUT secrets you can debug-sign the
-            // release variant by adding (do NOT commit a real keystore):
-            //   signingConfig = signingConfigs.getByName("debug")
-            // then `./gradlew assembleRelease` and verify isNativeLibraryLoaded.
+            // Sign the release variant with the "release" config when CI supplied
+            // the keystore secrets (see signingConfigs above). When the release
+            // config is ABSENT (forks, local builds, no secrets) fall back to the
+            // committed debug keystore so `assembleRelease` still produces an
+            // installable (debug-signed) APK instead of an unsigned/failed build.
+            // The R8 keep-rules above protect the native crypto path either way.
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
