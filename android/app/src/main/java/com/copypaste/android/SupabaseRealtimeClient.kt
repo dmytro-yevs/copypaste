@@ -498,6 +498,7 @@ class SupabaseRealtimeClient(
         }
 
         val isImage = item.contentType == "image" || item.contentType.startsWith("image/")
+        val isFile = item.contentType == "file"
         val stored = if (isImage) {
             if (item.plaintext.isEmpty()) {
                 false
@@ -515,6 +516,29 @@ class SupabaseRealtimeClient(
                     SyncThumbnailHelper.generateAndStore(item.plaintext) { thumbBytes ->
                         repository.storeThumbnailBytes(storedId, thumbBytes)
                     }
+                    true
+                } else {
+                    false
+                }
+            }
+        } else if (isFile) {
+            // File row: store actual bytes so the user can save/copy them.
+            // SyncedItem binding lacks file_name/mime (stale generated code —
+            // bindings regen is a separate CI step); pass nulls for now.
+            if (item.plaintext.isEmpty()) {
+                false
+            } else {
+                val label = SyncFileHelper.buildFileLabel(null)
+                val storedId = repository.storeItem(
+                    plaintext = label,
+                    key = settings.encryptionKey,
+                    overrideId = item.itemId,
+                    contentType = item.contentType,
+                    lamportTs = item.lamportTs,
+                )
+                if (storedId.isNotEmpty()) {
+                    repository.storeFileBytes(storedId, item.plaintext)
+                    repository.storeFileMeta(storedId, null, null)
                     true
                 } else {
                     false

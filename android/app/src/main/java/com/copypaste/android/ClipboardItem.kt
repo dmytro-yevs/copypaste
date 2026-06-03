@@ -43,6 +43,9 @@ data class ClipboardItem(
     /** True when this item carries an image payload that can be rendered as a thumbnail. */
     val isImage: Boolean get() = contentType.startsWith("image/") || contentType == "image"
 
+    /** True when this item is a synced file (content_type == "file"). */
+    val isFile: Boolean get() = contentType == "file"
+
     // ByteArray in a data class requires manual equals/hashCode to avoid identity comparison.
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
