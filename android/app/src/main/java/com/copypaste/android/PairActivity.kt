@@ -81,7 +81,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.copypaste_android.ScannedPairing
 import uniffi.copypaste_android.bootstrapPairInitiator
-import uniffi.copypaste_android.syncWithPeer
+// syncWithPeer is the package-local wrapper in CopypasteBindings.kt (ABI-9
+// signature: revokedFingerprints + deviceId, ByteArray sessionKey). It shadows
+// the generated uniffi.copypaste_android.syncWithPeer intentionally.
 
 /** Pairing token lifetime in seconds — mirrors the Rust core's PAKE session TTL. */
 private const val PAIR_TOKEN_TTL_SECONDS = 120
@@ -367,13 +369,23 @@ fun PairScreen(
                         syncAddr = "",
                     )
                     val localItems = repository.localItemsForSync(key)
+                    // Denylist: never ingest items from a peer this device revoked.
+                    // Pass the local denylist into the ABI-9 syncWithPeer and skip a
+                    // dial entirely if THIS peer is itself revoked.
+                    val revoked = runCatching { listRevokedFingerprints(settings.dbPath, key) }
+                        .getOrElse { e ->
+                            android.util.Log.w("PairActivity", "listRevokedFingerprints failed: ${e.message}")
+                            emptyList()
+                        }
                     val result = syncWithPeer(
                         peerAddr = bootstrap.peerSyncAddr,
                         peerFingerprint = bootstrap.peerFingerprint,
-                        sessionKey = bootstrap.sessionKey,
+                        sessionKey = ByteArray(bootstrap.sessionKey.size) { bootstrap.sessionKey[it].toByte() },
                         certDer = cert.certDer,
                         keyDer = cert.keyDer,
                         localItems = localItems,
+                        revokedFingerprints = revoked,
+                        deviceId = settings.deviceId,
                     )
                     var stored = 0
                     for (item in result.items) {
@@ -390,15 +402,27 @@ fun PairScreen(
                             stored += 1
                         }
                     }
-                    // Persist the peer for future syncs. The session key is
-                    // stored securely (KEK-wrapped) so the background dialer in
-                    // FgsSyncLoop can re-open a sync session unattended without
-                    // re-running the PAKE bootstrap / re-scanning a QR.
-                    settings.pairedPeerFingerprint = bootstrap.peerFingerprint
-                    settings.pairedPeerSyncAddr = bootstrap.peerSyncAddr
-                    settings.pairedPeerSessionKey =
+                    // Persist (APPEND) the peer into the multi-peer roster for
+                    // future syncs — a second pairing must NOT discard the first.
+                    // The session key is KEK-wrapped before it touches the roster
+                    // JSON so the background dialer in FgsSyncLoop can re-open a
+                    // sync session unattended without re-running the PAKE bootstrap
+                    // / re-scanning a QR.
+                    val rawSessionKey =
                         ByteArray(bootstrap.sessionKey.size) { bootstrap.sessionKey[it].toByte() }
-                    "Paired with ${peer.deviceName.ifBlank { "device" }} — received ${result.itemsReceived} item(s), stored $stored, sent ${result.itemsSent}."
+                    val (wrappedB64, ivB64) = settings.wrapSessionKey(rawSessionKey)
+                    settings.upsertPeer(
+                        PairedPeer(
+                            fingerprint = bootstrap.peerFingerprint,
+                            syncAddr = bootstrap.peerSyncAddr,
+                            name = peer.deviceName,
+                            sessionKeyWrappedB64 = wrappedB64,
+                            sessionKeyIvB64 = ivB64,
+                            lastSyncMs = System.currentTimeMillis(),
+                        )
+                    )
+                    val peerCount = settings.pairedPeers.size
+                    "Paired with ${peer.deviceName.ifBlank { "device" }} — received ${result.itemsReceived} item(s), stored $stored, sent ${result.itemsSent}. ($peerCount paired device(s))"
                 }
                 syncResult = message
                 scannedPeer = null

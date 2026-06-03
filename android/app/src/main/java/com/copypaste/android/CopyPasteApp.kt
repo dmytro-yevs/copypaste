@@ -21,6 +21,10 @@ class CopyPasteApp : Application() {
 
         // Load native library (no-op if .so is absent — service degrades gracefully)
         runCatching { System.loadLibrary("copypaste_android") }
+        // Verify the linked .so speaks the ABI this build was compiled against
+        // (APP_ABI_VERSION). On a mismatch this logs loudly rather than crashing
+        // on a later shifted call signature; stub mode (.so absent) is a no-op.
+        checkNativeAbiCompatibility()
         NotificationHelper.createChannels(this)
         // Restore the Supabase background poll worker after a process restart
         // (WorkManager persists the request but we need to re-evaluate it on boot).

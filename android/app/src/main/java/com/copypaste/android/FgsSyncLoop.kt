@@ -9,7 +9,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import uniffi.copypaste_android.syncWithPeer
+// syncWithPeer resolves to the package-local ABI-9 wrapper in
+// CopypasteBindings.kt (ByteArray sessionKey + revokedFingerprints + deviceId),
+// not the generated uniffi.copypaste_android.syncWithPeer.
 
 /**
  * Runs an incoming-sync catch-up poll loop inside the always-alive foreground
@@ -420,11 +422,8 @@ class FgsSyncLoop(
         // Without this guard P2P dials fire even when the user disabled P2P (HW-A9 inert).
         if (!settings.syncEnabled || !settings.p2pSyncEnabled) return@withContext
 
-        val peerAddr = settings.pairedPeerSyncAddr
-        val peerFingerprint = settings.pairedPeerFingerprint
-        val sessionKey = settings.pairedPeerSessionKey
-
-        if (!P2pDialerGate.shouldDial(peerAddr, peerFingerprint, sessionKey)) return@withContext
+        val peers = settings.pairedPeers
+        if (peers.isEmpty()) return@withContext
 
         // A device cert is mandatory for mTLS; if pairing never generated one
         // there is nothing to dial with.
@@ -434,15 +433,44 @@ class FgsSyncLoop(
         }
 
         val key = settings.encryptionKey
-        try {
-            val localItems = repository.localItemsForSync(key, limit = P2P_LOCAL_ITEM_LIMIT)
+
+        // Load the local denylist ONCE per pass. It is used twice:
+        //   (a) to skip dialing any peer we have locally revoked, and
+        //   (b) passed into syncWithPeer so the native side refuses to ingest
+        //       items from any revoked fingerprint (server-side enforcement).
+        val revoked = runCatching { listRevokedFingerprints(settings.dbPath, key) }
+            .getOrElse { e ->
+                Log.w(TAG, "listRevokedFingerprints failed; proceeding with empty denylist: ${e.message}")
+                emptyList()
+            }
+
+        val localItems = repository.localItemsForSync(key, limit = P2P_LOCAL_ITEM_LIMIT)
+
+        // Iterate every paired peer. Per-peer try/catch so one unreachable or
+        // failing peer does not abort dials to the others.
+        for (peer in peers) {
+            val peerAddr = peer.syncAddr
+            val peerFingerprint = peer.fingerprint
+            val sessionKey = settings.sessionKeyFor(peerFingerprint)
+
+            // (a) Local denylist: never dial a peer we revoked.
+            if (peerFingerprint in revoked) {
+                Log.i(TAG, "P2P dial: skipping revoked peer ${peerFingerprint.take(8)}")
+                continue
+            }
+
+            if (!P2pDialerGate.shouldDial(peerAddr, peerFingerprint, sessionKey)) continue
+
+            try {
             val result = syncWithPeer(
                 peerAddr = peerAddr,
                 peerFingerprint = peerFingerprint,
-                sessionKey = sessionKey.map { it.toUByte() },
+                sessionKey = sessionKey,
                 certDer = cert.certDer,
                 keyDer = cert.keyDer,
                 localItems = localItems,
+                revokedFingerprints = revoked,
+                deviceId = settings.deviceId,
             )
             var stored = 0
             for (item in result.items) {
@@ -525,13 +553,20 @@ class FgsSyncLoop(
             if (result.itemsReceived > 0uL || result.itemsSent > 0uL) {
                 Log.i(
                     TAG,
-                    "P2P dial: received ${result.itemsReceived} (stored $stored), sent ${result.itemsSent}",
+                    "P2P dial ${peerFingerprint.take(8)}: received ${result.itemsReceived} " +
+                        "(stored $stored), sent ${result.itemsSent}",
                 )
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "P2P dial to paired peer failed: ${e.message}")
+            // Record a successful contact time on the roster entry (best-effort;
+            // a write failure here must not abort the remaining peers).
+            runCatching {
+                settings.upsertPeer(peer.copy(lastSyncMs = System.currentTimeMillis()))
+            }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "P2P dial to peer ${peerFingerprint.take(8)} failed: ${e.message}")
+            }
         }
     }
 }
