@@ -14,6 +14,13 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
+/// Maximum number of bundle-id entries held in the icon cache at any time.
+///
+/// Icons are cheap to re-extract from AppKit, so a simple cap-and-evict
+/// strategy (drop one arbitrary entry when full) is sufficient to bound memory
+/// without a heavier LRU structure or an additional dependency.
+const ICON_CACHE_CAP: usize = 256;
+
 /// Process-global icon cache.  `None` value = already queried, no icon found.
 static ICON_CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
 
@@ -30,6 +37,14 @@ fn cache_get(bundle_id: &str) -> Option<Option<String>> {
 
 fn cache_set(bundle_id: &str, value: Option<String>) {
     let mut guard = cache().lock().unwrap_or_else(|e| e.into_inner());
+    // Evict one arbitrary entry before inserting a new key so the map stays
+    // bounded.  We only evict when the key is genuinely new to avoid dropping
+    // a good entry on a redundant write for an existing bundle id.
+    if guard.len() >= ICON_CACHE_CAP && !guard.contains_key(bundle_id) {
+        if let Some(k) = guard.keys().next().cloned() {
+            guard.remove(&k);
+        }
+    }
     guard.insert(bundle_id.to_string(), value);
 }
 
@@ -151,6 +166,12 @@ pub fn clear_cache_for_test() {
 }
 
 #[cfg(test)]
+pub fn cache_len_for_test() -> usize {
+    let guard = cache().lock().unwrap_or_else(|e| e.into_inner());
+    guard.len()
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -163,5 +184,21 @@ mod tests {
         // The second call must read from cache (same None).
         let result2 = get_app_icon_base64("com.fake.app.that.does.not.exist");
         assert!(result2.is_none());
+    }
+
+    #[test]
+    fn cache_is_bounded_at_cap() {
+        clear_cache_for_test();
+        // Insert CAP + 10 distinct keys via cache_set directly (bypasses platform
+        // icon extraction so this test is cross-platform).
+        let over = ICON_CACHE_CAP + 10;
+        for i in 0..over {
+            cache_set(&format!("com.test.bundle.{i}"), None);
+        }
+        let len = cache_len_for_test();
+        assert!(
+            len <= ICON_CACHE_CAP,
+            "cache grew to {len} which exceeds cap {ICON_CACHE_CAP}"
+        );
     }
 }
