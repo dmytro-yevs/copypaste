@@ -212,6 +212,16 @@ export interface PairedDevice {
   first_sync_at: number | null;
   /** Unix epoch seconds of the most recent successful sync, or null. */
   last_sync_at: number | null;
+  /**
+   * Whether the peer is currently reachable/online as reported by the daemon.
+   * Optional for back-compat with older daemons that don't emit this field.
+   */
+  online?: boolean;
+  /**
+   * Seconds since this peer was last seen (large / absent = never seen).
+   * Optional for back-compat with older daemons that don't emit this field.
+   */
+  last_seen_secs?: number;
 }
 
 /**
