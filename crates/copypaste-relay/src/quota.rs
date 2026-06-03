@@ -41,8 +41,11 @@ impl Tier {
             // cap). `push_item` accepts "file", so it must share the image limit
             // — otherwise file payloads >1 MiB are wrongly rejected with 413.
             (_, "image") | (_, "file") => 10 * 1024 * 1024,
-            // Text: 1 MiB for both tiers.
-            _ => 1024 * 1024,
+            // Text: 8 MiB for both tiers — matches the local `MAX_TEXT_SIZE_BYTES`
+            // headroom and the `SYNC_MAX_BLOB_BYTES` (8 MiB) cap used by the P2P /
+            // cloud transports, so a 1–8 MiB text item that stores locally and
+            // passes the sync caps is no longer rejected 413 on the relay path.
+            _ => 8 * 1024 * 1024,
         }
     }
 }
@@ -143,9 +146,11 @@ mod tests {
     }
 
     #[test]
-    fn text_item_limit_is_1mib() {
-        assert_eq!(Tier::Free.max_item_bytes("text"), 1024 * 1024);
-        assert_eq!(Tier::Pro.max_item_bytes("text"), 1024 * 1024);
+    fn text_item_limit_is_8mib() {
+        // Coherence: matches SYNC_MAX_BLOB_BYTES (8 MiB) so a 1–8 MiB text item that
+        // stores locally and passes the P2P/cloud caps is not rejected 413 here.
+        assert_eq!(Tier::Free.max_item_bytes("text"), 8 * 1024 * 1024);
+        assert_eq!(Tier::Pro.max_item_bytes("text"), 8 * 1024 * 1024);
     }
 
     #[test]
@@ -193,13 +198,18 @@ mod tests {
 
     #[test]
     fn oversized_text_item_is_rejected() {
-        let err = check_item_size(Tier::Free, 1024 * 1024 + 1, "text").unwrap_err();
-        assert_eq!(
-            err,
-            QuotaViolation::ItemTooLarge {
-                limit_bytes: 1024 * 1024
-            }
-        );
+        let limit = 8 * 1024 * 1024;
+        let err = check_item_size(Tier::Free, limit + 1, "text").unwrap_err();
+        assert_eq!(err, QuotaViolation::ItemTooLarge { limit_bytes: limit });
+    }
+
+    #[test]
+    fn text_item_between_1mib_and_8mib_is_accepted() {
+        // Regression: a 1–8 MiB text item used to fall into the old 1 MiB text arm
+        // and was wrongly rejected 413 even though it stores locally and passes the
+        // sync caps. It must now pass the relay quota.
+        assert!(check_item_size(Tier::Free, 4 * 1024 * 1024, "text").is_ok());
+        assert!(check_item_size(Tier::Free, 8 * 1024 * 1024, "text").is_ok());
     }
 
     #[test]

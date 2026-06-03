@@ -20,7 +20,10 @@ pub const MAX_IMAGE_SIZE_BYTES: u64 = 64 * 1024 * 1024;
 //     reassembled plaintext re-keyed onto the wire. Files between 8 MiB and
 //     100 MiB are stored/kept locally but SKIPPED for P2P/relay sync (warned).
 //   * P2P frame    =  16 MiB — transport framing cap (`p2p` transport).
-//   * Relay body   =  10 MiB — relay request-body cap.
+//   * Relay caps   = per content type (`copypaste-relay` `quota::Tier`):
+//       - text         =  8 MiB — matches SYNC cap, so a 1–8 MiB text item that
+//         stores locally and passes the sync caps is not rejected 413.
+//       - image + file = 10 MiB each — matches the relay request-body cap.
 // 100 MiB — matches `crate::file::MAX_FILE_BYTES` (the storable hard cap). Kept
 // honest: a larger default would be silently clamped back down on load.
 pub const MAX_FILE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
