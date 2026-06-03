@@ -295,8 +295,12 @@ fun DevicesScreen(
             title = { Text("Revoke pairing?") },
             text = {
                 Text(
-                    "This device will no longer connect to ${target.displayName()}. " +
-                    "A revocation record is kept."
+                    "${target.displayName()} will no longer connect over P2P, and a " +
+                    "revocation record is kept. But a revoked device that still holds " +
+                    "the shared sync key can keep reading cloud and relay items until " +
+                    "you rotate the sync key. To rotate it, change the Sync Passphrase " +
+                    "in Settings — every device must then re-enter the new passphrase " +
+                    "(or re-pair) to keep syncing."
                 )
             },
             confirmButton = {
