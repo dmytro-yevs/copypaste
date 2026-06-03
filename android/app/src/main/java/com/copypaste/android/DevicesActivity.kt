@@ -1,12 +1,20 @@
 package com.copypaste.android
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,7 +52,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -52,8 +62,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.IdeDanger
@@ -63,6 +76,10 @@ import com.copypaste.android.ui.theme.IdeFaint
 import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeText
 import com.copypaste.android.ui.theme.SectionLabel
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -163,6 +180,58 @@ fun DevicesScreen(
     val settings = remember { Settings(ctx) }
     val deviceKeyStore = remember { DeviceKeyStore(ctx) }
     val scope = rememberCoroutineScope()
+
+    // ── Direct camera scan launcher (Deliverable 2) ───────────────────────────
+    // The scan button on this screen launches the ZXing scanner directly —
+    // no PairActivity intermediary. The scan result (a CPPAIR1.… payload) is
+    // forwarded to PairActivity as a cppair:// deep-link so the full pair &
+    // sync flow (PAKE bootstrap, key persistence, provisioning apply) still
+    // runs there unmodified.
+    var scanError by remember { mutableStateOf<String?>(null) }
+
+    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val contents = result.contents ?: return@rememberLauncherForActivityResult
+        // Forward the raw CPPAIR1.… payload to PairActivity via the deep-link
+        // path so PAKE + provisioning logic runs there.
+        val intent = Intent(ctx, PairActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            data = android.net.Uri.parse("cppair://pair?p=${android.net.Uri.encode(contents)}")
+        }
+        ctx.startActivity(intent)
+    }
+
+    fun launchScanner() {
+        val opts = ScanOptions()
+            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt("Scan the pairing QR on the other device")
+            .setBeepEnabled(false)
+            .setOrientationLocked(true)
+            .setCaptureActivity(PortraitCaptureActivity::class.java)
+        try {
+            scanLauncher.launch(opts)
+        } catch (e: Exception) {
+            scanError = "Could not open the camera scanner: " +
+                (e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            launchScanner()
+        } else {
+            scanError = "Camera permission required to scan a pairing QR. " +
+                "Grant it in Settings → Apps → CopyPaste → Permissions."
+        }
+    }
+
+    fun startScanFlow() {
+        val hasCamera = ContextCompat.checkSelfPermission(
+            ctx, Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasCamera) launchScanner() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+    }
 
     // Refresh the roster every poll interval so the online dots and last-sync
     // labels update as FgsSyncLoop stamps presence.
@@ -429,6 +498,18 @@ fun DevicesScreen(
         )
     }
 
+    // ── Scan error surface ────────────────────────────────────────────────────
+    scanError?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { scanError = null },
+            title = { Text("Scanner unavailable") },
+            text = { Text(msg) },
+            confirmButton = {
+                TextButton(onClick = { scanError = null }) { Text("OK") }
+            },
+        )
+    }
+
     Scaffold(
         modifier = modifier,
         containerColor = IdeBg,
@@ -449,6 +530,19 @@ fun DevicesScreen(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+
+            // ── Deliverable 1: own QR at the top, always visible, blurred ────
+            // Shows THIS device's pairing QR at the top of the screen so the
+            // user doesn't need to navigate to PairActivity to get scanned.
+            // The QR is blurred by default (tap to reveal) because it encodes
+            // the PAKE password + sync provisioning material. Reuses the same
+            // blur/reveal pattern as PairActivity (Modifier.blur(16.dp) + overlay
+            // label, first-tap reveals, second-tap regenerates and stays visible).
+            // The QR is generated lazily in OwnQrSection; the Scaffold FLAG_SECURE
+            // from PairActivity is NOT needed here because the QR is blurred at
+            // rest and FLAG_SECURE on PairActivity still protects the reveal flow
+            // when the user taps through to that screen.
+            OwnQrSection(settings = settings)
 
             // ── Single unified device list ───────────────────────────────────
             // Parity with macOS DevicesView: this device first, then every
@@ -505,17 +599,13 @@ fun DevicesScreen(
                 }
             }
 
-            // ── Scan / pair action ───────────────────────────────────────────
-            // HB-6: scanning a device's QR lives HERE now (was on the Pair
-            // screen). Launch PairActivity with mode=scan so it auto-opens
-            // its camera scan flow.
+            // ── Deliverable 2: Scan button opens the camera directly ─────────
+            // Launches PortraitCaptureActivity (ZXing) via ScanContract without
+            // routing through PairActivity. The scan result is forwarded to
+            // PairActivity as a cppair:// deep-link so PAKE + provisioning still
+            // run there unmodified.
             OutlinedButton(
-                onClick = {
-                    ctx.startActivity(
-                        Intent(ctx, PairActivity::class.java)
-                            .putExtra("mode", "scan")
-                    )
-                },
+                onClick = { startScanFlow() },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.btn_scan_qr))
@@ -525,6 +615,230 @@ fun DevicesScreen(
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Own QR section (Deliverable 1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Pixel side of the QR bitmap generated here — matches [QR_BITMAP_PX] in
+ * PairActivity so both screens produce identical-quality codes.
+ */
+private const val DEVICES_QR_BITMAP_PX = 512
+
+/**
+ * On-screen dp side of the QR image inside the plate.
+ * Slightly smaller than PairActivity's 240 dp to fit compactly in the
+ * Devices list above the device cards.
+ */
+private const val DEVICES_QR_IMAGE_DP = 200
+
+/** White backing-plate padding (each side, dp). */
+private const val DEVICES_QR_PLATE_PADDING_DP = 10
+
+/** Total reserved slot size: image + plate padding on both sides. */
+private const val DEVICES_QR_SLOT_DP = DEVICES_QR_IMAGE_DP + DEVICES_QR_PLATE_PADDING_DP * 2
+
+/** Mirrors PAIR_TOKEN_TTL_SECONDS in PairActivity (private there). */
+private const val DEVICES_QR_TTL_SECONDS = 120
+
+/** Mirrors PAIR_TOKEN_URGENT_THRESHOLD_SECONDS in PairActivity (private there). */
+private const val DEVICES_QR_URGENT_THRESHOLD_SECONDS = 15
+
+/**
+ * Generates a QR [Bitmap] for [text] at [sizePx] pixels. Identical to
+ * [encodeQrBitmap] in PairActivity — duplicated to avoid a cross-file
+ * private reference; both produce the same ZXing QR_CODE output.
+ */
+private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap {
+    val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, sizePx, sizePx)
+    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.RGB_565)
+    for (x in 0 until sizePx) {
+        for (y in 0 until sizePx) {
+            bmp.setPixel(x, y, if (matrix[x, y]) Color.BLACK else Color.WHITE)
+        }
+    }
+    return bmp
+}
+
+/**
+ * Shows this device's pairing QR at the top of the Devices screen.
+ *
+ * Privacy model — identical to [PairActivity]:
+ *  - QR is blurred ([Modifier.blur] 16 dp) by default; a "Tap to reveal"
+ *    overlay guides the user.
+ *  - First tap → unblurred (revealed).
+ *  - Second tap → regenerates + stays visible (mirrors HW-A5 from PairActivity).
+ *  - On expiry (2-minute TTL) the QR auto-regenerates and stays visible.
+ *
+ * The QR is generated on first composition via [startPairing] (same FFI call
+ * as PairActivity). Failures show a muted error label so the rest of the
+ * Devices screen still renders.
+ *
+ * FLAG_SECURE: this composable lives in DevicesScreen, which does NOT set
+ * FLAG_SECURE. The QR is blurred at rest, so the secret material is not
+ * readable from a screenshot in the default state. Users who tap to reveal
+ * accept the exposure; a future hardening pass could set FLAG_SECURE on
+ * DevicesActivity too, but that blocks the rest of the screen uselessly.
+ */
+@Composable
+private fun OwnQrSection(settings: Settings) {
+    val scope = rememberCoroutineScope()
+    var qr by remember { mutableStateOf<PairingQrResult?>(null) }
+    var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var remainingSeconds by remember { mutableStateOf(0) }
+    // Blurred by default; tap reveals; second tap regenerates (stays unblurred).
+    var qrBlurred by remember { mutableStateOf(true) }
+
+    val expired = qr != null && remainingSeconds <= 0
+
+    fun generateQr(keepVisible: Boolean) {
+        scope.launch {
+            loading = true
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    startPairing(settings.deviceId, android.os.Build.MODEL ?: "Android")
+                }
+                val bmp = withContext(Dispatchers.Default) {
+                    encodeDevicesQrBitmap(result.qr, DEVICES_QR_BITMAP_PX)
+                }
+                qr = result
+                qrBitmap = bmp
+                if (keepVisible) qrBlurred = false
+            } catch (e: Exception) {
+                errorMsg = e.message ?: e.javaClass.simpleName
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    // Countdown ticker — restarts whenever a fresh QR is issued. Auto-regenerates
+    // on expiry and keeps the QR visible (mirrors PairActivity HW-A5).
+    LaunchedEffect(qr) {
+        if (qr == null) return@LaunchedEffect
+        remainingSeconds = DEVICES_QR_TTL_SECONDS
+        while (remainingSeconds > 0) {
+            delay(1_000L)
+            remainingSeconds -= 1
+        }
+        generateQr(keepVisible = true)
+    }
+
+    // Generate QR on first composition.
+    LaunchedEffect(Unit) {
+        if (qr != null || loading) return@LaunchedEffect
+        generateQr(keepVisible = false)
+    }
+
+    SectionLabel("Your QR code")
+
+    CopyPasteCard {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Let another device scan this to pair",
+                style = MaterialTheme.typography.bodySmall,
+                color = IdeDim,
+                textAlign = TextAlign.Center,
+            )
+
+            Box(
+                modifier = Modifier.size(DEVICES_QR_SLOT_DP.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                val bmp = qrBitmap
+                when {
+                    loading -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(32.dp),
+                            color = IdeAccent,
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                    bmp != null && !expired -> {
+                        Box(
+                            modifier = Modifier
+                                .size(DEVICES_QR_SLOT_DP.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .then(
+                                    if (qrBlurred) Modifier.blur(16.dp) else Modifier
+                                )
+                                .clickable {
+                                    if (qrBlurred) {
+                                        qrBlurred = false
+                                    } else {
+                                        generateQr(keepVisible = true)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            // White backing plate.
+                            Box(
+                                modifier = Modifier
+                                    .size(DEVICES_QR_SLOT_DP.dp)
+                                    .background(androidx.compose.ui.graphics.Color.White)
+                                    .padding(DEVICES_QR_PLATE_PADDING_DP.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = "Your pairing QR code — tap to reveal",
+                                    modifier = Modifier.size(DEVICES_QR_IMAGE_DP.dp),
+                                )
+                            }
+                            // Reveal overlay (only while blurred).
+                            if (qrBlurred) {
+                                Text(
+                                    text = "Tap to reveal",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = IdeText,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    }
+                    else -> {
+                        // Expired placeholder while auto-regeneration is in flight.
+                        Text(
+                            text = "Refreshing…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = IdeDim,
+                        )
+                    }
+                }
+            }
+
+            // Countdown / expiry label.
+            if (qr != null && !expired) {
+                val urgent = remainingSeconds <= DEVICES_QR_URGENT_THRESHOLD_SECONDS
+                Text(
+                    text = stringResource(R.string.pair_token_expires_in_seconds, remainingSeconds),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (urgent) IdeDanger else IdeFaint,
+                )
+            }
+
+            errorMsg?.let { msg ->
+                Text(
+                    text = "QR unavailable: $msg",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = IdeDanger,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** Display label for a peer: its name when set, else a short fingerprint. */
 private fun PairedPeer.displayName(): String =

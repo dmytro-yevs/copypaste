@@ -7,6 +7,7 @@ import com.google.zxing.DecodeHintType
 import com.journeyapps.barcodescanner.CaptureActivity
 import com.journeyapps.barcodescanner.DecoratedBarcodeView
 import com.journeyapps.barcodescanner.DefaultDecoderFactory
+import com.journeyapps.barcodescanner.Size
 
 /**
  * Portrait-locked ZXing capture screen for QR pairing.
@@ -40,14 +41,23 @@ class PortraitCaptureActivity : CaptureActivity() {
     }
 
     /**
-     * HB-5: scanner speed. CaptureActivity's default decoder scans EVERY barcode
-     * symbology and the camera uses its default (one-shot) focus, which makes
-     * pairing-QR acquisition sluggish. We tune the view here — the documented,
-     * public extension point — instead of touching the private `barcodeScannerView`
-     * field:
-     *  - continuous autofocus so the QR stays sharp as the phone moves;
-     *  - a QR-only DecoderFactory with TRY_HARDER so ZXing spends its decode
-     *    budget on the one format we care about.
+     * Scanner quality tuning. Applied at [initializeContent] — the documented
+     * public extension point — so we never touch private ZXing fields:
+     *
+     *  - **Continuous autofocus**: keeps the QR sharp as the phone moves (was
+     *    one-shot, so a small motion after the first lock lost focus).
+     *  - **QR_CODE only + TRY_HARDER**: ZXing defaults to every symbology;
+     *    restricting to QR_CODE eliminates wasted decode cycles and TRY_HARDER
+     *    enables exhaustive search patterns for high-density or slightly skewed
+     *    codes.
+     *  - **Centered framing rect (75 % of view)**: `marginFraction=0.125`
+     *    shrinks the scan window to a tight centered square so the viewfinder
+     *    guide and the actual decode region agree — eliminates corner-hits where
+     *    ZXing tries to decode from pixels nowhere near the crosshair overlay.
+     *  - **Higher preview resolution** (requested via [changeCameraParameters]):
+     *    requests the largest supported Camera1 preview size (width ≥ 1280) to
+     *    give ZXing more pixels per module, reducing misreads on dense QR codes.
+     *    Falls back gracefully on devices that don't support it.
      *
      * The cppair:// Google-Lens fallback (PairActivity.handleDeepLinkIntent) is a
      * separate deep-link path and is unaffected by this in-app scanner tuning.
@@ -55,6 +65,7 @@ class PortraitCaptureActivity : CaptureActivity() {
     override fun initializeContent(): DecoratedBarcodeView {
         val view = super.initializeContent()
         runCatching {
+            // Continuous autofocus + QR-only decoder with TRY_HARDER.
             view.cameraSettings.isContinuousFocusEnabled = true
             view.setDecoderFactory(
                 DefaultDecoderFactory(
@@ -64,6 +75,44 @@ class PortraitCaptureActivity : CaptureActivity() {
                     0,
                 )
             )
+
+            // Centered scan region: 75 % of the preview width (12.5 % margin on
+            // each side). This tightens the framing rect to a square in the centre
+            // of the viewfinder so the decode region matches what the overlay
+            // shows, avoiding false-negative decodes when the QR is centred but
+            // ZXing is sampling from the screen edges.
+            view.getBarcodeView().marginFraction = 0.125
+
+            // Request a larger preview size for more pixels per QR module.
+            // changeCameraParameters is async (executes on the camera thread after
+            // the preview starts); the runCatching wrapper absorbs any failure on
+            // devices that don't expose Camera1 parameters (Camera2-only paths).
+            view.changeCameraParameters { params ->
+                runCatching {
+                    val sizes = params.supportedPreviewSizes
+                    if (sizes != null) {
+                        // Pick the largest size with width ≥ 1280 (HD+); if none
+                        // qualifies fall back to the largest available size.
+                        val best = sizes
+                            .filter { it.width >= 1280 }
+                            .maxByOrNull { it.width * it.height }
+                            ?: sizes.maxByOrNull { it.width * it.height }
+                        if (best != null) {
+                            params.setPreviewSize(best.width, best.height)
+                            android.util.Log.d(
+                                "PortraitCapture",
+                                "preview resolution set to ${best.width}×${best.height}",
+                            )
+                        }
+                    }
+                }.onFailure { e ->
+                    android.util.Log.w(
+                        "PortraitCapture",
+                        "resolution tune failed: ${e.message}",
+                    )
+                }
+                params
+            }
         }.onFailure {
             android.util.Log.w(
                 "PortraitCapture",
