@@ -497,7 +497,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(256);
 
     #[cfg(unix)]
-    let (self_write_change_count_arc, p2p_sync_addr_slot, _ipc_handle) = {
+    let (self_write_change_count_arc, p2p_sync_addr_slot, pairing_coordinator, _ipc_handle) = {
         let mut server = IpcServer::new(
             db.clone(),
             private_mode.clone(),
@@ -573,6 +573,10 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // known; the pairing handlers then send it in-band over the bootstrap
         // channel so the peer can persist it for the Phase 3 connector.
         let sync_addr_slot = server.p2p_sync_addr_slot();
+        // LAN/SAS Phase 2: grab a clone of the shared discovery-pairing
+        // coordinator so the standing responder in `start_p2p` routes its SAS
+        // through the SAME state machine the IPC handlers observe.
+        let pairing_coordinator = server.pairing_coordinator();
         let ipc_shutdown = shutdown_token.clone();
         // DUAL-DAEMON FIX: bind the IPC listener SYNCHRONOUSLY here, before
         // spawning the accept loop and before `start_p2p` runs. If the bind
@@ -597,7 +601,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 tracing::error!("IPC server error: {e}");
             }
         });
-        (swcc, sync_addr_slot, handle)
+        (swcc, sync_addr_slot, pairing_coordinator, handle)
     };
 
     // Subscriber loops (p2p outbound_loop, cloud orchestrator, sync_orch) log
@@ -676,6 +680,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 sync_outbound_rx,
                 catchup,
                 p2p_disc,
+                // LAN/SAS Phase 2: the SAME pairing coordinator the IPC server
+                // exposes, and the SAME sync-addr slot, so the standing
+                // discovery-pairing responder routes its SAS through the shared
+                // state machine and advertises a routable sync address in-band.
+                std::sync::Arc::clone(&pairing_coordinator),
+                std::sync::Arc::clone(&p2p_sync_addr_slot),
             )
             .await
             {

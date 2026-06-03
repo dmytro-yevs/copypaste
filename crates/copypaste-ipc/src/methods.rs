@@ -89,6 +89,35 @@ pub const METHOD_PAIR_GENERATE_QR: &str = "pair_generate_qr";
 /// `bport` is null.
 pub const METHOD_LIST_DISCOVERED: &str = "list_discovered";
 
+// ── LAN/SAS discovery-initiated pairing (Phase 2) ─────────────────────────────
+
+/// Begin a discovery-initiated SAS pairing as the INITIATOR.
+///
+/// Takes `{ device_id }` (the discovered peer's mDNS `did`). The daemon resolves
+/// the peer's bootstrap address (`bport`), generates an ephemeral random PAKE
+/// password, runs the bootstrap handshake, and (on reaching the SAS step)
+/// transitions the pairing state machine to `awaiting_sas`. The UI then polls
+/// [`METHOD_PAIR_GET_SAS`] and calls [`METHOD_PAIR_CONFIRM_SAS`].
+pub const METHOD_PAIR_WITH_DISCOVERED: &str = "pair_with_discovered";
+
+/// Poll the discovery-pairing state machine.
+///
+/// Response: `{ state, sas?, role? }` where `state` is one of `idle`,
+/// `initiating`, `awaiting_sas`, `confirmed`, `rejected`, `aborted`,
+/// `timed_out`. `sas` (6 decimal digits) and `role` (`initiator`/`responder`)
+/// are present only in `awaiting_sas`.
+pub const METHOD_PAIR_GET_SAS: &str = "pair_get_sas";
+
+/// Deliver the local user's SAS accept/reject decision.
+///
+/// Takes `{ accept: bool }`. Fires the in-flight handshake's confirmation
+/// channel; the pairing succeeds (keys trusted + persisted) only when BOTH sides
+/// accept. On reject the keys are dropped/zeroized and nothing is persisted.
+pub const METHOD_PAIR_CONFIRM_SAS: &str = "pair_confirm_sas";
+
+/// Abort an in-flight discovery pairing and reset the state machine to `idle`.
+pub const METHOD_PAIR_ABORT: &str = "pair_abort";
+
 // ── Database maintenance ────────────────────────────────────────────────────
 
 /// Method name for the destructive "reset database" recovery operation.
@@ -142,6 +171,14 @@ mod tests {
     #[test]
     fn method_list_discovered_has_correct_wire_name() {
         assert_eq!(METHOD_LIST_DISCOVERED, "list_discovered");
+    }
+
+    #[test]
+    fn discovery_pairing_methods_have_correct_wire_names() {
+        assert_eq!(METHOD_PAIR_WITH_DISCOVERED, "pair_with_discovered");
+        assert_eq!(METHOD_PAIR_GET_SAS, "pair_get_sas");
+        assert_eq!(METHOD_PAIR_CONFIRM_SAS, "pair_confirm_sas");
+        assert_eq!(METHOD_PAIR_ABORT, "pair_abort");
     }
 
     #[test]

@@ -22,6 +22,7 @@ pub mod ipc;
 pub mod keychain;
 pub mod logging;
 pub mod p2p;
+pub mod pairing_sm;
 pub mod paths;
 pub mod peers;
 pub mod platform;

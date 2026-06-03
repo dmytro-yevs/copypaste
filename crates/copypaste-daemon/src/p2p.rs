@@ -244,10 +244,28 @@ pub async fn start_p2p(
     // (instead of constructing a second instance) ensures discovered peers
     // surface through the `list_discovered` IPC handler.
     discovery: Arc<DiscoveryService>,
+    // Shared discovery-pairing coordinator (LAN/SAS Phase 2). The standing
+    // responder task routes its SAS confirmation through this SAME coordinator
+    // the IPC `pair_get_sas` / `pair_confirm_sas` handlers observe, so the
+    // responder user confirms exactly like the initiator. The caller (daemon.rs)
+    // obtains it from the IPC server via `pairing_coordinator()`.
+    pairing: Arc<crate::pairing_sm::PairingCoordinator>,
+    // This daemon's own P2P sync-listener address (`host:port`) shared slot,
+    // sent in-band over the bootstrap channel by the standing responder so the
+    // initiator can persist where to dial us for sync. Same Arc the IPC server
+    // populates via `set_p2p_sync_addr`.
+    own_sync_addr: Arc<std::sync::Mutex<Option<String>>>,
 ) -> anyhow::Result<P2pHandle> {
     let bind_addr = format!("0.0.0.0:{}", config.listen_port);
     let listener = TcpListener::bind(&bind_addr).await?;
     let actual_port = listener.local_addr()?.port();
+
+    // LAN/SAS Phase 2: clone the cert DER+key BEFORE the transport consumes
+    // `cert`, so the standing discovery-pairing responder can TLS-wrap its
+    // bootstrap listener with the SAME identity the mTLS transport presents
+    // (and whose fingerprint pairing advertises).
+    let bootstrap_cert_der = cert.cert_der.clone();
+    let bootstrap_key_der = cert.key_der.clone();
 
     tracing::info!(
         port = actual_port,
@@ -284,18 +302,85 @@ pub async fn start_p2p(
     // task has to block the executor.
     let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
 
+    // ── standing discovery-pairing bootstrap listener (LAN/SAS Phase 2) ────────
+    // Bind ONE bootstrap listener up front so we learn the OS-assigned port and
+    // can advertise it in the mDNS `bport` TXT key. The standing responder loop
+    // (spawned below) re-binds this SAME port for each inbound pairing. A
+    // listening socket is dropped (not connected) between iterations, so it
+    // never enters TIME_WAIT and the immediate re-bind succeeds. Best-effort:
+    // if the bind fails we advertise v1 (no bport) and discovery pairing is
+    // simply unavailable on this instance — QR pairing is unaffected.
+    let bootstrap_port: Option<u16> = match copypaste_p2p::bootstrap::BootstrapResponder::bind_on(
+        0,
+        bootstrap_cert_der.clone(),
+        bootstrap_key_der.clone(),
+    )
+    .await
+    {
+        Ok(probe) => match probe.local_addr() {
+            Ok(addr) => {
+                // Drop the probe listener so the responder loop can re-bind
+                // the same port for its first accept.
+                let p = addr.port();
+                drop(probe);
+                Some(p)
+            }
+            Err(e) => {
+                tracing::warn!("LAN/SAS: bootstrap listener local_addr failed: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!("LAN/SAS: failed to bind bootstrap listener: {e}");
+            None
+        }
+    };
+
     // ── discovery service ─────────────────────────────────────────────────────
     // Use the injected instance (shared with the IPC server) so that discovered
     // peers surface through the `list_discovered` handler.  The caller
     // (daemon.rs) constructs the Arc once and passes clones to both start_p2p
     // and `IpcServer::with_discovery`.
     let device_id_str = device_id.to_string();
-    discovery
-        .register(actual_port, &device_id_str, &config.device_name)
-        .map_err(|e| anyhow::anyhow!("mDNS register failed: {e}"))?;
+    // Advertise the bootstrap port in `bport` when available (v2); else v1.
+    let register_result = match bootstrap_port {
+        Some(bport) => {
+            discovery.register_with_bport(actual_port, &device_id_str, &config.device_name, bport)
+        }
+        None => discovery.register(actual_port, &device_id_str, &config.device_name),
+    };
+    register_result.map_err(|e| anyhow::anyhow!("mDNS register failed: {e}"))?;
 
     let discovery_for_task = Arc::clone(&discovery);
     let device_name_for_task = config.device_name.clone();
+
+    // ── standing discovery-pairing responder loop (LAN/SAS Phase 2) ────────────
+    // Accepts inbound SAS-pairing connections on the advertised `bport` and runs
+    // `run_with_confirm`, routing the SAS through the SHARED pairing coordinator
+    // so the LOCAL user confirms via `pair_get_sas` / `pair_confirm_sas` exactly
+    // like the initiator. Authentication is the human SAS comparison: the
+    // initiator sends an EPHEMERAL random password in-clear inside the bootstrap
+    // TLS, and the SAS (derived from the post-PAKE bound_key) is the real
+    // authenticator. On reject/mismatch/timeout the session key drops/zeroizes
+    // and NOTHING is persisted (no rotate_peer).
+    if let Some(bport) = bootstrap_port {
+        let peers_for_responder = peers.clone();
+        let pairing_for_responder = Arc::clone(&pairing);
+        let own_sync_addr_for_responder = Arc::clone(&own_sync_addr);
+        let cert_der = bootstrap_cert_der;
+        let key_der = bootstrap_key_der;
+        tokio::spawn(async move {
+            standing_pairing_responder_loop(
+                bport,
+                cert_der,
+                key_der,
+                peers_for_responder,
+                pairing_for_responder,
+                own_sync_addr_for_responder,
+            )
+            .await;
+        });
+    }
 
     // ── accept loop ───────────────────────────────────────────────────────────
     {
@@ -1022,6 +1107,150 @@ async fn fanout_to_peers(item: &WireItem, peer_sinks: &PeerSinks) {
         let mut sinks = peer_sinks.lock().await;
         for key in dead_keys {
             sinks.remove(&key);
+        }
+    }
+}
+
+/// Standing discovery-pairing responder loop (LAN/SAS Phase 2).
+///
+/// Re-binds the bootstrap listener on the advertised `bport` and accepts ONE
+/// inbound SAS-pairing connection per iteration. Each accepted connection runs
+/// [`run_with_confirm`](copypaste_p2p::bootstrap::BootstrapResponder::run_with_confirm),
+/// routing the derived SAS through the SHARED [`PairingCoordinator`](crate::pairing_sm::PairingCoordinator)
+/// so the LOCAL user confirms via the IPC `pair_get_sas` / `pair_confirm_sas`
+/// surface exactly like the initiator.
+///
+/// ## Security
+/// The initiator transmits an EPHEMERAL random password in-clear inside the
+/// (unauthenticated) bootstrap TLS channel; that password is NOT a secret. The
+/// human SAS comparison — derived from the post-PAKE, post-channel-binding
+/// `bound_key` — is the SOLE authenticator. Both sides exchange frame-10a
+/// ACCEPT/REJECT inside `run_with_confirm`; on reject/mismatch/timeout the
+/// session key drops/zeroizes and NOTHING is persisted (no `rotate_peer`). Only
+/// on a both-accept success do we `rotate_peer` + `persist_paired_peer`,
+/// identical to the QR path, so steady-state remains mutual fingerprint-pinned
+/// mTLS.
+///
+/// ## Single active pairing
+/// We only begin (`try_begin`) when the coordinator is `Idle`; a connection that
+/// arrives while another pairing (inbound or the IPC-initiated outbound) is in
+/// flight is dropped immediately so there is never more than one pending SAS.
+async fn standing_pairing_responder_loop(
+    bport: u16,
+    cert_der: Vec<u8>,
+    key_der: Vec<u8>,
+    peers: PairedPeers,
+    pairing: Arc<crate::pairing_sm::PairingCoordinator>,
+    own_sync_addr: Arc<std::sync::Mutex<Option<String>>>,
+) {
+    tracing::info!(bport, "LAN/SAS standing pairing responder running");
+    loop {
+        // Re-bind the fixed bootstrap port for the next inbound pairing. A
+        // listening socket is dropped (not connected) between iterations, so it
+        // never enters TIME_WAIT and the re-bind succeeds immediately.
+        let responder = match copypaste_p2p::bootstrap::BootstrapResponder::bind_on(
+            bport,
+            cert_der.clone(),
+            key_der.clone(),
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(bport, "LAN/SAS: re-bind bootstrap listener failed: {e}");
+                // Brief backoff to avoid a hot loop if the port is wedged.
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+        };
+
+        // Resolve our own sync address + metadata for the in-band exchange.
+        let own_addr = own_sync_addr
+            .lock()
+            .map(|s| s.clone().unwrap_or_default())
+            .unwrap_or_else(|p| p.into_inner().clone().unwrap_or_default());
+        let own_meta = tokio::task::spawn_blocking(crate::ipc::IpcServer::collect_own_peer_meta)
+            .await
+            .unwrap_or_default();
+
+        // EPHEMERAL random password. The initiator sends its own random password
+        // in-band; the responder side of `run_with_confirm` reconstructs the
+        // PAKE from the initiator's transmitted password, so we register a
+        // matching throwaway here. SAS authenticates, not this value.
+        let password = copypaste_core::PairingToken::generate().to_pake_password();
+
+        let coordinator = Arc::clone(&pairing);
+        // Claim the single-active-pairing slot LAZILY inside the confirm
+        // callback is too late (the handshake already ran); instead we gate at
+        // the SAS step: the confirm callback only runs after frame 9, and we
+        // refuse to surface a SAS if a pairing is already active.
+        let confirm = move |sas: &str| {
+            let coordinator = Arc::clone(&coordinator);
+            let sas = sas.to_string();
+            async move {
+                // Single active pairing: if the coordinator is busy, reject.
+                if !coordinator.try_begin(crate::pairing_sm::PairingRole::Responder) {
+                    tracing::warn!("LAN/SAS: inbound pairing rejected — another pairing active");
+                    return false;
+                }
+                let rx =
+                    coordinator.enter_awaiting_sas(sas, crate::pairing_sm::PairingRole::Responder);
+                match tokio::time::timeout(crate::pairing_sm::SAS_CONFIRM_TIMEOUT, rx).await {
+                    Ok(Ok(accept)) => accept,
+                    // Sender dropped (pair_abort) or timed out → reject.
+                    _ => false,
+                }
+            }
+        };
+
+        match responder
+            .run_with_confirm(&password, &own_addr, &own_meta, confirm)
+            .await
+        {
+            Ok(outcome) => {
+                tracing::info!(
+                    peer_fingerprint = %outcome.peer_fingerprint,
+                    "LAN/SAS inbound pairing completed (both sides accepted)"
+                );
+                peers.rotate_peer(
+                    &outcome.peer_fingerprint,
+                    outcome.peer_fingerprint.clone(),
+                    String::new(),
+                );
+                let peer_meta = copypaste_p2p::bootstrap::PeerMeta {
+                    model: outcome.peer_model.clone(),
+                    os_version: outcome.peer_os.clone(),
+                    app_version: outcome.peer_app_version.clone(),
+                    local_ip: outcome.peer_local_ip.clone(),
+                    device_name: outcome.peer_device_name.clone(),
+                };
+                crate::ipc::IpcServer::persist_paired_peer(
+                    &outcome.peer_fingerprint,
+                    &outcome.peer_sync_addr,
+                    &outcome.session_key,
+                    &peer_meta,
+                );
+                pairing.finish(crate::pairing_sm::PairingState::Confirmed);
+            }
+            Err(e) => {
+                // Reject / mismatch / timeout / no inbound connection within the
+                // accept window. NO persist, NO rotate_peer — the session key
+                // already dropped/zeroized inside `run_with_confirm`. Only move
+                // to a terminal state if we had actually begun a pairing (a bare
+                // accept-timeout never claimed the coordinator).
+                let snap = pairing.snapshot();
+                if snap.is_active() {
+                    pairing.finish(crate::pairing_sm::PairingState::Rejected);
+                }
+                tracing::debug!("LAN/SAS inbound pairing ended without success: {e}");
+            }
+        }
+
+        // Reset to Idle so the next inbound (or IPC-initiated) pairing may begin.
+        // The UI has a brief window to observe the terminal state via
+        // `pair_get_sas` before this reset; v0.6 keeps it simple.
+        if pairing.snapshot().is_terminal() {
+            pairing.reset();
         }
     }
 }

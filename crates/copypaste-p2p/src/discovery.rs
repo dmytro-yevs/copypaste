@@ -192,17 +192,43 @@ impl DiscoveryService {
         device_id: impl Into<String>,
         device_name: impl Into<String>,
     ) -> Result<(), DiscoveryError> {
+        self.register_inner(port, device_id.into(), device_name.into(), None)
+    }
+
+    /// Register for advertisement INCLUDING the v2 `bport` TXT key (LAN/SAS
+    /// Phase 2).
+    ///
+    /// Identical to [`register`](Self::register) but also advertises the TCP
+    /// port of this device's standing PAKE bootstrap listener. Initiators read
+    /// `bport` from the discovered peer's TXT record to know where to dial for
+    /// SAS pairing; the presence of `bport` is also what flips the advertised
+    /// protocol version to v2.
+    pub fn register_with_bport(
+        &self,
+        port: u16,
+        device_id: impl Into<String>,
+        device_name: impl Into<String>,
+        bport: u16,
+    ) -> Result<(), DiscoveryError> {
+        self.register_inner(port, device_id.into(), device_name.into(), Some(bport))
+    }
+
+    fn register_inner(
+        &self,
+        port: u16,
+        device_id: String,
+        device_name: String,
+        bport: Option<u16>,
+    ) -> Result<(), DiscoveryError> {
         let mut reg = lock_safe(&self.registration);
         if reg.is_some() {
             return Err(DiscoveryError::AlreadyRegistered);
         }
         *reg = Some(Registration {
             port,
-            device_id: device_id.into(),
-            device_name: device_name.into(),
-            // bport is wired in Phase 2 via `register_with_bport`; Phase 0
-            // only needs the field present for the TXT advertise path.
-            bport: None,
+            device_id,
+            device_name,
+            bport,
         });
         Ok(())
     }
@@ -754,6 +780,31 @@ mod tests {
         assert_eq!(reg.port, 12345);
         assert_eq!(reg.device_id, "mydeviceid");
         assert_eq!(reg.device_name, "Test Device");
+    }
+
+    /// LAN/SAS Phase 2: `register_with_bport` stores the bootstrap port so the
+    /// advertise path can emit the v2 `bport` TXT key (initiators learn where to
+    /// dial the standing responder).
+    #[test]
+    fn register_with_bport_stores_bootstrap_port() {
+        let svc = DiscoveryService::new();
+        svc.register_with_bport(12345, "mydeviceid", "Test Device", 54321)
+            .unwrap();
+        let reg = svc.registration.lock().unwrap();
+        let reg = reg.as_ref().unwrap();
+        assert_eq!(reg.port, 12345);
+        assert_eq!(reg.bport, Some(54321));
+    }
+
+    /// Registering twice (even via `register_with_bport`) is refused.
+    #[test]
+    fn register_with_bport_twice_returns_already_registered() {
+        let svc = DiscoveryService::new();
+        svc.register(51515, "did", "Alice").unwrap();
+        let err = svc
+            .register_with_bport(51515, "did2", "Bob", 60000)
+            .unwrap_err();
+        assert!(matches!(err, DiscoveryError::AlreadyRegistered));
     }
 
     // ── callbacks ────────────────────────────────────────────────────────────

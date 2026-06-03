@@ -1,6 +1,6 @@
 use crate::protocol::{
     Request, Response, CURRENT_PROTOCOL_VERSION, ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR,
-    ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, ERR_CODE_NOT_FOUND,
+    ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, ERR_CODE_NOT_FOUND, ERR_CODE_RATE_LIMITED,
     MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 use copypaste_core::{
@@ -957,6 +957,16 @@ pub struct IpcServer {
     /// `tokio::sync::RwLock` (not `std::sync::Mutex`) because the
     /// `get_own_device_info` hot path is async and must not block the executor.
     pub cached_public_ip: Arc<tokio::sync::RwLock<Option<String>>>,
+
+    /// Discovery-initiated SAS pairing coordinator (LAN/SAS Phase 2).
+    ///
+    /// Holds the single-active-pairing state machine plus the confirmation
+    /// `oneshot` channel that wires `pair_confirm_sas`/`pair_abort` into the
+    /// in-flight bootstrap handshake's `confirm` callback. Shared (`Arc`) with
+    /// the standing discovery-pairing responder task in `start_p2p`, so an
+    /// inbound pair routes its SAS through the SAME machine the IPC handlers
+    /// observe. Always present (the machine is `Idle` when nothing is pairing).
+    pairing: Arc<crate::pairing_sm::PairingCoordinator>,
 }
 
 /// Canonical `status.degraded_reason` value for the keychain-locked /
@@ -1005,6 +1015,7 @@ impl IpcServer {
             degraded_reason: Arc::new(std::sync::Mutex::new(None)),
             core_config: None,
             cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
+            pairing: Arc::new(crate::pairing_sm::PairingCoordinator::new()),
         }
     }
 
@@ -1065,6 +1076,18 @@ impl IpcServer {
     ) -> Self {
         self.discovery = Some(discovery);
         self
+    }
+
+    /// Return a clone of the shared discovery-pairing coordinator (LAN/SAS
+    /// Phase 2).
+    ///
+    /// `start_p2p`'s standing discovery-pairing responder routes its SAS
+    /// confirmation through the SAME coordinator the IPC handlers observe, so
+    /// the responder user confirms via `pair_get_sas`/`pair_confirm_sas` exactly
+    /// like the initiator. The daemon calls this before moving the server into
+    /// its task and hands the clone to `start_p2p`.
+    pub fn pairing_coordinator(&self) -> Arc<crate::pairing_sm::PairingCoordinator> {
+        Arc::clone(&self.pairing)
     }
 
     /// Return a handle to the shared slot holding this daemon's own P2P
@@ -1162,6 +1185,7 @@ impl IpcServer {
             degraded_reason: Arc::new(std::sync::Mutex::new(None)),
             core_config: None,
             cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
+            pairing: Arc::new(crate::pairing_sm::PairingCoordinator::new()),
         }
     }
 
@@ -1275,7 +1299,10 @@ impl IpcServer {
     /// short-lived child processes (`scutil`, `sysctl`, `sw_vers`) that can block
     /// up to ~2 s, so callers MUST invoke this from a blocking context (e.g.
     /// `tokio::task::spawn_blocking`) rather than on an async worker thread.
-    fn collect_own_peer_meta() -> copypaste_p2p::bootstrap::PeerMeta {
+    ///
+    /// `pub(crate)` so the LAN/SAS Phase 2 standing responder in `p2p.rs` reuses
+    /// the same metadata collection as the QR path.
+    pub(crate) fn collect_own_peer_meta() -> copypaste_p2p::bootstrap::PeerMeta {
         let meta = crate::device_meta::DeviceMeta::collect(BUILD_VERSION);
         copypaste_p2p::bootstrap::PeerMeta {
             model: meta.device_model,
@@ -1325,7 +1352,10 @@ impl IpcServer {
     ///
     /// A free function (not a `&self` method) so the detached bootstrap-responder
     /// task can call it after `self` has been moved/borrowed away.
-    fn persist_paired_peer(
+    ///
+    /// `pub(crate)` so the LAN/SAS Phase 2 standing responder in `p2p.rs` reuses
+    /// the IDENTICAL persistence logic as the QR path.
+    pub(crate) fn persist_paired_peer(
         peer_fp_canonical: &str,
         peer_sync_addr: &str,
         session_key: &copypaste_p2p::pake::SessionKey,
@@ -1391,6 +1421,199 @@ impl IpcServer {
                 fingerprint = %peer_fp_canonical,
                 "failed to persist paired peer to peers.json: {e}"
             ),
+        }
+    }
+
+    /// LAN/SAS Phase 2 — INITIATOR side of discovery-initiated SAS pairing.
+    ///
+    /// Resolves the discovered peer (`device_id`) to its bootstrap socket
+    /// address via the shared [`DiscoveryService`](copypaste_p2p::discovery::DiscoveryService)
+    /// (using the v2 `bport` TXT key), generates an EPHEMERAL random PAKE
+    /// password, and runs [`run_initiator_with_confirm`](copypaste_p2p::bootstrap::run_initiator_with_confirm).
+    ///
+    /// ## Why an in-clear ephemeral password is safe here
+    /// The discovery path has NO pre-shared secret, so the bootstrap TLS channel
+    /// is run with a throwaway random password. Authentication is provided
+    /// ENTIRELY by the human SAS comparison: the SAS is derived from the
+    /// post-PAKE, post-channel-binding `bound_key`, so a man-in-the-middle that
+    /// substitutes its own password per leg produces a DIFFERENT SAS per leg and
+    /// the two users see mismatched codes. Both sides must ACCEPT (frame 10a)
+    /// before any key is trusted; on reject/abort/timeout the session key is
+    /// dropped/zeroized and NOTHING is persisted (no `rotate_peer`).
+    ///
+    /// The `confirm` callback transitions the state machine to `awaiting_sas`
+    /// and awaits the `oneshot` that `pair_confirm_sas`/`pair_abort` fire. On a
+    /// both-accept success this reuses the SAME `rotate_peer` +
+    /// `persist_paired_peer` as the QR path so the steady-state link is
+    /// identical (mutual fingerprint-pinned mTLS).
+    async fn pair_with_discovered(&self, req_id: String, device_id: &str) -> Response {
+        let cert = match self.p2p_cert.as_ref() {
+            Some(c) => Arc::clone(c),
+            None => {
+                return Response::err_with_code(
+                    req_id,
+                    ERR_CODE_INVALID_ARGUMENT,
+                    "P2P is disabled (set COPYPASTE_P2P=1): cannot pair over the network",
+                )
+            }
+        };
+        let discovery = match self.discovery.as_ref() {
+            Some(d) => d,
+            None => {
+                return Response::err_with_code(
+                    req_id,
+                    ERR_CODE_INVALID_ARGUMENT,
+                    "discovery not available (P2P disabled)",
+                )
+            }
+        };
+
+        // Resolve the peer's bootstrap listener address from the live snapshot.
+        let peer = match discovery.resolve_peer(device_id) {
+            Some(p) => p,
+            None => {
+                return Response::err_with_code(
+                    req_id,
+                    ERR_CODE_NOT_FOUND,
+                    format!("device not currently discoverable: {device_id}"),
+                )
+            }
+        };
+        let bport =
+            match peer.bport {
+                Some(p) => p,
+                None => return Response::err_with_code(
+                    req_id,
+                    ERR_CODE_INVALID_ARGUMENT,
+                    "peer does not advertise a bootstrap port (v1 peer): SAS pairing unsupported",
+                ),
+            };
+        // Prefer an IPv4 address (broadest compatibility); fall back to the
+        // first address of any family. `ip_addrs` is sorted IPv4-first.
+        let ip = match peer
+            .ip_addrs
+            .iter()
+            .find(|a| a.is_ipv4())
+            .or_else(|| peer.ip_addrs.first())
+        {
+            Some(ip) => *ip,
+            None => {
+                return Response::err_with_code(
+                    req_id,
+                    ERR_CODE_NOT_FOUND,
+                    "peer has no resolved IP address",
+                )
+            }
+        };
+        let addr = std::net::SocketAddr::new(ip, bport);
+
+        // Claim the single-active-pairing slot. A concurrent request is rejected
+        // with a rate-limited error (one pairing at a time, v0.6 simplicity).
+        if !self
+            .pairing
+            .try_begin(crate::pairing_sm::PairingRole::Initiator)
+        {
+            return Response::err_with_code(
+                req_id,
+                ERR_CODE_RATE_LIMITED,
+                "another pairing is already in progress",
+            );
+        }
+
+        // EPHEMERAL random password — NOT a shared secret. The SAS authenticates.
+        let password = copypaste_core::PairingToken::generate().to_pake_password();
+        let (cert_der, key_der) = (cert.0.clone(), cert.1.clone());
+        let own_sync_addr = self.own_sync_addr();
+        let own_meta = tokio::task::spawn_blocking(Self::collect_own_peer_meta)
+            .await
+            .unwrap_or_default();
+
+        let coordinator = Arc::clone(&self.pairing);
+        // The confirm callback runs AFTER frame 9 (PAKE + channel binding), when
+        // the SAS is known and identical on both honest endpoints. It moves the
+        // SM to `awaiting_sas` and awaits the user's decision (or the dropped
+        // sender on abort, which it maps to a rejection).
+        let confirm = move |sas: &str| {
+            let coordinator = Arc::clone(&coordinator);
+            let sas = sas.to_string();
+            async move {
+                let rx =
+                    coordinator.enter_awaiting_sas(sas, crate::pairing_sm::PairingRole::Initiator);
+                // SAS_CONFIRM_TIMEOUT bounds the human decision; a dropped sender
+                // (abort) or elapsed timeout both yield a rejection.
+                match tokio::time::timeout(crate::pairing_sm::SAS_CONFIRM_TIMEOUT, rx).await {
+                    Ok(Ok(accept)) => accept,
+                    // Sender dropped (pair_abort) or timed out → reject.
+                    _ => false,
+                }
+            }
+        };
+
+        let result = copypaste_p2p::bootstrap::run_initiator_with_confirm(
+            addr,
+            cert_der,
+            key_der,
+            &password,
+            &own_sync_addr,
+            &own_meta,
+            confirm,
+        )
+        .await;
+
+        match result {
+            Ok(outcome) => {
+                tracing::info!(
+                    peer_fingerprint = %outcome.peer_fingerprint,
+                    "discovery SAS pairing completed (both sides accepted)"
+                );
+                // Both sides accepted: trust + persist exactly like the QR path.
+                if let Some(ref peers) = self.p2p_peers {
+                    peers.rotate_peer(
+                        &outcome.peer_fingerprint,
+                        outcome.peer_fingerprint.clone(),
+                        String::new(),
+                    );
+                }
+                let peer_meta = copypaste_p2p::bootstrap::PeerMeta {
+                    model: outcome.peer_model.clone(),
+                    os_version: outcome.peer_os.clone(),
+                    app_version: outcome.peer_app_version.clone(),
+                    local_ip: outcome.peer_local_ip.clone(),
+                    device_name: outcome.peer_device_name.clone(),
+                };
+                Self::persist_paired_peer(
+                    &outcome.peer_fingerprint,
+                    &outcome.peer_sync_addr,
+                    &outcome.session_key,
+                    &peer_meta,
+                );
+                self.pairing
+                    .finish(crate::pairing_sm::PairingState::Confirmed);
+                Response::ok(
+                    req_id,
+                    serde_json::json!({
+                        "ok": true,
+                        "peer_fingerprint": outcome.peer_fingerprint,
+                    }),
+                )
+            }
+            Err(e) => {
+                // Reject / mismatch / timeout / network error → NO persist, NO
+                // rotate_peer; the session key already dropped/zeroized inside
+                // the bootstrap function. Record a terminal state unless the SM
+                // was already moved to a terminal state by `pair_abort`.
+                let snapshot = self.pairing.snapshot();
+                if !snapshot.is_terminal() {
+                    self.pairing
+                        .finish(crate::pairing_sm::PairingState::Rejected);
+                }
+                tracing::warn!("discovery SAS pairing failed: {e}");
+                Response::err_with_code(
+                    req_id,
+                    ERR_CODE_AUTH_FAILED,
+                    format!("discovery SAS pairing failed: {e}"),
+                )
+            }
         }
     }
 
@@ -3735,6 +3958,77 @@ impl IpcServer {
                     .collect();
 
                 Response::ok(req.id, serde_json::json!({ "devices": devices }))
+            }
+
+            // LAN/SAS Phase 2: begin a discovery-initiated SAS pairing as the
+            // INITIATOR. Resolves the peer's bootstrap port (`bport`) from the
+            // shared discovery snapshot, generates an EPHEMERAL random PAKE
+            // password (the SAS — derived from the post-PAKE bound_key — is the
+            // real authenticator; the password is sent in-clear inside the
+            // bootstrap TLS), and runs `run_initiator_with_confirm` with a
+            // callback wired into the pairing state machine.
+            "pair_with_discovered" => {
+                let device_id = match req.params.get("device_id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: device_id",
+                        )
+                    }
+                };
+                self.pair_with_discovered(req.id.clone(), &device_id).await
+            }
+
+            // LAN/SAS Phase 2: poll the pairing state machine. Returns the
+            // current state plus the SAS + role when awaiting confirmation.
+            "pair_get_sas" => {
+                let state = self.pairing.snapshot();
+                let mut body = serde_json::json!({ "state": state.as_str() });
+                if let Some(sas) = state.sas() {
+                    body["sas"] = serde_json::Value::String(sas.to_string());
+                }
+                if let Some(role) = state.role() {
+                    body["role"] = serde_json::Value::String(role.as_str().to_string());
+                }
+                Response::ok(req.id, body)
+            }
+
+            // LAN/SAS Phase 2: deliver the local user's accept/reject decision
+            // into the in-flight handshake's confirm callback. The pairing
+            // succeeds (keys trusted + persisted) only when BOTH sides accept.
+            "pair_confirm_sas" => {
+                let accept = match req.params.get("accept").and_then(|v| v.as_bool()) {
+                    Some(b) => b,
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing or non-boolean param: accept",
+                        )
+                    }
+                };
+                let delivered = self.pairing.deliver_decision(accept);
+                if !delivered {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "no pairing is awaiting SAS confirmation",
+                    );
+                }
+                Response::ok(
+                    req.id,
+                    serde_json::json!({ "ok": true, "accepted": accept }),
+                )
+            }
+
+            // LAN/SAS Phase 2: abort an in-flight pairing. Dropping the confirm
+            // channel resolves the handshake's await as a rejection so the
+            // session key drops/zeroizes; the machine moves to `aborted`.
+            "pair_abort" => {
+                self.pairing.abort();
+                Response::ok(req.id, serde_json::json!({ "ok": true }))
             }
 
             "pair_peer" => {
@@ -8486,6 +8780,86 @@ mod tests {
                 .contains("P2P is disabled"),
             "must be the disabled-P2P error, not a parse error: {resp:?}"
         );
+    }
+
+    /// LAN/SAS Phase 2: `pair_get_sas` on a fresh server reports the machine as
+    /// `idle` with no SAS/role fields.
+    #[tokio::test]
+    async fn pair_get_sas_reports_idle_initially() {
+        let server = bare_server();
+        let resp = server
+            .dispatch(r#"{"id":"s1","method":"pair_get_sas","params":{}}"#)
+            .await;
+        assert!(resp.ok, "pair_get_sas must succeed: {resp:?}");
+        let data = resp.data.expect("data present");
+        assert_eq!(data["state"], "idle");
+        assert!(data.get("sas").is_none(), "no SAS when idle");
+        assert!(data.get("role").is_none(), "no role when idle");
+    }
+
+    /// LAN/SAS Phase 2: `pair_confirm_sas` with no pairing awaiting confirmation
+    /// is an invalid-argument error (there is no oneshot to fire).
+    #[tokio::test]
+    async fn pair_confirm_sas_without_pending_errors() {
+        let server = bare_server();
+        let resp = server
+            .dispatch(r#"{"id":"c1","method":"pair_confirm_sas","params":{"accept":true}}"#)
+            .await;
+        assert!(!resp.ok, "must error when nothing is awaiting confirmation");
+        assert_eq!(resp.error_code, Some("invalid_argument"));
+    }
+
+    /// LAN/SAS Phase 2: `pair_confirm_sas` missing the `accept` boolean is
+    /// rejected with invalid_argument.
+    #[tokio::test]
+    async fn pair_confirm_sas_missing_accept_errors() {
+        let server = bare_server();
+        let resp = server
+            .dispatch(r#"{"id":"c2","method":"pair_confirm_sas","params":{}}"#)
+            .await;
+        assert!(!resp.ok);
+        assert_eq!(resp.error_code, Some("invalid_argument"));
+    }
+
+    /// LAN/SAS Phase 2: `pair_abort` always succeeds (idempotent) and leaves the
+    /// machine non-active.
+    #[tokio::test]
+    async fn pair_abort_is_idempotent_and_succeeds() {
+        let server = bare_server();
+        let resp = server
+            .dispatch(r#"{"id":"a1","method":"pair_abort","params":{}}"#)
+            .await;
+        assert!(resp.ok, "pair_abort must succeed: {resp:?}");
+        // Still idle afterwards (nothing was in flight).
+        let resp = server
+            .dispatch(r#"{"id":"s2","method":"pair_get_sas","params":{}}"#)
+            .await;
+        assert_eq!(resp.data.unwrap()["state"], "idle");
+    }
+
+    /// LAN/SAS Phase 2: `pair_with_discovered` requires P2P (a cert); without one
+    /// it errors with invalid_argument rather than silently starting a pairing.
+    #[tokio::test]
+    async fn pair_with_discovered_errors_when_p2p_disabled() {
+        let server = bare_server(); // no cert / no discovery
+        let resp = server
+            .dispatch(
+                r#"{"id":"p1","method":"pair_with_discovered","params":{"device_id":"deadbeef"}}"#,
+            )
+            .await;
+        assert!(!resp.ok, "must error without P2P: {resp:?}");
+        assert_eq!(resp.error_code, Some("invalid_argument"));
+    }
+
+    /// LAN/SAS Phase 2: `pair_with_discovered` missing `device_id` is rejected.
+    #[tokio::test]
+    async fn pair_with_discovered_missing_device_id_errors() {
+        let server = bare_server();
+        let resp = server
+            .dispatch(r#"{"id":"p2","method":"pair_with_discovered","params":{}}"#)
+            .await;
+        assert!(!resp.ok);
+        assert_eq!(resp.error_code, Some("invalid_argument"));
     }
 
     /// CRITICAL-1: when a cert fingerprint IS configured, `get_own_fingerprint`
