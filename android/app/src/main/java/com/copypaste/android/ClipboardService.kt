@@ -88,6 +88,12 @@ class ClipboardService : Service() {
     private lateinit var clipboardManager: ClipboardManager
     private lateinit var syncManager: SyncManager
     private lateinit var fgsSyncLoop: FgsSyncLoop
+    /**
+     * Supabase Realtime WS client — primary push-receive channel (~1 s latency).
+     * Owned by this FGS: started in [onStartCommand], closed in [onDestroy].
+     * Null when the WS client cannot be constructed (should not happen in practice).
+     */
+    private var realtimeClient: SupabaseRealtimeClient? = null
 
     /**
      * The 1×1 px invisible overlay view that gives this process a WindowManager
@@ -151,7 +157,11 @@ class ClipboardService : Service() {
 
         val relayClient = RelayClient(settings.relayUrl)
         syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
-        fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager, DeviceKeyStore(this))
+
+        // P1.2/P1.4: Supabase Realtime WS client — constructed here so it can be
+        // passed to FgsSyncLoop as the wsConnected gate.
+        realtimeClient = SupabaseRealtimeClient(settings, syncManager, repository, scope)
+        fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager, DeviceKeyStore(this), realtimeClient)
 
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         ensureChannel(this)
@@ -198,7 +208,11 @@ class ClipboardService : Service() {
             monitorClipboard()
         }
 
-        // Start the FGS-internal 60-second sync loop for near-real-time incoming sync.
+        // P1.4: start Supabase Realtime WS push channel (~1 s latency).
+        // The WS client owns its own reconnect loop inside `scope`.
+        realtimeClient?.start()
+
+        // Start the catch-up poll loop (WS-aware intervals: 120s connected / 60s down).
         fgsSyncLoop.start(scope)
 
         return START_STICKY
@@ -318,6 +332,10 @@ class ClipboardService : Service() {
 
     override fun onDestroy() {
         fgsSyncLoop.stop()
+        // P1.4: close the WS channel gracefully (sends phx_leave) before the
+        // scope is cancelled — avoids an abrupt TCP close that Supabase would
+        // count against the connection quota.
+        realtimeClient?.close()
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         settings.stopObserving(prefsListener)
         removeCaptureOverlay()

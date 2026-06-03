@@ -52,26 +52,26 @@ class FgsSyncLoopBackoffTest {
 
     @Test
     fun intervalUsesNormalUntilThresholdThenIdle() {
-        // Stopgap: active cadence is 3s for streaks below IDLE_THRESHOLD_POLLS.
-        assertEquals(3_000L, FgsSyncLoop.intervalForEmptyStreak(0))
-        assertEquals(3_000L, FgsSyncLoop.intervalForEmptyStreak(1))
-        // Idle (15s) once the empty streak reaches the threshold.
-        assertTrue(FgsSyncLoop.intervalForEmptyStreak(100) >= 15_000L)
+        // WS-primary: active catch-up when WS is down is 60s.
+        assertEquals(60_000L, FgsSyncLoop.intervalForEmptyStreak(0))
+        assertEquals(60_000L, FgsSyncLoop.intervalForEmptyStreak(1))
+        // Idle (300s) once the empty streak reaches the threshold.
+        assertTrue(FgsSyncLoop.intervalForEmptyStreak(100) >= 300_000L)
     }
 
     @Test
-    fun activeCadenceIsThreeSecondStopgap() {
-        // The stopgap active interval must be 3s so a foreground/FGS-active app
-        // receives a Supabase clip within ~3s instead of up to a minute.
-        assertEquals(3_000L, FgsSyncLoop.intervalForEmptyStreak(0))
+    fun activeCadenceIsWsDown_60s() {
+        // With WS as primary push channel, the catch-up interval while WS is
+        // down must be 60s (not the old 3s stopgap).
+        assertEquals(60_000L, FgsSyncLoop.intervalForEmptyStreak(0))
     }
 
     @Test
-    fun idleBackoffStaysResponsive() {
-        // Idle backoff must not balloon back to the old 5-minute cadence while
-        // the FGS is alive — keep it responsive (<= 15s).
+    fun idleIntervalIs300s() {
+        // Idle interval is 300s (5 min) in the WS-primary world. The old
+        // <= 15s constraint was a stopgap; now the WS delivers in ~1s.
         val idle = FgsSyncLoop.intervalForEmptyStreak(IDLE_FAR_STREAK)
-        assertTrue("idle interval $idle should be <= 15s", idle <= 15_000L)
+        assertEquals("idle interval must be 300s", 300_000L, idle)
     }
 
     private companion object {
