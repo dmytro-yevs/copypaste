@@ -739,6 +739,55 @@ mod tests {
         assert_eq!(peers.superseded_count(), 1);
     }
 
+    // ── C-P0-4: revoke cuts off P2P (verifier rejects the removed peer) ──────
+
+    /// `PairedPeers::remove` is what the daemon's revoke handlers call to evict
+    /// a revoked peer from the live mTLS allowlist. After removal the peer's
+    /// fingerprint must be unknown — `is_known` is the exact predicate the
+    /// `PeerCertVerifier` consults to accept/reject a presented client/server
+    /// certificate, so an unknown fingerprint means the mTLS handshake is
+    /// rejected on the next attempt (P2P sync is cut off without a restart).
+    #[test]
+    fn remove_revokes_peer_so_verifier_rejects_it() {
+        let peers = PairedPeers::new();
+        peers.add("aabbccdd", "Bob's Phone");
+        assert!(peers.is_known("aabbccdd"), "freshly paired peer is known");
+        assert_eq!(peers.active_count(), 1);
+
+        peers.remove("aabbccdd");
+
+        assert!(
+            !peers.is_known("aabbccdd"),
+            "revoked peer must be unknown → verifier rejects its mTLS handshake"
+        );
+        assert_eq!(
+            peers.active_count(),
+            0,
+            "revoked peer removed from allowlist"
+        );
+    }
+
+    /// `remove` must also evict a peer that is currently in the cert-rotation
+    /// grace window (superseded slot), so revoking during an in-flight rotation
+    /// cannot leave a still-accepted fingerprint behind.
+    #[test]
+    fn remove_evicts_superseded_fingerprint_too() {
+        let peers = PairedPeers::new();
+        peers.add("oldfp", "Carol's Mac");
+        peers.rotate_peer("oldfp", "newfp", "Carol's Mac");
+        assert!(peers.is_known("oldfp"), "old fp graced before revoke");
+
+        // Revoke both the active and the still-graced fingerprint.
+        peers.remove("newfp");
+        peers.remove("oldfp");
+
+        assert!(!peers.is_known("newfp"), "active fp revoked");
+        assert!(
+            !peers.is_known("oldfp"),
+            "superseded fp must also be evicted by remove"
+        );
+    }
+
     #[test]
     fn rotate_peer_old_fingerprint_rejected_after_grace_expires() {
         let peers = PairedPeers::new();

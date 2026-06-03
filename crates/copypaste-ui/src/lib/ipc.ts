@@ -336,6 +336,27 @@ export const api = {
 
   setSyncPassphrase: (passphrase: string) =>
     ipcCall("set_sync_passphrase", { passphrase }),
+  /**
+   * Rotate the shared cloud/relay sync key to a NEW passphrase. This is the
+   * only honest cloud/relay device revocation: the old key (still held by a
+   * revoked device) can no longer decrypt items produced after the rotation,
+   * and the relay inbox id (HKDF of the key) diverges so the revoked device's
+   * saved token addresses a dead inbox. Remaining devices must re-provision
+   * (re-scan the pairing QR or re-enter the new passphrase) to keep syncing.
+   */
+  rotateSyncKey: (passphrase: string) =>
+    ipcCall<{ ok: boolean; rotated: boolean }>("rotate_sync_key", { passphrase }),
+  /**
+   * Revoke a peer from P2P AND rotate the sync key in one call, cutting the
+   * revoked device off from cloud/relay sync too. Requires the new passphrase;
+   * the daemon derives the key first, so a bad passphrase fails before any
+   * revocation state is mutated.
+   */
+  revokeAndRotate: (fingerprint: string, passphrase: string) =>
+    ipcCall<{ revoked_at: number; rotated: boolean }>("revoke_and_rotate", {
+      fingerprint,
+      passphrase,
+    }),
   getSyncStatus: () => ipcCall<SyncStatus>("get_sync_status", {}),
   testCloudConnection: () =>
     ipcCall<CloudTestResult>("cloud_test_connection", {}),

@@ -659,6 +659,13 @@ export function DevicesView() {
   const [rowState, setRowState] = useState<Record<string, DeviceRowState>>({});
   const [revokeAllPending, setRevokeAllPending] = useState(false);
   const [revokeAllConfirm, setRevokeAllConfirm] = useState(false);
+  // C-P0-4: the device a Revoke confirm dialog is open for (null = closed).
+  const [revokePrompt, setRevokePrompt] = useState<{ fingerprint: string; name: string } | null>(
+    null,
+  );
+  // New sync-key passphrase entered in the "Revoke & rotate" path.
+  const [rotatePassphrase, setRotatePassphrase] = useState("");
+  const [revokeBusy, setRevokeBusy] = useState(false);
   const [globalMsg, setGlobalMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const globalMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Reset timer for the "Copied! ✓" fingerprint affordance — held in a ref so
@@ -988,7 +995,10 @@ export function DevicesView() {
     }
   };
 
+  // Plain revoke: P2P-only (mTLS allowlist + denylist). Does NOT cut off
+  // cloud/relay — that requires a sync-key rotation (see handleRevokeAndRotate).
   const handleRevoke = async (fingerprint: string) => {
+    setRevokePrompt(null);
     setRowPending(fingerprint, true);
     try {
       const { revoked_at } = await api.revokePeer(fingerprint);
@@ -1002,6 +1012,38 @@ export function DevicesView() {
       if (peerActionCancelledRef.current) return;
       const msg = err instanceof IpcError ? err.message : "Revoke failed";
       setRowError(fingerprint, msg);
+    }
+  };
+
+  // C-P0-4: revoke from P2P AND rotate the sync key so the revoked device is
+  // also cut off from cloud/relay sync. `revoke_and_rotate` derives the new key
+  // first, so a too-short passphrase fails before any revocation is applied.
+  const handleRevokeAndRotate = async (fingerprint: string) => {
+    if (revokeBusy) return;
+    setRevokeBusy(true);
+    setRowPending(fingerprint, true);
+    try {
+      const { revoked_at } = await api.revokeAndRotate(fingerprint, rotatePassphrase);
+      if (peerActionCancelledRef.current) return;
+      setRevokePrompt(null);
+      setRotatePassphrase("");
+      setRowState((prev) => ({
+        ...prev,
+        [fingerprint]: { revokedAt: revoked_at, pending: false, error: null },
+      }));
+      if (globalMsgTimer.current !== null) clearTimeout(globalMsgTimer.current);
+      setGlobalMsg({
+        text: "Revoked & rotated sync key — re-provision remaining devices",
+        isError: false,
+      });
+      globalMsgTimer.current = setTimeout(() => setGlobalMsg(null), 5000);
+      await loadPeers();
+    } catch (err) {
+      if (peerActionCancelledRef.current) return;
+      const msg = err instanceof IpcError ? err.message : "Revoke & rotate failed";
+      setRowError(fingerprint, msg);
+    } finally {
+      if (!peerActionCancelledRef.current) setRevokeBusy(false);
     }
   };
 
@@ -1202,7 +1244,13 @@ export function DevicesView() {
               peer={peer}
               rowSt={rowState[peer.fingerprint]}
               onUnpair={(fp) => void handleUnpair(fp)}
-              onRevoke={(fp) => void handleRevoke(fp)}
+              onRevoke={(fp) => {
+                setRotatePassphrase("");
+                setRevokePrompt({
+                  fingerprint: fp,
+                  name: peer.name || `Device ${fp.slice(0, 8)}`,
+                });
+              }}
             />
           ))}
       </div>
@@ -1315,6 +1363,73 @@ export function DevicesView() {
           onClose={handleClosePairing}
           onPaired={loadPeers}
         />
+      )}
+
+      {/* ── C-P0-4: Revoke confirm — offer P2P-only vs cloud/relay rotation ── */}
+      {revokePrompt !== null && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Revoke device"
+        >
+          <div className="w-full max-w-sm rounded-ide-lg border border-ide-border bg-ide-elevated p-5 shadow-ide-lg">
+            <p className="mb-1 text-[13px] font-medium text-ide-text">
+              Revoke “{revokePrompt.name}”
+            </p>
+            <p className="mb-3 text-[12px] leading-relaxed text-ide-dim">
+              Revoking removes this device from P2P. To also cut off cloud/relay
+              sync, rotate the sync key — remaining devices must re-scan the
+              pairing QR (or re-enter the new passphrase) to keep syncing. Rotate
+              now?
+            </p>
+
+            <label className="mb-1 block text-[11px] font-medium text-ide-faint">
+              New sync passphrase (for rotation)
+            </label>
+            <input
+              type="password"
+              value={rotatePassphrase}
+              onChange={(e) => setRotatePassphrase(e.target.value)}
+              placeholder="At least 8 characters"
+              autoComplete="new-password"
+              disabled={revokeBusy}
+              className="mb-3 w-full rounded-ide border border-ide-border bg-ide-panel/60 px-2.5 py-1.5 text-[12px] text-ide-text placeholder:text-ide-faint focus:border-ide-accent/60 focus:outline-none disabled:opacity-40"
+            />
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  setRevokePrompt(null);
+                  setRotatePassphrase("");
+                }}
+                disabled={revokeBusy}
+                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleRevoke(revokePrompt.fingerprint)}
+                disabled={revokeBusy}
+                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Revoke only
+              </button>
+              <button
+                onClick={() => void handleRevokeAndRotate(revokePrompt.fingerprint)}
+                disabled={revokeBusy || rotatePassphrase.length < 8}
+                title={
+                  rotatePassphrase.length < 8
+                    ? "Enter a new passphrase (min 8 chars) to rotate"
+                    : undefined
+                }
+                className="rounded-ide border border-ide-danger/40 bg-ide-danger/15 px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {revokeBusy ? "…" : "Revoke & rotate"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </ViewShell>
   );
