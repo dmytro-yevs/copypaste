@@ -73,11 +73,15 @@ const PUSH_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 
 // ── Realtime / poll-interval tuning (v0.5.3) ─────────────────────────────────
 
-/// HTTP poll interval when the Realtime WebSocket is **connected**.
+/// HTTP poll interval when the Realtime WebSocket is **connected** *and the
+/// Phoenix Channel join has been confirmed* (`phx_reply ok`).
 ///
-/// The WS delivers INSERT events instantly, so the poll loop runs only as a
-/// catch-up / missed-event safety net at a much lower frequency.
-const POLL_INTERVAL_WS_CONNECTED: Duration = Duration::from_secs(120);
+/// The WS delivers INSERT events instantly once the channel is subscribed, so
+/// the poll loop runs only as a catch-up / missed-event safety net at a lower
+/// frequency.  Lowered from 120 s → 60 s (Phase 3) to halve the worst-case
+/// missed-event window while still keeping the HTTP load negligible compared
+/// to full-speed fallback polling.
+const POLL_INTERVAL_WS_CONNECTED: Duration = Duration::from_secs(60);
 
 /// HTTP poll interval when the Realtime WebSocket is **disconnected** or
 /// has never connected (original behaviour — full-speed polling as the sole
@@ -1947,8 +1951,51 @@ async fn ws_ingest_loop(
             }
         };
 
-        tracing::info!("ws_ingest_loop: WebSocket connected; setting ws_connected=true");
-        ws_connected.store(true, Ordering::Relaxed);
+        tracing::info!(
+            "ws_ingest_loop: WebSocket socket open; awaiting Phoenix Channel join confirmation"
+        );
+
+        // Phase 3: gate ws_connected=true on the Phoenix Channel join being
+        // confirmed (phx_reply ok), NOT merely on the TCP/WS socket opening.
+        // Until the join is confirmed the channel is not yet subscribed and
+        // will not deliver events, so backing the poll loop off to
+        // POLL_INTERVAL_WS_CONNECTED before that point would open a window of
+        // up to 60 s where clips could be missed.
+        //
+        // We wait with a 10 s timeout so a server that never replies to phx_join
+        // (e.g. malformed credentials, network issue) still triggers a reconnect
+        // rather than hanging indefinitely.  Shutdown is also handled.
+        let joined_notify = handle.channel_joined();
+        let join_confirmed = tokio::select! {
+            biased;
+            _ = shutdown.notified() => {
+                tracing::info!("ws_ingest_loop: shutdown received while awaiting channel join");
+                ws_connected.store(false, Ordering::Relaxed);
+                handle.shutdown().await;
+                return;
+            }
+            _ = tokio::time::sleep(Duration::from_secs(10)) => {
+                tracing::warn!(
+                    "ws_ingest_loop: timed out waiting for phx_reply ok (10 s); \
+                     reconnecting without setting ws_connected"
+                );
+                false
+            }
+            _ = joined_notify.notified() => {
+                true
+            }
+        };
+
+        if join_confirmed {
+            tracing::info!(
+                "ws_ingest_loop: Phoenix Channel join confirmed; setting ws_connected=true"
+            );
+            ws_connected.store(true, Ordering::Relaxed);
+        } else {
+            // Join timed out — drop the handle (triggers shutdown via Drop) and retry.
+            drop(handle);
+            continue;
+        }
 
         // Drain events until the channel closes (WS disconnect) or shutdown fires.
         loop {

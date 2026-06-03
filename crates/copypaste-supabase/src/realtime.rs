@@ -345,6 +345,11 @@ pub struct RealtimeClient {
     tx: mpsc::Sender<ChangeEvent>,
     shutdown: Arc<Notify>,
     running: Arc<AtomicBool>,
+    /// Fired once when the Phoenix Channel join is confirmed (`phx_reply` with
+    /// `status == "ok"`).  Exposed via [`ClientHandle::channel_joined`] so the
+    /// daemon can gate `ws_connected = true` on actual join confirmation rather
+    /// than mere socket-open.
+    channel_joined: Arc<Notify>,
 }
 
 impl RealtimeClient {
@@ -353,12 +358,14 @@ impl RealtimeClient {
         let (tx, rx) = mpsc::channel(config.channel_capacity);
         let shutdown = Arc::new(Notify::new());
         let running = Arc::new(AtomicBool::new(false));
+        let channel_joined = Arc::new(Notify::new());
         (
             Self {
                 config,
                 tx,
                 shutdown,
                 running,
+                channel_joined,
             },
             rx,
         )
@@ -398,12 +405,14 @@ impl RealtimeClient {
             return Ok(ClientHandle {
                 shutdown: self.shutdown.clone(),
                 running: self.running.clone(),
+                channel_joined: self.channel_joined.clone(),
             });
         }
 
         let handle = ClientHandle {
             shutdown: self.shutdown.clone(),
             running: self.running.clone(),
+            channel_joined: self.channel_joined.clone(),
         };
 
         self.running.store(true, Ordering::SeqCst);
@@ -414,6 +423,7 @@ impl RealtimeClient {
             self.tx,
             self.shutdown,
             self.running,
+            self.channel_joined,
         ));
 
         Ok(handle)
@@ -426,9 +436,27 @@ impl RealtimeClient {
 pub struct ClientHandle {
     shutdown: Arc<Notify>,
     running: Arc<AtomicBool>,
+    /// Shared with the background `connection_loop` task.  Notified once when
+    /// the Phoenix Channel join is confirmed (`phx_reply` `status == "ok"`).
+    /// See [`channel_joined`](Self::channel_joined).
+    channel_joined: Arc<Notify>,
 }
 
 impl ClientHandle {
+    /// Return the channel-join notification handle.
+    ///
+    /// The returned [`Arc<Notify>`] is notified exactly once per successful
+    /// Phoenix Channel join confirmation (`phx_reply` with `status == "ok"`).
+    /// Callers should `await` the notify (with a timeout/shutdown guard) before
+    /// treating the WebSocket as *fully connected* — the socket being open does
+    /// not guarantee that the channel subscription is active.
+    ///
+    /// Multiple calls return the same underlying `Arc`, so it is safe (and
+    /// cheap) to clone for use in a `select!` branch.
+    pub fn channel_joined(&self) -> Arc<Notify> {
+        self.channel_joined.clone()
+    }
+
     /// Signal the client to shut down and wait for acknowledgement.
     pub async fn shutdown(self) {
         // `signal_shutdown` clears `running` and wakes any parked waiter; the
@@ -506,6 +534,7 @@ async fn connection_loop(
     tx: mpsc::Sender<ChangeEvent>,
     shutdown: Arc<Notify>,
     running: Arc<AtomicBool>,
+    channel_joined: Arc<Notify>,
 ) {
     // Audit-concurrency HIGH #4: clear `running` on ALL exit paths (return,
     // panic, abort) via a Drop guard, not just the bottom of the function.
@@ -522,7 +551,7 @@ async fn connection_loop(
         // Fix HIGH #1: strip ?apikey=... so the anon key never appears in logs.
         tracing::info!(url = %scrub_ws_url(&config.ws_url), "Connecting to Supabase Realtime");
 
-        match run_session(&config, &tx, &shutdown).await {
+        match run_session(&config, &tx, &shutdown, &channel_joined).await {
             SessionResult::Shutdown => {
                 tracing::info!("Supabase Realtime client: shutdown requested");
                 break;
@@ -590,6 +619,7 @@ async fn run_session(
     config: &RealtimeConfig,
     tx: &mpsc::Sender<ChangeEvent>,
     shutdown: &Arc<Notify>,
+    channel_joined: &Arc<Notify>,
 ) -> SessionResult {
     // Parse the URL.
     let url = match config
@@ -689,7 +719,7 @@ async fn run_session(
                         return SessionResult::Disconnected(session_started.elapsed());
                     }
                     Some(Ok(msg)) => {
-                        if let Some(result) = handle_message(msg, tx, &config.topic).await {
+                        if let Some(result) = handle_message(msg, tx, &config.topic, channel_joined).await {
                             let _ = hb_stop_tx.send(());
                             // For Disconnected results from handle_message, replace
                             // the placeholder duration with the actual session age.
@@ -759,6 +789,7 @@ async fn handle_message(
     msg: Message,
     tx: &mpsc::Sender<ChangeEvent>,
     topic: &str,
+    channel_joined: &Arc<Notify>,
 ) -> Option<SessionResult> {
     match msg {
         Message::Text(text) => {
@@ -784,7 +815,7 @@ async fn handle_message(
                     );
                 }
                 Ok(phoenix_msg) => {
-                    dispatch_event(&phoenix_msg, tx, topic).await;
+                    dispatch_event(&phoenix_msg, tx, topic, channel_joined).await;
                 }
             }
             None
@@ -810,12 +841,31 @@ async fn handle_message(
 }
 
 /// Route a parsed Phoenix message to the appropriate handler.
-async fn dispatch_event(msg: &PhoenixMessage, tx: &mpsc::Sender<ChangeEvent>, topic: &str) {
+///
+/// The `channel_joined` notify is fired when a `phx_reply` with
+/// `status == "ok"` is observed — indicating the Phoenix Channel join has been
+/// confirmed by the server.  The daemon's `ws_ingest_loop` awaits this signal
+/// before setting `ws_connected = true` so the HTTP catch-up poll does not back
+/// off to the slow rate until the channel is actually delivering events.
+async fn dispatch_event(
+    msg: &PhoenixMessage,
+    tx: &mpsc::Sender<ChangeEvent>,
+    topic: &str,
+    channel_joined: &Arc<Notify>,
+) {
     match msg.event.as_str() {
         PhoenixEvent::REPLY => {
             let status = msg.payload.get("status").and_then(|s| s.as_str());
             if status == Some("ok") {
                 tracing::info!(topic = %msg.topic, "Phoenix Channel join confirmed (phx_reply ok)");
+                // Signal the daemon that the channel subscription is live.
+                // `notify_one` stores a permit so the next call to
+                // `channel_joined.notified().await` completes immediately even
+                // if the waiter hasn't registered yet (i.e. the phx_reply
+                // arrives before ws_ingest_loop reaches its select! branch).
+                // `notify_waiters` would only wake *current* waiters and the
+                // permit would be lost if no one was waiting at that instant.
+                channel_joined.notify_one();
             } else {
                 tracing::warn!(topic = %msg.topic, ?status, "Phoenix reply with non-ok status");
             }
@@ -1007,6 +1057,7 @@ mod tests {
     async fn dispatch_postgres_changes_sends_to_channel() {
         let (tx, mut rx) = mpsc::channel(8);
         let topic = "realtime:clipboard_items";
+        let joined = Arc::new(Notify::new());
 
         let msg = PhoenixMessage {
             join_ref: None,
@@ -1022,7 +1073,7 @@ mod tests {
             }),
         };
 
-        dispatch_event(&msg, &tx, topic).await;
+        dispatch_event(&msg, &tx, topic, &joined).await;
 
         let event = rx.try_recv().expect("event should be in channel");
         assert_eq!(event.change_type, ChangeType::Insert);
@@ -1033,6 +1084,7 @@ mod tests {
     async fn dispatch_phx_reply_ok_does_not_send_event() {
         let (tx, mut rx) = mpsc::channel(8);
         let topic = "realtime:clipboard_items";
+        let joined = Arc::new(Notify::new());
 
         let msg = PhoenixMessage {
             join_ref: Some("1".to_owned()),
@@ -1042,7 +1094,7 @@ mod tests {
             payload: serde_json::json!({ "status": "ok", "response": {} }),
         };
 
-        dispatch_event(&msg, &tx, topic).await;
+        dispatch_event(&msg, &tx, topic, &joined).await;
         assert!(
             rx.try_recv().is_err(),
             "phx_reply should not produce a ChangeEvent"
@@ -1053,6 +1105,7 @@ mod tests {
     async fn dispatch_unknown_event_does_not_send_event() {
         let (tx, mut rx) = mpsc::channel(8);
         let topic = "realtime:clipboard_items";
+        let joined = Arc::new(Notify::new());
 
         let msg = PhoenixMessage {
             join_ref: None,
@@ -1062,7 +1115,7 @@ mod tests {
             payload: serde_json::json!({}),
         };
 
-        dispatch_event(&msg, &tx, topic).await;
+        dispatch_event(&msg, &tx, topic, &joined).await;
         assert!(rx.try_recv().is_err());
     }
 
@@ -1283,6 +1336,7 @@ mod tests {
         let handle = ClientHandle {
             shutdown: shutdown.clone(),
             running: running.clone(),
+            channel_joined: Arc::new(Notify::new()),
         };
         assert!(handle.is_running(), "precondition: flag starts true");
 
@@ -1333,6 +1387,97 @@ mod tests {
         for _ in 0..8 {
             tokio::task::yield_now().await;
         }
+    }
+
+    // ── channel_joined signal (Phase 3) ──────────────────────────────────────
+
+    /// `dispatch_event` must fire the `channel_joined` notify when it sees
+    /// `phx_reply` with `status == "ok"`.
+    ///
+    /// Contract: `ClientHandle::channel_joined()` must return an `Arc<Notify>`
+    /// that is notified by `dispatch_event` so that `ws_ingest_loop` in the
+    /// daemon can gate `ws_connected=true` on channel confirmation instead of
+    /// bare socket-open.
+    #[tokio::test]
+    async fn dispatch_phx_reply_ok_fires_channel_joined_notify() {
+        let (tx, _rx) = mpsc::channel(8);
+        let topic = "realtime:clipboard_items";
+        let joined = Arc::new(Notify::new());
+
+        let msg = PhoenixMessage {
+            join_ref: Some("1".to_owned()),
+            msg_ref: Some("1".to_owned()),
+            topic: topic.to_owned(),
+            event: PhoenixEvent::REPLY.to_owned(),
+            payload: serde_json::json!({ "status": "ok", "response": {} }),
+        };
+
+        // Must not be notified before calling dispatch_event.
+        let notified_before = tokio::time::timeout(
+            std::time::Duration::from_millis(0),
+            joined.clone().notified(),
+        )
+        .await
+        .is_ok();
+        assert!(
+            !notified_before,
+            "channel_joined must not fire before dispatch_event"
+        );
+
+        dispatch_event(&msg, &tx, topic, &joined).await;
+
+        // Must be notified now (use a tight timeout to stay deterministic).
+        let notified_after =
+            tokio::time::timeout(std::time::Duration::from_millis(50), joined.notified())
+                .await
+                .is_ok();
+        assert!(
+            notified_after,
+            "dispatch_event must fire channel_joined on phx_reply ok"
+        );
+    }
+
+    /// A non-ok `phx_reply` must NOT fire the `channel_joined` notify.
+    #[tokio::test]
+    async fn dispatch_phx_reply_error_does_not_fire_channel_joined() {
+        let (tx, _rx) = mpsc::channel(8);
+        let topic = "realtime:clipboard_items";
+        let joined = Arc::new(Notify::new());
+
+        let msg = PhoenixMessage {
+            join_ref: Some("1".to_owned()),
+            msg_ref: Some("1".to_owned()),
+            topic: topic.to_owned(),
+            event: PhoenixEvent::REPLY.to_owned(),
+            payload: serde_json::json!({ "status": "error", "response": {} }),
+        };
+
+        dispatch_event(&msg, &tx, topic, &joined).await;
+
+        let notified =
+            tokio::time::timeout(std::time::Duration::from_millis(10), joined.notified())
+                .await
+                .is_ok();
+        assert!(
+            !notified,
+            "dispatch_event must NOT fire channel_joined on non-ok phx_reply"
+        );
+    }
+
+    /// `ClientHandle` must expose a `channel_joined()` method returning
+    /// `Arc<Notify>` so the daemon can await join confirmation.
+    #[tokio::test]
+    async fn client_handle_exposes_channel_joined() {
+        let config = RealtimeConfig::new(
+            "https://abc.supabase.co",
+            "k",
+            RealtimeConfig::DEFAULT_TOPIC,
+            false, // disabled — no real network
+        );
+        let (client, _rx) = RealtimeClient::new(config);
+        let handle = client.connect().await.expect("connect ok");
+        // Must compile and return an Arc<Notify>.
+        let _joined: Arc<Notify> = handle.channel_joined();
     }
 
     // ── Disabled client ───────────────────────────────────────────────────────
