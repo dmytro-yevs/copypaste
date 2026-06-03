@@ -2,9 +2,12 @@
 
 package com.copypaste.android
 
+import android.content.pm.PackageManager
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
+import android.util.LruCache
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -210,6 +213,72 @@ private fun relativeTime(ms: Long): String {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// AB-12 — broad copy-back URI grant
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Grant FLAG_GRANT_READ_URI_PERMISSION for [uri] to EVERY package that can
+ * receive a paste, instead of a single hardcoded "com.android.systemui".
+ *
+ * The pasting app varies by OEM/launcher (Gboard, SystemUI clipboard overlay,
+ * Samsung clipboard, the target app itself), so a single-package grant left
+ * paste broken on many devices. We enumerate installed packages and grant read
+ * to each; failures per package are ignored (a package we cannot grant to was
+ * never going to read the URI anyway).
+ */
+private fun grantUriToAll(ctx: Context, uri: Uri) {
+    val pm = ctx.packageManager
+    val packages = try {
+        pm.getInstalledPackages(0)
+    } catch (e: Exception) {
+        android.util.Log.w("HistoryActivity", "grantUriToAll: package enumeration failed: ${e.message}")
+        emptyList<android.content.pm.PackageInfo>()
+    }
+    for (pkg in packages) {
+        try {
+            ctx.grantUriPermission(
+                pkg.packageName,
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+            )
+        } catch (_: Exception) {
+            // Some system packages reject the grant; harmless — skip them.
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AB-8 — bounded LRU cache for decoded/cached image bytes
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Process-wide bounded LRU of raw (encoded) display image bytes keyed by item id,
+ * mirroring the macOS `ImageThumb` cache. Capped at [IMAGE_CACHE_MAX_BYTES]
+ * (16 MiB) by summed byte length so the history list cannot blow up memory by
+ * holding every image at once. The row fetches its thumbnail through this cache
+ * on demand (lazy) rather than [ClipboardRepository.getItems] attaching bytes for
+ * every image up front.
+ */
+private const val IMAGE_CACHE_MAX_BYTES = 16 * 1024 * 1024 // 16 MiB
+
+private val imageByteCache = object : LruCache<String, ByteArray>(IMAGE_CACHE_MAX_BYTES) {
+    override fun sizeOf(key: String, value: ByteArray): Int = value.size
+}
+
+/**
+ * Return display bytes for image item [id], served from [imageByteCache] when
+ * present, otherwise fetched once via [ClipboardRepository.getDisplayImageBytes]
+ * (thumbnail preferred, full-res fallback) and cached. Returns null when the item
+ * has no stored image bytes.
+ */
+private fun cachedDisplayImageBytes(repository: ClipboardRepository, id: String): ByteArray? {
+    imageByteCache.get(id)?.let { return it }
+    val bytes = repository.getDisplayImageBytes(id) ?: return null
+    imageByteCache.put(id, bytes)
+    return bytes
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Screen
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -283,11 +352,45 @@ fun HistoryScreen(
                     .thenByDescending { it.wallTimeMs }
             )
     }
-    // Filter: case-insensitive substring match on snippet
-    val filteredItems = remember(sortedItems, searchQuery) {
+    // ── AB-11: full-content search ───────────────────────────────────────────
+    // The snippet-only filter missed any match past the 140-char preview. We now
+    // ALSO match the full decrypted text. To stay responsive we (a) show instant
+    // snippet matches synchronously, and (b) compute full-content matches in the
+    // background (debounced) and union them in once ready. Result: typing feels
+    // immediate and deep matches surface shortly after.
+    val searchRepository = remember { ClipboardRepository(ctx) }
+    var fullMatchIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var fullMatchQuery by remember { mutableStateOf("") }
+
+    LaunchedEffect(searchQuery, sortedItems) {
         val q = searchQuery.trim()
-        if (q.isEmpty()) sortedItems
-        else sortedItems.filter { it.snippet.contains(q, ignoreCase = true) }
+        if (q.isEmpty()) {
+            fullMatchIds = emptySet()
+            fullMatchQuery = ""
+            return@LaunchedEffect
+        }
+        // Debounce: wait out rapid keystrokes before the (decrypting) full scan.
+        delay(250)
+        val key = settings.encryptionKey
+        val ids = sortedItems.map { it.id }
+        fullMatchIds = searchRepository.searchIds(ids, q, key)
+        fullMatchQuery = q
+    }
+
+    // Filter: snippet match (instant) ∪ full-content match (async, debounced).
+    val filteredItems = remember(sortedItems, searchQuery, fullMatchIds, fullMatchQuery) {
+        val q = searchQuery.trim()
+        if (q.isEmpty()) {
+            sortedItems
+        } else {
+            // Only trust fullMatchIds when it was computed for the CURRENT query;
+            // otherwise fall back to the snippet match alone until it catches up.
+            val useFull = fullMatchQuery == q
+            sortedItems.filter { item ->
+                item.snippet.contains(q, ignoreCase = true) ||
+                    (useFull && item.id in fullMatchIds)
+            }
+        }
     }
 
     BackHandler(enabled = selectionMode) {
@@ -1045,6 +1148,7 @@ private fun HistoryList(
                 Column {
                     HistoryRow(
                         item = item,
+                        repository = repository,
                         maskSensitive = maskSensitive,
                         imageMaxHeightDp = imageMaxHeightDp,
                         previewDelayMs = previewDelayMs,
@@ -1087,12 +1191,12 @@ private fun HistoryList(
                                             if (uri != null) {
                                                 val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
                                                 clip.addItem(ClipData.Item(uri))
-                                                // Grant read permission so the receiving app can read the URI.
-                                                ctx.grantUriPermission(
-                                                    "com.android.systemui",
-                                                    uri,
-                                                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                                                )
+                                                // AB-12: broad URI read grant. Granting only to
+                                                // "com.android.systemui" failed on OEMs where the
+                                                // pasting app differs. Broaden the grant to every
+                                                // package that can handle the URI so paste works
+                                                // regardless of which app consumes the clip.
+                                                grantUriToAll(ctx, uri)
                                                 cm.setPrimaryClip(clip)
                                             }
                                             // else: image bytes unavailable, nothing to copy
@@ -1125,11 +1229,8 @@ private fun HistoryList(
                                             }
                                             if (uri != null) {
                                                 val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste file", uri)
-                                                ctx.grantUriPermission(
-                                                    "com.android.systemui",
-                                                    uri,
-                                                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                                                )
+                                                // AB-12: broad URI read grant (see image case above).
+                                                grantUriToAll(ctx, uri)
                                                 cm.setPrimaryClip(clip)
                                             }
                                             // else: file bytes unavailable or FileProvider failed; nothing to copy
@@ -1182,6 +1283,7 @@ private fun HistoryList(
 @Composable
 private fun HistoryRow(
     item: ClipboardItem,
+    repository: ClipboardRepository,
     maskSensitive: Boolean,
     imageMaxHeightDp: Int,
     previewDelayMs: Long,
@@ -1225,20 +1327,27 @@ private fun HistoryRow(
         label = "rowPressScale",
     )
 
-    // Decode image bytes off the main thread to avoid jank.
+    // AB-8: lazily fetch + decode image bytes off the main thread, on demand,
+    // through the bounded LRU ([cachedDisplayImageBytes]). getItems() no longer
+    // attaches imagePng, so the working set is the visible rows only — not every
+    // image in history at once. Thumbnail is preferred over full-res.
     val imageBitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
         initialValue = null,
         key1 = item.id,
-        key2 = item.imagePng,
     ) {
-        value = item.imagePng?.let { bytes ->
-            withContext(Dispatchers.Default) {
-                runCatching {
-                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-                }.getOrElse { t ->
-                    // Fix P2: log decode failures so they are diagnosable via adb/log export.
-                    AppLogger.w("HistoryRow", "image decode failed for item ${item.id}", t)
-                    null
+        value = if (!item.isImage) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                val bytes = cachedDisplayImageBytes(repository, item.id)
+                bytes?.let {
+                    runCatching {
+                        BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap()
+                    }.getOrElse { t ->
+                        // Fix P2: log decode failures so they are diagnosable via adb/log export.
+                        AppLogger.w("HistoryRow", "image decode failed for item ${item.id}", t)
+                        null
+                    }
                 }
             }
         }
