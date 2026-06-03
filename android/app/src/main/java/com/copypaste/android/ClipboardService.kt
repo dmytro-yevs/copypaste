@@ -468,8 +468,17 @@ class ClipboardService : Service() {
         /**
          * Capture an image clipboard item from a content:// [uri].
          *
-         * Stores the original image at full resolution. OOM is caught explicitly.
-         * The size cap is enforced by [ClipboardRepository.storeImageBytes].
+         * Stores the original image at full resolution AND generates a downscaled
+         * thumbnail (max ~680 px, WebP LOSSY 80 on API 30+, PNG fallback) stored
+         * under a separate "item_thumb_<id>" key. The history list displays the
+         * thumbnail for lower memory pressure; copy/open still uses full-res.
+         *
+         * OOM is caught explicitly. The full-res size cap is enforced by
+         * [ClipboardRepository.storeImageBytes].
+         *
+         * TODO(synced-images): when a synced image arrives via FgsSyncLoop
+         *   (off-limits file), call storeThumbnailBytes there too so synced image
+         *   rows also benefit from thumbnail display.
          */
         @Suppress("UNUSED_PARAMETER") // syncManager reserved for future image-sync wiring
         suspend fun captureImageClip(
@@ -511,16 +520,30 @@ class ClipboardService : Service() {
                 return
             }
 
-            // Re-encode as PNG (lossless). bitmap.recycle() runs in finally so
-            // native pixel memory is released immediately after the byte array is built.
-            val pngBytes: ByteArray? = try {
-                ByteArrayOutputStream().use { baos ->
-                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-                    baos.toByteArray()
+            // Re-encode as PNG (lossless) for the full-res copy.
+            // Also generate a thumbnail from the same Bitmap before recycling.
+            // Both operations run before recycle() — bitmap stays valid for both.
+            val pngBytes: ByteArray?
+            val thumbBytes: ByteArray?
+            try {
+                pngBytes = try {
+                    ByteArrayOutputStream().use { baos ->
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                        baos.toByteArray()
+                    }
+                } catch (t: Throwable) {
+                    Log.w(TAG, "captureImageClip: PNG encode failed: ${t.message}")
+                    null
                 }
-            } catch (t: Throwable) {
-                Log.w(TAG, "captureImageClip: PNG encode failed: ${t.message}")
-                null
+
+                // Generate thumbnail while the Bitmap is still valid (before recycle).
+                // ImageThumbnailUtils.generateThumbnail does NOT recycle bitmap.
+                thumbBytes = try {
+                    ImageThumbnailUtils.generateThumbnail(bitmap)
+                } catch (t: Throwable) {
+                    Log.w(TAG, "captureImageClip: thumbnail generation failed (non-fatal): ${t.message}")
+                    null
+                }
             } finally {
                 bitmap.recycle()
             }
@@ -538,7 +561,14 @@ class ClipboardService : Service() {
             }
 
             repository.storeImageBytes(storedId, pngBytes)
-            Log.d(TAG, "captureImageClip: stored image $storedId (${pngBytes.size} bytes, mime=$mimeType)")
+            Log.d(TAG, "captureImageClip: stored full-res image $storedId (${pngBytes.size} bytes, mime=$mimeType)")
+
+            if (thumbBytes != null) {
+                repository.storeThumbnailBytes(storedId, thumbBytes)
+                Log.d(TAG, "captureImageClip: stored thumbnail $storedId (${thumbBytes.size} bytes)")
+            } else {
+                Log.d(TAG, "captureImageClip: no thumbnail generated for $storedId — history will fall back to full-res")
+            }
 
             bumpTodayCounter(context)
             refreshNotification(context)
