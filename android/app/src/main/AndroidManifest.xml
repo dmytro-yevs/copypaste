@@ -191,6 +191,32 @@
             android:exported="false"
             android:theme="@style/Theme.CopyPaste" />
 
+        <!--
+            ClipboardFloatingActivity: transparent focusable overlay used for the
+            ClipCascade-technique background clipboard read on Android 10+ (API 29+).
+
+            Launched by LogcatCaptureService when a clipboard-access denial for our
+            package is detected in logcat. The Activity adds a TYPE_APPLICATION_OVERLAY
+            window, clears FLAG_NOT_FOCUSABLE to gain input focus, waits for the
+            OnGlobalLayoutListener callback (the OS lifts the API-29+ clipboard
+            restriction at that point), reads getPrimaryClip(), routes through the
+            shared capture pipeline, then finishes.
+
+            exported=false       — internal use only; no intent-filter needed
+            excludeFromRecents=true — must not appear in the Recents list
+            noHistory=true       — must not push onto the back stack
+            taskAffinity=""      — detach from the main task so FLAG_ACTIVITY_CLEAR_TASK
+                                   does not affect MainActivity's back stack
+            theme=FloatingOverlay — translucent/floating/no-dim (invisible to the user)
+        -->
+        <activity
+            android:name=".ClipboardFloatingActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.CopyPaste.FloatingOverlay" />
+
         <!-- Devices screen: paired P2P peer list + Unpair/Revoke actions.
              Surfaced as the DEVICES tab in MainActivity's bottom nav and as a
              "Devices" nav row in Settings › General. -->

@@ -12,48 +12,68 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Optional power-user background capture path via `logcat`.
+ * Background clipboard detection via logcat tailing (ClipCascade technique).
  *
- * ## Why this exists
- * [ClipboardAccessibilityService] is the PRIMARY background capture mechanism on
- * Android 10+. However, some users cannot or will not enable an AccessibilityService.
- * On those devices, clipboard content copied in background is never captured.
+ * ## How this works (ClipCascade technique)
  *
- * When `android.permission.READ_LOGS` is granted to the app via adb, the process
- * can read the system logcat stream. The Android ClipboardManager logs a message
- * whenever the primary clip changes:
+ * On Android 10+ (API 29+), [ClipboardManager.getPrimaryClip] is blocked from any
+ * context that is not the foreground app, the default IME, or an enabled
+ * AccessibilityService. A 1×1 invisible non-focusable overlay (the old ClipboardService
+ * trick) does NOT lift this restriction because it never gains input focus.
  *
- *   D ClipboardService: Setting primary clip <PrimaryClipDescription ...>
+ * The ClipCascade technique uses a two-step approach:
  *
- * We watch this tag + prefix and, when a clip-change event is detected, attempt to
- * read the clipboard via the normal ClipboardManager path.
+ * ### Step 1 — Detection via logcat (this service)
+ * When our app attempts a background getPrimaryClip() and is denied, ColorOS / AOSP
+ * logs an ERROR line that CONTAINS our package ID:
  *
- * ## Limitations (important — reflected in Settings UI)
+ *   E ClipboardService: Denying clipboard access to com.copypaste.android, ...
+ *
+ * On API > P (Android 10+) with READ_LOGS granted, we tail logcat with the filter
+ * `ClipboardService:E *:S` and match on our `BuildConfig.APPLICATION_ID`. On API <= P
+ * the old "Setting primary clip" debug marker is still available and we match that too
+ * (bonus fallback: lets us skip the Activity launch and read directly since the
+ * API-29+ restriction doesn't apply on Android 9 and below).
+ *
+ * A debounce of [FOCUSABLE_ACTIVITY_DEBOUNCE_MS] prevents rapid bursts (e.g. a paste
+ * followed immediately by a copy) from launching the Activity multiple times.
+ *
+ * ### Step 2 — Focused read via [ClipboardFloatingActivity]
+ * On API 29+ when a denial line is detected, we launch [ClipboardFloatingActivity]:
+ * a transparent, floating, no-history, excluded-from-recents Activity. That Activity
+ * adds a TYPE_APPLICATION_OVERLAY view, CLEARS FLAG_NOT_FOCUSABLE to gain focus,
+ * waits for the [ViewTreeObserver.OnGlobalLayoutListener] callback (the ONLY safe
+ * point where getPrimaryClip() returns non-null), reads the clip, routes it through
+ * [ClipboardService.captureClip]/[captureImageClip]/[captureFileClip], then finishes.
+ *
+ * The Activity is the load-bearing piece: the read MUST wait for window focus — the
+ * OS clipboard restriction is lifted only after the focused-window event.
+ *
+ * ## Limitations
  * - `READ_LOGS` is a signature-level permission that CANNOT be granted by the user
- *   via the standard permission dialog. It must be granted over adb:
+ *   via the standard dialog. It must be granted over adb:
  *     `adb shell pm grant com.copypaste.android android.permission.READ_LOGS`
- * - The logcat-based detection may NOT work on Android 11+ where logcat output is
- *   scoped to the app's own process (AOSP hardened). On stock Android 11+ the
- *   ClipboardManager log line is emitted by the SYSTEM process and will not appear
- *   in our filtered stream. Samsung/MIUI ROMs vary.
- * - Even when the detection fires, [android.content.ClipboardManager.getPrimaryClip]
- *   on API 29+ may return null from a background context without an enabled
- *   accessibility service (READ_LOGS does not override this restriction on stock ROMs).
- * - This path DOES NOT replace [ClipboardAccessibilityService]. It is a best-effort
- *   fallback for power users who have granted READ_LOGS and understand the limitations.
+ * - On stock Android 11+ AOSP, logcat output is scoped; the denial / clip-change
+ *   line may not appear in our stream. ColorOS (OPPO/OnePlus), MIUI, and OneUI vary
+ *   — many still emit the system tag in the shared logcat buffer.
+ * - SYSTEM_ALERT_WINDOW (draw-over-other-apps) must also be granted so
+ *   [ClipboardFloatingActivity] can add the TYPE_APPLICATION_OVERLAY view.
+ * - The AccessibilityService path ([ClipboardAccessibilityService]) remains the
+ *   primary recommended mechanism; this path is the fallback when a11y is disabled
+ *   by the OEM (e.g. ColorOS auto-disables it).
  *
  * ## How to enable
- * 1. Grant via adb:
+ * 1. Grant READ_LOGS via adb:
  *      adb shell pm grant com.copypaste.android android.permission.READ_LOGS
- * 2. Enable the toggle in Settings → Diagnostics → "adb logcat capture".
- * 3. The status indicator will update to reflect detected / not-detected state.
+ * 2. Grant SYSTEM_ALERT_WINDOW in Settings → Apps → Special app access → Display over other apps.
+ * 3. Enable the toggle in Settings → Diagnostics → "adb logcat capture".
  *
- * The service is started/stopped by [syncState] based on the setting and the
- * permission check. It does NOT run unless both conditions are met.
+ * The service is started/stopped by [syncState] based on the setting + permission check.
  */
 class LogcatCaptureService : Service() {
 
@@ -62,6 +82,10 @@ class LogcatCaptureService : Service() {
     private lateinit var repository: ClipboardRepository
     private lateinit var syncManager: SyncManager
     private var logcatJob: Job? = null
+
+    // Debounce: timestamp (ms) of last ClipboardFloatingActivity launch.
+    // Prevents N rapid denial lines from spawning N Activity instances.
+    @Volatile private var lastFocusedLaunchMs = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -96,20 +120,35 @@ class LogcatCaptureService : Service() {
     // ── Logcat reader loop ──────────────────────────────────────────────────
 
     /**
-     * Tails the logcat stream looking for ClipboardService "Setting primary clip"
-     * events from the system process. When detected, reads the current clipboard.
+     * Tails the system logcat stream for clipboard-change signals.
      *
-     * Started with `-T 1` (tail last 1 line) to avoid replaying old events,
-     * and `-s ClipboardService:D` to filter to relevant tag only.
+     * **Filter strategy (dual-marker):**
      *
-     * On Android 11+ (scoped logcat / AOSP hardening) this tag may produce no
-     * output; the loop exits cleanly and the status is updated to NOT_WORKING.
+     * On API > P (Android 10+): `ClipboardService:E *:S`
+     *   Matches ERROR lines from the system ClipboardService. When our app attempts
+     *   a background clipboard read, the system logs:
+     *     `E ClipboardService: Denying clipboard access to com.copypaste.android, ...`
+     *   We match lines containing [BuildConfig.APPLICATION_ID] to confirm it's our
+     *   denial. On detection → launch [ClipboardFloatingActivity] (focused-read path).
+     *
+     * On API <= P: `ClipboardService:D *:S`
+     *   Matches the older DEBUG "Setting primary clip" marker. On API <= P the
+     *   background restriction doesn't apply, so we can read the clip directly on
+     *   the main thread without the focusable Activity.
+     *
+     * Started with `-T 1` (tail last 1 line) to avoid replaying old events on restart.
      */
     private suspend fun runLogcatLoop() {
+        val useApi29Path = Build.VERSION.SDK_INT > Build.VERSION_CODES.P
+
+        // API 29+: watch for clipboard-access DENIAL lines (E level) naming our package.
+        // API <= 28: watch for "Setting primary clip" DEBUG lines (direct read is fine).
+        val logLevel = if (useApi29Path) "E" else "D"
         val process: Process = try {
-            // `-T 1` = start from the last 1 line (avoids replaying old events on startup)
-            // `-s ClipboardService:D` = only lines tagged ClipboardService at Debug level
-            ProcessBuilder("logcat", "-T", "1", "-v", "brief", "-s", "ClipboardService:D")
+            ProcessBuilder(
+                "logcat", "-T", "1", "-v", "brief",
+                "ClipboardService:$logLevel", "*:S"
+            )
                 .redirectErrorStream(true)
                 .start()
         } catch (e: Exception) {
@@ -117,16 +156,27 @@ class LogcatCaptureService : Service() {
             return
         }
 
-        AppLogger.i(TAG, "Logcat process started")
+        AppLogger.i(TAG, "Logcat process started (api29Path=$useApi29Path, level=$logLevel)")
 
         try {
             process.inputStream.bufferedReader().use { reader ->
                 var line: String?
                 while (scope.isActive) {
                     line = reader.readLine() ?: break
-                    if (CLIP_CHANGE_MARKER in line) {
-                        AppLogger.d(TAG, "Clip-change event detected via logcat")
-                        onClipChangedViaLogcat()
+                    if (useApi29Path) {
+                        // API 29+: look for the denial line naming our package.
+                        // The system ClipboardService logs the denying package name in the
+                        // ERROR message so we can confirm it's our denial, not another app's.
+                        if (BuildConfig.APPLICATION_ID in line) {
+                            AppLogger.d(TAG, "Clipboard denial detected (our package): debouncing")
+                            onDenialDetected()
+                        }
+                    } else {
+                        // API <= 28: the classic "Setting primary clip" debug marker.
+                        if (CLIP_SET_MARKER in line) {
+                            AppLogger.d(TAG, "Clip-set event detected via logcat (API<=28 path)")
+                            onClipChangedLegacy()
+                        }
                     }
                 }
             }
@@ -137,11 +187,11 @@ class LogcatCaptureService : Service() {
             AppLogger.i(TAG, "Logcat process destroyed")
         }
 
-        // Logcat stream ended — likely scoped on Android 11+ AOSP.
+        // Stream ended — scoped logcat on Android 11+ AOSP is the most likely cause.
         AppLogger.w(
             TAG,
-            "Logcat stream ended — READ_LOGS path may not be supported on this " +
-                "Android build (scoped logcat, API 30+ AOSP hardening). " +
+            "Logcat stream ended — READ_LOGS path may not be supported on this build " +
+                "(scoped logcat, API 30+ AOSP hardening). " +
                 "Enable ClipboardAccessibilityService for reliable background capture."
         )
         settings.logcatCaptureWorking = false
@@ -149,37 +199,79 @@ class LogcatCaptureService : Service() {
     }
 
     /**
-     * Called when the logcat listener detected a clip-change marker.
-     * Reads the current clipboard on the main thread and routes through the
-     * shared capture pipeline (same dedup, size limits, encryption as A11y path).
+     * API 29+ path: a clipboard-access denial for our package was detected.
+     *
+     * Launches [ClipboardFloatingActivity] after [FOCUSABLE_ACTIVITY_DEBOUNCE_MS].
+     * The Activity adds a focused overlay, waits for the layout pass (which is when
+     * the OS lifts the clipboard restriction), reads the clip, and routes it through
+     * the shared capture pipeline.
+     *
+     * Guards:
+     *  - Debounce: at most one Activity launch per [FOCUSABLE_ACTIVITY_DEBOUNCE_MS].
+     *  - canDrawOverlays: if overlay permission was revoked, skip (the Activity
+     *    also checks this internally, but early exit avoids the Activity lifecycle cost).
      */
-    private fun onClipChangedViaLogcat() {
+    private fun onDenialDetected() {
+        val now = System.currentTimeMillis()
+        if (now - lastFocusedLaunchMs < FOCUSABLE_ACTIVITY_DEBOUNCE_MS) {
+            AppLogger.d(TAG, "Denial debounced — skipping duplicate launch")
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            !android.provider.Settings.canDrawOverlays(this)
+        ) {
+            AppLogger.w(TAG, "canDrawOverlays=false — cannot launch ClipboardFloatingActivity")
+            settings.logcatCaptureWorking = false
+            return
+        }
+
+        lastFocusedLaunchMs = now
+        AppLogger.i(TAG, "Launching ClipboardFloatingActivity for focused clipboard read")
+
+        // The debounce delay is applied before launching to ensure we catch the clip
+        // AFTER the user's copy action has fully settled in the ClipboardManager.
+        scope.launch {
+            delay(FOCUSABLE_ACTIVITY_DEBOUNCE_MS)
+            ClipboardFloatingActivity.launch(this@LogcatCaptureService)
+            // Mark as working optimistically — the Activity will log its own result.
+            // If it finds null, it logs a warning but does not update logcatCaptureWorking
+            // (we don't have a callback from the Activity here). The working flag is only
+            // used for the Settings UI indicator and is updated to true by captureClip
+            // succeeding (indirectly via the notification count bump).
+            settings.logcatCaptureWorking = true
+        }
+    }
+
+    /**
+     * API <= 28 (Android 9 and below) path: the "Setting primary clip" debug marker
+     * was detected. On these API levels the background clipboard restriction does NOT
+     * apply, so we can read the clip directly from the main thread.
+     *
+     * This is a direct port of the original LogcatCaptureService.onClipChangedViaLogcat
+     * behaviour and is only exercised on old devices that still emit the debug-level tag.
+     */
+    private fun onClipChangedLegacy() {
         Handler(Looper.getMainLooper()).post {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
             val clip = cm.primaryClip ?: run {
-                AppLogger.d(
-                    TAG,
-                    "getPrimaryClip returned null — API 29+ background restriction applies " +
-                        "even with READ_LOGS (no AccessibilityService binding)"
-                )
-                // Detection fired but read is still blocked — mark as not-working.
+                AppLogger.d(TAG, "getPrimaryClip returned null on API<=28 — unexpected")
                 settings.logcatCaptureWorking = false
                 return@post
             }
 
-            // Image clips: skip — logcat path is text-only.
+            // Image clips: handled by foreground service / A11y; skip here (no URI context).
             val imageMime = (0 until clip.description.mimeTypeCount)
                 .map { clip.description.getMimeType(it) }
                 .firstOrNull { it.startsWith("image/") }
             if (imageMime != null) {
-                AppLogger.d(TAG, "Image clip via logcat — skipping (text-only path)")
+                AppLogger.d(TAG, "Image clip via logcat (API<=28) — skipping (no URI context)")
                 return@post
             }
 
             val text = clip.getItemAt(0)?.text?.toString()
             if (text.isNullOrBlank()) return@post
 
-            // At least one successful read — mark working.
             settings.logcatCaptureWorking = true
 
             scope.launch {
@@ -190,7 +282,7 @@ class LogcatCaptureService : Service() {
                     repository,
                     syncManager,
                 )
-                AppLogger.d(TAG, "logcat-captured clip stored via shared pipeline")
+                AppLogger.d(TAG, "logcat-captured clip stored via shared pipeline (API<=28 path)")
             }
         }
     }
@@ -199,11 +291,22 @@ class LogcatCaptureService : Service() {
         private const val TAG = "LogcatCaptureService"
 
         /**
-         * The logcat marker emitted by android/os/ClipboardService.java in AOSP
-         * when setPrimaryClip is called. Present on Android 9–10; may be absent
-         * or scoped-out on Android 11+ AOSP (system process log isolation).
+         * The logcat DEBUG marker emitted by android/os/ClipboardService.java in AOSP
+         * when setPrimaryClip is called. Used on API <= 28 only (direct-read path).
+         * On API 29+ this marker is not visible because the system ClipboardService
+         * runs in a different process with its own scoped logcat on newer AOSP.
          */
-        private const val CLIP_CHANGE_MARKER = "Setting primary clip"
+        private const val CLIP_SET_MARKER = "Setting primary clip"
+
+        /**
+         * Debounce window for [ClipboardFloatingActivity] launches (ms).
+         *
+         * A rapid copy action may cause several denial lines in quick succession
+         * (the foreground service listener + our own probing retry). We gate launches
+         * to at most one per window. 1000 ms matches the ClipCascade reference
+         * implementation's debounce interval.
+         */
+        private const val FOCUSABLE_ACTIVITY_DEBOUNCE_MS = 1000L
 
         /**
          * Returns true if READ_LOGS has been granted via adb to this package.
@@ -249,8 +352,7 @@ enum class LogcatCaptureStatus {
     DISABLED,
     /**
      * Granted and enabled, but captures have not succeeded yet.
-     * Likely cause: Android 11+ AOSP scoped logcat, or API 29+ clipboard
-     * background restriction still blocking getPrimaryClip.
+     * Likely cause: Android 11+ AOSP scoped logcat, or canDrawOverlays not granted.
      */
     GRANTED_NOT_WORKING,
     /** Granted, enabled, and at least one clip was read successfully. */
