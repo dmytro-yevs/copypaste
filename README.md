@@ -1,6 +1,41 @@
 # CopyPaste
 
-End-to-end encrypted clipboard sync for macOS and Android.
+End-to-end encrypted clipboard sync for macOS and Android, with full
+feature parity between the two platforms.
+
+## Sync
+
+CopyPaste ships three independent sync transports. They can be used alone or
+together; each encrypts items end-to-end before they leave the device
+(XChaCha20-Poly1305), and the relay/cloud paths only ever handle opaque
+ciphertext.
+
+- **P2P (LAN, direct):** mutual-TLS transport with mDNS-SD service discovery.
+  Devices pair over a PAKE bootstrap channel and confirm a 6-digit short
+  authentication string (SAS) — both users compare the same digits before the
+  pairing is accepted. Works macOS↔macOS and macOS↔Android.
+- **Relay-as-database:** an optional self-hostable relay server
+  (`copypaste-relay`). Each device co-registers a shared inbox id derived from
+  the sync key (`derive_relay_inbox_id`, HKDF over the 32-byte sync key) and
+  POSTs encrypted blobs for the others to poll. The relay never holds keys or
+  sees plaintext, and persists device records, tokens, and inbox items to a
+  local SQLite database so state survives a restart.
+- **Cloud (Supabase):** opt-in cloud sync. Enabled with the `cloud-sync`
+  feature on the daemon and valid `SUPABASE_URL` / `SUPABASE_ANON_KEY`.
+
+QR pairing fully provisions **all** sync paths on the scanning device with zero
+manual entry: over the already-authenticated bootstrap tunnel the host sends the
+Supabase connection params and `relay_url` (non-secret) plus the derived cloud
+sync key (never embedded in the QR image), so the new phone is configured for
+P2P, relay, and Supabase in one scan.
+
+### Upgrading to v0.6 — one-time re-pair required
+
+Upgrading from an earlier release requires a **one-time re-pair of all
+devices**. The P2P bootstrap protocol (`BOOTSTRAP_PROTO_VERSION` 2) and the
+Android UniFFI ABI (version 13) were bumped, so old pairings will not connect
+until re-paired. Re-scan the pairing QR, or re-run LAN discovery + SAS
+confirmation, on each device.
 
 ## Supported platforms
 
@@ -88,13 +123,8 @@ cargo run -p copypaste-relay
 cargo run -p copypaste-cli -- --help
 ```
 
-## Alpha caveats (v0.1.0-alpha)
+## Known issues
 
-This is an early alpha. Known limitations:
-
-- **P2P sync is scaffolding:** the `copypaste-p2p`, `copypaste-sync` crates exist but are not wired into the daemon yet. Pairing UI is a preview.
-- **Cloud sync (Supabase) is integration-tested only:** end-to-end push/pull requires valid `SUPABASE_URL`/`SUPABASE_ANON_KEY` and the schema migration applied to your project.
-- **Relay is in-memory only:** the optional `copypaste-relay` service does not persist devices or items across restart. Use only for testing.
-- **IPC protocol is unversioned:** the daemon, CLI, and UI must be built from the same commit. Mixed versions may break silently.
-- **Android is preview only:** UniFFI bindings + a Kotlin skeleton exist, but no signed APK is validated end-to-end.
-- **No code signing or notarisation yet.** macOS builds are unsigned.
+See [`docs/known-issues.md`](docs/known-issues.md) for the current v0.6
+limitations and deferred work, including cloud/relay device revocation
+(sync-key rotation) and its caveats.
