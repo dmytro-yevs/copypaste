@@ -683,6 +683,70 @@ fn resolve_addr_from_discovery_by_ip(
         .map(|p| SocketAddr::new(want_ip, p.port))
 }
 
+/// Proactively refresh a paired peer's `name`, `address`, and `local_ip` from
+/// the live mDNS discovery snapshot.
+///
+/// Called every [`CONNECTOR_TICK`] for each dialable peer, regardless of
+/// connection state.  Correlates by the IP component of the peer's persisted
+/// `address` — the mDNS `device_id` is a UUID, never a cert fingerprint, so
+/// fingerprint-keyed lookup (`resolve_addr_from_discovery`) would never match.
+///
+/// When a matching mDNS peer is found and any of its fields (name, sync port,
+/// IP) differ from what is persisted, [`crate::peers::update_peer_meta`] rewrites
+/// `peers.json` in place (atomic 0600 rename).  The next [`crate::ipc`]
+/// `list_peers` poll then surfaces the fresh values to the UI.
+///
+/// # Out-of-scope fields
+/// `model`, `os_version`, `app_version`, and `public_ip` are learned in-band
+/// over the bootstrap channel at pairing time and are NOT carried by mDNS TXT
+/// records — they are untouched here.  Refreshing them reactively would require
+/// a new wire-protocol extension and is deferred to a future release.
+fn refresh_peer_meta_from_discovery(
+    peers_path: &std::path::Path,
+    fingerprint: &str,
+    persisted_addr: SocketAddr,
+    discovery: &DiscoveryService,
+) {
+    let want_ip = persisted_addr.ip();
+    let Some(discovered) = discovery
+        .peers()
+        .into_iter()
+        .find(|p| p.ip_addrs.contains(&want_ip))
+    else {
+        // Peer not in the current mDNS snapshot — nothing to refresh.
+        return;
+    };
+
+    let fresh_addr = SocketAddr::new(want_ip, discovered.port);
+    let fresh_name = discovered.device_name.as_str();
+    let local_ip_str = want_ip.to_string();
+
+    match crate::peers::update_peer_meta(
+        peers_path,
+        fingerprint,
+        fresh_name,
+        fresh_addr,
+        &local_ip_str,
+    ) {
+        Ok(true) => {
+            tracing::debug!(
+                %fingerprint,
+                %fresh_addr,
+                name = %fresh_name,
+                "connector: refreshed peer name+addr from mDNS"
+            );
+        }
+        Ok(false) => {} // Nothing changed — no log noise.
+        Err(e) => {
+            tracing::warn!(
+                %fingerprint,
+                error = %e,
+                "connector: failed to persist mDNS meta refresh"
+            );
+        }
+    }
+}
+
 /// A dialable paired peer resolved from `peers.json`.
 struct DialablePeer {
     /// Canonical (colon-free, lowercase) cert fingerprint — the mTLS pin.
@@ -786,6 +850,15 @@ async fn peer_connector_loop(
             if peer.fingerprint == own_fp {
                 continue;
             }
+
+            // Live mDNS meta refresh: every tick, correlate the peer by IP and
+            // adopt its freshly-announced device_name, sync port, and local_ip
+            // into peers.json so `list_peers` surfaces up-to-date values even
+            // without a dial.  Cheap — just a snapshot read + optional file write
+            // when something actually changed.  The on-failure address refresh
+            // (below) is a superset of this for the error path; this call covers
+            // the steady-state case (connected peer renames itself).
+            refresh_peer_meta_from_discovery(&peers_path, &peer.fingerprint, peer.addr, &discovery);
 
             // M1: skip peers we already have a *healthy* live sink for, but
             // force-replace a stale (closed-but-unreaped) one. Checking only
