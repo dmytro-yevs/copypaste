@@ -49,6 +49,7 @@ fn mk_local_with_device(
         pinned: false,
         pin_order: None,
         thumb: None,
+        deleted: false,
     }
 }
 
@@ -69,6 +70,9 @@ fn mk_wire(id: &str, lamport: i64, wall: i64, device: &str, payload: u8) -> Wire
         key_version: 2,
         file_name: None,
         mime: None,
+        deleted: false,
+        pinned: false,
+        pin_order: None,
     }
 }
 

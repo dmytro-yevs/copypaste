@@ -91,13 +91,14 @@ pub fn wire_to_local(wire: WireItem) -> ClipboardItem {
         // + v3 AAD never matched the v2 ciphertext, so reads failed with
         // `EncryptError::AuthFailed`.
         key_version: wire.key_version,
-        // Received items are never pinned by default; the user must pin them
-        // explicitly on this device after syncing.
-        pinned: false,
-        // pin_order is a local UI concept — it is not synced across devices.
-        // Received items start with NULL and get a position only if the user
-        // explicitly pins them (via pin_item, which assigns MAX+1).
-        pin_order: None,
+        // Propagate the sender's deleted flag so tombstones apply correctly
+        // on the receiver. A tombstone win (higher lamport) must land as
+        // deleted=true in the local DB, wiping the content from this device.
+        deleted: wire.deleted,
+        // Propagate pinned/pin_order from the wire so pin and reorder
+        // operations converge across devices via LWW.
+        pinned: wire.pinned,
+        pin_order: wire.pin_order,
         // thumb is a local-only, capture-time derived image thumbnail (schema
         // v9). It is NOT part of the WireItem sync payload; received items start
         // with no thumbnail and can be backfilled later via `set_thumb`.
@@ -145,6 +146,11 @@ pub fn local_to_wire(item: &ClipboardItem, local_device_id: &str) -> WireItem {
         // Carry the row's real key_version so the receiver can select the
         // correct key + AAD when decrypting `content` (see wire_to_local).
         key_version: item.key_version,
+        // Propagate deleted/pinned/pin_order so tombstones, pin changes, and
+        // reorder operations travel to peers and win/lose via normal LWW.
+        deleted: item.deleted,
+        pinned: item.pinned,
+        pin_order: item.pin_order,
         file_name,
         mime,
     }
@@ -198,6 +204,7 @@ mod tests {
             pinned: false,
             pin_order: None,
             thumb: None,
+            deleted: false,
         }
     }
 
@@ -218,6 +225,9 @@ mod tests {
             key_version: 2,
             file_name: None,
             mime: None,
+            deleted: false,
+            pinned: false,
+            pin_order: None,
         }
     }
 
@@ -439,5 +449,88 @@ mod tests {
             "text items must not set file_name"
         );
         assert!(wire.mime.is_none(), "text items must not set mime");
+    }
+
+    // --- Tombstone LWW semantics ---
+
+    /// A remote tombstone (deleted=true) with a higher lamport_ts must beat
+    /// a live local item. The normal `resolve` path does not need to know
+    /// about deleted — it just compares lamport/wall/device and the winner
+    /// carries whatever deleted flag it has.
+    #[test]
+    fn tombstone_with_higher_lamport_beats_live_local() {
+        let local = make_local(5, 1000); // live item
+        let mut remote = make_remote(10, 500, "peer-A");
+        remote.deleted = true;
+        remote.content = None;
+        remote.content_nonce = None;
+        // Higher lamport → TakeRemote regardless of deleted flag.
+        assert_eq!(resolve(&local, &remote), MergeOutcome::TakeRemote);
+    }
+
+    /// A live remote item with a lower lamport must NOT beat a local tombstone.
+    #[test]
+    fn live_remote_with_lower_lamport_keeps_local_tombstone() {
+        let mut local = make_local(10, 1000);
+        local.deleted = true;
+        local.content = None;
+        let remote = make_remote(5, 2000, "peer-A"); // higher wall but lower lamport
+        assert_eq!(resolve(&local, &remote), MergeOutcome::KeepLocal);
+    }
+
+    // --- deleted / pinned / pin_order round-trip ---
+
+    /// local_to_wire copies deleted=true; wire_to_local restores it.
+    #[test]
+    fn tombstone_survives_local_to_wire_and_back() {
+        let mut item = make_local(7, 2000);
+        item.deleted = true;
+        item.content = None;
+        item.content_nonce = None;
+
+        let wire = local_to_wire(&item, "my-device");
+        assert!(wire.deleted, "local_to_wire must copy deleted=true");
+        assert!(wire.content.is_none());
+
+        let restored = wire_to_local(wire);
+        assert!(restored.deleted, "wire_to_local must restore deleted=true");
+        assert!(restored.content.is_none());
+    }
+
+    /// local_to_wire copies pinned=true and pin_order; wire_to_local restores them.
+    #[test]
+    fn pinned_and_pin_order_survive_round_trip() {
+        let mut item = make_local(3, 500);
+        item.pinned = true;
+        item.pin_order = Some(2.5);
+
+        let wire = local_to_wire(&item, "my-device");
+        assert!(wire.pinned, "local_to_wire must copy pinned=true");
+        assert_eq!(
+            wire.pin_order,
+            Some(2.5),
+            "local_to_wire must copy pin_order"
+        );
+
+        let restored = wire_to_local(wire);
+        assert!(restored.pinned, "wire_to_local must restore pinned=true");
+        assert_eq!(
+            restored.pin_order,
+            Some(2.5),
+            "wire_to_local must restore pin_order"
+        );
+    }
+
+    /// Unpinned item (pin_order=None) round-trips without acquiring a pin_order.
+    #[test]
+    fn unpinned_item_pin_order_stays_none_on_round_trip() {
+        let item = make_local(1, 100); // pinned=false, pin_order=None
+        let wire = local_to_wire(&item, "my-device");
+        assert!(!wire.pinned);
+        assert!(wire.pin_order.is_none());
+
+        let restored = wire_to_local(wire);
+        assert!(!restored.pinned);
+        assert!(restored.pin_order.is_none());
     }
 }

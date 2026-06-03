@@ -79,11 +79,15 @@ fn make_item(id: &str, lamport: i64) -> ClipboardItem {
         pinned: false,
         pin_order: None,
         thumb: None,
+        deleted: false,
     }
 }
 
 fn wire_from_local(item: &ClipboardItem, origin: &str) -> WireItem {
     WireItem {
+        deleted: false,
+        pinned: false,
+        pin_order: None,
         id: item.id.clone(),
         item_id: item.item_id.clone(),
         content_type: item.content_type.clone(),

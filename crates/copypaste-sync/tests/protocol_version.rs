@@ -44,6 +44,9 @@ fn sample_wire_item() -> WireItem {
         key_version: 2,
         file_name: None,
         mime: None,
+        deleted: false,
+        pinned: false,
+        pin_order: None,
     }
 }
 
