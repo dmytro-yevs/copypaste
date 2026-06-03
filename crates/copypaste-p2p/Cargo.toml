@@ -29,6 +29,12 @@ mdns-sd.workspace = true
 if-addrs = "0.15"
 # Async runtime
 tokio = { workspace = true }
+# Low-level socket options — enable TCP keepalive on accepted/connected P2P
+# sockets so a peer that vanishes with no FIN is detected and the connection
+# torn down (defense-in-depth alongside the daemon-side write timeout). Already
+# in the lock graph transitively via tokio (0.6.x); pinned to that major.
+# The `all` feature exposes `TcpKeepalive::with_interval`/`with_retries`.
+socket2 = { version = "0.6", features = ["all"] }
 # Crypto for fingerprint
 sha2.workspace = true
 hex.workspace = true
