@@ -10,6 +10,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,7 +23,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -139,6 +145,17 @@ fun SettingsScreen(
     var storageQuotaBytes by remember {
         mutableStateOf(snapToNearestLong(QUOTA_STEP_VALUES, settings.storageQuotaBytes))
     }
+    var maxFileSizeBytes by remember {
+        mutableStateOf(snapToNearestLong(FILE_SIZE_STEP_VALUES, settings.maxFileSizeBytes))
+    }
+    var sensitiveTtlSecs by remember {
+        mutableStateOf(snapToNearestLong(SENSITIVE_TTL_STEP_VALUES, settings.sensitiveTtlSecs))
+    }
+
+    // ── Privacy (config via FFI — macOS parity) ──
+    var collectPublicIp by remember { mutableStateOf(settings.collectPublicIp) }
+    var pasteAsPlainText by remember { mutableStateOf(settings.pasteAsPlainText) }
+    var excludedApps by remember { mutableStateOf(settings.excludedAppBundleIds) }
 
     // ── Sync ──
     var syncBackend by remember { mutableStateOf(settings.syncBackend) }
@@ -176,6 +193,11 @@ fun SettingsScreen(
         val maxTextSizeBytes: Long,
         val maxImageSizeBytes: Long,
         val storageQuotaBytes: Long,
+        val maxFileSizeBytes: Long,
+        val sensitiveTtlSecs: Long,
+        val collectPublicIp: Boolean,
+        val pasteAsPlainText: Boolean,
+        val excludedApps: List<String>,
         val syncBackend: SyncBackend,
         val syncOnWifiOnly: Boolean,
         val p2pSyncEnabled: Boolean,
@@ -204,6 +226,11 @@ fun SettingsScreen(
                 maxTextSizeBytes = snapToNearestLong(TEXT_SIZE_STEP_VALUES, settings.maxTextSizeBytes),
                 maxImageSizeBytes = snapToNearestLong(IMAGE_SIZE_STEP_VALUES, settings.maxImageSizeBytes),
                 storageQuotaBytes = snapToNearestLong(QUOTA_STEP_VALUES, settings.storageQuotaBytes),
+                maxFileSizeBytes = snapToNearestLong(FILE_SIZE_STEP_VALUES, settings.maxFileSizeBytes),
+                sensitiveTtlSecs = snapToNearestLong(SENSITIVE_TTL_STEP_VALUES, settings.sensitiveTtlSecs),
+                collectPublicIp = settings.collectPublicIp,
+                pasteAsPlainText = settings.pasteAsPlainText,
+                excludedApps = settings.excludedAppBundleIds,
                 syncBackend = settings.syncBackend,
                 syncOnWifiOnly = settings.syncOnWifiOnly,
                 p2pSyncEnabled = settings.p2pSyncEnabled,
@@ -233,6 +260,11 @@ fun SettingsScreen(
                 maxTextSizeBytes != savedSnapshot.maxTextSizeBytes ||
                 maxImageSizeBytes != savedSnapshot.maxImageSizeBytes ||
                 storageQuotaBytes != savedSnapshot.storageQuotaBytes ||
+                maxFileSizeBytes != savedSnapshot.maxFileSizeBytes ||
+                sensitiveTtlSecs != savedSnapshot.sensitiveTtlSecs ||
+                collectPublicIp != savedSnapshot.collectPublicIp ||
+                pasteAsPlainText != savedSnapshot.pasteAsPlainText ||
+                excludedApps != savedSnapshot.excludedApps ||
                 syncBackend != savedSnapshot.syncBackend ||
                 syncOnWifiOnly != savedSnapshot.syncOnWifiOnly ||
                 p2pSyncEnabled != savedSnapshot.p2pSyncEnabled ||
@@ -303,6 +335,13 @@ fun SettingsScreen(
             // KEK-wrapped secrets keep their dedicated keystore write path.
             settings.cloudSyncPassphrase = cloudPassphrase
             settings.supabasePassword = supabasePassword
+            // Config-via-FFI knobs not folded into saveScreenSettings — each setter
+            // clamps through the native clampConfig (macOS parity). C-P1-1.
+            settings.maxFileSizeBytes = maxFileSizeBytes
+            settings.sensitiveTtlSecs = sensitiveTtlSecs
+            settings.collectPublicIp = collectPublicIp
+            settings.pasteAsPlainText = pasteAsPlainText
+            settings.excludedAppBundleIds = excludedApps
             // Side-effects that must happen immediately after persisting.
             // logcatStatus is re-read on next recomposition automatically — no assignment needed.
             SupabasePollWorker.schedule(ctx, enabled = syncBackend == SyncBackend.SUPABASE)
@@ -320,6 +359,11 @@ fun SettingsScreen(
                 maxTextSizeBytes = maxTextSizeBytes,
                 maxImageSizeBytes = maxImageSizeBytes,
                 storageQuotaBytes = storageQuotaBytes,
+                maxFileSizeBytes = maxFileSizeBytes,
+                sensitiveTtlSecs = sensitiveTtlSecs,
+                collectPublicIp = collectPublicIp,
+                pasteAsPlainText = pasteAsPlainText,
+                excludedApps = excludedApps,
                 syncBackend = syncBackend,
                 syncOnWifiOnly = syncOnWifiOnly,
                 p2pSyncEnabled = p2pSyncEnabled,
@@ -427,6 +471,10 @@ fun SettingsScreen(
                         onPrivateModeChange = { privateMode = it },
                         syncEnabled = syncEnabled,
                         onSyncEnabledChange = { syncEnabled = it },
+                        collectPublicIp = collectPublicIp,
+                        onCollectPublicIpChange = { collectPublicIp = it },
+                        pasteAsPlainText = pasteAsPlainText,
+                        onPasteAsPlainTextChange = { pasteAsPlainText = it },
                         logcatEnabled = logcatEnabled,
                         onLogcatEnabledChange = { logcatEnabled = it },
                         logcatStatus = logcatStatus,
@@ -451,8 +499,14 @@ fun SettingsScreen(
                         onMaxTextSizeBytesChange = { maxTextSizeBytes = it },
                         maxImageSizeBytes = maxImageSizeBytes,
                         onMaxImageSizeBytesChange = { maxImageSizeBytes = it },
+                        maxFileSizeBytes = maxFileSizeBytes,
+                        onMaxFileSizeBytesChange = { maxFileSizeBytes = it },
                         storageQuotaBytes = storageQuotaBytes,
                         onStorageQuotaBytesChange = { storageQuotaBytes = it },
+                        sensitiveTtlSecs = sensitiveTtlSecs,
+                        onSensitiveTtlSecsChange = { sensitiveTtlSecs = it },
+                        excludedApps = excludedApps,
+                        onExcludedAppsChange = { excludedApps = it },
                         ctx = ctx,
                     )
                     TAB_SYNC -> SyncTab(
@@ -497,6 +551,10 @@ private fun GeneralTab(
     onPrivateModeChange: (Boolean) -> Unit,
     syncEnabled: Boolean,
     onSyncEnabledChange: (Boolean) -> Unit,
+    collectPublicIp: Boolean,
+    onCollectPublicIpChange: (Boolean) -> Unit,
+    pasteAsPlainText: Boolean,
+    onPasteAsPlainTextChange: (Boolean) -> Unit,
     logcatEnabled: Boolean,
     onLogcatEnabledChange: (Boolean) -> Unit,
     logcatStatus: LogcatCaptureStatus,
@@ -516,6 +574,26 @@ private fun GeneralTab(
             subtitle = stringResource(R.string.setting_sync_enabled_subtitle),
             checked = syncEnabled,
             onCheckedChange = onSyncEnabledChange,
+        )
+        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+        // ── PRIVACY (macOS-parity config-via-FFI) — C-P1-1 ─────────────────────
+        SectionLabel(stringResource(R.string.section_privacy))
+        // "Discover public IP" — allow a one-off STUN request to learn this
+        // device's public IP (shown in the device-info card). Mirrors macOS.
+        SettingsRow(
+            title = stringResource(R.string.setting_collect_public_ip_title),
+            subtitle = stringResource(R.string.setting_collect_public_ip_subtitle),
+            checked = collectPublicIp,
+            onCheckedChange = onCollectPublicIpChange,
+        )
+        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+        // "Paste as plain text" — strip rich formatting (RTF/HTML) on paste. Mirrors macOS.
+        SettingsRow(
+            title = stringResource(R.string.setting_paste_as_plain_text_title),
+            subtitle = stringResource(R.string.setting_paste_as_plain_text_subtitle),
+            checked = pasteAsPlainText,
+            onCheckedChange = onPasteAsPlainTextChange,
         )
         HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
         SettingsNavRow(
@@ -683,8 +761,14 @@ private fun StorageTab(
     onMaxTextSizeBytesChange: (Long) -> Unit,
     maxImageSizeBytes: Long,
     onMaxImageSizeBytesChange: (Long) -> Unit,
+    maxFileSizeBytes: Long,
+    onMaxFileSizeBytesChange: (Long) -> Unit,
     storageQuotaBytes: Long,
     onStorageQuotaBytesChange: (Long) -> Unit,
+    sensitiveTtlSecs: Long,
+    onSensitiveTtlSecsChange: (Long) -> Unit,
+    excludedApps: List<String>,
+    onExcludedAppsChange: (List<String>) -> Unit,
     ctx: android.content.Context,
 ) {
     Column {
@@ -703,12 +787,35 @@ private fun StorageTab(
             currentValue = maxImageSizeBytes,
             onRelease = onMaxImageSizeBytesChange,
         )
+        // C-P1-1: max clip file size — binary MiB steps (cap 100 MiB), macOS parity.
+        SteppedSliderRow(
+            label = stringResource(R.string.setting_max_file_size_label),
+            stepValues = FILE_SIZE_STEP_VALUES,
+            stepLabels = FILE_SIZE_STEP_LABELS,
+            currentValue = maxFileSizeBytes,
+            onRelease = onMaxFileSizeBytesChange,
+        )
         SteppedSliderRow(
             label = stringResource(R.string.setting_storage_quota_label),
             stepValues = QUOTA_STEP_VALUES,
             stepLabels = QUOTA_STEP_LABELS,
             currentValue = storageQuotaBytes,
             onRelease = onStorageQuotaBytesChange,
+        )
+        // C-P1-1: sensitive auto-clear TTL — stepped, 0 = disabled sentinel. macOS parity.
+        SteppedSliderRow(
+            label = stringResource(R.string.setting_sensitive_ttl_label),
+            stepValues = SENSITIVE_TTL_STEP_VALUES,
+            stepLabels = SENSITIVE_TTL_STEP_LABELS,
+            currentValue = sensitiveTtlSecs,
+            onRelease = onSensitiveTtlSecsChange,
+        )
+        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+        // C-P1-1: excluded apps — editable list (text input + Add + removable chips).
+        ExcludedAppsRow(
+            excludedApps = excludedApps,
+            onExcludedAppsChange = onExcludedAppsChange,
         )
         HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
         SettingsNavRow(
@@ -1030,4 +1137,124 @@ private fun snapToNearestLong(steps: LongArray, raw: Long): Long {
         }
     }
     return best
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// C-P1-1 step arrays — BINARY MiB units (* 1024 * 1024) to match the Rust core
+// (crates/copypaste-core/src/config/defaults.rs) and the macOS SettingsView, and
+// to fix the decimal-vs-binary drift for these new size fields.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Max clip file size steps: 8, 16, 25, 50, 100 MiB. Cap 100 MiB = MAX_FILE_SIZE_BYTES. */
+private val FILE_SIZE_STEP_VALUES: LongArray = longArrayOf(
+    8L * 1024 * 1024,
+    16L * 1024 * 1024,
+    25L * 1024 * 1024,
+    50L * 1024 * 1024,
+    100L * 1024 * 1024,
+)
+private val FILE_SIZE_STEP_LABELS: Array<String> = arrayOf(
+    "8 MiB", "16 MiB", "25 MiB", "50 MiB", "100 MiB (max)",
+)
+
+/**
+ * Sensitive auto-clear TTL steps (seconds). `0` is the "disabled" sentinel
+ * (never auto-wipe) and is intentionally the first step. Mirrors the macOS
+ * SENSITIVE_TTL_STEPS, with 0 added for the disabled case.
+ */
+private val SENSITIVE_TTL_STEP_VALUES: LongArray = longArrayOf(
+    0L, 10L, 30L, 60L, 5L * 60, 15L * 60, 60L * 60,
+)
+private val SENSITIVE_TTL_STEP_LABELS: Array<String> = arrayOf(
+    "Off", "10 s", "30 s", "1 min", "5 min", "15 min", "1 hour",
+)
+
+/**
+ * C-P1-1: editable "Excluded apps" list — a text input + Add button and a set of
+ * removable chips, mirroring the macOS SettingsView excluded-apps control. Edits
+ * are buffered in the parent's Compose state and persisted on Save (clamped via
+ * the native clampConfig in [Settings.excludedAppBundleIds]).
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ExcludedAppsRow(
+    excludedApps: List<String>,
+    onExcludedAppsChange: (List<String>) -> Unit,
+) {
+    var newApp by rememberSaveable { mutableStateOf("") }
+
+    val addCurrent: () -> Unit = {
+        val id = newApp.trim()
+        if (id.isNotEmpty() && !excludedApps.contains(id)) {
+            onExcludedAppsChange(excludedApps + id)
+        }
+        newApp = ""
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.setting_excluded_apps_label),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text = stringResource(R.string.setting_excluded_apps_subtitle),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = newApp,
+                onValueChange = { newApp = it },
+                placeholder = {
+                    Text("com.example.app", style = MaterialTheme.typography.bodySmall)
+                },
+                singleLine = true,
+                colors = ideTextFieldColors(),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { addCurrent() }),
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedButton(
+                onClick = addCurrent,
+                enabled = newApp.trim().isNotEmpty(),
+                modifier = Modifier.padding(start = 8.dp),
+            ) {
+                Text(stringResource(R.string.action_add))
+            }
+        }
+        if (excludedApps.isNotEmpty()) {
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                excludedApps.forEach { bundleId ->
+                    InputChip(
+                        selected = false,
+                        onClick = { onExcludedAppsChange(excludedApps.filterNot { it == bundleId }) },
+                        label = { Text(bundleId) },
+                        trailingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = stringResource(R.string.action_remove),
+                            )
+                        },
+                    )
+                }
+            }
+        }
+    }
 }

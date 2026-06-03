@@ -538,6 +538,7 @@ private fun fallbackDefaultConfig(): uniffi.copypaste_android.Config =
         imageMaxHeight = 680u,                             // DEFAULT_IMAGE_MAX_HEIGHT
         collectPublicIp = true,
         pasteAsPlainText = false,
+        excludedAppBundleIds = emptyList(),               // DEFAULT_EXCLUDED_APP_BUNDLE_IDS (none)
     )
 
 /**

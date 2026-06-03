@@ -48,12 +48,25 @@
     <string name="section_supabase_account">Supabase Account (optional)</string>
     <string name="section_relay_config">Relay Configuration</string>
     <string name="section_notifications">Notifications</string>
+    <string name="section_privacy">Privacy</string>
 
     <!-- Settings — General -->
     <string name="setting_private_mode_title">Private mode</string>
     <string name="setting_private_mode_subtitle">When on, this device stops recording new clipboard items. Matches Private mode on your other devices. (Temporary pause is also available from the notification.)</string>
     <string name="setting_sync_enabled_title">Enable Clipboard Sync</string>
     <string name="setting_sync_enabled_subtitle">Sync clipboard items with paired devices via the relay.</string>
+
+    <!-- Settings — Privacy (C-P1-1, macOS parity) -->
+    <string name="setting_collect_public_ip_title">Discover public IP</string>
+    <string name="setting_collect_public_ip_subtitle">Allow a one-off STUN request to learn this device\'s public IP, shown in the device-info card. No data is sent to analytics.</string>
+    <string name="setting_paste_as_plain_text_title">Paste as plain text</string>
+    <string name="setting_paste_as_plain_text_subtitle">Strip rich formatting (RTF/HTML) when pasting — writes plain text only.</string>
+    <string name="setting_excluded_apps_label">Excluded apps</string>
+    <string name="setting_excluded_apps_subtitle">Package IDs of apps whose clipboard is never captured, e.g. com.example.app.</string>
+
+    <!-- Generic actions -->
+    <string name="action_add">Add</string>
+    <string name="action_remove">Remove</string>
 
     <!-- Settings — Display -->
     <string name="setting_sensitive_warnings_title">Warn on Sensitive Data</string>
@@ -74,6 +87,8 @@
     <string name="setting_max_image_size_hint">1–512 MB (default 64)</string>
     <string name="setting_storage_quota_label">Local storage limit (MB)</string>
     <string name="setting_storage_quota_hint">50–20480 MB (default 10240)</string>
+    <string name="setting_max_file_size_label">Max clip file size</string>
+    <string name="setting_sensitive_ttl_label">Auto-clear sensitive after</string>
 
     <!-- Settings — Display (HW-A14: image quality) -->
     <string name="setting_image_quality_label">Image capture quality</string>
