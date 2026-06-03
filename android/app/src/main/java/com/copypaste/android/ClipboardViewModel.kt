@@ -8,6 +8,8 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -30,15 +32,32 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     val errors: LiveData<String?> = _errors
 
     /**
+     * Pending debounce job for the store-change listener. Cancelled and restarted
+     * on each prefs change so that a 262-item sync burst fires exactly one
+     * [loadItems] once the burst settles, rather than 262 back-to-back full
+     * [ClipboardRepository.getItems] calls (each decrypting every row) that
+     * saturate Dispatchers.IO and cause the "WaitForGcToComplete blocked Alloc"
+     * / Davey jank the user observed during sync.
+     */
+    private var storeDebounceJob: Job? = null
+
+    /**
      * Auto-refresh the history whenever the backing store changes.
      * Watches [ClipboardRepository.KEY_ITEM_IDS] (rewritten on every add/delete).
      * Retained as a field — SharedPreferences holds a weak reference to the listener.
+     *
+     * Debounced: rapid bursts of prefs writes (e.g. 262-item sync catch-up) are
+     * collapsed into a single [loadItems] call after [STORE_DEBOUNCE_MS] of quiet.
      */
     private val storeListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == ClipboardRepository.KEY_ITEM_IDS ||
                 key == ClipboardRepository.KEY_PINNED_IDS) {
-                loadItems()
+                storeDebounceJob?.cancel()
+                storeDebounceJob = viewModelScope.launch {
+                    delay(STORE_DEBOUNCE_MS)
+                    loadItems()
+                }
             }
         }
 
@@ -174,5 +193,13 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         private const val TAG = "ClipboardViewModel"
+
+        /**
+         * Quiet period after the last prefs change before [loadItems] fires.
+         * 300 ms is long enough to absorb a 262-item sync burst (≈ one write per
+         * ~1 ms) while short enough to feel instant to the user after a single
+         * manual add or delete.
+         */
+        private const val STORE_DEBOUNCE_MS = 300L
     }
 }
