@@ -40,17 +40,19 @@ const GENERAL_CLEANUP_INTERVAL_MS: u64 = 60_000;
 /// than the old 250 ms value.
 const DEGRADED_QUIT_POLL_INTERVAL_MS: u64 = 1_000;
 
-/// Resolve a human-readable device name for P2P advertisements.
+/// Resolve a human-readable device name for P2P advertisements and QR pairing.
 ///
-/// Tries `HOSTNAME` (Unix), then `COMPUTERNAME` (Windows), and falls back to
-/// the literal string `"CopyPaste"` if neither is set. Extracted into a helper
-/// so the single source of truth can be reused by `daemon.rs` and `ipc.rs`
-/// (ipc.rs:~3876 has an identical three-way fallback that should call this
-/// function in a follow-up edit).
+/// On macOS uses `scutil --get ComputerName` (the user-visible name, e.g.
+/// "Dmytro's MacBook Air") as the primary source, which is the same path used
+/// by `DeviceMeta::collect()` for the QR-pairing PeerMeta.  Falls back to the
+/// `HOSTNAME` env var (Unix), then `COMPUTERNAME` (Windows), then the `hostname`
+/// binary, and finally the literal `"CopyPaste"` only when all else fails.
+///
+/// This is the single source of truth for the P2P mDNS registration, the QR
+/// payload `device_name` field, and the relay identity — every advertising path
+/// calls this function so all peers see the same consistent name.
 pub(crate) fn resolve_device_name() -> String {
-    std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "CopyPaste".to_string())
+    crate::device_meta::collect_device_name().unwrap_or_else(|| "CopyPaste".to_string())
 }
 
 use std::sync::RwLock;
