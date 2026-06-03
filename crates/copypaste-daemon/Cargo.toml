@@ -15,6 +15,10 @@ path = "src/main.rs"
 [features]
 # Enables Supabase cloud sync (requires SUPABASE_URL + SUPABASE_ANON_KEY env vars at runtime).
 cloud-sync = ["reqwest", "copypaste-supabase", "chacha20poly1305"]
+# Enables the relay-as-database sync path (relay client: register/push/subscribe).
+# Independent of Supabase — pulls only the async HTTP client (reqwest), NOT
+# copypaste-supabase. Active at runtime iff `config.relay_url` is set.
+relay-sync = ["reqwest"]
 
 [dependencies]
 copypaste-core = { path = "../copypaste-core" }
