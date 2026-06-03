@@ -79,6 +79,7 @@ fn make_item(id: &str, lamport: i64) -> ClipboardItem {
         pinned: false,
         pin_order: None,
         thumb: None,
+        deleted: false,
     }
 }
 

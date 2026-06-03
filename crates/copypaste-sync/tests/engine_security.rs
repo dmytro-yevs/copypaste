@@ -41,6 +41,7 @@ fn make_item(id: &str, lamport: i64) -> ClipboardItem {
         pinned: false,
         pin_order: None,
         thumb: None,
+        deleted: false,
     }
 }
 
@@ -62,6 +63,9 @@ fn make_wire(id: &str, lamport: i64) -> WireItem {
         key_version: 2,
         file_name: None,
         mime: None,
+        deleted: false,
+        pinned: false,
+        pin_order: None,
     }
 }
 

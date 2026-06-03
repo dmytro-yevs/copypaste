@@ -91,6 +91,16 @@ pub struct ClipboardItem {
     /// distinct `thumb_file_id` (recorded in the image `blob_ref` meta JSON).
     /// Stored in the `thumb BLOB DEFAULT NULL` column.
     pub thumb: Option<Vec<u8>>,
+    /// Whether this item has been soft-deleted (schema v10).
+    ///
+    /// A soft-deleted item is a tombstone: its content is wiped but the row
+    /// remains so the LWW sync protocol can propagate the deletion to peer
+    /// devices. `false` for all freshly-captured and synced items. Set to
+    /// `true` by [`soft_delete_item`], which also NULLs `content`,
+    /// `content_nonce`, and `thumb`. UI list queries filter `deleted = 0`;
+    /// `get_item_by_item_id` intentionally does NOT filter so the merge
+    /// layer can apply tombstone wins correctly.
+    pub deleted: bool,
 }
 
 impl ClipboardItem {
@@ -135,6 +145,7 @@ impl ClipboardItem {
             pinned: false,
             pin_order: None,
             thumb: None,
+            deleted: false,
         }
     }
 
@@ -189,6 +200,7 @@ impl ClipboardItem {
             pinned: false,
             pin_order: None,
             thumb,
+            deleted: false,
         }
     }
 
@@ -236,6 +248,7 @@ impl ClipboardItem {
             pinned: false,
             pin_order: None,
             thumb: None,
+            deleted: false,
         }
     }
 }
@@ -261,8 +274,8 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned, pin_order, thumb)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
+          content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
         params![
             item.id,
             item.item_id,
@@ -282,6 +295,7 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
             item.pinned as i64,
             item.pin_order,
             item.thumb,
+            item.deleted as i64,
         ],
     )?;
     Ok(())
@@ -342,8 +356,8 @@ pub fn insert_item_with_fts(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned, pin_order, thumb)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
+          content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
         params![
             item.id,
             item.item_id,
@@ -363,6 +377,7 @@ pub fn insert_item_with_fts(
             item.pinned as i64,
             item.pin_order,
             item.thumb,
+            item.deleted as i64,
         ],
     );
 
@@ -487,8 +502,8 @@ pub fn get_page(
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order, thumb
-         FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
+         FROM clipboard_items WHERE deleted = 0 ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
         .query_map(params![limit_i64, offset_i64], row_to_item)?
@@ -517,8 +532,9 @@ pub fn get_page_pinned_first(
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order, thumb
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
          FROM clipboard_items
+         WHERE deleted = 0
          ORDER BY
            CASE WHEN pinned = 1 THEN 0 ELSE 1 END ASC,
            pin_order IS NULL ASC,
@@ -580,8 +596,8 @@ pub fn get_page_meta(
     let mut stmt = db.conn().prepare(
         "SELECT id, item_id, content_type, NULL AS content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order, thumb
-         FROM clipboard_items ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
+         FROM clipboard_items WHERE deleted = 0 ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
     )?;
     let items = stmt
         .query_map(params![limit_i64, offset_i64], row_to_item)?
@@ -599,7 +615,7 @@ pub fn get_item_by_id(db: &Database, id: &str) -> Result<Option<ClipboardItem>, 
     let result = db.conn().query_row(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order, thumb
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
          FROM clipboard_items WHERE id = ?1",
         params![id],
         row_to_item,
@@ -630,10 +646,13 @@ pub fn get_item_by_item_id(
     db: &Database,
     item_id: &str,
 ) -> Result<Option<ClipboardItem>, ItemsError> {
+    // NOTE: no `deleted = 0` filter here — the merge layer must be able to see
+    // tombstone rows (deleted = 1) so LWW can determine whether an incoming
+    // remote version beats the local tombstone or vice-versa.
     let result = db.conn().query_row(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order, thumb
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
          FROM clipboard_items WHERE item_id = ?1",
         params![item_id],
         row_to_item,
@@ -1160,10 +1179,10 @@ pub fn search_items(
         "SELECT ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref,
                 ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at,
                 ci.app_bundle_id, ci.content_hash, ci.origin_device_id, ci.key_version,
-                ci.pinned, ci.pin_order, ci.thumb
+                ci.pinned, ci.pin_order, ci.thumb, ci.deleted
          FROM clipboard_fts fts
          JOIN clipboard_items ci ON ci.id = fts.id
-         WHERE clipboard_fts MATCH ?1
+         WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0
          ORDER BY rank
          LIMIT ?2",
     )?;
@@ -1203,7 +1222,49 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
         pinned: row.get::<_, i64>(15)? != 0,
         pin_order: row.get(16)?,
         thumb: row.get(17)?,
+        deleted: row.get::<_, i64>(18)? != 0,
     })
+}
+
+/// Soft-delete a clipboard item, turning it into a tombstone.
+///
+/// Sets `deleted = 1` and wipes the encrypted payload columns (`content`,
+/// `content_nonce`, `thumb`) to reclaim storage, then removes the item's
+/// FTS5 entry so it no longer appears in search results. The row itself is
+/// kept so that the LWW sync protocol can propagate the deletion to peer
+/// devices: the tombstone travels on the wire as a `WireItem` with
+/// `deleted = true` and a higher `lamport_ts`, and peers apply it via the
+/// normal LWW merge path.
+///
+/// The existing hard [`delete_item`] is preserved for the reset/clear-all
+/// path where propagation is not needed (local-only destructive delete).
+///
+/// Returns the number of rows updated (`0` if `id` does not exist).
+pub fn soft_delete_item(
+    db: &Database,
+    id: &str,
+    lamport_ts: i64,
+    wall_time: i64,
+) -> Result<usize, ItemsError> {
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+    let changed = tx.execute(
+        "UPDATE clipboard_items
+         SET deleted = 1,
+             content = NULL,
+             content_nonce = NULL,
+             thumb = NULL,
+             lamport_ts = ?2,
+             wall_time = ?3
+         WHERE id = ?1",
+        params![id, lamport_ts, wall_time],
+    )?;
+    if changed > 0 {
+        // Remove from FTS so the tombstone is not returned by search queries.
+        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    }
+    tx.commit()?;
+    Ok(changed)
 }
 
 #[cfg(test)]

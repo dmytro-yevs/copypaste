@@ -105,6 +105,34 @@ pub struct WireItem {
     /// v2 ciphertext with the v1 key/AAD yields `AuthFailed`.
     #[serde(default = "default_key_version")]
     pub key_version: u8,
+    /// Whether this item is a soft-delete tombstone (schema v10).
+    ///
+    /// When `true` the item's content was intentionally wiped on the sender
+    /// and the receiver should apply the tombstone via LWW merge: if this
+    /// version's `lamport_ts` is higher than the local copy, replace the
+    /// local row with the tombstone (set `deleted = 1`, NULL content).
+    ///
+    /// `#[serde(default)]` keeps wire compatibility: old peers omit this
+    /// field, which deserializes as `false` (live item) — correct behaviour
+    /// since pre-v10 peers can never send tombstones.
+    #[serde(default)]
+    pub deleted: bool,
+    /// Whether the item is pinned by the user on the originating device.
+    ///
+    /// Carried on the wire so pin state propagates to peers. The receiver
+    /// applies this via LWW merge alongside the other fields.
+    ///
+    /// `#[serde(default)]` keeps wire compatibility: old peers omit this
+    /// field, which deserializes as `false` (unpinned).
+    #[serde(default)]
+    pub pinned: bool,
+    /// Explicit sort key among pinned items on the originating device.
+    ///
+    /// `None` for unpinned items or when the sender has not assigned an
+    /// explicit order. The receiver applies this via LWW merge so reorder
+    /// operations propagate. Old peers omit the field → `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_order: Option<f64>,
 }
 
 /// Default `key_version` for `WireItem`s deserialized from a peer that predates
@@ -266,6 +294,9 @@ mod tests {
             key_version: 2,
             file_name: None,
             mime: None,
+            deleted: false,
+            pinned: false,
+            pin_order: None,
         };
         let msg = Message::Items { items: vec![item] };
         assert_eq!(round_trip(msg.clone()), msg);
@@ -310,6 +341,9 @@ mod tests {
             key_version: 2,
             file_name: Some("report.pdf".to_string()),
             mime: Some("application/pdf".to_string()),
+            deleted: false,
+            pinned: false,
+            pin_order: None,
         };
         let msg = Message::Items { items: vec![item] };
         let decoded = round_trip(msg.clone());
@@ -368,6 +402,9 @@ mod tests {
             key_version: 2,
             file_name: None,
             mime: None,
+            deleted: false,
+            pinned: false,
+            pin_order: None,
         };
         let json = serde_json::to_string(&item).expect("must serialize");
         // Base64 for [0x01, 0x02, 0x03] is "AQID".

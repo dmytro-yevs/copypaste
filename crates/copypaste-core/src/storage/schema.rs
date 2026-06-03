@@ -46,7 +46,15 @@ pub enum SchemaError {
 ///     `image::encode_image_full`). `DEFAULT NULL` backfills all existing rows
 ///     with no thumbnail; the daemon may lazily backfill later via
 ///     `items::set_thumb`. Text rows keep `NULL`.
-pub const SCHEMA_VERSION: i64 = 9;
+///   * 9 → 10 (op-propagation foundation): added `deleted INTEGER NOT NULL
+///     DEFAULT 0` to `clipboard_items` so logical deletions can be represented
+///     as soft-delete tombstones that propagate via the LWW sync protocol.
+///     `DEFAULT 0` backfills all existing rows as live (not deleted), which is
+///     correct. A partial index on `deleted = 1` supports efficient tombstone
+///     enumeration (sync catchup). The UI list queries filter `deleted = 0`;
+///     `get_item_by_item_id` intentionally does NOT filter so the merge layer
+///     can see tombstones and apply LWW correctly.
+pub const SCHEMA_VERSION: i64 = 10;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -124,6 +132,20 @@ UPDATE clipboard_items \
 /// correct "no thumbnail yet" sentinel.
 pub(crate) const V9_ALTER: &str = "\
 ALTER TABLE clipboard_items ADD COLUMN thumb BLOB DEFAULT NULL;\n";
+
+/// v10 ALTER step — add `deleted INTEGER NOT NULL DEFAULT 0` to
+/// `clipboard_items` (op-propagation foundation).
+///
+/// `DEFAULT 0` backfills all existing rows as live (not soft-deleted). The
+/// partial index covers only the tombstone minority so tombstone enumeration
+/// during sync catchup remains O(tombstones) rather than a full-table scan.
+/// UI list queries add `AND deleted = 0`; the merge layer reads through the
+/// filter via `get_item_by_item_id` (no deleted filter) so LWW can apply
+/// tombstone wins correctly.
+pub(crate) const V10_ALTER: &str = "\
+ALTER TABLE clipboard_items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;\n\
+CREATE INDEX IF NOT EXISTS idx_clipboard_deleted \
+    ON clipboard_items(deleted) WHERE deleted = 1;\n";
 
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
@@ -263,6 +285,14 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // `DEFAULT NULL` backfills existing rows with no thumbnail; this is safe
         // — the column is optional and the daemon backfills lazily.
         script.push_str(V9_ALTER);
+    }
+
+    if current_version < 10 {
+        // Migration v10 (op-propagation foundation): add `deleted INTEGER NOT
+        // NULL DEFAULT 0` for soft-delete tombstones that LWW-propagate across
+        // devices. `DEFAULT 0` backfills existing rows as live. The partial
+        // index on `deleted = 1` keeps tombstone enumeration efficient.
+        script.push_str(V10_ALTER);
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));
@@ -602,6 +632,83 @@ mod tests {
             )
             .unwrap();
         assert_eq!(pinned, 0, "pre-v7 rows must land on pinned=0");
+
+        let uv: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(uv, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn fresh_db_has_deleted_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_migrations(&conn).unwrap();
+        let mut stmt = conn.prepare("PRAGMA table_info(clipboard_items)").unwrap();
+        let cols: Vec<(String, String, i64)> = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(1)?, // column name
+                    r.get::<_, String>(2)?, // declared type
+                    r.get::<_, i64>(3)?,    // notnull
+                ))
+            })
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        let deleted_col = cols
+            .iter()
+            .find(|c| c.0 == "deleted")
+            .expect("v10 schema must include deleted column");
+        assert_eq!(deleted_col.1.to_uppercase(), "INTEGER");
+        assert_eq!(deleted_col.2, 1, "deleted must be NOT NULL");
+    }
+
+    #[test]
+    fn v9_to_v10_migration_backfills_existing_rows_as_not_deleted() {
+        // Simulate a v9 database (no deleted column), run migrations, and verify
+        // existing rows land on deleted=0 (the DEFAULT in V10_ALTER) and the
+        // user_version reaches the current SCHEMA_VERSION.
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Hand-build v9 state.
+        conn.execute_batch(V1_SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
+             ALTER TABLE clipboard_items ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';\n\
+             ALTER TABLE clipboard_items ADD COLUMN key_version INTEGER NOT NULL DEFAULT 1;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pin_order REAL DEFAULT NULL;\n\
+             ALTER TABLE clipboard_items ADD COLUMN thumb BLOB DEFAULT NULL;\n\
+             CREATE TABLE IF NOT EXISTS migration_state (\
+               key TEXT PRIMARY KEY, key_version_in_progress INTEGER,\
+               last_processed_id INTEGER NOT NULL DEFAULT 0,\
+               started_at INTEGER, completed_at INTEGER);\n\
+             INSERT OR IGNORE INTO migration_state VALUES ('v4-key-version-sweep', 2, 0, 0, 0);",
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA user_version = 9;").unwrap();
+
+        // Insert a v9-era row (no deleted column yet).
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, lamport_ts, wall_time, origin_device_id, key_version, pinned) \
+             VALUES ('id-v9', 'item-v9', 'text', 1, 1000, '', 2, 0)",
+            [],
+        )
+        .unwrap();
+
+        // Run apply_migrations → must add deleted column, DEFAULT 0 backfills.
+        apply_migrations(&conn).unwrap();
+
+        let deleted: i64 = conn
+            .query_row(
+                "SELECT deleted FROM clipboard_items WHERE id = 'id-v9'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(deleted, 0, "pre-v10 rows must land on deleted=0");
 
         let uv: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
