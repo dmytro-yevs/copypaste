@@ -7,6 +7,7 @@ import {
   appVersion,
   getPopupShortcut,
   setPopupShortcut,
+  restartDaemon,
   detectStaleDaemonFromStatus,
   type AppSettings,
   type SyncStatus,
@@ -543,6 +544,12 @@ export function SettingsView() {
   // Sync parity — p2p toggle + wifi-only
   const [syncOnWifiOnly, setSyncOnWifiOnly] = useState(false);
 
+  // Sync-path restart guard: true while restart_daemon is in flight after a
+  // sync-path toggle (P2P/relay/Supabase). Disables the control so rapid
+  // double-toggles can't queue two restarts.
+  const [syncRestarting, setSyncRestarting] = useState(false);
+  const syncRestartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Data
   const [deleteMsg, setDeleteMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
@@ -683,6 +690,7 @@ export function SettingsView() {
     void load();
     return () => {
       cancelled = true;
+      if (syncRestartTimerRef.current !== null) clearTimeout(syncRestartTimerRef.current);
     };
   }, [reloadKey]);
 
@@ -834,6 +842,16 @@ export function SettingsView() {
       setSavedMsg(true);
       if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
       savedTimerRef.current = setTimeout(() => setSavedMsg(false), 2500);
+      // Supabase URL/key are read at daemon startup — restart so the new
+      // credentials take effect immediately without requiring a manual relaunch.
+      setSyncRestarting(true);
+      try {
+        await restartDaemon();
+      } catch {
+        // Non-fatal: config is saved; user can relaunch manually if restart fails.
+      } finally {
+        setSyncRestarting(false);
+      }
     } catch (err) {
       const msg = err instanceof IpcError ? err.message : "Save failed";
       setSaveError(msg);
@@ -873,13 +891,32 @@ export function SettingsView() {
     // buildConfigPatch reads current state for ALL fields and applies the
     // override, so storage/supabase fields cannot be clobbered.
     const prev = config.p2p_enabled;
+    // Skip if value unchanged (guard against rapid double-toggle).
+    if (val === prev || syncRestarting) return;
     setConfig((c) => ({ ...c, p2p_enabled: val }));
     try {
       await api.setConfig(
         buildConfigPatch({ p2p_enabled: val }) as unknown as Parameters<typeof api.setConfig>[0],
       );
+      // The daemon only reads p2p_enabled at startup — restart so the new
+      // value takes effect immediately. Show a transient status message and
+      // disable the toggle while the restart is in flight to prevent queuing
+      // a second restart from a rapid double-click.
+      setSyncRestarting(true);
+      showLimitsMsg("p2p_enabled", "Restarting sync service…", 6000);
+      try {
+        await restartDaemon();
+        showLimitsMsg("p2p_enabled", "Sync service restarted", 2500);
+      } catch (restartErr) {
+        const msg =
+          restartErr instanceof Error ? restartErr.message : "Restart failed — relaunch the app";
+        showLimitsMsg("p2p_enabled", msg, 4000);
+      } finally {
+        setSyncRestarting(false);
+        if (syncRestartTimerRef.current !== null) clearTimeout(syncRestartTimerRef.current);
+      }
     } catch (err) {
-      // Revert on failure
+      // Revert on set_config failure — no restart attempted.
       setConfig((c) => ({ ...c, p2p_enabled: prev }));
       const msg = err instanceof IpcError ? err.message : "Failed to update P2P setting";
       showLimitsMsg("p2p_enabled", msg, 4000);
@@ -1201,7 +1238,7 @@ export function SettingsView() {
               <Toggle
                 checked={config.p2p_enabled}
                 onChange={(v) => void handleP2pToggle(v)}
-                disabled={offline}
+                disabled={offline || syncRestarting}
                 aria-label="P2P sync"
               />
             </div>
