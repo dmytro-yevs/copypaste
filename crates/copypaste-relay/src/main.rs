@@ -10,6 +10,7 @@ mod api;
 mod auth;
 mod config;
 mod error;
+mod governor_cleanup;
 mod middleware;
 mod models;
 mod quota;
@@ -41,7 +42,16 @@ async fn main() -> anyhow::Result<()> {
     let _evictor =
         store::spawn_ttl_evictor(state.clone(), config.sync_ttl_secs, TTL_EVICTOR_TICK_SECS);
 
-    let app = routes::relay_router(state, config.clone());
+    let (app, retain_fns) = routes::relay_router(state, config.clone());
+
+    // Background governor cleanup — evict stale per-key rate-limit buckets
+    // every 60 s to bound resident memory (one entry per distinct client IP /
+    // device id accumulates without this).  The handle is kept alive for the
+    // duration of the server; dropping it would cancel the task.
+    let _governor_cleanup = governor_cleanup::spawn_cleanup_all(
+        retain_fns,
+        governor_cleanup::GOVERNOR_CLEANUP_TICK_SECS,
+    );
 
     let addr = format!("{}:{}", config.bind_addr, config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;

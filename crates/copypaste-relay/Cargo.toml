@@ -23,6 +23,9 @@ thiserror.workspace = true
 anyhow.workspace = true
 subtle = { workspace = true }  # S5: pinned to >=2.5 via workspace
 tower_governor = { version = "0.8", features = ["axum"] }
+# Required to name RateLimitingMiddleware / QuantaInstant in spawn_governor_cleanup
+# bounds. Already in the dependency graph transitively via tower_governor 0.8.
+governor = "0.10"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
