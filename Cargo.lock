@@ -1026,6 +1026,7 @@ dependencies = [
 name = "copypaste-sync"
 version = "0.6.0"
 dependencies = [
+ "base64 0.22.1",
  "copypaste-core",
  "serde",
  "serde_json",
