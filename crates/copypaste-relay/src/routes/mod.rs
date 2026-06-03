@@ -72,6 +72,13 @@ impl KeyExtractor for DeviceIdKeyExtractor {
 
 /// Build the complete relay router.
 ///
+/// Returns `(router, retain_fns)`.  `retain_fns` is a list of zero-argument
+/// closures — one per governor limiter — that each call `retain_recent()` on
+/// their respective limiter.  The caller is responsible for driving them on a
+/// periodic interval (see `crate::governor_cleanup::spawn_governor_cleanup_all`).
+/// Returning closures rather than spawning tasks here means `relay_router` can
+/// be called from plain `#[test]` contexts that have no tokio runtime.
+///
 /// # Rate limiting
 ///
 /// The router is split into sub-routers:
@@ -89,7 +96,10 @@ impl KeyExtractor for DeviceIdKeyExtractor {
 ///
 /// Exceeding either limit returns **HTTP 429 Too Many Requests** with a
 /// `Retry-After` header automatically set by `tower_governor`.
-pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
+/// Type alias for the list of retain callbacks returned alongside the router.
+pub type RetainFns = Vec<Box<dyn Fn() + Send + Sync + 'static>>;
+
+pub fn relay_router(state: AppState, config: RelayConfig) -> (Router, RetainFns) {
     // M3: select the per-IP key extractor. By default we key on the
     // unspoofable TCP peer IP (`PeerIpKeyExtractor`). When the operator opts in
     // via `RELAY_TRUST_PROXY_HEADERS` — and *only* then — we honor
@@ -108,7 +118,11 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> Router {
 ///
 /// Generic over `PerIp` so the same wiring serves both the peer-IP and
 /// proxy-header (smart-IP) variants without duplicating the route table.
-fn build_router<PerIp>(state: AppState, config: RelayConfig, per_ip_key: PerIp) -> Router
+fn build_router<PerIp>(
+    state: AppState,
+    config: RelayConfig,
+    per_ip_key: PerIp,
+) -> (Router, RetainFns)
 where
     PerIp: KeyExtractor + Send + Sync + 'static,
     PerIp::Key: Send + Sync + 'static,
@@ -157,6 +171,19 @@ where
             .expect("invalid per-device governor configuration"),
     );
 
+    // ---- Retain callbacks for background cleanup ---------------------------
+    // We capture type-erased `retain_recent` closures here instead of calling
+    // tokio::spawn directly, so this sync function can be called from plain
+    // #[test] contexts that have no tokio runtime.  The caller (main.rs) passes
+    // the vec to `governor_cleanup::spawn_cleanup_all` which spawns one task.
+    // Test code that only needs the Router can simply drop the vec.
+    let ip_limiter = std::sync::Arc::clone(per_ip_conf.limiter());
+    let dev_limiter = std::sync::Arc::clone(per_device_conf.limiter());
+    let retain_fns: RetainFns = vec![
+        Box::new(move || ip_limiter.retain_recent()),
+        Box::new(move || dev_limiter.retain_recent()),
+    ];
+
     // ---- Device-scoped item routes (per-device + per-IP limits) ------------
     // Note: axum 0.8 uses `{param}` syntax for path captures (`:param` is 0.7).
     let item_routes = Router::new()
@@ -185,7 +212,7 @@ where
         .layer(GovernorLayer::new(per_ip_conf));
 
     // ---- Merge all sub-routers + shared body-limit + config injection ------
-    Router::new()
+    let router = Router::new()
         .merge(exempt)
         .merge(item_routes)
         .merge(device_routes)
@@ -199,7 +226,9 @@ where
         // Inject the live `RelayConfig` so handlers (e.g. `items::push`)
         // can honor operator-supplied limits like `RELAY_MAX_ITEM_BYTES`
         // instead of falling back to compile-time defaults (HIGH #2).
-        .layer(axum::Extension(config))
+        .layer(axum::Extension(config));
+
+    (router, retain_fns)
 }
 
 async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
@@ -314,7 +343,9 @@ mod tests {
             };
             let state = Arc::new(Mutex::new(RelayStore::new(config.sync_ttl_secs)));
             // Must not panic while building either variant.
-            let _router = relay_router(state, config);
+            // retain_fns is dropped here — no tokio runtime needed since the
+            // closures are never spawned in the test context.
+            let (_router, _retain_fns) = relay_router(state, config);
         }
     }
 }
