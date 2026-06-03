@@ -112,6 +112,28 @@ pub fn build_image_meta_json(
     )
 }
 
+/// Build the file `blob_ref` meta JSON for a file item.
+///
+/// Carries the same `file_id` key the image meta uses (so the shared
+/// `ipc::parse_image_file_id` parser recovers it for both content types) plus
+/// the file-specific `filename`/`mime`/`original_size`/`chunk_count`. The core
+/// reader ignores unknown keys, so this stays forward-/backward-compatible.
+///
+/// `filename` and `mime` are JSON-string-escaped via `serde_json` so arbitrary
+/// names round-trip safely.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn build_file_meta_json(meta: &copypaste_core::FileMeta) -> String {
+    // serde_json::to_string on a &str produces a correctly-escaped JSON string
+    // literal (including the surrounding quotes); infallible for plain strings,
+    // so the unwrap_or keeps us total without panicking.
+    let filename = serde_json::to_string(&meta.filename).unwrap_or_else(|_| "\"\"".to_string());
+    let mime = serde_json::to_string(&meta.mime).unwrap_or_else(|_| "\"\"".to_string());
+    format!(
+        r#"{{"filename":{},"mime":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
+        filename, mime, meta.original_size, meta.chunk_count, meta.file_id
+    )
+}
+
 /// Process-wide set of pasteboard kinds we've already logged once.
 /// Keeps the steady-state log volume bounded when the user repeatedly
 /// copies an unsupported type (e.g. RTF inside a text editor).

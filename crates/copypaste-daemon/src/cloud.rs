@@ -831,31 +831,25 @@ async fn push_loop(
             guard.as_ref().map(|k| k.as_bytes().to_vec())
         };
         if let Some(ref key_bytes) = key_snapshot {
-            // P0: mark non-text unsynced rows as is_synced=1 so they are not
-            // re-queued on every startup. Cloud upload of image/file items is
-            // not implemented — decrypt_item_plaintext explicitly rejects them
-            // because the multi-chunk blob format requires a different encode
-            // path that push_loop does not have. Leaving them at is_synced=0
-            // causes them to appear in the unsynced-item count forever without
-            // ever being pushed. We warn once per row so operators know why
-            // images are absent from the cloud store.
+            // v0.6: text, image, and file items all sync to the cloud now. We
+            // still mark any OTHER (unknown) non-syncable content_type synced so
+            // it does not linger in the unsynced count forever.
             {
                 let db_arc2 = db.clone();
                 let _ = tokio::task::spawn_blocking(move || {
                     let db = db_arc2.blocking_lock();
                     match db.conn().execute(
                         "UPDATE clipboard_items SET is_synced = 1 \
-                         WHERE is_synced = 0 AND content_type != 'text'",
+                         WHERE is_synced = 0 \
+                           AND content_type NOT IN ('text', 'image', 'file')",
                         [],
                     ) {
                         Ok(0) => {}
                         Ok(n) => tracing::warn!(
-                            "cloud-sync backlog: marked {n} non-text item(s) is_synced=1; \
-                             image/file cloud-upload is not yet implemented — \
-                             these items will not appear in the cloud store"
+                            "cloud-sync backlog: marked {n} unsupported-type item(s) is_synced=1"
                         ),
                         Err(e) => tracing::warn!(
-                            "cloud-sync backlog: failed to mark non-text items synced: {e}"
+                            "cloud-sync backlog: failed to mark unsupported items synced: {e}"
                         ),
                     }
                 })
@@ -869,15 +863,17 @@ async fn push_loop(
             // Load unsynced items on the blocking pool (rusqlite is sync).
             let backlog_items: Vec<ClipboardItem> = tokio::task::spawn_blocking(move || {
                 let db = db_arc.blocking_lock();
-                // Fetch up to PUSH_RETRY_QUEUE_CAP unsynced text items,
-                // oldest first, so the timeline on Supabase is chronological.
+                // Fetch up to PUSH_RETRY_QUEUE_CAP unsynced syncable items
+                // (text/image/file), oldest first, so the Supabase timeline is
+                // chronological.
                 let mut stmt = match db.conn().prepare(
                     "SELECT id, item_id, content_type, content, content_nonce, \
                      blob_ref, is_sensitive, is_synced, lamport_ts, wall_time, \
                      expires_at, app_bundle_id, content_hash, origin_device_id, \
                      key_version, pinned \
                      FROM clipboard_items \
-                     WHERE is_synced = 0 AND content_type = 'text' \
+                     WHERE is_synced = 0 \
+                       AND content_type IN ('text', 'image', 'file') \
                      ORDER BY wall_time ASC \
                      LIMIT ?1",
                 ) {
@@ -1234,13 +1230,33 @@ fn decrypt_item_plaintext(
     item: &ClipboardItem,
     local_key: &zeroize::Zeroizing<[u8; 32]>,
 ) -> Result<Vec<u8>, String> {
-    // Image items store multi-chunk data that is not a simple decrypt target;
-    // we only support re-encrypting text items for cloud sync today.
-    if item.content_type != "text" {
-        return Err(format!(
-            "unsupported content_type '{}' for cloud re-encryption",
-            item.content_type
-        ));
+    // v0.6: image/file items store a multi-chunk blob encrypted under the LOCAL
+    // v1 seed with `file_id` AAD (NOT the per-item v2 AAD). Reassemble them into
+    // plaintext here so the cloud upload path re-wraps the SAME plaintext under
+    // the sync key (identical wire contract to the P2P re-key path), then
+    // enforce the sync ceiling so an oversized blob is rejected, not corrupted.
+    if item.content_type == "image" || item.content_type == "file" {
+        let meta_json = item
+            .blob_ref
+            .as_deref()
+            .ok_or("blob item has no blob_ref")?;
+        let file_id = crate::ipc::parse_image_file_id(meta_json)?;
+        let content = item.content.as_deref().ok_or("blob item has no content")?;
+        let chunks = copypaste_core::chunks_from_blob(content).map_err(|e| e.to_string())?;
+        let v1_key: [u8; 32] = **local_key;
+        let plaintext = if item.content_type == "image" {
+            copypaste_core::decode_image(&chunks, &v1_key, &file_id).map_err(|e| e.to_string())?
+        } else {
+            copypaste_core::decode_file(&chunks, &v1_key, &file_id).map_err(|e| e.to_string())?
+        };
+        let ceiling = crate::sync_orch::SYNC_MAX_BLOB_BYTES;
+        if plaintext.len() > ceiling {
+            return Err(format!(
+                "blob {} bytes exceeds cloud sync ceiling {ceiling}",
+                plaintext.len()
+            ));
+        }
+        return Ok(plaintext);
     }
     let content = item.content.as_deref().ok_or("item has no content")?;
     let nonce_vec = item
@@ -2641,8 +2657,24 @@ fn build_local_item(
     origin_device_id: String,
     local_key: &zeroize::Zeroizing<[u8; 32]>,
 ) -> Result<ClipboardItem, String> {
-    // Only text items are supported for cloud sync today; image items use
-    // multi-chunk storage that requires a different path.
+    // v0.6: image/file payloads arrive as a single sync-key-wrapped plaintext
+    // (PNG / raw bytes). Re-chunk them under THIS device's LOCAL v1 seed and
+    // rebuild the meta JSON so the stored row reads back through the production
+    // image/file decode path — symmetric with sync_orch::rewrap_inbound_blob.
+    if content_type == "image" || content_type == "file" {
+        return build_local_blob_item(
+            id,
+            item_id,
+            content_type,
+            plaintext,
+            lamport_ts,
+            wall_time,
+            expires_at,
+            app_bundle_id,
+            origin_device_id,
+            local_key,
+        );
+    }
     if content_type != "text" {
         return Err(format!(
             "unsupported content_type '{content_type}' for cloud download"
@@ -2696,6 +2728,90 @@ fn build_local_item(
         pin_order: None,
         // thumb is a local-only image thumbnail (schema v9); cloud download is
         // text-only here, so it never carries one.
+        thumb: None,
+    })
+}
+
+/// Build a local image/file [`ClipboardItem`] from decrypted plaintext by
+/// re-chunking it under the daemon's LOCAL v1 seed (the chunk-encryption key,
+/// keyed by a deterministically re-derived `file_id`) and rebuilding the
+/// `blob_ref` meta JSON. Symmetric with `sync_orch::rewrap_inbound_blob`; the
+/// stored row reads back through the production image/file decode path.
+#[allow(clippy::too_many_arguments)]
+fn build_local_blob_item(
+    id: &str,
+    item_id: &str,
+    content_type: &str,
+    plaintext: &[u8],
+    lamport_ts: i64,
+    wall_time: i64,
+    expires_at: Option<i64>,
+    app_bundle_id: Option<String>,
+    origin_device_id: String,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
+) -> Result<ClipboardItem, String> {
+    let ceiling = crate::sync_orch::SYNC_MAX_BLOB_BYTES;
+    if plaintext.len() > ceiling {
+        return Err(format!(
+            "inbound blob {} bytes exceeds cloud sync ceiling {ceiling}",
+            plaintext.len()
+        ));
+    }
+    let v1_key: [u8; 32] = **local_key;
+    // Re-derive file_id from the plaintext so item_id/dedup converge with the
+    // sender (the chunk AEAD binds file_id as AAD).
+    let file_id = crate::clipboard::image_content_hash(plaintext);
+
+    let (content, blob_ref) = if content_type == "image" {
+        let (meta, chunks) = copypaste_core::encode_image_with_limit(
+            plaintext,
+            &v1_key,
+            &file_id,
+            copypaste_core::MAX_IMAGE_BYTES,
+            copypaste_core::config::MAX_DECODED_IMAGE_MB,
+        )
+        .map_err(|e| e.to_string())?;
+        let blob = copypaste_core::chunks_to_blob(&chunks).map_err(|e| e.to_string())?;
+        let thumb_file_id = crate::clipboard::image_thumb_file_id(&file_id);
+        let meta_json = crate::clipboard::build_image_meta_json(&meta, &thumb_file_id, 0, 0);
+        (blob, meta_json)
+    } else {
+        let (meta, chunks) = copypaste_core::encode_file(
+            plaintext,
+            "file",
+            "application/octet-stream",
+            &v1_key,
+            &file_id,
+            copypaste_core::MAX_FILE_BYTES,
+        )
+        .map_err(|e| e.to_string())?;
+        let blob = copypaste_core::chunks_to_blob(&chunks).map_err(|e| e.to_string())?;
+        let meta_json = crate::clipboard::build_file_meta_json(&meta);
+        (blob, meta_json)
+    };
+
+    Ok(ClipboardItem {
+        id: id.to_owned(),
+        item_id: item_id.to_owned(),
+        content_type: content_type.to_owned(),
+        content: Some(content),
+        // Chunks are self-framed per-chunk; there is no item-level nonce.
+        content_nonce: None,
+        blob_ref: Some(blob_ref),
+        is_sensitive: false,
+        is_synced: true,
+        lamport_ts,
+        wall_time,
+        expires_at,
+        app_bundle_id,
+        content_hash: None,
+        origin_device_id,
+        // Chunk content is v1-keyed (local seed + file_id AAD), not the v2
+        // item-AAD scheme used for text.
+        key_version: 1,
+        pinned: false,
+        pin_order: None,
+        // Thumbnail is regenerated locally on demand, never synced.
         thumb: None,
     })
 }
