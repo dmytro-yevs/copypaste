@@ -654,6 +654,62 @@ function BulkActionBar({
 }
 
 // ---------------------------------------------------------------------------
+// FullResImage — fetches the FULL-RESOLUTION image for the detail modal.
+// Unlike ImageThumb (which fetches the small thumbnail), this always calls
+// getItemImage so the detail view shows the original quality image.
+// One image at a time, so no shared cache needed — a simple local state
+// per-mount is sufficient.
+// ---------------------------------------------------------------------------
+
+function FullResImage({ id, maxHeight }: { id: string; maxHeight: number }) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    setSrc(null);
+    setFailed(false);
+    api
+      .getItemImage(id)
+      .then(({ data_uri }) => {
+        if (!mountedRef.current) return;
+        setSrc(data_uri);
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setFailed(true);
+      });
+    return () => { mountedRef.current = false; };
+  }, [id]);
+
+  if (failed) {
+    return (
+      <span className="text-[12px] text-ide-faint italic">Image unavailable</span>
+    );
+  }
+  if (src === null) {
+    return <span className="text-[12px] text-ide-faint">Loading…</span>;
+  }
+  return (
+    <img
+      src={src}
+      alt=""
+      style={{
+        maxWidth: "100%",
+        maxHeight: maxHeight,
+        width: "auto",
+        height: "auto",
+        objectFit: "contain",
+        imageRendering: "auto",
+        display: "block",
+        borderRadius: 2,
+      }}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
 // M10: DetailsModal — full preview for text and image clip entries
 // ---------------------------------------------------------------------------
 
@@ -708,7 +764,8 @@ function DetailsModal({
         {/* Body */}
         <div className="flex-1 overflow-auto p-4">
           {isImage ? (
-            <ImageThumb id={entry.id} maxHeight={600} />
+            // Full-res for detail modal — one image at a time, no shared cache.
+            <FullResImage id={entry.id} maxHeight={600} />
           ) : (
             <pre
               className="whitespace-pre-wrap break-words text-[13px] text-ide-text font-mono leading-relaxed select-text"

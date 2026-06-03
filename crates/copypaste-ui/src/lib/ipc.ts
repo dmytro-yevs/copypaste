@@ -278,6 +278,16 @@ export const api = {
   getItemImage: (id: string) => ipcCall<{ data_uri: string }>("get_item_image", { id }),
 
   /**
+   * Fetch the pre-computed thumbnail for a clipboard image item. Returns
+   * `{ thumbnail: "data:image/webp;base64,…" }` when the daemon has a thumb,
+   * or `{ thumbnail: null }` when thumbnails are not available for this item
+   * (older daemon, non-image item, or thumbnail generation failed at capture
+   * time). Callers should fall back to `getItemImage` when `thumbnail` is null.
+   */
+  getItemThumbnail: (id: string) =>
+    ipcCall<{ thumbnail: string | null }>("get_item_thumbnail", { id }),
+
+  /**
    * Ask the daemon to resolve a source-app bundle identifier to a 32×32 PNG
    * icon, base64-encoded.  Returns `null` when the app is not installed or
    * the daemon cannot extract the icon.  Results are cached in the daemon so
