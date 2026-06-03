@@ -831,13 +831,19 @@ async fn peer_connector_loop(
 
                         tracing::info!(fingerprint = %peer.fingerprint, addr = %peer.addr, "connector established outbound mTLS link");
 
-                        // Sync-on-connect catch-up: replay local history once so
-                        // items produced before this link came up reach the peer.
-                        push_catchup(&catchup, &cleanup_tx).await;
-
                         // Stamp first/last sync times for this peer (once per
                         // established connection — see `stamp_peer_sync`).
                         stamp_peer_sync(&peers_path, &peer.fingerprint);
+
+                        // Clone the sink sender for the catch-up replay BEFORE the
+                        // drainer task takes ownership of `cleanup_tx`. The drainer
+                        // MUST start first: `push_catchup` does a bounded
+                        // `send().await` over the ENTIRE local history (commonly far
+                        // more than the 64-slot channel capacity), so with no active
+                        // receiver draining `peer_rx` it deadlocks the moment the
+                        // buffer fills — the sink then stays full forever and the
+                        // peer receives nothing.
+                        let catchup_tx = cleanup_tx.clone();
 
                         let incoming_tx = incoming_tx.clone();
                         let peer_sinks = Arc::clone(&peer_sinks);
@@ -854,6 +860,10 @@ async fn peer_connector_loop(
                             drop(sinks);
                             tracing::debug!(fingerprint = %peer_key, "connector outbound connection closed");
                         });
+
+                        // Drainer is now consuming `peer_rx`, so replaying the local
+                        // history (sync-on-connect) cannot deadlock on a full sink.
+                        push_catchup(&catchup, &catchup_tx).await;
                     }
                     // M3: a successful connect records the connection start but
                     // does NOT reset the backoff yet — a flapping peer that
