@@ -363,7 +363,7 @@ class ClipboardService : Service() {
             PeerSessionKeyInfo(it.fingerprint, settings.sessionKeyFor(it.fingerprint))
         }
         val localItems = runBlocking {
-            repository.localItemsForSync(key, limit = FgsSyncLoop.P2P_LOCAL_ITEM_LIMIT)
+            repository.localItemsForSync(key)
         }
 
         val handle = try {
