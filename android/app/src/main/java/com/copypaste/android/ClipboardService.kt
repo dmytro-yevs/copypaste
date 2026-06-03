@@ -198,7 +198,7 @@ class ClipboardService : Service() {
         // passed to FgsSyncLoop as the wsConnected gate.
         realtimeClient = SupabaseRealtimeClient(settings, syncManager, repository, scope)
         deviceKeyStore = DeviceKeyStore(this)
-        fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager, deviceKeyStore, realtimeClient)
+        fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager, deviceKeyStore, realtimeClient, applicationContext)
 
         // Relay SSE subscription — the third independent receive transport.
         // Reuses the same syncManager (relay decrypt + LWW) and FGS scope.

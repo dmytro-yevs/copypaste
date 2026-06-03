@@ -1,5 +1,8 @@
 package com.copypaste.android
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -71,6 +74,12 @@ class FgsSyncLoop(
     /** WS client whose [SupabaseRealtimeClient.isConnected] gate drives the
      *  catch-up poll interval. Null-safe: when absent the loop treats WS as down. */
     private val wsClient: SupabaseRealtimeClient? = null,
+    /**
+     * Application context used for auto-applying synced text clips to the
+     * Android system clipboard (Deliverable 1). Must be the application context
+     * (not an Activity context) to avoid leaking.
+     */
+    private val appContext: Context? = null,
 ) {
     private var job: Job? = null
 
@@ -371,13 +380,18 @@ class FgsSyncLoop(
                     if (text.isBlank()) {
                         false
                     } else {
-                        repository.storeItemWithLww(
+                        val didStore = repository.storeItemWithLww(
                             plaintext = text,
                             key = settings.encryptionKey,
                             itemId = item.itemId,
                             incomingLamportTs = item.lamportTs,
                             wallTimeMs = item.wallTime,
                         )
+                        // Auto-apply: push the newest inbound text clip to the system
+                        // clipboard so the user can paste without opening history.
+                        // TODO: extend to image/file when a suitable clipboard URI scheme exists.
+                        if (didStore) autoApplySyncedTextClip(text)
+                        didStore
                     }
                 }
                 if (stored) newCount++
@@ -616,6 +630,41 @@ class FgsSyncLoop(
      * Returns true when a new (or replaced) row was stored, false on a dedup /
      * empty / blank no-op.
      */
+    /**
+     * Auto-apply a freshly-stored inbound TEXT clip to the Android system clipboard
+     * so the user can immediately paste it without opening the history list.
+     *
+     * Self-write guard: calls [ClipboardRepository.expectClip] BEFORE
+     * [ClipboardManager.setPrimaryClip] — the exact same mechanism used by
+     * [HistoryActivity] when the user taps a row to copy it. This sets a
+     * 5-second suppression window that causes every capture listener
+     * (ClipboardService, ClipboardAccessibilityService) to skip this write,
+     * preventing the auto-applied clip from creating a duplicate history row
+     * or triggering a redundant cloud re-push.
+     *
+     * Only applies TEXT clips. Images and files are left for a later task
+     * (TODO comment at each call site).
+     *
+     * No-op when [appContext] is null (constructor default, used in tests) or
+     * when [ClipboardManager] is unavailable.
+     */
+    private fun autoApplySyncedTextClip(text: String) {
+        val ctx = appContext ?: return
+        try {
+            // Register expectation BEFORE setPrimaryClip so all capture listeners
+            // see the suppression window when the clipboard-changed callback fires.
+            ClipboardRepository.expectClip(text)
+            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                ?: return
+            cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", text))
+            Log.d(TAG, "autoApplySyncedTextClip: applied ${text.length} chars to system clipboard")
+        } catch (e: Exception) {
+            // setPrimaryClip can throw SecurityException on some locked-screen OEM
+            // variants. Non-fatal — the clip is already stored in history.
+            Log.d(TAG, "autoApplySyncedTextClip: failed (non-fatal): ${e.message}")
+        }
+    }
+
     suspend fun storeSyncedItem(item: uniffi.copypaste_android.SyncedItem): Boolean =
         withContext(Dispatchers.IO) {
             // Advance the local Lamport clock to stay causally after every received
@@ -691,12 +740,18 @@ class FgsSyncLoop(
                     // Lamport clock above (line ~535) and the same basis the macOS
                     // daemon's P2P LWW uses.
                     val plaintext = String(plaintextBytes, Charsets.UTF_8)
-                    repository.storeItemWithLww(
+                    val stored = repository.storeItemWithLww(
                         plaintext = plaintext,
                         key = key,
                         itemId = item.itemId,
                         incomingLamportTs = item.wallTimeMs,
                     )
+                    // Auto-apply: if this is a newly-stored (not LWW-deduped) inbound
+                    // text clip, push it to the Android system clipboard so the user can
+                    // immediately paste without opening the history list.
+                    // TODO: extend to image/file when a suitable clipboard URI scheme exists.
+                    if (stored) autoApplySyncedTextClip(plaintext)
+                    stored
                 }
             }
         }

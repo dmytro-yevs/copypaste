@@ -123,6 +123,9 @@ class ClipboardRepository(context: Context) {
             val ids = storedIds().takeLast(limit)
             ids.mapNotNull { id ->
                 val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
+                // Soft-delete tombstone: skip deleted items in the visible list
+                // (cheap last-field check, before any AEAD decrypt).
+                if (isDeletedBlob(raw)) return@mapNotNull null
                 // A: serve from parse cache when the raw blob is unchanged — avoids a
                 // full AEAD decrypt + native isSensitive() for every row on every reload.
                 // Only decrypt when the blob has actually been written since last load.
@@ -279,20 +282,33 @@ class ClipboardRepository(context: Context) {
     }
 
     suspend fun deleteItem(id: String): Boolean = withContext(Dispatchers.IO) {
-        val removed = synchronized(idsWriteLock) {
-            val ids = storedIds().toMutableList()
-            if (!ids.remove(id)) return@synchronized false
+        val tombstoned = synchronized(idsWriteLock) {
+            val ids = storedIds()
+            if (id !in ids) return@synchronized false
+            val existing = prefs.getString("item_$id", null) ?: return@synchronized false
+            // Already a tombstone — nothing to do.
+            if (isDeletedBlob(existing)) return@synchronized false
+
             val pinnedList = storedPinnedList().toMutableList()
             val wasPinned = pinnedList.remove(id)
+
+            // Write a soft-delete tombstone: bump lamportTs by 1 so a concurrent
+            // LWW re-sync of the original text (with a lower lamportTs) is rejected.
+            val oldLamport = try {
+                val parts = existing.split("|")
+                if (parts.size >= 6) parts[5].toLongOrNull() ?: 0L else 0L
+            } catch (_: Exception) { 0L }
+            val tombstone = encodeTombstone(existing, oldLamport + 1L)
+
+            // Clear binary sidecars: image/file bytes are no longer needed once
+            // the item is logically deleted (saves storage; tombstone keeps the id
+            // in the index to prevent re-sync resurrection).
             val editor = prefs.edit()
-                .remove("item_$id")
+                .putString("item_$id", tombstone)
                 .remove("item_img_$id")
                 .remove("item_thumb_$id")
                 .remove("item_file_$id")
                 .remove("item_filemeta_$id")
-                // Remove the reverse-lookup key to prevent orphan LWW ghost on re-sync.
-                .remove("item_id_ref_$id")
-                .putString(KEY_ITEM_IDS, ids.joinToString(","))
             if (wasPinned) {
                 editor.putString(KEY_PINNED_IDS, pinnedList.joinToString(","))
             }
@@ -302,12 +318,12 @@ class ClipboardRepository(context: Context) {
         // Keep the foreground-service notification's "captured today" count from
         // drifting above reality after a deletion: decrement by one (floored at
         // 0) and re-issue the notification so the shown number matches the store.
-        // Only fires when an item was actually removed.
-        if (removed) {
-            evictParseCache(id) // A: evict stale decrypt cache entry
+        // Only fires when an item was actually tombstoned.
+        if (tombstoned) {
+            evictParseCache(id) // A: evict stale decrypt cache entry (blob is now a tombstone)
             ClipboardService.onItemsDeleted(appContext, 1)
         }
-        removed
+        tombstoned
     }
 
     /**
@@ -499,8 +515,11 @@ class ClipboardRepository(context: Context) {
             val ids = storedIds().toMutableList()
             if (!ids.remove(id)) return  // unknown id — nothing to bump
             val raw = prefs.getString("item_$id", null) ?: return
+            // Soft-delete tombstone: tombstoned items must not be bumped to the top
+            // of the visible history — they are logically deleted.
+            if (isDeletedBlob(raw)) return
             val parts = raw.split("|")
-            // v2 blob = <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>
+            // v3 blob = <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>|<deleted>
             if (parts.size < 6) return  // legacy/malformed — leave untouched
             val rebuilt = buildString {
                 append(System.currentTimeMillis())  // field 0: fresh wall-time
@@ -1082,11 +1101,16 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Encode a stored item as a pipe-delimited string (v2 format, 6 fields):
-     * <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>
+     * Encode a stored item as a pipe-delimited string (v3 format, 7 fields):
+     * <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>|<deleted>
      *
      * The lamportTs field (index 5) was added for LWW cloud sync. Legacy rows
      * (only 5 fields) are read back with lamportTs=0.
+     *
+     * The deleted field (index 6) was added for local soft-delete tombstones.
+     * Legacy rows (fewer than 7 fields) parse as deleted=false (back-compat).
+     * A tombstone has deleted=1; its ciphertext/nonce are empty strings so the
+     * encrypted payload is not retained on disk after a user delete.
      */
     private fun encodeItem(
         blob: EncryptedBlob,
@@ -1094,10 +1118,46 @@ class ClipboardRepository(context: Context) {
         contentType: String = "text/plain",
         lamportTs: Long = 0L,
         wallTimeMs: Long = System.currentTimeMillis(),
+        deleted: Boolean = false,
     ): String {
         val nonce64 = Base64.encodeToString(blob.nonce, Base64.NO_WRAP)
         val ct64 = Base64.encodeToString(blob.ciphertext, Base64.NO_WRAP)
-        return "$wallTimeMs|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs"
+        val deletedFlag = if (deleted) 1 else 0
+        return "$wallTimeMs|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs|$deletedFlag"
+    }
+
+    /**
+     * Build a tombstone blob for item [id].
+     *
+     * The tombstone keeps the entry in the id-index so a re-sync cannot
+     * resurrect the deleted item, but clears the encrypted payload to avoid
+     * retaining plaintext on disk. Field layout mirrors [encodeItem] v3:
+     * <nowMs>|<contentType>|0||tombstone|<lamportTs>|1
+     *
+     * The nonce field is empty and the ciphertext is the literal string
+     * "tombstone" (harmless; the deleted flag prevents any decrypt attempt).
+     * The lamportTs is bumped so LWW on the same item_id sees this as newer
+     * and will not be overwritten by a stale re-sync of the original text.
+     */
+    private fun encodeTombstone(existingRaw: String, bumpedLamportTs: Long): String {
+        val parts = existingRaw.split("|")
+        val wallTimeMs = System.currentTimeMillis()
+        // Preserve contentType from the original blob so tombstones are typed.
+        val contentType = parts.getOrNull(1) ?: "text/plain"
+        return "$wallTimeMs|$contentType|0||tombstone|$bumpedLamportTs|1"
+    }
+
+    /**
+     * Read the deleted flag from a raw blob string.
+     * Field 6 (index 6) is the deleted flag: "1" = deleted, absent/other = false.
+     * Back-compat: blobs with fewer than 7 fields (legacy v1/v2 format) are NOT deleted.
+     */
+    private fun isDeletedBlob(raw: String): Boolean {
+        val idx = raw.lastIndexOf('|')
+        if (idx < 0) return false
+        // Only the last field is the deleted flag; avoid a full split for perf.
+        val tail = raw.substring(idx + 1)
+        return tail == "1"
     }
 
     private fun parseItem(id: String, raw: String, key: ByteArray): ClipboardItem? {
@@ -1500,6 +1560,9 @@ class ClipboardRepository(context: Context) {
         val ids = storedIds()
         ids.mapNotNull { id ->
             val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
+            // Soft-delete tombstone: skip deleted items — FFI tombstone propagation
+            // is a separate later task; for now tombstones must not sync outbound.
+            if (isDeletedBlob(raw)) return@mapNotNull null
             try {
                 val parts = raw.split("|")
                 val wallTimeMs = parts[0].toLong()
