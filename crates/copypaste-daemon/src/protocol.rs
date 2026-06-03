@@ -77,6 +77,10 @@ pub const ERR_CODE_VERSION_MISMATCH: &str = "version_mismatch";
 /// error rather than writing new items to avoid mixing key versions during the
 /// sweep. Clients should back off and retry after a short delay.
 pub const ERR_CODE_MIGRATION_IN_PROGRESS: &str = "migration_in_progress";
+/// The request was refused because a conflicting operation is already in flight
+/// (e.g. a second discovery pairing while one is active). Single-active-pairing:
+/// the client should wait for the current operation to finish, then retry.
+pub const ERR_CODE_RATE_LIMITED: &str = "rate_limited";
 
 #[derive(Debug, Serialize)]
 pub struct Response {

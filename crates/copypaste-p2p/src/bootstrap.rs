@@ -371,7 +371,29 @@ impl BootstrapResponder {
     /// Returns [`TransportError::Io`] if the bind fails or
     /// [`TransportError::TlsConfig`] if the TLS config cannot be built.
     pub async fn bind(cert_der: Vec<u8>, key_der: Vec<u8>) -> Result<Self, TransportError> {
-        let listener = TcpListener::bind("0.0.0.0:0").await?;
+        Self::bind_on(0, cert_der, key_der).await
+    }
+
+    /// Bind the bootstrap listener on a SPECIFIC TCP port (`0.0.0.0:port`) and
+    /// TLS-wrap it with the daemon's self-signed certificate.
+    ///
+    /// `port = 0` requests an OS-assigned ephemeral port (the QR path's
+    /// behaviour, via [`bind`](Self::bind)). The LAN/SAS Phase 2 standing
+    /// responder uses a FIXED port so the advertised mDNS `bport` stays stable
+    /// across pairing iterations: it discovers a free port once, advertises it,
+    /// then re-binds the SAME port for each subsequent inbound pairing (a
+    /// listening socket is dropped — not connected — so it never enters
+    /// TIME_WAIT and re-bind succeeds immediately).
+    ///
+    /// # Errors
+    /// Returns [`TransportError::Io`] if the bind fails or
+    /// [`TransportError::TlsConfig`] if the TLS config cannot be built.
+    pub async fn bind_on(
+        port: u16,
+        cert_der: Vec<u8>,
+        key_der: Vec<u8>,
+    ) -> Result<Self, TransportError> {
+        let listener = TcpListener::bind(("0.0.0.0", port)).await?;
         let own_fingerprint = fingerprint_of(&cert_der);
 
         let cert = CertificateDer::from(cert_der.clone());
@@ -1259,6 +1281,34 @@ where
 mod tests {
     use super::*;
     use crate::cert::SelfSignedCert;
+
+    /// `bind_on` binds the EXACT requested port (LAN/SAS Phase 2 standing
+    /// responder advertises a stable `bport`, so the listener must re-bind the
+    /// same port across pairing iterations rather than getting a fresh ephemeral
+    /// one each time). Re-binding the same port immediately after dropping the
+    /// previous listener must also succeed (listening sockets do not enter
+    /// TIME_WAIT).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn bind_on_binds_requested_port_and_is_reusable() {
+        let cert = SelfSignedCert::generate("standing-responder").unwrap();
+
+        // First pick a free port via an ephemeral bind, then drop it.
+        let probe = tokio::net::TcpListener::bind("0.0.0.0:0").await.unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+
+        let r1 = BootstrapResponder::bind_on(port, cert.cert_der.clone(), cert.key_der.clone())
+            .await
+            .expect("bind_on requested port");
+        assert_eq!(r1.local_addr().unwrap().port(), port);
+        drop(r1);
+
+        // Re-bind the same port immediately — must not fail with EADDRINUSE.
+        let r2 = BootstrapResponder::bind_on(port, cert.cert_der.clone(), cert.key_der.clone())
+            .await
+            .expect("re-bind same port");
+        assert_eq!(r2.local_addr().unwrap().port(), port);
+    }
 
     /// Two endpoints over a real loopback TCP/TLS socket complete PAKE, the S3
     /// channel-binding confirmation exchange, and converge on the same session
