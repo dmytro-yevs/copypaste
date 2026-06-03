@@ -51,8 +51,10 @@ import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
@@ -104,8 +106,11 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import java.io.File
 import androidx.compose.ui.graphics.asImageBitmap
@@ -656,6 +661,41 @@ fun HistoryScreen(
                 onSensitiveTap = {
                     scope.launch { snackbarHostState.showSnackbar(sensitiveTapMsg) }
                 },
+                onSaveFile = { id ->
+                    scope.launch {
+                        val repository = ClipboardRepository(ctx)
+                        val saved = withContext(Dispatchers.IO) {
+                            try {
+                                val fileBytes = repository.getFileBytes(id) ?: return@withContext false
+                                val (fileName, mime) = repository.getFileMeta(id)
+                                val safeName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
+                                val mimeType = mime ?: "application/octet-stream"
+                                // API 29+: insert into MediaStore.Downloads (no WRITE_EXTERNAL_STORAGE needed)
+                                val values = ContentValues().apply {
+                                    put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+                                    put(MediaStore.Downloads.MIME_TYPE, mimeType)
+                                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                                    put(MediaStore.Downloads.IS_PENDING, 1)
+                                }
+                                val resolver = ctx.contentResolver
+                                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                                    ?: return@withContext false
+                                resolver.openOutputStream(uri)?.use { it.write(fileBytes) }
+                                values.clear()
+                                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                                resolver.update(uri, values, null, null)
+                                true
+                            } catch (e: Exception) {
+                                android.util.Log.w("HistoryActivity", "saveFile failed for $id: ${e.message}")
+                                false
+                            }
+                        }
+                        snackbarHostState.showSnackbar(
+                            if (saved) ctx.getString(R.string.file_saved_ok)
+                            else ctx.getString(R.string.file_save_failed)
+                        )
+                    }
+                },
             )
         }
     }
@@ -941,6 +981,8 @@ private fun HistoryList(
     onLongPress: (String) -> Unit,
     onCheckboxTap: (String) -> Unit,
     onSensitiveTap: () -> Unit = {},
+    /** Called when the user taps Save on a file row; receives the item id. */
+    onSaveFile: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -1000,52 +1042,92 @@ private fun HistoryList(
                         onCopy = {
                             scope.launch {
                                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                if (item.isImage) {
-                                    // Image copy-back: write full-res bytes to a cache file
-                                    // and expose via FileProvider so the system clipboard
-                                    // receives a proper content:// URI instead of "[image]".
-                                    val imageBytes = withContext(Dispatchers.IO) {
-                                        repository.getImageBytes(item.id)
-                                    }
-                                    if (imageBytes != null) {
-                                        val uri = withContext(Dispatchers.IO) {
-                                            try {
-                                                val dir = File(ctx.cacheDir, "image_copy").also { it.mkdirs() }
-                                                val file = File(dir, "${item.id}.png")
-                                                file.writeBytes(imageBytes)
-                                                FileProvider.getUriForFile(
-                                                    ctx,
-                                                    "${ctx.packageName}.fileprovider",
-                                                    file,
-                                                )
-                                            } catch (e: Exception) {
-                                                android.util.Log.w("HistoryActivity", "image copy-back FileProvider failed: ${e.message}")
-                                                null
+                                when {
+                                    item.isImage -> {
+                                        // Image copy-back: write full-res bytes to a cache file
+                                        // and expose via FileProvider so the system clipboard
+                                        // receives a proper content:// URI instead of "[image]".
+                                        val imageBytes = withContext(Dispatchers.IO) {
+                                            repository.getImageBytes(item.id)
+                                        }
+                                        if (imageBytes != null) {
+                                            val uri = withContext(Dispatchers.IO) {
+                                                try {
+                                                    val dir = File(ctx.cacheDir, "image_copy").also { it.mkdirs() }
+                                                    val file = File(dir, "${item.id}.png")
+                                                    file.writeBytes(imageBytes)
+                                                    FileProvider.getUriForFile(
+                                                        ctx,
+                                                        "${ctx.packageName}.fileprovider",
+                                                        file,
+                                                    )
+                                                } catch (e: Exception) {
+                                                    android.util.Log.w("HistoryActivity", "image copy-back FileProvider failed: ${e.message}")
+                                                    null
+                                                }
                                             }
+                                            if (uri != null) {
+                                                val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
+                                                clip.addItem(ClipData.Item(uri))
+                                                // Grant read permission so the receiving app can read the URI.
+                                                ctx.grantUriPermission(
+                                                    "com.android.systemui",
+                                                    uri,
+                                                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                                                )
+                                                cm.setPrimaryClip(clip)
+                                            }
+                                            // else: image bytes unavailable, nothing to copy
                                         }
-                                        if (uri != null) {
-                                            val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
-                                            clip.addItem(ClipData.Item(uri))
-                                            // Grant read permission so the receiving app can read the URI.
-                                            ctx.grantUriPermission(
-                                                "com.android.systemui",
-                                                uri,
-                                                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                                            )
-                                            cm.setPrimaryClip(clip)
-                                        }
-                                        // else: fall through; image bytes unavailable, nothing to copy
                                     }
-                                } else {
-                                    val key = settings.encryptionKey
-                                    val fullText = repository.loadFullPlaintext(item.id, key)
-                                        ?: item.snippet
-                                    // Register the expected content-hash BEFORE setting
-                                    // the clip so the capture listeners recognise this
-                                    // as an internal copy-from-history echo and do not
-                                    // re-capture it as a duplicate row + cloud re-push.
-                                    ClipboardRepository.expectClip(fullText)
-                                    cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
+                                    item.isFile -> {
+                                        // File copy-back: write bytes to a cache file and
+                                        // expose via FileProvider as a content:// URI.
+                                        val fileBytes = withContext(Dispatchers.IO) {
+                                            repository.getFileBytes(item.id)
+                                        }
+                                        if (fileBytes != null) {
+                                            val uri = withContext(Dispatchers.IO) {
+                                                try {
+                                                    val (fileName, mime) = repository.getFileMeta(item.id)
+                                                    val safeName = fileName?.takeIf { it.isNotBlank() }
+                                                        ?: "${item.id}.bin"
+                                                    val dir = File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
+                                                    val file = File(dir, safeName)
+                                                    file.writeBytes(fileBytes)
+                                                    FileProvider.getUriForFile(
+                                                        ctx,
+                                                        "${ctx.packageName}.fileprovider",
+                                                        file,
+                                                    )
+                                                } catch (e: Exception) {
+                                                    android.util.Log.w("HistoryActivity", "file copy-back FileProvider failed: ${e.message}")
+                                                    null
+                                                }
+                                            }
+                                            if (uri != null) {
+                                                val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste file", uri)
+                                                ctx.grantUriPermission(
+                                                    "com.android.systemui",
+                                                    uri,
+                                                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                                                )
+                                                cm.setPrimaryClip(clip)
+                                            }
+                                            // else: file bytes unavailable or FileProvider failed; nothing to copy
+                                        }
+                                    }
+                                    else -> {
+                                        val key = settings.encryptionKey
+                                        val fullText = repository.loadFullPlaintext(item.id, key)
+                                            ?: item.snippet
+                                        // Register the expected content-hash BEFORE setting
+                                        // the clip so the capture listeners recognise this
+                                        // as an internal copy-from-history echo and do not
+                                        // re-capture it as a duplicate row + cloud re-push.
+                                        ClipboardRepository.expectClip(fullText)
+                                        cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
+                                    }
                                 }
                                 // Move the copied clip to the top of the recency section
                                 // (no-op for pinned items). Mirrors macOS bump_item_recency.
@@ -1055,6 +1137,7 @@ private fun HistoryList(
                         onLongPress = { onLongPress(item.id) },
                         onCheckboxTap = { onCheckboxTap(item.id) },
                         onSensitiveTap = onSensitiveTap,
+                        onSaveFile = { onSaveFile(item.id) },
                     )
                     HorizontalDivider(
                         color = IdeBorder.copy(alpha = 0.5f),
@@ -1097,6 +1180,7 @@ private fun HistoryRow(
     onLongPress: () -> Unit,
     onCheckboxTap: () -> Unit,
     onSensitiveTap: () -> Unit = {},
+    onSaveFile: () -> Unit = {},
 ) {
     val detectedSensitive = item.isSensitive
 
@@ -1294,6 +1378,98 @@ private fun HistoryRow(
                                 modifier = Modifier.size(16.dp),
                             )
                         }
+                    }
+                }
+            }
+        } else if (item.isFile) {
+            // ── File row — icon + filename label + Save action ────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Checkbox
+                Icon(
+                    imageVector = if (isSelected) Icons.Filled.CheckBox
+                                  else Icons.Filled.CheckBoxOutlineBlank,
+                    contentDescription = null,
+                    tint = if (isSelected) IdeAccent else IdeDim.copy(alpha = 0.4f),
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clickable { onCheckboxTap() },
+                )
+                Spacer(Modifier.width(6.dp))
+                if (!selectionMode && item.pinned) {
+                    Icon(
+                        imageVector = Icons.Filled.BookmarkAdded,
+                        contentDescription = stringResource(R.string.cd_pin_item),
+                        tint = IdeWarning.copy(alpha = 0.9f),
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                }
+                // §3 content-type chip (file = dim/elevated)
+                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive)
+                Spacer(Modifier.width(6.dp))
+                // File icon
+                Icon(
+                    imageVector = Icons.Filled.AttachFile,
+                    contentDescription = stringResource(R.string.cd_file_item),
+                    tint = IdeDim,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                // Filename / label — snippet holds "[file: name]" or "[file]"
+                Text(
+                    text = item.snippet,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = IdeText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = relativeTime(item.wallTimeMs),
+                    style = TextStyle(
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Normal,
+                        fontFeatureSettings = "tnum",
+                    ),
+                    color = IdeFaint,
+                    maxLines = 1,
+                )
+                if (!selectionMode) {
+                    Spacer(Modifier.width(2.dp))
+                    // Save action — write bytes to Downloads
+                    ScaleIconButton(onClick = onSaveFile) {
+                        Icon(
+                            imageVector = Icons.Filled.SaveAlt,
+                            contentDescription = stringResource(R.string.action_save_file),
+                            tint = IdeAccent,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
+                        Icon(
+                            imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
+                                          else Icons.Filled.BookmarkBorder,
+                            contentDescription = if (item.pinned)
+                                stringResource(R.string.action_unpin)
+                            else
+                                stringResource(R.string.action_pin),
+                            tint = if (item.pinned) IdeWarning else IdeDim,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                    ScaleIconButton(onClick = { onDelete(item.id) }) {
+                        Icon(
+                            imageVector = Icons.Filled.Delete,
+                            contentDescription = stringResource(R.string.cd_delete),
+                            tint = IdeDanger,
+                            modifier = Modifier.size(16.dp),
+                        )
                     }
                 }
             }

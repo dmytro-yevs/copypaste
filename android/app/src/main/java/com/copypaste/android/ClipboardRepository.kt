@@ -176,6 +176,58 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
+     * Return the raw file bytes stored for file item [id], or null.
+     * File bytes are persisted under the key "item_file_<id>" as Base64 NO_WRAP.
+     */
+    fun getFileBytes(id: String): ByteArray? {
+        val b64 = prefs.getString("item_file_$id", null) ?: return null
+        return try {
+            Base64.decode(b64, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            Log.w(TAG, "getFileBytes: failed to decode file for $id: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Persist raw file bytes for item [id] under "item_file_<id>".
+     * Rejects files larger than [Settings.maxImageSizeBytes] (reuses the same cap
+     * as images — both are binary blobs subject to the same quota).
+     */
+    fun storeFileBytes(id: String, bytes: ByteArray) {
+        val maxBytes = settings.maxImageSizeBytes
+        if (bytes.size.toLong() > maxBytes) {
+            Log.w(TAG, "storeFileBytes: file ${bytes.size} B exceeds cap $maxBytes — dropping")
+            return
+        }
+        val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        prefs.edit().putString("item_file_$id", b64).apply()
+        Log.d(TAG, "storeFileBytes: stored ${bytes.size} bytes for $id")
+    }
+
+    /**
+     * Return the stored (fileName, mime) pair for file item [id], or (null, null).
+     * Metadata is stored as a pipe-delimited pair under "item_filemeta_<id>".
+     * An empty/absent field is returned as null.
+     */
+    fun getFileMeta(id: String): Pair<String?, String?> {
+        val raw = prefs.getString("item_filemeta_$id", null) ?: return null to null
+        val parts = raw.split("|", limit = 2)
+        val fileName = parts.getOrNull(0)?.takeIf { it.isNotEmpty() }
+        val mime = parts.getOrNull(1)?.takeIf { it.isNotEmpty() }
+        return fileName to mime
+    }
+
+    /**
+     * Persist filename and mime for file item [id] under "item_filemeta_<id>".
+     * Either value may be null; stored as empty string in that case.
+     */
+    fun storeFileMeta(id: String, fileName: String?, mime: String?) {
+        val encoded = "${fileName ?: ""}|${mime ?: ""}"
+        prefs.edit().putString("item_filemeta_$id", encoded).apply()
+    }
+
+    /**
      * Persist raw image bytes for item [id].
      * Rejects images larger than [Settings.maxImageSizeBytes].
      */
@@ -200,6 +252,8 @@ class ClipboardRepository(context: Context) {
                 .remove("item_$id")
                 .remove("item_img_$id")
                 .remove("item_thumb_$id")
+                .remove("item_file_$id")
+                .remove("item_filemeta_$id")
                 // Remove the reverse-lookup key to prevent orphan LWW ghost on re-sync.
                 .remove("item_id_ref_$id")
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
@@ -243,6 +297,8 @@ class ClipboardRepository(context: Context) {
                 editor.remove("item_$id")
                 editor.remove("item_img_$id")
                 editor.remove("item_thumb_$id")
+                editor.remove("item_file_$id")
+                editor.remove("item_filemeta_$id")
                 // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
                 editor.remove("item_id_ref_$id")
             }
@@ -275,6 +331,8 @@ class ClipboardRepository(context: Context) {
                     editor.remove("item_$id")
                     editor.remove("item_img_$id")
                     editor.remove("item_thumb_$id")
+                    editor.remove("item_file_$id")
+                    editor.remove("item_filemeta_$id")
                     // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
                     editor.remove("item_id_ref_$id")
                 }
@@ -312,6 +370,8 @@ class ClipboardRepository(context: Context) {
                     editor.remove("item_$id")
                     editor.remove("item_img_$id")
                     editor.remove("item_thumb_$id")
+                    editor.remove("item_file_$id")
+                    editor.remove("item_filemeta_$id")
                     // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
                     editor.remove("item_id_ref_$id")
                 }
@@ -701,7 +761,8 @@ class ClipboardRepository(context: Context) {
                 // with '=' padding) avoids a full decode allocation per row.
                 val imgBytes = prefs.getString("item_img_$id", null)?.let { base64RawByteSize(it) } ?: 0
                 val thumbBytes = prefs.getString("item_thumb_$id", null)?.let { base64RawByteSize(it) } ?: 0
-                id to (textBytes + imgBytes + thumbBytes)
+                val fileBytes = prefs.getString("item_file_$id", null)?.let { base64RawByteSize(it) } ?: 0
+                id to (textBytes + imgBytes + thumbBytes + fileBytes)
             }
 
             var totalBytes = blobSizes.values.sumOf { it.toLong() }
@@ -721,6 +782,8 @@ class ClipboardRepository(context: Context) {
                 editor.remove("item_$evictId")
                 editor.remove("item_img_$evictId")
                 editor.remove("item_thumb_$evictId")
+                editor.remove("item_file_$evictId")
+                editor.remove("item_filemeta_$evictId")
                 // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
                 editor.remove("item_id_ref_$evictId")
                 didEvict = true

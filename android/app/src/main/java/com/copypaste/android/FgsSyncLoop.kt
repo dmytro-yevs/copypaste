@@ -311,6 +311,7 @@ class FgsSyncLoop(
 
                 val isImage = item.contentType == "image" ||
                     item.contentType.startsWith("image/")
+                val isFile = item.contentType == "file"
 
                 val stored = if (isImage) {
                     // Image row: store a placeholder entry then persist raw bytes.
@@ -331,6 +332,29 @@ class FgsSyncLoop(
                             SyncThumbnailHelper.generateAndStore(item.plaintext) { thumbBytes ->
                                 repository.storeThumbnailBytes(storedId, thumbBytes)
                             }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                } else if (isFile) {
+                    // File row: store actual bytes so the user can save/copy them.
+                    // SyncedItem binding lacks file_name/mime (stale generated code —
+                    // bindings regen is a separate CI step); pass nulls for now.
+                    if (item.plaintext.isEmpty()) {
+                        false
+                    } else {
+                        val label = SyncFileHelper.buildFileLabel(null)
+                        val storedId = repository.storeItem(
+                            plaintext = label,
+                            key = settings.encryptionKey,
+                            overrideId = item.itemId,
+                            contentType = item.contentType,
+                            lamportTs = item.lamportTs,
+                        )
+                        if (storedId.isNotEmpty()) {
+                            repository.storeFileBytes(storedId, item.plaintext)
+                            repository.storeFileMeta(storedId, null, null)
                             true
                         } else {
                             false
@@ -464,19 +488,27 @@ class FgsSyncLoop(
                         }
                     }
                     isFile -> {
-                        // File frame: Android has no file UI yet, so store a
-                        // minimal text placeholder for now (transport lands here;
-                        // display is the v0.6 P3 follow-up). The raw bytes are
-                        // dropped until a file store/render path exists.
-                        // TODO(v0.6 P3): persist the file bytes + original
-                        // name/mime (once SyncedItem carries blob_ref) and add a
-                        // file row UI to HistoryActivity instead of this stub.
-                        repository.storeItem(
-                            plaintext = "[file]",
-                            key = key,
-                            overrideId = item.itemId,
-                            contentType = item.contentType,
-                        ).isNotEmpty()
+                        // File frame: store actual bytes so the user can save/copy them.
+                        // SyncedItem binding lacks file_name/mime (stale generated code —
+                        // bindings regen is a separate CI step); pass nulls for now.
+                        if (plaintextBytes.isEmpty()) {
+                            false
+                        } else {
+                            val label = SyncFileHelper.buildFileLabel(null)
+                            val storedId = repository.storeItem(
+                                plaintext = label,
+                                key = key,
+                                overrideId = item.itemId,
+                                contentType = item.contentType,
+                            )
+                            if (storedId.isNotEmpty()) {
+                                repository.storeFileBytes(storedId, plaintextBytes)
+                                repository.storeFileMeta(storedId, null, null)
+                                true
+                            } else {
+                                false
+                            }
+                        }
                     }
                     else -> {
                         // Text frame: persist under the peer's STABLE item_id

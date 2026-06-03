@@ -23,4 +23,10 @@
     <cache-path
         name="image_copy_cache"
         path="image_copy/" />
+    <!-- Temporary file copies written by HistoryActivity when copying a synced
+         file item back to the system clipboard via a FileProvider content:// URI.
+         Files live at cacheDir/file_copy/<id>.<ext> and are written transiently. -->
+    <cache-path
+        name="file_copy_cache"
+        path="file_copy/" />
 </paths>

@@ -276,4 +276,11 @@
     <string name="snackbar_dismiss">Dismiss</string>
     <string name="settings_saved">Settings saved</string>
     <string name="action_save">Save</string>
+
+    <!-- File item UI -->
+    <string name="cd_file_item">Synced file</string>
+    <string name="action_save_file">Save file</string>
+    <string name="file_saved_ok">File saved to Downloads</string>
+    <string name="file_save_failed">Could not save file</string>
+    <string name="file_copy_failed">Could not copy file</string>
 </resources>
