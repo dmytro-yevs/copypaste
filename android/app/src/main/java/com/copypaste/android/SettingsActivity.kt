@@ -526,6 +526,14 @@ private fun GeneralTab(
             }
         )
         HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+        SettingsNavRow(
+            title = stringResource(R.string.setting_devices_title),
+            subtitle = stringResource(R.string.setting_devices_subtitle),
+            onClick = {
+                ctx.startActivity(Intent(ctx, DevicesActivity::class.java))
+            }
+        )
+        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
         // ── DIAGNOSTICS ────────────────────────────────────────────────────
         SectionLabel(stringResource(R.string.section_diagnostics))

@@ -935,6 +935,11 @@ fn with_cached_db<T>(
     let cache_key = (db_path.to_string(), *key);
     let mut map = db_by_path().lock().unwrap_or_else(|e| e.into_inner());
     if !map.contains_key(&cache_key) {
+        // #40b: evict any stale entry for the same path but a different key
+        // before inserting the new connection. Without this, each key rotation
+        // leaks a connection handle (the old (path, old_key) entry stays in the
+        // map forever). Entries for OTHER paths are unaffected.
+        map.retain(|(p, k), _| p != db_path || k == key);
         let db =
             copypaste_core::Database::open(std::path::Path::new(db_path), key).map_err(|e| {
                 CopypasteError::DatabaseError {
@@ -2250,5 +2255,64 @@ mod tests {
         let blob = cloud_encrypt(item_id.clone(), plaintext, &key).expect("encrypt");
         let recovered = cloud_decrypt(item_id, &blob, &key).expect("decrypt");
         assert_eq!(recovered, plaintext);
+    }
+
+    /// #40b DB_BY_PATH cache eviction: when `with_cached_db` is called with a
+    /// key that differs from a previously-cached entry for the SAME path, the
+    /// stale (path, old_key) entry must be evicted before the new one is
+    /// inserted. Without the `retain` call the map would accumulate one entry
+    /// per key rotation — a connection leak.
+    ///
+    /// The test uses a unique path prefix so it does not collide with the
+    /// global `DB_BY_PATH` state set by sibling tests.
+    #[cfg(feature = "android-uniffi-live")]
+    #[test]
+    fn db_by_path_evicts_stale_entries_on_key_rotation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir
+            .path()
+            .join("evict_test.db")
+            .to_string_lossy()
+            .into_owned();
+
+        let key_a: [u8; 32] = [1u8; 32];
+        let key_b: [u8; 32] = [2u8; 32];
+
+        // Prime the cache with (path, key_a).
+        {
+            let mut map = db_by_path().lock().unwrap_or_else(|e| e.into_inner());
+            let cache_key_a = (path.clone(), key_a);
+            if !map.contains_key(&cache_key_a) {
+                let db = copypaste_core::Database::open(
+                    std::path::Path::new(&path),
+                    &Zeroizing::new(key_a),
+                )
+                .expect("open with key_a");
+                map.insert(cache_key_a, db);
+            }
+        }
+
+        // Verify key_a is in the cache.
+        {
+            let map = db_by_path().lock().unwrap_or_else(|e| e.into_inner());
+            assert!(
+                map.contains_key(&(path.clone(), key_a)),
+                "key_a must be in cache after initial insert"
+            );
+        }
+
+        // Now call with_cached_db with key_b for the SAME path. The retain
+        // must evict the (path, key_a) entry. Without the fix both entries
+        // would coexist (connection leak).
+        let result = with_cached_db(&path, &key_b, |_db| Ok(()));
+        // The open may fail because key_a already encrypted the file, but the
+        // eviction test is about what's LEFT in the map — key_a must be gone.
+        let _ = result; // tolerate open failure; we only test the cache state
+
+        let map = db_by_path().lock().unwrap_or_else(|e| e.into_inner());
+        assert!(
+            !map.contains_key(&(path.clone(), key_a)),
+            "stale (path, key_a) entry must be evicted after inserting (path, key_b)"
+        );
     }
 }
