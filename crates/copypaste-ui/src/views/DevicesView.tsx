@@ -74,16 +74,16 @@ function StatusDot({
 }
 
 // ---------------------------------------------------------------------------
-// MetaRow — one labelled line in the rich-info block, hidden when absent
+// MetaChip — inline "label: value" segment for compact flex rows, hidden when absent
 // ---------------------------------------------------------------------------
 
-function MetaRow({ label, value }: { label: string; value: string | null | undefined }) {
+function MetaChip({ label, value }: { label: string; value: string | null | undefined }) {
   if (!value) return null;
   return (
-    <p className="text-[11px] text-ide-faint">
+    <span className="text-[11px] text-ide-faint whitespace-nowrap">
       <span className="text-ide-dim">{label}</span>{" "}
       <span>{value}</span>
-    </p>
+    </span>
   );
 }
 
@@ -93,12 +93,8 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
 
 function ThisDeviceCard({
   info,
-  copied,
-  onCopy,
 }: {
   info: OwnDeviceInfo;
-  copied: boolean;
-  onCopy: () => void;
 }) {
   return (
     <div className="px-3 py-2.5">
@@ -113,37 +109,14 @@ function ThisDeviceCard({
         </span>
       </div>
 
-      {/* Rich metadata rows — each omitted when absent */}
-      <div className="mt-1 space-y-0.5">
-        <MetaRow label="Model" value={info.device_model} />
-        <MetaRow label="OS" value={info.os_version} />
-        <MetaRow label="Version" value={info.app_version} />
-        <MetaRow label="Local IP" value={info.local_ip} />
-        {/* Public IP — WAN address from the daemon relay probe; "—" when
-            null/absent. */}
-        <MetaRow label="Public IP" value={info.public_ip ?? "—"} />
-
-        {/* Fingerprint — click to copy */}
-        {info.fingerprint !== null && (
-          <div className="pt-0.5">
-            <span
-              role="button"
-              tabIndex={0}
-              onClick={onCopy}
-              onKeyDown={(e) => e.key === "Enter" && onCopy()}
-              className="cursor-pointer select-all break-all font-mono text-[11px] text-ide-dim hover:text-ide-text transition-colors"
-              title={copied ? "Copied!" : "Click to copy fingerprint"}
-            >
-              {copied ? `${info.fingerprint} ✓` : info.fingerprint}
-            </span>
-          </div>
-        )}
-        {info.fingerprint === null && (
-          <p className="text-[11px] text-ide-faint">
-            <span className="text-ide-dim">Fingerprint</span>{" "}
-            <span className="text-ide-warning">P2P disabled — enable COPYPASTE_P2P=1</span>
-          </p>
-        )}
+      {/* Compact flex-wrap row of metadata chips — each omitted when absent */}
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+        <MetaChip label="Model" value={info.device_model} />
+        <MetaChip label="OS" value={info.os_version} />
+        <MetaChip label="Version" value={info.app_version} />
+        <MetaChip label="Local IP" value={info.local_ip} />
+        {/* Public IP — WAN address from the daemon relay probe */}
+        <MetaChip label="Public IP" value={info.public_ip ?? undefined} />
       </div>
     </div>
   );
@@ -181,54 +154,36 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke }: PeerRowProps) {
             </p>
           </div>
 
-          <div className="mt-1 space-y-0.5">
-            {/* Truncated fingerprint */}
-            <p
-              className="font-mono text-[11px] text-ide-dim"
-              title={peer.fingerprint}
-            >
-              {peer.fingerprint.length > 32
-                ? `${peer.fingerprint.slice(0, 16)}…${peer.fingerprint.slice(-8)}`
-                : peer.fingerprint}
-            </p>
-
-            {/* Rich peer metadata — each row omitted when absent, mirroring
+          {/* Compact flex-wrap chips — metadata + timestamps on two wrapped rows */}
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+            {/* Rich peer metadata — each chip omitted when absent, mirroring
                 the "This device" card. Learned in-band over the bootstrap
                 channel during pairing. */}
-            <MetaRow label="Model" value={peer.model} />
-            <MetaRow label="OS" value={peer.os_version} />
-            <MetaRow label="Version" value={peer.app_version} />
-            <MetaRow label="Local IP" value={ip} />
-            {/* AB-10: peer public IP — daemon already persists + returns
-                peer.public_ip; MetaRow omits the row when absent. */}
-            <MetaRow label="Public IP" value={peer.public_ip} />
-
-            {/* Paired / first-sync / last-sync timestamps. formatEpochSecs
-                returns "—" for null/0. */}
+            <MetaChip label="Model" value={peer.model} />
+            <MetaChip label="OS" value={peer.os_version} />
+            <MetaChip label="Version" value={peer.app_version} />
+            <MetaChip label="Local IP" value={ip} />
+            {/* AB-10: peer public IP — daemon already persists + returns peer.public_ip */}
+            <MetaChip label="Public IP" value={peer.public_ip} />
+            {/* Timestamps — formatEpochSecs returns "—" for null/0 */}
             {(peer.added_at ?? 0) > 0 && (
-              <p className="text-[11px] text-ide-faint">
+              <span className="text-[11px] text-ide-faint whitespace-nowrap">
                 Paired {formatEpochSecs(peer.added_at)}
-              </p>
+              </span>
             )}
-            <p className="text-[11px] text-ide-faint">
-              <span className="text-ide-dim">First sync</span>{" "}
-              <span>{formatEpochSecs(peer.first_sync_at)}</span>
-            </p>
-            <p className="text-[11px] text-ide-faint">
-              <span className="text-ide-dim">Last sync</span>{" "}
-              <span>{formatEpochSecs(peer.last_sync_at)}</span>
-            </p>
-
-            {/* Revoked / error states */}
-            {revokedAt !== null && (
-              <p className="text-[11px] text-ide-accent">
-                Revoked · {formatWallTime(revokedAt)}
-              </p>
-            )}
-            {rowError !== null && (
-              <p className="text-[11px] text-ide-danger">{rowError}</p>
-            )}
+            <MetaChip label="First sync" value={formatEpochSecs(peer.first_sync_at)} />
+            <MetaChip label="Last sync" value={formatEpochSecs(peer.last_sync_at)} />
           </div>
+
+          {/* Revoked / error states — kept on their own line for visual weight */}
+          {revokedAt !== null && (
+            <p className="mt-0.5 text-[11px] text-ide-accent">
+              Revoked · {formatWallTime(revokedAt)}
+            </p>
+          )}
+          {rowError !== null && (
+            <p className="mt-0.5 text-[11px] text-ide-danger">{rowError}</p>
+          )}
         </div>
 
         {/* Actions */}
@@ -619,7 +574,7 @@ function DiscoveredRow({
           <p className="truncate text-[13px] font-medium text-ide-text">
             {device.device_name || `Device ${device.device_id.slice(0, 8)}`}
           </p>
-          <MetaRow label="Local IP" value={ip} />
+          <MetaChip label="Local IP" value={ip} />
         </div>
         <button
           onClick={() => onPair(device)}
@@ -650,7 +605,6 @@ const QR_REFRESH_MARGIN_SECS = 15;
 export function DevicesView() {
   // --- Own device info ---
   const [ownState, setOwnState] = useState<OwnDeviceState>({ status: "loading" });
-  const [copied, setCopied] = useState(false);
   // Ref that always holds the latest own fingerprint so loadPeers (a useCallback)
   // can read the current value without closing over a stale ownState snapshot.
   const ownFpRef = useRef<string | null>(null);
@@ -670,9 +624,6 @@ export function DevicesView() {
   const [revokeBusy, setRevokeBusy] = useState(false);
   const [globalMsg, setGlobalMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const globalMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Reset timer for the "Copied! ✓" fingerprint affordance — held in a ref so
-  // it can be cleared on unmount (and replaced on a rapid second copy).
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- LAN discovery + SAS pairing ---
   const [discovered, setDiscovered] = useState<DiscoveredDevice[]>([]);
@@ -978,12 +929,11 @@ export function DevicesView() {
     return () => { peerActionCancelledRef.current = true; };
   }, []);
 
-  // Clear handler-scheduled message/affordance timers on unmount so a late
-  // tick never calls setState on an unmounted component (UI memory leak).
+  // Clear handler-scheduled message timer on unmount so a late tick never
+  // calls setState on an unmounted component (UI memory leak).
   useEffect(() => {
     return () => {
       if (globalMsgTimer.current !== null) clearTimeout(globalMsgTimer.current);
-      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
     };
   }, []);
 
@@ -1094,34 +1044,6 @@ export function DevicesView() {
       setRevokeAllPending(false);
     }
   };
-
-  // --- Fingerprint copy ---
-  function handleCopy() {
-    if (ownState.status !== "ready" || ownState.info.fingerprint === null) return;
-    const fp = ownState.info.fingerprint;
-    const markCopied = () => {
-      setCopied(true);
-      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
-      copiedTimer.current = setTimeout(() => setCopied(false), 1500);
-    };
-    navigator.clipboard.writeText(fp).then(
-      () => {
-        markCopied();
-      },
-      () => {
-        // Fallback for restricted clipboard contexts.
-        const el = document.createElement("textarea");
-        el.value = fp;
-        el.style.position = "fixed";
-        el.style.opacity = "0";
-        document.body.appendChild(el);
-        el.select();
-        document.execCommand("copy");
-        document.body.removeChild(el);
-        markCopied();
-      }
-    );
-  }
 
   // --- Actions bar ---
   const actions = (
@@ -1243,11 +1165,7 @@ export function DevicesView() {
           </div>
         )}
         {ownState.status === "ready" && (
-          <ThisDeviceCard
-            info={ownState.info}
-            copied={copied}
-            onCopy={handleCopy}
-          />
+          <ThisDeviceCard info={ownState.info} />
         )}
 
         {/* Paired peers */}
