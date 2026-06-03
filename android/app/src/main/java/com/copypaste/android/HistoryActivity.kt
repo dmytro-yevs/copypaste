@@ -1329,6 +1329,11 @@ private fun HistoryList(
                                                 // package that can handle the URI so paste works
                                                 // regardless of which app consumes the clip.
                                                 grantUriToAll(ctx, uri)
+                                                // Register the expected URI BEFORE setPrimaryClip so
+                                                // the capture listeners recognise this as an internal
+                                                // copy-from-history echo and do NOT re-store it as a
+                                                // duplicate row (parity with the text expectClip guard).
+                                                ClipboardRepository.expectImageUri(uri)
                                                 cm.setPrimaryClip(clip)
                                             }
                                             // else: image bytes unavailable, nothing to copy
@@ -1363,6 +1368,9 @@ private fun HistoryList(
                                                 val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste file", uri)
                                                 // AB-12: broad URI read grant (see image case above).
                                                 grantUriToAll(ctx, uri)
+                                                // Register the expected URI BEFORE setPrimaryClip (same
+                                                // guard as image copy-back above and text expectClip).
+                                                ClipboardRepository.expectImageUri(uri)
                                                 cm.setPrimaryClip(clip)
                                             }
                                             // else: file bytes unavailable or FileProvider failed; nothing to copy
