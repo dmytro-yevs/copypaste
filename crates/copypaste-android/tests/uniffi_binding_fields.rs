@@ -133,6 +133,39 @@ fn relay_derivation_fns_present_in_kotlin_binding() {
     );
 }
 
+/// ABI 15 (delete/pin propagation): `LocalItem` and `SyncedItem` must carry
+/// `deleted`, `pinned`, and `pinOrder` so tombstones + pin state propagate over P2P.
+#[test]
+fn abi15_delete_pin_fields_present_in_kotlin_binding() {
+    let path = kotlin_binding_path();
+    assert!(
+        path.exists(),
+        "Kotlin binding not found at {}: run ./scripts/generate-android-bindings.sh",
+        path.display()
+    );
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+
+    // Both LocalItem and SyncedItem must carry all three ABI-15 fields.
+    for class in ["LocalItem", "SyncedItem"] {
+        let class_pos = src
+            .find(&format!("data class {class}"))
+            .unwrap_or_else(|| panic!("{class} data class missing from Kotlin binding"));
+        let after = &src[class_pos..];
+        let block = after
+            .find("\ndata class ")
+            .map(|end| &after[..end])
+            .unwrap_or(after);
+        for field in ["`deleted`", "`pinned`", "`pinOrder`"] {
+            assert!(
+                block.contains(field),
+                "{class} in the committed Kotlin binding is STALE: missing {field} (ABI 15). \
+                 Regenerate with ./scripts/generate-android-bindings.sh"
+            );
+        }
+    }
+}
+
 /// ABI 14 (HB-1 / HB-7): the committed Kotlin binding must expose the PeerMeta
 /// send params, the received peer_* fields on BootstrapResult / PairStatus, and
 /// the three P2pSyncResult drop counters. Fails if the binding was not

@@ -425,6 +425,14 @@ dictionary LocalItem {
   // reconstruct the filename and MIME on receive. None for text/image.
   string? file_name;
   string? mime;
+  // ABI 14: soft-delete tombstone propagation. When `deleted` is true the peer
+  // applies a tombstone (deleted=1) for this item_id via LWW so deletions
+  // propagate cross-device. `plaintext` MUST be empty for tombstones.
+  // `pinned` and `pin_order` carry the caller's current pin state so pin/unpin
+  // and reorder operations propagate to peers alongside content.
+  boolean deleted;
+  boolean pinned;
+  f64? pin_order;
 };
 
 // An item received from the peer during sync, decrypted back to plaintext.
@@ -433,6 +441,9 @@ dictionary LocalItem {
 // is not re-minted (which would resurface as a duplicate).
 // `file_name` and `mime` are set for content_type=="file" items (task #21b);
 // both are absent (null in Kotlin) for text and image items.
+// ABI 14: `deleted` is true when the peer soft-deleted this item — Kotlin MUST
+// write/refresh a local tombstone (LWW: newer remote delete wins). `pinned` and
+// `pin_order` carry the originating device's pin state for propagation.
 dictionary SyncedItem {
   string id;
   string item_id;
@@ -441,6 +452,9 @@ dictionary SyncedItem {
   i64 wall_time_ms;
   string? file_name;
   string? mime;
+  boolean deleted;
+  boolean pinned;
+  f64? pin_order;
 };
 
 // A peer's PAKE session key, keyed by its pinned cert fingerprint. Passed to

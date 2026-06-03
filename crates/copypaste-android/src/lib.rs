@@ -798,6 +798,17 @@ pub struct LocalItem {
     /// MIME type for file items (e.g. `"application/pdf"`). `None` for text/image items.
     /// Added in ABI 8 to enable Android→macOS file metadata forwarding.
     pub mime: Option<String>,
+    /// ABI 14: soft-delete tombstone flag. When `true` the Rust send path produces a
+    /// `WireItem` with `deleted = true` (and empty `content`) so the macOS daemon
+    /// applies a tombstone for this `item_id` via LWW. `plaintext` MUST be empty
+    /// for tombstones — no decryption is attempted.
+    pub deleted: bool,
+    /// ABI 14: pin state of this item on the Android device. Carried on the wire so
+    /// pin/unpin propagates to macOS and other peers.
+    pub pinned: bool,
+    /// ABI 14: explicit sort order among pinned items (`None` when not pinned or no
+    /// explicit order has been set). Propagates drag-to-reorder across devices.
+    pub pin_order: Option<f64>,
 }
 
 /// An item received from the peer during sync, decrypted back to plaintext.
@@ -809,6 +820,11 @@ pub struct LocalItem {
 /// `file_name` and `mime` are populated for `content_type == "file"` items only
 /// (sourced from the new `WireItem::file_name` / `WireItem::mime` fields added in
 /// task #21b). Both are `None` for text/image items.
+///
+/// ABI 14: `deleted` is `true` when the peer soft-deleted this item. Kotlin MUST
+/// write/refresh a local tombstone for this `item_id` via LWW instead of storing
+/// visible content. `pinned` and `pin_order` carry the originating device's pin
+/// state; Kotlin applies them to the stored row.
 #[derive(Debug)]
 pub struct SyncedItem {
     pub id: String,
@@ -820,6 +836,12 @@ pub struct SyncedItem {
     pub file_name: Option<String>,
     /// MIME type for file items (e.g. `"application/pdf"`). `None` for non-file types.
     pub mime: Option<String>,
+    /// ABI 14: true when the originating device soft-deleted this item.
+    pub deleted: bool,
+    /// ABI 14: pin state on the originating device.
+    pub pinned: bool,
+    /// ABI 14: explicit pin sort order on the originating device (`None` when unpinned).
+    pub pin_order: Option<f64>,
 }
 
 /// Outcome of one completed P2P sync session.
@@ -1262,6 +1284,43 @@ pub fn sync_with_peer(
         // per-chunk re-key and no wire `file_id`.
         let mut outbound: Vec<WireItem> = Vec::with_capacity(local_items.len());
         for it in &local_items {
+            // Tombstones (deleted=true): emit a WireItem with no content blob so
+            // the peer applies the delete via LWW without needing to decrypt anything.
+            // The content_type is preserved (typed tombstone) so the peer can route
+            // it correctly; plaintext MUST be empty — skip the encrypt step entirely.
+            if it.deleted {
+                let item_id = if it.item_id.is_empty() {
+                    it.id.clone()
+                } else {
+                    it.item_id.clone()
+                };
+                let id = if it.id.is_empty() {
+                    item_id.clone()
+                } else {
+                    it.id.clone()
+                };
+                outbound.push(WireItem {
+                    id,
+                    item_id,
+                    content_type: it.content_type.clone(),
+                    content: None,
+                    content_nonce: None,
+                    blob_ref: None,
+                    is_sensitive: false,
+                    lamport_ts: it.wall_time_ms,
+                    wall_time: it.wall_time_ms,
+                    expires_at: None,
+                    app_bundle_id: None,
+                    origin_device_id: device_id.clone(),
+                    key_version: P2P_WIRE_KEY_VERSION,
+                    file_name: None,
+                    mime: None,
+                    deleted: true,
+                    pinned: it.pinned,
+                    pin_order: it.pin_order,
+                });
+                continue;
+            }
             // Determine the canonical wire content type for this item, or skip
             // it if the type is one we don't sync. Defense-in-depth: callers
             // (the Android Kotlin layer) normalize to the canonical "text"
@@ -1320,9 +1379,11 @@ pub fn sync_with_peer(
                 // Text and image items never set these fields.
                 file_name: it.file_name.clone(),
                 mime: it.mime.clone(),
+                // Propagate caller-supplied pin state so pin/unpin/reorder
+                // operations travel to the peer alongside content.
                 deleted: false,
-                pinned: false,
-                pin_order: None,
+                pinned: it.pinned,
+                pin_order: it.pin_order,
             });
         }
 
@@ -1444,6 +1505,25 @@ pub fn sync_with_peer(
                 );
                 continue;
             }
+            // ABI 14: tombstone frame — the peer soft-deleted this item. Surface
+            // it to Kotlin as a SyncedItem with deleted=true and empty plaintext
+            // so Kotlin can apply/refresh the local tombstone via LWW without
+            // attempting a decrypt. Skip the content-type and blob checks below.
+            if wire.deleted {
+                items.push(SyncedItem {
+                    id: wire.id.clone(),
+                    item_id: wire.item_id.clone(),
+                    content_type: wire.content_type.clone(),
+                    plaintext: Vec::new(),
+                    wall_time_ms: wire.wall_time,
+                    file_name: None,
+                    mime: None,
+                    deleted: true,
+                    pinned: wire.pinned,
+                    pin_order: wire.pin_order,
+                });
+                continue;
+            }
             // Accept text, image and file frames. Every accepted type uses the
             // identical sync-key-wrapped shape (`content` present, `content_nonce`
             // None), so the decrypt path below is shared. Any other content type
@@ -1473,6 +1553,10 @@ pub fn sync_with_peer(
                     // Both are None for text/image items — that is correct.
                     file_name: wire.file_name.clone(),
                     mime: wire.mime.clone(),
+                    // ABI 14: propagate pin state from the wire.
+                    deleted: false,
+                    pinned: wire.pinned,
+                    pin_order: wire.pin_order,
                 }),
                 Err(_) => {
                     items_skipped_decrypt_fail = items_skipped_decrypt_fail.saturating_add(1);

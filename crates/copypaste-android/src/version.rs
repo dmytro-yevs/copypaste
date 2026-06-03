@@ -192,7 +192,24 @@
 /// Kotlin generated against ABI 13 constructs the old pairing-fn arities and
 /// reads `BootstrapResult` / `PairStatus` / `P2pSyncResult` with the wrong shape
 /// — it must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 14;
+///
+/// **ABI 15 (delete/pin propagation over P2P FFI):** `LocalItem` gained three
+/// new fields — `deleted: bool`, `pinned: bool`, `pin_order: f64?` — enabling
+/// Android to send local soft-delete tombstones and its current pin state to
+/// peers. `SyncedItem` gained the same three fields so Kotlin can receive and
+/// apply inbound delete/pin state. Both `sync_with_peer` and the inbound
+/// listener (`build_catchup_wire_items` / `decrypt_wire_item`) are updated:
+///   * `LocalItem.deleted = true` → sender emits a `WireItem { deleted: true,
+///     content: None }` so the macOS daemon applies a tombstone via LWW.
+///   * `LocalItem.pinned` / `pin_order` → forwarded onto the wire so pin/unpin
+///     and drag-to-reorder propagate cross-device.
+///   * `SyncedItem.deleted = true` → Kotlin refreshes the local tombstone (LWW:
+///     newer remote delete wins) instead of storing visible content.
+///   * `SyncedItem.pinned` / `pin_order` → Kotlin applies pin state to the row.
+///
+/// Kotlin generated against ABI 14 constructs `LocalItem` without the new fields
+/// and reads `SyncedItem` with the wrong shape; both must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 15;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

@@ -672,6 +672,19 @@ class FgsSyncLoop(
             // future local pushes appear "older" and breaking LWW ordering.
             settings.lamportClock.observe(item.wallTimeMs)
 
+            // ABI 15: tombstone frame — apply via LWW so a newer remote delete wins
+            // and a stale re-sync cannot resurrect a live item.
+            if (item.deleted) {
+                val tombstoned = repository.applyInboundTombstoneWithLww(
+                    itemId = item.itemId,
+                    lamportTs = item.wallTimeMs,
+                )
+                if (tombstoned) {
+                    Log.d(TAG, "P2P: applied inbound tombstone for itemId=${item.itemId.take(8)}…")
+                }
+                return@withContext tombstoned
+            }
+
             val key = settings.encryptionKey
             val isImage = item.contentType == "image" ||
                 item.contentType.startsWith("image/")
@@ -681,7 +694,7 @@ class FgsSyncLoop(
             // UTF-8 text decode below both want a ByteArray.
             val plaintextBytes = ByteArray(item.plaintext.size) { item.plaintext[it].toByte() }
 
-            when {
+            val stored = when {
                 isImage -> {
                     // Image frame: store a placeholder row under the peer's STABLE
                     // item_id, then persist the raw image bytes so HistoryActivity
@@ -740,7 +753,7 @@ class FgsSyncLoop(
                     // Lamport clock above (line ~535) and the same basis the macOS
                     // daemon's P2P LWW uses.
                     val plaintext = String(plaintextBytes, Charsets.UTF_8)
-                    val stored = repository.storeItemWithLww(
+                    val didStore = repository.storeItemWithLww(
                         plaintext = plaintext,
                         key = key,
                         itemId = item.itemId,
@@ -750,9 +763,19 @@ class FgsSyncLoop(
                     // text clip, push it to the Android system clipboard so the user can
                     // immediately paste without opening the history list.
                     // TODO: extend to image/file when a suitable clipboard URI scheme exists.
-                    if (stored) autoApplySyncedTextClip(plaintext)
-                    stored
+                    if (didStore) autoApplySyncedTextClip(plaintext)
+                    didStore
                 }
             }
+
+            // ABI 15: apply inbound pin state when the item was stored/updated.
+            // Use setPinned (which is idempotent) so a re-dial carrying the same
+            // pin state is a no-op. Only apply when the item was actually stored to
+            // avoid spuriously pinning a deduped item on every re-dial.
+            if (stored && item.pinned) {
+                repository.setPinned(item.itemId, true)
+            }
+
+            stored
         }
 }

@@ -1558,11 +1558,43 @@ class ClipboardRepository(context: Context) {
         key: ByteArray,
     ): List<uniffi.copypaste_android.LocalItem> = withContext(Dispatchers.IO) {
         val ids = storedIds()
+        // Snapshot pin state once: storedPinnedList() is ordered (index = sort position).
+        val pinnedList = storedPinnedList()
+        val pinnedSet = pinnedList.toHashSet()
+        // pin_order: position in the pinned list (0 = top of pinned section) as a
+        // 1-based f64 so the macOS daemon can sort correctly. None for unpinned.
+        val pinnedOrderMap: Map<String, Double> =
+            pinnedList.mapIndexed { idx, pid -> pid to (idx + 1).toDouble() }.toMap()
+
         ids.mapNotNull { id ->
             val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
-            // Soft-delete tombstone: skip deleted items — FFI tombstone propagation
-            // is a separate later task; for now tombstones must not sync outbound.
-            if (isDeletedBlob(raw)) return@mapNotNull null
+            val isPinned = id in pinnedSet
+            val pinOrder: Double? = pinnedOrderMap[id]
+            // ABI 15: include soft-delete tombstones so they propagate to peers.
+            // Tombstones carry deleted=true with empty plaintext (no decrypt needed).
+            if (isDeletedBlob(raw)) {
+                return@mapNotNull try {
+                    val parts = raw.split("|")
+                    // For tombstones, wall_time is parts[0] and lamport_ts is parts[5].
+                    val wallTimeMs = parts[0].toLong()
+                    val contentType = normalizeContentTypeForSync(parts.getOrNull(1) ?: "text")
+                    uniffi.copypaste_android.LocalItem(
+                        id = id,
+                        itemId = id,
+                        wallTimeMs = wallTimeMs,
+                        contentType = contentType,
+                        plaintext = emptyList(),
+                        fileName = null,
+                        mime = null,
+                        deleted = true,
+                        pinned = false,      // tombstones are never pinned
+                        pinOrder = null,
+                    )
+                } catch (e: Exception) {
+                    Log.d(TAG, "Skipping tombstone $id for sync (parse failed): ${e.message}")
+                    null
+                }
+            }
             try {
                 val parts = raw.split("|")
                 val wallTimeMs = parts[0].toLong()
@@ -1589,6 +1621,9 @@ class ClipboardRepository(context: Context) {
                         plaintext = fileBytes.map { it.toUByte() },
                         fileName = fileName,
                         mime = mime,
+                        deleted = false,
+                        pinned = isPinned,
+                        pinOrder = pinOrder,
                     )
                 } else if (isImage) {
                     // AB-5: for image items the raw plaintext is the content:// URI
@@ -1609,6 +1644,9 @@ class ClipboardRepository(context: Context) {
                         // Images carry no in-band name/MIME header (only files do).
                         fileName = null,
                         mime = null,
+                        deleted = false,
+                        pinned = isPinned,
+                        pinOrder = pinOrder,
                     )
                 } else {
                     uniffi.copypaste_android.LocalItem(
@@ -1623,6 +1661,9 @@ class ClipboardRepository(context: Context) {
                         plaintext = plain.map { it.toUByte() },
                         fileName = null,
                         mime = null,
+                        deleted = false,
+                        pinned = isPinned,
+                        pinOrder = pinOrder,
                     )
                 }
             } catch (e: Exception) {
@@ -1630,6 +1671,59 @@ class ClipboardRepository(context: Context) {
                 null
             }
         }.reversed()
+    }
+
+    /**
+     * Apply an inbound P2P soft-delete tombstone with LWW semantics.
+     *
+     * Only tombstones the local row when:
+     *  1. The item_id is known locally (already in the index via [item_id_ref_*]).
+     *  2. The incoming [lamportTs] is STRICTLY greater than the stored row's lamport_ts
+     *     (newer remote delete wins; a stale re-sync cannot resurrect a re-pinned item).
+     *
+     * If the item is not known locally → no-op (no point creating a ghost tombstone).
+     * If the stored lamport_ts >= [lamportTs] → no-op (local state is at least as new).
+     *
+     * Returns true when a tombstone was written (for caller stats).
+     */
+    suspend fun applyInboundTombstoneWithLww(
+        itemId: String,
+        lamportTs: Long,
+    ): Boolean = withContext(Dispatchers.IO) {
+        synchronized(idsWriteLock) {
+            // Resolve the local storage id for this cross-device item_id.
+            val storageId = prefs.getString("item_id_ref_$itemId", null)
+                ?: return@synchronized false  // unknown item — skip
+            val existing = prefs.getString("item_$storageId", null)
+                ?: return@synchronized false
+            // Already a tombstone — only replace if incoming ts is strictly newer.
+            val storedTs = try {
+                val parts = existing.split("|")
+                if (parts.size >= 6) parts[5].toLongOrNull() ?: 0L else 0L
+            } catch (_: Exception) { 0L }
+            if (lamportTs <= storedTs) {
+                Log.d(TAG, "applyInboundTombstone: skipping (stored=$storedTs >= incoming=$lamportTs) for item_id=$itemId")
+                return@synchronized false
+            }
+            // Write the tombstone at the incoming lamportTs so future LWW comparisons
+            // use the remote delete's timestamp (not a local bump of the old ts).
+            val tombstone = encodeTombstone(existing, lamportTs)
+            val pinnedList = storedPinnedList().toMutableList()
+            val wasPinned = pinnedList.remove(storageId)
+            val editor = prefs.edit()
+                .putString("item_$storageId", tombstone)
+                .remove("item_img_$storageId")
+                .remove("item_thumb_$storageId")
+                .remove("item_file_$storageId")
+                .remove("item_filemeta_$storageId")
+            if (wasPinned) {
+                editor.putString(KEY_PINNED_IDS, pinnedList.joinToString(","))
+            }
+            editor.apply()
+            evictParseCache(storageId)
+            Log.d(TAG, "applyInboundTombstone: tombstoned item_id=$itemId storageId=$storageId (lamport $storedTs→$lamportTs)")
+            true
+        }
     }
 
     /**
