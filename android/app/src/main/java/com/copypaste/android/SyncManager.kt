@@ -383,40 +383,68 @@ class SyncManager(
      *
      * Returns null on configuration error or key-derivation failure.
      */
-    suspend fun pollFromSupabase(
-        sinceWallTime: Long = 0L,
-        sinceId: String = "",
-    ): SupabasePollBatch? = withContext(Dispatchers.IO) {
+    /**
+     * Resolve the per-request Supabase sync context — the [SupabaseClient], the
+     * Argon2id-derived sync key, and a valid bearer token — WITHOUT performing
+     * any network poll.
+     *
+     * E3: WS pushes carry the row inline, so they only need the decryption
+     * context, not a fresh REST GET of history. [SupabaseRealtimeClient.ingestWsRow]
+     * previously called [pollFromSupabase] purely to obtain `client`/`syncKey`,
+     * which issued a wasteful full-history GET (up to 20 oldest rows) on every
+     * inbound WS message. This method factors out the exact client construction,
+     * cached sync-key derivation, and cached/fresh bearer resolution that
+     * [pollFromSupabase] uses, so both share the same crypto/auth path with no
+     * duplication and no spurious network call.
+     *
+     * Returns null on configuration error, key-derivation failure, or sign-in
+     * failure (a sign-in failure must NOT fall back to the anon key — that would
+     * bypass Row Level Security).
+     */
+    suspend fun resolveSyncContext(): SyncContext? = withContext(Dispatchers.IO) {
         val s = settings ?: run {
-            Log.w(TAG, "pollFromSupabase: no Settings instance provided")
+            Log.w(TAG, "resolveSyncContext: no Settings instance provided")
             return@withContext null
         }
         if (!s.isSupabaseConfigured) {
-            Log.w(TAG, "pollFromSupabase: Supabase not configured")
+            Log.w(TAG, "resolveSyncContext: Supabase not configured")
             return@withContext null
         }
 
         val client = SupabaseClient(s.supabaseUrl, s.supabaseAnonKey)
 
         // M8: cached Argon2id-derived sync key (re-derived only on passphrase
-        // change). Returns null on derivation failure → abort the poll.
+        // change). Returns null on derivation failure → abort.
         val syncKeyBytes = derivedSyncKey(s.cloudSyncPassphrase) ?: run {
-            Log.w(TAG, "pollFromSupabase: key derivation failed")
+            Log.w(TAG, "resolveSyncContext: key derivation failed")
             return@withContext null
         }
 
-        // M8 + JWT-cache: see pushToSupabase — a sign-in failure must NOT fall
-        // back to the anon key (RLS bypass). Abort the poll instead.
-        // cachedOrFreshBearer reuses the cached JWT while valid (no GoTrue
-        // POST per poll) and re-signs only on cache miss or near-expiry.
+        // M8 + JWT-cache: a sign-in failure must NOT fall back to the anon key
+        // (RLS bypass). cachedOrFreshBearer reuses the cached JWT while valid
+        // (no GoTrue POST per call) and re-signs only on cache miss or near-expiry.
         val bearer = if (s.hasSupabaseCredentials) {
             cachedOrFreshBearer(client, s.supabaseUrl, s.supabaseEmail, s.supabasePassword) ?: run {
-                Log.w(TAG, "pollFromSupabase: sign-in failed — aborting (no anon-key RLS bypass)")
+                Log.w(TAG, "resolveSyncContext: sign-in failed — aborting (no anon-key RLS bypass)")
                 return@withContext null
             }
         } else {
             s.supabaseAnonKey
         }
+
+        SyncContext(client = client, syncKey = syncKeyBytes, bearer = bearer)
+    }
+
+    suspend fun pollFromSupabase(
+        sinceWallTime: Long = 0L,
+        sinceId: String = "",
+    ): SupabasePollBatch? = withContext(Dispatchers.IO) {
+        // E3: reuse the shared client/sync-key/bearer setup (no network poll;
+        // crypto + auth are resolved exactly once, here and in ingestWsRow).
+        val ctx = resolveSyncContext() ?: return@withContext null
+        val client = ctx.client
+        val syncKeyBytes = ctx.syncKey
+        val bearer = ctx.bearer
 
         // JWT-cache: pollRaw swallows HTTP errors (including 401) into an
         // empty list, so we cannot distinguish "no rows" from "auth failure"
@@ -435,13 +463,27 @@ class SyncManager(
         // Advance the persistent logical clock past every remote lamport_ts so
         // the next local tick() produces a value causally after all received items.
         // This is the Lamport "observe" rule: local = max(local, incoming) + 1.
-        val clock = s.lamportClock
-        for (row in rows) {
-            clock.observe(row.lamportTs)
+        // settings is non-null here: resolveSyncContext() already returned non-null,
+        // which it only does when settings is present and Supabase is configured.
+        settings?.lamportClock?.let { clock ->
+            for (row in rows) {
+                clock.observe(row.lamportTs)
+            }
         }
 
         SupabasePollBatch(rows = rows, syncKey = syncKeyBytes, client = client, bearer = bearer)
     }
+
+    /**
+     * The decryption + auth context for a single Supabase sync request, resolved
+     * by [resolveSyncContext] WITHOUT any network poll. Used by WS push ingest
+     * (which already has the row inline) to decrypt without a wasteful REST GET.
+     */
+    data class SyncContext(
+        val client: SupabaseClient,
+        val syncKey: ByteArray,
+        val bearer: String,
+    )
 
     /** Holds the result of a raw Supabase poll for the caller to process. */
     data class SupabasePollBatch(

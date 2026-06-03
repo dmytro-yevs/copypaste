@@ -203,14 +203,22 @@ class SupabaseRealtimeClient(
         }
 
         /**
-         * Exponential backoff for WS reconnects: `1s * 2^(attempt-1)`, clamped to 60s.
-         * [attempt] >= 1. Mirror of realtime.rs initial_backoff→max_backoff doubling.
+         * Exponential backoff for WS reconnects: `1s * 2^(attempt-1)` with ±20%
+         * random jitter applied, then clamped to 60s. [attempt] >= 1. Mirror of
+         * realtime.rs initial_backoff→max_backoff doubling.
+         *
+         * E6: the jitter (random factor in 0.8..1.2) de-synchronizes reconnects
+         * across multiple devices so they do not retry in lockstep (thundering
+         * herd) after a shared outage. The 60s clamp is applied AFTER jitter so
+         * the delay never meaningfully exceeds BACKOFF_MAX_MS.
          */
         fun reconnectDelayMs(attempt: Int): Long {
             if (attempt <= 0) return BACKOFF_BASE_MS
             val exp = (attempt - 1).coerceAtMost(30)
-            val raw = BACKOFF_BASE_MS.toDouble() * (1L shl exp).toDouble()
-            return if (raw >= BACKOFF_MAX_MS.toDouble()) BACKOFF_MAX_MS else raw.toLong()
+            val base = BACKOFF_BASE_MS.toDouble() * (1L shl exp).toDouble()
+            val jitterFactor = 0.8 + kotlin.random.Random.nextDouble() * 0.4 // 0.8..1.2
+            val jittered = base * jitterFactor
+            return if (jittered >= BACKOFF_MAX_MS.toDouble()) BACKOFF_MAX_MS else jittered.toLong()
         }
 
         /** Redact a payload for safe logging: emit only byte-length + 16-byte hex prefix. */
@@ -362,16 +370,24 @@ class SupabaseRealtimeClient(
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.w(TAG, "WS: failure — ${t.message}")
-                _connected.set(false)
-                activeSocket = null
+                // E4: only tear down if this callback belongs to the CURRENT
+                // socket. A delayed callback from a previous socket must not
+                // null out a newer healthy connection.
+                if (activeSocket === webSocket) {
+                    _connected.set(false)
+                    activeSocket = null
+                }
                 heartbeatJob?.cancel()
                 latch.countDown()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.i(TAG, "WS: closed (code=$code reason=$reason)")
-                _connected.set(false)
-                activeSocket = null
+                // E4: identity-guard — see onFailure above.
+                if (activeSocket === webSocket) {
+                    _connected.set(false)
+                    activeSocket = null
+                }
                 heartbeatJob?.cancel()
                 latch.countDown()
             }
@@ -379,16 +395,14 @@ class SupabaseRealtimeClient(
 
         httpClient.newWebSocket(request, listener)
 
-        // Wait for the socket to close (failure or server close). The coroutine
-        // is blocked here; cancellation will interrupt the CountDownLatch wait.
-        try {
-            while (!latch.await(1, TimeUnit.SECONDS)) {
-                if (!scope.isActive) break
-            }
-        } catch (_: InterruptedException) {
-            // Coroutine was cancelled — close the socket if still open.
-            activeSocket?.close(1001, "cancelled")
-            activeSocket = null
+        // Wait for the socket to close (failure or server close). The latch is
+        // counted down from onFailure/onClosed. Teardown is driven by [close],
+        // which explicitly closes the socket → triggers onClosed → counts the
+        // latch down, unblocking this wait. Coroutine cancellation does NOT
+        // interrupt CountDownLatch.await (no InterruptedException is thrown
+        // here), so the scope.isActive check is the cancellation escape hatch.
+        while (!latch.await(1, TimeUnit.SECONDS)) {
+            if (!scope.isActive) break
         }
     }
 
@@ -450,10 +464,11 @@ class SupabaseRealtimeClient(
      * watermark, matching the poll drain logic.
      */
     private suspend fun ingestWsRow(record: JSONObject) {
-        val batch = syncManager.pollFromSupabase(
-            sinceWallTime = 0L,
-            sinceId = "",
-        ) ?: return
+        // E3: the row to ingest arrives inline in the WS frame, so we only need
+        // the decryption context (client + sync key) — NOT a REST history GET.
+        // resolveSyncContext() reuses the same cached JWT / Argon2id sync key /
+        // client construction as pollFromSupabase but performs no network poll.
+        val ctx = syncManager.resolveSyncContext() ?: return
 
         // Build a CloudRow from the WS record JSON.
         val id = record.optString("id").takeIf { it.isNotBlank() } ?: return
@@ -484,7 +499,7 @@ class SupabaseRealtimeClient(
         // Advance the Lamport clock for this row (mirrors FgsSyncLoop poll path).
         settings.lamportClock.observe(lamportTs)
 
-        val item = batch.client.decryptRow(row, batch.syncKey) ?: run {
+        val item = ctx.client.decryptRow(row, ctx.syncKey) ?: run {
             Log.w(TAG, "WS: decryptRow failed for id=$id")
             return
         }
