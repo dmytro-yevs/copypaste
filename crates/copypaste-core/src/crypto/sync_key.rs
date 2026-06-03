@@ -156,6 +156,20 @@ impl SyncKey {
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
         SyncKey(bytes)
     }
+
+    /// Constant-time comparison of this key's bytes against a candidate
+    /// 32-byte key.
+    ///
+    /// Used by the provisioning-apply path to distinguish a ROUTINE pairing
+    /// re-provision (incoming key identical → no-op) from a ROTATION
+    /// re-provision (incoming key differs → replace). Per the project's
+    /// security constraints, secret key material must never be compared with
+    /// `==`; this uses `subtle::ConstantTimeEq` so the comparison does not leak
+    /// information via timing.
+    pub fn ct_eq_bytes(&self, other: &[u8; 32]) -> bool {
+        use subtle::ConstantTimeEq;
+        self.0.ct_eq(other).into()
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -607,5 +621,61 @@ mod tests {
             Err(SyncKeyError::PassphraseTooShort(n)) => assert_eq!(n, 3),
             _ => panic!("expected PassphraseTooShort(3), got Err variant or Ok"),
         }
+    }
+
+    // ── C-P0-4: sync-key rotation framing ────────────────────────────────────
+
+    /// Rotating the sync key is the ONLY real cloud/relay device revocation: a
+    /// blob encrypted under key A (held by a now-revoked device) must FAIL to
+    /// decrypt under the rotated key B. This proves the revoked device can no
+    /// longer read items produced AFTER the rotation, even though it still holds
+    /// key A.
+    #[test]
+    fn rotated_key_cannot_decrypt_pre_rotation_blob() {
+        let item_id = "rotation-item-001";
+        let plaintext = b"secret produced after rotation";
+
+        // Key A = the pre-rotation key the revoked device still holds.
+        let key_a = derive_sync_key("old-shared-passphrase").expect("derive A must succeed");
+        // Key B = the rotated key. A different passphrase yields different bytes.
+        let key_b = derive_sync_key("new-rotated-passphrase").expect("derive B must succeed");
+        assert_ne!(
+            key_a.as_bytes(),
+            key_b.as_bytes(),
+            "rotation must produce a distinct key"
+        );
+
+        // A NEW cloud item is encrypted under the rotated key B.
+        let blob_b = encrypt_for_cloud(&key_b, item_id, plaintext).expect("encrypt under B");
+
+        // The revoked device, holding only key A, must NOT be able to decrypt it.
+        let result = decrypt_from_cloud(&key_a, item_id, &blob_b);
+        assert!(
+            matches!(result, Err(SyncKeyError::DecryptFailed)),
+            "pre-rotation key A must not decrypt a post-rotation blob, got {:?}",
+            result
+        );
+
+        // Sanity: the rotated key B still decrypts its own blob.
+        let ok = decrypt_from_cloud(&key_b, item_id, &blob_b).expect("B decrypts its own blob");
+        assert_eq!(ok, plaintext);
+    }
+
+    /// `SyncKey::ct_eq_bytes` is the helper the daemon's provisioning-apply path
+    /// uses to distinguish a routine re-provision (identical key → no-op) from a
+    /// rotation re-provision (differing key → replace). Verify it matches the
+    /// raw-byte equality without leaking via `==`.
+    #[test]
+    fn ct_eq_bytes_matches_byte_equality() {
+        let key = derive_sync_key("ct-eq-passphrase").expect("derive must succeed");
+        let same = *key.as_bytes();
+        let mut different = *key.as_bytes();
+        different[0] ^= 0xFF;
+
+        assert!(key.ct_eq_bytes(&same), "identical bytes must compare equal");
+        assert!(
+            !key.ct_eq_bytes(&different),
+            "differing bytes must compare unequal"
+        );
     }
 }

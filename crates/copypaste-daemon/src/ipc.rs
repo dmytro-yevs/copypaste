@@ -1553,19 +1553,47 @@ impl IpcServer {
             );
             return;
         }
-        {
-            let guard = sync_key.lock().await;
-            if guard.is_some() {
-                tracing::debug!(
-                    "apply_peer_provisioning: device already has a sync key; not overwriting"
-                );
-                return;
-            }
-        }
         // Wrap in Zeroizing so the transient byte buffer is scrubbed on drop.
+        // Built before the overwrite-guard so we can constant-time compare the
+        // incoming key against any existing key.
         let key_bytes = zeroize::Zeroizing::new(key_bytes);
         let mut arr = zeroize::Zeroizing::new([0u8; 32]);
         arr.copy_from_slice(&key_bytes);
+        {
+            let guard = sync_key.lock().await;
+            if let Some(existing) = guard.as_ref() {
+                // Distinguish ROUTINE pairing from a ROTATION re-provision.
+                //
+                // Routine pairing fills a MISSING key; both peers derive the
+                // SAME deterministic Argon2id key from the same passphrase, so a
+                // re-provision that carries the IDENTICAL key is a harmless
+                // no-op and must NOT clobber locally-encrypted cloud blobs.
+                //
+                // After a sync-key ROTATION the operator re-scans the pairing QR
+                // on each remaining device; the QR now carries the NEW key,
+                // which DIFFERS from the stale key this device still holds. That
+                // is the legitimate replace case — without it a remaining device
+                // would silently ignore the rotated key and keep addressing the
+                // dead (pre-rotation) relay inbox.
+                //
+                // Constant-time compare on the 32-byte key material
+                // (`SyncKey::ct_eq_bytes` uses `subtle` — never `==` on secrets,
+                // per CLAUDE.md security constraints).
+                // `&arr` derefs Zeroizing<[u8; 32]> → &[u8; 32] at the call site.
+                if existing.ct_eq_bytes(&arr) {
+                    tracing::debug!(
+                        "apply_peer_provisioning: incoming sync key matches existing; no-op"
+                    );
+                    return;
+                }
+                // Incoming key differs → treat as an explicit rotation re-provision
+                // and REPLACE the stale key below.
+                tracing::info!(
+                    "apply_peer_provisioning: incoming sync key differs from existing; \
+                     replacing (rotation re-provision)"
+                );
+            }
+        }
 
         // Persist via the SAME backend set_sync_passphrase uses, so an
         // ad-hoc/unsigned install does not raise a Keychain prompt.
@@ -1604,6 +1632,60 @@ impl IpcServer {
 
         *sync_key.lock().await = Some(SyncKey::from_bytes(*arr));
         tracing::info!("applied peer sync provisioning: installed derived cloud sync key");
+    }
+
+    /// Persist a freshly-derived [`SyncKey`] to the SAME backend
+    /// `set_sync_passphrase` uses (0600 file store or Keychain, never raising a
+    /// prompt on an ad-hoc/unsigned install), then swap the live `self.sync_key`
+    /// slot so the cloud push/poll loops pick it up immediately.
+    ///
+    /// Shared by `set_sync_passphrase` and `rotate_sync_key`/`revoke_and_rotate`
+    /// so the rotation path is byte-for-byte identical to the original
+    /// passphrase-set path. The key bytes are NEVER logged.
+    ///
+    /// A persist failure is logged and swallowed: the key is still installed
+    /// in-memory for this session, matching `set_sync_passphrase`'s contract.
+    #[cfg(feature = "cloud-sync")]
+    async fn persist_and_install_sync_key(&self, new_key: SyncKey) {
+        // Persist the raw key bytes so they survive a daemon restart.
+        #[cfg(target_os = "macos")]
+        if crate::keychain::keychain_bypassed() {
+            // Dev/test bypass: do not persist (would prompt / touch disk). The
+            // key stays active in-memory for this session.
+            tracing::debug!(
+                "persist_and_install_sync_key: COPYPASTE_EPHEMERAL_KEY set; not persisting"
+            );
+        } else {
+            match crate::keychain::signing::choose_key_backend() {
+                crate::keychain::signing::KeyBackend::File => {
+                    if let Err(e) =
+                        crate::keychain::file_store::store_cloud_sync_key(new_key.as_bytes())
+                    {
+                        tracing::warn!(
+                            "persist_and_install_sync_key: file-store persist failed ({e}); \
+                             key is active in-memory only until daemon restart"
+                        );
+                    }
+                }
+                crate::keychain::signing::KeyBackend::Keychain => {
+                    use security_framework::passwords::set_generic_password;
+                    if let Err(e) = set_generic_password(
+                        crate::keychain::SERVICE,
+                        crate::keychain::CLOUD_SYNC_ACCOUNT,
+                        new_key.as_bytes(),
+                    ) {
+                        tracing::warn!(
+                            "persist_and_install_sync_key: keychain persist failed ({e}); \
+                             key is active in-memory only until daemon restart"
+                        );
+                    }
+                }
+            }
+        }
+
+        // Store in shared state so push/poll loops pick it up immediately
+        // (they hold an Arc to the same Mutex).
+        *self.sync_key.lock().await = Some(new_key);
     }
 
     /// `cloud-sync`-disabled stub: nothing to apply.
@@ -2232,6 +2314,9 @@ impl IpcServer {
                 | "get_item_file"
                 | "revoke_peer"
                 | "revoke_all_peers"
+                // revoke_and_rotate runs the revoke body (audit-row insert),
+                // which needs a ready DB.
+                | "revoke_and_rotate"
         )
     }
 
@@ -3758,53 +3843,189 @@ impl IpcServer {
                     }
                 };
 
-                // Persist the raw key bytes to the macOS Keychain under the
-                // cloud-sync account so they survive a daemon restart.
-                #[cfg(target_os = "macos")]
-                if crate::keychain::keychain_bypassed() {
-                    // Dev/test bypass: do not persist (would prompt / touch
-                    // disk). The key stays active in-memory for this session.
-                    tracing::debug!(
-                        "set_sync_passphrase: COPYPASTE_EPHEMERAL_KEY set; skipping key persist"
-                    );
-                } else {
-                    // Persist via the SAME backend the device key uses. On
-                    // ad-hoc / unsigned installs that is the non-prompting
-                    // 0600 file store — using the Keychain here would raise
-                    // the login-password prompt that this change eliminates.
-                    // See `keychain::signing` / `keychain::file_store`.
-                    match crate::keychain::signing::choose_key_backend() {
-                        crate::keychain::signing::KeyBackend::File => {
-                            if let Err(e) = crate::keychain::file_store::store_cloud_sync_key(
-                                new_key.as_bytes(),
-                            ) {
-                                tracing::warn!(
-                                    "set_sync_passphrase: file-store persist failed ({e}); \
-                                     key is active in-memory only until daemon restart"
-                                );
-                            }
-                        }
-                        crate::keychain::signing::KeyBackend::Keychain => {
-                            use security_framework::passwords::set_generic_password;
-                            if let Err(e) = set_generic_password(
-                                crate::keychain::SERVICE,
-                                crate::keychain::CLOUD_SYNC_ACCOUNT,
-                                new_key.as_bytes(),
-                            ) {
-                                tracing::warn!(
-                                    "set_sync_passphrase: keychain persist failed ({e}); \
-                                     key is active in-memory only until daemon restart"
-                                );
-                            }
-                        }
-                    }
-                }
-
-                // Store in shared state so push/poll loops pick it up
-                // immediately (they hold an Arc to the same Mutex).
-                *self.sync_key.lock().await = Some(new_key);
+                // Persist via the SAME backend the device key uses (0600 file
+                // store on unsigned installs, Keychain otherwise) and swap the
+                // live slot so the cloud loops pick it up immediately. The key
+                // bytes are never logged.
+                self.persist_and_install_sync_key(new_key).await;
                 tracing::info!("set_sync_passphrase: sync key updated");
                 Response::ok(req.id, serde_json::json!({"ok": true}))
+            }
+
+            // ── C-P0-4: honest cloud/relay device revocation ────────────────
+            //
+            // Revoking a peer (`revoke_peer`) only cuts off P2P (mTLS allowlist
+            // + revoked_fingerprints denylist). It does NOT cut off cloud /
+            // relay sync, because the revoked device still holds the shared sync
+            // key — it can keep decrypting NEW cloud items and keeps addressing
+            // the SAME relay inbox (the inbox id is HKDF of the sync key).
+            //
+            // The ONLY real cloud/relay revocation is ROTATING the sync key:
+            //   * the old key can no longer decrypt items encrypted under the
+            //     new key (XChaCha20-Poly1305 auth-tag rejection — see
+            //     copypaste_core::sync_key);
+            //   * the relay inbox id (HKDF of the sync key — see
+            //     copypaste_core::relay::derive_relay_inbox_id) diverges, so the
+            //     revoked device's saved token now addresses a DEAD inbox.
+            //
+            // `rotate_sync_key` accepts a NEW passphrase, derives a fresh key,
+            // and installs it via the SAME persist + slot-swap path as
+            // `set_sync_passphrase`. Remaining devices must re-provision (re-scan
+            // the pairing QR or re-enter the new passphrase) to keep syncing.
+            #[cfg(feature = "cloud-sync")]
+            "rotate_sync_key" => {
+                let passphrase = match req.params.get("passphrase").and_then(|v| v.as_str()) {
+                    Some(p) if !p.is_empty() => p.to_owned(),
+                    _ => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing or empty param: passphrase",
+                        )
+                    }
+                };
+
+                let new_key = match derive_sync_key(&passphrase) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        tracing::warn!("rotate_sync_key: key derivation failed: {e}");
+                        return Response::err(req.id, format!("key derivation failed: {e}"));
+                    }
+                };
+
+                self.persist_and_install_sync_key(new_key).await;
+                tracing::info!(
+                    "rotate_sync_key: sync key rotated; relay inbox id will diverge and the old \
+                     key can no longer decrypt new cloud items"
+                );
+                Response::ok(req.id, serde_json::json!({"ok": true, "rotated": true}))
+            }
+
+            // C-P0-4: revoke a peer from P2P AND rotate the sync key in one call,
+            // so the revoked device is cut off from cloud/relay sync too. Runs
+            // the SAME body as `revoke_peer` (P2P allowlist eviction + audit
+            // row), then derives & installs the new sync key. The new passphrase
+            // is required; if it is missing/invalid we do NOT revoke (so the
+            // caller can retry without a half-applied state).
+            #[cfg(feature = "cloud-sync")]
+            "revoke_and_rotate" => {
+                let fingerprint = match req.params.get("fingerprint").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: fingerprint",
+                        )
+                    }
+                };
+                if !is_valid_fingerprint(&fingerprint) {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        format!("invalid fingerprint format: {fingerprint}"),
+                    );
+                }
+                let passphrase = match req.params.get("passphrase").and_then(|v| v.as_str()) {
+                    Some(p) if !p.is_empty() => p.to_owned(),
+                    _ => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing or empty param: passphrase",
+                        )
+                    }
+                };
+                // Derive the new key FIRST so a bad passphrase fails before we
+                // mutate any revocation state.
+                let new_key = match derive_sync_key(&passphrase) {
+                    Ok(k) => k,
+                    Err(e) => {
+                        tracing::warn!("revoke_and_rotate: key derivation failed: {e}");
+                        return Response::err(req.id, format!("key derivation failed: {e}"));
+                    }
+                };
+
+                // ── Revoke (same as the `revoke_peer` body) ──
+                let (removed, captured_name) = match load_peers() {
+                    Ok(mut peers) => {
+                        let before_len = peers.len();
+                        let name = peers
+                            .iter()
+                            .find(|p| {
+                                p.get("fingerprint")
+                                    .and_then(|v| v.as_str())
+                                    .map(|f| f == fingerprint)
+                                    .unwrap_or(false)
+                            })
+                            .and_then(|p| p.get("name"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        peers.retain(|p| {
+                            p.get("fingerprint")
+                                .and_then(|v| v.as_str())
+                                .map(|f| f != fingerprint)
+                                .unwrap_or(true)
+                        });
+                        if let Err(e) = save_peers(&peers) {
+                            return Response::err(req.id, format!("failed to save peers: {e}"));
+                        }
+                        (peers.len() < before_len, name)
+                    }
+                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
+                };
+
+                let db_arc = self.db.clone();
+                let fp_for_db = fingerprint.clone();
+                let name_for_db = captured_name.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    revoke_device(db.conn(), &fp_for_db, &name_for_db)
+                })
+                .await;
+
+                let revoked_at = match join {
+                    Ok(Ok(ts)) => {
+                        // Evict from the live mTLS allowlist immediately.
+                        if let Some(ref peers) = self.p2p_peers {
+                            peers.remove(&canonical_fingerprint(&fingerprint));
+                        }
+                        ts
+                    }
+                    Ok(Err(e)) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("failed to record revocation: {e}"),
+                        )
+                    }
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("revoke task join error: {e}"),
+                        )
+                    }
+                };
+
+                // ── Rotate the sync key (cuts off cloud/relay for the revoked
+                // device; remaining devices must re-provision). ──
+                self.persist_and_install_sync_key(new_key).await;
+                tracing::info!(
+                    "revoke_and_rotate: revoked peer and rotated sync key; remaining devices must \
+                     re-provision to keep syncing"
+                );
+                Response::ok(
+                    req.id,
+                    serde_json::json!({
+                        "ok": true,
+                        "removed": removed,
+                        "revoked_at": revoked_at,
+                        "fingerprint": fingerprint,
+                        "rotated": true,
+                    }),
+                )
             }
 
             #[cfg(feature = "cloud-sync")]
@@ -3895,9 +4116,11 @@ impl IpcServer {
             // When cloud-sync is not compiled in, return not_implemented so
             // the UI gets a machine-readable code rather than "method not found".
             #[cfg(not(feature = "cloud-sync"))]
-            "set_sync_passphrase" | "get_sync_status" | "cloud_test_connection" => {
-                Response::not_implemented(req.id, "cloud-sync")
-            }
+            "set_sync_passphrase"
+            | "get_sync_status"
+            | "cloud_test_connection"
+            | "rotate_sync_key"
+            | "revoke_and_rotate" => Response::not_implemented(req.id, "cloud-sync"),
             "set_private_mode" => {
                 let enabled = match req.params.get("enabled").and_then(|v| v.as_bool()) {
                     Some(b) => b,
@@ -9914,7 +10137,10 @@ mod tests {
     }
 
     /// On a device that ALREADY has Supabase config + a sync key, applying a
-    /// peer's provisioning must NOT overwrite either.
+    /// peer's provisioning that carries the IDENTICAL key (routine re-pairing)
+    /// must NOT overwrite the config OR the key. (A DIFFERING key signals a
+    /// rotation re-provision and IS allowed to replace — see
+    /// `apply_peer_provisioning_rotation_replaces_differing_key`.)
     #[cfg(feature = "cloud-sync")]
     #[tokio::test]
     async fn apply_peer_provisioning_never_overwrites_existing() {
@@ -9952,11 +10178,14 @@ mod tests {
         let sync_key: Arc<Mutex<Option<SyncKey>>> =
             Arc::new(Mutex::new(Some(SyncKey::from_bytes([1u8; 32]))));
 
+        // Carry the IDENTICAL key (all 1s) — this is the routine-pairing shape
+        // where both peers derive the same deterministic key. It must be a
+        // no-op for the key, and config fill-missing must still not overwrite.
         let prov = copypaste_p2p::bootstrap::SyncProvisioning {
             supabase_url: Some("https://peer.supabase.co".into()),
             supabase_anon_key: Some("peer-anon".into()),
             relay_url: Some("https://peer-relay.example.com".into()),
-            derived_sync_key: Some(vec![9u8; 32]),
+            derived_sync_key: Some(vec![1u8; 32]),
         };
         IpcServer::apply_peer_provisioning_to(&sync_key, prov).await;
 
@@ -9972,11 +10201,75 @@ mod tests {
             Some("https://existing-relay.example.com"),
             "existing relay_url must not be overwritten by the peer's"
         );
-        // The pre-existing key (all 1s) must be untouched.
+        // The pre-existing key (all 1s) must be untouched (identical → no-op).
         assert_eq!(
             sync_key.lock().await.as_ref().map(|k| *k.as_bytes()),
             Some([1u8; 32]),
-            "existing sync key must not be overwritten by the peer's"
+            "an identical incoming sync key must not change the existing key"
+        );
+    }
+
+    /// C-P0-4: after a sync-key ROTATION, the operator re-scans the pairing QR
+    /// on each remaining device. That re-provision carries the NEW key, which
+    /// DIFFERS from the stale key the device still holds — the apply path must
+    /// REPLACE the stale key (otherwise the device keeps the dead, pre-rotation
+    /// key and silently fails to sync). Config fields are still fill-missing
+    /// only and must not be overwritten.
+    #[cfg(feature = "cloud-sync")]
+    #[tokio::test]
+    async fn apply_peer_provisioning_rotation_replaces_differing_key() {
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+                "SUPABASE_URL",
+                "SUPABASE_ANON_KEY",
+                "COPYPASTE_EPHEMERAL_KEY",
+            ],
+            &cfg_home,
+        );
+        // SAFETY: single-threaded test scope; restored by EnvGuard on drop.
+        unsafe {
+            std::env::remove_var("SUPABASE_URL");
+            std::env::remove_var("SUPABASE_ANON_KEY");
+            std::env::set_var("COPYPASTE_EPHEMERAL_KEY", "1");
+        }
+
+        let seed = AppConfig {
+            supabase_url: Some("https://existing.supabase.co".into()),
+            supabase_anon_key: Some("existing-anon".into()),
+            ..Default::default()
+        };
+        write_config(&seed).expect("seed config.json");
+
+        // Device holds the STALE pre-rotation key (all 1s).
+        let sync_key: Arc<Mutex<Option<SyncKey>>> =
+            Arc::new(Mutex::new(Some(SyncKey::from_bytes([1u8; 32]))));
+
+        // Rotation re-provision carries the NEW key (all 7s).
+        let prov = copypaste_p2p::bootstrap::SyncProvisioning {
+            supabase_url: Some("https://peer.supabase.co".into()),
+            supabase_anon_key: Some("peer-anon".into()),
+            relay_url: None,
+            derived_sync_key: Some(vec![7u8; 32]),
+        };
+        IpcServer::apply_peer_provisioning_to(&sync_key, prov).await;
+
+        // The differing key REPLACES the stale one (honest rotation).
+        assert_eq!(
+            sync_key.lock().await.as_ref().map(|k| *k.as_bytes()),
+            Some([7u8; 32]),
+            "a differing incoming sync key (rotation) must replace the stale key"
+        );
+        // Config fill-missing still never overwrites an existing value.
+        let cfg = read_config();
+        assert_eq!(
+            cfg.supabase_url.as_deref(),
+            Some("https://existing.supabase.co"),
+            "existing supabase_url must not be overwritten on a rotation re-provision"
         );
     }
 
