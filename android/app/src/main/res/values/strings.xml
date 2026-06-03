@@ -98,6 +98,8 @@
     <string name="setting_device_id_label">Device ID</string>
     <string name="setting_permissions_title">Permissions</string>
     <string name="setting_permissions_subtitle">Review and re-request permissions</string>
+    <string name="setting_devices_title">Devices</string>
+    <string name="setting_devices_subtitle">Manage paired P2P peers and view this device\'s identity</string>
 
     <!-- Settings — Notifications -->
     <string name="setting_notify_on_copy_title">Notify on copy</string>

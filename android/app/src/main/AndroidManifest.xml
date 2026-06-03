@@ -162,6 +162,14 @@
             android:exported="false"
             android:theme="@style/Theme.CopyPaste" />
 
+        <!-- Devices screen: paired P2P peer list + Unpair/Revoke actions.
+             Surfaced as the DEVICES tab in MainActivity's bottom nav and as a
+             "Devices" nav row in Settings › General. -->
+        <activity
+            android:name=".DevicesActivity"
+            android:exported="false"
+            android:theme="@style/Theme.CopyPaste" />
+
         <!--
             Foreground clipboard-monitoring service.
 

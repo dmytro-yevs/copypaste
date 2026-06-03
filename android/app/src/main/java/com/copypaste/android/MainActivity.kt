@@ -251,7 +251,7 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                         showBackButton = false,
                         onBack = {}
                     )
-                    NavTab.DEVICES -> PairScreen(
+                    NavTab.DEVICES -> DevicesScreen(
                         showBackButton = false,
                         onBack = {}
                     )
