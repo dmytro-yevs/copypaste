@@ -933,24 +933,28 @@ class ClipboardService : Service() {
                     }
                 }
                 SyncBackend.RELAY -> {
-                    // RELAY cloud backend is DISABLED.
-                    //
-                    // The relay path encrypted items with the local per-device AES
-                    // key (settings.encryptionKey) which no other device holds, so
-                    // every payload it uploaded was undecryptable by macOS or any
-                    // peer. The incoming poll (syncIncoming / syncItems) was also
-                    // never wired into any active code path, making the relay
-                    // write-only. This combination makes the relay cloud backend
-                    // completely broken for cross-device sync.
-                    //
-                    // Decision: cloud sync = Supabase only. Switch to Supabase in
-                    // Settings to enable cross-device cloud sync. The P2P/pairing
-                    // LAN path (dialPairedPeer in FgsSyncLoop) is unaffected.
-                    Log.w(
-                        TAG,
-                        "relay cloud backend is disabled — use Supabase for " +
-                            "cross-device cloud sync (Settings → Use Supabase Cloud Sync)"
-                    )
+                    // Relay path: encrypt with the cross-device cloud SyncKey via
+                    // cloud_encrypt (item_id bound into the AEAD AAD), wrap as a
+                    // RelayEnvelope, and POST to the derived shared inbox. STABLE
+                    // identity: push under the row's persisted [itemId] so the
+                    // relay item_id matches the local row and is reused on every
+                    // push, mirroring the Supabase branch above. pushToRelay runs
+                    // on Dispatchers.IO internally and zeroes the sync key after use.
+                    try {
+                        val ok = syncManager.pushToRelay(
+                            itemId = itemId,
+                            plaintext = plaintext.toByteArray(Charsets.UTF_8),
+                            contentType = "text",
+                            lamportTs = lamportTs,
+                        )
+                        if (ok) {
+                            Log.d(TAG, "Relay push ok: $itemId")
+                        } else {
+                            Log.w(TAG, "Relay push returned false (logged above)")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Relay push failed: ${e.message}")
+                    }
                 }
             }
         }
