@@ -2719,6 +2719,11 @@ impl IpcServer {
                                     "is_sensitive": item.is_sensitive,
                                     "wall_time": item.wall_time,
                                     "lamport_ts": item.lamport_ts,
+                                    // Daemon-computed single source of truth: true when
+                                    // this item exceeds the local sync size ceiling and
+                                    // therefore won't be synced. UIs badge it. Same
+                                    // shape as the `list`/`history_page` arms.
+                                    "too_large_to_sync": too_large_to_sync(item),
                                 })
                             })
                             .collect();
@@ -3697,6 +3702,11 @@ impl IpcServer {
                                 "pinned": item.pinned,
                                 "pin_order": item.pin_order,
                                 "sensitive_spans": sensitive_spans,
+                                // Daemon-computed single source of truth: true when
+                                // this item exceeds the local sync size ceiling and
+                                // therefore won't be synced. This is the arm the macOS
+                                // UI (HistoryWindow) actually renders from.
+                                "too_large_to_sync": too_large_to_sync(item),
                             })
                         })
                         .collect();
@@ -9386,6 +9396,65 @@ mod tests {
                 it["too_large_to_sync"]
                     .as_bool()
                     .expect("too_large_to_sync must be a bool on every item")
+            })
+            .collect();
+        assert_eq!(
+            flags.iter().filter(|&&f| f).count(),
+            1,
+            "exactly one item must be flagged too_large_to_sync: {items:?}"
+        );
+        assert_eq!(
+            flags.iter().filter(|&&f| !f).count(),
+            1,
+            "exactly one item must be under the sync ceiling: {items:?}"
+        );
+    }
+
+    /// The `history_page` IPC response — the verb the macOS UI (HistoryWindow)
+    /// actually renders from — must carry the same daemon-computed
+    /// `too_large_to_sync` flag per item as `list`: `true` for an item whose
+    /// stored blob exceeds `SYNC_MAX_BLOB_BYTES` (8 MiB), `false` otherwise.
+    /// Mirrors `list_reports_too_large_to_sync_per_item` so the badge is faithful
+    /// regardless of which list verb the UI calls.
+    #[tokio::test]
+    async fn history_page_reports_too_large_to_sync_per_item() {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let server = IpcServer::new(
+            db.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+            Arc::new([0u8; 32]),
+        );
+
+        // Seed a normal small item and an oversized one. `content` is the
+        // at-rest ciphertext blob; the badge compares its length to 8 MiB.
+        {
+            let guard = db.lock().await;
+            let small = copypaste_core::ClipboardItem::new_text(vec![0xAB; 16], vec![0u8; 24], 1);
+            copypaste_core::insert_item(&guard, &small).unwrap();
+            // One byte over the ceiling guarantees too_large_to_sync == true.
+            let oversized = copypaste_core::ClipboardItem::new_text(
+                vec![0xCD; crate::sync_orch::SYNC_MAX_BLOB_BYTES + 1],
+                vec![0u8; 24],
+                2,
+            );
+            copypaste_core::insert_item(&guard, &oversized).unwrap();
+        }
+
+        let resp = server
+            .dispatch(r#"{"id":"1","method":"history_page","params":{"limit":50,"offset":0}}"#)
+            .await;
+        assert!(resp.ok, "history_page must succeed: {resp:?}");
+        let data = resp.data.expect("history_page returns data");
+        let items = data["items"].as_array().expect("items array");
+        assert_eq!(items.len(), 2, "two seeded items expected");
+
+        let flags: Vec<bool> = items
+            .iter()
+            .map(|it| {
+                it["too_large_to_sync"]
+                    .as_bool()
+                    .expect("too_large_to_sync must be a bool on every history_page item")
             })
             .collect();
         assert_eq!(
