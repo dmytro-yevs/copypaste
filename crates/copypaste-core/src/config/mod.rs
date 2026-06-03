@@ -152,6 +152,11 @@ impl AppConfig {
             .clamp(POLL_INTERVAL_MIN_MS, POLL_INTERVAL_MAX_MS);
         self.image_quality = self.image_quality.clamp(1, 100);
         self.encryption_chunk_kb = self.encryption_chunk_kb.clamp(16, 4096);
+        // Bound the SQLite page-cache knob so a bad/hand-edited config cannot
+        // request a 0 MiB (ineffective) or multi-GiB (memory-pinning) cache.
+        self.sqlite_cache_mb = self
+            .sqlite_cache_mb
+            .clamp(SQLITE_CACHE_MB_MIN, SQLITE_CACHE_MB_MAX);
 
         // Fix 7: floor values that must never be 0 to prevent wipe-all / divide-by-zero.
         // history_limit = 0 would silently return no history rows from every page query.
@@ -314,6 +319,30 @@ mod tests {
         def.clamp_values();
         assert_eq!(def.max_file_size_bytes, MAX_FILE_SIZE_BYTES);
         assert_eq!(def.max_file_size_bytes, crate::file::MAX_FILE_BYTES as u64);
+    }
+
+    #[test]
+    fn clamp_bounds_sqlite_cache_mb() {
+        // Below the floor → lifted to the minimum.
+        let mut low = AppConfig {
+            sqlite_cache_mb: 0,
+            ..Default::default()
+        };
+        low.clamp_values();
+        assert_eq!(low.sqlite_cache_mb, SQLITE_CACHE_MB_MIN);
+
+        // Above the ceiling → clamped down to the maximum.
+        let mut high = AppConfig {
+            sqlite_cache_mb: u32::MAX,
+            ..Default::default()
+        };
+        high.clamp_values();
+        assert_eq!(high.sqlite_cache_mb, SQLITE_CACHE_MB_MAX);
+
+        // The default is in range and preserved.
+        let mut def = AppConfig::default();
+        def.clamp_values();
+        assert_eq!(def.sqlite_cache_mb, SQLITE_CACHE_MB);
     }
 
     #[test]

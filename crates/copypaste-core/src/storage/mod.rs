@@ -16,4 +16,4 @@ pub use items::{
     ClipboardItem, ItemsError, ITEM_KEY_VERSION_CURRENT,
 };
 pub use migration_v4::{migrate_v1_image_chunks_to_v2, migrate_v1_to_v2_keys, MigrationV4Error};
-pub use pool::{open_pool, PoolError, SqlitePool};
+pub use pool::{open_pool, open_pool_with_cache_mb, PoolError, SqlitePool};

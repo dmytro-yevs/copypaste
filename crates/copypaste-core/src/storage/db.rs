@@ -155,6 +155,11 @@ pub struct Database {
     /// `None` for `open_in_memory` connections, where `rekey` falls back
     /// to `PRAGMA rekey` (volatile DB → a crash loses everything anyway).
     path: Option<PathBuf>,
+    /// Per-connection page-cache budget in MiB. Re-applied to every fresh
+    /// connection this handle creates internally (e.g. the re-open after
+    /// `encrypt_existing`, and the rebuilt connection in `rekey`) so the
+    /// configured cache survives those operations.
+    cache_mb: u32,
 }
 
 /// Format a 32-byte key as the hex string SQLCipher expects:
@@ -186,18 +191,38 @@ fn key_pragma(key: &[u8; 32]) -> zeroize::Zeroizing<String> {
 /// set so behaviour is uniform across UI reader, daemon writer, and the
 /// migration pass.
 ///
-/// Item 4: `cache_size = -8192` sets an 8 MB page cache per connection
-/// (negative value = KiB units; 8192 KiB = 8 MB = `SQLITE_CACHE_MB` default).
-/// Previously absent, so SQLite fell back to its own tiny default (≈2 MB).
-/// If a future change threads `AppConfig::sqlite_cache_mb` through `open()`,
-/// replace the literal with `-N*1024` computed at runtime and remove this pragma
-/// from the static constant.
+/// The `cache_size` pragma is NOT included here because it is configurable:
+/// it is applied separately via [`cache_size_pragma`] so a caller's
+/// `AppConfig::sqlite_cache_mb` can be honoured. Every open path applies both
+/// this static set and a `cache_size_pragma(..)` (see [`connection_pragmas`]).
 pub(crate) const CONNECTION_PRAGMAS: &str = "\
 PRAGMA busy_timeout = 5000;\n\
 PRAGMA synchronous = NORMAL;\n\
 PRAGMA foreign_keys = ON;\n\
-PRAGMA temp_store = MEMORY;\n\
-PRAGMA cache_size = -8192;\n";
+PRAGMA temp_store = MEMORY;\n";
+
+/// Build the `PRAGMA cache_size` statement for `cache_mb` MiB of page cache.
+///
+/// SQLite treats a NEGATIVE `cache_size` as a memory budget in KiB, so
+/// `cache_mb` MiB maps to `-(cache_mb * 1024)`. `cache_mb` is clamped to
+/// `SQLITE_CACHE_MB_MIN..=SQLITE_CACHE_MB_MAX` here too (defence in depth: the
+/// value normally arrives already clamped from `AppConfig::clamp_values`, but
+/// callers may pass a raw value). The default (8 MiB) yields the historical
+/// `PRAGMA cache_size = -8192;`.
+pub(crate) fn cache_size_pragma(cache_mb: u32) -> String {
+    let mb = cache_mb.clamp(
+        crate::config::SQLITE_CACHE_MB_MIN,
+        crate::config::SQLITE_CACHE_MB_MAX,
+    );
+    // mb <= 256, so mb * 1024 (<= 262_144) fits in i64 without overflow.
+    let kib = i64::from(mb) * 1024;
+    format!("PRAGMA cache_size = -{kib};\n")
+}
+
+/// The full per-connection pragma batch (static set + configurable cache_size).
+pub(crate) fn connection_pragmas(cache_mb: u32) -> String {
+    format!("{CONNECTION_PRAGMAS}{}", cache_size_pragma(cache_mb))
+}
 
 impl Database {
     /// Open (or create) an encrypted database at `path`.
@@ -212,7 +237,22 @@ impl Database {
     ///
     /// Returns `Err(DbError::Sqlite(...))` if `key` is wrong for an existing
     /// encrypted database.
+    ///
+    /// Uses the default page-cache size (`SQLITE_CACHE_MB`, 8 MiB). To honour a
+    /// user-configured `AppConfig::sqlite_cache_mb`, use
+    /// [`Database::open_with_cache_mb`].
     pub fn open(path: impl AsRef<Path>, key: &[u8; 32]) -> Result<Self, DbError> {
+        Self::open_with_cache_mb(path, key, crate::config::SQLITE_CACHE_MB)
+    }
+
+    /// Like [`Database::open`] but applies `cache_mb` MiB of SQLite page cache
+    /// per connection instead of the 8 MiB default. `cache_mb` is clamped to
+    /// `SQLITE_CACHE_MB_MIN..=SQLITE_CACHE_MB_MAX` (see [`cache_size_pragma`]).
+    pub fn open_with_cache_mb(
+        path: impl AsRef<Path>,
+        key: &[u8; 32],
+        cache_mb: u32,
+    ) -> Result<Self, DbError> {
         // Eagerly compile sensitive-data patterns at first DB open so any
         // invalid regex surfaces as a startup error rather than a panic
         // during the first clipboard scan.
@@ -220,6 +260,7 @@ impl Database {
             return Err(DbError::Migration(format!("pattern init failed: {e}")));
         }
 
+        let pragmas = connection_pragmas(cache_mb);
         let path = path.as_ref();
 
         let conn = Connection::open_with_flags(
@@ -242,11 +283,15 @@ impl Database {
                 // touch user data (foreign_keys requires reading the
                 // schema). Single-connection callers (e.g. the daemon) now
                 // get the same lock / FK behaviour as pooled callers.
-                conn.execute_batch(CONNECTION_PRAGMAS)?;
+                conn.execute_batch(&pragmas)?;
                 apply_migrations(&conn)?;
+                // apply_migrations re-applies the default cache_size; re-assert
+                // the configured value so it wins for this connection.
+                conn.execute_batch(&cache_size_pragma(cache_mb))?;
                 Ok(Self {
                     conn,
                     path: Some(path.to_path_buf()),
+                    cache_mb,
                 })
             }
             Err(rusqlite::Error::SqliteFailure(err, msg))
@@ -284,11 +329,15 @@ impl Database {
                                 OpenFlags::SQLITE_OPEN_READ_WRITE,
                             )?;
                             enc.execute_batch(&key_pragma(key))?;
-                            enc.execute_batch(CONNECTION_PRAGMAS)?;
+                            enc.execute_batch(&pragmas)?;
                             apply_migrations(&enc)?;
+                            // Re-assert configured cache (apply_migrations sets
+                            // the default).
+                            enc.execute_batch(&cache_size_pragma(cache_mb))?;
                             Ok(Self {
                                 conn: enc,
                                 path: Some(path.to_path_buf()),
+                                cache_mb,
                             })
                         } else {
                             // Both keyed and unkeyed probes fail → wrong key.
@@ -308,7 +357,20 @@ impl Database {
     /// Like [`open`] but returns [`DbError::PlaintextMigrationBlocked`] instead
     /// of auto-migrating when a plaintext database is found. Use this when the
     /// caller has received `COPYPASTE_NO_AUTO_MIGRATE=1` from the environment.
+    ///
+    /// Uses the default page-cache size; see
+    /// [`Database::open_no_auto_migrate_with_cache_mb`] to tune it.
     pub fn open_no_auto_migrate(path: impl AsRef<Path>, key: &[u8; 32]) -> Result<Self, DbError> {
+        Self::open_no_auto_migrate_with_cache_mb(path, key, crate::config::SQLITE_CACHE_MB)
+    }
+
+    /// Like [`Database::open_no_auto_migrate`] but applies `cache_mb` MiB of
+    /// page cache per connection instead of the 8 MiB default.
+    pub fn open_no_auto_migrate_with_cache_mb(
+        path: impl AsRef<Path>,
+        key: &[u8; 32],
+        cache_mb: u32,
+    ) -> Result<Self, DbError> {
         let path = path.as_ref();
         if let Err(rusqlite::Error::SqliteFailure(err, msg)) = {
             let conn = Connection::open_with_flags(
@@ -342,7 +404,7 @@ impl Database {
             }
         }
         // Plaintext check passed — key is valid; delegate to regular open.
-        Self::open(path, key)
+        Self::open_with_cache_mb(path, key, cache_mb)
     }
 
     /// Migrate an unencrypted file to SQLCipher in-place.
@@ -431,12 +493,25 @@ impl Database {
     /// Open an in-memory (unencrypted) database.
     ///
     /// Used exclusively in tests. Signature is unchanged so all existing test
-    /// callers compile without modification.
+    /// callers compile without modification. Uses the default 8 MiB cache; see
+    /// [`Database::open_in_memory_with_cache_mb`] to tune it.
     pub fn open_in_memory() -> Result<Self, DbError> {
+        Self::open_in_memory_with_cache_mb(crate::config::SQLITE_CACHE_MB)
+    }
+
+    /// Like [`Database::open_in_memory`] but applies `cache_mb` MiB of page
+    /// cache instead of the 8 MiB default.
+    pub fn open_in_memory_with_cache_mb(cache_mb: u32) -> Result<Self, DbError> {
         let conn = Connection::open_in_memory()?;
-        conn.execute_batch(CONNECTION_PRAGMAS)?;
+        conn.execute_batch(&connection_pragmas(cache_mb))?;
         apply_migrations(&conn)?;
-        Ok(Self { conn, path: None })
+        // apply_migrations re-applies the default cache_size; re-assert.
+        conn.execute_batch(&cache_size_pragma(cache_mb))?;
+        Ok(Self {
+            conn,
+            path: None,
+            cache_mb,
+        })
     }
 
     /// Re-encrypt the database with a new key (key rotation).
@@ -468,6 +543,11 @@ impl Database {
     pub fn rekey(self, new_key: &[u8; 32]) -> Result<Self, DbError> {
         use std::fmt::Write;
 
+        // Preserve the configured page-cache size across the rebuild. `self`
+        // is dropped mid-method (to release the file for rename), so capture
+        // it up front.
+        let cache_mb = self.cache_mb;
+
         // In-memory connections have no path to atomically rename onto;
         // fall back to PRAGMA rekey for those. They're crash-safe by
         // virtue of being volatile — a crash loses the whole DB anyway.
@@ -487,6 +567,7 @@ impl Database {
                 return Ok(Self {
                     conn: self.conn,
                     path: None,
+                    cache_mb,
                 });
             }
         };
@@ -576,15 +657,21 @@ impl Database {
         .map_err(|e| {
             DbError::Migration(format!("rekey key-validation failed at {path_str}: {e}"))
         })?;
-        enc.execute_batch(CONNECTION_PRAGMAS)
+        enc.execute_batch(&connection_pragmas(cache_mb))
             .map_err(|e| DbError::Migration(format!("rekey pragmas failed at {path_str}: {e}")))?;
         apply_migrations(&enc).map_err(|e| {
             DbError::Migration(format!("rekey migrations failed at {path_str}: {e}"))
         })?;
+        // apply_migrations re-applies the default cache_size; re-assert.
+        enc.execute_batch(&cache_size_pragma(cache_mb))
+            .map_err(|e| {
+                DbError::Migration(format!("rekey cache pragma failed at {path_str}: {e}"))
+            })?;
 
         Ok(Self {
             conn: enc,
             path: Some(path),
+            cache_mb,
         })
     }
 
@@ -907,6 +994,73 @@ mod tests {
             .query_row("PRAGMA journal_mode", [], |r| r.get(0))
             .unwrap();
         assert_eq!(mode, "wal");
+    }
+
+    #[test]
+    fn cache_size_pragma_maps_mb_to_negative_kib() {
+        // Negative cache_size means "KiB of memory"; N MiB → -(N * 1024).
+        assert_eq!(cache_size_pragma(8), "PRAGMA cache_size = -8192;\n");
+        assert_eq!(cache_size_pragma(16), "PRAGMA cache_size = -16384;\n");
+        assert_eq!(cache_size_pragma(1), "PRAGMA cache_size = -1024;\n");
+    }
+
+    #[test]
+    fn cache_size_pragma_clamps_out_of_range() {
+        use crate::config::{SQLITE_CACHE_MB_MAX, SQLITE_CACHE_MB_MIN};
+        // 0 is below the floor → clamped up to the minimum.
+        assert_eq!(
+            cache_size_pragma(0),
+            format!(
+                "PRAGMA cache_size = -{};\n",
+                i64::from(SQLITE_CACHE_MB_MIN) * 1024
+            )
+        );
+        // A pathological value is clamped down to the ceiling.
+        assert_eq!(
+            cache_size_pragma(u32::MAX),
+            format!(
+                "PRAGMA cache_size = -{};\n",
+                i64::from(SQLITE_CACHE_MB_MAX) * 1024
+            )
+        );
+    }
+
+    #[test]
+    fn open_with_cache_mb_applies_configured_cache_size() {
+        // A configured cache size is reflected in the live connection's
+        // PRAGMA cache_size (negative ⇒ KiB), surviving apply_migrations which
+        // would otherwise reset it to the default.
+        let db = Database::open_in_memory_with_cache_mb(32).unwrap();
+        let cache: i64 = db
+            .conn()
+            .query_row("PRAGMA cache_size", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(cache, -(32 * 1024));
+    }
+
+    #[test]
+    fn open_uses_default_cache_size() {
+        // The plain open path keeps the historical 8 MiB (-8192 KiB) cache.
+        let db = Database::open_in_memory().unwrap();
+        let cache: i64 = db
+            .conn()
+            .query_row("PRAGMA cache_size", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(cache, -(i64::from(crate::config::SQLITE_CACHE_MB) * 1024));
+    }
+
+    #[test]
+    fn open_with_cache_mb_clamps_out_of_range_on_connection() {
+        // An out-of-range request is clamped to the ceiling on the real conn.
+        let db = Database::open_in_memory_with_cache_mb(u32::MAX).unwrap();
+        let cache: i64 = db
+            .conn()
+            .query_row("PRAGMA cache_size", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            cache,
+            -(i64::from(crate::config::SQLITE_CACHE_MB_MAX) * 1024)
+        );
     }
 
     #[test]

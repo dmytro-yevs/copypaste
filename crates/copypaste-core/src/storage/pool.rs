@@ -65,8 +65,28 @@ fn key_hex(key: &[u8; 32]) -> Zeroizing<String> {
 /// Note: this constructor does **not** run schema migrations. Either run
 /// `Database::open()` once first on the same path (it will apply migrations),
 /// or call the schema module directly on a borrowed connection.
+///
+/// Uses the default page-cache size (`SQLITE_CACHE_MB`, 8 MiB per connection).
+/// To honour a configured `AppConfig::sqlite_cache_mb`, use
+/// [`open_pool_with_cache_mb`].
 pub fn open_pool(path: &Path, key: &[u8; 32], max_size: u32) -> Result<SqlitePool, PoolError> {
+    open_pool_with_cache_mb(path, key, max_size, crate::config::SQLITE_CACHE_MB)
+}
+
+/// Like [`open_pool`] but applies `cache_mb` MiB of page cache per connection
+/// instead of the 8 MiB default. `cache_mb` is clamped to
+/// `SQLITE_CACHE_MB_MIN..=SQLITE_CACHE_MB_MAX` (via
+/// [`crate::storage::db::cache_size_pragma`]).
+pub fn open_pool_with_cache_mb(
+    path: &Path,
+    key: &[u8; 32],
+    max_size: u32,
+    cache_mb: u32,
+) -> Result<SqlitePool, PoolError> {
     let key_hex = key_hex(key);
+    // `cache_size_pragma` clamps and formats the negative-KiB cache_size
+    // statement, keeping the value in sync with the single-connection path.
+    let cache_pragma = crate::storage::db::cache_size_pragma(cache_mb);
     // Build the full PRAGMA string inside a Zeroizing buffer so the key hex
     // material in the PRAGMA string is also scrubbed from the heap on drop.
     let pragma_str: Zeroizing<String> = Zeroizing::new(format!(
@@ -76,8 +96,9 @@ pub fn open_pool(path: &Path, key: &[u8; 32], max_size: u32) -> Result<SqlitePoo
          PRAGMA synchronous = NORMAL;\n\
          PRAGMA foreign_keys = ON;\n\
          PRAGMA temp_store = MEMORY;\n\
-         PRAGMA cache_size = -8192;",
-        key_hex.as_str()
+         {}",
+        key_hex.as_str(),
+        cache_pragma.trim_end()
     ));
     let manager = SqliteConnectionManager::file(path).with_init(move |conn| {
         // SQLCipher requirement: key pragma MUST be the very first statement
