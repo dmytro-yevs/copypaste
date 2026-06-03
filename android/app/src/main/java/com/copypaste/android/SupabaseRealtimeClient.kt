@@ -523,8 +523,8 @@ class SupabaseRealtimeClient(
             }
         } else if (isFile) {
             // File row: store actual bytes so the user can save/copy them.
-            // SyncedItem binding lacks file_name/mime (stale generated code —
-            // bindings regen is a separate CI step); pass nulls for now.
+            // WS path uses DecryptedItem (no file_name/mime columns in the Supabase
+            // SELECT); nulls are correct here — file metadata lives in the payload.
             if (item.plaintext.isEmpty()) {
                 false
             } else {

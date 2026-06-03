@@ -19,11 +19,10 @@ import android.util.Log
  * [ClipboardRepository.storeFileMeta]).
  *
  * ## Generated-binding note
- * The generated Kotlin binding for [uniffi.copypaste_android.SyncedItem] does
- * NOT yet carry `file_name`/`mime` (the UDL defines them but bindings have not
- * been regenerated). Callers must supply these from whatever source is available
- * (e.g. parse the blob_ref field, or pass nulls). The helper handles nulls
- * gracefully and falls back to the "[file]" placeholder label.
+ * The generated Kotlin binding for [uniffi.copypaste_android.SyncedItem] carries
+ * `file_name`/`mime` as of ABI 7 (regenerated in the stale-bindings fix). Callers
+ * pass `item.fileName` and `item.mime` directly. The helper handles nulls
+ * gracefully and falls back to the "[file]" placeholder label for text/image items.
  */
 object SyncFileHelper {
 
