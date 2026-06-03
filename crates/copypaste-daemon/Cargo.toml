@@ -150,6 +150,10 @@ name = "harness_single_daemon"
 path = "tests/harness_single_daemon.rs"
 
 [dev-dependencies]
+# `test-util` enables tokio's paused-time test clock (`start_paused`) so the
+# write-timeout teardown test runs instantly and deterministically instead of
+# waiting out the real WRITE_TIMEOUT. Test-only; not in the production build.
+tokio = { workspace = true, features = ["test-util"] }
 # Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+
 # (our MSRV is 1.89 so this is already satisfied, but the pin keeps the
 # lock consistent with copypaste-core and avoids an accidental bump).

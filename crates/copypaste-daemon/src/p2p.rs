@@ -936,6 +936,20 @@ async fn run_peer_connection_client(
     run_peer_connection_framed(framed, peer_rx, incoming_tx).await
 }
 
+/// Maximum time a single outbound `framed.send().await` may block before the
+/// pump tears the connection down.
+///
+/// Without this bound a half-closed peer (e.g. Android dials one-shot every few
+/// seconds, sends FIN, then leaves the socket in CLOSE_WAIT) makes
+/// `framed.send().await` to the dead socket block forever. While the
+/// `tokio::select!` is parked in the write arm it never re-polls the read arm,
+/// so the EOF is never observed, the task never returns, `peer_rx` is never
+/// dropped, and the per-peer sink `Sender` never closes — which silently kills
+/// steady-state sync in both directions (connector never re-dials; the accept
+/// loop keeps treating the dead peer as connected). Bounding the write forces
+/// teardown so the sink closes and recovery can proceed.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(8);
+
 /// Duplex pump shared by the accept-side and connector-side connection tasks.
 ///
 /// Reads incoming frames and forwards them to `incoming_tx`; reads from
@@ -985,9 +999,31 @@ async fn run_peer_connection_framed<S>(
                     Some(item) => {
                         match serde_json::to_vec(&item) {
                             Ok(payload) => {
-                                if let Err(e) = framed.send(Bytes::from(payload)).await {
-                                    tracing::warn!("failed to send WireItem to peer: {e}");
-                                    return;
+                                // Bound the write: a half-closed peer can make this
+                                // send block forever, parking the select! in the write
+                                // arm so the read arm never sees EOF and the sink never
+                                // closes. On timeout or send error, tear the connection
+                                // down so `peer_rx` drops, the sink `Sender` closes, the
+                                // connector re-dials, and the accept loop stops treating
+                                // the peer as connected.
+                                match tokio::time::timeout(
+                                    WRITE_TIMEOUT,
+                                    framed.send(Bytes::from(payload)),
+                                )
+                                .await
+                                {
+                                    Ok(Ok(())) => {}
+                                    Ok(Err(e)) => {
+                                        tracing::warn!("failed to send WireItem to peer: {e}");
+                                        return;
+                                    }
+                                    Err(_elapsed) => {
+                                        tracing::warn!(
+                                            timeout = ?WRITE_TIMEOUT,
+                                            "peer write timed out — tearing down half-closed connection"
+                                        );
+                                        return;
+                                    }
                                 }
                             }
                             Err(e) => {
@@ -1380,6 +1416,76 @@ mod tests {
             file_name: None,
             mime: None,
         }
+    }
+
+    /// A stream that accepts reads/writes but never makes progress: reads stay
+    /// `Pending` (no EOF, no data) and writes stay `Pending` (the kernel send
+    /// buffer is "full"). Models a half-closed / wedged peer socket so a
+    /// `framed.send().await` blocks indefinitely.
+    struct StuckStream;
+
+    impl tokio::io::AsyncRead for StuckStream {
+        fn poll_read(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            _buf: &mut tokio::io::ReadBuf<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Pending
+        }
+    }
+
+    impl tokio::io::AsyncWrite for StuckStream {
+        fn poll_write(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+            _buf: &[u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            std::task::Poll::Pending
+        }
+        fn poll_flush(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Pending
+        }
+        fn poll_shutdown(
+            self: std::pin::Pin<&mut Self>,
+            _cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<()>> {
+            std::task::Poll::Pending
+        }
+    }
+
+    /// A stuck writer (half-closed peer) must not park the pump forever: the
+    /// write timeout fires, the task returns, and `peer_rx` is dropped so the
+    /// per-peer sink `Sender` reports closed — which is what unblocks both the
+    /// connector re-dial and the accept loop's duplicate guard.
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn stuck_writer_drops_sink_within_write_timeout() {
+        let framed = tokio_util::codec::Framed::new(
+            StuckStream,
+            tokio_util::codec::LengthDelimitedCodec::new(),
+        );
+        let (peer_tx, peer_rx) = mpsc::channel::<WireItem>(8);
+        let (incoming_tx, _incoming_rx) = mpsc::channel::<WireItem>(8);
+
+        // Queue an outbound item so the pump enters the write arm and blocks.
+        peer_tx.send(test_wire_item("a")).await.unwrap();
+
+        let handle = tokio::spawn(run_peer_connection_framed(framed, peer_rx, incoming_tx));
+
+        // The sink Sender must close once the pump tears down on write timeout.
+        // With paused time the timer advances automatically when the runtime is
+        // otherwise idle, so a generous bound keeps the test instant yet robust.
+        tokio::time::timeout(WRITE_TIMEOUT * 2, handle)
+            .await
+            .expect("pump task must return after write timeout, not block forever")
+            .expect("pump task must not panic");
+
+        assert!(
+            peer_tx.is_closed(),
+            "peer sink Sender must be closed after the pump tears down a stuck writer"
+        );
     }
 
     /// `accept_loop_forwards_wire_item_to_incoming_tx`:
