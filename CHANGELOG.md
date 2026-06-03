@@ -1,9 +1,75 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0] - 2026-06-03
+
+Three independent sync transports, full QR provisioning, and Android device-management
+parity. No P0 security/data-loss/crash findings in the 9-agent v0.6 audit; crypto APPROVED.
+
+> **Upgrade note — one-time re-pair required.** The bootstrap handshake protocol advanced
+> (`BOOTSTRAP_PROTO_VERSION` 1 → 2) and the Android UniFFI ABI advanced (now 13). All devices
+> must be re-paired once after upgrading to v0.6.0.
+
+### Added
+- **sync:** Three independent sync transports that operate in parallel — (1) P2P over mTLS
+  with mDNS-SD LAN discovery and 6-digit SAS pairing; (2) relay-as-database with an
+  HKDF-derived shared inbox and SQLite persistence that survives restart; (3) opt-in Supabase
+  cloud sync.
+- **pairing:** QR codes now fully provision all sync paths over the authenticated bootstrap
+  tunnel (`SyncProvisioning` frame), so a scanned device sets up P2P, relay, and cloud without
+  manual key entry.
+- **app/android:** "Too large to sync" badge on history rows whose payload exceeds the 8 MiB
+  sync ceiling (macOS `SyncBlockedIndicator`, Android `TooLargeBadge`), surfaced on the list,
+  history-page, and search IPC verbs.
+- **android:** Multi-peer device-management UI with per-peer Unpair/Revoke, real P2P presence,
+  and LAN discovery + SAS pairing — parity with the macOS Devices view.
+- **android:** Settings parity for the five previously macOS-only config fields
+  (`max_file_size_bytes`, `sensitive_ttl_secs`, `collect_public_ip`, `paste_as_plain_text`,
+  `excluded_app_bundle_ids`).
+- **sync:** Image and file sync across platforms (capture, store, display, copy-back) over P2P,
+  relay, and cloud; synced files preserve their original name and MIME type.
+- **daemon/app:** Device card shows the device's public IP (STUN, best-effort, opt-out gated).
+- **core:** `relay_url` config field threaded end-to-end.
 
 ### Changed
-- **ui:** Replaced the Slint menu-bar UI with a Tauri v2 + React desktop app; dropped the `copypaste-ui-snapshot` crate; switched `tokio-tungstenite` and `sentry` to rustls (no more openssl/native-tls in the tree).
+- **ui:** Replaced the Slint menu-bar UI with a Tauri v2 + React desktop app; dropped the
+  `copypaste-ui-snapshot` crate; switched `tokio-tungstenite` and `sentry` to rustls (no more
+  openssl/native-tls in the tree).
+- **android:** Settings are now single-sourced from `AppConfig` over UniFFI
+  (`default_config`/`clamp_config` + `Config` dictionary) instead of hand-mirrored
+  SharedPreferences defaults; retention is driven by `storage_quota_bytes` (byte-only),
+  retiring the divergent item-count caps.
+- **core/daemon:** File-size ceilings made coherent — `max_file_size_bytes` is clamped to the
+  effective transport ceiling (≤ 100 MiB) and the UI slider reflects the real limit.
+
+### Fixed
+- **android:** Image thumbnail precompute/backfill on all inbound paths and memory-leak fixes
+  to curb webview memory spikes.
+- **relay:** Parked SSE producer task no longer leaks on an idle-inbox client disconnect
+  (now races `rx.recv()` against `tx.closed()`).
+- **daemon:** LAN/SAS pairing state machine resets after each attempt, so repeat pairing no
+  longer returns `ERR_CODE_RATE_LIMITED`; the macOS SAS modal no longer hangs on a
+  responder reset-race.
+- **daemon:** Cloud file sync preserves file name + MIME in the encrypted envelope (parity
+  with P2P); cloud backlog re-sweeps after a sync passphrase is set later.
+- **daemon:** `sync_orch` threads the configured `max_file_size_bytes` instead of a hardcoded
+  cap, and re-encodes blobs outside the DB mutex to cut the buffer peak.
+- **android:** Online-dot derived from real last-seen presence; WebSocket push resolves sync
+  context without a full history GET; stale-socket guard, cancellable connect, reconnect
+  jitter, and robust cross-listener dedup.
+
+### Security
+- **sync:** Cloud/relay device revocation via sync-key rotation — a revoked device's
+  cloud/relay inbox diverges (macOS "Revoke only" vs "Revoke & rotate"; Android revoke copy
+  explains the rotation).
+- **p2p:** One shared fixed PAKE password for LAN/SAS discovery pairing (SAS authenticates,
+  so the password is a fixed well-known constant), making macOS-discovery and macOS↔Android
+  discovery pairing converge.
+- **core/p2p:** `derive_xchacha_key` returns `Zeroizing` key material; single-sourced QR
+  pairing TTL.
+
+### CI
+- **dist:** Android release job is now blocking and ships a release-signed APK (debug-signed
+  fallback); `versionName`/`versionCode` are derived from the git tag.
 
 ## [0.3.2] - 2026-05-24
 
