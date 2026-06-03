@@ -164,7 +164,16 @@ impl AppConfig {
         // small-but-reasonable limits.
         self.max_text_size_bytes = self.max_text_size_bytes.max(MIN_TEXT_SIZE_BYTES);
         self.max_image_size_bytes = self.max_image_size_bytes.max(MIN_IMAGE_SIZE_BYTES);
-        self.max_file_size_bytes = self.max_file_size_bytes.max(MIN_FILE_SIZE_BYTES);
+        // The file cap is also bounded ABOVE by the library hard cap
+        // `crate::file::MAX_FILE_BYTES` (100 MiB) — the single storable ceiling.
+        // A larger configured value (the old 1 GiB default, or hand-edited TOML)
+        // can never be honoured: `encode_file` rejects anything over MAX_FILE_BYTES
+        // and the sync path caps even lower (SYNC_MAX_BLOB_BYTES = 8 MiB). Clamping
+        // here keeps config, capture gate, and storage all coherent. `as u64` is
+        // lossless: MAX_FILE_BYTES (100 MiB) fits in u64 on every target.
+        self.max_file_size_bytes = self
+            .max_file_size_bytes
+            .clamp(MIN_FILE_SIZE_BYTES, crate::file::MAX_FILE_BYTES as u64);
         self.storage_quota_bytes = self.storage_quota_bytes.max(MIN_STORAGE_QUOTA_BYTES);
         // max_decoded_image_mb = 0 would produce a 0-byte image decode limit (reject all images).
         self.max_decoded_image_mb = self.max_decoded_image_mb.max(1);
@@ -284,6 +293,27 @@ mod tests {
         big.clamp_values();
         assert_eq!(big.storage_quota_bytes, STORAGE_QUOTA_BYTES);
         assert_eq!(big.max_image_size_bytes, MAX_IMAGE_SIZE_BYTES);
+    }
+
+    #[test]
+    fn clamp_caps_file_size_at_library_hard_cap() {
+        // B3: the file-size knob is bounded ABOVE by the library hard cap
+        // (crate::file::MAX_FILE_BYTES = 100 MiB), the single storable ceiling.
+        // An over-cap value (e.g. the old 1 GiB default, or hand-edited TOML)
+        // is clamped down so config can never advertise a limit encode_file
+        // would reject.
+        let mut over = AppConfig {
+            max_file_size_bytes: 8 * 1024 * 1024 * 1024, // 8 GiB
+            ..Default::default()
+        };
+        over.clamp_values();
+        assert_eq!(over.max_file_size_bytes, crate::file::MAX_FILE_BYTES as u64);
+
+        // The default already sits exactly at the hard cap and is preserved.
+        let mut def = AppConfig::default();
+        def.clamp_values();
+        assert_eq!(def.max_file_size_bytes, MAX_FILE_SIZE_BYTES);
+        assert_eq!(def.max_file_size_bytes, crate::file::MAX_FILE_BYTES as u64);
     }
 
     #[test]

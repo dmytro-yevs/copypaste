@@ -46,8 +46,13 @@ const TEXT_SIZE_LABELS = ["1 MB","2 MB","5 MB","10 MB","15 MB","25 MB","50 MB","
 const IMAGE_SIZE_STEPS_BYTES = [5,10,25,64,128,256,512].map((n) => n * 1024 * 1024) as unknown as readonly number[];
 const IMAGE_SIZE_LABELS = ["5 MB","10 MB","25 MB","64 MB","128 MB","256 MB","512 MB (max)"] as const;
 
-const FILE_SIZE_STEPS_BYTES = [64,128,256,512,1024,2048].map((n) => n * 1024 * 1024) as unknown as readonly number[];
-const FILE_SIZE_LABELS = ["64 MB","128 MB","256 MB","512 MB","1 GB","2 GB (max)"] as const;
+// File-size cap: max is the library hard cap MAX_FILE_BYTES (100 MiB) — the
+// single storable ceiling (mirrors crate::file::MAX_FILE_BYTES). Larger values
+// are clamped back down by the daemon, so advertising "2 GB" was dishonest.
+// The 8 MB step marks the P2P/relay sync ceiling (SYNC_MAX_BLOB_BYTES): files
+// above it are kept locally but skipped for sync (see helper text below).
+const FILE_SIZE_STEPS_BYTES = [8,16,25,50,100].map((n) => n * 1024 * 1024) as unknown as readonly number[];
+const FILE_SIZE_LABELS = ["8 MB","16 MB","25 MB","50 MB","100 MB (max)"] as const;
 
 const QUOTA_STEPS_BYTES = [1,2,5,10,25,50].map((n) => n * 1024 * 1024 * 1024) as unknown as readonly number[];
 const QUOTA_LABELS = ["1 GB","2 GB","5 GB","10 GB","25 GB","50 GB (max)"] as const;
@@ -348,11 +353,11 @@ function formatLastSync(ms: number | null): string {
 // array entry so an existing config always loads cleanly.
 //
 // Core binary defaults (MiB/GiB):
-//   text 15 MiB, image 64 MiB, file 1 GiB, quota 10 GiB
+//   text 10 MiB, image 64 MiB, file 100 MiB, quota 10 GiB
 // Step arrays defined above (moved from the deleted StepSlider.tsx in v0.5.3) cover or exceed each of these.
 const DEFAULT_MAX_TEXT_BYTES = 10 * 1024 * 1024;          // 10 MiB
 const DEFAULT_MAX_IMAGE_BYTES = 64 * 1024 * 1024;          // 64 MiB
-const DEFAULT_MAX_FILE_BYTES = 1024 * 1024 * 1024;         // 1 GiB
+const DEFAULT_MAX_FILE_BYTES = 100 * 1024 * 1024;          // 100 MiB (= crate::file::MAX_FILE_BYTES, the storable hard cap)
 const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024; // 10 GiB
 const DEFAULT_IMAGE_QUALITY = 100;
 const DEFAULT_SENSITIVE_TTL_SECS = 30;
@@ -1559,6 +1564,9 @@ export function SettingsView() {
               void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: v }, () => setMaxFileBytes(prev));
             }}
           />
+          <div className="border-b border-ide-divider/70 px-3 pb-2 text-[11px] text-ide-faint">
+            Files over ~8&nbsp;MB are kept locally but won&apos;t sync over P2P/cloud — they&apos;re skipped with a warning.
+          </div>
           <LimitSliderRow
             label="Local storage limit"
             field="storage_quota_bytes"

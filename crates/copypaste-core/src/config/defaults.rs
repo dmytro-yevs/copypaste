@@ -9,8 +9,21 @@ pub const POLL_INTERVAL_MAX_MS: u64 = 5000;
 pub const MAX_TEXT_SIZE_BYTES: u64 = 10 * 1024 * 1024;
 // 64 MiB — supports high-res screenshots at original quality.
 pub const MAX_IMAGE_SIZE_BYTES: u64 = 64 * 1024 * 1024;
-// 1 GiB — generous; local DB is a cache, not the bottleneck.
-pub const MAX_FILE_SIZE_BYTES: u64 = 1024 * 1024 * 1024;
+// File-size ceiling layering (the single storable source of truth lives in
+// `crate::file::MAX_FILE_BYTES`; `clamp_values` enforces it as an upper bound on
+// this knob). All four numbers below describe the SAME blob travelling through
+// the system, so the next editor sees how they relate before bumping any one:
+//   * STORABLE cap = 100 MiB — `crate::file::MAX_FILE_BYTES`, the library hard
+//     cap on the raw bytes a file item may occupy locally. `max_file_size_bytes`
+//     is a user knob *below* this; it can never exceed it (clamped).
+//   * SYNC cap     =   8 MiB — `sync_orch::SYNC_MAX_BLOB_BYTES`: the largest
+//     reassembled plaintext re-keyed onto the wire. Files between 8 MiB and
+//     100 MiB are stored/kept locally but SKIPPED for P2P/relay sync (warned).
+//   * P2P frame    =  16 MiB — transport framing cap (`p2p` transport).
+//   * Relay body   =  10 MiB — relay request-body cap.
+// 100 MiB — matches `crate::file::MAX_FILE_BYTES` (the storable hard cap). Kept
+// honest: a larger default would be silently clamped back down on load.
+pub const MAX_FILE_SIZE_BYTES: u64 = 100 * 1024 * 1024;
 // 10 GiB local quota; cloud / P2P back-fill is bounded by sync_ttl_secs.
 pub const STORAGE_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 // Sane minimum floors for the size/quota caps. A previous bug set

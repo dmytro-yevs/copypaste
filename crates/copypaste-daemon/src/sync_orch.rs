@@ -573,6 +573,17 @@ enum RekeyOutcome {
 /// caps the request body, so an oversized blob would either be rejected by the
 /// transport or land undecryptable on the peer. We enforce the ceiling here so
 /// the item is *dropped with a warning* rather than silently corrupting sync.
+///
+/// Ceiling layering (one blob, four caps — see `defaults.rs::MAX_FILE_SIZE_BYTES`):
+///   * STORABLE = 100 MiB — `copypaste_core::MAX_FILE_BYTES`, library hard cap on
+///     a locally-stored file item. `max_file_size_bytes` is clamped to this.
+///   * SYNC     =   8 MiB — *this* const: the largest plaintext re-keyed onto the
+///     wire. Items 8–100 MiB are kept LOCALLY but skipped for sync (warned).
+///   * P2P frame =  16 MiB — transport framing cap.
+///   * Relay body = 10 MiB — relay request-body cap.
+///
+/// So a file can be storable yet un-syncable: local storage and sync are
+/// deliberately decoupled, and the UI tells the user where the sync line sits.
 pub(crate) const SYNC_MAX_BLOB_BYTES: usize = 8 * 1024 * 1024;
 
 /// Reassemble an image/file item's at-rest chunk blob back into plaintext.
@@ -835,16 +846,20 @@ fn rewrap_inbound_blob(
     wire: WireItem,
     shared: &SyncKey,
 ) -> Result<(ClipboardItem, Option<Vec<u8>>), Box<WireItem>> {
-    let blob = match wire.content.as_ref() {
-        Some(b) => b.clone(),
+    // F2: decrypt borrows the at-rest blob in place — no `.clone()` of the
+    // (potentially multi-MiB) ciphertext. We still hand `wire` back intact on
+    // either failure path so the caller's verbatim-storage fallback keeps the
+    // original `content`. The borrow of `wire.content` ends before each
+    // `Err(Box::new(wire))` move (NLL), so returning `wire` is sound.
+    let plaintext = match wire.content.as_deref() {
+        Some(blob) => match decrypt_from_cloud(shared, &wire.item_id, blob) {
+            Ok(pt) => pt,
+            Err(e) => {
+                warn!(item_id = %wire.item_id, "sync_orch: inbound blob shared-decrypt failed: {e}");
+                return Err(Box::new(wire));
+            }
+        },
         None => return Err(Box::new(wire)),
-    };
-    let plaintext = match decrypt_from_cloud(shared, &wire.item_id, &blob) {
-        Ok(pt) => pt,
-        Err(e) => {
-            warn!(item_id = %wire.item_id, "sync_orch: inbound blob shared-decrypt failed: {e}");
-            return Err(Box::new(wire));
-        }
     };
 
     // Re-derive file_id deterministically from the recovered bytes (same hash
@@ -898,6 +913,13 @@ fn rewrap_inbound_blob(
                 .and_then(parse_file_name_mime)
                 .unwrap_or_else(|| ("file".to_string(), "application/octet-stream".to_string()))
         };
+        // B3: this is the INBOUND re-chunk path; the configured per-device
+        // capture knob (`max_file_size_bytes`) is NOT threaded this deep (doing
+        // so would change `run`'s signature and its daemon.rs call site, which is
+        // out of scope here). Using `MAX_FILE_BYTES` is now coherent regardless:
+        // `clamp_values` caps the user knob AT `MAX_FILE_BYTES`, so the storable
+        // ceiling and this bound are the same number — we accept any item a peer
+        // could legitimately have stored, never more.
         match copypaste_core::encode_file(
             &plaintext,
             &filename,
