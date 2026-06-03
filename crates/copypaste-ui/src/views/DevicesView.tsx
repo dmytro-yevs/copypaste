@@ -289,43 +289,100 @@ function SasPairingModal({
   const [error, setError] = useState<string | null>(null);
   const [confirmPending, setConfirmPending] = useState(false);
   const [sasCopied, setSasCopied] = useState(false);
+  // True once the handshake ended without a local confirm (trailing `idle`
+  // from the daemon's standing responder). Neutral terminal close state — not
+  // an error, not a success. Distinct from the daemon's `aborted` wire state.
+  const [ended, setEnded] = useState(false);
   // True once a terminal Confirmed has been observed — closing then must NOT
   // call pair_abort (the pairing already succeeded).
   const confirmedRef = useRef(false);
-  const cancelledRef = useRef(false);
+  // True once the user has locally accepted the SAS (clicked "Match"). Used to
+  // disambiguate a trailing `idle` from the daemon's standing responder (see
+  // the poll effect): local-accepted + idle ⇒ treat as success.
+  const localAcceptedRef = useRef(false);
+  // Component-lifetime unmount guard for async handlers (handleConfirm) so they
+  // never setState after the modal closes. Distinct from the per-effect poll
+  // cancellation flag, which scopes only its own loop.
+  const unmountedRef = useRef(false);
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => { unmountedRef.current = true; };
+  }, []);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const terminal =
+    ended ||
     status.state === "confirmed" ||
     status.state === "rejected" ||
     status.state === "aborted" ||
     status.state === "timed_out";
 
   // Poll pair_get_sas until a terminal state.
+  //
+  // The daemon's standing responder resets its state machine to `idle`
+  // immediately after a terminal outcome, so a trailing `idle` observed AFTER
+  // the handshake has been seen progressing (initiating/awaiting_sas) is itself
+  // terminal — "pairing ended". We must NOT keep polling on it (that spins the
+  // spinner forever). Interpretation: if the local user already accepted the
+  // SAS, treat trailing idle as success (Paired + onPaired); otherwise show a
+  // neutral "ended" close state.
   useEffect(() => {
-    cancelledRef.current = false;
+    // Per-effect cancellation flag captured by this closure. Each effect run's
+    // cleanup authoritatively stops only its own poll loop, so re-creating the
+    // effect (e.g. on a stable-but-recreated dep) never orphans a prior loop.
+    let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // Whether this loop has ever seen a non-idle (active) handshake state.
+    let sawActive = false;
 
     const poll = async () => {
       try {
         const next = await api.pairGetSas();
-        if (cancelledRef.current) return;
-        setStatus(next);
+        if (cancelled) return;
+
+        if (next.state === "initiating" || next.state === "awaiting_sas") {
+          sawActive = true;
+          setStatus(next);
+          timer = setTimeout(() => void poll(), SAS_POLL_MS);
+          return;
+        }
+
         if (next.state === "confirmed") {
           confirmedRef.current = true;
+          setStatus(next);
           onPaired();
           return; // stop polling — terminal success
         }
+
         if (
           next.state === "rejected" ||
           next.state === "aborted" ||
           next.state === "timed_out"
         ) {
+          setStatus(next);
           return; // stop polling — terminal failure
         }
+
+        // next.state === "idle"
+        if (sawActive) {
+          // The handshake progressed then the responder reset to idle: the
+          // pairing has ended. Resolve terminally — never re-poll on idle.
+          if (confirmedRef.current || localAcceptedRef.current) {
+            confirmedRef.current = true;
+            setStatus({ state: "confirmed" });
+            onPaired();
+          } else {
+            // Ended without a local confirm — neutral close state.
+            setEnded(true);
+          }
+          return;
+        }
+        // Still idle before any active state was observed (e.g. the daemon
+        // hasn't begun the handshake yet) — keep waiting.
+        setStatus(next);
         timer = setTimeout(() => void poll(), SAS_POLL_MS);
       } catch (e) {
-        if (cancelledRef.current) return;
+        if (cancelled) return;
         const msg = e instanceof IpcError ? e.message : "Pairing status unavailable";
         setError(msg);
       }
@@ -333,7 +390,7 @@ function SasPairingModal({
 
     void poll();
     return () => {
-      cancelledRef.current = true;
+      cancelled = true;
       if (timer !== null) clearTimeout(timer);
     };
   }, [onPaired]);
@@ -357,9 +414,13 @@ function SasPairingModal({
     async (accept: boolean) => {
       setConfirmPending(true);
       setError(null);
+      // Record the local accept up-front so a trailing `idle` from the daemon's
+      // standing responder is interpreted as success even if it arrives before
+      // a `confirmed` tick.
+      if (accept) localAcceptedRef.current = true;
       try {
         await api.pairConfirmSas(accept);
-        if (cancelledRef.current) return;
+        if (unmountedRef.current) return;
         if (!accept) {
           // User said it doesn't match — close immediately.
           onClose();
@@ -367,11 +428,14 @@ function SasPairingModal({
         }
         // On accept, keep polling; the next poll tick reflects confirmed/rejected.
       } catch (e) {
-        if (cancelledRef.current) return;
+        // The accept never reached the daemon — undo the optimistic flag so a
+        // later trailing idle isn't misread as success.
+        localAcceptedRef.current = false;
+        if (unmountedRef.current) return;
         const msg = e instanceof IpcError ? e.message : "Failed to send decision";
         setError(msg);
       } finally {
-        if (!cancelledRef.current) setConfirmPending(false);
+        if (!unmountedRef.current) setConfirmPending(false);
       }
     },
     [onClose]
@@ -405,7 +469,7 @@ function SasPairingModal({
         <p className="mb-1 text-[13px] font-medium text-ide-text">Pair “{title}”</p>
 
         {/* Connecting / initiating */}
-        {status.state === "initiating" && error === null && (
+        {!ended && status.state === "initiating" && error === null && (
           <div className="flex items-center gap-2 py-4">
             <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ide-faint border-t-ide-accent" />
             <p className="text-[12px] text-ide-dim">Connecting…</p>
@@ -413,7 +477,7 @@ function SasPairingModal({
         )}
 
         {/* Awaiting SAS — show the code prominently */}
-        {status.state === "awaiting_sas" && status.sas !== undefined && (
+        {!ended && status.state === "awaiting_sas" && status.sas !== undefined && (
           <div className="py-2">
             <p className="mb-2 text-[12px] text-ide-dim">
               Confirm this code matches the one shown on the other device.
@@ -447,7 +511,7 @@ function SasPairingModal({
         )}
 
         {/* Waiting after the user accepted, for the peer to also accept */}
-        {status.state === "awaiting_sas" && status.sas === undefined && (
+        {!ended && status.state === "awaiting_sas" && status.sas === undefined && (
           <div className="flex items-center gap-2 py-4">
             <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ide-faint border-t-ide-accent" />
             <p className="text-[12px] text-ide-dim">Waiting for the other device…</p>
@@ -480,6 +544,26 @@ function SasPairingModal({
                 : status.state === "rejected"
                   ? "Pairing was rejected."
                   : "Pairing was cancelled."}
+            </p>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={onClose}
+                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Neutral terminal "ended" state — the daemon's standing responder
+            reset to idle after the handshake without a local confirm. Not an
+            error: the pairing simply ended (likely resolved on the other
+            device). */}
+        {ended && (
+          <div className="py-3">
+            <p className="text-[13px] text-ide-dim">
+              Pairing ended — check the other device.
             </p>
             <div className="mt-3 flex justify-end">
               <button
@@ -1229,7 +1313,7 @@ export function DevicesView() {
         <SasPairingModal
           device={pairingDevice}
           onClose={handleClosePairing}
-          onPaired={() => void loadPeers()}
+          onPaired={loadPeers}
         />
       )}
     </ViewShell>
