@@ -191,6 +191,50 @@ export interface SyncStatus {
 }
 
 
+/**
+ * One peer seen on the LAN via mDNS-SD, as returned by `list_discovered`.
+ * Field names mirror the daemon's `list_discovered` response exactly.
+ */
+export interface DiscoveredDevice {
+  /** The peer's mDNS `did` — its canonical certificate fingerprint. */
+  device_id: string;
+  /** User-visible device name advertised over mDNS. */
+  device_name: string;
+  /** Resolved IP addresses (IPv4-first), as strings. */
+  ip_addrs: string[];
+  /** P2P sync-listener port. */
+  port: number;
+  /**
+   * Bootstrap port for SAS pairing. `null` on v1 peers that don't advertise
+   * one — the UI disables "Pair" in that case.
+   */
+  bport: number | null;
+  /** True when this device's fingerprint already matches a paired entry. */
+  paired: boolean;
+}
+
+/**
+ * State of the discovery-initiated SAS pairing state machine, returned by
+ * `pair_get_sas`. `state` values mirror the daemon's wire strings exactly.
+ */
+export type PairingSasState =
+  | "idle"
+  | "initiating"
+  | "awaiting_sas"
+  | "confirmed"
+  | "rejected"
+  | "aborted"
+  | "timed_out";
+
+/** Reply from the daemon's `pair_get_sas` poll. */
+export interface PairSasStatus {
+  state: PairingSasState;
+  /** 6 decimal digits — present only when `state === "awaiting_sas"`. */
+  sas?: string;
+  /** "initiator" | "responder" — present only mid-pairing. */
+  role?: string;
+}
+
 export interface PairedDevice {
   fingerprint: string;
   name: string;
@@ -334,6 +378,25 @@ export const api = {
   generatePairingQr: () =>
     ipcCall<{ qr: string; expires_in_secs: number }>("pair_generate_qr", {}),
   listPeers: () => ipcCall<{ peers: PairedDevice[] }>("list_peers"),
+
+  /** List peers currently visible on the LAN via mDNS-SD. */
+  listDiscovered: () =>
+    ipcCall<{ devices: DiscoveredDevice[] }>("list_discovered", {}),
+  /**
+   * Begin a discovery-initiated SAS pairing with `deviceId` (the discovered
+   * peer's `device_id`). Returns immediately; poll {@link pairGetSas} for the
+   * SAS. Throws `IpcError` with code `rate_limited` when another pairing is
+   * already in progress.
+   */
+  pairWithDiscovered: (deviceId: string) =>
+    ipcCall("pair_with_discovered", { device_id: deviceId }),
+  /** Poll the discovery-pairing state machine. */
+  pairGetSas: () => ipcCall<PairSasStatus>("pair_get_sas", {}),
+  /** Deliver the local user's SAS accept (true) / reject (false) decision. */
+  pairConfirmSas: (accept: boolean) =>
+    ipcCall<{ ok: boolean; accepted: boolean }>("pair_confirm_sas", { accept }),
+  /** Abort an in-flight discovery pairing and reset the machine to idle. */
+  pairAbort: () => ipcCall<{ ok: boolean }>("pair_abort", {}),
   pairWithPassword: (peer_fingerprint: string, password: string) =>
     ipcCall("pair_peer_with_password", { peer_fingerprint, password }),
   unpairPeer: (fingerprint: string) => ipcCall("unpair_peer", { fingerprint }),
