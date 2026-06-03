@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ViewShell } from "../components/ViewShell";
 import {
@@ -10,6 +10,7 @@ import {
   showCopyNotification,
   sourceAppLabel,
   type HistoryEntry,
+  type HistoryPage,
 } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
@@ -254,6 +255,49 @@ function SyncBlockedIndicator() {
 }
 
 // ---------------------------------------------------------------------------
+// Origin-device badge — shown on each row indicating which device captured it
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a compact label for an origin device ID.
+ * - Empty / unknown → null (badge not shown)
+ * - Matches own device → "This device"
+ * - Otherwise → first 8 chars of UUID (enough to distinguish devices)
+ */
+function deviceLabel(originId: string | undefined, ownId: string): string | null {
+  if (!originId) return null;
+  if (ownId && originId === ownId) return "This device";
+  if (originId === "") return null;
+  // Compact: first 8 chars of UUID is visually enough for disambiguation
+  return originId.slice(0, 8);
+}
+
+function DeviceBadge({
+  originId,
+  ownId,
+}: {
+  originId: string | undefined;
+  ownId: string;
+}) {
+  const label = deviceLabel(originId, ownId);
+  if (!label) return null;
+  const isOwn = label === "This device";
+  return (
+    <span
+      className={[
+        "flex shrink-0 items-center text-[10px] px-1 py-0.5 rounded border leading-none",
+        isOwn
+          ? "border-ide-accent/40 bg-ide-accent/10 text-ide-accent"
+          : "border-ide-divider/60 bg-ide-elevated/50 text-ide-faint",
+      ].join(" ")}
+      title={originId}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Row height model (shared by the row and the virtualizer)
 // ---------------------------------------------------------------------------
 
@@ -352,6 +396,8 @@ interface RowProps {
   previewSize: number;
   imageMaxHeight: number;
   maskSensitive: boolean;
+  /** Own device UUID from the HistoryPage envelope — used for device badge. */
+  ownDeviceId: string;
   onSelect: () => void;
   onToggleMultiSelect: (e: React.MouseEvent) => void;
   onCopy: () => void;
@@ -381,6 +427,7 @@ function HistoryRow({
   previewSize: _previewSize,
   imageMaxHeight,
   maskSensitive,
+  ownDeviceId,
   onSelect,
   onToggleMultiSelect,
   onCopy,
@@ -551,14 +598,17 @@ function HistoryRow({
         </span>
       )}
 
-      {/* Right-side slot: source-app chip + timestamp (always visible) + icon action buttons (on hover).
-          Both live in the same fixed-width flex container so showing/hiding the
+      {/* Right-side slot: device badge + source-app chip + timestamp (always visible) + icon action buttons (on hover).
+          All live in the same fixed-width flex container so showing/hiding the
           buttons never shifts the layout — the slot width is constant. */}
       <div
         className="flex shrink-0 items-center justify-end gap-1"
         style={{ minWidth: "4.5rem" }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Origin-device badge: "This device" or compact UUID prefix */}
+        <DeviceBadge originId={entry.origin_device_id} ownId={ownDeviceId} />
+
         {/* Source-app icon + label chip; only rendered when present */}
         {entry.app_bundle_id && (() => {
           const appLabel = sourceAppLabel(entry.app_bundle_id);
@@ -1057,6 +1107,14 @@ export function HistoryView() {
   const PAGE_SIZE = 200;
 
   const [items, setItems] = useState<HistoryEntry[]>([]);
+  // Own device UUID from the most-recent history_page response envelope.
+  // Empty string until the first successful load (back-compat with old daemons).
+  const [ownDeviceId, setOwnDeviceId] = useState<string>("");
+  // "all" | device UUID | "this" — filters the list to a specific origin device.
+  // Client-side over the loaded page (PAGE_SIZE=200 fits comfortably in memory).
+  const [deviceFilter, setDeviceFilter] = useState<string>("all");
+  // "recency" (default daemon order) | "device" (group by origin device, then recency within group)
+  const [sortMode, setSortMode] = useState<"recency" | "device">("recency");
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1133,7 +1191,7 @@ export function HistoryView() {
       if (!silent) setLoadState("loading");
       try {
         // PAGE_SIZE controls how many items to request initially; clamped by MAX_PAGE server-side.
-        const page = await api.historyPage(PAGE_SIZE, 0);
+        const page = await api.historyPage(PAGE_SIZE, 0) as HistoryPage;
         // Daemon returns pinned items first, then newest-first within each group.
         const incoming = page.items;
         const newSig = itemsSignature(incoming);
@@ -1141,6 +1199,8 @@ export function HistoryView() {
           sigRef.current = newSig;
           setItems(incoming);
         }
+        // Capture own device UUID for the device badge (back-compat: empty string on old daemons).
+        setOwnDeviceId(page.own_device_id ?? "");
         setDegraded(false);
         setErrorDetail(null);
         setLoadState("ready");
@@ -1239,11 +1299,52 @@ export function HistoryView() {
   // Filtered list
   // -------------------------------------------------------------------------
 
-  const filtered = search.trim()
-    ? items.filter((it) =>
-        it.preview.toLowerCase().includes(search.trim().toLowerCase())
-      )
-    : items;
+  // -------------------------------------------------------------------------
+  // Distinct device IDs seen in the loaded items — drives the filter dropdown.
+  // Computed with useMemo so it only recalculates when items or ownDeviceId change.
+  // -------------------------------------------------------------------------
+  const knownDeviceIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const it of items) {
+      if (it.origin_device_id) ids.add(it.origin_device_id);
+    }
+    return Array.from(ids);
+  }, [items]);
+
+  // -------------------------------------------------------------------------
+  // Filtered + sorted list (client-side over the loaded PAGE_SIZE items)
+  // -------------------------------------------------------------------------
+
+  const filtered = useMemo(() => {
+    // 1. Text search
+    let result = search.trim()
+      ? items.filter((it) =>
+          it.preview.toLowerCase().includes(search.trim().toLowerCase())
+        )
+      : items;
+
+    // 2. Device filter
+    if (deviceFilter !== "all") {
+      result = result.filter((it) => (it.origin_device_id ?? "") === deviceFilter);
+    }
+
+    // 3. Sort mode: "device" groups by origin_device_id (own device first, then
+    //    alphabetical by id), preserving the daemon's recency order within each group.
+    if (sortMode === "device") {
+      // Stable sort: JS Array.sort is stable in all modern engines.
+      result = [...result].sort((a, b) => {
+        const aId = a.origin_device_id ?? "";
+        const bId = b.origin_device_id ?? "";
+        if (aId === bId) return 0;
+        // Own device always sorts first.
+        if (ownDeviceId && aId === ownDeviceId) return -1;
+        if (ownDeviceId && bId === ownDeviceId) return 1;
+        return aId.localeCompare(bId);
+      });
+    }
+
+    return result;
+  }, [items, search, deviceFilter, sortMode, ownDeviceId]);
 
   // -------------------------------------------------------------------------
   // Multi-select helpers
@@ -1765,6 +1866,13 @@ export function HistoryView() {
   // Render
   // -------------------------------------------------------------------------
 
+  // Build human-readable label for a device id in the filter dropdown.
+  const deviceOptionLabel = (id: string): string => {
+    if (id === "all") return "All devices";
+    if (ownDeviceId && id === ownDeviceId) return "This device";
+    return id.slice(0, 8);
+  };
+
   const actions = (
     <>
       {/* D2: hidden file input + attach button */}
@@ -1789,6 +1897,48 @@ export function HistoryView() {
           <path d="M13.5 7.5 7 14a4.243 4.243 0 0 1-6-6l7-7a2.828 2.828 0 1 1 4 4L5.5 12A1.414 1.414 0 0 1 3.5 10L9 4.5" />
         </svg>
       </button>
+      {/* Device filter dropdown — only shown when more than one device is present */}
+      {knownDeviceIds.length > 1 && (
+        <select
+          value={deviceFilter}
+          onChange={(e) => setDeviceFilter(e.target.value)}
+          className="h-7 rounded-ide border border-ide-border bg-ide-elevated px-1.5 text-[11px] text-ide-text hover:bg-ide-hover cursor-pointer"
+          aria-label="Filter by device"
+          title="Filter by origin device"
+        >
+          <option value="all">All devices</option>
+          {knownDeviceIds.map((id) => (
+            <option key={id} value={id}>
+              {deviceOptionLabel(id)}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {/* Sort-mode toggle — only shown when multiple devices are present */}
+      {knownDeviceIds.length > 1 && (
+        <button
+          type="button"
+          title={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
+          aria-label={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
+          onClick={() => setSortMode((m) => (m === "recency" ? "device" : "recency"))}
+          className={[
+            "flex h-7 items-center gap-1 rounded-ide border px-2 text-[11px]",
+            sortMode === "device"
+              ? "border-ide-accent/60 bg-ide-accent/10 text-ide-accent"
+              : "border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text",
+          ].join(" ")}
+        >
+          {/* Simple sort icon — two lines of different widths */}
+          <svg viewBox="0 0 14 12" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+            <line x1="1" y1="2" x2="13" y2="2" />
+            <line x1="1" y1="6" x2="9" y2="6" />
+            <line x1="1" y1="10" x2="5" y2="10" />
+          </svg>
+          {sortMode === "device" ? "By device" : "By time"}
+        </button>
+      )}
+
       <input
         ref={searchRef}
         type="search"
@@ -1931,6 +2081,7 @@ export function HistoryView() {
               previewSize={previewSize}
               imageMaxHeight={imageMaxHeight}
               maskSensitive={maskSensitive}
+              ownDeviceId={ownDeviceId}
               onSelect={() => {
                 isKeyboardNavRef.current = false;
                 setSelectedId(entry.id);

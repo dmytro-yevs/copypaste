@@ -74,6 +74,13 @@ export interface HistoryEntry {
    * Arrives as snake_case `too_large_to_sync` in the daemon JSON.
    */
   too_large_to_sync?: boolean;
+  /**
+   * Stable device UUID of the machine that originally captured this item.
+   * Empty string for pre-v3 rows that were never backfilled. Compare against
+   * `HistoryPage.own_device_id` to determine whether an item is local.
+   * Optional for back-compat with daemon builds predating this field.
+   */
+  origin_device_id?: string;
 }
 
 /**
@@ -93,6 +100,12 @@ export function sourceAppLabel(bundleId: string | null | undefined): string {
 export interface HistoryPage {
   items: HistoryEntry[];
   total: number;
+  /**
+   * This daemon's own stable device UUID. Compare each item's `origin_device_id`
+   * against this to label locally-captured items as "This device".
+   * Empty string on daemon builds that predate this field.
+   */
+  own_device_id: string;
 }
 
 export interface AppSettings {

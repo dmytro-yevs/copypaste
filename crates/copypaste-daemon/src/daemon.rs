@@ -516,7 +516,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             device_public_key_arc.clone(),
         )
         .with_new_item_tx(new_item_tx.clone())
-        .with_core_config(core_config_arc.clone());
+        .with_core_config(core_config_arc.clone())
+        .with_local_device_id(local_device_id.clone());
         if let Some(peers) = p2p_peers.clone() {
             server = server.with_p2p_peers(peers);
         }

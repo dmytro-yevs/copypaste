@@ -916,6 +916,12 @@ pub struct IpcServer {
     db: Arc<Mutex<Database>>,
     /// Shared private-mode flag. When true, the clipboard monitor skips recording.
     private_mode: Arc<AtomicBool>,
+    /// Stable device UUID loaded (or created) at daemon start via
+    /// `load_or_create_device_id`. Stamped on every locally-captured clipboard
+    /// item as `origin_device_id`. Returned in `history_page` as `own_device_id`
+    /// so the UI can label "This device" vs. synced items from other devices.
+    /// `None` when not wired in (unit tests / degraded-mode builds).
+    local_device_id: Option<String>,
     /// Local symmetric encryption key (XChaCha20-Poly1305). Required by the
     /// `copy`/`paste` handlers so paste-back can decrypt the ciphertext
     /// stored in `clipboard_items.content` and write *plaintext* to
@@ -1123,6 +1129,7 @@ impl IpcServer {
         Self {
             db,
             private_mode,
+            local_device_id: None,
             local_key,
             device_public_key,
             ready: Arc::new(AtomicBool::new(true)),
@@ -1172,6 +1179,14 @@ impl IpcServer {
     /// `start_p2p` and the colon-hex fingerprint here, guaranteeing they agree.
     pub fn with_cert_fingerprint(mut self, fingerprint: impl Into<String>) -> Self {
         self.cert_fingerprint = Some(fingerprint.into());
+        self
+    }
+
+    /// Attach the stable per-device UUID so `history_page` can return it as
+    /// `own_device_id`. The UI uses this to label locally-captured items as
+    /// "This device" vs. items synced from a remote peer.
+    pub fn with_local_device_id(mut self, id: impl Into<String>) -> Self {
+        self.local_device_id = Some(id.into());
         self
     }
 
@@ -1294,6 +1309,7 @@ impl IpcServer {
         Self {
             db,
             private_mode,
+            local_device_id: None,
             local_key,
             device_public_key,
             ready,
@@ -3899,16 +3915,30 @@ impl IpcServer {
                                 // therefore won't be synced. This is the arm the macOS
                                 // UI (HistoryWindow) actually renders from.
                                 "too_large_to_sync": too_large_to_sync(item),
+                                // Stable device UUID of the machine that originally
+                                // captured this item. Empty string for pre-v3 rows
+                                // that were never backfilled. The UI uses this with
+                                // `own_device_id` (envelope field) to show "This device"
+                                // vs. items synced from a peer.
+                                "origin_device_id": item.origin_device_id,
                             })
                         })
                         .collect();
                     Ok::<_, anyhow::Error>((json_items, total))
                 })
                 .await;
+                // Snapshot the own device id outside the blocking task (it lives on self).
+                let own_device_id = self.local_device_id.clone().unwrap_or_default();
                 match join {
                     Ok(Ok((json_items, total))) => Response::ok(
                         req.id,
-                        serde_json::json!({"items": json_items, "total": total}),
+                        serde_json::json!({
+                            "items": json_items,
+                            "total": total,
+                            // This device's stable UUID — lets the UI distinguish
+                            // locally-captured items from items synced from peers.
+                            "own_device_id": own_device_id,
+                        }),
                     ),
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
