@@ -60,6 +60,11 @@ tracing.workspace = true
 # Zeroize PAKE password buffers on drop (security MED #9)
 zeroize.workspace = true
 
+[features]
+# Expose test-seam helpers (e.g. `inject_peer_for_test`) to integration tests
+# in other crates (copypaste-daemon tests).  Never enable in production builds.
+test-helpers = []
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }

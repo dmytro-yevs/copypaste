@@ -155,7 +155,7 @@ serde_json = "1"
 # because copypaste-daemon is a binary-only crate (no lib.rs).  See module docs in
 # tests/sync_orch_integration.rs and tests/p2p_init.rs for the full gap analysis.
 copypaste-sync = { path = "../copypaste-sync" }
-copypaste-p2p = { path = "../copypaste-p2p" }
+copypaste-p2p = { path = "../copypaste-p2p", features = ["test-helpers"] }
 # mockito 0.31 supports Rust 1.75 and doesn't require edition 2024 deps;
 # used by cloud.rs Wave 2.7 tests (401/429/transient retry paths). These
 # tests live under `#[cfg(all(test, feature = "cloud-sync"))]`, so this dep
