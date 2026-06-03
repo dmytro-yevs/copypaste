@@ -746,6 +746,22 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -793,12 +809,24 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_copypaste_android_fn_func_is_sensitive(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_copypaste_android_fn_func_list_discovered(`pairedFingerprints`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_list_revoked_fingerprints(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_list_revoked_peers(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_open_database(`path`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    fun uniffi_copypaste_android_fn_func_pair_abort(uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_copypaste_android_fn_func_pair_confirm_sas(`accept`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_copypaste_android_fn_func_pair_get_sas(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_pair_reset(uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_copypaste_android_fn_func_pair_with_discovered(`deviceId`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`syncAddr`: RustBuffer.ByValue,`localProvisioning`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_copypaste_android_fn_func_parse_pairing_qr(`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_poll_p2p_listener(`listenerId`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -807,8 +835,12 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_copypaste_android_fn_func_sensitive_kind(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_start_discovery(`deviceId`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`syncPort`: Short,`bport`: Short,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_copypaste_android_fn_func_start_p2p_listener(`listenPort`: Short,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`allowedFingerprints`: RustBuffer.ByValue,`revokedFingerprints`: RustBuffer.ByValue,`sessionKeys`: RustBuffer.ByValue,`localItems`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_stop_discovery(uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_copypaste_android_fn_func_stop_p2p_listener(`listenerId`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_copypaste_android_fn_func_sync_with_peer(`peerAddr`: RustBuffer.ByValue,`peerFingerprint`: RustBuffer.ByValue,`sessionKey`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`localItems`: RustBuffer.ByValue,`revokedFingerprints`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -961,11 +993,23 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_is_sensitive(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_list_discovered(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_list_revoked_fingerprints(
     ): Short
     fun uniffi_copypaste_android_checksum_func_list_revoked_peers(
     ): Short
     fun uniffi_copypaste_android_checksum_func_open_database(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_pair_abort(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_pair_confirm_sas(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_pair_get_sas(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_pair_reset(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_pair_with_discovered(
     ): Short
     fun uniffi_copypaste_android_checksum_func_parse_pairing_qr(
     ): Short
@@ -975,7 +1019,11 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_sensitive_kind(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_start_discovery(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_start_p2p_listener(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_stop_discovery(
     ): Short
     fun uniffi_copypaste_android_checksum_func_stop_p2p_listener(
     ): Short
@@ -1050,6 +1098,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_is_sensitive() != 38750.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_copypaste_android_checksum_func_list_discovered() != 49878.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_copypaste_android_checksum_func_list_revoked_fingerprints() != 27245.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1057,6 +1108,21 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_open_database() != 37477.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_pair_abort() != 34430.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_pair_confirm_sas() != 28162.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_pair_get_sas() != 54806.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_pair_reset() != 34960.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_pair_with_discovered() != 60934.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_parse_pairing_qr() != 38365.toShort()) {
@@ -1071,7 +1137,13 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_sensitive_kind() != 9170.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_copypaste_android_checksum_func_start_discovery() != 44307.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_copypaste_android_checksum_func_start_p2p_listener() != 23086.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_stop_discovery() != 58505.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_stop_p2p_listener() != 15796.toShort()) {
@@ -1354,7 +1426,8 @@ data class Config (
     var `imageQuality`: kotlin.UInt, 
     var `imageMaxHeight`: kotlin.UInt, 
     var `collectPublicIp`: kotlin.Boolean, 
-    var `pasteAsPlainText`: kotlin.Boolean
+    var `pasteAsPlainText`: kotlin.Boolean, 
+    var `excludedAppBundleIds`: List<kotlin.String>
 ) {
     
     companion object
@@ -1378,6 +1451,7 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterUInt.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
+            FfiConverterSequenceString.read(buf),
         )
     }
 
@@ -1396,7 +1470,8 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterUInt.allocationSize(value.`imageQuality`) +
             FfiConverterUInt.allocationSize(value.`imageMaxHeight`) +
             FfiConverterBoolean.allocationSize(value.`collectPublicIp`) +
-            FfiConverterBoolean.allocationSize(value.`pasteAsPlainText`)
+            FfiConverterBoolean.allocationSize(value.`pasteAsPlainText`) +
+            FfiConverterSequenceString.allocationSize(value.`excludedAppBundleIds`)
     )
 
     override fun write(value: Config, buf: ByteBuffer) {
@@ -1415,6 +1490,7 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterUInt.write(value.`imageMaxHeight`, buf)
             FfiConverterBoolean.write(value.`collectPublicIp`, buf)
             FfiConverterBoolean.write(value.`pasteAsPlainText`, buf)
+            FfiConverterSequenceString.write(value.`excludedAppBundleIds`, buf)
     }
 }
 
@@ -1452,6 +1528,51 @@ public object FfiConverterTypeDeviceCert: FfiConverterRustBuffer<DeviceCert> {
             FfiConverterString.write(value.`fingerprint`, buf)
             FfiConverterSequenceUByte.write(value.`certDer`, buf)
             FfiConverterSequenceUByte.write(value.`keyDer`, buf)
+    }
+}
+
+
+
+data class DiscoveredPeer (
+    var `deviceId`: kotlin.String, 
+    var `deviceName`: kotlin.String, 
+    var `ipAddrs`: List<kotlin.String>, 
+    var `port`: kotlin.UShort, 
+    var `bport`: kotlin.UShort?, 
+    var `paired`: kotlin.Boolean
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeDiscoveredPeer: FfiConverterRustBuffer<DiscoveredPeer> {
+    override fun read(buf: ByteBuffer): DiscoveredPeer {
+        return DiscoveredPeer(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterUShort.read(buf),
+            FfiConverterOptionalUShort.read(buf),
+            FfiConverterBoolean.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DiscoveredPeer) = (
+            FfiConverterString.allocationSize(value.`deviceId`) +
+            FfiConverterString.allocationSize(value.`deviceName`) +
+            FfiConverterSequenceString.allocationSize(value.`ipAddrs`) +
+            FfiConverterUShort.allocationSize(value.`port`) +
+            FfiConverterOptionalUShort.allocationSize(value.`bport`) +
+            FfiConverterBoolean.allocationSize(value.`paired`)
+    )
+
+    override fun write(value: DiscoveredPeer, buf: ByteBuffer) {
+            FfiConverterString.write(value.`deviceId`, buf)
+            FfiConverterString.write(value.`deviceName`, buf)
+            FfiConverterSequenceString.write(value.`ipAddrs`, buf)
+            FfiConverterUShort.write(value.`port`, buf)
+            FfiConverterOptionalUShort.write(value.`bport`, buf)
+            FfiConverterBoolean.write(value.`paired`, buf)
     }
 }
 
@@ -1596,6 +1717,55 @@ public object FfiConverterTypeP2pSyncResult: FfiConverterRustBuffer<P2pSyncResul
             FfiConverterULong.write(value.`itemsSent`, buf)
             FfiConverterSequenceTypeSyncedItem.write(value.`items`, buf)
             FfiConverterUInt.write(value.`itemsSkippedLegacy`, buf)
+    }
+}
+
+
+
+data class PairStatus (
+    var `state`: kotlin.String, 
+    var `sas`: kotlin.String?, 
+    var `role`: kotlin.String?, 
+    var `peerFingerprint`: kotlin.String?, 
+    var `peerSyncAddr`: kotlin.String?, 
+    var `sessionKey`: List<kotlin.UByte>?, 
+    var `peerProvisioning`: SyncProvisioning?
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypePairStatus: FfiConverterRustBuffer<PairStatus> {
+    override fun read(buf: ByteBuffer): PairStatus {
+        return PairStatus(
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalSequenceUByte.read(buf),
+            FfiConverterOptionalTypeSyncProvisioning.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PairStatus) = (
+            FfiConverterString.allocationSize(value.`state`) +
+            FfiConverterOptionalString.allocationSize(value.`sas`) +
+            FfiConverterOptionalString.allocationSize(value.`role`) +
+            FfiConverterOptionalString.allocationSize(value.`peerFingerprint`) +
+            FfiConverterOptionalString.allocationSize(value.`peerSyncAddr`) +
+            FfiConverterOptionalSequenceUByte.allocationSize(value.`sessionKey`) +
+            FfiConverterOptionalTypeSyncProvisioning.allocationSize(value.`peerProvisioning`)
+    )
+
+    override fun write(value: PairStatus, buf: ByteBuffer) {
+            FfiConverterString.write(value.`state`, buf)
+            FfiConverterOptionalString.write(value.`sas`, buf)
+            FfiConverterOptionalString.write(value.`role`, buf)
+            FfiConverterOptionalString.write(value.`peerFingerprint`, buf)
+            FfiConverterOptionalString.write(value.`peerSyncAddr`, buf)
+            FfiConverterOptionalSequenceUByte.write(value.`sessionKey`, buf)
+            FfiConverterOptionalTypeSyncProvisioning.write(value.`peerProvisioning`, buf)
     }
 }
 
@@ -2030,6 +2200,35 @@ public object FfiConverterTypeVersionError : FfiConverterRustBuffer<VersionExcep
 
 
 
+public object FfiConverterOptionalUShort: FfiConverterRustBuffer<kotlin.UShort?> {
+    override fun read(buf: ByteBuffer): kotlin.UShort? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterUShort.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.UShort?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterUShort.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.UShort?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterUShort.write(value, buf)
+        }
+    }
+}
+
+
+
+
 public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
     override fun read(buf: ByteBuffer): kotlin.String? {
         if (buf.get().toInt() == 0) {
@@ -2160,6 +2359,31 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterString.write(it, buf)
+        }
+    }
+}
+
+
+
+
+public object FfiConverterSequenceTypeDiscoveredPeer: FfiConverterRustBuffer<List<DiscoveredPeer>> {
+    override fun read(buf: ByteBuffer): List<DiscoveredPeer> {
+        val len = buf.getInt()
+        return List<DiscoveredPeer>(len) {
+            FfiConverterTypeDiscoveredPeer.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<DiscoveredPeer>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeDiscoveredPeer.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<DiscoveredPeer>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeDiscoveredPeer.write(it, buf)
         }
     }
 }
@@ -2468,6 +2692,21 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     
 
         /**
+         * Snapshot the peers currently discovered on the LAN. `paired_fingerprints`
+         * is the caller's already-paired set; each peer's `paired` flag is set when
+         * its device_id matches one (canonicalized). Empty when discovery is off.
+         */
+    @Throws(CopypasteException::class) fun `listDiscovered`(`pairedFingerprints`: List<kotlin.String>): List<DiscoveredPeer> {
+            return FfiConverterSequenceTypeDiscoveredPeer.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_list_discovered(
+        FfiConverterSequenceString.lower(`pairedFingerprints`),_status)
+}
+    )
+    }
+    
+
+        /**
          * List the fingerprints of all revoked devices, newest first. Drives the
          * local fast-skip in the dialer and the `revoked_fingerprints` denylist
          * passed to `sync_with_peer`.
@@ -2504,6 +2743,82 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
 }
     )
     }
+    
+
+        /**
+         * Abort the in-flight pairing: cancel the initiator task, drop the confirm
+         * channel (handshake await resolves to rejection → keys zeroize), move to
+         * `aborted`. Idempotent.
+         */
+    @Throws(CopypasteException::class) fun `pairAbort`()
+        = 
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_pair_abort(
+        _status)
+}
+    
+    
+
+        /**
+         * Deliver the local user's accept(true)/reject(false) SAS decision. A reject
+         * drops/zeroizes the session key (nothing persisted). No-op when no pairing
+         * is awaiting confirmation.
+         */
+    @Throws(CopypasteException::class) fun `pairConfirmSas`(`accept`: kotlin.Boolean)
+        = 
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_pair_confirm_sas(
+        FfiConverterBoolean.lower(`accept`),_status)
+}
+    
+    
+
+        /**
+         * Poll the current pairing status. While active, `sas`+`role` are populated;
+         * the peer_* outputs (incl. the 32-byte `session_key`) are populated ONLY
+         * when state=="confirmed". The session_key is secret — zero the ByteArray
+         * after KEK-wrapping it; never log it.
+         */
+    @Throws(CopypasteException::class) fun `pairGetSas`(): PairStatus {
+            return FfiConverterTypePairStatus.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_pair_get_sas(
+        _status)
+}
+    )
+    }
+    
+
+        /**
+         * Reset the pairing machine to `idle` (call after observing a terminal state
+         * so a fresh pairing may begin). Also aborts any lingering initiator task.
+         */
+    @Throws(CopypasteException::class) fun `pairReset`()
+        = 
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_pair_reset(
+        _status)
+}
+    
+    
+
+        /**
+         * Begin pairing (Initiator role) with a discovered peer. Resolves the peer's
+         * bport + IPv4-first address, claims the single-active-pairing slot, and
+         * SPAWNS the bootstrap initiator on the shared runtime (does NOT block).
+         * Kotlin then polls `pair_get_sas`. `cert_der`/`key_der` are this device's
+         * mTLS identity; `sync_addr` is this device's own sync host:port (sent
+         * in-band); `local_provisioning` is the optional sync-account setup to offer
+         * (typically null on Android). Throws P2pError if the peer is unknown, is a
+         * v1 peer (no bport), has no routable address, or a pairing is in flight.
+         */
+    @Throws(CopypasteException::class) fun `pairWithDiscovered`(`deviceId`: kotlin.String, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>, `syncAddr`: kotlin.String, `localProvisioning`: SyncProvisioning?)
+        = 
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_pair_with_discovered(
+        FfiConverterString.lower(`deviceId`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),FfiConverterString.lower(`syncAddr`),FfiConverterOptionalTypeSyncProvisioning.lower(`localProvisioning`),_status)
+}
+    
     
 
         /**
@@ -2564,6 +2879,24 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     
 
         /**
+         * Start LAN discovery + the standing SAS-pairing responder. Idempotent (a
+         * second call replaces the previous discovery/responder). Advertises this
+         * device over mDNS with the v2 `bport` TXT key and browses for peers; ALSO
+         * binds a standing BootstrapResponder on `bport` (Responder role) so macOS
+         * can INITIATE pairing to this device. `cert_der`/`key_der` are this device's
+         * mTLS identity; `sync_port` is the advertised P2P sync-listener port; `bport`
+         * is the fixed bootstrap-listener port. key_der is secret — zero it after.
+         */
+    @Throws(CopypasteException::class) fun `startDiscovery`(`deviceId`: kotlin.String, `deviceName`: kotlin.String, `syncPort`: kotlin.UShort, `bport`: kotlin.UShort, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>)
+        = 
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_start_discovery(
+        FfiConverterString.lower(`deviceId`),FfiConverterString.lower(`deviceName`),FfiConverterUShort.lower(`syncPort`),FfiConverterUShort.lower(`bport`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),_status)
+}
+    
+    
+
+        /**
          * Bind 0.0.0.0:listen_port (0 = OS-assigned), register an inbound mTLS
          * listener, and spawn its accept loop on the shared runtime. Returns
          * immediately with the registry handle + the actual bound port.
@@ -2584,6 +2917,20 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
 }
     )
     }
+    
+
+        /**
+         * Stop LAN discovery + the standing responder. Idempotent. Aborts the
+         * browse/responder/initiator tasks, drops the mDNS service, and aborts any
+         * in-flight confirmation.
+         */
+    @Throws(CopypasteException::class) fun `stopDiscovery`()
+        = 
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_stop_discovery(
+        _status)
+}
+    
     
 
         /**

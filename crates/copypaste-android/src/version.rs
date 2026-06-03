@@ -119,7 +119,37 @@
 ///
 /// Kotlin generated against ABI 10 lacks all four functions and both
 /// dictionaries and must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 11;
+///
+/// **ABI 12 (LAN discovery + SAS pairing — Android parity):** Added the
+/// discovery + Short-Authentication-String pairing surface (the Android analog
+/// of the macOS daemon's discovery-pairing path), as a POLLED state machine
+/// (UniFFI cannot pass an async Rust callback). Eight new FFI functions plus two
+/// new dictionaries, and one new field on the existing `Config` dictionary:
+///   * `start_discovery(device_id, device_name, sync_port, bport, cert_der,
+///     key_der)` — advertise over mDNS with the v2 `bport` TXT key, browse for
+///     peers, AND bind a standing `BootstrapResponder` on `bport` (Responder
+///     role) so macOS can INITIATE pairing to this device. Idempotent.
+///   * `stop_discovery()` — tear down discovery + responder + initiator tasks.
+///   * `list_discovered(paired_fingerprints) -> [DiscoveredPeer]` — snapshot the
+///     LAN peers, flagging which are already paired.
+///   * `pair_with_discovered(device_id, cert_der, key_der, sync_addr,
+///     local_provisioning)` — resolve the peer's bport + IPv4-first address and
+///     SPAWN the bootstrap initiator (Initiator role) on the shared runtime.
+///   * `pair_get_sas() -> PairStatus` — poll the pairing machine; the peer_*
+///     outputs (incl. the 32-byte `session_key`) appear only on `confirmed`.
+///   * `pair_confirm_sas(accept)` — deliver the user's SAS decision.
+///   * `pair_abort()` / `pair_reset()` — abort / reset the machine.
+///   * New dictionary `DiscoveredPeer { device_id, device_name, ip_addrs, port,
+///     bport?, paired }`.
+///   * New dictionary `PairStatus { state, sas?, role?, peer_fingerprint?,
+///     peer_sync_addr?, session_key?, peer_provisioning? }`.
+///   * New `Config` field `sequence<string> excluded_app_bundle_ids` (maps to
+///     `AppConfig::excluded_app_bundle_ids`) so the Android settings UI can
+///     render the excluded-apps list — folded in here to avoid a later ABI bump.
+///
+/// Kotlin generated against ABI 11 lacks all eight functions, both dictionaries,
+/// and the new `Config` field, and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 12;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).
