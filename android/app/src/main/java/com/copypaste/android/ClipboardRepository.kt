@@ -1422,8 +1422,14 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Decrypt all locally stored items into [uniffi.copypaste_android.LocalItem]
-     * values for a P2P sync push.
+     * Decrypt ALL locally stored items into [uniffi.copypaste_android.LocalItem]
+     * values for a P2P/cloud sync push.
+     *
+     * No arbitrary count cap is applied. The only legitimate size bound is the
+     * byte-cap retention (items are pruned when local storage exceeds the
+     * configured byte limit), which already runs at capture/load time. The sync
+     * layer deduplicates via LWW/Lamport, so re-offering previously-synced items
+     * is cheap and guarantees full convergence between devices.
      *
      * For `content_type == "file"` items: the stored plaintext is a human-readable
      * label (e.g. "[file: report.pdf]"). The actual bytes are loaded from the
@@ -1434,9 +1440,8 @@ class ClipboardRepository(context: Context) {
      */
     suspend fun localItemsForSync(
         key: ByteArray,
-        limit: Int = 200,
     ): List<uniffi.copypaste_android.LocalItem> = withContext(Dispatchers.IO) {
-        val ids = storedIds().takeLast(limit)
+        val ids = storedIds()
         ids.mapNotNull { id ->
             val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
             try {

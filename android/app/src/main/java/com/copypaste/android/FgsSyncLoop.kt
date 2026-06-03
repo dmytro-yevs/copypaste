@@ -108,13 +108,6 @@ class FgsSyncLoop(
         private const val IDLE_THRESHOLD_POLLS = 3
 
         /**
-         * Cap on local items pushed per background P2P dial (mirrors PairActivity).
-         * Also reused by the inbound listener ([ClipboardService]) so a peer that
-         * dials IN receives the same catch-up window the dialer would have sent.
-         */
-        const val P2P_LOCAL_ITEM_LIMIT = 200
-
-        /**
          * Cadence for the background LAN P2P dial, DECOUPLED from the Supabase
          * poll delay. The poll delay can grow to [IDLE_POLL_INTERVAL_MS] after an
          * empty streak, but the P2P link is the priority transport — we want it
@@ -454,7 +447,7 @@ class FgsSyncLoop(
                 emptyList()
             }
 
-        val localItems = repository.localItemsForSync(key, limit = P2P_LOCAL_ITEM_LIMIT)
+        val localItems = repository.localItemsForSync(key)
 
         // Snapshot the LAN discovery table ONCE per pass. Used by the per-peer
         // mDNS IP-correlation fallback below. listDiscovered can throw if the
