@@ -152,6 +152,8 @@ import com.copypaste.android.ui.theme.Motion
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 /**
  * History screen — Compose list of clipboard items with macOS parity.
@@ -300,6 +302,48 @@ fun HistoryScreen(
     val loadErrorTemplate = stringResource(R.string.error_load_history)
     val dismissLabel = stringResource(R.string.snackbar_dismiss)
     val sensitiveTapMsg = stringResource(R.string.sensitive_tap_hint)
+
+    // ── In-app file picker (HB-11) ───────────────────────────────────────────
+    // Opens the system file picker via ACTION_OPEN_DOCUMENT. On a successful pick
+    // the URI is routed through the same captureFileClip path the share-target uses,
+    // so the file lands in history and is pushed to all active sync transports.
+    val fileCapturedMsg = stringResource(R.string.snackbar_file_captured)
+    val filePickFailed  = stringResource(R.string.error_file_pick_failed)
+    val filePickLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri: android.net.Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val repository = ClipboardRepository(ctx)
+                val syncManager = try {
+                    SyncManager(
+                        RelayClient(settings.relayUrl),
+                        settings.deviceId,
+                        token = "",
+                        settings = settings,
+                    )
+                } catch (_: Exception) { null }
+                val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+                ClipboardService.captureFileClip(
+                    context = ctx,
+                    uri = uri,
+                    mimeType = mime,
+                    settings = settings,
+                    repository = repository,
+                    syncManager = syncManager,
+                )
+                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    snackbarHostState.showSnackbar(fileCapturedMsg)
+                }
+                viewModel.loadItems()
+            } catch (t: Throwable) {
+                withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    snackbarHostState.showSnackbar(filePickFailed)
+                }
+            }
+        }
+    }
 
     // ── Search / filter state ────────────────────────────────────────────────
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -526,6 +570,18 @@ fun HistoryScreen(
                             }
                         },
                         actions = {
+                            // HB-11: in-app file picker — lets the user pick a file
+                            // directly from the history screen and send it to the Mac.
+                            IconButton(onClick = {
+                                filePickLauncher.launch(arrayOf("*/*"))
+                            }) {
+                                Icon(
+                                    Icons.Filled.AttachFile,
+                                    contentDescription = stringResource(R.string.cd_attach_file),
+                                    tint = IdeDim,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
                             // Search toggle icon — toggles the inline full-width search Row below.
                             IconButton(onClick = { searchExpanded = !searchExpanded }) {
                                 Icon(
