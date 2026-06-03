@@ -16,7 +16,8 @@ use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use thiserror::Error;
 use tokio::net::TcpListener;
-use tokio::sync::{broadcast, mpsc, oneshot, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio_util::sync::CancellationToken;
 
 use copypaste_core::{ClipboardItem, Database};
 use copypaste_p2p::{
@@ -62,8 +63,13 @@ pub struct P2pConfig {
 pub struct P2pHandle {
     /// The actual TCP port bound by the listener (useful when `listen_port` was 0).
     pub actual_port: u16,
-    /// Send `()` to request a graceful shutdown of all P2P tasks.
-    pub shutdown_tx: oneshot::Sender<()>,
+    /// Cancel this token to request a graceful shutdown of ALL P2P tasks.
+    ///
+    /// BUG F1: previously a single `oneshot::Sender<()>` whose receiver reached
+    /// only `accept_loop`, leaking the responder/outbound/connector/discovery
+    /// tasks on an in-process P2P restart. A [`CancellationToken`] is cloned into
+    /// every long-running task instead, so one `cancel()` stops them all.
+    pub shutdown_token: CancellationToken,
 }
 
 /// Lightweight, synchronously-constructed P2P state used by the IPC layer.
@@ -278,7 +284,10 @@ pub async fn start_p2p(
         "P2P subsystem started"
     );
 
-    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    // BUG F1: one CancellationToken governs ALL long-running P2P tasks (accept,
+    // standing responder, outbound, connector, discovery). Each task gets a
+    // clone and a `cancelled()` arm; `daemon.rs` calls `cancel()` on shutdown.
+    let shutdown_token = CancellationToken::new();
 
     // ── mTLS transport ────────────────────────────────────────────────────────
     // Use the cert generated once by the daemon (CRITICAL-1). Its fingerprint
@@ -374,6 +383,7 @@ pub async fn start_p2p(
         let public_ip_cache_for_responder = Arc::clone(&public_ip_cache);
         let cert_der = bootstrap_cert_der;
         let key_der = bootstrap_key_der;
+        let responder_shutdown = shutdown_token.clone();
         tokio::spawn(async move {
             standing_pairing_responder_loop(
                 bport,
@@ -383,6 +393,7 @@ pub async fn start_p2p(
                 pairing_for_responder,
                 own_sync_addr_for_responder,
                 public_ip_cache_for_responder,
+                responder_shutdown,
             )
             .await;
         });
@@ -394,10 +405,11 @@ pub async fn start_p2p(
         let peer_sinks = Arc::clone(&peer_sinks);
         let incoming_tx = incoming_tx.clone();
         let catchup = Arc::clone(&catchup);
+        let accept_shutdown = shutdown_token.clone();
         tokio::spawn(async move {
             accept_loop(
                 listener,
-                shutdown_rx,
+                accept_shutdown,
                 transport,
                 peer_sinks,
                 incoming_tx,
@@ -410,8 +422,9 @@ pub async fn start_p2p(
     // ── outbound fanout loop ──────────────────────────────────────────────────
     {
         let peer_sinks = Arc::clone(&peer_sinks);
+        let outbound_shutdown = shutdown_token.clone();
         tokio::spawn(async move {
-            outbound_loop(new_item_rx, outbound_rx, peer_sinks).await;
+            outbound_loop(new_item_rx, outbound_rx, peer_sinks, outbound_shutdown).await;
         });
     }
 
@@ -436,6 +449,7 @@ pub async fn start_p2p(
         // Clone the shared discovery Arc — the connector, the accept loop, and
         // the IPC handlers all observe the same `known_peers` map through it.
         let discovery_for_connector = Arc::clone(&discovery);
+        let connector_shutdown = shutdown_token.clone();
         tokio::spawn(async move {
             peer_connector_loop(
                 transport,
@@ -444,12 +458,14 @@ pub async fn start_p2p(
                 own_fp,
                 catchup,
                 discovery_for_connector,
+                connector_shutdown,
             )
             .await;
         });
     }
 
     // ── discovery task ────────────────────────────────────────────────────────
+    let discovery_shutdown = shutdown_token.clone();
     tokio::spawn(async move {
         match discovery_for_task.start().await {
             Ok(handle) => {
@@ -458,7 +474,14 @@ pub async fn start_p2p(
                     device_name = %device_name_for_task,
                     "mDNS-SD discovery service running"
                 );
-                let _ = handle.await;
+                // BUG F1: race the mDNS handle against cancellation so the task
+                // exits promptly on shutdown instead of awaiting `handle` forever.
+                tokio::select! {
+                    _ = handle => {}
+                    _ = discovery_shutdown.cancelled() => {
+                        tracing::info!("mDNS-SD discovery task shutting down");
+                    }
+                }
             }
             Err(e) => {
                 tracing::warn!("mDNS-SD discovery failed to start: {e}");
@@ -468,7 +491,7 @@ pub async fn start_p2p(
 
     Ok(P2pHandle {
         actual_port,
-        shutdown_tx,
+        shutdown_token,
     })
 }
 
@@ -485,7 +508,7 @@ pub async fn start_p2p(
 /// fingerprint) so the outbound fanout loop can deliver outgoing items.
 async fn accept_loop(
     listener: TcpListener,
-    mut shutdown_rx: oneshot::Receiver<()>,
+    shutdown: CancellationToken,
     transport: Arc<PeerTransport>,
     peer_sinks: PeerSinks,
     incoming_tx: mpsc::Sender<WireItem>,
@@ -577,7 +600,7 @@ async fn accept_loop(
                     }
                 }
             }
-            _ = &mut shutdown_rx => {
+            _ = shutdown.cancelled() => {
                 tracing::info!("P2P accept loop shutting down");
                 break;
             }
@@ -698,13 +721,22 @@ async fn peer_connector_loop(
     // Injected mDNS discovery service — consulted as a fallback when a
     // persisted dial address fails (peer DHCP renew / network switch).
     discovery: Arc<DiscoveryService>,
+    shutdown: CancellationToken,
 ) {
     tracing::debug!(%own_fp, "P2P peer connector loop running");
     let peers_path = crate::ipc::peers_file_path();
     let mut dial_state: HashMap<DeviceFingerprint, DialBackoff> = HashMap::new();
 
     loop {
-        tokio::time::sleep(CONNECTOR_TICK).await;
+        // BUG F1: race the inter-tick sleep against cancellation so shutdown wins
+        // instead of waiting up to CONNECTOR_TICK for the next wake.
+        tokio::select! {
+            _ = tokio::time::sleep(CONNECTOR_TICK) => {}
+            _ = shutdown.cancelled() => {
+                tracing::info!("P2P peer connector loop shutting down");
+                break;
+            }
+        }
 
         let peers = dialable_peers_from_path(&peers_path);
         // Drop dial-state for peers no longer present (unpaired) so the map
@@ -975,6 +1007,7 @@ async fn outbound_loop(
     mut new_item_rx: broadcast::Receiver<ClipboardItem>,
     mut outbound_rx: mpsc::Receiver<WireItem>,
     peer_sinks: PeerSinks,
+    shutdown: CancellationToken,
 ) {
     tracing::debug!("P2P outbound fanout loop running");
 
@@ -1017,6 +1050,11 @@ async fn outbound_loop(
                         outbound_closed = true;
                     }
                 }
+            }
+            // BUG F1: graceful shutdown — break out even while channels are open.
+            _ = shutdown.cancelled() => {
+                tracing::info!("P2P outbound loop shutting down");
+                break;
             }
         }
     }
@@ -1151,9 +1189,15 @@ async fn standing_pairing_responder_loop(
     // B1: shared public-IP cache (the daemon's single STUN source). Read each
     // iteration so our own current global IP is advertised in-band to the peer.
     public_ip_cache: Arc<tokio::sync::RwLock<Option<String>>>,
+    shutdown: CancellationToken,
 ) {
     tracing::info!(bport, "LAN/SAS standing pairing responder running");
     loop {
+        // BUG F1: exit promptly if shutdown was requested between iterations.
+        if shutdown.is_cancelled() {
+            tracing::info!("LAN/SAS standing pairing responder shutting down");
+            break;
+        }
         // Re-bind the fixed bootstrap port for the next inbound pairing. A
         // listening socket is dropped (not connected) between iterations, so it
         // never enters TIME_WAIT and the re-bind succeeds immediately.
@@ -1167,8 +1211,12 @@ async fn standing_pairing_responder_loop(
             Ok(r) => r,
             Err(e) => {
                 tracing::warn!(bport, "LAN/SAS: re-bind bootstrap listener failed: {e}");
-                // Brief backoff to avoid a hot loop if the port is wedged.
-                tokio::time::sleep(Duration::from_secs(2)).await;
+                // Brief backoff to avoid a hot loop if the port is wedged; race it
+                // against cancellation so shutdown is not delayed by the sleep.
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                    _ = shutdown.cancelled() => break,
+                }
                 continue;
             }
         };
@@ -1215,10 +1263,24 @@ async fn standing_pairing_responder_loop(
             }
         };
 
-        match responder
-            .run_with_confirm(&password, &own_addr, &own_meta, confirm)
-            .await
-        {
+        // BUG F1: race the (potentially long, up to SAS_CONFIRM_TIMEOUT) inbound
+        // handshake against cancellation. On shutdown we drop the responder
+        // future — cancelling the in-flight handshake (the confirm await resolves
+        // to a rejection, keys drop/zeroize) — and exit the loop.
+        let run_result = tokio::select! {
+            r = responder.run_with_confirm(&password, &own_addr, &own_meta, confirm) => r,
+            _ = shutdown.cancelled() => {
+                tracing::info!("LAN/SAS standing pairing responder shutting down (mid-accept)");
+                if pairing.snapshot().is_active() {
+                    pairing.finish(crate::pairing_sm::PairingState::Aborted);
+                }
+                if pairing.snapshot().is_terminal() {
+                    pairing.reset();
+                }
+                break;
+            }
+        };
+        match run_result {
             Ok(outcome) => {
                 tracing::info!(
                     peer_fingerprint = %outcome.peer_fingerprint,
@@ -1356,6 +1418,58 @@ mod tests {
         let received = incoming_rx.recv().await.expect("must receive one item");
         assert_eq!(received.id, item_check.id);
         assert_eq!(received.content, item_check.content);
+    }
+
+    /// BUG F1: cancelling the shared `CancellationToken` must stop the
+    /// long-running loops. Drives `accept_loop` and `outbound_loop` (both blocked
+    /// on their idle awaits with no traffic) and asserts each task exits promptly
+    /// once the token is cancelled — before the fix only the accept loop had a
+    /// shutdown path and the outbound loop ran forever.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancellation_token_stops_accept_and_outbound_loops() {
+        let token = CancellationToken::new();
+
+        // accept_loop: bound listener, nothing dialing in → blocked on accept().
+        let accept_handle = {
+            let cert = copypaste_p2p::cert::SelfSignedCert::generate("f1-accept").unwrap();
+            let transport = Arc::new(PeerTransport::from_cert(
+                cert.cert_der,
+                cert.key_der,
+                PairedPeers::new(),
+            ));
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
+            let (incoming_tx, _incoming_rx) = mpsc::channel::<WireItem>(8);
+            let catchup: CatchupProvider = Arc::new(Vec::new);
+            let token = token.clone();
+            tokio::spawn(async move {
+                accept_loop(listener, token, transport, peer_sinks, incoming_tx, catchup).await;
+            })
+        };
+
+        // outbound_loop: both channels open but idle → blocked in its select!.
+        let outbound_handle = {
+            let (_new_item_tx, new_item_rx) = broadcast::channel::<ClipboardItem>(8);
+            let (_outbound_tx, outbound_rx) = mpsc::channel::<WireItem>(8);
+            let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
+            let token = token.clone();
+            tokio::spawn(async move {
+                outbound_loop(new_item_rx, outbound_rx, peer_sinks, token).await;
+            })
+        };
+
+        // Both tasks are parked on their idle awaits; cancel and require both to
+        // finish well within a generous bound (no hang = cancellation works).
+        token.cancel();
+        let joined = tokio::time::timeout(Duration::from_secs(5), async {
+            accept_handle.await.unwrap();
+            outbound_handle.await.unwrap();
+        })
+        .await;
+        assert!(
+            joined.is_ok(),
+            "BUG F1: both P2P loops must exit promptly on token cancel"
+        );
     }
 
     /// `subscriber_loop_fans_out_to_connected_peer`:

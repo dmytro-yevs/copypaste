@@ -1609,13 +1609,20 @@ impl IpcServer {
                 );
                 self.pairing
                     .finish(crate::pairing_sm::PairingState::Confirmed);
-                Response::ok(
+                let resp = Response::ok(
                     req_id,
                     serde_json::json!({
                         "ok": true,
                         "peer_fingerprint": outcome.peer_fingerprint,
                     }),
-                )
+                );
+                // BUG A1: the terminal outcome is returned synchronously to the
+                // UI in `resp`, so the brief observable-window concern does not
+                // apply on this initiator path. Reset the SM to `Idle` so a
+                // SUBSEQUENT `pair_with_discovered` is not refused as
+                // rate-limited (the SM requires `is_idle()` for `try_begin`).
+                self.pairing.reset();
+                resp
             }
             Err(e) => {
                 // Reject / mismatch / timeout / network error → NO persist, NO
@@ -1628,11 +1635,17 @@ impl IpcServer {
                         .finish(crate::pairing_sm::PairingState::Rejected);
                 }
                 tracing::warn!("discovery SAS pairing failed: {e}");
-                Response::err_with_code(
+                let resp = Response::err_with_code(
                     req_id,
                     ERR_CODE_AUTH_FAILED,
                     format!("discovery SAS pairing failed: {e}"),
-                )
+                );
+                // BUG A1: reset the SM to `Idle` on EVERY failure return path that
+                // reached here after `try_begin` succeeded, so the next pairing
+                // attempt is not refused as rate-limited. The terminal outcome is
+                // already returned synchronously to the UI in `resp` above.
+                self.pairing.reset();
+                resp
             }
         }
     }
@@ -8891,6 +8904,52 @@ mod tests {
             .await;
         assert!(!resp.ok);
         assert_eq!(resp.error_code, Some("invalid_argument"));
+    }
+
+    /// BUG A1: discovery-initiated pairing must work MORE THAN ONCE per daemon
+    /// lifetime. The `pair_with_discovered` handler resets the coordinator to
+    /// `Idle` after recording the terminal outcome (on BOTH the success and the
+    /// failure arm). This reproduces the exact begin → terminal → reset sequence
+    /// the handler performs and proves a SECOND pairing can begin (the SM is not
+    /// stuck rate-limited). Before the fix the second `try_begin` returned false.
+    #[tokio::test]
+    async fn pair_with_discovered_can_begin_twice_sequentially() {
+        use crate::pairing_sm::{PairingRole, PairingState};
+        let server = bare_server();
+        let pairing = server.pairing_coordinator();
+
+        // --- First pairing: success arm. ---
+        assert!(
+            pairing.try_begin(PairingRole::Initiator),
+            "first pairing must begin from Idle"
+        );
+        // Handler records the terminal outcome, then resets (the fix).
+        pairing.finish(PairingState::Confirmed);
+        pairing.reset();
+        assert!(
+            pairing.snapshot().is_idle(),
+            "after a confirmed pairing the SM must be Idle again"
+        );
+
+        // --- Second pairing: must NOT be refused as rate-limited. ---
+        assert!(
+            pairing.try_begin(PairingRole::Initiator),
+            "BUG A1: a second pair_with_discovered must be able to begin; \
+             without the reset the SM stays terminal and try_begin returns false"
+        );
+        // Failure arm of the handler also resets.
+        pairing.finish(PairingState::Rejected);
+        pairing.reset();
+        assert!(
+            pairing.snapshot().is_idle(),
+            "after a failed pairing the SM must be Idle again"
+        );
+
+        // --- Third pairing proves the failure arm reset works too. ---
+        assert!(
+            pairing.try_begin(PairingRole::Initiator),
+            "a pairing after a failed one must also begin"
+        );
     }
 
     /// CRITICAL-1: when a cert fingerprint IS configured, `get_own_fingerprint`

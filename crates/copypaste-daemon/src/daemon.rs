@@ -1030,10 +1030,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // IPC accept loop exits on shutdown token; join it now.
     #[cfg(unix)]
     let _ = _ipc_handle.await;
-    // P2P: signal shutdown via the oneshot sender then let the handle drop.
+    // P2P: signal shutdown by cancelling the token then let the handle drop.
     if let Some(p2p_handle) = _p2p_handle {
-        // P2pHandle::shutdown_tx is a oneshot; sending () requests graceful stop.
-        let _ = p2p_handle.shutdown_tx.send(());
+        // BUG F1: cancel the shared CancellationToken — this stops ALL five P2P
+        // tasks (accept, standing responder, outbound, connector, discovery),
+        // not just the accept loop as the old single-receiver oneshot did.
+        p2p_handle.shutdown_token.cancel();
     }
 
     #[cfg(unix)]
