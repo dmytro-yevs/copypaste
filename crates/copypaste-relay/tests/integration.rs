@@ -69,6 +69,22 @@ fn make_app() -> (axum::Router, AppState) {
     (router, app_state)
 }
 
+/// Like [`make_app`] but with a larger `max_item_bytes` so the request-body
+/// limit (`max_item_bytes + 4096`) does not preempt the per-content-type tier
+/// caps. Needed to exercise the 8 MiB text cap: base64 of >8 MiB exceeds the
+/// default 10 MiB body limit, which would 413 at the body layer (wrong code)
+/// before the item-size quota runs.
+fn make_app_with_item_bytes(max_item_bytes: usize) -> (axum::Router, AppState) {
+    let config = RelayConfig {
+        max_item_bytes,
+        ..RelayConfig::default()
+    };
+    let store = RelayStore::new(config.sync_ttl_secs);
+    let app_state: AppState = Arc::new(Mutex::new(store));
+    let router = relay_router(app_state.clone(), config);
+    (router, app_state)
+}
+
 fn valid_pub_key() -> String {
     B64.encode([0u8; 32])
 }
@@ -345,12 +361,13 @@ async fn test_delete_nonexistent_item_is_404() {
 // Item-size quota (plan: 413 ITEM_SIZE_EXCEEDED, checked at the HTTP layer)
 // ---------------------------------------------------------------------------
 
-/// A text item whose decoded ciphertext exceeds the Free-tier 1 MiB limit must
-/// be rejected with HTTP 413 and the `ITEM_SIZE_EXCEEDED` error code — even
-/// though it is well under the 10 MiB `max_item_bytes` body limit.
+/// A text item whose decoded ciphertext exceeds the Free-tier 8 MiB text limit
+/// must be rejected with HTTP 413 and the `ITEM_SIZE_EXCEEDED` error code. We
+/// raise `max_item_bytes` so the request-body limit does not preempt the tier
+/// check (base64 of >8 MiB would otherwise exceed the default 10 MiB body cap).
 #[tokio::test]
 async fn test_push_oversized_text_item_is_413_item_size_exceeded() {
-    let (app, state) = make_app();
+    let (app, state) = make_app_with_item_bytes(20 * 1024 * 1024);
     let a_token = {
         let mut s = state.lock().unwrap();
         s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
@@ -358,9 +375,9 @@ async fn test_push_oversized_text_item_is_413_item_size_exceeded() {
             .0
     };
 
-    // 1 MiB + 1 byte of decoded payload — over the Free text limit (1 MiB),
-    // under the 10 MiB body/max_item_bytes limit.
-    let oversized = B64.encode(vec![0u8; 1024 * 1024 + 1]);
+    // 8 MiB + 1 byte of decoded payload — over the Free text limit (8 MiB),
+    // under the raised 20 MiB body/max_item_bytes limit.
+    let oversized = B64.encode(vec![0u8; 8 * 1024 * 1024 + 1]);
     let (status, body) = post_json(
         app,
         &format!("/devices/{DEVICE_A}/items"),
@@ -373,10 +390,10 @@ async fn test_push_oversized_text_item_is_413_item_size_exceeded() {
     assert_eq!(body["code"], "ITEM_SIZE_EXCEEDED");
 }
 
-/// A text item at exactly the 1 MiB Free-tier limit must be accepted.
+/// A text item at exactly the 8 MiB Free-tier limit must be accepted.
 #[tokio::test]
 async fn test_push_text_item_at_limit_is_accepted() {
-    let (app, state) = make_app();
+    let (app, state) = make_app_with_item_bytes(20 * 1024 * 1024);
     let a_token = {
         let mut s = state.lock().unwrap();
         s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
@@ -384,8 +401,8 @@ async fn test_push_text_item_at_limit_is_accepted() {
             .0
     };
 
-    // Exactly 1 MiB of decoded payload — at the limit, must pass.
-    let at_limit = B64.encode(vec![0u8; 1024 * 1024]);
+    // Exactly 8 MiB of decoded payload — at the limit, must pass.
+    let at_limit = B64.encode(vec![0u8; 8 * 1024 * 1024]);
     let (status, _body) = post_json(
         app,
         &format!("/devices/{DEVICE_A}/items"),
@@ -539,8 +556,8 @@ async fn test_pull_route_advances_last_seen() {
     );
 }
 
-/// An image item up to the 10 MiB Free-tier limit must be accepted even though
-/// it far exceeds the 1 MiB text limit — the size check is content-type aware.
+/// An image item up to the 10 MiB Free-tier limit must be accepted — the size
+/// check is content-type aware (image cap 10 MiB, text cap 8 MiB).
 #[tokio::test]
 async fn test_push_large_image_under_image_limit_is_accepted() {
     let (app, state) = make_app();
@@ -551,7 +568,7 @@ async fn test_push_large_image_under_image_limit_is_accepted() {
             .0
     };
 
-    // 2 MiB image: over the 1 MiB text limit, under the 10 MiB image limit.
+    // 2 MiB image: well under both the 8 MiB text cap and the 10 MiB image cap.
     let image = B64.encode(vec![0u8; 2 * 1024 * 1024]);
     let (status, _body) = post_json(
         app,

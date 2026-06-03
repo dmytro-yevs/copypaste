@@ -1008,9 +1008,20 @@ async fn push_loop(
                                     };
                                     // BUG C1: for files, embed name+MIME inside
                                     // the encrypted plaintext (Supabase schema
-                                    // carries none). No-op for text/image.
+                                    // carries none). No-op for text/image. The
+                                    // ceiling is enforced on the WRAPPED bytes so
+                                    // upload skips exactly what download rejects.
                                     let cloud_plaintext =
-                                        wrap_cloud_upload_plaintext(&item, plaintext);
+                                        match wrap_and_check_cloud_upload_plaintext(&item, plaintext) {
+                                            Ok(p) => p,
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    "cloud-sync push_loop: skipping id={}: {e}",
+                                                    item.id
+                                                );
+                                                continue;
+                                            }
+                                        };
                                     // Re-encrypt for cloud with sync key + item_id AAD.
                                     match encrypt_for_cloud(key, &item.item_id, &cloud_plaintext) {
                                         Ok(blob) => {
@@ -1203,8 +1214,19 @@ async fn run_backlog_sweep(
                 }
             };
             // BUG C1: for files, embed name+MIME inside the encrypted plaintext
-            // so cloud sync preserves file identity. No-op for text/image.
-            let cloud_plaintext = wrap_cloud_upload_plaintext(&item, plaintext);
+            // so cloud sync preserves file identity. No-op for text/image. The
+            // ceiling is enforced on the WRAPPED bytes so the backlog sweep skips
+            // exactly what the download side would reject.
+            let cloud_plaintext = match wrap_and_check_cloud_upload_plaintext(&item, plaintext) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(
+                        "cloud-sync backlog: skipping id={}: {e}",
+                        item.id
+                    );
+                    continue;
+                }
+            };
             match encrypt_for_cloud(&tmp_key, &item.item_id, &cloud_plaintext) {
                 Ok(blob) => {
                     use base64::Engine as _;
@@ -1313,13 +1335,11 @@ fn decrypt_item_plaintext(
         } else {
             copypaste_core::decode_file(&chunks, &v1_key, &file_id).map_err(|e| e.to_string())?
         };
-        let ceiling = crate::sync_orch::SYNC_MAX_BLOB_BYTES;
-        if plaintext.len() > ceiling {
-            return Err(format!(
-                "blob {} bytes exceeds cloud sync ceiling {ceiling}",
-                plaintext.len()
-            ));
-        }
+        // NOTE: the cloud sync ceiling is enforced on the WRAPPED plaintext (after
+        // `wrap_cloud_upload_plaintext` prepends the file name/MIME header), NOT on
+        // this raw plaintext. The DOWNLOAD side (`build_local_blob_item`) checks the
+        // same header-INCLUSIVE buffer, so checking the wrapped quantity keeps upload
+        // and download symmetric — see `wrap_and_check_cloud_upload_plaintext`.
         return Ok(plaintext);
     }
     let content = item.content.as_deref().ok_or("item has no content")?;
@@ -3236,6 +3256,13 @@ fn truncate_utf8(s: &str, max: usize) -> &str {
 /// Returns the embedded name/MIME when a valid header is present; otherwise
 /// (old-daemon payload, or any malformed/overrunning header) treats the WHOLE
 /// buffer as raw file bytes with the legacy name/MIME — never panics.
+///
+/// The headerless-legacy detection is BEST-EFFORT. It assumes no genuine
+/// pre-envelope (pre-`3eab077`) headerless file payload ever reaches a post-fix
+/// decoder in production: the file-sync feature is unreleased, so the only way a
+/// headerless payload could arrive is from a dev Supabase table seeded during the
+/// pre-envelope window. Such dev tables MUST be cleared so a real file whose first
+/// bytes happen to collide with the header magic is not mis-stripped.
 fn decode_cloud_file_payload(payload: &[u8]) -> (Vec<u8>, String, String) {
     let legacy = || {
         (
@@ -3315,6 +3342,35 @@ fn wrap_cloud_upload_plaintext(item: &ClipboardItem, plaintext: Vec<u8>) -> Vec<
     } else {
         plaintext
     }
+}
+
+/// Wrap a decrypted plaintext for cloud upload and enforce the sync ceiling on
+/// the WRAPPED bytes (the exact bytes that get encrypted and shipped).
+///
+/// Coherence fix: the DOWNLOAD side (`build_local_blob_item`) rejects an inbound
+/// payload when the header-INCLUSIVE buffer exceeds [`SYNC_MAX_BLOB_BYTES`]. For
+/// files, `wrap_cloud_upload_plaintext` prepends a name/MIME header (a few + up to
+/// ~2*u16 bytes), so a raw plaintext just under the ceiling could wrap to just
+/// over it. Checking the raw plaintext on upload but the wrapped buffer on
+/// download would let such a file upload yet be rejected on every download — a
+/// one-sided failure. By checking the same wrapped quantity here, upload
+/// skips-with-warning exactly what download would reject.
+///
+/// Returns `Err` (caller logs a `warn!` and skips the item) when the wrapped
+/// payload exceeds the ceiling — never panics, never silently drops.
+fn wrap_and_check_cloud_upload_plaintext(
+    item: &ClipboardItem,
+    plaintext: Vec<u8>,
+) -> Result<Vec<u8>, String> {
+    let wrapped = wrap_cloud_upload_plaintext(item, plaintext);
+    let ceiling = crate::sync_orch::SYNC_MAX_BLOB_BYTES;
+    if wrapped.len() > ceiling {
+        return Err(format!(
+            "wrapped blob {} bytes exceeds cloud sync ceiling {ceiling}",
+            wrapped.len()
+        ));
+    }
+    Ok(wrapped)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -5784,5 +5840,91 @@ mod bytea_e2e {
         assert_eq!(rb, file_bytes);
         assert_eq!(rn, "");
         assert_eq!(rm, "");
+    }
+
+    // ── Coherence fix: upload ceiling checks the WRAPPED quantity ──────────────
+
+    /// A minimal `content_type == "file"` item with a valid `blob_ref` meta so
+    /// `wrap_cloud_upload_plaintext` can read its name/MIME.
+    fn file_item(id: &str, name: &str, mime: &str, original_size: usize) -> ClipboardItem {
+        ClipboardItem {
+            id: id.to_owned(),
+            item_id: id.to_owned(),
+            content_type: "file".to_owned(),
+            content: Some(Vec::new()),
+            content_nonce: None,
+            blob_ref: Some(
+                serde_json::json!({
+                    "filename": name,
+                    "mime": mime,
+                    "original_size": original_size,
+                    "chunk_count": 1,
+                    "file_id": vec![0u8; 16],
+                })
+                .to_string(),
+            ),
+            is_sensitive: false,
+            is_synced: false,
+            lamport_ts: 1,
+            wall_time: 1,
+            expires_at: None,
+            app_bundle_id: None,
+            content_hash: None,
+            origin_device_id: String::new(),
+            key_version: 1,
+            pinned: false,
+            pin_order: None,
+            thumb: None,
+        }
+    }
+
+    /// A file whose RAW plaintext fits under the sync ceiling but whose WRAPPED
+    /// (header-prepended) payload exceeds it must be SKIPPED on upload — exactly
+    /// what `build_local_blob_item` would reject on download. This asserts the two
+    /// ends now check the same quantity, closing the one-sided-failure window.
+    #[test]
+    fn cloud_upload_skips_file_whose_wrapped_payload_exceeds_ceiling() {
+        let ceiling = crate::sync_orch::SYNC_MAX_BLOB_BYTES;
+        let name = "huge.bin";
+        let mime = "application/octet-stream";
+        // Header overhead = 1 (version) + 2 + name.len() + 2 + mime.len().
+        let header_overhead = 1 + 2 + name.len() + 2 + mime.len();
+
+        // RAW plaintext is exactly the ceiling → would PASS a raw-only check, but
+        // once the header is prepended the wrapped buffer is `header_overhead`
+        // bytes over the ceiling.
+        let raw = vec![0u8; ceiling];
+
+        let item = file_item("file-1", name, mime, raw.len());
+
+        let err = wrap_and_check_cloud_upload_plaintext(&item, raw)
+            .expect_err("wrapped payload over the ceiling must be skipped, not uploaded");
+        assert!(
+            err.contains("exceeds cloud sync ceiling"),
+            "unexpected error message: {err}"
+        );
+        // Sanity: the rejected size is the wrapped size, not the raw size.
+        let expected = ceiling + header_overhead;
+        assert!(
+            err.contains(&expected.to_string()),
+            "error should report the WRAPPED size {expected}: {err}"
+        );
+    }
+
+    /// The boundary: a file whose WRAPPED payload is exactly the ceiling is
+    /// accepted (upload and download agree on `<=` vs `>`).
+    #[test]
+    fn cloud_upload_accepts_file_whose_wrapped_payload_equals_ceiling() {
+        let ceiling = crate::sync_orch::SYNC_MAX_BLOB_BYTES;
+        let name = "ok.bin";
+        let mime = "application/octet-stream";
+        let header_overhead = 1 + 2 + name.len() + 2 + mime.len();
+        let raw = vec![7u8; ceiling - header_overhead];
+
+        let item = file_item("file-2", name, mime, raw.len());
+
+        let wrapped = wrap_and_check_cloud_upload_plaintext(&item, raw)
+            .expect("a wrapped payload exactly at the ceiling must be accepted");
+        assert_eq!(wrapped.len(), ceiling, "wrapped size should hit the ceiling exactly");
     }
 }

@@ -209,8 +209,10 @@ pub fn encode_image(
     file_id: &[u8; 16],
     max_bytes: usize,
 ) -> Result<(ImageMeta, Vec<EncryptedChunk>), ImageError> {
-    // FIXWAVE: daemon handle_image should pass config.max_decoded_image_mb
-    // instead of relying on the compile-time default baked into this wrapper.
+    // Convenience wrapper: uses the compile-time MAX_DECODED_IMAGE_MB default. The
+    // real capture path threads the user-configured budget via
+    // `encode_image_with_limit`; this entry point is for callers that have no
+    // config to pass (tests, internal re-encodes).
     encode_image_with_limit(
         raw,
         key,
