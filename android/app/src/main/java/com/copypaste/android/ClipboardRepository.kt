@@ -1017,6 +1017,7 @@ class ClipboardRepository(context: Context) {
          * [ClipboardRepository] instances in the same process) consume it.
          */
         @Volatile var expectedClipHash: Int = 0
+        @Volatile var expectedClipLen: Int = 0
         @Volatile var expectedClipHasValue: Boolean = false
         @Volatile var expectedClipAtMs: Long = 0L
         val expectedClipLock = Any()
@@ -1025,12 +1026,18 @@ class ClipboardRepository(context: Context) {
 
         /**
          * Record that the next observed clipboard change carrying text whose
-         * hash equals [content].hashCode() is an internal copy-from-history echo
+         * (length, hash) equals [content]'s is an internal copy-from-history echo
          * and must NOT be re-captured. Call immediately before setPrimaryClip.
+         *
+         * The match key is the clip's length plus its [String.hashCode] rather than
+         * the full string, so a very large expected clip (megabytes of text) is
+         * never retained or compared in full. Length is paired with the hash so a
+         * hashCode collision between two different-length clips cannot match.
          */
         fun expectClip(content: String) {
             synchronized(expectedClipLock) {
                 expectedClipHash = content.hashCode()
+                expectedClipLen = content.length
                 expectedClipHasValue = true
                 expectedClipAtMs = System.currentTimeMillis()
             }
@@ -1049,7 +1056,11 @@ class ClipboardRepository(context: Context) {
          *
          * The expectation is cleared only when:
          *   - the window expires (stale expectation — genuinely new copy), or
-         *   - the content hash does NOT match (different clip — not our echo).
+         *   - the (length, hash) does NOT match (different clip — not our echo).
+         *
+         * Matching on (length, hash) instead of full-string equality avoids
+         * retaining/comparing the entire clip text for large clips while keeping
+         * the suppression semantics identical for matching clips.
          *
          * A later genuine re-copy of the same text after [EXPECTED_CLIP_WINDOW_MS]
          * has elapsed will not be suppressed because the window will have expired.
@@ -1063,8 +1074,8 @@ class ClipboardRepository(context: Context) {
                     expectedClipHasValue = false
                     return false
                 }
-                if (content.hashCode() == expectedClipHash) {
-                    // Hash matches within window: suppress this echo.
+                if (content.length == expectedClipLen && content.hashCode() == expectedClipHash) {
+                    // (length, hash) matches within window: suppress this echo.
                     // Do NOT clear expectedClipHasValue — other concurrent
                     // listeners firing for the same tap must also be suppressed.
                     // The window expiry above will self-clear after 5 s.

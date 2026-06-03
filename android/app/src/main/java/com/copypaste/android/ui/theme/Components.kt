@@ -323,46 +323,55 @@ fun ContinuousSliderRow(
 // All arrays MUST include/exceed core defaults: text 15 MiB, image 64 MiB.
 // ---------------------------------------------------------------------------
 
-/** 1,2,5,10,15,25,50,100 MB in bytes (MiB-aligned; 15 MB ≥ core default 15 MiB). */
+/**
+ * 1,2,5,10,15,25,50,100 MiB in bytes (BINARY MiB; 15 MiB ≥ core default 15 MiB).
+ * Uses 1024*1024 to match the Rust core sync caps and the FILE_SIZE/macOS steps.
+ */
 val TEXT_SIZE_STEP_VALUES: LongArray = longArrayOf(
-    1L * 1_000_000,
-    2L * 1_000_000,
-    5L * 1_000_000,
-    10L * 1_000_000,
-    15L * 1_000_000,
-    25L * 1_000_000,
-    50L * 1_000_000,
-    100L * 1_000_000,
+    1L * 1024 * 1024,
+    2L * 1024 * 1024,
+    5L * 1024 * 1024,
+    10L * 1024 * 1024,
+    15L * 1024 * 1024,
+    25L * 1024 * 1024,
+    50L * 1024 * 1024,
+    100L * 1024 * 1024,
 )
 val TEXT_SIZE_STEP_LABELS: Array<String> = arrayOf(
-    "1 MB", "2 MB", "5 MB", "10 MB", "15 MB", "25 MB", "50 MB", "100 MB (max)",
+    "1 MiB", "2 MiB", "5 MiB", "10 MiB", "15 MiB", "25 MiB", "50 MiB", "100 MiB (max)",
 )
 
-/** 5,10,25,64,128,256,512 MB in bytes (64 MB ≥ core default 64 MiB). */
+/**
+ * 5,10,25,64,128,256,512 MiB in bytes (BINARY MiB; 64 MiB ≥ core default 64 MiB).
+ * Uses 1024*1024 to match the Rust core sync caps and the FILE_SIZE/macOS steps.
+ */
 val IMAGE_SIZE_STEP_VALUES: LongArray = longArrayOf(
-    5L * 1_000_000,
-    10L * 1_000_000,
-    25L * 1_000_000,
-    64L * 1_000_000,
-    128L * 1_000_000,
-    256L * 1_000_000,
-    512L * 1_000_000,
+    5L * 1024 * 1024,
+    10L * 1024 * 1024,
+    25L * 1024 * 1024,
+    64L * 1024 * 1024,
+    128L * 1024 * 1024,
+    256L * 1024 * 1024,
+    512L * 1024 * 1024,
 )
 val IMAGE_SIZE_STEP_LABELS: Array<String> = arrayOf(
-    "5 MB", "10 MB", "25 MB", "64 MB", "128 MB", "256 MB", "512 MB (max)",
+    "5 MiB", "10 MiB", "25 MiB", "64 MiB", "128 MiB", "256 MiB", "512 MiB (max)",
 )
 
-/** 1,2,5,10,25,50 GB in bytes (10 GB ≥ core default 10 GiB). */
+/**
+ * 1,2,5,10,25,50 GiB in bytes (BINARY GiB; 10 GiB ≥ core default 10 GiB).
+ * Uses 1024^3 to match the Rust core sync caps and the FILE_SIZE/macOS steps.
+ */
 val QUOTA_STEP_VALUES: LongArray = longArrayOf(
-    1L * 1_000_000_000,
-    2L * 1_000_000_000,
-    5L * 1_000_000_000,
-    10L * 1_000_000_000,
-    25L * 1_000_000_000,
-    50L * 1_000_000_000,
+    1L * 1024 * 1024 * 1024,
+    2L * 1024 * 1024 * 1024,
+    5L * 1024 * 1024 * 1024,
+    10L * 1024 * 1024 * 1024,
+    25L * 1024 * 1024 * 1024,
+    50L * 1024 * 1024 * 1024,
 )
 val QUOTA_STEP_LABELS: Array<String> = arrayOf(
-    "1 GB", "2 GB", "5 GB", "10 GB", "25 GB", "50 GB (max)",
+    "1 GiB", "2 GiB", "5 GiB", "10 GiB", "25 GiB", "50 GiB (max)",
 )
 
 /**
