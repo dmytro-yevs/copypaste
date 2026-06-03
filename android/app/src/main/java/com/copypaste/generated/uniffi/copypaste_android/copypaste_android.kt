@@ -353,7 +353,7 @@ private fun findLibraryName(componentName: String): String {
     if (libOverride != null) {
         return libOverride
     }
-    return "uniffi_copypaste_android"
+    return "copypaste_android"
 }
 
 private inline fun <reified Lib : Library> loadIndirect(
@@ -1453,7 +1453,9 @@ data class SyncedItem (
     var `itemId`: kotlin.String, 
     var `contentType`: kotlin.String, 
     var `plaintext`: List<kotlin.UByte>, 
-    var `wallTimeMs`: kotlin.Long
+    var `wallTimeMs`: kotlin.Long, 
+    var `fileName`: kotlin.String?, 
+    var `mime`: kotlin.String?
 ) {
     
     companion object
@@ -1467,6 +1469,8 @@ public object FfiConverterTypeSyncedItem: FfiConverterRustBuffer<SyncedItem> {
             FfiConverterString.read(buf),
             FfiConverterSequenceUByte.read(buf),
             FfiConverterLong.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -1475,7 +1479,9 @@ public object FfiConverterTypeSyncedItem: FfiConverterRustBuffer<SyncedItem> {
             FfiConverterString.allocationSize(value.`itemId`) +
             FfiConverterString.allocationSize(value.`contentType`) +
             FfiConverterSequenceUByte.allocationSize(value.`plaintext`) +
-            FfiConverterLong.allocationSize(value.`wallTimeMs`)
+            FfiConverterLong.allocationSize(value.`wallTimeMs`) +
+            FfiConverterOptionalString.allocationSize(value.`fileName`) +
+            FfiConverterOptionalString.allocationSize(value.`mime`)
     )
 
     override fun write(value: SyncedItem, buf: ByteBuffer) {
@@ -1484,6 +1490,8 @@ public object FfiConverterTypeSyncedItem: FfiConverterRustBuffer<SyncedItem> {
             FfiConverterString.write(value.`contentType`, buf)
             FfiConverterSequenceUByte.write(value.`plaintext`, buf)
             FfiConverterLong.write(value.`wallTimeMs`, buf)
+            FfiConverterOptionalString.write(value.`fileName`, buf)
+            FfiConverterOptionalString.write(value.`mime`, buf)
     }
 }
 

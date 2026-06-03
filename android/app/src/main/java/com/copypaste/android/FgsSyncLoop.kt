@@ -339,8 +339,8 @@ class FgsSyncLoop(
                     }
                 } else if (isFile) {
                     // File row: store actual bytes so the user can save/copy them.
-                    // SyncedItem binding lacks file_name/mime (stale generated code —
-                    // bindings regen is a separate CI step); pass nulls for now.
+                    // Cloud-poll (DecryptedItem) has no file_name/mime columns in the
+                    // SELECT — those live in the encrypted payload, not separate columns.
                     if (item.plaintext.isEmpty()) {
                         false
                     } else {
@@ -489,12 +489,12 @@ class FgsSyncLoop(
                     }
                     isFile -> {
                         // File frame: store actual bytes so the user can save/copy them.
-                        // SyncedItem binding lacks file_name/mime (stale generated code —
-                        // bindings regen is a separate CI step); pass nulls for now.
+                        // ABI 7 bindings carry file_name/mime; use them so the label
+                        // shows the real name ("[file: report.pdf]") instead of "[file]".
                         if (plaintextBytes.isEmpty()) {
                             false
                         } else {
-                            val label = SyncFileHelper.buildFileLabel(null)
+                            val label = SyncFileHelper.buildFileLabel(item.fileName)
                             val storedId = repository.storeItem(
                                 plaintext = label,
                                 key = key,
@@ -503,7 +503,7 @@ class FgsSyncLoop(
                             )
                             if (storedId.isNotEmpty()) {
                                 repository.storeFileBytes(storedId, plaintextBytes)
-                                repository.storeFileMeta(storedId, null, null)
+                                repository.storeFileMeta(storedId, item.fileName, item.mime)
                                 true
                             } else {
                                 false
