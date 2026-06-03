@@ -6,9 +6,11 @@ import {
   formatEpochSecs,
   pairingQrSvg,
   probeStatus,
+  type DiscoveredDevice,
   type OwnDeviceInfo,
   type PairedDevice,
   type PairingQr,
+  type PairSasStatus,
 } from "../lib/ipc";
 import { ViewShell } from "../components/ViewShell";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
@@ -261,6 +263,292 @@ function extractIp(address: string | null | undefined): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// SAS pairing — discovery-initiated (LAN) pairing modal + discovered list
+// ---------------------------------------------------------------------------
+
+/** How often to poll `pair_get_sas` while the modal is open. */
+const SAS_POLL_MS = 700;
+/** How often to refresh the discovered-devices list while the view is open. */
+const DISCOVERED_POLL_MS = 3000;
+
+/**
+ * Modal that drives the discovery-initiated SAS pairing handshake for a single
+ * peer. On mount it polls `pair_get_sas`; closing it (without a terminal
+ * Confirmed state) aborts the in-flight pairing.
+ */
+function SasPairingModal({
+  device,
+  onClose,
+  onPaired,
+}: {
+  device: DiscoveredDevice;
+  onClose: () => void;
+  onPaired: () => void;
+}) {
+  const [status, setStatus] = useState<PairSasStatus>({ state: "initiating" });
+  const [error, setError] = useState<string | null>(null);
+  const [confirmPending, setConfirmPending] = useState(false);
+  const [sasCopied, setSasCopied] = useState(false);
+  // True once a terminal Confirmed has been observed — closing then must NOT
+  // call pair_abort (the pairing already succeeded).
+  const confirmedRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const terminal =
+    status.state === "confirmed" ||
+    status.state === "rejected" ||
+    status.state === "aborted" ||
+    status.state === "timed_out";
+
+  // Poll pair_get_sas until a terminal state.
+  useEffect(() => {
+    cancelledRef.current = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const next = await api.pairGetSas();
+        if (cancelledRef.current) return;
+        setStatus(next);
+        if (next.state === "confirmed") {
+          confirmedRef.current = true;
+          onPaired();
+          return; // stop polling — terminal success
+        }
+        if (
+          next.state === "rejected" ||
+          next.state === "aborted" ||
+          next.state === "timed_out"
+        ) {
+          return; // stop polling — terminal failure
+        }
+        timer = setTimeout(() => void poll(), SAS_POLL_MS);
+      } catch (e) {
+        if (cancelledRef.current) return;
+        const msg = e instanceof IpcError ? e.message : "Pairing status unavailable";
+        setError(msg);
+      }
+    };
+
+    void poll();
+    return () => {
+      cancelledRef.current = true;
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [onPaired]);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+    };
+  }, []);
+
+  // Close the modal. Aborts the pairing unless it already succeeded.
+  const handleClose = useCallback(() => {
+    if (!confirmedRef.current) {
+      // Best-effort abort; ignore failure (modal is closing regardless).
+      void api.pairAbort().catch(() => {});
+    }
+    onClose();
+  }, [onClose]);
+
+  const handleConfirm = useCallback(
+    async (accept: boolean) => {
+      setConfirmPending(true);
+      setError(null);
+      try {
+        await api.pairConfirmSas(accept);
+        if (cancelledRef.current) return;
+        if (!accept) {
+          // User said it doesn't match — close immediately.
+          onClose();
+          return;
+        }
+        // On accept, keep polling; the next poll tick reflects confirmed/rejected.
+      } catch (e) {
+        if (cancelledRef.current) return;
+        const msg = e instanceof IpcError ? e.message : "Failed to send decision";
+        setError(msg);
+      } finally {
+        if (!cancelledRef.current) setConfirmPending(false);
+      }
+    },
+    [onClose]
+  );
+
+  const handleCopySas = useCallback(() => {
+    if (status.sas === undefined) return;
+    const sas = status.sas;
+    navigator.clipboard.writeText(sas).then(
+      () => {
+        setSasCopied(true);
+        if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
+        copiedTimer.current = setTimeout(() => setSasCopied(false), 1500);
+      },
+      () => {
+        // Clipboard denied — non-fatal; the code is visible on screen.
+      }
+    );
+  }, [status.sas]);
+
+  const title = device.device_name || `Device ${device.device_id.slice(0, 8)}`;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Pair device"
+    >
+      <div className="w-full max-w-sm rounded-ide-lg border border-ide-border bg-ide-elevated p-5 shadow-ide-lg">
+        <p className="mb-1 text-[13px] font-medium text-ide-text">Pair “{title}”</p>
+
+        {/* Connecting / initiating */}
+        {status.state === "initiating" && error === null && (
+          <div className="flex items-center gap-2 py-4">
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ide-faint border-t-ide-accent" />
+            <p className="text-[12px] text-ide-dim">Connecting…</p>
+          </div>
+        )}
+
+        {/* Awaiting SAS — show the code prominently */}
+        {status.state === "awaiting_sas" && status.sas !== undefined && (
+          <div className="py-2">
+            <p className="mb-2 text-[12px] text-ide-dim">
+              Confirm this code matches the one shown on the other device.
+            </p>
+            <button
+              type="button"
+              onClick={handleCopySas}
+              title={sasCopied ? "Copied!" : "Click to copy"}
+              className="mx-auto block rounded-ide bg-ide-panel/60 px-4 py-3 font-mono text-[28px] font-semibold tracking-[0.3em] text-ide-text hover:bg-ide-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
+            >
+              {status.sas}
+              {sasCopied && <span className="ml-2 text-[12px] text-ide-success">✓</span>}
+            </button>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                onClick={() => void handleConfirm(false)}
+                disabled={confirmPending}
+                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Doesn’t match
+              </button>
+              <button
+                onClick={() => void handleConfirm(true)}
+                disabled={confirmPending}
+                className="rounded-ide border border-ide-accent/40 bg-ide-accent/15 px-3 py-1.5 text-[12px] font-medium text-ide-accent hover:bg-ide-accent/25 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {confirmPending ? "…" : "Match"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Waiting after the user accepted, for the peer to also accept */}
+        {status.state === "awaiting_sas" && status.sas === undefined && (
+          <div className="flex items-center gap-2 py-4">
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ide-faint border-t-ide-accent" />
+            <p className="text-[12px] text-ide-dim">Waiting for the other device…</p>
+          </div>
+        )}
+
+        {/* Terminal success */}
+        {status.state === "confirmed" && (
+          <div className="py-3">
+            <p className="text-[13px] font-medium text-ide-success">Paired ✓</p>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={onClose}
+                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Terminal failure */}
+        {(status.state === "rejected" ||
+          status.state === "aborted" ||
+          status.state === "timed_out") && (
+          <div className="py-3">
+            <p className="text-[13px] text-ide-danger">
+              {status.state === "timed_out"
+                ? "Pairing timed out."
+                : status.state === "rejected"
+                  ? "Pairing was rejected."
+                  : "Pairing was cancelled."}
+            </p>
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={onClose}
+                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Transient poll/confirm error (non-terminal) */}
+        {error !== null && !terminal && (
+          <p className="mt-2 text-[11px] text-ide-danger">{error}</p>
+        )}
+
+        {/* Cancel affordance for the non-terminal states (Connecting / awaiting) */}
+        {!terminal && (
+          <div className="mt-4 border-t border-ide-divider pt-3 text-right">
+            <button
+              onClick={handleClose}
+              className="text-[11px] text-ide-faint hover:text-ide-dim"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** One discovered (unpaired) LAN device row with a Pair button. */
+function DiscoveredRow({
+  device,
+  onPair,
+  busy,
+}: {
+  device: DiscoveredDevice;
+  onPair: (device: DiscoveredDevice) => void;
+  busy: boolean;
+}) {
+  const ip = device.ip_addrs[0] ?? null;
+  // v1 peers without a bootstrap port cannot do SAS pairing.
+  const pairable = device.bport !== null;
+  return (
+    <div className="px-3 py-2.5 hover:bg-ide-hover">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13px] font-medium text-ide-text">
+            {device.device_name || `Device ${device.device_id.slice(0, 8)}`}
+          </p>
+          <MetaRow label="Local IP" value={ip} />
+        </div>
+        <button
+          onClick={() => onPair(device)}
+          disabled={!pairable || busy}
+          title={pairable ? undefined : "This device does not support secure pairing"}
+          className="shrink-0 rounded-ide border border-ide-accent/40 bg-ide-accent/15 px-2.5 py-1 text-[12px] font-medium text-ide-accent hover:bg-ide-accent/25 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Pair
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main view
 // ---------------------------------------------------------------------------
 
@@ -292,6 +580,15 @@ export function DevicesView() {
   // Reset timer for the "Copied! ✓" fingerprint affordance — held in a ref so
   // it can be cleared on unmount (and replaced on a rapid second copy).
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // --- LAN discovery + SAS pairing ---
+  const [discovered, setDiscovered] = useState<DiscoveredDevice[]>([]);
+  // The device a SAS pairing modal is currently open for, or null.
+  const [pairingDevice, setPairingDevice] = useState<DiscoveredDevice | null>(null);
+  // Set true while pair_with_discovered is in flight (before the modal opens).
+  const [pairStarting, setPairStarting] = useState(false);
+  // Inline error shown beneath the discovered list (e.g. rate-limited).
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
 
   // --- QR pairing ---
   const [qrState, setQrState] = useState<QrState>({ status: "idle" });
@@ -498,6 +795,61 @@ export function DevicesView() {
     const id = setInterval(() => { void loadPeers(); }, PEERS_POLL_MS);
     return () => { clearInterval(id); };
   }, [loadPeers]);
+
+  // --- Discover LAN peers ---
+  // Poll list_discovered every DISCOVERED_POLL_MS while the view is open. Only
+  // unpaired, pairable peers are shown (paired ones live in the list above).
+  const loadDiscovered = useCallback(async () => {
+    try {
+      const { devices } = await api.listDiscovered();
+      const ownFp = ownFpRef.current;
+      const unpaired = devices.filter(
+        (d) => !d.paired && (ownFp === null || d.device_id !== ownFp)
+      );
+      setDiscovered(unpaired);
+    } catch (e) {
+      // Discovery is best-effort (e.g. P2P disabled). Don't surface as a hard
+      // error — just show an empty list. A real daemon-offline state is already
+      // handled by the peers loader above.
+      if (e instanceof IpcError && e.code === "daemon_offline") {
+        setDiscovered([]);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDiscovered();
+    const id = setInterval(() => { void loadDiscovered(); }, DISCOVERED_POLL_MS);
+    return () => { clearInterval(id); };
+  }, [loadDiscovered]);
+
+  // Begin a discovery-initiated SAS pairing, then open the SAS modal.
+  const handlePairDiscovered = useCallback(async (device: DiscoveredDevice) => {
+    if (pairStarting || pairingDevice !== null) return;
+    setDiscoverError(null);
+    setPairStarting(true);
+    try {
+      await api.pairWithDiscovered(device.device_id);
+      setPairingDevice(device);
+    } catch (e) {
+      if (e instanceof IpcError && e.code === "rate_limited") {
+        setDiscoverError("Another pairing is already in progress.");
+      } else {
+        const msg = e instanceof IpcError ? e.message : "Failed to start pairing";
+        setDiscoverError(msg);
+      }
+    } finally {
+      setPairStarting(false);
+    }
+  }, [pairStarting, pairingDevice]);
+
+  // Close the SAS modal and refresh both lists (a freshly paired device should
+  // move from "Discovered" to the paired list).
+  const handleClosePairing = useCallback(() => {
+    setPairingDevice(null);
+    void loadPeers();
+    void loadDiscovered();
+  }, [loadPeers, loadDiscovered]);
 
   // Unmount guard for handleUnpair / handleRevoke — prevents setState after
   // the component unmounts if the user navigates away mid-request (P2 finding).
@@ -771,6 +1123,28 @@ export function DevicesView() {
           ))}
       </div>
 
+      {/* ── Discovered on your network ─────────────────────────── */}
+      {discovered.length > 0 && (
+        <>
+          <p className="mb-2 mt-5 text-[11px] font-medium uppercase tracking-wider text-ide-faint">
+            Discovered on your network
+          </p>
+          <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">
+            {discovered.map((device) => (
+              <DiscoveredRow
+                key={device.device_id}
+                device={device}
+                onPair={(d) => void handlePairDiscovered(d)}
+                busy={pairStarting || pairingDevice !== null}
+              />
+            ))}
+          </div>
+          {discoverError !== null && (
+            <p className="mt-2 text-[11px] text-ide-danger">{discoverError}</p>
+          )}
+        </>
+      )}
+
       {/* ── Divider ────────────────────────────────────────────── */}
       <div className="my-5 border-t border-ide-divider" />
 
@@ -849,6 +1223,15 @@ export function DevicesView() {
           <p className="text-[12px] text-ide-dim animate-pulse">Generating pairing code…</p>
         )}
       </section>
+
+      {/* ── SAS pairing modal (discovery-initiated) ──────────────── */}
+      {pairingDevice !== null && (
+        <SasPairingModal
+          device={pairingDevice}
+          onClose={handleClosePairing}
+          onPaired={() => void loadPeers()}
+        />
+      )}
     </ViewShell>
   );
 }
