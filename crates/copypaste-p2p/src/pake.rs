@@ -111,12 +111,18 @@ impl SessionKey {
     ///
     /// The info string `"copypaste-xchacha20-key-v1"` domain-separates this
     /// derivation from any future use of the same `SessionKey`.
-    pub fn derive_xchacha_key(&self, salt: &[u8]) -> [u8; 32] {
+    ///
+    /// Returns a [`zeroize::Zeroizing`]-wrapped key so the sensitive material is
+    /// wiped on drop at call sites (parity with [`Self::bind_to_tls_channel`]).
+    /// `Zeroizing<[u8; 32]>` derefs to `[u8; 32]` / `&[u8]`, so passing it where
+    /// a key slice is expected needs no change; only a by-value `[u8; 32]` move
+    /// requires an explicit deref (`*key`).
+    pub fn derive_xchacha_key(&self, salt: &[u8]) -> zeroize::Zeroizing<[u8; 32]> {
         let hk = Hkdf::<Sha256>::new(Some(salt), &self.0);
         let mut out = [0u8; 32];
         hk.expand(b"copypaste-xchacha20-key-v1", &mut out)
             .expect("32 bytes is well within HKDF-SHA256 output limit");
-        out
+        zeroize::Zeroizing::new(out)
     }
 
     /// Derive a 32-byte *channel-bound* session key by mixing in a TLS
