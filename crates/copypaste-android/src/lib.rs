@@ -3385,14 +3385,10 @@ mod tests {
         {
             let mut map = db_by_path().lock().unwrap_or_else(|e| e.into_inner());
             let cache_key_a = (path.clone(), key_a);
-            if !map.contains_key(&cache_key_a) {
-                let db = copypaste_core::Database::open(
-                    std::path::Path::new(&path),
-                    &Zeroizing::new(key_a),
-                )
-                .expect("open with key_a");
-                map.insert(cache_key_a, db);
-            }
+            map.entry(cache_key_a).or_insert_with(|| {
+                copypaste_core::Database::open(std::path::Path::new(&path), &Zeroizing::new(key_a))
+                    .expect("open with key_a")
+            });
         }
 
         // Verify key_a is in the cache.
