@@ -9,11 +9,14 @@ use copypaste_core::derive_sync_key;
 use copypaste_core::SyncKey;
 use copypaste_core::{
     bump_item_recency, chunks_from_blob, count_items, decode_file, decode_image,
-    decrypt_item_by_version, delete_fts, delete_item, derive_v2, encode_thumbnail_from_png,
-    ensure_revoked_devices_table, fetch_text_preview, get_item_by_id, get_page,
-    get_page_pinned_first, pin_item, reorder_pinned, revoke_device, revoke_devices, search_items,
-    set_thumb, unpin_item, Database, EncryptError, FileMeta, SensitiveDetector,
+    decrypt_item_by_version, derive_v2, encode_thumbnail_from_png, ensure_revoked_devices_table,
+    fetch_text_preview, get_item_by_id, get_page, get_page_pinned_first, pin_item, reorder_pinned,
+    revoke_device, revoke_devices, search_items, set_thumb, unpin_item, Database, EncryptError,
+    FileMeta, SensitiveDetector,
 };
+// `soft_delete_item` is not yet re-exported from the crate root so we use the
+// full module path (the `storage` module is `pub`).
+use copypaste_core::storage::items::soft_delete_item;
 use copypaste_p2p::pake::{PakeInitiator, PakeResponder, PasswordFile};
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
@@ -2734,20 +2737,33 @@ impl IpcServer {
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    let del = delete_item(&db, &id_for_task);
-                    // Best-effort FTS cleanup; surface as warning, not failure
-                    let fts = delete_fts(&db, &id_for_task);
-                    (del, fts)
+                    // Soft-delete: wipe content/nonce/thumb, set deleted=1, bump
+                    // lamport_ts + wall_time so the tombstone wins LWW on peers.
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        // SAFETY: current time is always after UNIX_EPOCH.
+                        .unwrap_or_default()
+                        .as_millis() as i64;
+                    // Look up the current row to get its lamport_ts for the bump.
+                    let existing = get_item_by_id(&db, &id_for_task)?;
+                    let new_lamport = existing.as_ref().map(|r| r.lamport_ts + 1).unwrap_or(1);
+                    let changed = soft_delete_item(&db, &id_for_task, new_lamport, now_ms)?;
+                    // Re-read the tombstone row so we can broadcast it to peers.
+                    let tombstone = get_item_by_id(&db, &id_for_task)?;
+                    Ok::<_, copypaste_core::storage::items::ItemsError>((changed, tombstone))
                 })
                 .await;
                 match join {
-                    Ok((Ok(_), fts_res)) => {
-                        if let Err(e) = fts_res {
-                            tracing::warn!("fts delete failed for id={id}: {e}");
+                    Ok(Ok((_, tombstone_opt))) => {
+                        // Broadcast the tombstone via the sync channel so peers
+                        // receive the deletion and apply it via LWW.
+                        if let (Some(tombstone), Some(ref tx)) = (tombstone_opt, &self.new_item_tx)
+                        {
+                            let _ = tx.send(tombstone);
                         }
                         Response::ok(req.id, serde_json::Value::Null)
                     }
-                    Ok((Err(e), _)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -2985,11 +3001,19 @@ impl IpcServer {
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    copypaste_core::pin_item(&db, &id_for_task)
+                    copypaste_core::pin_item(&db, &id_for_task)?;
+                    // Re-read the updated row so the broadcast carries the new
+                    // pinned=true / pin_order for LWW propagation to peers.
+                    let row = get_item_by_id(&db, &id_for_task)?;
+                    Ok::<_, copypaste_core::storage::items::ItemsError>(row)
                 })
                 .await;
                 match join {
-                    Ok(Ok(())) => {
+                    Ok(Ok(row_opt)) => {
+                        // Propagate pin state to peers via the sync channel.
+                        if let (Some(row), Some(ref tx)) = (row_opt, &self.new_item_tx) {
+                            let _ = tx.send(row);
+                        }
                         Response::ok(req.id, serde_json::json!({"pinned": true, "id": id}))
                     }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
@@ -3037,14 +3061,22 @@ impl IpcServer {
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     if pinned {
-                        pin_item(&db, &id_for_task)
+                        pin_item(&db, &id_for_task)?;
                     } else {
-                        unpin_item(&db, &id_for_task)
+                        unpin_item(&db, &id_for_task)?;
                     }
+                    // Re-read the updated row so the broadcast carries the new
+                    // pinned / pin_order for LWW propagation to peers.
+                    let row = get_item_by_id(&db, &id_for_task)?;
+                    Ok::<_, copypaste_core::storage::items::ItemsError>(row)
                 })
                 .await;
                 match join {
-                    Ok(Ok(())) => {
+                    Ok(Ok(row_opt)) => {
+                        // Propagate pin-state change to peers via the sync channel.
+                        if let (Some(row), Some(ref tx)) = (row_opt, &self.new_item_tx) {
+                            let _ = tx.send(row);
+                        }
                         Response::ok(req.id, serde_json::json!({"pinned": pinned, "id": id}))
                     }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
@@ -3090,11 +3122,30 @@ impl IpcServer {
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-                    reorder_pinned(&db, &id_refs)
+                    reorder_pinned(&db, &id_refs)?;
+                    // Re-read each reordered row so the broadcast carries the
+                    // updated pin_order for LWW convergence on peers.
+                    let mut rows: Vec<copypaste_core::ClipboardItem> =
+                        Vec::with_capacity(id_refs.len());
+                    for id in &id_refs {
+                        if let Some(row) = get_item_by_id(&db, id)? {
+                            rows.push(row);
+                        }
+                    }
+                    Ok::<_, copypaste_core::storage::items::ItemsError>(rows)
                 })
                 .await;
                 match join {
-                    Ok(Ok(_changed)) => Response::ok(req.id, serde_json::json!({"ok": true})),
+                    Ok(Ok(rows)) => {
+                        // Broadcast every reordered item so peers converge on
+                        // the new pin_order via LWW.
+                        if let Some(ref tx) = self.new_item_tx {
+                            for row in rows {
+                                let _ = tx.send(row);
+                            }
+                        }
+                        Response::ok(req.id, serde_json::json!({"ok": true}))
+                    }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
@@ -3129,25 +3180,38 @@ impl IpcServer {
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    let del = delete_item(&db, &id_for_task);
-                    let fts = delete_fts(&db, &id_for_task);
-                    (del, fts)
+                    // Soft-delete: wipe content/nonce/thumb, set deleted=1, bump
+                    // lamport_ts + wall_time so the tombstone wins LWW on peers.
+                    let now_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        // SAFETY: current time is always after UNIX_EPOCH.
+                        .unwrap_or_default()
+                        .as_millis() as i64;
+                    let existing = get_item_by_id(&db, &id_for_task)?;
+                    let new_lamport = existing.as_ref().map(|r| r.lamport_ts + 1).unwrap_or(1);
+                    let changed = soft_delete_item(&db, &id_for_task, new_lamport, now_ms)?;
+                    // Re-read the tombstone row so we can broadcast it to peers.
+                    let tombstone = get_item_by_id(&db, &id_for_task)?;
+                    Ok::<_, copypaste_core::storage::items::ItemsError>((changed, tombstone))
                 })
                 .await;
                 match join {
-                    Ok((Ok(removed), fts_res)) => {
-                        if let Err(e) = fts_res {
-                            tracing::warn!("fts delete failed for id={id}: {e}");
+                    Ok(Ok((changed, tombstone_opt))) => {
+                        // Broadcast the tombstone via the sync channel so peers
+                        // receive the deletion and apply it via LWW.
+                        if let (Some(tombstone), Some(ref tx)) = (tombstone_opt, &self.new_item_tx)
+                        {
+                            let _ = tx.send(tombstone);
                         }
-                        // Report whether a row was actually removed so the
+                        // Report whether a row was actually soft-deleted so the
                         // response matches reality: `deleted: false` for an id
                         // that did not exist, instead of always claiming `true`.
                         Response::ok(
                             req.id,
-                            serde_json::json!({"deleted": removed > 0, "id": id}),
+                            serde_json::json!({"deleted": changed > 0, "id": id}),
                         )
                     }
-                    Ok((Err(e), _)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,

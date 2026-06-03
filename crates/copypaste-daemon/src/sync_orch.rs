@@ -370,14 +370,38 @@ pub async fn merge_incoming_with_crypto(
                 debug!(item_id = %wire.item_id, "sync_orch: LWW kept local");
                 continue;
             }
-            // Fix-3: capture the local `pinned` flag before `wire_to_local`
-            // (which always sets pinned=false — the wire carries no pinned field).
-            let local_pinned: bool = existing.as_ref().map(|r| r.pinned).unwrap_or(false);
-            // Fix (pin_order): also capture the local `pin_order` before
-            // `wire_to_local` (which carries no pin_order → None). The replace
-            // INSERT must re-bind this or the user's pinned ordering is reset to
-            // NULL on every LWW content update of a pinned item.
-            let local_pin_order: Option<f64> = existing.as_ref().and_then(|r| r.pin_order);
+            // Tombstone fast-path: when the winning wire item is a soft-delete
+            // (deleted=true), apply it locally without going through the full
+            // rekey + replace path.
+            //   • Row exists locally  → soft-delete it (wipe content, set deleted=1).
+            //   • Row does not exist  → skip; no point creating a tombstone for a
+            //     row we never held (the item was already absent here).
+            if wire.deleted {
+                if exists {
+                    let local_id = local_pk
+                        .as_deref()
+                        // SAFETY: `exists` is true only when `local_pk` is Some —
+                        // it is set from `existing.as_ref().map(|r| r.id.clone())`.
+                        .unwrap_or("");
+                    match copypaste_core::storage::items::soft_delete_item(
+                        &db_guard,
+                        local_id,
+                        wire.lamport_ts,
+                        wire.wall_time,
+                    ) {
+                        Ok(_) => {
+                            debug!(item_id = %wire.item_id, "sync_orch: applied inbound tombstone");
+                            upserted += 1;
+                        }
+                        Err(e) => {
+                            warn!(item_id = %wire.item_id, "sync_orch: soft_delete_item failed: {e}");
+                        }
+                    }
+                } else {
+                    debug!(item_id = %wire.item_id, "sync_orch: inbound tombstone for unknown item — skipping");
+                }
+                continue;
+            }
 
             // Capture wall_time before wire is consumed by rekey_inbound.
             let wire_wall_time = wire.wall_time;
@@ -405,18 +429,12 @@ pub async fn merge_incoming_with_crypto(
                 to_insert.id = pk;
             }
 
-            // Fix-3 (cont.): OR-merge the local `pinned` flag so a pinned item
-            // that gets a content update via LWW TakeRemote is not silently
-            // unpinned (losing its prune-exemption → TTL data loss).
-            to_insert.pinned = to_insert.pinned || local_pinned;
-            // Fix (pin_order, cont.): carry the prior pin_order across the
-            // replace so the pinned ordering is preserved. `wire_to_local`
-            // leaves pin_order=None, so without this the replace INSERT would
-            // store NULL and scramble the user's pinned order. Prefer the
-            // existing local value; only keep an inbound non-None as a fallback.
-            if to_insert.pin_order.is_none() {
-                to_insert.pin_order = local_pin_order;
-            }
+            // `wire_to_local` now propagates `pinned` and `pin_order` directly from
+            // the wire (see merge.rs), so pin/unpin/reorder broadcasts converge via
+            // normal LWW TakeRemote.  We intentionally trust the wire's values here
+            // instead of OR-merging with the local state: the IPC handlers bump
+            // lamport_ts before broadcasting, so the wire wins LWW only when it is
+            // causally later — which is exactly when its pin state should take effect.
 
             // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
             // ran `delete_item` then a separate `insert_item`; if the insert failed
@@ -592,8 +610,8 @@ fn replace_item_atomic(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned, pin_order)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+          content_hash, origin_device_id, key_version, pinned, pin_order, deleted)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
         params![
             item.id,
             item.item_id,
@@ -615,10 +633,13 @@ fn replace_item_atomic(
             // v1-encrypted → permanent auth-tag failure on every subsequent decrypt.
             item.key_version as i64,
             item.pinned as i64,
-            // pin_order: preserved from the prior local row by the caller's
-            // OR-merge above. Without this column the replace defaulted it to
-            // NULL and scrambled the user's pinned ordering on every update.
+            // pin_order: the wire now carries pin_order directly via wire_to_local,
+            // so this correctly reflects the sender's pinned ordering.
             item.pin_order,
+            // deleted: wire_to_local propagates this from the WireItem; for
+            // non-tombstone items this is always false (tombstones are handled
+            // by the soft_delete_item fast-path above and never reach here).
+            item.deleted as i64,
         ],
     )?;
     if let Some(text) = fts_text {

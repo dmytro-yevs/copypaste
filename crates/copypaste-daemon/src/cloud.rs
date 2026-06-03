@@ -1202,6 +1202,10 @@ async fn run_backlog_sweep(
                 // backlog query selects no thumb column; thumbnails are a
                 // local-only field (schema v9) and never synced.
                 thumb: None,
+                // Rows fetched from the upload backlog are live items (not
+                // tombstones) — if they were soft-deleted they would have been
+                // filtered out by the backlog query's `deleted = 0` guard.
+                deleted: false,
             })
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
