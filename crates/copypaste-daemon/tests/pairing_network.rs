@@ -76,6 +76,7 @@ fn wait_for_persisted_peer(daemon: &Daemon, want_fp_canonical: &str) -> serde_js
 }
 
 #[test]
+#[ignore = "requires LAN multicast; not available in CI/sandbox"]
 fn two_daemons_complete_pake_over_network_bootstrap() {
     // Both daemons run with P2P enabled so they have a live mTLS cert and the
     // bootstrap pairing channel.
