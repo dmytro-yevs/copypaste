@@ -11,16 +11,23 @@ use crate::error::RelayError;
 use crate::models::{DeviceInfoResponse, RegisterRequest, RegisterResponse};
 use crate::state::AppState;
 
-/// POST /devices — register a new device and issue an auth token.
+/// POST /devices — register (or co-register) a device and issue an auth token.
 ///
 /// Body: `{ device_id, device_name, public_key_b64 }`
 /// Response (201): `{ device_id, auth_token, expires_at }`
 ///
+/// Shared-account co-registration (R1a): a `device_id` that is *already*
+/// registered is NOT rejected — the relay mints a fresh, independent token for
+/// it (still 201) and keeps every previously-issued token valid. This lets all
+/// devices on one account co-register the same secret account-inbox id (derived
+/// via HKDF of the shared sync key, never sent in cleartext) and thereby push
+/// to / read the one shared inbox — the mechanism for cross-device delivery.
+/// The relay only ever stores opaque ciphertext.
+///
 /// Errors:
 /// - 400 Bad Request — invalid UUID, invalid base64, key length mismatch, blank name
-/// - 403 Forbidden — free-tier device quota exhausted
-/// - 409 Conflict — device_id already registered
-/// - 429 Too Many Requests — per-device registration rate limit (5/min) tripped
+/// - 403 Forbidden — free-tier device quota exhausted (NEW device records only)
+/// - 429 Too Many Requests — per-(ip, device) registration rate limit (5/min) tripped
 pub async fn register(
     State(state): State<AppState>,
     // In axum 0.8, `Option<ConnectInfo<T>>` no longer implements FromRequestParts.
@@ -149,7 +156,9 @@ pub async fn get_device(
         device_name: record.device_name.clone(),
         public_key_b64: record.public_key_b64.clone(),
         registered_at: unix_to_rfc3339(registered_at_unix),
-        expires_at: unix_to_rfc3339(record.expires_at_unix),
+        // A device_id now holds a SET of co-registered tokens (R1a); surface
+        // the latest expiry across them as the record's `expires_at`.
+        expires_at: unix_to_rfc3339(record.latest_expires_at()),
     }))
 }
 

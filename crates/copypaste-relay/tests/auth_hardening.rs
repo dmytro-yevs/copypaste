@@ -294,9 +294,10 @@ async fn read_only_handlers_handle_concurrent_load() {
 // ---------------------------------------------------------------------------
 // Wave 3.4 — security MEDIUM #13: per-device registration rate limit.
 //
-// Five attempts within 60s for the same device_id are allowed (they may fail
-// with 409 Conflict after the first, but the limiter does not reject them).
-// The 6th attempt within the window must return 429 with a Retry-After header.
+// Five attempts within 60s for the same device_id are allowed (under R1a each
+// co-registers and returns 201, but the limiter does not reject them). The 6th
+// attempt within the window must return 429 with a Retry-After header — the
+// per-(ip, device) limiter still bounds co-registration floods from one source.
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -313,15 +314,15 @@ async fn register_device_per_device_rate_limited() {
     let (status, _) = register(app.clone(), &device_id, &key).await;
     assert_eq!(status, StatusCode::CREATED);
 
-    // Attempts 2..=5: subsequent registrations of the same device_id return
-    // 409 Conflict (already registered) but each one still counts toward the
-    // per-device rate-limit window.
+    // Attempts 2..=5: subsequent registrations of the same device_id now
+    // co-register (R1a) and return 201 Created, each minting a new token — but
+    // each one still counts toward the per-(ip, device) rate-limit window.
     for n in 2..=5 {
         let (status, _) = register(app.clone(), &device_id, &key).await;
         assert_eq!(
             status,
-            StatusCode::CONFLICT,
-            "attempt #{n}: expected 409 Conflict from store, got {status}",
+            StatusCode::CREATED,
+            "attempt #{n}: expected 201 (co-registration), got {status}",
         );
     }
 

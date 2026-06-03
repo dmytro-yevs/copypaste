@@ -6,6 +6,12 @@ use serde_json::json;
 pub enum RelayError {
     #[error("device not found")]
     DeviceNotFound,
+    // No longer constructed in production since R1a shared-account
+    // co-registration: a duplicate `device_id` co-registers (mints an
+    // additional token) instead of conflicting. The variant + its 409 mapping
+    // are retained for the error-mapping test and any future re-introduction of
+    // a conflict path.
+    #[allow(dead_code)]
     #[error("device already registered")]
     DeviceConflict,
     #[error("unauthorized")]
