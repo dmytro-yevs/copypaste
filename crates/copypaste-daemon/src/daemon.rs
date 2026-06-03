@@ -786,6 +786,22 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // as the cloud path (Fix HIGH-3). Saturating cast: values above i64::MAX
     // (>9 EB) are unreachable in practice.
     let sync_quota_bytes = config.storage_quota_bytes.min(i64::MAX as u64) as i64;
+
+    // Universal Clipboard auto-apply: wire the self-write sentinel Arc (shared
+    // with ClipboardMonitor via IpcServer) and the local key into the sync
+    // orchestrator so freshly-synced items are immediately written to
+    // NSPasteboard. The same changeCount guard that prevents IPC copy_item
+    // from being re-captured is reused here — zero new primitives required.
+    // Only wired on Unix (where the IPC socket and ClipboardMonitor exist).
+    #[cfg(unix)]
+    let sync_auto_apply = Some(sync_orch::AutoApplyCtx {
+        self_write_change_count: self_write_change_count_arc.clone(),
+        local_key: local_key_arc.clone(),
+        core_config: core_config_arc.clone(),
+    });
+    #[cfg(not(unix))]
+    let sync_auto_apply: Option<sync_orch::AutoApplyCtx> = None;
+
     let sync_handle = tokio::spawn(async move {
         if let Err(e) = sync_orch::run(
             sync_db,
@@ -795,6 +811,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             sync_device_id,
             sync_crypto,
             sync_quota_bytes,
+            sync_auto_apply,
             sync_shutdown,
         )
         .await

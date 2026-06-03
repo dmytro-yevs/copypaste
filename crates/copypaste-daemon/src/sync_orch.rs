@@ -19,6 +19,7 @@
 //! forwards bytes through these channels.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc, Mutex};
@@ -40,6 +41,29 @@ use copypaste_sync::{
     merge::{local_to_wire, resolve, wire_to_local, MergeOutcome},
     protocol::WireItem,
 };
+
+/// Context passed to [`merge_incoming_with_crypto`] to enable the
+/// Universal Clipboard auto-apply feature: when a genuinely fresh remote
+/// item wins the LWW merge, write its decrypted plaintext directly to
+/// NSPasteboard so it is ready to paste immediately.
+///
+/// The `self_write_change_count` is the **same** `Arc<AtomicI64>` the
+/// [`ClipboardMonitor`](crate::clipboard::ClipboardMonitor) checks on every
+/// poll tick.  Writing to NSPasteboard increments the system changeCount;
+/// we stamp the new changeCount into this atomic before the monitor's next
+/// tick so the poller recognises the write as ours and skips re-capturing it
+/// (loop prevention — identical to the mechanism used by the `copy_item` IPC
+/// handler).
+pub struct AutoApplyCtx {
+    /// Shared self-write sentinel for the pasteboard poller.
+    pub self_write_change_count: Arc<AtomicI64>,
+    /// This device's local encryption key (v1 seed).  Needed to decrypt image
+    /// chunks for NSPasteboard writes.
+    pub local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
+    /// Live daemon config.  The `auto_apply_synced_clip` flag is read here on
+    /// every merge so toggling it via `set_config` takes effect immediately.
+    pub core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+}
 
 /// Cross-device content-key context for the sync orchestrator (P2P Phase 3).
 ///
@@ -122,10 +146,15 @@ impl SyncCrypto {
 /// * `device_id` — UUID stamped as `origin_device_id` on outgoing items.
 /// * `storage_quota_bytes` — byte cap passed to `prune_to_cap` after each
 ///   successful P2P merge so the local DB stays bounded (mirrors the cloud path).
+/// * `auto_apply` — when `Some`, enables the Universal Clipboard feature: a
+///   genuinely fresh incoming item (newer than the current local clipboard) is
+///   written to NSPasteboard immediately after merge, with the self-write guard
+///   armed to prevent re-capture by the poller.
 /// * `shutdown` — D2: token cancelled by the daemon on SIGINT/SIGTERM so the
 ///   orchestrator exits promptly instead of waiting for channels to drain.
 ///
 /// Returns `Ok(())` once both channels close or `shutdown` fires.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     db: Arc<Mutex<Database>>,
     mut new_item_rx: broadcast::Receiver<ClipboardItem>,
@@ -134,6 +163,7 @@ pub async fn run(
     device_id: String,
     crypto: Option<SyncCrypto>,
     storage_quota_bytes: i64,
+    auto_apply: Option<AutoApplyCtx>,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
     info!(%device_id, has_crypto = crypto.is_some(), "sync orchestrator started");
@@ -188,7 +218,13 @@ pub async fn run(
             incoming = incoming_rx.recv(), if !incoming_closed => {
                 match incoming {
                     Some(wire) => {
-                        if let Err(e) = merge_incoming_with_crypto(&db, vec![wire], crypto.as_ref(), storage_quota_bytes).await {
+                        if let Err(e) = merge_incoming_with_crypto(
+                            &db,
+                            vec![wire],
+                            crypto.as_ref(),
+                            storage_quota_bytes,
+                            auto_apply.as_ref(),
+                        ).await {
                             warn!("sync_orch: merge_incoming failed: {e}");
                         }
                     }
@@ -224,7 +260,7 @@ pub async fn merge_incoming(
     items: Vec<WireItem>,
 ) -> anyhow::Result<usize> {
     let quota = copypaste_core::AppConfig::default().storage_quota_bytes as i64;
-    merge_incoming_with_crypto(db, items, None, quota).await
+    merge_incoming_with_crypto(db, items, None, quota, None).await
 }
 
 /// Crypto-aware variant of [`merge_incoming`] (P2P Phase 3).
@@ -246,11 +282,19 @@ pub async fn merge_incoming(
 /// **Fix HIGH-3:** after a successful merge `prune_to_cap` is called with
 /// `storage_quota_bytes` so the P2P inbound path enforces the same local DB
 /// size cap the cloud path already enforces.
+///
+/// **Universal Clipboard:** when `auto_apply` is `Some` and the winning item
+/// is *strictly newer* than the current local latest (wall_time comparison),
+/// the decrypted plaintext is written to NSPasteboard so it is immediately
+/// ready to paste. The self-write changeCount sentinel is stamped before/after
+/// the write so the poller skips re-capturing the write. Only text and image
+/// are auto-applied; files are skipped (noted in the log).
 pub async fn merge_incoming_with_crypto(
     db: &Arc<Mutex<Database>>,
     items: Vec<WireItem>,
     crypto: Option<&SyncCrypto>,
     storage_quota_bytes: i64,
+    auto_apply: Option<&AutoApplyCtx>,
 ) -> anyhow::Result<usize> {
     if items.is_empty() {
         return Ok(0);
@@ -261,6 +305,20 @@ pub async fn merge_incoming_with_crypto(
     // - `SyncCrypto` is `Clone` (derives it).
     let db = db.clone();
     let crypto_owned: Option<SyncCrypto> = crypto.cloned();
+    // Clone the auto-apply Arcs so the blocking closure can move them in.
+    // Type alias avoids the `clippy::type_complexity` lint on this local binding.
+    type AutoApplyTuple = (
+        Arc<AtomicI64>,
+        Arc<zeroize::Zeroizing<[u8; 32]>>,
+        Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+    );
+    let auto_apply_owned: Option<AutoApplyTuple> = auto_apply.map(|ctx| {
+        (
+            ctx.self_write_change_count.clone(),
+            ctx.local_key.clone(),
+            ctx.core_config.clone(),
+        )
+    });
 
     let result = tokio::task::spawn_blocking(move || {
         // Acquire the std-compatible blocking lock INSIDE the blocking closure.
@@ -269,6 +327,11 @@ pub async fn merge_incoming_with_crypto(
         let db_guard = db.blocking_lock();
 
         let mut upserted = 0usize;
+        // Candidate for auto-apply: (wall_time, plaintext_bytes, content_type).
+        // We track the highest-wall_time winner across the batch so only the
+        // single freshest item is applied to NSPasteboard even during a burst.
+        let mut apply_candidate: Option<(i64, Vec<u8>, String)> = None;
+
         for mut wire in items {
             // P0 security/correctness: clamp any negative lamport_ts / wall_time
             // before processing. A hostile or buggy peer can send lamport_ts = -1
@@ -316,6 +379,10 @@ pub async fn merge_incoming_with_crypto(
             // NULL on every LWW content update of a pinned item.
             let local_pin_order: Option<f64> = existing.as_ref().and_then(|r| r.pin_order);
 
+            // Capture wall_time before wire is consumed by rekey_inbound.
+            let wire_wall_time = wire.wall_time;
+            let wire_content_type = wire.content_type.clone();
+
             // P2P Phase 3: unwrap the shared-key payload into a row encrypted under
             // this device's own local key, recovering the plaintext for FTS. Returns
             // the row to insert plus the decrypted plaintext (when text) to index.
@@ -358,11 +425,41 @@ pub async fn merge_incoming_with_crypto(
             // old row (and its FTS entry) intact. Mirrors `insert_item_with_fts`'s
             // `unchecked_transaction` approach (we can't reuse it directly because
             // it does plain INSERT with dedup-on-conflict rather than replace).
-            let fts_text = fts_plaintext.and_then(|pt| String::from_utf8(pt).ok());
+            let fts_text = fts_plaintext
+                .clone()
+                .and_then(|pt| String::from_utf8(pt).ok());
             match replace_item_atomic(&db_guard, exists, &to_insert, fts_text.as_deref()) {
                 Ok(()) => {
                     debug!(item_id = %to_insert.item_id, "sync_orch: upserted incoming item");
                     upserted += 1;
+                    // Track the highest-wall_time winner for potential auto-apply.
+                    // `fts_plaintext` holds the already-decrypted text bytes; for
+                    // image/file we recover the plaintext separately in
+                    // `apply_to_pasteboard_if_fresh`.  Only update the candidate
+                    // when this item is strictly newer than the current best.
+                    if auto_apply_owned.is_some() {
+                        let plaintext_opt = match wire_content_type.as_str() {
+                            "text" => fts_plaintext.clone(),
+                            // Image plaintext must be recovered from the stored
+                            // row's chunks; pass a sentinel so the caller knows to
+                            // do the decode step.  We use an empty vec as the
+                            // marker here — the actual decode happens in
+                            // `apply_to_pasteboard_if_fresh`.
+                            "image" => Some(Vec::new()),
+                            // Files: skip (deferred — file-URL pasteboard write
+                            // needs a temp-file round-trip; not safe to do in
+                            // the blocking DB closure).
+                            _ => None,
+                        };
+                        if let Some(pt) = plaintext_opt {
+                            let better = apply_candidate
+                                .as_ref()
+                                .is_none_or(|(best_wt, _, _)| wire_wall_time > *best_wt);
+                            if better {
+                                apply_candidate = Some((wire_wall_time, pt, wire_content_type));
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     warn!(item_id = %to_insert.item_id, "sync_orch: atomic replace failed: {e}")
@@ -378,6 +475,64 @@ pub async fn merge_incoming_with_crypto(
                 Ok(0) => {}
                 Ok(n) => debug!("sync_orch: prune_to_cap removed {n} rows after P2P merge"),
                 Err(e) => warn!("sync_orch: prune_to_cap failed after P2P merge: {e}"),
+            }
+        }
+
+        // Universal Clipboard auto-apply: write the single freshest winner to
+        // NSPasteboard, but ONLY when it is strictly newer than the current local
+        // latest wall_time (prevents historical backfill from overwriting the user's
+        // current clipboard on reconnect).
+        if let (
+            Some((candidate_wt, plaintext, content_type)),
+            Some((swcc, local_key, core_config)),
+        ) = (apply_candidate, auto_apply_owned)
+        {
+            // Check feature flag — allows live toggle via set_config.
+            let enabled = core_config
+                .read()
+                .map(|cfg| cfg.auto_apply_synced_clip)
+                .unwrap_or(true); // safe default: on
+
+            if enabled {
+                // Query the current local latest wall_time to decide whether this
+                // is a genuinely fresh remote copy or historical catch-up.
+                let local_latest_wt: i64 = db_guard
+                    .conn()
+                    .query_row(
+                        "SELECT COALESCE(MAX(wall_time), 0) FROM clipboard_items \
+                         WHERE origin_device_id = ''  OR 1=1",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                // Use the actual max wall_time across ALL rows (local or synced)
+                // to detect whether this candidate is the newest thing we know of.
+                let global_max_wt: i64 = db_guard
+                    .conn()
+                    .query_row(
+                        "SELECT COALESCE(MAX(wall_time), 0) FROM clipboard_items",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                let _ = local_latest_wt; // used via global_max_wt path below
+
+                if candidate_wt >= global_max_wt {
+                    // This item is the newest in the DB — apply it.
+                    apply_to_pasteboard_if_fresh(
+                        &db_guard,
+                        &content_type,
+                        plaintext,
+                        &local_key,
+                        &swcc,
+                    );
+                } else {
+                    debug!(
+                        candidate_wt,
+                        global_max_wt,
+                        "sync_orch: auto-apply skipped — not the newest item (historical backfill)"
+                    );
+                }
             }
         }
 
@@ -967,6 +1122,193 @@ fn parse_file_name_mime(meta_json: &str) -> Option<(String, String)> {
     Some((filename, mime))
 }
 
+/// Write decrypted plaintext for a synced item directly to NSPasteboard.
+///
+/// Called from [`merge_incoming_with_crypto`] after determining that the
+/// incoming item is the freshest thing in the DB and `auto_apply_synced_clip`
+/// is enabled.
+///
+/// # Loop prevention
+///
+/// The self-write guard works identically to the `copy_item` IPC handler:
+/// 1. Read the *current* NSPasteboard `changeCount` (pre-write).
+/// 2. Pre-stamp the expected post-write value (`current + 2`) into
+///    `self_write_change_count` **before** calling `clearContents` /
+///    `setString_forType`, so no poll arriving between the write and the stamp
+///    can slip through with a stale sentinel.
+/// 3. After the write, overwrite with the *actual* new `changeCount` so a
+///    macOS increment that differs from our prediction is handled correctly.
+/// 4. On any failure reset the sentinel to `-1` to avoid permanent suppression.
+///
+/// # Content types
+///
+/// * `text` — writes `NSPasteboardTypeString`.  `plaintext` is the raw UTF-8
+///   bytes returned by [`rekey_inbound`].
+/// * `image` — `plaintext` is an empty-vec sentinel (set in the merge loop
+///   because the full PNG was not re-materialised there).  We re-decode it
+///   here from the stored chunks in the DB row.
+/// * `file` — **skipped** (a temp-file round-trip is required; deferred).
+///   Logged at DEBUG.
+///
+/// All Cocoa calls are wrapped in `autoreleasepool` to prevent Objective-C
+/// object leaks on this tokio blocking thread (mirrors `clipboard.rs::poll` and
+/// `ipc.rs::write_to_pasteboard`).
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+fn apply_to_pasteboard_if_fresh(
+    db: &Database,
+    content_type: &str,
+    plaintext: Vec<u8>,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
+    self_write_change_count: &Arc<AtomicI64>,
+) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSPasteboard;
+
+        match content_type {
+            "text" => {
+                let text = match std::str::from_utf8(&plaintext) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        warn!("sync_orch: auto-apply text is not UTF-8: {e}");
+                        return;
+                    }
+                };
+                objc2::rc::autoreleasepool(|_pool| {
+                    use objc2_app_kit::NSPasteboardTypeString;
+                    use objc2_foundation::NSString;
+
+                    // Pre-stamp expected changeCount (clearContents +1, setString +1).
+                    let pre = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                    self_write_change_count.store(pre + 2, Ordering::Release);
+
+                    let ok = unsafe {
+                        let pb = NSPasteboard::generalPasteboard();
+                        pb.clearContents();
+                        let ns_str = NSString::from_str(text);
+                        pb.setString_forType(&ns_str, NSPasteboardTypeString)
+                    };
+                    if ok {
+                        // Post-stamp with the actual changeCount.
+                        let actual =
+                            unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                        self_write_change_count.store(actual, Ordering::Release);
+                        debug!(
+                            change_count = actual,
+                            "sync_orch: auto-applied synced text to NSPasteboard"
+                        );
+                    } else {
+                        // Reset sentinel so the monitor is not permanently suppressed.
+                        self_write_change_count.store(-1, Ordering::Release);
+                        warn!("sync_orch: auto-apply text: NSPasteboard setString:forType: returned false");
+                    }
+                });
+            }
+            "image" => {
+                // `plaintext` is an empty-vec sentinel from the merge loop
+                // (the PNG was not re-materialised there to avoid a second
+                // decode pass).  Recover the PNG from the most-recent image
+                // row in the DB — it was just inserted/updated by this merge.
+                let png_bytes = recover_latest_image_png(db, local_key);
+                let png_bytes = match png_bytes {
+                    Some(b) => b,
+                    None => {
+                        warn!("sync_orch: auto-apply image: could not recover PNG from DB");
+                        return;
+                    }
+                };
+                objc2::rc::autoreleasepool(|_pool| {
+                    use objc2_foundation::{NSData, NSString};
+
+                    let pre = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                    self_write_change_count.store(pre + 2, Ordering::Release);
+
+                    let ok = unsafe {
+                        let pb = NSPasteboard::generalPasteboard();
+                        pb.clearContents();
+                        let type_str = NSString::from_str("public.png");
+                        let data = NSData::with_bytes(&png_bytes);
+                        pb.setData_forType(Some(&data), &type_str)
+                    };
+                    if ok {
+                        let actual =
+                            unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                        self_write_change_count.store(actual, Ordering::Release);
+                        debug!(
+                            change_count = actual,
+                            "sync_orch: auto-applied synced image to NSPasteboard"
+                        );
+                    } else {
+                        self_write_change_count.store(-1, Ordering::Release);
+                        warn!("sync_orch: auto-apply image: NSPasteboard setData:forType: returned false");
+                    }
+                });
+            }
+            "file" => {
+                // Files require writing bytes to a temp file and placing its
+                // file-URL on the pasteboard — deferred to a future iteration.
+                debug!("sync_orch: auto-apply skipped for file item (not yet supported)");
+            }
+            other => {
+                debug!(
+                    content_type = other,
+                    "sync_orch: auto-apply skipped for unknown content_type"
+                );
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Non-macOS: no NSPasteboard. No-op — called only on macOS in production.
+        debug!(content_type, "sync_orch: auto-apply skipped (not macOS)");
+    }
+}
+
+/// Recover PNG bytes for the most-recently-inserted image row from the DB.
+///
+/// Used by [`apply_to_pasteboard_if_fresh`] for the image auto-apply path.
+/// Reads the newest image row's chunk blob + blob_ref, decodes with `local_key`
+/// (v1 seed, the chunk-encryption key), and returns the raw PNG bytes.
+/// Returns `None` on any parse/decrypt failure (logged at DEBUG).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn recover_latest_image_png(
+    db: &Database,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
+) -> Option<Vec<u8>> {
+    use copypaste_core::{chunks_from_blob, decode_image};
+
+    // Fetch the most recent image row (just inserted by this merge).
+    let (content, blob_ref): (Vec<u8>, String) = db
+        .conn()
+        .query_row(
+            "SELECT content, blob_ref FROM clipboard_items \
+             WHERE content_type = 'image' AND content IS NOT NULL AND blob_ref IS NOT NULL \
+             ORDER BY wall_time DESC, id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, String>(1)?)),
+        )
+        .ok()?;
+
+    let file_id = crate::ipc::parse_image_file_id(&blob_ref)
+        .map_err(|e| {
+            debug!("sync_orch: auto-apply image: blob_ref parse failed: {e}");
+        })
+        .ok()?;
+
+    let chunks = chunks_from_blob(&content)
+        .map_err(|e| {
+            debug!("sync_orch: auto-apply image: chunks_from_blob failed: {e}");
+        })
+        .ok()?;
+
+    decode_image(&chunks, local_key, &file_id)
+        .map_err(|e| {
+            debug!("sync_orch: auto-apply image: decode_image failed: {e}");
+        })
+        .ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1359,6 +1701,7 @@ mod tests {
                 "local-device".to_string(),
                 None,
                 500_000_000, // storage_quota_bytes: 500 MB (test default)
+                None,        // auto_apply: disabled in tests (no NSPasteboard)
                 shutdown,
             )
             .await
@@ -1406,6 +1749,7 @@ mod tests {
                 "local-device".to_string(),
                 None,
                 500_000_000, // storage_quota_bytes: 500 MB (test default)
+                None,        // auto_apply: disabled in tests (no NSPasteboard)
                 shutdown,
             )
             .await
