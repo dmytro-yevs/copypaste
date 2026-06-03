@@ -948,6 +948,15 @@ pub struct IpcServer {
     /// tick without a daemon restart.
     /// `None` when not wired in (degraded mode / tests that don't need hot-reload).
     pub core_config: Option<Arc<std::sync::RwLock<copypaste_core::AppConfig>>>,
+
+    /// Best-effort cached public / WAN IP (resolved via STUN on startup, then
+    /// refreshed every ~15 minutes by a background task spawned in `daemon.rs`).
+    /// `None` before the first resolution attempt completes, on failure, or when
+    /// the user has opted out via `AppConfig::collect_public_ip = false`.
+    ///
+    /// `tokio::sync::RwLock` (not `std::sync::Mutex`) because the
+    /// `get_own_device_info` hot path is async and must not block the executor.
+    pub cached_public_ip: Arc<tokio::sync::RwLock<Option<String>>>,
 }
 
 /// Canonical `status.degraded_reason` value for the keychain-locked /
@@ -995,6 +1004,7 @@ impl IpcServer {
             new_item_tx: None,
             degraded_reason: Arc::new(std::sync::Mutex::new(None)),
             core_config: None,
+            cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -1151,6 +1161,7 @@ impl IpcServer {
             new_item_tx: None,
             degraded_reason: Arc::new(std::sync::Mutex::new(None)),
             core_config: None,
+            cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -1164,6 +1175,17 @@ impl IpcServer {
         core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
     ) -> Self {
         self.core_config = Some(core_config);
+        self
+    }
+
+    /// Share the pre-allocated public-IP cache slot with the daemon's
+    /// STUN-refresh background task.
+    ///
+    /// The daemon creates the `Arc<RwLock<…>>`, passes it into the IPC server
+    /// via this method, and also clones it into the refresh task so both can
+    /// write to / read from the same slot without a process-wide lock.
+    pub fn with_public_ip_cache(mut self, cache: Arc<tokio::sync::RwLock<Option<String>>>) -> Self {
+        self.cached_public_ip = cache;
         self
     }
 
@@ -3519,7 +3541,12 @@ impl IpcServer {
                     os_version: None,
                     app_version: env!("CARGO_PKG_VERSION").to_owned(),
                     local_ip: None,
+                    public_ip: None,
                 });
+                // Read the cached public IP collected asynchronously on startup
+                // (STUN, best-effort). `None` when disabled by config or when
+                // the network query has not yet resolved / failed.
+                let public_ip_val = self.cached_public_ip.read().await.clone();
                 Response::ok(
                     req.id,
                     serde_json::json!({
@@ -3529,6 +3556,7 @@ impl IpcServer {
                         "os_version": meta.os_version,
                         "app_version": meta.app_version,
                         "local_ip": meta.local_ip,
+                        "public_ip": public_ip_val,
                     }),
                 )
             }
@@ -8311,6 +8339,46 @@ mod tests {
         assert!(resp.ok, "must succeed with a cert: {resp:?}");
         let data = resp.data.expect("data present");
         assert_eq!(data["fingerprint"], serde_json::Value::String(expected));
+    }
+
+    /// `get_own_device_info` must include `public_ip` in its response payload.
+    /// Without a wired public-IP cache the field serialises as JSON `null`, but
+    /// it must NOT be absent entirely (the UI keys off its presence to decide
+    /// whether to render the public-IP row).
+    #[tokio::test]
+    async fn get_own_device_info_includes_public_ip_field() {
+        let server = bare_server();
+        let resp = server
+            .dispatch(r#"{"id":"d1","method":"get_own_device_info","params":{}}"#)
+            .await;
+        assert!(resp.ok, "get_own_device_info must succeed: {resp:?}");
+        let data = resp.data.expect("data must be present");
+        // The key must exist in the JSON object; its value may be null (no
+        // cached IP yet) or a non-empty string (IP resolved).
+        assert!(
+            data.as_object()
+                .map(|o| o.contains_key("public_ip"))
+                .unwrap_or(false),
+            "get_own_device_info response must include public_ip key: {data}"
+        );
+    }
+
+    /// When the cached public-IP slot contains a value, `get_own_device_info`
+    /// returns that exact string.
+    #[tokio::test]
+    async fn get_own_device_info_returns_cached_public_ip() {
+        let cache = Arc::new(tokio::sync::RwLock::new(Some("203.0.113.42".to_owned())));
+        let server = bare_server().with_public_ip_cache(cache);
+        let resp = server
+            .dispatch(r#"{"id":"d2","method":"get_own_device_info","params":{}}"#)
+            .await;
+        assert!(resp.ok, "must succeed: {resp:?}");
+        let data = resp.data.expect("data present");
+        assert_eq!(
+            data["public_ip"],
+            serde_json::Value::String("203.0.113.42".to_owned()),
+            "public_ip must reflect cached value: {data}"
+        );
     }
 
     /// fix/p2p-c-review #1 — a session older than `PAKE_SESSION_TTL` is evicted

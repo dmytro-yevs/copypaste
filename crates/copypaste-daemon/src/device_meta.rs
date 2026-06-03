@@ -42,6 +42,14 @@ pub struct DeviceMeta {
     /// real LAN interface (e.g. a CI sandbox).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_ip: Option<String>,
+
+    /// Best-effort public / WAN IPv4 address, resolved once on startup via a
+    /// STUN binding request and refreshed every ~15 minutes.  `None` when the
+    /// network query fails, times out, or the user has opted out via the
+    /// `collect_public_ip = false` config flag.  Never blocks startup.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub public_ip: Option<String>,
 }
 
 impl DeviceMeta {
@@ -57,6 +65,11 @@ impl DeviceMeta {
             os_version: collect_os_version(),
             app_version: app_version.to_owned(),
             local_ip: collect_local_ip(),
+            // public_ip is NOT populated here: it requires an async network
+            // call (STUN) and is injected by the IPC layer from the cached
+            // value in ServerState.  Keeping collect() sync + offline ensures
+            // it stays usable from spawn_blocking.
+            public_ip: None,
         }
     }
 }
@@ -322,5 +335,49 @@ mod tests {
         {
             assert!(!v.is_empty(), "optional field must not be Some(\"\")");
         }
+        // public_ip is NOT collected by DeviceMeta::collect (requires async +
+        // network); it is injected at the IPC layer. The field must exist and
+        // default to None.
+        assert!(
+            meta.public_ip.is_none(),
+            "DeviceMeta::collect must not populate public_ip"
+        );
+    }
+
+    /// `DeviceMeta` serialises `public_ip` only when it is `Some` (the field is
+    /// tagged `skip_serializing_if = "Option::is_none"`).
+    #[test]
+    fn public_ip_skipped_in_serialisation_when_none() {
+        let meta = DeviceMeta {
+            device_name: None,
+            device_model: None,
+            os_version: None,
+            app_version: "test".to_owned(),
+            local_ip: None,
+            public_ip: None,
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(
+            !json.contains("public_ip"),
+            "public_ip must be absent from JSON when None: {json}"
+        );
+    }
+
+    /// When `public_ip` is `Some`, it IS included in the serialised form.
+    #[test]
+    fn public_ip_present_in_serialisation_when_some() {
+        let meta = DeviceMeta {
+            device_name: None,
+            device_model: None,
+            os_version: None,
+            app_version: "test".to_owned(),
+            local_ip: None,
+            public_ip: Some("203.0.113.42".to_owned()),
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(
+            json.contains("\"public_ip\":\"203.0.113.42\""),
+            "public_ip must appear in JSON when Some: {json}"
+        );
     }
 }
