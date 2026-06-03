@@ -1244,11 +1244,13 @@ async fn standing_pairing_responder_loop(
         .await
         .unwrap_or_default();
 
-        // EPHEMERAL random password. The initiator sends its own random password
-        // in-band; the responder side of `run_with_confirm` reconstructs the
-        // PAKE from the initiator's transmitted password, so we register a
-        // matching throwaway here. SAS authenticates, not this value.
-        let password = copypaste_core::PairingToken::generate().to_pake_password();
+        // Discovery (QR-less) path: the responder's OPAQUE `PasswordFile` MUST be
+        // registered for the SAME password the initiator uses, because opaque-ke
+        // is asymmetric — a per-side random password makes `ClientLogin::finish`
+        // fail at frame 7 before any SAS is derived. So both ends use the FIXED,
+        // well-known, NON-SECRET `copypaste_p2p::DISCOVERY_PAIRING_PASSWORD`; the
+        // human SAS compare authenticates, not this value.
+        let password = copypaste_p2p::DISCOVERY_PAIRING_PASSWORD.to_string();
 
         let coordinator = Arc::clone(&pairing);
         // Claim the single-active-pairing slot LAZILY inside the confirm

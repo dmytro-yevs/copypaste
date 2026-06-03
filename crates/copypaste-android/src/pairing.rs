@@ -57,25 +57,16 @@ use crate::{CopypasteError, SyncProvisioning};
 
 /// Fixed, well-known PAKE password for the LAN/SAS *discovery* pairing path.
 ///
-/// The discovery path has NO pre-shared secret, so PAKE alone cannot
-/// authenticate — the human SAS comparison does. opaque-ke is an ASYMMETRIC
-/// PAKE: the initiator's `ClientLogin` only succeeds against a `PasswordFile`
-/// registered for the IDENTICAL password (a mismatch fails at frame 7, before
-/// any SAS is derived). Both ends therefore agree on this constant up front and
-/// rely ENTIRELY on the post-channel-binding SAS compare for authentication
-/// (Bluetooth numeric-comparison / Magic-Wormhole-verifier pattern): a MitM
-/// substituting its own per-leg session yields a different `bound_key` → a
-/// different SAS → the two humans see a mismatch and abort.
-///
-/// This is NON-SECRET by design — publishing it changes nothing, because the
-/// SAS, not the password, gates trust and persistence.
-///
-/// NOTE (interop caveat): this is the value BOTH the Android initiator and the
-/// Android standing responder use, so Android↔Android discovery pairing
-/// converges. macOS↔Android discovery pairing additionally requires the macOS
-/// daemon's discovery path to agree on this same constant; reconciling that is a
-/// desktop-side (`copypaste-daemon`) concern outside this crate's scope.
-pub const DISCOVERY_PAIRING_PASSWORD: &str = "copypaste/p2p/lan-sas-discovery/v1";
+/// Re-exported from [`copypaste_p2p::DISCOVERY_PAIRING_PASSWORD`] so every
+/// platform (Android initiator + standing responder AND the macOS daemon's
+/// initiator + responder) uses ONE byte-identical value — opaque-ke is
+/// asymmetric, so `ClientLogin::finish` only succeeds against a `PasswordFile`
+/// registered for the IDENTICAL password. Authentication comes ENTIRELY from
+/// the post-channel-binding human SAS compare, not from password secrecy, so
+/// this is NON-SECRET by design. See the doc comment on the source constant for
+/// the full rationale. The value is unchanged from what Android already shipped,
+/// so Android↔Android wire bytes / checksums are unaffected.
+pub use copypaste_p2p::DISCOVERY_PAIRING_PASSWORD;
 
 /// How long the standing responder / a polling Kotlin client waits for the local
 /// user to confirm or reject the SAS before auto-aborting the in-flight pairing.

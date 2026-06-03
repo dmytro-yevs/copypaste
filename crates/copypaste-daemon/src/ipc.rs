@@ -1777,8 +1777,13 @@ impl IpcServer {
             );
         }
 
-        // EPHEMERAL random password — NOT a shared secret. The SAS authenticates.
-        let password = copypaste_core::PairingToken::generate().to_pake_password();
+        // Discovery (QR-less) path: a FIXED, well-known, NON-SECRET PAKE password
+        // shared by every initiator/responder. opaque-ke is asymmetric, so a
+        // per-side random password would fail `ClientLogin::finish` at frame 7
+        // before any SAS is derived. The human SAS compare authenticates, not the
+        // password — see `copypaste_p2p::DISCOVERY_PAIRING_PASSWORD`. (QR pairing
+        // keeps its token-derived password; this only affects discovery.)
+        let password = copypaste_p2p::DISCOVERY_PAIRING_PASSWORD.to_string();
         let (cert_der, key_der) = (cert.0.clone(), cert.1.clone());
         let own_sync_addr = self.own_sync_addr();
         // B1: our own STUN-discovered global IP, read from the shared cache and
