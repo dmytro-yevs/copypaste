@@ -33,8 +33,12 @@ import javax.crypto.spec.SecretKeySpec
  *
  * ## Sensitive items
  *
- * Sensitive items are DROPPED at capture time in [storeItem] and
- * [storeItemWithLww] — Android never persists them.
+ * Sensitive items are STORED (not dropped) at capture time in [storeItem] and
+ * on sync-in in [storeItemWithLww], matching the macOS daemon. The sensitivity
+ * verdict is recomputed at read time by [parseItem] and surfaced via
+ * [ClipboardItem.isSensitive], which drives the masked preview / PRIVATE chip in
+ * the history UI. Sensitive items are still subject to the sensitive-TTL
+ * auto-wipe pass in [pruneByAge].
  */
 class ClipboardRepository(context: Context) {
 
@@ -109,6 +113,9 @@ class ClipboardRepository(context: Context) {
      */
     suspend fun getItems(key: ByteArray, limit: Int = 200): List<ClipboardItem> =
         withContext(Dispatchers.IO) {
+            // AB-13: run the retention TTL auto-wipe on the same cadence as load
+            // (cheap general-age fast-path; sensitive pass only decrypts aged rows).
+            pruneByAge(key)
             val pinnedList = storedPinnedList()
             val pinnedSet = pinnedList.toHashSet()
             // Build index map: id → position in pinned list (0 = top of pinned section).
@@ -117,13 +124,13 @@ class ClipboardRepository(context: Context) {
             ids.mapNotNull { id ->
                 val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
                 val item = parseItem(id, raw, key) ?: return@mapNotNull null
-                // Attach image bytes for display when available. Prefer the thumbnail (smaller,
-                // faster to decode) and fall back to full-res when no thumbnail has been generated
-                // yet (lazy backfill for items captured before thumbnail support was added).
-                val displayBytes = if (item.isImage) {
-                    getThumbnailBytes(id) ?: getImageBytes(id)
-                } else null
-                val withImage = if (item.isImage) item.copy(imagePng = displayBytes) else item
+                // AB-8: do NOT eagerly attach decoded display bytes here. Attaching
+                // bytes for every image up front allocated the whole image working
+                // set on load → jank/OOM. The row now lazily fetches its thumbnail
+                // on demand (HistoryActivity, through a bounded LRU). We leave
+                // imagePng null; the row resolves it per-row, preferring the stored
+                // thumbnail over full-res.
+                val withImage = item
                 val isPinned = id in pinnedSet
                 // For binary payloads the synced blob is the full-res image / raw file, NOT the
                 // thumbnail shown in the row. Measure its stored byte size cheaply from the
@@ -172,6 +179,16 @@ class ClipboardRepository(context: Context) {
             null
         }
     }
+
+    /**
+     * AB-8: bytes a history ROW should render for image item [id]. Prefers the
+     * stored thumbnail (small, generated at capture from a max-680-px Bitmap) and
+     * falls back to full-res only when no thumbnail exists yet (lazy backfill for
+     * items captured before thumbnail support). Called per-row on demand by
+     * [HistoryActivity] through its bounded LRU — never eagerly in [getItems].
+     */
+    fun getDisplayImageBytes(id: String): ByteArray? =
+        getThumbnailBytes(id) ?: getImageBytes(id)
 
     /**
      * Persist thumbnail bytes for item [id] under "item_thumb_<id>".
@@ -548,12 +565,14 @@ class ClipboardRepository(context: Context) {
             lastStoredAtMs = now
         }
 
-        val sensitive = try {
-            isSensitive(plaintext)
-        } catch (_: UnsatisfiedLinkError) {
-            false
-        }
-        if (sensitive) return@withContext ""
+        // AB-6b — PARITY with macOS: do NOT drop sensitive items. macOS stores
+        // them (the daemon persists every captured clip) and masks them in the
+        // UI. Dropping them on Android meant macOS-captured secrets never showed
+        // up here, breaking cross-device coherence. We now STORE the item; the
+        // is_sensitive flag is recomputed at read time by parseItem() and drives
+        // the PRIVATE chip + masked preview in HistoryActivity. (The native
+        // detector threshold was aligned to >=0.70 in ABI 14 so the capture-time
+        // and read-time verdicts agree.)
 
         // STABLE identity: reuse an incoming item's stable id verbatim; mint a
         // fresh UUID only for a locally-captured clip. This is the value bound
@@ -619,8 +638,10 @@ class ClipboardRepository(context: Context) {
     ): Boolean = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext false
 
-        val sensitive = try { isSensitive(plaintext) } catch (_: UnsatisfiedLinkError) { false }
-        if (sensitive) return@withContext false
+        // AB-6b — PARITY with macOS: store sensitive synced items instead of
+        // dropping them. A sensitive clip captured on macOS must round-trip to
+        // Android and render masked, not silently vanish. Sensitivity is
+        // recomputed at read time by parseItem() and drives the masked preview.
 
         // ── REPLACE PATH: close the TOCTOU between the existingStorageId
         // lookup + storedLamportTs read and the final putString write.
@@ -736,19 +757,50 @@ class ClipboardRepository(context: Context) {
      */
     suspend fun loadFullPlaintext(id: String, key: ByteArray): String? =
         withContext(Dispatchers.IO) {
-            val raw = prefs.getString("item_$id", null) ?: return@withContext null
-            val parts = raw.split("|")
-            val nonceB64 = parts.getOrNull(3) ?: return@withContext null
-            val ctB64 = parts.getOrNull(4) ?: return@withContext null
-            return@withContext try {
-                val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
-                val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
-                decryptForPreview(id, ciphertext, nonce, key)
-            } catch (e: Exception) {
-                Log.w(TAG, "loadFullPlaintext: decrypt failed for $id: ${e.message}")
-                null
+            loadFullPlaintextBlocking(id, key)
+        }
+
+    /**
+     * AB-11 — full-content search. Returns the subset of [ids] whose FULL
+     * decrypted text contains [query] (case-insensitive). The snippet-only filter
+     * in [HistoryActivity] missed matches past the 140-char preview; this decrypts
+     * each candidate and matches the whole payload.
+     *
+     * Image / file items have no searchable text body, so they are matched on
+     * their stored snippet/label only (decrypting yields the same label). A blank
+     * [query] returns all [ids] unchanged. Decryption failures are treated as
+     * non-matches rather than propagating an error.
+     *
+     * Runs on [Dispatchers.IO]; the caller is expected to debounce.
+     */
+    suspend fun searchIds(ids: List<String>, query: String, key: ByteArray): Set<String> =
+        withContext(Dispatchers.IO) {
+            val q = query.trim()
+            if (q.isEmpty()) return@withContext ids.toSet()
+            ids.filterTo(HashSet()) { id ->
+                val full = loadFullPlaintextBlocking(id, key)
+                full != null && full.contains(q, ignoreCase = true)
             }
         }
+
+    /**
+     * Synchronous full-plaintext decrypt for use inside an already-`IO` context
+     * (e.g. [searchIds]). Mirrors [loadFullPlaintext] without an extra dispatch.
+     */
+    private fun loadFullPlaintextBlocking(id: String, key: ByteArray): String? {
+        val raw = prefs.getString("item_$id", null) ?: return null
+        val parts = raw.split("|")
+        val nonceB64 = parts.getOrNull(3) ?: return null
+        val ctB64 = parts.getOrNull(4) ?: return null
+        return try {
+            val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
+            val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
+            decryptForPreview(id, ciphertext, nonce, key)
+        } catch (e: Exception) {
+            Log.d(TAG, "loadFullPlaintextBlocking: decrypt failed for $id: ${e.message}")
+            null
+        }
+    }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -816,6 +868,129 @@ class ClipboardRepository(context: Context) {
             ClipboardService.onItemsDeleted(appContext, evictedCount)
         }
     }
+
+    /**
+     * AB-13 — retention TTL auto-wipe (macOS parity).
+     *
+     * macOS auto-wipes by two age policies; Android had neither. This pass
+     * deletes:
+     *  - any UNPINNED item older than the GENERAL retention TTL
+     *    ([generalTtlSecs], default [DEFAULT_GENERAL_TTL_SECS] = 30 days, mirroring
+     *    the macOS `sync_ttl_secs` retention floor); and
+     *  - any UNPINNED *sensitive* item older than [Settings.sensitiveTtlSecs]
+     *    (default 30 s; `0` disables, exactly like macOS).
+     *
+     * A TTL of `0` disables that pass (the macOS "never wipe" sentinel). PINNED
+     * items are never aged out — they survive until an explicit user delete,
+     * matching [pruneToLimits].
+     *
+     * Sensitivity is only evaluated for items already past the (short) sensitive
+     * TTL window AND only when the sensitive pass is enabled, so the per-row
+     * decrypt cost is bounded — fresh items are never decrypted here.
+     *
+     * Wall-time is field 0 of the pipe-delimited blob (written by [encodeItem]),
+     * so the general pass needs no decrypt at all.
+     */
+    private fun pruneByAge(key: ByteArray? = null) {
+        val generalTtlSecs = generalTtlSecs().coerceAtLeast(0L)
+        val sensitiveTtlSecs = settings.sensitiveTtlSecs.coerceAtLeast(0L)
+        if (generalTtlSecs == 0L && sensitiveTtlSecs == 0L) return // both disabled
+
+        val now = System.currentTimeMillis()
+        val generalCutoffMs = if (generalTtlSecs > 0L) now - generalTtlSecs * 1000L else Long.MIN_VALUE
+        val sensitiveCutoffMs = if (sensitiveTtlSecs > 0L) now - sensitiveTtlSecs * 1000L else Long.MIN_VALUE
+        var deletedCount = 0
+
+        synchronized(idsWriteLock) {
+            val pinnedSet = storedPinnedIds()
+            val ids = storedIds()
+            val editor = prefs.edit()
+            val survivors = ArrayList<String>(ids.size)
+
+            for (id in ids) {
+                if (id in pinnedSet) {
+                    survivors.add(id) // pinned items never age out
+                    continue
+                }
+                val raw = prefs.getString("item_$id", null)
+                if (raw == null) {
+                    // Index references a missing blob — drop the dangling id.
+                    continue
+                }
+                val wallTimeMs = raw.substringBefore('|').toLongOrNull()
+                if (wallTimeMs == null) {
+                    survivors.add(id) // malformed — leave it for the normal prune
+                    continue
+                }
+
+                // General retention: oldest-first absolute age cap.
+                val expiredByGeneral = generalTtlSecs > 0L && wallTimeMs < generalCutoffMs
+
+                // Sensitive retention: only decrypt+classify items already past the
+                // sensitive window (cheap fast-path skips the vast majority of rows).
+                val expiredBySensitive = sensitiveTtlSecs > 0L &&
+                    wallTimeMs < sensitiveCutoffMs &&
+                    isItemSensitive(id, raw, key)
+
+                if (expiredByGeneral || expiredBySensitive) {
+                    editor.remove("item_$id")
+                    editor.remove("item_img_$id")
+                    editor.remove("item_thumb_$id")
+                    editor.remove("item_file_$id")
+                    editor.remove("item_filemeta_$id")
+                    editor.remove("item_id_ref_$id")
+                    deletedCount++
+                    Log.d(TAG, "pruneByAge: wiped $id (general=$expiredByGeneral, sensitive=$expiredBySensitive)")
+                } else {
+                    survivors.add(id)
+                }
+            }
+
+            if (deletedCount > 0) {
+                editor.putString(KEY_ITEM_IDS, survivors.joinToString(",")).apply()
+            }
+        }
+
+        if (deletedCount > 0) {
+            ClipboardService.onItemsDeleted(appContext, deletedCount)
+        }
+    }
+
+    /**
+     * Decrypt [raw]'s payload and classify it via the native [isSensitive].
+     * Returns false (treat as non-sensitive) when no [key] is available or the
+     * blob cannot be decrypted, so a missing key never wrongly wipes data.
+     */
+    private fun isItemSensitive(id: String, raw: String, key: ByteArray?): Boolean {
+        if (key == null) return false
+        val parts = raw.split("|")
+        val nonceB64 = parts.getOrNull(3) ?: return false
+        val ctB64 = parts.getOrNull(4) ?: return false
+        return try {
+            val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
+            val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
+            val plain = decryptForPreview(id, ciphertext, nonce, key)
+            try {
+                isSensitive(plain)
+            } catch (_: UnsatisfiedLinkError) {
+                false
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "isItemSensitive: decrypt failed for $id: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * General retention TTL in seconds. Read from the same "copypaste" prefs file
+     * Settings owns (key `general_ttl_secs`) so a future settings UI can drive it;
+     * defaults to [DEFAULT_GENERAL_TTL_SECS] (30 days) to mirror the macOS
+     * `sync_ttl_secs` retention floor. `0` disables the general age pass.
+     */
+    private fun generalTtlSecs(): Long =
+        appContext.getSharedPreferences(SETTINGS_PREFS_NAME, Context.MODE_PRIVATE)
+            .getLong(KEY_GENERAL_TTL_SECS, DEFAULT_GENERAL_TTL_SECS)
+            .coerceAtLeast(0L)
 
     /**
      * Raw decoded byte count of a Base64 (NO_WRAP) string, computed without
@@ -1002,6 +1177,24 @@ class ClipboardRepository(context: Context) {
 
         /** SharedPreferences file name — single source of truth, not scattered as string literals. */
         const val PREFS_NAME = "copypaste_items"
+
+        /**
+         * Name of the SharedPreferences file that [Settings] owns ("copypaste").
+         * [generalTtlSecs] reads the general retention TTL from here so the value
+         * is shared with any future settings UI without coupling to [Settings]'s
+         * private prefs handle. Must stay in sync with the literal in Settings.
+         */
+        const val SETTINGS_PREFS_NAME = "copypaste"
+
+        /** Pref key for the general retention TTL (seconds); `0` disables. */
+        const val KEY_GENERAL_TTL_SECS = "general_ttl_secs"
+
+        /**
+         * Default general retention TTL = 30 days, mirroring the macOS
+         * `SYNC_TTL_SECS` (2_592_000 s) retention floor. Items older than this are
+         * auto-wiped by [pruneByAge] unless pinned.
+         */
+        const val DEFAULT_GENERAL_TTL_SECS: Long = 30L * 24 * 60 * 60
 
         fun normalizeContentTypeForSync(stored: String): String =
             if (stored == "text" || stored.startsWith("text/")) "text" else stored
