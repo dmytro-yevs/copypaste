@@ -2,38 +2,60 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/ipc";
 
 // ---------------------------------------------------------------------------
-// Shared image thumbnail cache — keyed by item id, value is the resolved data
-// URI (or null when the fetch failed). Module-level so it survives re-mounts
-// across HistoryView and PopupRow.
+// Shared image cache — keyed by item id, value is the resolved data URI (or
+// null when the fetch failed). Module-level so it survives re-mounts across
+// HistoryView and PopupRow.
 //
-// Bounded LRU at IMAGE_CACHE_MAX entries: we delete-then-re-set on every
-// access ("touch") so the Map insertion order reflects recency, and we evict
-// the oldest (first) key when the cap is hit.
+// Byte-budget LRU (~24 MiB cap): each entry's cost is the byte length of its
+// data-URI string. Null entries (recorded misses) cost 0 bytes. When the
+// cumulative cost of all entries exceeds CACHE_BUDGET_BYTES the oldest (LRU)
+// entry is evicted until the cache is within budget.
+//
+// LRU ordering is implemented via Map insertion order: on every access
+// (cacheGet "touch" + cacheSet) we delete-then-re-insert so the Map tail is
+// always the most-recently-used key and the head is the LRU candidate.
 // ---------------------------------------------------------------------------
 
-const IMAGE_CACHE_MAX = 100;
-const imageCache = new Map<string, string | null>();
+const CACHE_BUDGET_BYTES = 24 * 1024 * 1024; // 24 MiB
+
+// Value stored per entry: { uri, bytes }.
+interface CacheEntry {
+  uri: string | null;
+  bytes: number;
+}
+
+const imageCache = new Map<string, CacheEntry>();
+let cacheTotalBytes = 0;
 
 // In-flight promise cache — prevents parallel duplicate fetches for the same
 // item id (e.g. popup + history both mount an ImageThumb for the same id).
-// Mirrors the pattern used in AppIcon.tsx.
 const inflight = new Map<string, Promise<string | null>>();
 
 function cacheGet(id: string): string | null | undefined {
-  if (!imageCache.has(id)) return undefined;
-  const value = imageCache.get(id) as string | null;
+  const entry = imageCache.get(id);
+  if (entry === undefined) return undefined;
   // Touch — move to most-recently-used tail.
   imageCache.delete(id);
-  imageCache.set(id, value);
-  return value;
+  imageCache.set(id, entry);
+  return entry.uri;
 }
 
-function cacheSet(id: string, value: string | null): void {
-  if (imageCache.has(id)) imageCache.delete(id);
-  imageCache.set(id, value);
-  while (imageCache.size > IMAGE_CACHE_MAX) {
+function cacheSet(id: string, uri: string | null): void {
+  const existing = imageCache.get(id);
+  if (existing !== undefined) {
+    cacheTotalBytes -= existing.bytes;
+    imageCache.delete(id);
+  }
+  const bytes = uri !== null ? uri.length : 0;
+  imageCache.set(id, { uri, bytes });
+  cacheTotalBytes += bytes;
+
+  // Evict LRU entries until we are within budget.
+  while (cacheTotalBytes > CACHE_BUDGET_BYTES && imageCache.size > 1) {
     const oldest = imageCache.keys().next().value;
     if (oldest === undefined) break;
+    const evicted = imageCache.get(oldest)!;
+    cacheTotalBytes -= evicted.bytes;
     imageCache.delete(oldest);
   }
 }
@@ -41,16 +63,42 @@ function cacheSet(id: string, value: string | null): void {
 /** Drop all cached thumbnails (call when the user clears history). */
 export function clearImageCache(): void {
   imageCache.clear();
+  cacheTotalBytes = 0;
   inflight.clear();
 }
 
 // ---------------------------------------------------------------------------
-// fetchImage — coalesces concurrent fetches for the same item id so that when
-// popup + history both mount an ImageThumb for the same id only one IPC call
-// is made. Mirrors AppIcon.tsx's fetchIcon pattern.
+// Test-only exports — exposed solely for unit tests; not part of the public
+// component API. The `__testOnly_` prefix signals this clearly.
 // ---------------------------------------------------------------------------
 
-function fetchImage(id: string): Promise<string | null> {
+/** Returns the current number of entries in the cache. */
+export function __testOnly_cacheSize(): number {
+  return imageCache.size;
+}
+
+/** Returns the byte-budget constant (CACHE_BUDGET_BYTES). */
+export function __testOnly_cacheBudgetBytes(): number {
+  return CACHE_BUDGET_BYTES;
+}
+
+/** Set a cache entry directly (test helper). */
+export function __testOnly_cacheSet(id: string, uri: string | null): void {
+  cacheSet(id, uri);
+}
+
+/** Get a cache entry directly (test helper). Returns undefined when absent. */
+export function __testOnly_cacheGet(id: string): string | null | undefined {
+  return cacheGet(id);
+}
+
+// ---------------------------------------------------------------------------
+// fetchThumbnail — fetch the small thumbnail first; fall back to full-res
+// when the daemon does not support get_item_thumbnail or returns null.
+// Coalesces concurrent fetches for the same item id.
+// ---------------------------------------------------------------------------
+
+function fetchThumbnail(id: string): Promise<string | null> {
   // Resolved cache — fastest path.
   const cached = cacheGet(id);
   if (cached !== undefined) return Promise.resolve(cached);
@@ -60,9 +108,19 @@ function fetchImage(id: string): Promise<string | null> {
   if (existing) return existing;
 
   const p = api
-    .getItemImage(id)
-    .then(({ data_uri }) => data_uri)
-    .catch(() => null as string | null)
+    .getItemThumbnail(id)
+    .then(({ thumbnail }) => {
+      if (thumbnail !== null) return thumbnail;
+      // Daemon returned null thumbnail — fall back to full-res.
+      return api.getItemImage(id).then(({ data_uri }) => data_uri);
+    })
+    .catch(() => {
+      // get_item_thumbnail not supported by this daemon version — fall back.
+      return api
+        .getItemImage(id)
+        .then(({ data_uri }) => data_uri)
+        .catch(() => null as string | null);
+    })
     .then((result) => {
       cacheSet(id, result);
       inflight.delete(id);
@@ -82,10 +140,14 @@ function fetchImage(id: string): Promise<string | null> {
 //     natural size (CSS: max-width / max-height, no min-* forcing).
 //   • CSS object-fit: contain; image-rendering: auto (high-quality downscale).
 //   • On fetch failure renders a small placeholder instead of null (blank row).
+//
+// For list rows this component fetches the THUMBNAIL (small preview) and falls
+// back to full-res only when the daemon doesn't support thumbnails. The detail
+// modal (DetailsModal) uses getItemImage directly for full-resolution display.
 // ---------------------------------------------------------------------------
 
 interface ImageThumbProps {
-  /** Clipboard item ID passed to api.getItemImage. */
+  /** Clipboard item ID passed to api.getItemThumbnail (with full-res fallback). */
   id: string;
   /**
    * Height cap of the bounding box in px (the `imageMaxHeight` setting).
@@ -132,9 +194,9 @@ export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
     // Reset to loading state while the fetch is in flight.
     setSrc(null);
 
-    fetchImage(id).then((result) => {
+    fetchThumbnail(id).then((result) => {
       if (!mountedRef.current) return;
-      // null from fetchImage means fetch failed — use sentinel so render shows
+      // null from fetchThumbnail means fetch failed — use sentinel so render shows
       // placeholder instead of staying blank (null = "still loading" ambiguity).
       setSrc(result ?? FETCH_FAILED);
     });
