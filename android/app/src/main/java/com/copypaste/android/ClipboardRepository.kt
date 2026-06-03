@@ -117,8 +117,13 @@ class ClipboardRepository(context: Context) {
             ids.mapNotNull { id ->
                 val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
                 val item = parseItem(id, raw, key) ?: return@mapNotNull null
-                // Attach image bytes when available — non-null only for image/* content types.
-                val withImage = if (item.isImage) item.copy(imagePng = getImageBytes(id)) else item
+                // Attach image bytes for display when available. Prefer the thumbnail (smaller,
+                // faster to decode) and fall back to full-res when no thumbnail has been generated
+                // yet (lazy backfill for items captured before thumbnail support was added).
+                val displayBytes = if (item.isImage) {
+                    getThumbnailBytes(id) ?: getImageBytes(id)
+                } else null
+                val withImage = if (item.isImage) item.copy(imagePng = displayBytes) else item
                 val isPinned = id in pinnedSet
                 withImage.copy(
                     pinned = isPinned,
@@ -139,6 +144,35 @@ class ClipboardRepository(context: Context) {
             Log.w(TAG, "getImageBytes: failed to decode image for $id: ${e.message}")
             null
         }
+    }
+
+    /**
+     * Return the thumbnail bytes for image item [id], or null when no thumbnail
+     * has been generated yet. Thumbnail bytes are stored under "item_thumb_<id>"
+     * as Base64 NO_WRAP (WebP LOSSY on API 30+, PNG on older APIs).
+     */
+    fun getThumbnailBytes(id: String): ByteArray? {
+        val b64 = prefs.getString("item_thumb_$id", null) ?: return null
+        return try {
+            Base64.decode(b64, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            Log.w(TAG, "getThumbnailBytes: failed to decode thumb for $id: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Persist thumbnail bytes for item [id] under "item_thumb_<id>".
+     *
+     * No size gate is applied here — thumbnails are intentionally small (generated
+     * from a max-680-px scaled Bitmap) so the quota overhead is negligible. The
+     * caller ([ClipboardService.captureImageClip]) is responsible for only passing
+     * the output of [ImageThumbnailUtils.generateThumbnail].
+     */
+    fun storeThumbnailBytes(id: String, bytes: ByteArray) {
+        val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
+        prefs.edit().putString("item_thumb_$id", b64).apply()
+        Log.d(TAG, "storeThumbnailBytes: stored ${bytes.size} bytes for $id")
     }
 
     /**
@@ -165,6 +199,7 @@ class ClipboardRepository(context: Context) {
             val editor = prefs.edit()
                 .remove("item_$id")
                 .remove("item_img_$id")
+                .remove("item_thumb_$id")
                 // Remove the reverse-lookup key to prevent orphan LWW ghost on re-sync.
                 .remove("item_id_ref_$id")
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
@@ -207,6 +242,7 @@ class ClipboardRepository(context: Context) {
             for (id in toDelete) {
                 editor.remove("item_$id")
                 editor.remove("item_img_$id")
+                editor.remove("item_thumb_$id")
                 // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
                 editor.remove("item_id_ref_$id")
             }
@@ -238,6 +274,7 @@ class ClipboardRepository(context: Context) {
                 if (id !in pinnedSet) {
                     editor.remove("item_$id")
                     editor.remove("item_img_$id")
+                    editor.remove("item_thumb_$id")
                     // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
                     editor.remove("item_id_ref_$id")
                 }
@@ -274,6 +311,7 @@ class ClipboardRepository(context: Context) {
                 if (id !in pinnedSet) {
                     editor.remove("item_$id")
                     editor.remove("item_img_$id")
+                    editor.remove("item_thumb_$id")
                     // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
                     editor.remove("item_id_ref_$id")
                 }
@@ -662,7 +700,8 @@ class ClipboardRepository(context: Context) {
                 // size from the Base64 length (NO_WRAP, so it is a multiple of 4
                 // with '=' padding) avoids a full decode allocation per row.
                 val imgBytes = prefs.getString("item_img_$id", null)?.let { base64RawByteSize(it) } ?: 0
-                id to (textBytes + imgBytes)
+                val thumbBytes = prefs.getString("item_thumb_$id", null)?.let { base64RawByteSize(it) } ?: 0
+                id to (textBytes + imgBytes + thumbBytes)
             }
 
             var totalBytes = blobSizes.values.sumOf { it.toLong() }
@@ -681,6 +720,7 @@ class ClipboardRepository(context: Context) {
                 totalBytes -= sz
                 editor.remove("item_$evictId")
                 editor.remove("item_img_$evictId")
+                editor.remove("item_thumb_$evictId")
                 // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
                 editor.remove("item_id_ref_$evictId")
                 didEvict = true
