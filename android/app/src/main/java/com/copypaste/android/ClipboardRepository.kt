@@ -1400,6 +1400,7 @@ class ClipboardRepository(context: Context) {
                 val ciphertext = Base64.decode(parts[4], Base64.NO_WRAP)
                 val plain = decryptText(id, ciphertext, nonce, key)
 
+                val isImage = contentType == "image" || contentType.startsWith("image/")
                 if (contentType == "file") {
                     // For file items the raw plaintext is just a label; the peer
                     // needs the actual file bytes. Fetch from the sidecar store.
@@ -1417,6 +1418,26 @@ class ClipboardRepository(context: Context) {
                         plaintext = fileBytes.map { it.toUByte() },
                         fileName = fileName,
                         mime = mime,
+                    )
+                } else if (isImage) {
+                    // AB-5: for image items the raw plaintext is the content:// URI
+                    // placeholder, NOT the pixels. Attach the real image bytes from
+                    // the sidecar store (mirrors the file branch) so P2P/cloud send
+                    // ships actual bytes instead of a useless URI string.
+                    val imageBytes = getImageBytes(id)
+                    if (imageBytes == null || imageBytes.isEmpty()) {
+                        Log.d(TAG, "Skipping image item $id for sync: bytes missing or empty")
+                        return@mapNotNull null
+                    }
+                    uniffi.copypaste_android.LocalItem(
+                        id = id,
+                        itemId = id,
+                        wallTimeMs = wallTimeMs,
+                        contentType = contentType,
+                        plaintext = imageBytes.map { it.toUByte() },
+                        // Images carry no in-band name/MIME header (only files do).
+                        fileName = null,
+                        mime = null,
                     )
                 } else {
                     uniffi.copypaste_android.LocalItem(

@@ -185,7 +185,7 @@ class ClipboardService : Service() {
             }
             if (fileMime != null) {
                 scope.launch {
-                    captureFileClip(this@ClipboardService, itemUri, fileMime, settings, repository)
+                    captureFileClip(this@ClipboardService, itemUri, fileMime, settings, repository, syncManager)
                 }
                 return@OnPrimaryClipChangedListener
             }
@@ -746,7 +746,14 @@ class ClipboardService : Service() {
                 if (settings.notifyOnCopy) postCopyNotification(context)
                 if (settings.soundOnCopy) playCopySound(context)
                 if (settings.syncEnabled) {
-                    notifySyncManager(storedId, text, key, settings, syncManager, lamportTs)
+                    notifySyncManager(
+                        itemId = storedId,
+                        payload = text.toByteArray(Charsets.UTF_8),
+                        contentType = "text",
+                        settings = settings,
+                        syncManager = syncManager,
+                        lamportTs = lamportTs,
+                    )
                 }
             }
         }
@@ -766,7 +773,6 @@ class ClipboardService : Service() {
          *   (off-limits file), call storeThumbnailBytes there too so synced image
          *   rows also benefit from thumbnail display.
          */
-        @Suppress("UNUSED_PARAMETER") // syncManager reserved for future image-sync wiring
         suspend fun captureImageClip(
             context: Context,
             uri: android.net.Uri,
@@ -838,9 +844,17 @@ class ClipboardService : Service() {
 
             // Persist a placeholder text blob with the image MIME type so the row
             // appears in history, then attach the image bytes under the same id.
+            // Generate ONE lamport tick and thread it into the stored row AND the
+            // cloud push (parity with the text path) so LWW agrees on a later poll.
             val placeholder = uri.toString()
             val key = settings.encryptionKey
-            val storedId = repository.storeItem(placeholder, key, contentType = mimeType)
+            val lamportTs = settings.lamportClock.tick()
+            val storedId = repository.storeItem(
+                placeholder,
+                key,
+                contentType = mimeType,
+                lamportTs = lamportTs,
+            )
             if (storedId.isEmpty()) {
                 Log.d(TAG, "captureImageClip: storeItem returned empty (dedup/sensitive) — not storing bytes")
                 return
@@ -860,7 +874,21 @@ class ClipboardService : Service() {
             refreshNotification(context)
             if (settings.notifyOnCopy) postCopyNotification(context)
             if (settings.soundOnCopy) playCopySound(context)
-            // Image sync is not wired in this version — text sync only for now.
+
+            // AB-4: push the IMAGE bytes to the cloud (Supabase + relay) the same
+            // way text does. content_type "image" makes the receiver store raw
+            // bytes (build_local_blob_item on macOS, the image branch on Android)
+            // instead of UTF-8-decoding binary. No header — images carry none.
+            if (settings.syncEnabled) {
+                notifySyncManager(
+                    itemId = storedId,
+                    payload = pngBytes,
+                    contentType = "image",
+                    settings = settings,
+                    syncManager = syncManager,
+                    lamportTs = lamportTs,
+                )
+            }
         }
 
         /**
@@ -885,6 +913,11 @@ class ClipboardService : Service() {
             mimeType: String,
             settings: Settings,
             repository: ClipboardRepository,
+            // AB-4: when supplied AND sync is enabled, the captured file is also
+            // pushed to the cloud (Supabase + relay). Optional/defaulted so the
+            // accessibility-service caller (which has no SyncManager wired) compiles
+            // unchanged and simply skips the cloud push.
+            syncManager: SyncManager? = null,
         ) {
             if (!settings.captureEnabled) {
                 Log.d(TAG, "captureFileClip: capture paused — dropping file clipboard change")
@@ -929,10 +962,14 @@ class ClipboardService : Service() {
 
             val key = settings.encryptionKey
             val label = SyncFileHelper.buildFileLabel(fileName)
+            // Generate ONE lamport tick and thread it into the stored row AND the
+            // cloud push (parity with the text/image paths) so LWW agrees later.
+            val lamportTs = settings.lamportClock.tick()
             val storedId = repository.storeItem(
                 plaintext = label,
                 key = key,
                 contentType = "file",
+                lamportTs = lamportTs,
             )
             if (storedId.isEmpty()) {
                 Log.d(TAG, "captureFileClip: storeItem returned empty (dedup/sensitive) — skipping")
@@ -951,16 +988,51 @@ class ClipboardService : Service() {
             refreshNotification(context)
             if (settings.notifyOnCopy) postCopyNotification(context)
             if (settings.soundOnCopy) playCopySound(context)
+
+            // AB-4: push the FILE to the cloud (Supabase + relay) the same way text
+            // does. ENCODE the cloud file-identity header (name + mime + bytes) so
+            // the receiver recovers the original name/MIME (AB-3) — byte-for-byte
+            // the same envelope the macOS daemon ships. Only when a SyncManager is
+            // wired (the foreground-service capture path) and sync is enabled.
+            if (settings.syncEnabled && syncManager != null) {
+                val payload = SyncManager.encodeCloudFilePayload(
+                    name = fileName ?: SyncManager.CLOUD_FILE_LEGACY_NAME,
+                    mime = mimeType.ifBlank { SyncManager.CLOUD_FILE_LEGACY_MIME },
+                    fileBytes = fileBytes,
+                )
+                notifySyncManager(
+                    itemId = storedId,
+                    payload = payload,
+                    contentType = "file",
+                    settings = settings,
+                    syncManager = syncManager,
+                    lamportTs = lamportTs,
+                )
+            }
         }
 
         /** Path to the app-private encrypted SQLite DB used by the UniFFI live binding. */
         private fun databasePath(context: Context): String =
             context.applicationContext.getDatabasePath("copypaste.db").absolutePath
 
+        /**
+         * Push one freshly-captured local item to the configured cloud backend.
+         *
+         * AB-4: routes by ACTUAL [contentType] — text/image/file — instead of the
+         * old text-only path. [payload] is the EXACT byte payload the cloud blob
+         * must carry:
+         *   - text  → UTF-8 bytes of the clip
+         *   - image → raw image bytes (PNG)
+         *   - file  → the cloud file-identity header + bytes
+         *             (`SyncManager.encodeCloudFilePayload(name, mime, bytes)`),
+         *             so the receiver recovers the original name/MIME (AB-3).
+         * The same [payload] is shipped over BOTH the Supabase and relay transports
+         * under the row's STABLE [itemId].
+         */
         private suspend fun notifySyncManager(
             itemId: String,
-            plaintext: String,
-            key: ByteArray,
+            payload: ByteArray,
+            contentType: String,
             settings: Settings,
             syncManager: SyncManager,
             lamportTs: Long,
@@ -975,14 +1047,14 @@ class ClipboardService : Service() {
                     // instead of seeing a new item each time (the duplicates bug).
                     try {
                         val id = syncManager.pushToSupabase(
-                            plaintext = plaintext.toByteArray(Charsets.UTF_8),
-                            contentType = "text",
+                            plaintext = payload,
+                            contentType = contentType,
                             overrideId = itemId,
                             deviceId = settings.deviceId,
                             lamportTs = lamportTs,
                         )
                         if (id != null) {
-                            Log.d(TAG, "Supabase push ok: $id")
+                            Log.d(TAG, "Supabase push ok: $id ($contentType)")
                         } else {
                             Log.w(TAG, "Supabase push returned null (logged above)")
                         }
@@ -1001,12 +1073,12 @@ class ClipboardService : Service() {
                     try {
                         val ok = syncManager.pushToRelay(
                             itemId = itemId,
-                            plaintext = plaintext.toByteArray(Charsets.UTF_8),
-                            contentType = "text",
+                            plaintext = payload,
+                            contentType = contentType,
                             lamportTs = lamportTs,
                         )
                         if (ok) {
-                            Log.d(TAG, "Relay push ok: $itemId")
+                            Log.d(TAG, "Relay push ok: $itemId ($contentType)")
                         } else {
                             Log.w(TAG, "Relay push returned false (logged above)")
                         }

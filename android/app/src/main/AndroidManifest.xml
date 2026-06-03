@@ -135,6 +135,35 @@
             android:exported="false"
             android:theme="@style/Theme.CopyPaste" />
 
+        <!--
+            HB-11: share-target. Lets the user SEND a file (or several) into
+            CopyPaste from any app's share sheet ("Share → CopyPaste"). The
+            activity reads the EXTRA_STREAM URI(s), captures them as file clipboard
+            items via ClipboardService.captureFileClip, and finishes (no UI).
+
+            android:exported="true" is required for the system share sheet to route
+            ACTION_SEND / ACTION_SEND_MULTIPLE here. mimeType="*/*" accepts any
+            shareable stream (PDF, ZIP, photo, document, …). excludeFromRecents +
+            noHistory + Translucent theme keep it invisible and off the recents list.
+        -->
+        <activity
+            android:name=".ShareReceiverActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
         <!-- In-app log viewer, launched from Settings › Diagnostics -->
         <activity
             android:name=".LogViewerActivity"
