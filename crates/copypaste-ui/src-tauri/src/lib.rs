@@ -200,6 +200,7 @@ pub fn run() {
             set_popup_position,
             ipc::read_logs,
             ipc::log_dir_path,
+            ipc::ingest_dropped_files,
         ])
         .setup(|app| {
             // Load persisted config now that we have the app handle.

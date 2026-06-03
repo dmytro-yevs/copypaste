@@ -2397,6 +2397,8 @@ impl IpcServer {
                 | "get_item_thumbnail"
                 // get_item_file decrypts file chunks — needs a ready DB.
                 | "get_item_file"
+                // add_file_item encrypts and stores a new file item — needs a ready DB.
+                | "add_file_item"
                 | "revoke_peer"
                 | "revoke_all_peers"
                 // revoke_and_rotate runs the revoke body (audit-row insert),
@@ -6325,6 +6327,105 @@ impl IpcServer {
                 .await;
                 match join {
                     Ok(png_b64) => Response::ok(req.id, serde_json::json!({ "png_b64": png_b64 })),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
+
+            // ── File ingest (desktop UI file picker / drag-drop) ───────────────────
+            // Takes { filename, mime, data_b64 } where data_b64 is standard
+            // base64. Encrypts and stores the file exactly as handle_file does
+            // for pasteboard-captured files. Returns { id } on success.
+            "add_file_item" => {
+                let filename = match req.params.get("filename").and_then(|v| v.as_str()) {
+                    Some(s) if !s.is_empty() => s.to_string(),
+                    _ => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing or empty param: filename",
+                        )
+                    }
+                };
+                let mime = req
+                    .params
+                    .get("mime")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("application/octet-stream")
+                    .to_string();
+                let data_b64 = match req.params.get("data_b64").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: data_b64",
+                        )
+                    }
+                };
+
+                use base64::Engine as _;
+                let raw_bytes = match base64::engine::general_purpose::STANDARD.decode(&data_b64) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            format!("data_b64 decode error: {e}"),
+                        )
+                    }
+                };
+
+                let db_arc = self.db.clone();
+                let local_key: [u8; 32] = **self.local_key;
+                let join = tokio::task::spawn_blocking(move || {
+                    // Read config on blocking thread — same pattern as set_config.
+                    let config = read_config();
+                    // Content-hash file_id: deterministic so identical files dedup
+                    // across captures (mirrors handle_file in daemon.rs).
+                    let file_id = crate::clipboard::image_content_hash(&raw_bytes);
+                    let max_file_bytes = config
+                        .max_file_size_bytes
+                        .and_then(|v| usize::try_from(v).ok())
+                        .unwrap_or(usize::MAX);
+
+                    let (meta, chunks) = copypaste_core::encode_file(
+                        &raw_bytes,
+                        &filename,
+                        &mime,
+                        &local_key,
+                        &file_id,
+                        max_file_bytes,
+                    )
+                    .map_err(|e| anyhow::anyhow!("encode_file failed: {e}"))?;
+
+                    let blob = copypaste_core::chunks_to_blob(&chunks)
+                        .map_err(|e| anyhow::anyhow!("chunks_to_blob failed: {e}"))?;
+
+                    let meta_json = crate::clipboard::build_file_meta_json(&meta);
+                    let mut item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
+                    // Stable cross-device identity: derive item_id from the
+                    // content-hash file_id (mirrors handle_file in daemon.rs).
+                    item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+
+                    let db_guard = db_arc.blocking_lock();
+                    let stored_id = copypaste_core::insert_item_with_fts(&db_guard, &item, "")
+                        .map_err(|e| anyhow::anyhow!("insert_item_with_fts failed: {e}"))?;
+
+                    Ok::<String, anyhow::Error>(stored_id)
+                })
+                .await;
+
+                match join {
+                    Ok(Ok(id)) => Response::ok(req.id, serde_json::json!({ "id": id })),
+                    Ok(Err(e)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("add_file_item failed: {e}"),
+                    ),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
