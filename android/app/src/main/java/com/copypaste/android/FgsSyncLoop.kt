@@ -333,6 +333,7 @@ class FgsSyncLoop(
                             overrideId = item.itemId,
                             contentType = item.contentType,
                             lamportTs = item.lamportTs,
+                            wallTimeMs = item.wallTime,
                         )
                         if (storedId.isNotEmpty()) {
                             repository.storeImageBytes(storedId, item.plaintext)
@@ -360,6 +361,7 @@ class FgsSyncLoop(
                             overrideId = item.itemId,
                             contentType = item.contentType,
                             lamportTs = item.lamportTs,
+                            wallTimeMs = item.wallTime,
                         )
                         if (storedId.isNotEmpty()) {
                             repository.storeFileBytes(storedId, item.plaintext)
@@ -381,6 +383,7 @@ class FgsSyncLoop(
                             key = settings.encryptionKey,
                             itemId = item.itemId,
                             incomingLamportTs = item.lamportTs,
+                            wallTimeMs = item.wallTime,
                         )
                     }
                 }

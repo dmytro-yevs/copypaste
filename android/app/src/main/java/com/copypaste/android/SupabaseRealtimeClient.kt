@@ -524,6 +524,7 @@ class SupabaseRealtimeClient(
                     overrideId = item.itemId,
                     contentType = item.contentType,
                     lamportTs = item.lamportTs,
+                    wallTimeMs = item.wallTime,
                 )
                 if (storedId.isNotEmpty()) {
                     repository.storeImageBytes(storedId, item.plaintext)
@@ -550,6 +551,7 @@ class SupabaseRealtimeClient(
                     overrideId = item.itemId,
                     contentType = item.contentType,
                     lamportTs = item.lamportTs,
+                    wallTimeMs = item.wallTime,
                 )
                 if (storedId.isNotEmpty()) {
                     repository.storeFileBytes(storedId, item.plaintext)
@@ -567,6 +569,7 @@ class SupabaseRealtimeClient(
                 key = settings.encryptionKey,
                 itemId = item.itemId,
                 incomingLamportTs = item.lamportTs,
+                wallTimeMs = item.wallTime,
             )
         }
 

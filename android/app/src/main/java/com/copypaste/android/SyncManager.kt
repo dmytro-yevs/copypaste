@@ -462,6 +462,7 @@ class SyncManager(
                     overrideId = envelope.itemId,
                     contentType = item.contentType,
                     lamportTs = envelope.lamportTs,
+                    wallTimeMs = item.wallTime,
                 )
                 if (storedId.isNotEmpty()) {
                     repository.storeImageBytes(storedId, plaintext)
@@ -490,6 +491,7 @@ class SyncManager(
                     overrideId = envelope.itemId,
                     contentType = item.contentType,
                     lamportTs = envelope.lamportTs,
+                    wallTimeMs = item.wallTime,
                 )
                 if (storedId.isNotEmpty()) {
                     repository.storeFileBytes(storedId, decoded.body)
@@ -509,6 +511,7 @@ class SyncManager(
                     key = s.encryptionKey,
                     itemId = envelope.itemId,
                     incomingLamportTs = envelope.lamportTs,
+                    wallTimeMs = item.wallTime,
                 )
             }
         }
