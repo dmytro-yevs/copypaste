@@ -92,6 +92,10 @@ export interface AppSettings {
   p2p_enabled: boolean;
   supabase_url: string | null;
   supabase_anon_key: string | null;
+  /** HTTP relay base URL for store-and-forward sync. Non-secret; surfaced
+   *  verbatim by get_config. null / absent on set_config preserves the stored
+   *  value. */
+  relay_url?: string | null;
   // Storage / Limits — all map 1-to-1 to AppConfig fields in copypaste-core.
   // Byte fields are stored as raw bytes (u64) and converted to MB in the UI.
   max_text_size_bytes?: number | null;
