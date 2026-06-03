@@ -246,6 +246,19 @@ class SyncManager(
         val lamportTs: Long,
         val ctB64: String,
     ) {
+        /**
+         * Serialize to the canonical envelope JSON the relay carries as the
+         * inner payload of `content_b64`. Byte-compatible with the daemon's
+         * `ContentEnvelope` and with [parse] (round-trips). Keys are emitted as
+         * `item_id` / `lamport_ts` / `ct_b64`.
+         */
+        fun encode(): String =
+            org.json.JSONObject().apply {
+                put("item_id", itemId)
+                put("lamport_ts", lamportTs)
+                put("ct_b64", ctB64)
+            }.toString()
+
         companion object {
             /** Parse the JSON envelope decoded from `content_b64`. Null on malformed. */
             fun parse(json: String): RelayEnvelope? {
@@ -383,28 +396,172 @@ class SyncManager(
         stored
     }
 
+    // ── Relay backend — shared-account registration + producer (R3b) ──────────
+
     /**
-     * Upload an already-encrypted item to the relay. [itemId] MUST match the
-     * value bound into the ciphertext's AAD on the sender side (v0.3 schema),
-     * otherwise the receiver will fail decryption. Callers should generate the
-     * id BEFORE encrypting and pass the same value here.
+     * The shared-account relay registration identity, derived deterministically
+     * from the cross-device sync key so every device (Android + the macOS daemon)
+     * co-registers, subscribes to, and pushes to the SAME relay inbox.
+     *
+     * - [inboxId]   — `relayInboxId(syncKey)`: the inbox `device_id` (canonical
+     *                 UUID), byte-identical to the daemon's `derive_relay_inbox_id`.
+     * - [publicKeyB64] — `relayPublicKeyB64(syncKey)`: the registration public key.
+     * - [deviceName]   — human-readable name for the relay device row.
+     *
+     * SECURITY: [inboxId] and [publicKeyB64] are secret-derived; never logged.
      */
-    suspend fun uploadItem(
+    data class RelayRegistration(
+        val inboxId: String,
+        val publicKeyB64: String,
+        val deviceName: String,
+    )
+
+    /**
+     * Resolve the shared-account relay registration identity from the cross-device
+     * sync key, INDEPENDENT of Supabase (the relay can be the sole transport).
+     *
+     * Returns null when no sync key is available (no QR-provisioned direct key and
+     * no passphrase) — without a key the inbox cannot be derived. The sync-key
+     * bytes are zeroed before returning; only the derived (non-key) strings leave.
+     *
+     * Routes the key through [resolveCloudSyncKey] so the QR-provisioned direct
+     * key is preferred over the passphrase, exactly like the Supabase path.
+     */
+    fun relayRegistration(): RelayRegistration? {
+        val s = settings ?: run {
+            Log.w(TAG, "relayRegistration: no Settings instance provided")
+            return null
+        }
+        val syncKeyBytes = resolveCloudSyncKey(s) ?: run {
+            Log.w(TAG, "relayRegistration: no cloud sync key (no direct key, no passphrase)")
+            return null
+        }
+        return try {
+            RelayRegistration(
+                inboxId = relay_inbox_id(syncKeyBytes),
+                publicKeyB64 = relay_public_key_b64(syncKeyBytes),
+                deviceName = android.os.Build.MODEL ?: "Android",
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "relayRegistration: derivation failed: ${e.message}")
+            null
+        } finally {
+            // resolveCloudSyncKey hands back a defensive copy — scrub it.
+            syncKeyBytes.fill(0)
+        }
+    }
+
+    /**
+     * PRODUCER: push one local item to the shared relay inbox.
+     *
+     * Builds the SAME envelope the daemon's relay producer builds and the Android
+     * SSE receiver decodes (see [RelayEnvelope]):
+     *   `content_b64 = base64( JSON{ item_id, lamport_ts, ct_b64 } )`
+     *   `ct_b64      = base64( cloud_encrypt(item_id, plaintext, syncKey) )`
+     * then POSTs `{content_type, content_b64, wall_time}` to the derived inbox id
+     * with the relay bearer token, registering on a token miss and re-registering
+     * once on a 401.
+     *
+     * Reuses the EXACT cross-device cloud crypto ([cloud_encrypt]) the Supabase
+     * path uses, so any device that knows the passphrase — including macOS over
+     * the relay — decrypts it. Gated ONLY on a configured `relayUrl`, independent
+     * of Supabase.
+     *
+     * [itemId] MUST be the row's STABLE id (also bound into the AEAD AAD) so the
+     * receiver dedups/LWW-merges instead of seeing a new item each push. The
+     * caller should mint ONE lamport tick at capture and thread the SAME value
+     * here and into the stored local row.
+     *
+     * @return true iff the relay accepted the push. Never throws; logs failures
+     *   at WARN and never logs the inbox id, token, ciphertext, or plaintext.
+     */
+    suspend fun pushToRelay(
         itemId: String,
-        ciphertext: ByteArray,
-        nonce: ByteArray,
-        contentType: String,
-        lamportTs: Long
-    ): Boolean {
-        val item = RelayClient.RelayItem(
-            itemId = itemId,
-            ciphertext = Base64.encodeToString(ciphertext, Base64.DEFAULT),
-            nonce = Base64.encodeToString(nonce, Base64.DEFAULT),
-            senderDeviceId = deviceId,
-            contentType = contentType,
-            lamportTs = lamportTs
-        )
-        return relayClient.uploadItem(deviceId, token, item)
+        plaintext: ByteArray,
+        contentType: String = "text",
+        lamportTs: Long,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val s = settings ?: run {
+            Log.w(TAG, "pushToRelay: no Settings instance provided")
+            return@withContext false
+        }
+        if (!s.isRelayConfigured) {
+            Log.w(TAG, "pushToRelay: relay not configured (relayUrl missing/loopback)")
+            return@withContext false
+        }
+        val reg = relayRegistration() ?: run {
+            Log.w(TAG, "pushToRelay: no relay registration identity (no sync key)")
+            return@withContext false
+        }
+
+        // Build the envelope. cloud_encrypt binds item_id into the AEAD AAD; the
+        // sync key is resolved internally and never leaves this call.
+        val syncKeyBytes = resolveCloudSyncKey(s) ?: run {
+            Log.w(TAG, "pushToRelay: no cloud sync key")
+            return@withContext false
+        }
+        val contentB64 = try {
+            val blob = cloud_encrypt(itemId, plaintext, syncKeyBytes)
+            val ctB64 = Base64.encodeToString(blob, Base64.NO_WRAP)
+            val envelopeJson = RelayEnvelope(
+                itemId = itemId,
+                lamportTs = lamportTs,
+                ctB64 = ctB64,
+            ).encode()
+            Base64.encodeToString(envelopeJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        } catch (e: Exception) {
+            Log.w(TAG, "pushToRelay: envelope build failed: ${e.message}")
+            return@withContext false
+        } finally {
+            syncKeyBytes.fill(0)
+        }
+
+        val relayUrl = s.relayUrl
+        val client = RelayClient(relayUrl)
+        val wallTime = System.currentTimeMillis()
+
+        // Ensure a token (register on miss), push, and on 401 re-register once.
+        var token = ensureRelayToken(client, s, reg, relayUrl) ?: run {
+            Log.w(TAG, "pushToRelay: registration failed — no token")
+            return@withContext false
+        }
+        var result = client.pushEnvelope(reg.inboxId, token, contentType, contentB64, wallTime)
+        if (result == RelayClient.PushResult.UNAUTHORIZED) {
+            Log.i(TAG, "pushToRelay: 401 — re-registering and retrying once")
+            s.relayToken = ""
+            s.relayTokenUrl = ""
+            token = ensureRelayToken(client, s, reg, relayUrl) ?: run {
+                Log.w(TAG, "pushToRelay: re-registration failed on retry")
+                return@withContext false
+            }
+            result = client.pushEnvelope(reg.inboxId, token, contentType, contentB64, wallTime)
+        }
+        val ok = result == RelayClient.PushResult.OK
+        if (ok) Log.d(TAG, "relay push ok: itemId=${itemId.take(8)}… contentType=$contentType")
+        ok
+    }
+
+    /**
+     * Return a valid relay bearer token for the shared inbox, registering (and
+     * caching the server-issued token) on a miss or when the cached token was
+     * issued for a different relay URL. Returns null if registration fails.
+     *
+     * Shared by the producer push path; the SSE subscribe path has its own copy
+     * in [RelaySubscriptionClient] keyed on the same persisted token settings.
+     */
+    private suspend fun ensureRelayToken(
+        client: RelayClient,
+        s: Settings,
+        reg: RelayRegistration,
+        relayUrl: String,
+    ): String? {
+        val cached = s.relayToken
+        if (cached.isNotBlank() && s.relayTokenUrl == relayUrl) return cached
+        val device = client.registerDevice(reg.inboxId, reg.publicKeyB64, reg.deviceName) ?: return null
+        s.relayToken = device.token
+        s.relayTokenUrl = relayUrl
+        Log.i(TAG, "relay: registered shared inbox, token cached")
+        return device.token
     }
 
     // ── Supabase backend ──────────────────────────────────────────────────────

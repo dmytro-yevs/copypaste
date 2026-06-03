@@ -762,6 +762,10 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -830,6 +834,10 @@ internal interface UniffiLib : Library {
     fun uniffi_copypaste_android_fn_func_parse_pairing_qr(`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_poll_p2p_listener(`listenerId`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_relay_inbox_id(`syncKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_relay_public_key_b64(`syncKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_revoke_device_audit(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
@@ -1015,6 +1023,10 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_poll_p2p_listener(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_relay_inbox_id(
+    ): Short
+    fun uniffi_copypaste_android_checksum_func_relay_public_key_b64(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_revoke_device_audit(
     ): Short
     fun uniffi_copypaste_android_checksum_func_sensitive_kind(
@@ -1129,6 +1141,12 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_poll_p2p_listener() != 4210.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_relay_inbox_id() != 19369.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_relay_public_key_b64() != 54456.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_revoke_device_audit() != 60588.toShort()) {
@@ -2847,6 +2865,36 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_poll_p2p_listener(
         FfiConverterULong.lower(`listenerId`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Derive the deterministic shared relay inbox `device_id` (canonical
+         * lowercase UUID) from the 32-byte sync key. Byte-identical to the macOS
+         * daemon's `derive_relay_inbox_id`. Throws `InvalidKeyLength` if not 32 bytes.
+         */
+    @Throws(CopypasteException::class) fun `relayInboxId`(`syncKey`: List<kotlin.UByte>): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_relay_inbox_id(
+        FfiConverterSequenceUByte.lower(`syncKey`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Derive the relay registration `public_key_b64` (STANDARD base64 of
+         * `derive_relay_public_key`) from the 32-byte sync key. Matches the daemon's
+         * registration value. Throws `InvalidKeyLength` if not 32 bytes.
+         */
+    @Throws(CopypasteException::class) fun `relayPublicKeyB64`(`syncKey`: List<kotlin.UByte>): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_relay_public_key_b64(
+        FfiConverterSequenceUByte.lower(`syncKey`),_status)
 }
     )
     }

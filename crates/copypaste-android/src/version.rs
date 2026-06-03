@@ -149,7 +149,21 @@
 ///
 /// Kotlin generated against ABI 11 lacks all eight functions, both dictionaries,
 /// and the new `Config` field, and must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 12;
+///
+/// **ABI 13 (relay-as-database producer — R3b):** Added two FFI functions that
+/// expose the shared-account relay inbox derivation so Android co-registers,
+/// subscribes to, and pushes to the SAME relay inbox the macOS daemon uses
+/// (instead of its wrong per-install device id):
+///   * `relay_inbox_id(sync_key) -> string` — the deterministic inbox
+///     `device_id` (canonical UUID) from `copypaste_core::derive_relay_inbox_id`.
+///   * `relay_public_key_b64(sync_key) -> string` — STANDARD base64 of
+///     `copypaste_core::derive_relay_public_key`, the registration public key.
+///
+/// Both throw `InvalidKeyLength` if the key is not 32 bytes. They wrap the core
+/// functions directly (no Kotlin-side HKDF) for a guaranteed byte-match with the
+/// daemon. Kotlin generated against ABI 12 lacks both symbols and must be
+/// regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 13;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

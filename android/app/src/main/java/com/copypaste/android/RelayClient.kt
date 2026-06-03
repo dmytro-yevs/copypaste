@@ -22,31 +22,46 @@ class RelayClient(private val baseUrl: String) {
 
     data class Device(val deviceId: String, val token: String)
 
-    data class RelayItem(
-        val itemId: String,
-        val ciphertext: String,  // base64
-        val nonce: String,        // base64
-        val senderDeviceId: String,
-        val contentType: String,
-        val lamportTs: Long
-    )
-
-    suspend fun registerDevice(deviceId: String, publicKeyBase64: String): Device? =
+    /**
+     * Register (or co-register) this device's shared-account inbox with the
+     * relay. Matches the daemon's contract (relay.rs): `POST /devices`
+     * `{device_id, device_name, public_key_b64}` → 201 `{auth_token}`.
+     *
+     * [deviceId] MUST be the shared-account inbox id (`relayInboxId(syncKey)`),
+     * NOT the per-install device id, so this device shares the daemon's inbox.
+     * [publicKeyBase64] MUST be `relayPublicKeyB64(syncKey)`. A fresh register
+     * always returns 201 with a new independent token, whether or not the inbox
+     * was already co-registered by another device.
+     *
+     * SECURITY: never logs the inbox id, public key, or token.
+     */
+    suspend fun registerDevice(
+        deviceId: String,
+        publicKeyBase64: String,
+        deviceName: String,
+    ): Device? =
         withContext(Dispatchers.IO) {
             try {
                 val body = JSONObject().apply {
                     put("device_id", deviceId)
-                    put("public_key", publicKeyBase64)
+                    put("device_name", deviceName)
+                    put("public_key_b64", publicKeyBase64)
                 }.toString()
 
                 val resp = post("/devices", body, null)
-                if (resp.code == 200) {
+                if (resp.code in 200..201) {
                     val json = JSONObject(resp.body)
                     Device(
-                        deviceId = json.getString("device_id"),
-                        token = json.getString("token")
-                    )
-                } else null
+                        deviceId = json.optString("device_id", deviceId),
+                        // Daemon contract: response field is `auth_token`. Accept
+                        // the legacy `token` alias too for forward/backward safety.
+                        token = json.optString("auth_token").takeIf { it.isNotBlank() }
+                            ?: json.optString("token"),
+                    ).takeIf { it.token.isNotBlank() }
+                } else {
+                    Log.w(TAG, "registerDevice: HTTP ${resp.code}")
+                    null
+                }
             } catch (e: Exception) {
                 // L11: log relay errors so outages are diagnosable (was a silent swallow).
                 Log.w(TAG, "registerDevice failed: ${e.javaClass.simpleName}: ${e.message}", e)
@@ -54,50 +69,51 @@ class RelayClient(private val baseUrl: String) {
             }
         }
 
-    suspend fun uploadItem(deviceId: String, token: String, item: RelayItem): Boolean =
+    /**
+     * Push one already-built envelope to the shared inbox. Matches the daemon's
+     * push contract (relay.rs): `POST /devices/{deviceId}/items`
+     * `{content_type, content_b64, wall_time}` with `Authorization: Bearer`.
+     *
+     * [deviceId] is the shared inbox id; [contentB64] is the base64-std envelope
+     * (`base64(JSON{item_id, lamport_ts, ct_b64})`) the receiver decodes. The
+     * item_id lives INSIDE the envelope — the relay never sees it.
+     *
+     * @return 401 if the token was rejected (caller should re-register and
+     *   retry), otherwise true on 2xx / false on any other failure. The 401 is
+     *   distinguished via [PushResult] so the caller can re-register exactly once.
+     */
+    suspend fun pushEnvelope(
+        deviceId: String,
+        token: String,
+        contentType: String,
+        contentB64: String,
+        wallTime: Long,
+    ): PushResult =
         withContext(Dispatchers.IO) {
             try {
                 val body = JSONObject().apply {
-                    put("item_id", item.itemId)
-                    put("ciphertext", item.ciphertext)
-                    put("nonce", item.nonce)
-                    put("sender_device_id", item.senderDeviceId)
-                    put("content_type", item.contentType)
-                    put("lamport_ts", item.lamportTs)
+                    put("content_type", contentType)
+                    put("content_b64", contentB64)
+                    put("wall_time", wallTime)
                 }.toString()
 
                 val resp = post("/devices/$deviceId/items", body, token)
-                resp.code in 200..201
-            } catch (e: Exception) {
-                Log.w(TAG, "uploadItem failed: ${e.javaClass.simpleName}: ${e.message}", e)
-                false
-            }
-        }
-
-    suspend fun pollItems(deviceId: String, token: String, sinceLamport: Long = 0): List<RelayItem> =
-        withContext(Dispatchers.IO) {
-            try {
-                val resp = get("/devices/$deviceId/items?since_lamport=$sinceLamport", token)
-                if (resp.code != 200) return@withContext emptyList()
-
-                val json = JSONObject(resp.body)
-                val arr = json.getJSONArray("items")
-                (0 until arr.length()).map { i ->
-                    val item = arr.getJSONObject(i)
-                    RelayItem(
-                        itemId = item.getString("item_id"),
-                        ciphertext = item.getString("ciphertext"),
-                        nonce = item.getString("nonce"),
-                        senderDeviceId = item.getString("sender_device_id"),
-                        contentType = item.getString("content_type"),
-                        lamportTs = item.getLong("lamport_ts")
-                    )
+                when {
+                    resp.code in 200..201 -> PushResult.OK
+                    resp.code == 401 -> PushResult.UNAUTHORIZED
+                    else -> {
+                        Log.w(TAG, "pushEnvelope: HTTP ${resp.code}")
+                        PushResult.FAILED
+                    }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "pollItems failed: ${e.javaClass.simpleName}: ${e.message}", e)
-                emptyList()
+                Log.w(TAG, "pushEnvelope failed: ${e.javaClass.simpleName}: ${e.message}", e)
+                PushResult.FAILED
             }
         }
+
+    /** Outcome of [pushEnvelope]; `UNAUTHORIZED` signals a stale token (re-register). */
+    enum class PushResult { OK, UNAUTHORIZED, FAILED }
 
     /**
      * One parsed SSE `item` frame from `GET /devices/{id}/subscribe`.

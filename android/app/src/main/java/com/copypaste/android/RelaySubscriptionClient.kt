@@ -1,6 +1,5 @@
 package com.copypaste.android
 
-import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -8,7 +7,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.security.SecureRandom
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -140,14 +138,21 @@ class RelaySubscriptionClient(
         val relayUrl = settings.relayUrl
         val client = RelayClient(relayUrl)
 
-        val token = ensureRelayToken(client, relayUrl) ?: run {
+        // R3b: register/subscribe with the SHARED-ACCOUNT inbox id derived from
+        // the sync key (NOT the per-install settings.deviceId) so this device
+        // shares the macOS daemon's inbox.
+        val reg = syncManager.relayRegistration() ?: run {
+            Log.w(TAG, "relay SSE: no registration identity (no sync key) — will retry")
+            return
+        }
+        val token = ensureRelayToken(client, reg, relayUrl) ?: run {
             Log.w(TAG, "relay SSE: no token (registration failed) — will retry")
             return
         }
 
-        Log.i(TAG, "relay SSE: connecting (device=${settings.deviceId.take(8)}…)")
+        Log.i(TAG, "relay SSE: connecting to shared inbox")
         val status = client.subscribe(
-            deviceId = settings.deviceId,
+            deviceId = reg.inboxId,
             token = token,
             sinceWallTime = settings.lastRelaySubscribeWallTime,
             sinceId = settings.lastRelaySubscribeId,
@@ -211,35 +216,27 @@ class RelaySubscriptionClient(
     }
 
     /**
-     * Return a valid relay bearer token, registering this device with the relay
+     * Return a valid relay bearer token for the SHARED-ACCOUNT inbox, registering
      * (and persisting the server-issued token) on a miss or when the cached token
      * was issued for a different relay URL. Returns null if registration fails.
      *
-     * The relay issues a random token (not derivable), so we register once and
-     * cache it. The 32-byte registration public key is a stable per-install random
-     * value (see [Settings.relayRegistrationKeyB64]) — the relay only stores it.
+     * R3b: registers with the inbox id + public key DERIVED from the sync key
+     * ([reg]) so every account device co-registers the SAME inbox. The relay
+     * issues a random token (not derivable), so we register once and cache it.
      */
-    private suspend fun ensureRelayToken(client: RelayClient, relayUrl: String): String? {
+    private suspend fun ensureRelayToken(
+        client: RelayClient,
+        reg: SyncManager.RelayRegistration,
+        relayUrl: String,
+    ): String? {
         val cached = settings.relayToken
         if (cached.isNotBlank() && settings.relayTokenUrl == relayUrl) return cached
 
-        val pubKeyB64 = ensureRegistrationKey()
-        val device = client.registerDevice(settings.deviceId, pubKeyB64) ?: return null
+        val device = client.registerDevice(reg.inboxId, reg.publicKeyB64, reg.deviceName) ?: return null
         settings.relayToken = device.token
         settings.relayTokenUrl = relayUrl
-        Log.i(TAG, "relay SSE: registered device, token cached")
+        Log.i(TAG, "relay SSE: registered shared inbox, token cached")
         return device.token
-    }
-
-    /** Mint (once) and return the base64 32-byte relay registration key. */
-    private fun ensureRegistrationKey(): String {
-        settings.relayRegistrationKeyB64.takeIf { it.isNotBlank() }?.let { return it }
-        val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
-        // NO_WRAP: the relay decodes standard base64; a trailing newline would
-        // corrupt the value on some servers.
-        val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-        settings.relayRegistrationKeyB64 = b64
-        return b64
     }
 
     /**
@@ -266,10 +263,12 @@ class RelaySubscriptionClient(
     private suspend fun runCatchUpPoll() {
         val relayUrl = settings.relayUrl
         val client = RelayClient(relayUrl)
-        val token = ensureRelayToken(client, relayUrl) ?: return
+        // R3b: poll the SHARED inbox id, not the per-install device id.
+        val reg = syncManager.relayRegistration() ?: return
+        val token = ensureRelayToken(client, reg, relayUrl) ?: return
         try {
             val items = client.pollSseBacklog(
-                deviceId = settings.deviceId,
+                deviceId = reg.inboxId,
                 token = token,
                 sinceWallTime = settings.lastRelaySubscribeWallTime,
                 sinceId = settings.lastRelaySubscribeId,
