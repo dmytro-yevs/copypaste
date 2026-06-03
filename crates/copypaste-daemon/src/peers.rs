@@ -84,6 +84,33 @@ fn canonical_fp(fp: &str) -> String {
     fp.replace(':', "").to_ascii_lowercase()
 }
 
+/// Update the persisted `address` field for a paired peer.
+///
+/// Loads `peers.json`, finds the record whose fingerprint canonicalises to the
+/// same value as `fingerprint` (colon-hex stored vs colon-free P2P both
+/// match), updates only its `address` to `new_addr.to_string()`, then
+/// atomically rewrites the file via [`save_peers`].  All other fields (name,
+/// added_at, sync timestamps, etc.) are preserved verbatim.
+///
+/// No-op (and not an error) when no matching peer record exists.
+pub fn update_peer_address(
+    path: &Path,
+    fingerprint: &str,
+    new_addr: std::net::SocketAddr,
+) -> anyhow::Result<()> {
+    let target = canonical_fp(fingerprint);
+    let mut peers = load_peers(path);
+    let Some(peer) = peers
+        .iter_mut()
+        .find(|p| canonical_fp(&p.fingerprint) == target)
+    else {
+        // No matching record — nothing to update.  Not an error.
+        return Ok(());
+    };
+    peer.address = Some(new_addr.to_string());
+    save_peers(path, &peers)
+}
+
 /// Stamp first/last sync timestamps for the peer identified by `fingerprint`.
 ///
 /// Loads `peers.json`, finds the record whose fingerprint canonicalises to the

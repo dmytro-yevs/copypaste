@@ -299,6 +299,15 @@ impl DiscoveryService {
         lock_safe(&self.known_peers).values().cloned().collect()
     }
 
+    /// Insert a peer directly into `known_peers`. Intended **only** for unit
+    /// tests that need deterministic discovery state without a live mDNS daemon.
+    ///
+    /// Not compiled into production builds.
+    #[cfg(any(test, feature = "test-helpers"))]
+    pub fn inject_peer_for_test(&self, fullname: &str, peer: PeerInfo) {
+        lock_safe(&self.known_peers).insert(fullname.to_string(), peer);
+    }
+
     /// Resolve a peer by its advertised `device_id` (the `did` TXT record).
     ///
     /// Returns the most-recently-seen [`PeerInfo`] for `device_id`, or `None`

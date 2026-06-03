@@ -331,14 +331,30 @@ pub async fn start_p2p(
     // every tick (so a freshly-paired peer is picked up with no restart), skips
     // peers already in `peer_sinks`, never dials its own fingerprint, and
     // applies per-peer exponential backoff on failure.
+    //
+    // The injected `discovery` clone enables mDNS address refresh on dial
+    // failure (P2P audit P2 #3): when a persisted address is stale (DHCP renew
+    // / network switch) the connector consults the live discovery snapshot and
+    // persists a fresher address before the next backoff tick.
     {
         let transport = Arc::clone(&transport);
         let peer_sinks = Arc::clone(&peer_sinks);
         let incoming_tx = incoming_tx.clone();
         let own_fp = transport.fingerprint().to_string();
         let catchup = Arc::clone(&catchup);
+        // Clone the shared discovery Arc — the connector, the accept loop, and
+        // the IPC handlers all observe the same `known_peers` map through it.
+        let discovery_for_connector = Arc::clone(&discovery);
         tokio::spawn(async move {
-            peer_connector_loop(transport, peer_sinks, incoming_tx, own_fp, catchup).await;
+            peer_connector_loop(
+                transport,
+                peer_sinks,
+                incoming_tx,
+                own_fp,
+                catchup,
+                discovery_for_connector,
+            )
+            .await;
         });
     }
 
@@ -482,6 +498,43 @@ async fn accept_loop(
 /// connected peers to dial.
 const CONNECTOR_TICK: Duration = Duration::from_secs(3);
 
+/// Resolve a fresh dial address for `fingerprint` from the mDNS discovery
+/// service.
+///
+/// Iterates the current snapshot of discovered peers and returns a
+/// `SocketAddr` for the first peer whose `device_id` matches `fingerprint`
+/// (exact string match after the caller has already normalised both sides to
+/// canonical form).  The first IPv4 address is preferred over IPv6 to maximise
+/// compatibility; if only IPv6 addresses are present the first one is used.
+///
+/// Returns `None` when:
+/// - discovery has no peers at all,
+/// - no peer's `device_id` matches `fingerprint`, or
+/// - the matching peer has an empty `ip_addrs` list.
+///
+/// This is **best-effort**: the discovery snapshot may be stale (mDNS
+/// re-announcement period is typically 1–5 minutes) and is never guaranteed to
+/// reflect a peer's current address.  The connector must not rely on it as the
+/// sole source of truth — it is a fallback consulted only after a persisted
+/// address fails.
+fn resolve_addr_from_discovery(
+    discovery: &DiscoveryService,
+    fingerprint: &str,
+) -> Option<SocketAddr> {
+    // `resolve_peer` matches by device_id (already the right semantic).
+    let peer = discovery.resolve_peer(fingerprint)?;
+    // Prefer IPv4 for broadest compatibility; fall back to the first address
+    // regardless of family if no IPv4 is found.  `ip_addrs` is sorted IPv4-
+    // first by `peer_from_resolved`, so `find` over a non-empty vec is O(n)
+    // with n typically ≤ 2.
+    let ip = peer
+        .ip_addrs
+        .iter()
+        .find(|a| a.is_ipv4())
+        .or_else(|| peer.ip_addrs.first())?;
+    Some(SocketAddr::new(*ip, peer.port))
+}
+
 /// A dialable paired peer resolved from `peers.json`.
 struct DialablePeer {
     /// Canonical (colon-free, lowercase) cert fingerprint — the mTLS pin.
@@ -551,6 +604,9 @@ async fn peer_connector_loop(
     incoming_tx: mpsc::Sender<WireItem>,
     own_fp: DeviceFingerprint,
     catchup: CatchupProvider,
+    // Injected mDNS discovery service — consulted as a fallback when a
+    // persisted dial address fails (peer DHCP renew / network switch).
+    discovery: Arc<DiscoveryService>,
 ) {
     tracing::debug!(%own_fp, "P2P peer connector loop running");
     let peers_path = crate::ipc::peers_file_path();
@@ -687,6 +743,38 @@ async fn peer_connector_loop(
                         error = %e,
                         "connector dial failed — backing off"
                     );
+
+                    // mDNS address refresh (P2P audit P2 #3): on dial failure,
+                    // consult the live discovery snapshot to see if the peer
+                    // has a fresh LAN address (DHCP renew / network switch).
+                    // Only act when discovery returns an address that DIFFERS
+                    // from the one that just failed — avoids a spurious write
+                    // that would be a no-op at best.  The existing per-peer
+                    // backoff already rate-limits how often we reach this
+                    // branch, so no additional throttle is needed here.
+                    if let Some(fresh_addr) =
+                        resolve_addr_from_discovery(&discovery, &peer.fingerprint)
+                    {
+                        if fresh_addr != peer.addr {
+                            tracing::info!(
+                                fingerprint = %peer.fingerprint,
+                                stale_addr = %peer.addr,
+                                fresh_addr = %fresh_addr,
+                                "connector: mDNS returned a fresher address — updating peers.json"
+                            );
+                            if let Err(persist_err) = crate::peers::update_peer_address(
+                                &peers_path,
+                                &peer.fingerprint,
+                                fresh_addr,
+                            ) {
+                                tracing::warn!(
+                                    fingerprint = %peer.fingerprint,
+                                    error = %persist_err,
+                                    "connector: failed to persist refreshed peer address"
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1297,5 +1385,188 @@ mod tests {
         let peers = PairedPeers::new();
         assert_eq!(load_peers_from_path_into(&path, &peers), 0);
         assert_eq!(peers.active_count(), 0);
+    }
+
+    // ── mDNS address refresh (P2P audit P2 #3) ───────────────────────────────
+
+    /// `resolve_addr_from_discovery` returns `None` when the discovery service
+    /// has no matching peer (empty).
+    #[test]
+    fn resolve_addr_from_discovery_returns_none_when_empty() {
+        let discovery = DiscoveryService::new();
+        let result = resolve_addr_from_discovery(&discovery, "aabbccdd");
+        assert!(
+            result.is_none(),
+            "empty discovery must yield None for any fingerprint"
+        );
+    }
+
+    /// `resolve_addr_from_discovery` returns `None` when no discovered peer
+    /// has a matching `device_id` (fingerprint).
+    #[test]
+    fn resolve_addr_from_discovery_returns_none_for_unknown_peer() {
+        let discovery = DiscoveryService::new();
+        // Manually inject a peer with a different fingerprint via on_peer_found
+        // callback simulation: insert directly into known_peers (test-internal).
+        discovery.inject_peer_for_test(
+            "bob.local.",
+            PeerInfo {
+                device_id: "1122334455".to_string(),
+                device_name: "Bob".to_string(),
+                ip_addrs: vec!["192.168.1.10".parse().unwrap()],
+                port: 51000,
+                bport: None,
+            },
+        );
+        let result = resolve_addr_from_discovery(&discovery, "aabbccdd");
+        assert!(result.is_none(), "non-matching peer must yield None");
+    }
+
+    /// `resolve_addr_from_discovery` returns a valid `SocketAddr` when a
+    /// discovered peer's `device_id` matches the queried fingerprint and it has
+    /// at least one routable IP address.
+    #[test]
+    fn resolve_addr_from_discovery_returns_addr_for_matching_peer() {
+        let discovery = DiscoveryService::new();
+        discovery.inject_peer_for_test(
+            "alice.local.",
+            PeerInfo {
+                device_id: "aabbccdd".to_string(),
+                device_name: "Alice".to_string(),
+                ip_addrs: vec!["192.168.1.99".parse().unwrap()],
+                port: 51515,
+                bport: None,
+            },
+        );
+        let result = resolve_addr_from_discovery(&discovery, "aabbccdd");
+        assert!(result.is_some(), "matching peer must yield Some addr");
+        let addr = result.unwrap();
+        assert_eq!(addr.port(), 51515);
+        assert_eq!(addr.ip().to_string(), "192.168.1.99");
+    }
+
+    /// `resolve_addr_from_discovery` prefers IPv4 over IPv6 when both are
+    /// present (IPv4 is listed first after the sort in `peer_from_resolved`).
+    #[test]
+    fn resolve_addr_from_discovery_prefers_ipv4() {
+        let discovery = DiscoveryService::new();
+        discovery.inject_peer_for_test(
+            "carol.local.",
+            PeerInfo {
+                device_id: "ccddee".to_string(),
+                device_name: "Carol".to_string(),
+                ip_addrs: vec!["192.168.2.5".parse().unwrap(), "::1".parse().unwrap()],
+                port: 9000,
+                bport: None,
+            },
+        );
+        let result = resolve_addr_from_discovery(&discovery, "ccddee");
+        assert!(result.is_some());
+        let addr = result.unwrap();
+        assert!(!addr.ip().is_ipv6(), "must prefer IPv4 when available");
+    }
+
+    /// `update_peer_address` updates the `address` field of a matching peer and
+    /// leaves all other fields (fingerprint, name, added_at, etc.) intact.
+    #[test]
+    fn update_peer_address_updates_matching_peer_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+
+        crate::peers::save_peers(
+            &path,
+            &[
+                crate::peers::PairedDevice {
+                    fingerprint: "aabb".to_string(),
+                    name: "Alice".to_string(),
+                    added_at: 1_000,
+                    address: Some("10.0.0.1:1000".to_string()),
+                    sync_key_b64: None,
+                    model: None,
+                    os_version: None,
+                    app_version: None,
+                    local_ip: None,
+                    first_sync_at: Some(500),
+                    last_sync_at: Some(999),
+                },
+                crate::peers::PairedDevice {
+                    fingerprint: "ccdd".to_string(),
+                    name: "Bob".to_string(),
+                    added_at: 2_000,
+                    address: Some("10.0.0.2:2000".to_string()),
+                    sync_key_b64: None,
+                    model: None,
+                    os_version: None,
+                    app_version: None,
+                    local_ip: None,
+                    first_sync_at: None,
+                    last_sync_at: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        let new_addr: SocketAddr = "192.168.9.9:7777".parse().unwrap();
+        crate::peers::update_peer_address(&path, "aabb", new_addr).unwrap();
+
+        let loaded = crate::peers::load_peers(&path);
+        assert_eq!(loaded.len(), 2);
+
+        let alice = loaded.iter().find(|p| p.fingerprint == "aabb").unwrap();
+        assert_eq!(
+            alice.address.as_deref(),
+            Some("192.168.9.9:7777"),
+            "Alice's address must be updated"
+        );
+        // Other fields must be preserved.
+        assert_eq!(alice.name, "Alice");
+        assert_eq!(alice.added_at, 1_000);
+        assert_eq!(alice.first_sync_at, Some(500), "first_sync_at must be kept");
+        assert_eq!(alice.last_sync_at, Some(999), "last_sync_at must be kept");
+
+        // Bob must be untouched.
+        let bob = loaded.iter().find(|p| p.fingerprint == "ccdd").unwrap();
+        assert_eq!(
+            bob.address.as_deref(),
+            Some("10.0.0.2:2000"),
+            "Bob's address must be unchanged"
+        );
+    }
+
+    /// `update_peer_address` is a no-op (and not an error) when no matching peer
+    /// record exists.
+    #[test]
+    fn update_peer_address_no_match_is_noop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        crate::peers::save_peers(
+            &path,
+            &[crate::peers::PairedDevice {
+                fingerprint: "aabb".to_string(),
+                name: "Alice".to_string(),
+                added_at: 1_000,
+                address: Some("10.0.0.1:1000".to_string()),
+                sync_key_b64: None,
+                model: None,
+                os_version: None,
+                app_version: None,
+                local_ip: None,
+                first_sync_at: None,
+                last_sync_at: None,
+            }],
+        )
+        .unwrap();
+
+        let new_addr: SocketAddr = "192.168.9.9:7777".parse().unwrap();
+        // "deadbeef" does not match "aabb".
+        crate::peers::update_peer_address(&path, "deadbeef", new_addr).unwrap();
+
+        let loaded = crate::peers::load_peers(&path);
+        // Alice's address must be untouched.
+        assert_eq!(
+            loaded[0].address.as_deref(),
+            Some("10.0.0.1:1000"),
+            "unmatched update must not modify any record"
+        );
     }
 }
