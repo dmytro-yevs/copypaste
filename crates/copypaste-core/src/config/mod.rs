@@ -82,6 +82,21 @@ pub struct AppConfig {
     /// Default: `None`.
     #[serde(default)]
     pub relay_url: Option<String>,
+
+    /// Universal Clipboard: when `true`, the daemon immediately writes a
+    /// freshly-synced clipboard item to NSPasteboard so it is ready to paste
+    /// on this Mac without any further action.
+    ///
+    /// Only the *newest* incoming item (wall_time strictly greater than the
+    /// current local latest) is auto-applied; historical backfill items are
+    /// stored but NOT applied, preventing a catch-up burst from thrashing the
+    /// local clipboard.  The daemon's own pasteboard-poller self-write guard is
+    /// reused so the applied item is not re-captured as a new local item (loop
+    /// prevention).  Files are skipped (only text and images are supported).
+    ///
+    /// Default: `true`.
+    #[serde(default = "default_true")]
+    pub auto_apply_synced_clip: bool,
 }
 
 impl Default for AppConfig {
@@ -110,6 +125,7 @@ impl Default for AppConfig {
             notify_on_copy: true,
             collect_public_ip: true,
             relay_url: None,
+            auto_apply_synced_clip: true,
         }
     }
 }
