@@ -610,6 +610,23 @@ class Settings(context: Context) {
     }
 
     /**
+     * Stamp the roster entry for [fingerprint] with a fresh contact time
+     * [atMs] (real-presence signal — drives the Devices screen "online" dot).
+     *
+     * Replace-in-place: preserves the peer's position, name, syncAddr, and
+     * KEK-wrapped session key untouched — only [PairedPeer.lastSyncMs] changes.
+     * No-op when the peer is unknown. Called on a SUCCESSFUL P2P sync from
+     * [FgsSyncLoop]; keep it minimal (no migration/wrap work here).
+     */
+    fun updatePeerLastSync(fingerprint: String, atMs: Long) {
+        val current = pairedPeers
+        val idx = current.indexOfFirst { it.fingerprint == fingerprint }
+        if (idx < 0) return
+        val next = current.toMutableList().also { it[idx] = it[idx].copy(lastSyncMs = atMs) }
+        pairedPeers = next
+    }
+
+    /**
      * KEK-unwrap and return the 32-byte PAKE session key for the peer with
      * [fingerprint], or an empty array when the peer is unknown or the wrapped
      * key can no longer be decrypted (lost KEK). DO NOT log the result.
