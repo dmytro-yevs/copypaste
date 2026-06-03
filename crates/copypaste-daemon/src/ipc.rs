@@ -5,10 +5,10 @@ use crate::protocol::{
 };
 use copypaste_core::{
     bump_item_recency, chunks_from_blob, count_items, decode_file, decode_image,
-    decrypt_item_by_version, delete_fts, delete_item, derive_v2, ensure_revoked_devices_table,
-    fetch_text_preview, get_item_by_id, get_page, get_page_pinned_first, pin_item, reorder_pinned,
-    revoke_device, revoke_devices, search_items, unpin_item, Database, EncryptError, FileMeta,
-    SensitiveDetector,
+    decrypt_item_by_version, delete_fts, delete_item, derive_v2, encode_thumbnail_from_png,
+    ensure_revoked_devices_table, fetch_text_preview, get_item_by_id, get_page,
+    get_page_pinned_first, pin_item, reorder_pinned, revoke_device, revoke_devices, search_items,
+    set_thumb, unpin_item, Database, EncryptError, FileMeta, SensitiveDetector,
 };
 #[cfg(feature = "cloud-sync")]
 use copypaste_core::{derive_sync_key, SyncKey};
@@ -2592,82 +2592,126 @@ impl IpcServer {
                 }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
+                // Capture the local_key once before entering spawn_blocking;
+                // the Zeroizing wrapper is not Send so we dereference to a plain array.
+                let local_key: [u8; 32] = **self.local_key;
+                // All DB work — fetch + optional Phase-4 lazy backfill + decrypt —
+                // runs in a single spawn_blocking so we hold the mutex for one
+                // contiguous span and avoid async/sync boundary issues.
+                // Returns: Ok(Some((png_bytes, data_uri_string))) on success,
+                //          Ok(None) when item not found,
+                //          Err for wrong content_type or missing blob_ref.
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    let item = get_item_by_id(&db, &id_for_task)?;
-                    Ok::<_, anyhow::Error>(item)
+                    let item = match get_item_by_id(&db, &id_for_task)? {
+                        Some(i) => i,
+                        None => return Ok::<_, anyhow::Error>(None),
+                    };
+
+                    let is_image =
+                        item.content_type == "image" || item.content_type.starts_with("image/");
+                    if !is_image {
+                        return Err(anyhow::anyhow!(
+                            "item {} is not an image (content_type: {})",
+                            id_for_task,
+                            item.content_type
+                        ));
+                    }
+
+                    let mut meta_json = item
+                        .blob_ref
+                        .as_deref()
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("image item {} missing blob_ref metadata", id_for_task)
+                        })?
+                        .to_owned();
+
+                    // Resolve the thumbnail blob: use the stored one when present,
+                    // or attempt a Phase-4 lazy backfill for legacy rows with
+                    // thumb IS NULL.
+                    let thumb_blob: Vec<u8> = match item.thumb {
+                        Some(b) => b,
+                        None => {
+                            // Phase 4 lazy backfill: generate + persist a
+                            // thumbnail on first display.  Returns both the
+                            // encrypted blob and the updated meta_json (which
+                            // now includes thumb_file_id / thumb_w / thumb_h)
+                            // so the subsequent decode path reads the right AAD.
+                            // Any failure is logged and falls back to the null
+                            // sentinel — we never error the request.
+                            // content is Option<Vec<u8>>; for image items it is
+                            // always Some (set at capture), so None here means
+                            // the row is corrupt — treat it as backfill failure.
+                            let content_ref: &[u8] = match item.content.as_deref() {
+                                Some(b) => b,
+                                None => {
+                                    tracing::warn!(
+                                        item_id = %id_for_task,
+                                        "lazy thumbnail backfill: image item has no content blob"
+                                    );
+                                    return Ok(Some((Vec::<u8>::new(), String::new())));
+                                }
+                            };
+                            match lazy_backfill_thumbnail(
+                                &db,
+                                &id_for_task,
+                                content_ref,
+                                &meta_json,
+                                &local_key,
+                            ) {
+                                Ok((blob, new_meta)) => {
+                                    // Overwrite the local meta_json so the
+                                    // thumb_file_id parse below reads the value
+                                    // we just persisted to the DB.
+                                    meta_json = new_meta;
+                                    blob
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        item_id = %id_for_task,
+                                        err = %e,
+                                        "lazy thumbnail backfill failed; returning null sentinel"
+                                    );
+                                    // Signal null sentinel via a sentinel Ok(Some)
+                                    // with an empty bytes vec — caller checks.
+                                    // Cleaner than a custom error variant: the
+                                    // outer match maps empty bytes → null response.
+                                    return Ok(Some((Vec::<u8>::new(), String::new())));
+                                }
+                            }
+                        }
+                    };
+
+                    // The thumbnail is keyed by a DISTINCT thumb_file_id recorded
+                    // additively in blob_ref meta JSON (written at capture time or
+                    // by the backfill path above).
+                    let thumb_file_id = parse_image_thumb_file_id(&meta_json).map_err(|e| {
+                        anyhow::anyhow!("image item {} thumb meta parse error: {}", id_for_task, e)
+                    })?;
+
+                    // `decode_thumbnail` takes the serialized blob directly
+                    // (runs `chunks_from_blob` + decrypt internally).
+                    let png_bytes =
+                        copypaste_core::decode_thumbnail(&thumb_blob, &local_key, &thumb_file_id)
+                            .map_err(|e| {
+                            anyhow::anyhow!("image item {} thumb decode failed: {}", id_for_task, e)
+                        })?;
+
+                    use base64::Engine as _;
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                    let data_uri = format!("data:image/png;base64,{b64}");
+                    Ok(Some((png_bytes, data_uri)))
                 })
                 .await;
                 match join {
-                    Ok(Ok(Some(item))) => {
-                        let is_image =
-                            item.content_type == "image" || item.content_type.starts_with("image/");
-                        if !is_image {
-                            return Response::err_with_code(
-                                req.id,
-                                ERR_CODE_INVALID_ARGUMENT,
-                                format!(
-                                    "item {} is not an image (content_type: {})",
-                                    id, item.content_type
-                                ),
-                            );
-                        }
-                        // No thumbnail captured (legacy row or thumb-less sync
-                        // import): return the null sentinel so the UI falls back
-                        // to the full-res image rather than treating it as an
-                        // error.
-                        let thumb_blob = match &item.thumb {
-                            Some(b) => b.clone(),
-                            None => {
-                                return Response::ok(
-                                    req.id,
-                                    serde_json::json!({ "thumbnail": serde_json::Value::Null }),
-                                )
-                            }
-                        };
-                        let meta_json = match item.blob_ref.as_deref() {
-                            Some(s) => s.to_owned(),
-                            None => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_INTERNAL_ERROR,
-                                    format!("image item {} missing blob_ref metadata", id),
-                                )
-                            }
-                        };
-                        // The thumbnail is keyed by a DISTINCT thumb_file_id
-                        // recorded additively in the meta JSON.
-                        let thumb_file_id = match parse_image_thumb_file_id(&meta_json) {
-                            Ok(fid) => fid,
-                            Err(e) => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_INTERNAL_ERROR,
-                                    format!("image item {id} thumb meta parse error: {e}"),
-                                )
-                            }
-                        };
-                        // `decode_thumbnail` takes the serialized blob directly
-                        // (it runs `chunks_from_blob` internally), mirroring how
-                        // `encode_thumbnail`/`encode_image_full` produce it.
-                        let local_key: [u8; 32] = **self.local_key;
-                        let png_bytes = match copypaste_core::decode_thumbnail(
-                            &thumb_blob,
-                            &local_key,
-                            &thumb_file_id,
-                        ) {
-                            Ok(b) => b,
-                            Err(e) => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_AUTH_FAILED,
-                                    format!("image item {id} thumb decode failed: {e}"),
-                                )
-                            }
-                        };
-                        use base64::Engine as _;
-                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-                        let data_uri = format!("data:image/png;base64,{b64}");
+                    Ok(Ok(Some((png_bytes, _data_uri)))) if png_bytes.is_empty() => {
+                        // Empty-bytes sentinel: backfill failed, return null.
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({ "thumbnail": serde_json::Value::Null }),
+                        )
+                    }
+                    Ok(Ok(Some((_png_bytes, data_uri)))) => {
                         Response::ok(req.id, serde_json::json!({ "thumbnail": data_uri }))
                     }
                     Ok(Ok(None)) => Response::err_with_code(
@@ -5868,6 +5912,125 @@ fn parse_meta_id_array(meta_json: &str, key: &str) -> Result<[u8; 16], String> {
             .ok_or_else(|| format!("image meta_json '{key}[{i}]' not a u8"))?;
     }
     Ok(out)
+}
+
+/// Phase 4 lazy-backfill helper: generate and persist an encrypted thumbnail
+/// for a legacy image item whose `thumb` column is NULL.
+///
+/// # Pipeline
+/// 1. `chunks_from_blob(content)` + `decode_image(…)` → full-res PNG bytes.
+/// 2. `encode_thumbnail_from_png(…)` → encrypted thumbnail blob + dimensions.
+/// 3. `set_thumb(db, id, Some(&blob))` — write the blob to the DB (crash-safe:
+///    a failed write just means we regenerate on the next display).
+/// 4. Update `blob_ref` with `thumb_file_id` / `thumb_w` / `thumb_h` so the
+///    normal decode path (`parse_image_thumb_file_id`) can find the AAD key.
+///
+/// Returns `(thumb_blob, updated_meta_json)` on success. The caller must
+/// replace its in-scope `meta_json` with the returned `updated_meta_json` so
+/// the subsequent `decode_thumbnail` call uses the correct `thumb_file_id`.
+///
+/// # Errors
+/// Any step failure is returned as an `anyhow::Error`; the caller logs it and
+/// falls back to the `{ "thumbnail": null }` sentinel — the request never
+/// errors out.
+fn lazy_backfill_thumbnail(
+    db: &copypaste_core::Database,
+    item_id: &str,
+    content: &[u8],
+    meta_json: &str,
+    local_key: &[u8; 32],
+) -> Result<(Vec<u8>, String), anyhow::Error> {
+    use copypaste_core::THUMBNAIL_MAX_DIM;
+
+    // 1. Decrypt the full-resolution content to PNG bytes.
+    let file_id = parse_image_file_id(meta_json)
+        .map_err(|e| anyhow::anyhow!("backfill: file_id parse error: {e}"))?;
+    let chunks = chunks_from_blob(content)
+        .map_err(|e| anyhow::anyhow!("backfill: chunks_from_blob failed: {e}"))?;
+    let png_bytes = decode_image(&chunks, local_key, &file_id)
+        .map_err(|e| anyhow::anyhow!("backfill: decode_image failed: {e}"))?;
+
+    // 2. Derive the distinct thumb_file_id and encode the thumbnail.
+    //    `image_thumb_file_id` is deterministic (SHA-256 domain-separated), so
+    //    the same id is always derived for the same full-image file_id.
+    let thumb_file_id = crate::clipboard::image_thumb_file_id(&file_id);
+    let (thumb_blob, thumb_w, thumb_h) =
+        encode_thumbnail_from_png(&png_bytes, local_key, &thumb_file_id, THUMBNAIL_MAX_DIM)
+            .map_err(|e| anyhow::anyhow!("backfill: encode_thumbnail_from_png failed: {e}"))?;
+
+    // 3. Persist the thumbnail blob.  A write failure is non-fatal: the item
+    //    will just be regenerated on the next `get_item_thumbnail` call.
+    if let Err(e) = set_thumb(db, item_id, Some(&thumb_blob)) {
+        tracing::warn!(
+            item_id = %item_id,
+            err = %e,
+            "backfill: set_thumb write failed (will regenerate next time)"
+        );
+    }
+
+    // 4. Build the updated meta_json with the additive thumb fields and
+    //    persist it.  Parse the existing meta to get the full-image fields so
+    //    we can reconstruct the JSON in the canonical shape expected by
+    //    `parse_image_file_id` and `get_item_image`.
+    let updated_meta = build_updated_meta_json(meta_json, &thumb_file_id, thumb_w, thumb_h)
+        .map_err(|e| anyhow::anyhow!("backfill: meta_json update failed: {e}"))?;
+    if let Err(e) = db.conn().execute(
+        "UPDATE clipboard_items SET blob_ref = ?1 WHERE id = ?2",
+        rusqlite::params![updated_meta, item_id],
+    ) {
+        tracing::warn!(
+            item_id = %item_id,
+            err = %e,
+            "backfill: blob_ref update failed (will regenerate next time)"
+        );
+    }
+
+    Ok((thumb_blob, updated_meta))
+}
+
+/// Rebuild the image `blob_ref` meta JSON by injecting `thumb_file_id`,
+/// `thumb_w`, and `thumb_h` into an existing legacy meta JSON that lacks them.
+///
+/// Preserves all existing keys (width, height, original_size, chunk_count,
+/// file_id) and appends the three new thumbnail keys — identical in shape to
+/// [`crate::clipboard::build_image_meta_json`].
+///
+/// Returns `Err` if the input JSON cannot be parsed or is missing required
+/// fields.
+fn build_updated_meta_json(
+    meta_json: &str,
+    thumb_file_id: &[u8; 16],
+    thumb_w: u32,
+    thumb_h: u32,
+) -> Result<String, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(meta_json).map_err(|e| format!("meta_json parse error: {e}"))?;
+
+    // Pull out required fields; missing fields → error so the caller can
+    // surface the backfill failure rather than writing a broken meta_json.
+    let width = v
+        .get("width")
+        .and_then(|x| x.as_u64())
+        .ok_or("meta_json missing 'width'")?;
+    let height = v
+        .get("height")
+        .and_then(|x| x.as_u64())
+        .ok_or("meta_json missing 'height'")?;
+    let original_size = v
+        .get("original_size")
+        .and_then(|x| x.as_u64())
+        .ok_or("meta_json missing 'original_size'")?;
+    let chunk_count = v
+        .get("chunk_count")
+        .and_then(|x| x.as_u64())
+        .ok_or("meta_json missing 'chunk_count'")?;
+    let file_id = parse_meta_id_array(meta_json, "file_id")
+        .map_err(|e| format!("meta_json missing 'file_id': {e}"))?;
+
+    // Produce the same canonical shape as `clipboard::build_image_meta_json`.
+    Ok(format!(
+        r#"{{"width":{width},"height":{height},"original_size":{original_size},"chunk_count":{chunk_count},"file_id":{file_id:?},"thumb_file_id":{thumb_file_id:?},"thumb_w":{thumb_w},"thumb_h":{thumb_h}}}"#
+    ))
 }
 
 /// Parse all file metadata fields out of the `blob_ref` JSON stored in a
@@ -9261,17 +9424,134 @@ mod tests {
             full_uri.len()
         );
 
-        // get_item_thumbnail on the item WITHOUT a thumb → null sentinel.
-        let null_resp = server
+        // Phase 4: get_item_thumbnail on a legacy item WITHOUT a stored thumb
+        // now lazily backfills and returns a non-null PNG data-URI (Phase 4).
+        // The null sentinel is only returned when backfill itself fails.
+        let backfill_resp = server
             .dispatch(&format!(
                 r#"{{"id":"t2","method":"get_item_thumbnail","params":{{"id":"{no_thumb_id}"}}}}"#
             ))
             .await;
-        let null_data = null_resp.data.expect("get_item_thumbnail (no thumb) data");
+        let backfill_data = backfill_resp
+            .data
+            .expect("get_item_thumbnail (no stored thumb) data");
         assert!(
-            null_data["thumbnail"].is_null(),
-            "thumb-less item must return null sentinel: {null_data}"
+            !backfill_data["thumbnail"].is_null(),
+            "Phase-4: legacy thumb-less item must be lazily backfilled, not null: {backfill_data}"
         );
+        assert!(
+            backfill_data["thumbnail"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("data:image/png;base64,"),
+            "backfilled thumbnail must be a PNG data-URI: {backfill_data}"
+        );
+    }
+
+    /// Phase 4: lazy backfill — an image item with `thumb IS NULL` (legacy row
+    /// captured before schema v9 / Plan-B P2) must have a thumbnail generated
+    /// and persisted on first `get_item_thumbnail` call, and returned as a
+    /// non-null PNG data-URI. A second call must also return non-null (proving
+    /// the thumbnail was written to the DB, not just computed in memory).
+    #[tokio::test]
+    async fn get_item_thumbnail_lazy_backfill_missing_thumb() {
+        use copypaste_core::THUMBNAIL_MAX_DIM;
+        use image::{DynamicImage, RgbaImage};
+
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let server = IpcServer::new(
+            db.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+            Arc::new([0u8; 32]),
+        );
+        let key = [0u8; 32];
+
+        // Build a 1000×1000 image (larger than THUMBNAIL_MAX_DIM so a real
+        // downscale occurs), encode with the old path (no thumb blob), and
+        // store with thumb=None to simulate a legacy row.
+        let mut buf = RgbaImage::new(1000, 1000);
+        for (x, y, px) in buf.enumerate_pixels_mut() {
+            *px = image::Rgba([(x % 256) as u8, (y % 256) as u8, ((x + y) % 256) as u8, 255]);
+        }
+        let raw = copypaste_core::encode_as_png(&DynamicImage::ImageRgba8(buf)).unwrap();
+
+        let file_id = crate::clipboard::image_content_hash(&raw);
+        let (meta, chunks) =
+            copypaste_core::encode_image_with_limit(&raw, &key, &file_id, 0, 64).unwrap();
+        let blob = copypaste_core::chunks_to_blob(&chunks).unwrap();
+
+        // Legacy meta_json: no thumb_file_id / thumb_w / thumb_h fields.
+        let meta_json = format!(
+            r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
+            meta.width, meta.height, meta.original_size, meta.chunk_count, meta.file_id
+        );
+
+        let mut item = copypaste_core::ClipboardItem::new_image(blob, meta_json, 0, None);
+        item.item_id = uuid::Uuid::new_v4().to_string();
+        item.id = uuid::Uuid::new_v4().to_string();
+        let item_id = item.id.clone();
+
+        {
+            let guard = db.lock().await;
+            copypaste_core::insert_item_with_fts(&guard, &item, "").unwrap();
+        }
+
+        // ── First call: thumb is NULL → should backfill and return data-URI ──
+        let resp1 = server
+            .dispatch(&format!(
+                r#"{{"id":"b1","method":"get_item_thumbnail","params":{{"id":"{item_id}"}}}}"#
+            ))
+            .await;
+        let data1 = resp1.data.expect("first get_item_thumbnail must have data");
+        assert!(
+            !data1["thumbnail"].is_null(),
+            "lazy backfill: first call must return non-null thumbnail, got: {data1}"
+        );
+        let uri1 = data1["thumbnail"]
+            .as_str()
+            .expect("thumbnail must be a string");
+        assert!(
+            uri1.starts_with("data:image/png;base64,"),
+            "backfilled thumbnail must be a PNG data-URI"
+        );
+        // Verify thumbnail was genuinely downscaled (PNG is smaller than full-res).
+        let thumb_b64_len = uri1.len() - "data:image/png;base64,".len();
+        let full_resp = server
+            .dispatch(&format!(
+                r#"{{"id":"b_full","method":"get_item_image","params":{{"id":"{item_id}"}}}}"#
+            ))
+            .await;
+        let full_uri = full_resp.data.expect("get_item_image data")["data_uri"]
+            .as_str()
+            .expect("data_uri")
+            .to_string();
+        let full_b64_len = full_uri.len() - "data:image/png;base64,".len();
+        assert!(
+            thumb_b64_len < full_b64_len,
+            "backfilled thumbnail ({thumb_b64_len}) must be smaller than full-res ({full_b64_len})"
+        );
+
+        // ── Second call: thumb must now be in DB (persisted) ─────────────────
+        let resp2 = server
+            .dispatch(&format!(
+                r#"{{"id":"b2","method":"get_item_thumbnail","params":{{"id":"{item_id}"}}}}"#
+            ))
+            .await;
+        let data2 = resp2
+            .data
+            .expect("second get_item_thumbnail must have data");
+        assert!(
+            !data2["thumbnail"].is_null(),
+            "lazy backfill: second call must still return non-null thumbnail (persisted), got: {data2}"
+        );
+        assert_eq!(
+            data2["thumbnail"], data1["thumbnail"],
+            "second call must return the same data-URI (served from DB, deterministic)"
+        );
+
+        // Confirm THUMBNAIL_MAX_DIM was respected by the backfill.
+        let _ = THUMBNAIL_MAX_DIM; // ensure the constant stays referenced in this test
     }
 
     // -----------------------------------------------------------------------

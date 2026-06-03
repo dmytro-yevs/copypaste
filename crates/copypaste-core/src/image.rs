@@ -384,6 +384,37 @@ pub fn decode_thumbnail(
     Ok(bytes)
 }
 
+/// Lazy-backfill path: decode raw PNG bytes, then produce an encrypted
+/// thumbnail blob identical in format to the capture-time path.
+///
+/// This is the Phase-4 helper used by `get_item_thumbnail` when a legacy
+/// image item has `thumb IS NULL`. The caller decrypts the full-res content
+/// to `png_bytes` first (via [`decode_image`]), then passes them here.
+///
+/// Pipeline:
+///   `png_bytes` → [`decode_clipboard_image`] → [`encode_thumbnail`]
+///
+/// On success returns `(thumb_blob, thumb_w, thumb_h)` — the same shape
+/// produced by [`encode_image_full`] — so the caller can persist it via
+/// [`crate::storage::items::set_thumb`] and record `thumb_w`/`thumb_h` in
+/// the updated `blob_ref` meta JSON.
+///
+/// `thumb_file_id` MUST be the DISTINCT id derived from the full-image
+/// `file_id` (see `clipboard::image_thumb_file_id`); it is bound as AEAD
+/// AAD so the same id MUST be used when decoding (via [`decode_thumbnail`]).
+pub fn encode_thumbnail_from_png(
+    png_bytes: &[u8],
+    key: &[u8; 32],
+    thumb_file_id: &[u8; 16],
+    max_dim: u32,
+) -> Result<(Vec<u8>, u32, u32), ImageError> {
+    let img = decode_clipboard_image(png_bytes)?;
+    let (bytes, w, h) = encode_thumbnail_bytes(&img, max_dim)?;
+    let chunks = encrypt_chunks(&bytes, key, thumb_file_id, IMAGE_CHUNK_SIZE)?;
+    let blob = chunks_to_blob(&chunks)?;
+    Ok((blob, w, h))
+}
+
 /// Full capture-time encode producing BOTH the full-resolution encrypted
 /// chunks AND a small encrypted thumbnail blob from a SINGLE decode of `raw`.
 ///
