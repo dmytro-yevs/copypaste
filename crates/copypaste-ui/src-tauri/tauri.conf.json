@@ -25,20 +25,6 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "visible": true
-      },
-      {
-        "label": "popup",
-        "title": "CopyPaste Quick Paste",
-        "url": "popup.html",
-        "width": 403,
-        "height": 624,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "resizable": false,
-        "visible": false,
-        "focus": true
       }
     ],
     "security": {
