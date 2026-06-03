@@ -40,9 +40,12 @@ private const val TAG = "CopypasteBindings"
  * changes. Bumped 8 → 9 for the multi-peer roster / config-via-FFI / revoke
  * audit surface. Bumped 9 → 10 for the QR full-provisioning surface
  * (`SyncProvisioning`, `BootstrapResult.peerProvisioning`, and the trailing
- * `localProvisioning` param on `bootstrapPairInitiator`).
+ * `localProvisioning` param on `bootstrapPairInitiator`). Bumped 11 → 12 for the
+ * LAN discovery + SAS pairing surface (`startDiscovery`/`stopDiscovery`/
+ * `listDiscovered`/`pairWithDiscovered`/`pairGetSas`/`pairConfirmSas`/`pairAbort`/
+ * `pairReset`, plus the `DiscoveredPeer` / `PairStatus` records).
  */
-const val APP_ABI_VERSION: UInt = 10u
+const val APP_ABI_VERSION: UInt = 12u
 
 /** Mirrors `EncryptedBlob` in copypaste_android.udl — uses ByteArray for callers. */
 data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {
@@ -850,5 +853,215 @@ fun stopP2pListener(listenerId: Long) {
         uniffi.copypaste_android.stopP2pListener(listenerId.toULong())
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         throw CopypasteException.DatabaseError(e.message ?: "stopP2pListener failed")
+    }
+}
+
+// ── LAN discovery + SAS pairing (ABI-12 surface) ───────────────────────────────
+//
+// The discovery/SAS surface is the Android mirror of the macOS daemon's
+// "Discovered on your network" + SAS-confirm pairing flow (DevicesView.tsx
+// SasPairingModal). The native side owns an in-process mDNS browser/advertiser
+// ([startDiscovery]/[stopDiscovery]) and a single-active pairing state machine
+// driven by [pairWithDiscovered] (initiator) → [pairGetSas] (poll) →
+// [pairConfirmSas] (human SAS decision) → [pairReset] (clear after terminal).
+//
+// SECURITY: NEVER log the 6-digit SAS or the session-key bytes returned in a
+// confirmed [PairStatus]. The wrappers below surface FFI/IPC failures rather
+// than swallowing them (the discovery list and pairing UI must show real
+// errors), except for [stopDiscovery]/[pairAbort]/[pairReset] cleanup paths
+// where a best-effort double-call is tolerated.
+//
+// The generated [uniffi.copypaste_android.DiscoveredPeer] and
+// [uniffi.copypaste_android.PairStatus] records are re-exported as type aliases
+// so DevicesActivity can name them without importing the generated package.
+
+/** App-side alias for the generated discovered-peer record. */
+typealias DiscoveredPeer = uniffi.copypaste_android.DiscoveredPeer
+
+/** App-side alias for the generated pairing-status record. */
+typealias PairStatus = uniffi.copypaste_android.PairStatus
+
+/**
+ * Start advertising THIS device and browsing the LAN for peers over mDNS.
+ *
+ *  - [deviceId]: this device's stable id (its cert fingerprint).
+ *  - [deviceName]: human-readable name advertised in the TXT record.
+ *  - [syncPort]: the inbound P2P mTLS listener port (read from
+ *    [ClipboardService.activeListenerPort]; 0 when the listener is not up).
+ *  - [bport]: the ephemeral bootstrap (SAS-pairing) listener port advertised so
+ *    peers can dial back to pair. A non-zero value marks this device as
+ *    SAS-pairing-capable (v2); peers advertising no bport (v1) cannot be paired.
+ *  - [certDer]/[keyDer]: this device's mTLS identity (already `List<UByte>`, as
+ *    held by [uniffi.copypaste_android.DeviceCert]).
+ *
+ * No-op in stub mode. Throws [CopypasteException] on a native error so the
+ * caller can decide whether discovery is available.
+ */
+@Throws(CopypasteException::class)
+fun startDiscovery(
+    deviceId: String,
+    deviceName: String,
+    syncPort: Int,
+    bport: Int,
+    certDer: List<UByte>,
+    keyDer: List<UByte>,
+) {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "startDiscovery: stub — native library not loaded")
+        return
+    }
+    try {
+        uniffi.copypaste_android.startDiscovery(
+            deviceId = deviceId,
+            deviceName = deviceName,
+            syncPort = syncPort.toUShort(),
+            bport = bport.toUShort(),
+            certDer = certDer,
+            keyDer = keyDer,
+        )
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "startDiscovery failed")
+    }
+}
+
+/**
+ * Stop the mDNS advertiser + browser. Best-effort cleanup: a double-stop or a
+ * stop without a prior start is tolerated and only logged. No-op in stub mode.
+ */
+fun stopDiscovery() {
+    if (!isNativeLibraryLoaded) return
+    try {
+        uniffi.copypaste_android.stopDiscovery()
+    } catch (e: Exception) {
+        Log.w(TAG, "stopDiscovery: native call failed (tolerated): ${e.message}")
+    }
+}
+
+/**
+ * Snapshot the currently-discovered LAN peers. [pairedFingerprints] is the set of
+ * already-paired peer fingerprints; the native side stamps [DiscoveredPeer.paired]
+ * accordingly so the caller can filter them out of the "discoverable" list.
+ *
+ * Returns an empty list in stub mode. Throws [CopypasteException] on a native
+ * error (the caller may choose to keep the previous snapshot).
+ */
+@Throws(CopypasteException::class)
+fun listDiscovered(pairedFingerprints: List<String>): List<DiscoveredPeer> {
+    if (!isNativeLibraryLoaded) return emptyList()
+    return try {
+        uniffi.copypaste_android.listDiscovered(pairedFingerprints)
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "listDiscovered failed")
+    }
+}
+
+/**
+ * Begin a discovery-initiated SAS pairing as the INITIATOR against the peer with
+ * [deviceId]. Drives the bootstrap handshake to the SAS stage in the background;
+ * progress is observed via [pairGetSas] and the human decision sent via
+ * [pairConfirmSas].
+ *
+ *  - [certDer]/[keyDer]: this device's mTLS identity (`List<UByte>`).
+ *  - [syncAddr]: this device's dialable inbound listener address to advertise to
+ *    the peer (empty when no listener is up).
+ *  - [localProvisioning]: this device's sync provisioning to offer the peer, or
+ *    null when this device carries nothing of its own (the common phone case).
+ *
+ * Throws [CopypasteException] on a native error — notably when a pairing is
+ * already in progress (single-active state machine) — so the caller can surface
+ * it. Throws [IllegalStateException] when the native library is absent.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun pairWithDiscovered(
+    deviceId: String,
+    certDer: List<UByte>,
+    keyDer: List<UByte>,
+    syncAddr: String,
+    localProvisioning: uniffi.copypaste_android.SyncProvisioning?,
+) {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; pairWithDiscovered is unavailable")
+    }
+    try {
+        uniffi.copypaste_android.pairWithDiscovered(
+            deviceId = deviceId,
+            certDer = certDer,
+            keyDer = keyDer,
+            syncAddr = syncAddr,
+            localProvisioning = localProvisioning,
+        )
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "pairWithDiscovered failed")
+    }
+}
+
+/**
+ * Poll the current pairing state machine. Returns a [PairStatus] whose `state` is
+ * one of `idle` / `initiating` / `awaiting_sas` / `confirmed` / `rejected` /
+ * `aborted` / `timed_out`. On `awaiting_sas` the `sas` field carries the 6-digit
+ * code; on `confirmed` the `sessionKey`, `peerFingerprint`, `peerSyncAddr`, and
+ * `peerProvisioning` fields are populated for persistence.
+ *
+ * NEVER log the returned `sas` or `sessionKey`. Throws [CopypasteException] on a
+ * native error; throws [IllegalStateException] when the native library is absent.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun pairGetSas(): PairStatus {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; pairGetSas is unavailable")
+    }
+    return try {
+        uniffi.copypaste_android.pairGetSas()
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "pairGetSas failed")
+    }
+}
+
+/**
+ * Send the human SAS decision to the in-flight pairing: [accept] = true when the
+ * user confirms the codes match, false to reject. A false decision aborts the
+ * handshake on both sides (keys are dropped + zeroized natively).
+ *
+ * Throws [CopypasteException] on a native error; throws [IllegalStateException]
+ * when the native library is absent.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun pairConfirmSas(accept: Boolean) {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; pairConfirmSas is unavailable")
+    }
+    try {
+        uniffi.copypaste_android.pairConfirmSas(accept)
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "pairConfirmSas failed")
+    }
+}
+
+/**
+ * Abort the in-flight pairing (e.g. the user closed the modal before a terminal
+ * state). Best-effort: a call with no active pairing is tolerated and only
+ * logged, mirroring the macOS modal's "abort exactly once on close". No-op in
+ * stub mode.
+ */
+fun pairAbort() {
+    if (!isNativeLibraryLoaded) return
+    try {
+        uniffi.copypaste_android.pairAbort()
+    } catch (e: Exception) {
+        Log.w(TAG, "pairAbort: native call failed (tolerated): ${e.message}")
+    }
+}
+
+/**
+ * Reset the pairing state machine back to `idle` after a terminal outcome so the
+ * next pairing can start cleanly. Best-effort cleanup: tolerated/logged on
+ * failure. No-op in stub mode.
+ */
+fun pairReset() {
+    if (!isNativeLibraryLoaded) return
+    try {
+        uniffi.copypaste_android.pairReset()
+    } catch (e: Exception) {
+        Log.w(TAG, "pairReset: native call failed (tolerated): ${e.message}")
     }
 }
