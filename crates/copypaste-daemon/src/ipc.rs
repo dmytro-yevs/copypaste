@@ -108,6 +108,12 @@ pub struct AppConfig {
     /// override: `SUPABASE_ANON_KEY`.
     #[serde(default)]
     pub supabase_anon_key: Option<String>,
+    /// HTTP relay base URL for store-and-forward sync fan-out (e.g.
+    /// `https://relay.example.com`). Non-secret: surfaced verbatim by
+    /// `get_config`. `None` / absent on `set_config` preserves the stored value
+    /// (see [`merge_config`]). Mirrored into the core `config.toml`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay_url: Option<String>,
     /// GoTrue account email for the `authenticated` scope sign-in. Persisted
     /// (not env-only) so the documented `copypaste cloud setup` flow yields a
     /// daemon that authenticates and passes the `authenticated`-only RLS
@@ -280,6 +286,7 @@ pub(crate) fn read_config() -> AppConfig {
             collect_public_ip: Some(core.collect_public_ip),
             paste_as_plain_text: Some(core.paste_as_plain_text),
             excluded_app_bundle_ids: Some(core.excluded_app_bundle_ids.clone()),
+            relay_url: core.relay_url.clone(),
             ..AppConfig::default()
         };
     };
@@ -327,6 +334,9 @@ pub(crate) fn read_config() -> AppConfig {
     cfg.collect_public_ip = Some(core.collect_public_ip);
     cfg.paste_as_plain_text = Some(core.paste_as_plain_text);
     cfg.excluded_app_bundle_ids = Some(core.excluded_app_bundle_ids.clone());
+    // relay_url is a non-secret base URL persisted in config.toml; surface it
+    // verbatim so the UI prefills the current value (mirrors supabase_url).
+    cfg.relay_url = core.relay_url.clone();
     cfg
 }
 
@@ -375,6 +385,9 @@ pub(crate) fn update_core_config(
     if let Some(ref v) = incoming.excluded_app_bundle_ids {
         core.excluded_app_bundle_ids = v.clone();
     }
+    if let Some(ref v) = incoming.relay_url {
+        core.relay_url = Some(v.clone());
+    }
     // Clamp the merged config into valid ranges ONCE, here, before both the
     // disk write and the returned (hot-loaded) value — otherwise an unclamped
     // set_config (e.g. image_quality:0) would be persisted and pushed straight
@@ -416,6 +429,7 @@ fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfig {
         p2p_enabled: incoming.p2p_enabled.or(existing.p2p_enabled),
         supabase_url: incoming.supabase_url.or(existing.supabase_url),
         supabase_anon_key: incoming.supabase_anon_key.or(existing.supabase_anon_key),
+        relay_url: incoming.relay_url.or(existing.relay_url),
         supabase_email: incoming.supabase_email.or(existing.supabase_email),
         supabase_password: incoming.supabase_password.or(existing.supabase_password),
         sound_on_copy: incoming.sound_on_copy.or(existing.sound_on_copy),
@@ -1373,8 +1387,9 @@ impl IpcServer {
     /// device, or a build without `cloud-sync`, sends an all-`None` value and the
     /// peer learns nothing to apply).
     ///
-    /// `relay_url` is always `None`: the daemon has no relay-URL config field
-    /// (relay is env-only today). The field is carried for wire/FFI symmetry.
+    /// `relay_url` is populated from the persisted `relay_url` config field so a
+    /// freshly paired peer inherits this device's relay endpoint. It is a
+    /// non-secret base URL (no env override today, unlike the Supabase params).
     ///
     /// SECURITY: the returned struct's `derived_sync_key` is secret; it is never
     /// logged here (and `SyncProvisioning`'s `Debug` redacts it).
@@ -1388,6 +1403,7 @@ impl IpcServer {
         let app_cfg = tokio::task::spawn_blocking(read_config)
             .await
             .unwrap_or_default();
+        let relay_url = app_cfg.relay_url.clone();
         let supabase_url = std::env::var("SUPABASE_URL").ok().or(app_cfg.supabase_url);
         let supabase_anon_key = std::env::var("SUPABASE_ANON_KEY")
             .ok()
@@ -1401,13 +1417,17 @@ impl IpcServer {
             .as_ref()
             .map(|k| zeroize::Zeroizing::new(k.as_bytes().to_vec()));
 
-        if supabase_url.is_none() && supabase_anon_key.is_none() && derived_sync_key.is_none() {
+        if supabase_url.is_none()
+            && supabase_anon_key.is_none()
+            && derived_sync_key.is_none()
+            && relay_url.is_none()
+        {
             return None;
         }
         Some(copypaste_p2p::bootstrap::SyncProvisioning {
             supabase_url,
             supabase_anon_key,
-            relay_url: None,
+            relay_url,
             // Unwrap the Zeroizing into the owned Vec the struct holds. The
             // struct's own Debug redacts these bytes; they never hit a log.
             derived_sync_key: derived_sync_key.map(|z| z.to_vec()),
@@ -1439,8 +1459,10 @@ impl IpcServer {
     ///   `set_sync_passphrase` uses (file store or Keychain), then installed in
     ///   the live `sync_key` slot so the cloud loops pick it up immediately. We
     ///   set the KEY directly — the passphrase is never transmitted.
-    /// * `relay_url` — no daemon config field exists yet; ignored (logged at
-    ///   debug). Carried only for wire/FFI symmetry.
+    /// * `relay_url` — written into `config.json` (and mirrored to `config.toml`)
+    ///   via the same `merge_config` + `write_config` path, but ONLY when this
+    ///   device has no persisted `relay_url` yet. An existing local relay URL is
+    ///   never overwritten (mirrors the `supabase_url` fill-missing rule).
     ///
     /// All steps are best-effort and idempotent; a persist failure is logged and
     /// swallowed (pairing already succeeded).
@@ -1480,26 +1502,40 @@ impl IpcServer {
                 config_changed = true;
             }
         }
+        // relay_url: non-secret base URL. Fill it only when this device has no
+        // persisted relay_url yet (never overwrite an existing local value),
+        // mirroring the supabase_url fill-missing rule above. It is persisted to
+        // BOTH config.json (via write_config below) and config.toml (via
+        // update_core_config) because read_config overlays relay_url from the
+        // core config.toml — a config.json-only write would be clobbered on the
+        // next read.
+        if current.relay_url.is_none() {
+            if let Some(url) = prov.relay_url {
+                incoming.relay_url = Some(url);
+                config_changed = true;
+            }
+        }
         if config_changed {
             // merge_config keeps existing values for every field `incoming`
             // leaves `None`, so this only ADDS the missing sync params.
             let merged = merge_config(current, incoming);
-            match tokio::task::spawn_blocking(move || write_config(&merged)).await {
+            match tokio::task::spawn_blocking(move || {
+                write_config(&merged)?;
+                // Mirror relay_url (and any other core-backed fields) into
+                // config.toml so read_config's overlay does not clobber it.
+                update_core_config(&merged)?;
+                Ok::<_, anyhow::Error>(())
+            })
+            .await
+            {
                 Ok(Ok(())) => {
-                    tracing::info!("applied peer sync provisioning: persisted Supabase config")
+                    tracing::info!("applied peer sync provisioning: persisted sync config")
                 }
                 Ok(Err(e)) => {
-                    tracing::warn!("apply_peer_provisioning: write_config failed: {e}")
+                    tracing::warn!("apply_peer_provisioning: config persist failed: {e}")
                 }
                 Err(e) => tracing::warn!("apply_peer_provisioning: config task join failed: {e}"),
             }
-        }
-
-        if prov.relay_url.is_some() {
-            tracing::debug!(
-                "apply_peer_provisioning: peer advertised a relay_url but this build has \
-                 no relay-URL config field; ignoring (relay is env-only)"
-            );
         }
 
         // ── 2. Derived cloud sync key → key store + live slot ──
@@ -9854,7 +9890,7 @@ mod tests {
         let prov = copypaste_p2p::bootstrap::SyncProvisioning {
             supabase_url: Some("https://new.supabase.co".into()),
             supabase_anon_key: Some("new-anon".into()),
-            relay_url: None,
+            relay_url: Some("https://relay.example.com".into()),
             derived_sync_key: Some(vec![5u8; 32]),
         };
         IpcServer::apply_peer_provisioning_to(&sync_key, prov).await;
@@ -9862,6 +9898,13 @@ mod tests {
         let cfg = read_config();
         assert_eq!(cfg.supabase_url.as_deref(), Some("https://new.supabase.co"));
         assert_eq!(cfg.supabase_anon_key.as_deref(), Some("new-anon"));
+        // R2: a peer-advertised relay_url is persisted on an unconfigured device
+        // and survives the read_config overlay (it round-trips via config.toml).
+        assert_eq!(
+            cfg.relay_url.as_deref(),
+            Some("https://relay.example.com"),
+            "an unconfigured device must adopt the peer's relay_url"
+        );
         assert!(
             sync_key.lock().await.is_some(),
             "an unconfigured device must install the peer's derived sync key"
@@ -9893,20 +9936,24 @@ mod tests {
             std::env::set_var("COPYPASTE_EPHEMERAL_KEY", "1");
         }
 
-        // Seed an already-configured device.
-        write_config(&AppConfig {
+        // Seed an already-configured device. supabase_* live in config.json;
+        // relay_url is core-backed, so seed it via update_core_config (config.toml)
+        // — read_config overlays relay_url from there.
+        let seed = AppConfig {
             supabase_url: Some("https://existing.supabase.co".into()),
             supabase_anon_key: Some("existing-anon".into()),
+            relay_url: Some("https://existing-relay.example.com".into()),
             ..Default::default()
-        })
-        .expect("seed config");
+        };
+        write_config(&seed).expect("seed config.json");
+        update_core_config(&seed).expect("seed config.toml");
         let sync_key: Arc<Mutex<Option<SyncKey>>> =
             Arc::new(Mutex::new(Some(SyncKey::from_bytes([1u8; 32]))));
 
         let prov = copypaste_p2p::bootstrap::SyncProvisioning {
             supabase_url: Some("https://peer.supabase.co".into()),
             supabase_anon_key: Some("peer-anon".into()),
-            relay_url: None,
+            relay_url: Some("https://peer-relay.example.com".into()),
             derived_sync_key: Some(vec![9u8; 32]),
         };
         IpcServer::apply_peer_provisioning_to(&sync_key, prov).await;
@@ -9918,6 +9965,11 @@ mod tests {
             "existing supabase_url must not be overwritten"
         );
         assert_eq!(cfg.supabase_anon_key.as_deref(), Some("existing-anon"));
+        assert_eq!(
+            cfg.relay_url.as_deref(),
+            Some("https://existing-relay.example.com"),
+            "existing relay_url must not be overwritten by the peer's"
+        );
         // The pre-existing key (all 1s) must be untouched.
         assert_eq!(
             sync_key.lock().await.as_ref().map(|k| *k.as_bytes()),

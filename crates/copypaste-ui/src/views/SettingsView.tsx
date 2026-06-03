@@ -510,6 +510,7 @@ export function SettingsView() {
   });
   const [supabaseUrl, setSupabaseUrl] = useState("");
   const [supabaseKey, setSupabaseKey] = useState("");
+  const [relayUrl, setRelayUrl] = useState("");
   const [savedMsg, setSavedMsg] = useState(false);
   const [testMsg, setTestMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [testing, setTesting] = useState(false);
@@ -660,11 +661,13 @@ export function SettingsView() {
           p2p_enabled: rawCfg.p2p_enabled ?? true,
           supabase_url: rawCfg.supabase_url ?? null,
           supabase_anon_key: rawCfg.supabase_anon_key ?? null,
+          relay_url: rawCfg.relay_url ?? null,
         });
 
         // Prefill Supabase URL — prefer stored config, fall back to sync_status.
         setSupabaseUrl(rawCfg.supabase_url ?? syncSt?.supabase_url ?? "");
         setSupabaseKey(rawCfg.supabase_anon_key ?? "");
+        setRelayUrl(rawCfg.relay_url ?? "");
         setSyncStatus(syncSt);
 
         // Storage / Limits — snap raw bytes to nearest step array entry so an
@@ -815,6 +818,7 @@ export function SettingsView() {
       p2p_enabled: config.p2p_enabled,
       supabase_url: supabaseUrl.trim() || null,
       supabase_anon_key: supabaseKey.trim() || null,
+      relay_url: relayUrl.trim() || null,
       max_text_size_bytes: maxTextBytes,
       max_image_size_bytes: maxImageBytes,
       max_file_size_bytes: maxFileBytes,
@@ -940,6 +944,7 @@ export function SettingsView() {
       p2p_enabled: config.p2p_enabled,
       supabase_url: supabaseUrl.trim() || null,
       supabase_anon_key: anonKey,
+      relay_url: relayUrl.trim() || null,
     };
     setSaveError(null);
     try {
@@ -964,7 +969,7 @@ export function SettingsView() {
       if (saveErrTimer.current !== null) clearTimeout(saveErrTimer.current);
       saveErrTimer.current = setTimeout(() => setSaveError(null), 3500);
     }
-  }, [config.p2p_enabled, config.supabase_anon_key, supabaseUrl, supabaseKey, saveErrTimer]);
+  }, [config.p2p_enabled, config.supabase_anon_key, supabaseUrl, supabaseKey, relayUrl, saveErrTimer]);
 
   const handleTestConnection = useCallback(async () => {
     setTesting(true);
@@ -1491,6 +1496,21 @@ export function SettingsView() {
               {syncStatus?.supabase_configured && !supabaseKey && (
                 <span className="text-[11px] text-ide-success">set ✓</span>
               )}
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Relay URL">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Optional HTTP relay for store-and-forward sync when devices aren't on the same network. Leave blank to use direct P2P / cloud sync only. Saved with the cloud-sync settings." />
+              <input
+                type="url"
+                className={inputCls}
+                placeholder="https://relay.example.com"
+                value={relayUrl}
+                onChange={(e) => setRelayUrl(e.target.value)}
+                disabled={offline}
+                autoComplete="off"
+                spellCheck={false}
+              />
             </div>
           </SettingsRow>
           {/* M7: "Set" button removed — passphrase saves on Enter or focus-out */}

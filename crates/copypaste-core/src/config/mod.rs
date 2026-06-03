@@ -73,6 +73,15 @@ pub struct AppConfig {
     /// always be `null` in `get_own_device_info`.  Default: `true`.
     #[serde(default = "default_true")]
     pub collect_public_ip: bool,
+
+    /// Base URL of the HTTP relay used for store-and-forward sync fan-out, e.g.
+    /// `https://relay.example.com`. `None` means "no relay configured" — the
+    /// daemon then relies solely on direct P2P (and/or cloud sync) and never
+    /// POSTs ciphertext to a relay. This value is non-secret and is surfaced
+    /// verbatim over IPC; it is validated at the use-site, not clamped here.
+    /// Default: `None`.
+    #[serde(default)]
+    pub relay_url: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -100,6 +109,7 @@ impl Default for AppConfig {
             sound_on_copy: true,
             notify_on_copy: true,
             collect_public_ip: true,
+            relay_url: None,
         }
     }
 }
@@ -203,6 +213,35 @@ mod tests {
         assert_eq!(loaded.history_limit, HISTORY_LIMIT);
         assert_eq!(loaded.poll_interval_ms, 500);
         assert!(!loaded.sync_on_wifi_only);
+        // relay_url defaults to None and survives a save/load round-trip.
+        assert_eq!(loaded.relay_url, None);
+    }
+
+    #[test]
+    fn relay_url_roundtrips_through_save_and_load() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let cfg = AppConfig {
+            relay_url: Some("https://relay.example.com".to_owned()),
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let loaded = AppConfig::load(&path).unwrap();
+        assert_eq!(
+            loaded.relay_url.as_deref(),
+            Some("https://relay.example.com")
+        );
+    }
+
+    #[test]
+    fn relay_url_absent_from_toml_defaults_to_none() {
+        // A config file written before relay_url existed must still load, with
+        // relay_url defaulting to None via #[serde(default)].
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "config_version = 1\n").unwrap();
+        let cfg = AppConfig::load(&path).unwrap();
+        assert_eq!(cfg.relay_url, None);
     }
 
     #[test]
