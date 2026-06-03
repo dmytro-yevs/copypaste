@@ -57,8 +57,8 @@ import kotlinx.coroutines.launch
  *
  * Clipboard monitoring:
  *   - [ClipboardService] covers API 26-28 (background allowed).
- *   - [ClipboardAccessibilityService] covers API 29+ background access
- *     (requires the user to enable it via Accessibility Settings).
+ *   - [LogcatCaptureService] covers API 29+ background access via the logcat+overlay path
+ *     (requires READ_LOGS via adb + SYSTEM_ALERT_WINDOW).
  *   - The in-activity [ClipboardManager] listener below covers the foreground
  *     window while this activity is visible (all API levels).
  */
@@ -186,7 +186,7 @@ class MainActivity : ComponentActivity() {
     private suspend fun handleClipboardChange(text: String) {
         // Route through the shared capture pipeline so foreground-captured clips
         // are counted in the notification, trigger copy sound/notification, and
-        // sync — exactly like ClipboardService and ClipboardAccessibilityService.
+        // sync — exactly like ClipboardService and LogcatCaptureService.
         // Previously this called repository.storeItem directly, skipping all of
         // bumpTodayCounter / postCopyNotification / playCopySound / notifySyncManager.
         ClipboardService.captureClip(this, text, settings, repository, syncManager)

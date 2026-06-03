@@ -54,23 +54,17 @@ import java.util.Calendar
  *
  * ## Background clipboard access (Android 10+)
  * `ClipboardManager.getPrimaryClip()` is blocked from any non-foreground,
- * non-IME, non-AccessibilityService context on API 29+. This service registers
+ * non-IME context on API 29+. This service registers
  * `OnPrimaryClipChangedListener` on the main thread (framework requirement),
  * which *fires* even from background — but `getPrimaryClip()` inside the
- * callback will return null unless the process also has an enabled
- * AccessibilityService. [ClipboardAccessibilityService] provides that binding;
- * since both services run in the same process, enabling the a11y service makes
- * getPrimaryClip() return non-null here too.
+ * callback will return null unless the process has a focused window token.
+ * [addCaptureOverlay] adds a 1×1 invisible TYPE_APPLICATION_OVERLAY window
+ * that grants this token, lifting the restriction on Android 10+.
  *
- * When getPrimaryClip() returns null on API 29+ (a11y service not enabled),
- * [clipListener] issues a one-time actionable notification via
- * [maybeNotifyA11yRequired] — shown at most once per install to avoid spam —
- * so the user knows background capture is silently inactive and can fix it.
- * Without the a11y service, this FGS only captures clips copied while the
- * app is in the foreground (via this listener) or via [MainActivity]'s own
- * ClipboardManager listener; it does NOT capture clips from other apps in
- * background on API 29+. There is no workaround for this platform restriction
- * without an enabled AccessibilityService or the default IME role.
+ * Background capture via the logcat+ClipboardFloatingActivity path requires
+ * READ_LOGS (adb grant) and SYSTEM_ALERT_WINDOW. See [LogcatCaptureService].
+ * When getPrimaryClip() returns null (overlay not yet added), this FGS only
+ * captures clips copied while the app is in the foreground.
  *
  * ## Restart on swipe-away ([onTaskRemoved])
  * When the user swipes the app from the recents list, Android calls
@@ -149,11 +143,6 @@ class ClipboardService : Service() {
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         val clip = clipboardManager.primaryClip
         if (clip == null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                if (!ClipboardAccessibilityService.isEnabled(this@ClipboardService)) {
-                    maybeNotifyA11yRequired(this@ClipboardService)
-                }
-            }
             return@OnPrimaryClipChangedListener
         }
 
@@ -518,7 +507,7 @@ class ClipboardService : Service() {
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return  // canDrawOverlays needs API 23
         if (!android.provider.Settings.canDrawOverlays(this)) {
-            Log.d(TAG, "addCaptureOverlay: SYSTEM_ALERT_WINDOW not granted — skipping overlay (a11y path remains active)")
+            Log.d(TAG, "addCaptureOverlay: SYSTEM_ALERT_WINDOW not granted — skipping overlay")
             return
         }
 
@@ -548,7 +537,7 @@ class ClipboardService : Service() {
             // canDrawOverlays check and the addView call, or on some OEM ROMs
             // that return false from canDrawOverlays at add-time. Non-fatal —
             // fall back to the AccessibilityService capture path.
-            Log.w(TAG, "addCaptureOverlay: addView failed (${e.javaClass.simpleName}: ${e.message}) — falling back to a11y path")
+            Log.w(TAG, "addCaptureOverlay: addView failed (${e.javaClass.simpleName}: ${e.message})")
         }
     }
 
@@ -618,20 +607,6 @@ class ClipboardService : Service() {
         var activeListenerPort: Int = 0
             private set
 
-        /** Separate notification channel for the one-time "enable Accessibility" action prompt. */
-        private const val CHANNEL_A11Y_WARN = "copypaste_a11y_warn"
-
-        /** Stable notification id for the a11y-required warning (never collides with NOTIFICATION_ID). */
-        private const val NOTIF_ID_A11Y_WARN = 1002
-
-        /**
-         * SharedPreferences key used to gate the a11y-required warning to a single
-         * notification per install. We show it once when clipboard data is first
-         * silently dropped due to the Android 10+ restriction, then never again —
-         * the user can always re-open Onboarding from Settings.
-         */
-        private const val KEY_A11Y_WARN_SHOWN = "a11y_warn_shown"
-
         /**
          * Notification channel for per-copy event toasts (A-SET-6 parity).
          * IMPORTANCE_MIN = no sound, no heads-up, no status-bar icon — just a
@@ -660,13 +635,10 @@ class ClipboardService : Service() {
         /**
          * Shared capture pipeline: store + count + sync. HIGH-2.
          *
-         * Both the foreground [ClipboardService] and the background
-         * [ClipboardAccessibilityService] funnel captures through here so that
-         * a11y-captured clips (the PRIMARY background path on Android 10+, where
-         * the FGS's getPrimaryClip() returns null) are stored, counted in the
-         * notification, AND pushed to sync — exactly like foreground captures.
-         * Previously the a11y service only called repository.storeItem, so
-         * backgrounded copies were stored locally but never synced/counted.
+         * The foreground [ClipboardService], [LogcatCaptureService] background
+         * path, and [MainActivity] all funnel captures through here so that
+         * background-captured clips are stored, counted in the notification,
+         * AND pushed to sync — exactly like foreground captures.
          *
          * The native SQLite insert and the repository store mirror
          * [ClipboardService]'s original logic: the native insert is
@@ -1163,10 +1135,6 @@ class ClipboardService : Service() {
          * [CHANNEL_ID]: IMPORTANCE_LOW = silent (no sound, no heads-up).
          *   setShowBadge(false) keeps the launcher icon clean.
          *
-         * [CHANNEL_A11Y_WARN]: IMPORTANCE_DEFAULT = shows a heads-up the first
-         *   time, which is intentional — the user needs to act on it to restore
-         *   background clipboard capture on Android 10+.
-         *
          * [CHANNEL_COPY_EVENT]: IMPORTANCE_MIN = silent badge only, no heads-up.
          */
         fun ensureChannel(context: Context) {
@@ -1188,19 +1156,6 @@ class ClipboardService : Service() {
                 )
             }
 
-            if (nm.getNotificationChannel(CHANNEL_A11Y_WARN) == null) {
-                nm.createNotificationChannel(
-                    NotificationChannel(
-                        CHANNEL_A11Y_WARN,
-                        context.getString(R.string.notif_channel_a11y_warn_name),
-                        NotificationManager.IMPORTANCE_DEFAULT
-                    ).apply {
-                        description = context.getString(R.string.notif_channel_a11y_warn_description)
-                        setShowBadge(true)
-                    }
-                )
-            }
-
             if (nm.getNotificationChannel(CHANNEL_COPY_EVENT) == null) {
                 nm.createNotificationChannel(
                     NotificationChannel(
@@ -1217,44 +1172,6 @@ class ClipboardService : Service() {
             }
         }
 
-        fun maybeNotifyA11yRequired(context: Context) {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            if (prefs.getBoolean(KEY_A11Y_WARN_SHOWN, false)) return
-            prefs.edit().putBoolean(KEY_A11Y_WARN_SHOWN, true).apply()
-
-            Log.w(
-                TAG,
-                "Android 10+ clipboard restriction: getPrimaryClip() returned null from " +
-                    "background FGS — background capture disabled until Accessibility " +
-                    "Service is enabled. Issuing one-time setup notification."
-            )
-
-            ensureChannel(context)
-            val nm = context.getSystemService(NotificationManager::class.java) ?: return
-
-            val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            val onboardingIntent = Intent(context, OnboardingActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-            }
-            val onboardingPi = PendingIntent.getActivity(context, 10, onboardingIntent, piFlags)
-
-            val notification = NotificationCompat.Builder(context, CHANNEL_A11Y_WARN)
-                .setContentTitle(context.getString(R.string.notif_a11y_warn_title))
-                .setContentText(context.getString(R.string.notif_a11y_warn_content))
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setAutoCancel(true)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setContentIntent(onboardingPi)
-                .addAction(0, context.getString(R.string.notif_a11y_warn_action), onboardingPi)
-                .setStyle(
-                    NotificationCompat.BigTextStyle()
-                        .bigText(context.getString(R.string.notif_a11y_warn_content_long))
-                )
-                .build()
-
-            nm.notify(NOTIF_ID_A11Y_WARN, notification)
-        }
-
         /**
          * Re-issue the foreground notification using current [Settings] state.
          * Called by [CaptureControlReceiver] after toggling pause/resume, and
@@ -1268,7 +1185,7 @@ class ClipboardService : Service() {
 
         /**
          * Guards [bumpTodayCounter]'s read-modify-write against concurrent callers
-         * (ClipboardService + ClipboardAccessibilityService both call captureClip/
+         * (ClipboardService + LogcatCaptureService both call captureClip/
          * captureImageClip on the IO dispatcher and can race on the same prefs file).
          */
         private val counterLock = Any()

@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhonelinkSetup
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -72,9 +71,9 @@ import com.copypaste.android.ui.theme.IdeText
  * permission is already granted, so the user can revisit a screen to re-check
  * or revoke/re-grant.
  *
- * Permissions covered (matching [OnboardingActivity]'s matrix):
+ * Permissions covered:
  *  1. POST_NOTIFICATIONS (Android 13+)   — runtime request
- *  2. Accessibility Service              — ACTION_ACCESSIBILITY_SETTINGS
+ *  2. Background Capture (ADB)           — tap-to-copy commands + live status
  *  3. Battery Optimization exemption     — ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS chain
  *  4. OEM autostart / protected apps     — OemAutoStartHelper (only if hasOemScreen())
  *  5. Foreground service                 — install-time, info only
@@ -122,7 +121,6 @@ class PermissionsSettingsActivity : ComponentActivity() {
                 @Suppress("UNUSED_EXPRESSION") trigger // read so Compose tracks it
                 PermissionsScreen(
                     onRequestNotification = { requestNotificationPermission() },
-                    onOpenAccessibility = { openAccessibilitySettings() },
                     onRequestBattery = { requestBatteryOptimizationExemption() },
                     onOpenOemAutoStart = { openOemAutoStart() },
                     onBack = { finish() },
@@ -174,15 +172,6 @@ class PermissionsSettingsActivity : ComponentActivity() {
         notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    private fun openAccessibilitySettings() {
-        launchGated(
-            listOf(
-                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-        )
-    }
-
     private fun requestBatteryOptimizationExemption() {
         launchGated(OemAutoStartHelper.getBatteryFallbackCandidates(this))
     }
@@ -217,7 +206,6 @@ class PermissionsSettingsActivity : ComponentActivity() {
 @Composable
 fun PermissionsScreen(
     onRequestNotification: () -> Unit,
-    onOpenAccessibility: () -> Unit,
     onRequestBattery: () -> Unit,
     onOpenOemAutoStart: () -> Unit,
     onBack: () -> Unit,
@@ -230,7 +218,10 @@ fun PermissionsScreen(
                 PackageManager.PERMISSION_GRANTED
     } else true
 
-    val a11yEnabled = ClipboardAccessibilityService.isEnabled(ctx)
+    val readLogsGranted = LogcatCaptureService.hasReadLogsPermission(ctx)
+    val overlayGranted: Boolean = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        Settings.canDrawOverlays(ctx)
+    } else true
 
     // Not memoized: must re-read on every recomposition so it reflects changes
     // made in the system battery-optimisation screen.
@@ -280,23 +271,11 @@ fun PermissionsScreen(
                 required = true,
             )
 
-            // 2. Accessibility Service
-            PermissionStatusCard(
-                icon = Icons.Filled.Visibility,
-                title = "Clipboard Access (Accessibility)",
-                description = "Android 10+ blocks background clipboard reads unless an " +
-                        "AccessibilityService is enabled. CopyPaste's service ONLY monitors " +
-                        "clipboard changes — it does NOT read screen content or intercept inputs.",
-                granted = a11yEnabled,
-                buttonLabel = "Open Accessibility Settings",
-                onClick = onOpenAccessibility,
-                required = true,
-            )
-            // HW-A11: tap-to-copy ADB command for power users / testers.
-            AdbCommandBlock(
-                label = stringResource(R.string.a11y_adb_label),
-                command = stringResource(R.string.a11y_adb_command),
-                toastText = stringResource(R.string.a11y_adb_copied),
+            // 2. Background Capture (ADB)
+            BgCaptureStatusCard(
+                readLogsGranted = readLogsGranted,
+                overlayGranted = overlayGranted,
+                ctx = ctx,
             )
 
             // 3. Battery Optimization exemption
@@ -348,6 +327,73 @@ fun PermissionsScreen(
                 onClick = {},
                 required = false,
                 infoOnly = true,
+            )
+        }
+    }
+}
+
+/**
+ * Permissions screen card showing live background-capture ADB status.
+ *
+ * Displays READ_LOGS and overlay status, and tap-to-copy commands for both.
+ * No button is needed for READ_LOGS (requires adb); overlay can be opened via Settings.
+ */
+@Composable
+private fun BgCaptureStatusCard(
+    readLogsGranted: Boolean,
+    overlayGranted: Boolean,
+    ctx: android.content.Context,
+) {
+    val borderColor = if (readLogsGranted && overlayGranted) IdeSuccess else IdeBorder
+    CopyPasteCard(accent = borderColor) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.bg_adb_section_title),
+                style = MaterialTheme.typography.titleMedium,
+                color = IdeText,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = stringResource(R.string.bg_adb_explainer),
+                style = MaterialTheme.typography.bodyMedium,
+                color = IdeDim,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = if (readLogsGranted)
+                        stringResource(R.string.bg_adb_status_read_logs_ok)
+                    else
+                        stringResource(R.string.bg_adb_status_read_logs_no),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (readLogsGranted) IdeSuccess else IdeDim,
+                )
+                Text(
+                    text = if (overlayGranted)
+                        stringResource(R.string.bg_adb_status_overlay_ok)
+                    else
+                        stringResource(R.string.bg_adb_status_overlay_no),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (overlayGranted) IdeSuccess else IdeDim,
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            AdbCommandBlock(
+                label = stringResource(R.string.bg_adb_cmd1_label),
+                command = stringResource(R.string.bg_adb_cmd1),
+                toastText = stringResource(R.string.bg_adb_cmd_copied),
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            AdbCommandBlock(
+                label = stringResource(R.string.bg_adb_cmd2_label),
+                command = stringResource(R.string.bg_adb_cmd2),
+                toastText = stringResource(R.string.bg_adb_cmd_copied),
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            AdbCommandBlock(
+                label = stringResource(R.string.bg_adb_cmd3_label),
+                command = stringResource(R.string.bg_adb_cmd3),
+                toastText = stringResource(R.string.bg_adb_cmd_copied),
             )
         }
     }

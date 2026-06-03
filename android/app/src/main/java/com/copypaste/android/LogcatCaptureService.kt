@@ -63,17 +63,16 @@ import kotlinx.coroutines.launch
  *   — many still emit the system tag in the shared logcat buffer.
  * - SYSTEM_ALERT_WINDOW (draw-over-other-apps) must also be granted so
  *   [ClipboardFloatingActivity] can add the TYPE_APPLICATION_OVERLAY view.
- * - The AccessibilityService path ([ClipboardAccessibilityService]) remains the
- *   primary recommended mechanism; this path is the fallback when a11y is disabled
- *   by the OEM (e.g. ColorOS auto-disables it).
  *
  * ## How to enable
  * 1. Grant READ_LOGS via adb:
  *      adb shell pm grant com.copypaste.android android.permission.READ_LOGS
  * 2. Grant SYSTEM_ALERT_WINDOW in Settings → Apps → Special app access → Display over other apps.
- * 3. Enable the toggle in Settings → Diagnostics → "adb logcat capture".
+ * 3. (Optional) The service auto-starts on next app launch; use the toggle in Settings to disable.
  *
- * The service is started/stopped by [syncState] based on the setting + permission check.
+ * The service is started/stopped by [syncState]. When READ_LOGS is granted and the user has NOT
+ * explicitly disabled the toggle, the service auto-starts (logcatCaptureEnabled defaults to true
+ * in that case — see [syncState]).
  */
 class LogcatCaptureService : Service() {
 
@@ -191,8 +190,7 @@ class LogcatCaptureService : Service() {
         AppLogger.w(
             TAG,
             "Logcat stream ended — READ_LOGS path may not be supported on this build " +
-                "(scoped logcat, API 30+ AOSP hardening). " +
-                "Enable ClipboardAccessibilityService for reliable background capture."
+                "(scoped logcat, API 30+ AOSP hardening)."
         )
         settings.logcatCaptureWorking = false
         stopSelf()
@@ -260,7 +258,7 @@ class LogcatCaptureService : Service() {
                 return@post
             }
 
-            // Image clips: handled by foreground service / A11y; skip here (no URI context).
+            // Image clips: handled by foreground service / logcat path; skip here (no URI context).
             val imageMime = (0 until clip.description.mimeTypeCount)
                 .map { clip.description.getMimeType(it) }
                 .firstOrNull { it.startsWith("image/") }
@@ -329,8 +327,30 @@ class LogcatCaptureService : Service() {
             }
         }
 
-        /** Start or stop the service based on current settings + permission state. */
+        /**
+         * Start or stop the service based on READ_LOGS permission and user preference.
+         *
+         * Auto-enable logic: if READ_LOGS is granted and the user has not explicitly disabled
+         * the toggle (logcatCaptureEnabled stored in prefs is `false` only when the user
+         * flipped it OFF — the default is `false` but we treat a first-time READ_LOGS grant
+         * as an implicit enable here), we flip logcatCaptureEnabled to `true` so the service
+         * starts automatically on the next app launch after the adb grant.
+         *
+         * Implementation: if READ_LOGS just became granted and there is no explicit "user
+         * set this to false" marker, set logcatCaptureEnabled = true before evaluating shouldRun.
+         * A separate "user_disabled_logcat" pref distinguishes "default false" from "user chose
+         * false" — avoids re-enabling after the user explicitly turns it off.
+         */
         fun syncState(context: Context, settings: Settings) {
+            if (hasReadLogsPermission(context)) {
+                // Auto-enable: if READ_LOGS just became available and the user has not
+                // explicitly turned the feature OFF, enable it automatically.
+                val prefs = context.getSharedPreferences("copypaste", android.content.Context.MODE_PRIVATE)
+                val userExplicitlyDisabled = prefs.getBoolean("logcat_capture_user_disabled", false)
+                if (!userExplicitlyDisabled && !settings.logcatCaptureEnabled) {
+                    settings.logcatCaptureEnabled = true
+                }
+            }
             val shouldRun = hasReadLogsPermission(context) && settings.logcatCaptureEnabled
             val intent = Intent(context, LogcatCaptureService::class.java)
             if (shouldRun) {
@@ -338,6 +358,24 @@ class LogcatCaptureService : Service() {
             } else {
                 context.stopService(intent)
             }
+        }
+
+        /**
+         * Called by SettingsActivity when the user explicitly turns OFF the logcat capture toggle.
+         * Records the "user chose off" marker so [syncState] does not re-enable it automatically.
+         */
+        fun markUserDisabled(context: Context) {
+            context.getSharedPreferences("copypaste", android.content.Context.MODE_PRIVATE)
+                .edit().putBoolean("logcat_capture_user_disabled", true).apply()
+        }
+
+        /**
+         * Called by SettingsActivity when the user explicitly turns ON the logcat capture toggle.
+         * Clears the "user chose off" marker.
+         */
+        fun markUserEnabled(context: Context) {
+            context.getSharedPreferences("copypaste", android.content.Context.MODE_PRIVATE)
+                .edit().putBoolean("logcat_capture_user_disabled", false).apply()
         }
     }
 }

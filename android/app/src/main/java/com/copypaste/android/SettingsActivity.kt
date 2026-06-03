@@ -80,6 +80,8 @@ import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.ideSwitchColors
 import com.copypaste.android.ui.theme.ideTextFieldColors
 import kotlinx.coroutines.launch
+import android.content.ClipData
+import android.content.ClipboardManager
 
 /**
  * Settings screen — grouped into tabs mirroring the macOS settings layout:
@@ -476,7 +478,14 @@ fun SettingsScreen(
                         pasteAsPlainText = pasteAsPlainText,
                         onPasteAsPlainTextChange = { pasteAsPlainText = it },
                         logcatEnabled = logcatEnabled,
-                        onLogcatEnabledChange = { logcatEnabled = it },
+                        onLogcatEnabledChange = { enabled ->
+                            logcatEnabled = enabled
+                            if (enabled) {
+                                LogcatCaptureService.markUserEnabled(ctx)
+                            } else {
+                                LogcatCaptureService.markUserDisabled(ctx)
+                            }
+                        },
                         logcatStatus = logcatStatus,
                         ctx = ctx,
                     )
@@ -630,43 +639,27 @@ private fun GeneralTab(
             onClick = { LogExportHelper.shareLogsZip(ctx) }
         )
         HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+        // ── BACKGROUND CAPTURE (ADB) ─────────────────────────────────────────
+        SectionLabel(stringResource(R.string.bg_adb_section_title))
+        // Explainer
+        Text(
+            text = stringResource(R.string.bg_adb_explainer),
+            style = MaterialTheme.typography.bodySmall,
+            color = IdeDim,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+        // Live status line
+        AdbCaptureStatusLine(logcatStatus = logcatStatus, ctx = ctx)
+        // Toggle: user can disable logcat capture even when READ_LOGS is granted
         SettingsRow(
             title = stringResource(R.string.setting_logcat_capture_title),
             subtitle = stringResource(R.string.setting_logcat_capture_subtitle),
             checked = logcatEnabled,
             onCheckedChange = onLogcatEnabledChange,
         )
-        val (statusText, statusColor) = when (logcatStatus) {
-            LogcatCaptureStatus.NOT_GRANTED ->
-                stringResource(R.string.logcat_status_not_granted) to IdeDanger
-            LogcatCaptureStatus.DISABLED ->
-                stringResource(R.string.logcat_status_disabled) to IdeDim
-            LogcatCaptureStatus.GRANTED_NOT_WORKING ->
-                stringResource(R.string.logcat_status_not_working) to IdeWarning
-            LogcatCaptureStatus.WORKING ->
-                stringResource(R.string.logcat_status_working) to IdeSuccess
-        }
-        Text(
-            text = statusText,
-            style = MaterialTheme.typography.bodySmall,
-            color = statusColor,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
-        )
-        if (logcatStatus == LogcatCaptureStatus.NOT_GRANTED) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                Text(
-                    text = stringResource(R.string.logcat_adb_label),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = IdeDim,
-                )
-                Text(
-                    text = stringResource(R.string.logcat_adb_grant_command),
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = IdeAccent,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
+        // Tap-to-copy ADB commands
+        AdbCaptureCommandRows(ctx = ctx)
         HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
         // ── ABOUT (last General entry) ─────────────────────────────────────
@@ -1120,6 +1113,106 @@ private fun SettingsRow(
         )
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Background capture (ADB) composables
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Live status badge for the background-capture ADB section in Settings. */
+@Composable
+private fun AdbCaptureStatusLine(
+    logcatStatus: LogcatCaptureStatus,
+    ctx: android.content.Context,
+) {
+    val readLogsGranted = LogcatCaptureService.hasReadLogsPermission(ctx)
+    val overlayGranted: Boolean = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+        android.provider.Settings.canDrawOverlays(ctx)
+    } else true
+
+    val (captureText, captureColor) = when (logcatStatus) {
+        LogcatCaptureStatus.WORKING ->
+            stringResource(R.string.bg_adb_status_capture_working) to IdeSuccess
+        LogcatCaptureStatus.DISABLED, LogcatCaptureStatus.NOT_GRANTED ->
+            stringResource(R.string.bg_adb_status_capture_inactive) to IdeDim
+        LogcatCaptureStatus.GRANTED_NOT_WORKING ->
+            stringResource(R.string.bg_adb_status_capture_inactive) to IdeWarning
+    }
+
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = if (readLogsGranted)
+                    stringResource(R.string.bg_adb_status_read_logs_ok)
+                else
+                    stringResource(R.string.bg_adb_status_read_logs_no),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (readLogsGranted) IdeSuccess else IdeDanger,
+            )
+            Text(
+                text = if (overlayGranted)
+                    stringResource(R.string.bg_adb_status_overlay_ok)
+                else
+                    stringResource(R.string.bg_adb_status_overlay_no),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (overlayGranted) IdeSuccess else IdeDim,
+            )
+        }
+        Text(
+            text = captureText,
+            style = MaterialTheme.typography.labelSmall,
+            color = captureColor,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+}
+
+/** Three tap-to-copy ADB command rows for background capture setup. */
+@Composable
+private fun AdbCaptureCommandRows(ctx: android.content.Context) {
+    val toastText = stringResource(R.string.bg_adb_cmd_copied)
+    val commands = listOf(
+        stringResource(R.string.bg_adb_cmd1_label) to stringResource(R.string.bg_adb_cmd1),
+        stringResource(R.string.bg_adb_cmd2_label) to stringResource(R.string.bg_adb_cmd2),
+        stringResource(R.string.bg_adb_cmd3_label) to stringResource(R.string.bg_adb_cmd3),
+    )
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+        AdbCmdRow(label = commands[0].first, cmd = commands[0].second, toastText = toastText, ctx = ctx)
+        Spacer(modifier = Modifier.height(6.dp))
+        AdbCmdRow(label = commands[1].first, cmd = commands[1].second, toastText = toastText, ctx = ctx)
+        Spacer(modifier = Modifier.height(6.dp))
+        AdbCmdRow(label = commands[2].first, cmd = commands[2].second, toastText = toastText, ctx = ctx)
+    }
+}
+
+@Composable
+private fun AdbCmdRow(
+    label: String,
+    cmd: String,
+    toastText: String,
+    ctx: android.content.Context,
+) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        color = IdeDim,
+    )
+    Text(
+        text = cmd,
+        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        color = IdeAccent,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("adb_cmd", cmd))
+                android.widget.Toast.makeText(ctx, toastText, android.widget.Toast.LENGTH_SHORT)
+                    .show()
+            }
+            .padding(top = 2.dp, bottom = 4.dp),
+    )
+}
+
 
 /**
  * Return the value in [steps] whose absolute distance to [raw] is smallest.
