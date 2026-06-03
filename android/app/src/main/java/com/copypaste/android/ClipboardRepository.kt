@@ -1246,6 +1246,51 @@ class ClipboardRepository(context: Context) {
 
         private const val EXPECTED_CLIP_WINDOW_MS = 5_000L
 
+        // ── Image/URI copy-from-history echo guard ────────────────────────────
+        // Mirrors the text guard above, but keyed by the content:// URI string
+        // written to the clipboard when the user copies an image (or file) back
+        // from the history list.  The capture listeners see an image/file MIME
+        // clip whose URI is our own FileProvider URI — we must not re-store it.
+        // 5-second window (same as text); does NOT clear on first match so that
+        // concurrent ClipboardService + ClipboardAccessibilityService callbacks
+        // for the same user tap are both suppressed.
+        @Volatile private var expectedImageUri: String = ""
+        @Volatile private var expectedImageUriAtMs: Long = 0L
+        @Volatile private var expectedImageUriHasValue: Boolean = false
+        private val expectedImageUriLock = Any()
+
+        /**
+         * Record that the next observed clipboard change carrying an image (or
+         * file) URI equal to [uri] is an internal copy-from-history echo and must
+         * NOT be re-captured.  Call immediately before [ClipboardManager.setPrimaryClip]
+         * in the image/file copy-back path of [HistoryActivity].
+         */
+        fun expectImageUri(uri: android.net.Uri) {
+            synchronized(expectedImageUriLock) {
+                expectedImageUri = uri.toString()
+                expectedImageUriAtMs = System.currentTimeMillis()
+                expectedImageUriHasValue = true
+            }
+        }
+
+        /**
+         * Returns true when [uri] matches the pending [expectImageUri] registration
+         * within [EXPECTED_CLIP_WINDOW_MS].  Does NOT clear on a match so concurrent
+         * listeners both get suppressed; the window expiry self-clears after 5 s.
+         */
+        fun shouldSkipExpectedImageUri(uri: android.net.Uri): Boolean {
+            synchronized(expectedImageUriLock) {
+                if (!expectedImageUriHasValue) return false
+                val now = System.currentTimeMillis()
+                if (now - expectedImageUriAtMs > EXPECTED_CLIP_WINDOW_MS) {
+                    expectedImageUriHasValue = false
+                    return false
+                }
+                if (uri.toString() == expectedImageUri) return true
+                return false
+            }
+        }
+
         /**
          * Record that the next observed clipboard change carrying text whose
          * (length, hash) equals [content]'s is an internal copy-from-history echo

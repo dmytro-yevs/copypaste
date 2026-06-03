@@ -781,6 +781,17 @@ class ClipboardService : Service() {
             repository: ClipboardRepository,
             syncManager: SyncManager,
         ) {
+            // Copy-from-history echo guard (parity with text path in captureClip).
+            // When HistoryActivity copies an image back to the clipboard it calls
+            // ClipboardRepository.expectImageUri(uri) RIGHT BEFORE setPrimaryClip.
+            // Without this check the capture listener fires, decodes the same bytes,
+            // and creates a duplicate history row.  The text path has an identical
+            // guard (shouldSkipExpectedClip); this is the image equivalent.
+            if (ClipboardRepository.shouldSkipExpectedImageUri(uri)) {
+                Log.d(TAG, "Skipping copy-from-history echo for image URI: $uri")
+                return
+            }
+
             if (!settings.captureEnabled) {
                 Log.d(TAG, "Capture paused — dropping image clipboard change")
                 return
@@ -919,6 +930,14 @@ class ClipboardService : Service() {
             // unchanged and simply skips the cloud push.
             syncManager: SyncManager? = null,
         ) {
+            // Copy-from-history echo guard (mirrors text + image paths above).
+            // HistoryActivity calls ClipboardRepository.expectImageUri(uri) before
+            // setPrimaryClip for the file copy-back path; suppress the re-capture here.
+            if (ClipboardRepository.shouldSkipExpectedImageUri(uri)) {
+                Log.d(TAG, "captureFileClip: skipping copy-from-history echo for URI: $uri")
+                return
+            }
+
             if (!settings.captureEnabled) {
                 Log.d(TAG, "captureFileClip: capture paused — dropping file clipboard change")
                 return
