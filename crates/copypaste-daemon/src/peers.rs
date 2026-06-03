@@ -112,6 +112,8 @@ fn canonical_fp(fp: &str) -> String {
 /// over the bootstrap channel at pairing time and are NOT carried by mDNS TXT
 /// records.  Refreshing them reactively would require a separate wire-protocol
 /// extension and is deferred.
+/// // TODO(DeviceInfoAnnounce frame): once we add a DeviceInfoAnnounce wire frame,
+/// // drive model/os_version/app_version/public_ip refresh through that path.
 pub fn update_peer_meta(
     path: &Path,
     fingerprint: &str,

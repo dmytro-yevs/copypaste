@@ -148,9 +148,11 @@ interface PeerRowProps {
   rowSt: DeviceRowState | undefined;
   onUnpair: (fp: string) => void;
   onRevoke: (fp: string) => void;
+  /** A-4: live-adjusted last_seen_secs so the "Xm ago" label ticks every 1 s. */
+  liveLastSeenSecs: number | undefined;
 }
 
-function PeerRow({ peer, rowSt, onUnpair, onRevoke }: PeerRowProps) {
+function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs }: PeerRowProps) {
   const isPending = rowSt?.pending ?? false;
   const revokedAt = rowSt?.revokedAt ?? null;
   const rowError = rowSt?.error ?? null;
@@ -169,8 +171,8 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke }: PeerRowProps) {
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           {/* Name + online dot */}
-          <div className="flex items-center gap-1.5 mb-0.5">
-            <StatusDot online={peer.online === true} lastSeenSecs={peer.last_seen_secs} />
+          <div className="flex items-center gap-1.5">
+            <StatusDot online={peer.online === true} lastSeenSecs={liveLastSeenSecs} />
             <p className="truncate text-[13px] font-medium text-ide-text">
               {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
             </p>
@@ -626,6 +628,20 @@ export function DevicesView() {
   // can read the current value without closing over a stale ownState snapshot.
   const ownFpRef = useRef<string | null>(null);
 
+  // A-4: 1 s clock tick so "last seen Xm ago" labels update live between
+  // the 10 s loadPeers polls. Stored as epoch-seconds so PeerRow can compute
+  // the elapsed offset without closing over a stale snapshot.
+  const [nowSecs, setNowSecs] = useState(() => Math.floor(Date.now() / 1000));
+  // Ref to the epoch-second timestamp when peers data was last fetched from
+  // the daemon; used to compute live last_seen_secs = daemon_value + elapsed.
+  const peersFetchedAtRef = useRef<number>(Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const id = setInterval(() => {
+      setNowSecs(Math.floor(Date.now() / 1000));
+    }, 1000);
+    return () => { clearInterval(id); };
+  }, []);
+
   // --- Paired peers ---
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [peers, setPeers] = useState<PairedDevice[]>([]);
@@ -705,7 +721,7 @@ export function DevicesView() {
   }, [qrRevealed, generateQr]);
 
   // --- Load own device info ---
-  // A2: extracted to a stable useCallback so it can be called both on mount
+  // A-2: extracted to a stable useCallback so it can be called both on mount
   // and on the 10 s polling interval (same cadence as loadPeers) so that
   // Public IP (resolved async via STUN after mount) and Local IP (may change
   // on network switch) stay fresh without requiring a manual refresh.
@@ -834,6 +850,9 @@ export function DevicesView() {
         return next;
       });
 
+      // A-4: stamp when we last got fresh data so the 1 s clock can compute
+      // live elapsed seconds since the daemon snapshot.
+      peersFetchedAtRef.current = Math.floor(Date.now() / 1000);
       setLoadState("ready");
     } catch (e) {
       // A transport failure means the daemon is genuinely unreachable.
@@ -1223,21 +1242,30 @@ export function DevicesView() {
           </div>
         )}
         {loadState === "ready" &&
-          peers.map((peer) => (
-            <PeerRow
-              key={peer.fingerprint}
-              peer={peer}
-              rowSt={rowState[peer.fingerprint]}
-              onUnpair={(fp) => void handleUnpair(fp)}
-              onRevoke={(fp) => {
-                setRotatePassphrase("");
-                setRevokePrompt({
-                  fingerprint: fp,
-                  name: peer.name || `Device ${fp.slice(0, 8)}`,
-                });
-              }}
-            />
-          ))}
+          peers.map((peer) => {
+            // A-4: advance the daemon's last_seen_secs snapshot by the number of
+            // seconds elapsed since we last fetched peers, so the "Xm ago" tooltip
+            // updates every 1 s tick instead of jumping only on the 10 s poll.
+            const elapsed = nowSecs - peersFetchedAtRef.current;
+            const rawSecs = peer.last_seen_secs ?? -1;
+            const liveLastSeenSecs = rawSecs >= 0 ? rawSecs + elapsed : undefined;
+            return (
+              <PeerRow
+                key={peer.fingerprint}
+                peer={peer}
+                rowSt={rowState[peer.fingerprint]}
+                liveLastSeenSecs={liveLastSeenSecs}
+                onUnpair={(fp) => void handleUnpair(fp)}
+                onRevoke={(fp) => {
+                  setRotatePassphrase("");
+                  setRevokePrompt({
+                    fingerprint: fp,
+                    name: peer.name || `Device ${fp.slice(0, 8)}`,
+                  });
+                }}
+              />
+            );
+          })}
       </div>
 
       {/* ── Discovered on your network ─────────────────────────── */}

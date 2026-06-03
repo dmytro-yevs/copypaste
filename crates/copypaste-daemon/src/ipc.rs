@@ -1201,6 +1201,14 @@ impl IpcServer {
         self
     }
 
+    /// Return the slot that daemon.rs writes `P2pHandle::live_sinks` into after
+    /// `start_p2p` returns. The `list_peers` handler reads this slot to compute
+    /// the authoritative online flag from live connection state rather than the
+    /// stale mTLS-allowlist heuristic.
+    pub fn live_peer_sinks_slot(&self) -> Arc<std::sync::Mutex<Option<crate::p2p::LivePeerSinks>>> {
+        Arc::clone(&self.live_peer_sinks)
+    }
+
     /// Attach the self-signed mTLS cert (DER) + key used to TLS-wrap the
     /// unauthenticated bootstrap pairing channel (P2P Phase 1).
     ///
@@ -1358,17 +1366,6 @@ impl IpcServer {
     pub fn with_public_ip_cache(mut self, cache: Arc<tokio::sync::RwLock<Option<String>>>) -> Self {
         self.cached_public_ip = cache;
         self
-    }
-
-    /// Return the shared live-peer-sinks slot so the daemon can populate it
-    /// after `start_p2p` completes (the server is already spawned by then —
-    /// matching the `p2p_sync_addr_slot` pattern).
-    ///
-    /// The caller stores the returned `Arc` clone, calls `start_p2p`, and then
-    /// writes the returned `P2pHandle::live_sinks` into the slot so subsequent
-    /// `list_peers` calls use the live connection table as the online source.
-    pub fn live_peer_sinks_slot(&self) -> Arc<std::sync::Mutex<Option<crate::p2p::LivePeerSinks>>> {
-        Arc::clone(&self.live_peer_sinks)
     }
 
     /// Insert a PAKE session under `session_id`, first evicting stale and
@@ -11590,6 +11587,8 @@ mod tests {
     /// map, even if `last_sync_at` is absent or stale.
     #[tokio::test]
     async fn list_peers_online_true_from_live_mtls_allowlist() {
+        use tokio::sync::mpsc;
+
         let dir = tempdir().unwrap();
         let sock = dir.path().join("lp_online_mtls.sock");
         let cfg_home = dir.path().join("cfg4");

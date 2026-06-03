@@ -1032,7 +1032,7 @@ async fn peer_connector_loop(
                             tracing::info!(
                                 fingerprint = %peer.fingerprint,
                                 stale_addr = %peer.addr,
-                                fresh_addr = %fresh_addr,
+                                %fresh_addr,
                                 "connector: mDNS returned a fresher address — updating peers.json"
                             );
                             if let Err(persist_err) = crate::peers::update_peer_address(
