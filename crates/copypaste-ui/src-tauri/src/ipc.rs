@@ -267,6 +267,101 @@ pub fn log_dir_path() -> String {
     }
 }
 
+/// Ingest a file at a host-filesystem path into the clipboard history.
+///
+/// Reads the file, infers its MIME type from the extension, base64-encodes the
+/// bytes, and forwards them to the daemon as an `add_file_item` IPC call.  The
+/// daemon encrypts, stores, and deduplicates the file exactly as it does for
+/// files captured from NSPasteboard.
+///
+/// Runs on the blocking thread pool because both `std::fs::read` and the IPC
+/// call are blocking.
+fn ingest_path_blocking(path: std::path::PathBuf) -> Result<serde_json::Value, String> {
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string();
+
+    // Infer MIME from the extension; fall back to octet-stream.
+    let mime = mime_from_extension(path.extension().and_then(|e| e.to_str()).unwrap_or(""));
+
+    let raw_bytes = std::fs::read(&path).map_err(|e| format!("read '{}': {e}", path.display()))?;
+
+    use base64::Engine as _;
+    let data_b64 = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
+
+    call(
+        "add_file_item",
+        serde_json::json!({
+            "filename": filename,
+            "mime":     mime,
+            "data_b64": data_b64,
+        }),
+    )
+    .map_err(|e| format!("IPC error: {e}"))
+    .and_then(|reply| {
+        if reply.ok {
+            Ok(reply.data.unwrap_or(serde_json::json!({})))
+        } else {
+            Err(reply.error.unwrap_or_else(|| "add_file_item failed".into()))
+        }
+    })
+}
+
+/// Return a MIME type string for a given file extension (lowercase, no dot).
+/// Covers the most common types; unknown extensions fall back to
+/// `application/octet-stream`.
+fn mime_from_extension(ext: &str) -> &'static str {
+    match ext.to_ascii_lowercase().as_str() {
+        "txt" | "text" | "log" | "md" => "text/plain",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "js" | "mjs" => "application/javascript",
+        "json" => "application/json",
+        "xml" => "application/xml",
+        "csv" => "text/csv",
+        "pdf" => "application/pdf",
+        "zip" => "application/zip",
+        "tar" => "application/x-tar",
+        "gz" => "application/gzip",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "mp4" => "video/mp4",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "rs" | "py" | "ts" | "tsx" | "sh" => "text/plain",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Ingest one or more files dropped onto the app window.
+///
+/// Called from the frontend via `invoke("ingest_dropped_files", { paths })`.
+/// Each path is read, base64-encoded, and sent to the daemon via `add_file_item`.
+/// Errors for individual files are collected in the result array so the frontend
+/// can surface them as toasts without aborting the whole batch.
+#[tauri::command]
+pub async fn ingest_dropped_files(paths: Vec<String>) -> Result<Vec<serde_json::Value>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .map(|p| {
+                let path = std::path::PathBuf::from(&p);
+                match ingest_path_blocking(path) {
+                    Ok(v) => v,
+                    Err(e) => serde_json::json!({ "error": e, "path": p }),
+                }
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|e| format!("blocking task error: {e}"))
+}
+
 /// Render `payload` as an inline SVG QR code string.
 fn render_svg(payload: &str) -> Result<String, String> {
     use qrcode::render::svg;

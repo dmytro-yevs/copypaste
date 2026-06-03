@@ -454,6 +454,28 @@ export const api = {
    * \ responses.
    */
   reorderPinned: (ids: string[]) => ipcCall("reorder_pinned", { ids }),
+
+  /**
+   * Ingest a file into the clipboard history directly from the UI.
+   *
+   * The caller provides the raw file bytes already read (e.g. via the browser
+   * File API from an `<input type="file">` picker or the drag-drop handler),
+   * the filename, and an optional MIME type.  The bytes are base64-encoded and
+   * forwarded to the daemon's `add_file_item` method which encrypts and stores
+   * them exactly like a pasteboard-captured file.
+   *
+   * Returns `{ id: string }` on success. Throws `IpcError` on failure.
+   */
+  addFileItem: (
+    bytes: Uint8Array,
+    filename: string,
+    mime = "application/octet-stream"
+  ): Promise<{ id: string }> => {
+    // btoa + fromCharCode is safe for arbitrary binary; the daemon accepts any
+    // bytes. For large files this may be slow — acceptable for the initial impl.
+    const data_b64 = btoa(String.fromCharCode(...Array.from(bytes)));
+    return ipcCall<{ id: string }>("add_file_item", { filename, mime, data_b64 });
+  },
 };
 
 /** Format Unix epoch milliseconds for display. */
