@@ -45,9 +45,14 @@ private const val TAG = "CopypasteBindings"
  * `listDiscovered`/`pairWithDiscovered`/`pairGetSas`/`pairConfirmSas`/`pairAbort`/
  * `pairReset`, plus the `DiscoveredPeer` / `PairStatus` records). Bumped 12 → 13
  * for the relay-as-database producer surface (`relayInboxId` /
- * `relayPublicKeyB64` — the shared-account inbox derivation, R3b).
+ * `relayPublicKeyB64` — the shared-account inbox derivation, R3b). Bumped 13 → 14
+ * for PeerMeta send+receive + P2P drop counters (v0.6.1 HB-1/HB-7): the three
+ * pairing fns gained five trailing device-meta params; `BootstrapResult` and
+ * `PairStatus` gained five `peer*` fields; `P2pSyncResult` gained three per-reason
+ * drop counters. (AB-6a — the `isSensitive` >= 0.70 threshold parity — ships in
+ * this ABI too but is a pure behaviour change with no signature impact.)
  */
-const val APP_ABI_VERSION: UInt = 13u
+const val APP_ABI_VERSION: UInt = 14u
 
 /** Mirrors `EncryptedBlob` in copypaste_android.udl — uses ByteArray for callers. */
 data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {
@@ -967,6 +972,12 @@ fun startDiscovery(
     bport: Int,
     certDer: List<UByte>,
     keyDer: List<UByte>,
+    // HB-1a (ABI 14): this device's own metadata, threaded into the standing
+    // responder so a macOS-INITIATED discovery pair records real Android info.
+    deviceModel: String? = null,
+    osVersion: String? = null,
+    appVersion: String? = null,
+    localIp: String? = null,
 ) {
     if (!isNativeLibraryLoaded) {
         Log.w(TAG, "startDiscovery: stub — native library not loaded")
@@ -980,6 +991,10 @@ fun startDiscovery(
             bport = bport.toUShort(),
             certDer = certDer,
             keyDer = keyDer,
+            deviceModel = deviceModel,
+            osVersion = osVersion,
+            appVersion = appVersion,
+            localIp = localIp,
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         throw CopypasteException.DatabaseError(e.message ?: "startDiscovery failed")
@@ -1040,6 +1055,13 @@ fun pairWithDiscovered(
     keyDer: List<UByte>,
     syncAddr: String,
     localProvisioning: uniffi.copypaste_android.SyncProvisioning?,
+    // HB-1a (ABI 14): this device's own metadata, advertised to the discovered
+    // peer during the initiator handshake.
+    deviceName: String? = null,
+    deviceModel: String? = null,
+    osVersion: String? = null,
+    appVersion: String? = null,
+    localIp: String? = null,
 ) {
     if (!isNativeLibraryLoaded) {
         throw IllegalStateException("copypaste_android native library not loaded; pairWithDiscovered is unavailable")
@@ -1051,6 +1073,11 @@ fun pairWithDiscovered(
             keyDer = keyDer,
             syncAddr = syncAddr,
             localProvisioning = localProvisioning,
+            deviceName = deviceName,
+            deviceModel = deviceModel,
+            osVersion = osVersion,
+            appVersion = appVersion,
+            localIp = localIp,
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         throw CopypasteException.DatabaseError(e.message ?: "pairWithDiscovered failed")

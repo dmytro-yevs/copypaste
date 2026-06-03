@@ -401,6 +401,14 @@ fun PairScreen(
                         // own — it RECEIVES the PC's sync provisioning in the
                         // response (bootstrap.peerProvisioning), applied below.
                         localProvisioning = null,
+                        // HB-1a (ABI 14): send THIS device's own metadata so the
+                        // PC's device card shows real Android info. public_ip is
+                        // not collected here (lib.rs passes None).
+                        deviceName = android.os.Build.MODEL ?: "Android",
+                        deviceModel = android.os.Build.MODEL ?: "Android",
+                        osVersion = "Android " + android.os.Build.VERSION.RELEASE,
+                        appVersion = BuildConfig.VERSION_NAME,
+                        localIp = lanIp,
                     )
 
                     // QR full-provisioning: if the paired PC carried its sync
@@ -505,10 +513,24 @@ fun PairScreen(
                             sessionKeyWrappedB64 = wrappedB64,
                             sessionKeyIvB64 = ivB64,
                             lastSyncMs = System.currentTimeMillis(),
+                            // HB-1b (ABI 14): persist the peer's device metadata
+                            // received over the authenticated tunnel so Wave 3
+                            // renders the device card.
+                            peerModel = bootstrap.peerModel,
+                            peerOs = bootstrap.peerOs,
+                            peerAppVersion = bootstrap.peerAppVersion,
+                            peerLocalIp = bootstrap.peerLocalIp,
+                            peerPublicIp = bootstrap.peerPublicIp,
                         )
                     )
                     val peerCount = settings.pairedPeers.size
-                    "Paired with ${peer.deviceName.ifBlank { "device" }} — received ${result.itemsReceived} item(s), stored $stored, sent ${result.itemsSent}. ($peerCount paired device(s))"
+                    // HB-7a (ABI 14): surface the per-reason drop counters so a
+                    // "received N stored 0" outcome reveals WHY items dropped.
+                    val skipped = "skipped: legacy ${result.itemsSkippedLegacy} / " +
+                        "decrypt ${result.itemsSkippedDecryptFail} / " +
+                        "type ${result.itemsSkippedUnknownType} / " +
+                        "blob ${result.itemsSkippedMissingBlob}"
+                    "Paired with ${peer.deviceName.ifBlank { "device" }} — received ${result.itemsReceived} item(s), stored $stored ($skipped), sent ${result.itemsSent}. ($peerCount paired device(s))"
                 }
                 syncResult = message
                 scannedPeer = null
@@ -858,8 +880,11 @@ fun PairScreen(
  *
  * No WifiManager dependency: NetworkInterface enumeration works for both Wi-Fi
  * and other LAN interfaces without the ACCESS_WIFI_STATE permission.
+ *
+ * `internal` so the discovery pairing path ([DevicesActivity]) reuses the SAME
+ * helper for HB-1a `local_ip` instead of duplicating the enumeration.
  */
-private fun lanIpv4Address(): String? {
+internal fun lanIpv4Address(): String? {
     return try {
         java.net.NetworkInterface.getNetworkInterfaces()?.toList()
             ?.asSequence()

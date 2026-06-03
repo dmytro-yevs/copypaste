@@ -783,7 +783,7 @@ internal interface UniffiLib : Library {
 
     fun uniffi_copypaste_android_fn_func_add_clipboard_item(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_copypaste_android_fn_func_bootstrap_pair_initiator(`addrHint`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`pakePassword`: RustBuffer.ByValue,`syncAddr`: RustBuffer.ByValue,`localProvisioning`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_bootstrap_pair_initiator(`addrHint`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`pakePassword`: RustBuffer.ByValue,`syncAddr`: RustBuffer.ByValue,`localProvisioning`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`deviceModel`: RustBuffer.ByValue,`osVersion`: RustBuffer.ByValue,`appVersion`: RustBuffer.ByValue,`localIp`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_build_pairing_qr(`fingerprint`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`addrHint`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -829,7 +829,7 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_pair_reset(uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    fun uniffi_copypaste_android_fn_func_pair_with_discovered(`deviceId`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`syncAddr`: RustBuffer.ByValue,`localProvisioning`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_pair_with_discovered(`deviceId`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`syncAddr`: RustBuffer.ByValue,`localProvisioning`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`deviceModel`: RustBuffer.ByValue,`osVersion`: RustBuffer.ByValue,`appVersion`: RustBuffer.ByValue,`localIp`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_copypaste_android_fn_func_parse_pairing_qr(`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -843,7 +843,7 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_copypaste_android_fn_func_sensitive_kind(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_copypaste_android_fn_func_start_discovery(`deviceId`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`syncPort`: Short,`bport`: Short,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_start_discovery(`deviceId`: RustBuffer.ByValue,`deviceName`: RustBuffer.ByValue,`syncPort`: Short,`bport`: Short,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`deviceModel`: RustBuffer.ByValue,`osVersion`: RustBuffer.ByValue,`appVersion`: RustBuffer.ByValue,`localIp`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_copypaste_android_fn_func_start_p2p_listener(`listenPort`: Short,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`allowedFingerprints`: RustBuffer.ByValue,`revokedFingerprints`: RustBuffer.ByValue,`sessionKeys`: RustBuffer.ByValue,`localItems`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1065,7 +1065,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_add_clipboard_item() != 1001.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_bootstrap_pair_initiator() != 39326.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_bootstrap_pair_initiator() != 39029.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_build_pairing_qr() != 8917.toShort()) {
@@ -1134,7 +1134,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_pair_reset() != 34960.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_pair_with_discovered() != 60934.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_pair_with_discovered() != 3869.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_parse_pairing_qr() != 38365.toShort()) {
@@ -1155,7 +1155,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_sensitive_kind() != 9170.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_start_discovery() != 44307.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_start_discovery() != 8068.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_start_p2p_listener() != 23086.toShort()) {
@@ -1396,7 +1396,12 @@ data class BootstrapResult (
     var `peerFingerprint`: kotlin.String, 
     var `peerSyncAddr`: kotlin.String, 
     var `sessionKey`: List<kotlin.UByte>, 
-    var `peerProvisioning`: SyncProvisioning?
+    var `peerProvisioning`: SyncProvisioning?, 
+    var `peerModel`: kotlin.String?, 
+    var `peerOs`: kotlin.String?, 
+    var `peerAppVersion`: kotlin.String?, 
+    var `peerLocalIp`: kotlin.String?, 
+    var `peerPublicIp`: kotlin.String?
 ) {
     
     companion object
@@ -1409,6 +1414,11 @@ public object FfiConverterTypeBootstrapResult: FfiConverterRustBuffer<BootstrapR
             FfiConverterString.read(buf),
             FfiConverterSequenceUByte.read(buf),
             FfiConverterOptionalTypeSyncProvisioning.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -1416,7 +1426,12 @@ public object FfiConverterTypeBootstrapResult: FfiConverterRustBuffer<BootstrapR
             FfiConverterString.allocationSize(value.`peerFingerprint`) +
             FfiConverterString.allocationSize(value.`peerSyncAddr`) +
             FfiConverterSequenceUByte.allocationSize(value.`sessionKey`) +
-            FfiConverterOptionalTypeSyncProvisioning.allocationSize(value.`peerProvisioning`)
+            FfiConverterOptionalTypeSyncProvisioning.allocationSize(value.`peerProvisioning`) +
+            FfiConverterOptionalString.allocationSize(value.`peerModel`) +
+            FfiConverterOptionalString.allocationSize(value.`peerOs`) +
+            FfiConverterOptionalString.allocationSize(value.`peerAppVersion`) +
+            FfiConverterOptionalString.allocationSize(value.`peerLocalIp`) +
+            FfiConverterOptionalString.allocationSize(value.`peerPublicIp`)
     )
 
     override fun write(value: BootstrapResult, buf: ByteBuffer) {
@@ -1424,6 +1439,11 @@ public object FfiConverterTypeBootstrapResult: FfiConverterRustBuffer<BootstrapR
             FfiConverterString.write(value.`peerSyncAddr`, buf)
             FfiConverterSequenceUByte.write(value.`sessionKey`, buf)
             FfiConverterOptionalTypeSyncProvisioning.write(value.`peerProvisioning`, buf)
+            FfiConverterOptionalString.write(value.`peerModel`, buf)
+            FfiConverterOptionalString.write(value.`peerOs`, buf)
+            FfiConverterOptionalString.write(value.`peerAppVersion`, buf)
+            FfiConverterOptionalString.write(value.`peerLocalIp`, buf)
+            FfiConverterOptionalString.write(value.`peerPublicIp`, buf)
     }
 }
 
@@ -1707,7 +1727,10 @@ data class P2pSyncResult (
     var `itemsReceived`: kotlin.ULong, 
     var `itemsSent`: kotlin.ULong, 
     var `items`: List<SyncedItem>, 
-    var `itemsSkippedLegacy`: kotlin.UInt
+    var `itemsSkippedLegacy`: kotlin.UInt, 
+    var `itemsSkippedDecryptFail`: kotlin.UInt, 
+    var `itemsSkippedUnknownType`: kotlin.UInt, 
+    var `itemsSkippedMissingBlob`: kotlin.UInt
 ) {
     
     companion object
@@ -1720,6 +1743,9 @@ public object FfiConverterTypeP2pSyncResult: FfiConverterRustBuffer<P2pSyncResul
             FfiConverterULong.read(buf),
             FfiConverterSequenceTypeSyncedItem.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
+            FfiConverterUInt.read(buf),
         )
     }
 
@@ -1727,7 +1753,10 @@ public object FfiConverterTypeP2pSyncResult: FfiConverterRustBuffer<P2pSyncResul
             FfiConverterULong.allocationSize(value.`itemsReceived`) +
             FfiConverterULong.allocationSize(value.`itemsSent`) +
             FfiConverterSequenceTypeSyncedItem.allocationSize(value.`items`) +
-            FfiConverterUInt.allocationSize(value.`itemsSkippedLegacy`)
+            FfiConverterUInt.allocationSize(value.`itemsSkippedLegacy`) +
+            FfiConverterUInt.allocationSize(value.`itemsSkippedDecryptFail`) +
+            FfiConverterUInt.allocationSize(value.`itemsSkippedUnknownType`) +
+            FfiConverterUInt.allocationSize(value.`itemsSkippedMissingBlob`)
     )
 
     override fun write(value: P2pSyncResult, buf: ByteBuffer) {
@@ -1735,6 +1764,9 @@ public object FfiConverterTypeP2pSyncResult: FfiConverterRustBuffer<P2pSyncResul
             FfiConverterULong.write(value.`itemsSent`, buf)
             FfiConverterSequenceTypeSyncedItem.write(value.`items`, buf)
             FfiConverterUInt.write(value.`itemsSkippedLegacy`, buf)
+            FfiConverterUInt.write(value.`itemsSkippedDecryptFail`, buf)
+            FfiConverterUInt.write(value.`itemsSkippedUnknownType`, buf)
+            FfiConverterUInt.write(value.`itemsSkippedMissingBlob`, buf)
     }
 }
 
@@ -1747,7 +1779,12 @@ data class PairStatus (
     var `peerFingerprint`: kotlin.String?, 
     var `peerSyncAddr`: kotlin.String?, 
     var `sessionKey`: List<kotlin.UByte>?, 
-    var `peerProvisioning`: SyncProvisioning?
+    var `peerProvisioning`: SyncProvisioning?, 
+    var `peerModel`: kotlin.String?, 
+    var `peerOs`: kotlin.String?, 
+    var `peerAppVersion`: kotlin.String?, 
+    var `peerLocalIp`: kotlin.String?, 
+    var `peerPublicIp`: kotlin.String?
 ) {
     
     companion object
@@ -1763,6 +1800,11 @@ public object FfiConverterTypePairStatus: FfiConverterRustBuffer<PairStatus> {
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalSequenceUByte.read(buf),
             FfiConverterOptionalTypeSyncProvisioning.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -1773,7 +1815,12 @@ public object FfiConverterTypePairStatus: FfiConverterRustBuffer<PairStatus> {
             FfiConverterOptionalString.allocationSize(value.`peerFingerprint`) +
             FfiConverterOptionalString.allocationSize(value.`peerSyncAddr`) +
             FfiConverterOptionalSequenceUByte.allocationSize(value.`sessionKey`) +
-            FfiConverterOptionalTypeSyncProvisioning.allocationSize(value.`peerProvisioning`)
+            FfiConverterOptionalTypeSyncProvisioning.allocationSize(value.`peerProvisioning`) +
+            FfiConverterOptionalString.allocationSize(value.`peerModel`) +
+            FfiConverterOptionalString.allocationSize(value.`peerOs`) +
+            FfiConverterOptionalString.allocationSize(value.`peerAppVersion`) +
+            FfiConverterOptionalString.allocationSize(value.`peerLocalIp`) +
+            FfiConverterOptionalString.allocationSize(value.`peerPublicIp`)
     )
 
     override fun write(value: PairStatus, buf: ByteBuffer) {
@@ -1784,6 +1831,11 @@ public object FfiConverterTypePairStatus: FfiConverterRustBuffer<PairStatus> {
             FfiConverterOptionalString.write(value.`peerSyncAddr`, buf)
             FfiConverterOptionalSequenceUByte.write(value.`sessionKey`, buf)
             FfiConverterOptionalTypeSyncProvisioning.write(value.`peerProvisioning`, buf)
+            FfiConverterOptionalString.write(value.`peerModel`, buf)
+            FfiConverterOptionalString.write(value.`peerOs`, buf)
+            FfiConverterOptionalString.write(value.`peerAppVersion`, buf)
+            FfiConverterOptionalString.write(value.`peerLocalIp`, buf)
+            FfiConverterOptionalString.write(value.`peerPublicIp`, buf)
     }
 }
 
@@ -2526,13 +2578,17 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
          * to the responder ("QR fully provisions all sync"); an Android device
          * scanning a configured PC passes `null` (nothing to offer). The provisioning
          * the PEER advertised comes back in `BootstrapResult.peer_provisioning`.
+         * ABI 14 (HB-1a): the five trailing optional params are THIS device's own
+         * metadata (device_name, Build.MODEL, "Android <release>", app version, LAN
+         * IP) — sent in-band so the peer's device card shows real Android info instead
+         * of a bare entry. The PEER's metadata comes back in `BootstrapResult.peer_*`.
          * Throws `P2pError` on a bad addr_hint or any transport/PAKE failure.
          */
-    @Throws(CopypasteException::class) fun `bootstrapPairInitiator`(`addrHint`: kotlin.String, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>, `pakePassword`: kotlin.String, `syncAddr`: kotlin.String, `localProvisioning`: SyncProvisioning?): BootstrapResult {
+    @Throws(CopypasteException::class) fun `bootstrapPairInitiator`(`addrHint`: kotlin.String, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>, `pakePassword`: kotlin.String, `syncAddr`: kotlin.String, `localProvisioning`: SyncProvisioning?, `deviceName`: kotlin.String?, `deviceModel`: kotlin.String?, `osVersion`: kotlin.String?, `appVersion`: kotlin.String?, `localIp`: kotlin.String?): BootstrapResult {
             return FfiConverterTypeBootstrapResult.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_bootstrap_pair_initiator(
-        FfiConverterString.lower(`addrHint`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),FfiConverterString.lower(`pakePassword`),FfiConverterString.lower(`syncAddr`),FfiConverterOptionalTypeSyncProvisioning.lower(`localProvisioning`),_status)
+        FfiConverterString.lower(`addrHint`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),FfiConverterString.lower(`pakePassword`),FfiConverterString.lower(`syncAddr`),FfiConverterOptionalTypeSyncProvisioning.lower(`localProvisioning`),FfiConverterOptionalString.lower(`deviceName`),FfiConverterOptionalString.lower(`deviceModel`),FfiConverterOptionalString.lower(`osVersion`),FfiConverterOptionalString.lower(`appVersion`),FfiConverterOptionalString.lower(`localIp`),_status)
 }
     )
     }
@@ -2829,12 +2885,14 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
          * in-band); `local_provisioning` is the optional sync-account setup to offer
          * (typically null on Android). Throws P2pError if the peer is unknown, is a
          * v1 peer (no bport), has no routable address, or a pairing is in flight.
+         * ABI 14 (HB-1a): the five trailing optional params are THIS device's own
+         * metadata, advertised to the discovered peer during the initiator handshake.
          */
-    @Throws(CopypasteException::class) fun `pairWithDiscovered`(`deviceId`: kotlin.String, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>, `syncAddr`: kotlin.String, `localProvisioning`: SyncProvisioning?)
+    @Throws(CopypasteException::class) fun `pairWithDiscovered`(`deviceId`: kotlin.String, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>, `syncAddr`: kotlin.String, `localProvisioning`: SyncProvisioning?, `deviceName`: kotlin.String?, `deviceModel`: kotlin.String?, `osVersion`: kotlin.String?, `appVersion`: kotlin.String?, `localIp`: kotlin.String?)
         = 
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_pair_with_discovered(
-        FfiConverterString.lower(`deviceId`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),FfiConverterString.lower(`syncAddr`),FfiConverterOptionalTypeSyncProvisioning.lower(`localProvisioning`),_status)
+        FfiConverterString.lower(`deviceId`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),FfiConverterString.lower(`syncAddr`),FfiConverterOptionalTypeSyncProvisioning.lower(`localProvisioning`),FfiConverterOptionalString.lower(`deviceName`),FfiConverterOptionalString.lower(`deviceModel`),FfiConverterOptionalString.lower(`osVersion`),FfiConverterOptionalString.lower(`appVersion`),FfiConverterOptionalString.lower(`localIp`),_status)
 }
     
     
@@ -2934,12 +2992,16 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
          * can INITIATE pairing to this device. `cert_der`/`key_der` are this device's
          * mTLS identity; `sync_port` is the advertised P2P sync-listener port; `bport`
          * is the fixed bootstrap-listener port. key_der is secret — zero it after.
+         * ABI 14 (HB-1a): the four trailing optional params are THIS device's own
+         * metadata, threaded into the standing responder so a macOS-INITIATED pair
+         * records real Android info. `device_name` (already a param) is reused for the
+         * friendly-name field; `public_ip` is not collected on Android.
          */
-    @Throws(CopypasteException::class) fun `startDiscovery`(`deviceId`: kotlin.String, `deviceName`: kotlin.String, `syncPort`: kotlin.UShort, `bport`: kotlin.UShort, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>)
+    @Throws(CopypasteException::class) fun `startDiscovery`(`deviceId`: kotlin.String, `deviceName`: kotlin.String, `syncPort`: kotlin.UShort, `bport`: kotlin.UShort, `certDer`: List<kotlin.UByte>, `keyDer`: List<kotlin.UByte>, `deviceModel`: kotlin.String?, `osVersion`: kotlin.String?, `appVersion`: kotlin.String?, `localIp`: kotlin.String?)
         = 
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_start_discovery(
-        FfiConverterString.lower(`deviceId`),FfiConverterString.lower(`deviceName`),FfiConverterUShort.lower(`syncPort`),FfiConverterUShort.lower(`bport`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),_status)
+        FfiConverterString.lower(`deviceId`),FfiConverterString.lower(`deviceName`),FfiConverterUShort.lower(`syncPort`),FfiConverterUShort.lower(`bport`),FfiConverterSequenceUByte.lower(`certDer`),FfiConverterSequenceUByte.lower(`keyDer`),FfiConverterOptionalString.lower(`deviceModel`),FfiConverterOptionalString.lower(`osVersion`),FfiConverterOptionalString.lower(`appVersion`),FfiConverterOptionalString.lower(`localIp`),_status)
 }
     
     
