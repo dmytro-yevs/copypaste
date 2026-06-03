@@ -612,7 +612,7 @@ fn shared_sync_key_from_session(
     // SessionKey is a thin wrapper over [u8; 32]; the field is public.
     let session = copypaste_p2p::pake::SessionKey(arr);
     let content_key = session.derive_xchacha_key(P2P_SYNC_KEY_SALT);
-    Ok(copypaste_core::SyncKey::from_bytes(content_key))
+    Ok(copypaste_core::SyncKey::from_bytes(*content_key))
 }
 
 /// Canonicalize a cert fingerprint for denylist comparison: lowercase and
@@ -1901,7 +1901,7 @@ mod tests {
         // round-trip, so the effective key is exactly these derived bytes from
         // the responder's pairing result.
         let daemon_key = copypaste_core::SyncKey::from_bytes(
-            resp_pairing
+            *resp_pairing
                 .session_key
                 .derive_xchacha_key(P2P_SYNC_KEY_SALT),
         );
@@ -2018,7 +2018,7 @@ mod tests {
         // The peer derives the SAME shared content key the FFI will derive.
         let shared = {
             let sk = SessionKey(session_key);
-            copypaste_core::SyncKey::from_bytes(sk.derive_xchacha_key(P2P_SYNC_KEY_SALT))
+            copypaste_core::SyncKey::from_bytes(*sk.derive_xchacha_key(P2P_SYNC_KEY_SALT))
         };
 
         // Identities. The FFI (initiator/client) pins the peer's fingerprint;
@@ -2182,7 +2182,7 @@ mod tests {
         let session_key = [0x5Au8; 32];
         let shared = {
             let sk = SessionKey(session_key);
-            copypaste_core::SyncKey::from_bytes(sk.derive_xchacha_key(P2P_SYNC_KEY_SALT))
+            copypaste_core::SyncKey::from_bytes(*sk.derive_xchacha_key(P2P_SYNC_KEY_SALT))
         };
 
         let peer_cert = generate_device_cert().expect("peer cert");
@@ -2329,7 +2329,7 @@ mod tests {
         let session_key = [0x5Au8; 32];
         let _shared = {
             let sk = SessionKey(session_key);
-            copypaste_core::SyncKey::from_bytes(sk.derive_xchacha_key(P2P_SYNC_KEY_SALT))
+            copypaste_core::SyncKey::from_bytes(*sk.derive_xchacha_key(P2P_SYNC_KEY_SALT))
         };
 
         let peer_cert = generate_device_cert().expect("peer cert");
