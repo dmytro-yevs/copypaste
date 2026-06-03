@@ -34,8 +34,8 @@ pub use file::{decode_file, encode_file, FileError, FileMeta, FILE_CHUNK_SIZE, M
 pub use image::{
     chunks_from_blob, chunks_to_blob, decode_clipboard_image, decode_clipboard_image_limited,
     decode_image, decode_thumbnail, encode_as_png, encode_image, encode_image_full,
-    encode_image_with_limit, encode_thumbnail, thumbnail, ImageError, ImageMeta, IMAGE_CHUNK_SIZE,
-    MAX_IMAGE_BYTES, THUMBNAIL_MAX_DIM,
+    encode_image_with_limit, encode_thumbnail, encode_thumbnail_from_png, thumbnail, ImageError,
+    ImageMeta, IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES, THUMBNAIL_MAX_DIM,
 };
 pub use sensitive::{
     detect, is_sensitive_app, is_sensitive_for_autowipe, luhn_valid, redact, PatternMatch,
