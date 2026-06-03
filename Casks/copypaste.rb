@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
 cask "copypaste" do
-  version "0.5.5"
-  sha256 "aaa8ce7327b4cc221c8c61a51eea038852f0b7b9b7c148e54af939c58ae780ca"
+  version "0.6.0"
+  sha256 "3706904cade6a46fded83138f0b8b28f46b9fc62ae3c5f4192487cb80c6f70d4"
 
   # DMG filename follows the CI pattern: CopyPaste-v<version>-macos-arm64.dmg
   # where <version> is bare (build-dmg-ci.sh strips any leading 'v'), so the
