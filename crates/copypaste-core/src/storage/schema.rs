@@ -137,13 +137,17 @@ ALTER TABLE clipboard_items ADD COLUMN thumb BLOB DEFAULT NULL;\n";
 ///     the version mismatch (CRITICAL edge-case #2).
 pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
     // Connection-level pragmas that MUST run before BEGIN (PRAGMA journal_mode
-    // is a no-op inside a transaction). Only the pragmas NOT already applied by
-    // `db::CONNECTION_PRAGMAS` live here — callers that go through
-    // `Database::open` / `Database::open_in_memory` apply CONNECTION_PRAGMAS
-    // separately, so we keep only the ones unique to the migration path
-    // (journal_mode and cache_size) to avoid redundant double-application.
+    // is a no-op inside a transaction). The `Database::open*` paths apply the
+    // full per-connection set (including a configurable cache_size) separately,
+    // and RE-ASSERT the configured cache_size *after* this function returns, so
+    // the value set here is only the DEFAULT used by raw-connection callers
+    // (e.g. the migration unit tests). Keep it equal to the shipping default so
+    // those callers behave as before; tuned callers override it post-migration.
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
-    conn.execute_batch(&format!("PRAGMA cache_size=-{};", 8 * 1024))?;
+    conn.execute_batch(&format!(
+        "PRAGMA cache_size=-{};",
+        i64::from(crate::config::SQLITE_CACHE_MB) * 1024
+    ))?;
 
     let current_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
 

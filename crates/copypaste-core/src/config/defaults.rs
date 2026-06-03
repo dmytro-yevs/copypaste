@@ -46,23 +46,28 @@ pub const SYNC_TTL_SECS: u64 = 2_592_000;
 pub const SENSITIVE_TTL_RELAY_SECS: u64 = 1_800;
 pub const SENSITIVE_TTL_LOCAL_SECS: u64 = 1_800;
 pub const SENSITIVE_TTL_SECS: u64 = 30;
-// 100 = lossless / original quality (field is currently a no-op for PNG; kept
-// for future JPEG support — never compress by default).
+// 100 = lossless / original quality. NO-OP for the default PNG capture path:
+// PNG is a lossless format and ignores this knob entirely, so changing it has
+// zero effect on stored screenshots today. Retained as the wiring point for a
+// future lossy JPEG/WebP path (where 1..=100 would map to encoder quality);
+// never compress by default.
 pub const IMAGE_QUALITY: u8 = 100;
-// [P2] sqlite_cache_mb is stored in AppConfig and exposed to users, but the
-// actual SQLite cache size is hardcoded to 8 MB in both db.rs
-// (CONNECTION_PRAGMAS: `PRAGMA cache_size = -8192`) and schema.rs
-// (`PRAGMA cache_size = -8192` in apply_migrations). The hardcoded value
-// intentionally equals SQLITE_CACHE_MB * 1024 = 8 * 1024 = 8192, so the
-// default matches. To honour a user-supplied value, thread AppConfig through
-// Database::open() and replace the two literal `-8192` values with
-// `-<sqlite_cache_mb as i64 * 1024>` computed at runtime. Deferred because
-// the open() signature ripple touches multiple callers across crates.
+// sqlite_cache_mb is the per-connection SQLite page-cache size in MiB. It is
+// wired through `Database::open_with_cache_mb` /
+// `Database::open_in_memory_with_cache_mb` (and the pooled
+// `open_pool_with_cache_mb`), which apply `PRAGMA cache_size = -(cache_mb * 1024)`
+// (a negative cache_size value means KiB units). The plain `open` /
+// `open_in_memory` / `open_pool` entry points delegate with this default, so
+// callers that don't tune it keep an unchanged 8 MiB cache.
+// `AppConfig::clamp_values` bounds the configured value to
+// `SQLITE_CACHE_MB_MIN..=SQLITE_CACHE_MB_MAX` so a bad config can't request a
+// pathological cache.
 pub const SQLITE_CACHE_MB: u32 = 8;
+// Sane bounds for `sqlite_cache_mb`: at least 1 MiB (a smaller cache hurts more
+// than it helps) and at most 256 MiB (above this a hand-edited config could pin
+// hundreds of MiB of resident memory per connection).
+pub const SQLITE_CACHE_MB_MIN: u32 = 1;
+pub const SQLITE_CACHE_MB_MAX: u32 = 256;
 pub const ENCRYPTION_CHUNK_KB: u32 = 64;
 pub const MAX_DECODED_IMAGE_MB: u32 = 50;
 pub const MAX_BANDWIDTH_KBPS: u32 = 0;
-// FIXWAVE: INLINE_THRESHOLD_BYTES is defined here but never read by any production
-// code path (grep shows zero callsites outside this file). Either wire it into the
-// daemon's image-inlining decision or remove it to avoid dead-const confusion.
-pub const INLINE_THRESHOLD_BYTES: u64 = 512_000;
