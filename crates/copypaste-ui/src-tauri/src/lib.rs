@@ -857,72 +857,121 @@ fn hide_popup(handle: tauri::AppHandle) {
     hide_popup_internal(&handle);
 }
 
-/// Show a macOS notification banner after a successful copy.
+/// Show a rich macOS notification banner after a successful copy.
 ///
-/// Uses `osascript` to post a "display notification" so we don't need the
-/// tauri-plugin-notification or any entitlement changes.  Any failure
-/// (osascript missing, user denied Script Editor notifications, etc.) is
-/// silently ignored — this is purely cosmetic feedback.
+/// Posts via `UNUserNotificationCenter` from inside the `CopyPaste.app`
+/// bundle so the notification automatically shows the app icon.  This
+/// replaces the old `osascript display notification` path which ran from
+/// a process with no bundle identity and therefore showed a generic
+/// `Script Editor` icon with no app icon and no rich preview.
 ///
-/// `preview` is a short one-line string supplied by the frontend (already
-/// truncated to ≤60 chars).  The command sanitises it before embedding in the
-/// AppleScript literal to prevent injection via quotes, backslashes, or
-/// newlines/control chars (V-18 fix: newlines caused osascript to fail silently).
+/// Parameters (set by the frontend):
+/// - `title`: short type label, e.g. "Text Copied", "Image Copied",
+///   "File Copied".
+/// - `body`: item preview — first ~160 chars of text (newlines preserved,
+///   truncated with `…`), the filename for files, or "Image" for images.
+///
+/// Authorization: on macOS 10.14+ the first call triggers the system
+/// permission prompt.  If the user denies it or the request fails, the
+/// error is silently swallowed — this is purely cosmetic feedback.
 ///
 /// The command is cross-platform safe: on non-macOS it is a no-op.
 #[tauri::command]
-fn show_copy_notification(preview: String) {
+fn show_copy_notification(title: String, body: String) {
     #[cfg(target_os = "macos")]
     {
-        use std::process::Command;
-
-        // Sanitise preview: replace quotes, backslashes, newlines, carriage
-        // returns, and all other ASCII control characters with a space so they
-        // cannot escape the AppleScript string literal or cause osascript to
-        // fail silently on multi-line input (V-18 fix: \n was not stripped).
-        let safe: String = preview
-            .chars()
-            .map(|c| {
-                if c == '"' || c == '\\' || c == '\n' || c == '\r' || (c as u32) < 0x20 {
-                    ' '
-                } else {
-                    c
-                }
-            })
-            .take(60)
-            .collect();
-        let safe = safe.trim();
-
-        let title = "CopyPaste";
-        let body = if safe.is_empty() { "Copied" } else { safe };
-
-        // Build the AppleScript.  Double-quote delimiters are already safe
-        // because we stripped all `"` from the input above.
-        let script = format!(r#"display notification "{body}" with title "{title}""#);
-
-        // Spawn osascript on a background thread so we don't block the Tauri
-        // command handler.  Errors are logged at DEBUG level; they never surface
-        // to the user since this is purely cosmetic feedback.
-        std::thread::spawn(move || {
-            match Command::new("osascript").arg("-e").arg(&script).output() {
-                Ok(out) if !out.status.success() => {
-                    tracing::debug!(
-                        "show_copy_notification: osascript exited {:?}: {}",
-                        out.status.code(),
-                        String::from_utf8_lossy(&out.stderr).trim()
-                    );
-                }
-                Err(e) => {
-                    tracing::debug!("show_copy_notification: failed to spawn osascript: {e}");
-                }
-                Ok(_) => {}
-            }
-        });
+        post_un_notification(title, body);
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = preview;
+        let _ = (title, body);
     }
+}
+
+/// Post a `UNUserNotificationCenter` banner from the app bundle.
+///
+/// Called on a background thread (spawned by the Tauri command handler or
+/// the background-capture poller) so the main run-loop is never blocked.
+/// Any failure is logged at DEBUG level and silently swallowed.
+#[cfg(target_os = "macos")]
+fn post_un_notification(title: String, body: String) {
+    std::thread::spawn(move || {
+        use block2::RcBlock;
+        // objc2_foundation_v3 is the aliased objc2-foundation 0.3.x crate that
+        // matches the types used by objc2-user-notifications 0.3.x (which
+        // depends on objc2 0.6.x).  The rest of the crate uses the 0.2.x
+        // bindings required by objc2-app-kit 0.2.x; both coexist in the graph.
+        use objc2_foundation_v3::{NSError, NSString};
+        // Bool from objc2 0.6.x — must match the version used by
+        // objc2-user-notifications 0.3.x for the IntoBlock impl to unify.
+        use objc2_user_notifications::{
+            UNAuthorizationOptions, UNMutableNotificationContent, UNNotificationRequest,
+            UNUserNotificationCenter,
+        };
+        use objc2_v6::runtime::Bool;
+
+        // SAFETY: All ObjC calls below are on the same thread; objc2 0.6.x
+        // enforces Send/Sync on retained objects so cross-thread use is safe.
+        // `UNUserNotificationCenter::currentNotificationCenter()` is documented
+        // as safe to call from any thread.
+        unsafe {
+            let center = UNUserNotificationCenter::currentNotificationCenter();
+
+            // Request `.alert` authorization — shows a system prompt on first
+            // call; subsequent calls return the cached decision immediately.
+            let auth_opts = UNAuthorizationOptions::Alert | UNAuthorizationOptions::Badge;
+            // The closure parameter types must match the DynBlock signature
+            // generated by objc2-user-notifications 0.3.x:
+            //   dyn Fn(Bool, *mut NSError)
+            // where Bool and NSError come from objc2 0.6.x / objc2-foundation 0.3.x.
+            let auth_block = RcBlock::new(move |granted: Bool, err: *mut NSError| {
+                if !granted.as_bool() {
+                    if err.is_null() {
+                        tracing::debug!("post_un_notification: notification permission denied");
+                    } else {
+                        // SAFETY: err is non-null and owned by the ObjC runtime.
+                        let msg = (*err).localizedDescription();
+                        tracing::debug!("post_un_notification: auth error: {}", msg);
+                    }
+                }
+            });
+            center.requestAuthorizationWithOptions_completionHandler(auth_opts, &auth_block);
+
+            // Build content — title + body.
+            // NSString::from_str returns Retained<NSString>; bind before
+            // passing so we can deref to &NSString as required by setTitle/setBody.
+            let content = UNMutableNotificationContent::new();
+            let ns_title = NSString::from_str(&title);
+            let ns_body = NSString::from_str(&body);
+            content.setTitle(&*ns_title);
+            content.setBody(&*ns_body);
+
+            // Unique identifier per notification so each fires independently.
+            let req_id = NSString::from_str(&format!(
+                "com.copypaste.copy.{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            ));
+
+            // trigger = None → deliver immediately.
+            // req_id is Retained<NSString>; deref to &NSString for the call.
+            let request = UNNotificationRequest::requestWithIdentifier_content_trigger(
+                &*req_id, &content, None,
+            );
+
+            // Completion block: dyn Fn(*mut NSError) — same NSError from 0.3.x.
+            let done_block = RcBlock::new(move |err: *mut NSError| {
+                if !err.is_null() {
+                    // SAFETY: err is non-null and owned by the ObjC runtime.
+                    let msg = (*err).localizedDescription();
+                    tracing::debug!("post_un_notification: add request failed: {}", msg);
+                }
+            });
+            center.addNotificationRequest_withCompletionHandler(&request, Some(&done_block));
+        }
+    });
 }
 
 /// Toggle (show or hide) the quick-paste popup using the configured position mode.
@@ -1367,13 +1416,10 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                             // tray copies are consistent with the "always sound on copy"
                             // promise (audit finding P1 / M12 parity).
                             play_copy_sound();
-                            let preview = reply
-                                .data
-                                .as_ref()
-                                .and_then(|d| d["preview"].as_str())
-                                .unwrap_or("")
-                                .to_owned();
-                            show_copy_notification(preview);
+                            // Build rich title + body from the content_type / preview
+                            // returned by the copy_item IPC response.
+                            let (title, body) = notification_title_body_from_reply(reply);
+                            show_copy_notification(title, body);
                         }
                         Ok(_) => {}
                         Err(e) => {
@@ -1581,6 +1627,91 @@ fn rebuild_recent_submenu(
 
 /// Startup-race + periodic Recent submenu resync.
 ///
+/// Build a rich notification `(title, body)` pair from a `copy_item` IPC
+/// reply.
+///
+/// - Text → `("Text Copied", first ~160 chars truncated with …)`
+/// - Image → `("Image Copied", "Image")`
+/// - File → `("File Copied", filename extracted from "[file: <name>]")`
+/// - Unknown → `("Copied", preview-as-body or "Copied")`
+fn notification_title_body_from_reply(reply: &ipc::IpcReply) -> (String, String) {
+    let content_type = reply
+        .data
+        .as_ref()
+        .and_then(|d| d["content_type"].as_str())
+        .unwrap_or("");
+    let preview = reply
+        .data
+        .as_ref()
+        .and_then(|d| d["preview"].as_str())
+        .unwrap_or("");
+
+    notification_title_body(content_type, preview)
+}
+
+/// Build a rich notification `(title, body)` pair from `content_type` and
+/// `preview` strings (the shape returned by `history_page` and `copy_item`).
+fn notification_title_body(content_type: &str, preview: &str) -> (String, String) {
+    match content_type {
+        "text" => {
+            let body = build_text_preview_body(preview);
+            ("Text Copied".to_owned(), body)
+        }
+        ct if ct == "image" || ct.starts_with("image/") => {
+            ("Image Copied".to_owned(), "Image".to_owned())
+        }
+        "file" => {
+            // preview arrives as "[file: <filename>]" from history_page.
+            // Strip the wrapper to show just the filename in the banner.
+            let body = if let Some(inner) = preview
+                .strip_prefix("[file: ")
+                .and_then(|s| s.strip_suffix(']'))
+            {
+                inner.to_owned()
+            } else if !preview.is_empty() {
+                preview.to_owned()
+            } else {
+                "File".to_owned()
+            };
+            ("File Copied".to_owned(), body)
+        }
+        _ => {
+            // Fallback: unknown or empty content_type.
+            let body = build_text_preview_body(preview);
+            (
+                "Copied".to_owned(),
+                if body.is_empty() {
+                    "Copied".to_owned()
+                } else {
+                    body
+                },
+            )
+        }
+    }
+}
+
+/// Truncate a text `preview` to ~160 chars at a word boundary and append `…`
+/// if truncated.  Preserves newlines so multi-line text reads naturally in the
+/// notification banner (macOS renders them as line breaks).
+fn build_text_preview_body(preview: &str) -> String {
+    const MAX_CHARS: usize = 160;
+    if preview.len() <= MAX_CHARS {
+        return preview.to_owned();
+    }
+    // Truncate at MAX_CHARS chars (not bytes), preferring a word boundary.
+    let truncated: String = preview.chars().take(MAX_CHARS).collect();
+    // Walk back to the last whitespace for a clean cut.
+    let cut = truncated
+        .rfind(|c: char| c.is_whitespace())
+        .unwrap_or(MAX_CHARS);
+    let chopped = truncated[..cut].trim_end();
+    if chopped.is_empty() {
+        format!("{}…", truncated.trim_end())
+    } else {
+        format!("{chopped}…")
+    }
+}
+
 /// `setup_tray` runs at startup before the daemon socket is necessarily bound,
 /// so the Recent submenu often shows a placeholder. This function spawns a
 /// background thread that:
@@ -1588,8 +1719,14 @@ fn rebuild_recent_submenu(
 /// 1. Polls until the daemon responds, then does an initial rebuild.
 /// 2. Continues polling every `REFRESH_INTERVAL` so the tray stays current as
 ///    the user copies things.
+/// 3. On each poll, checks whether a new clipboard item appeared (by comparing
+///    the most recent item's `wall_time` to the last seen value) and, if so,
+///    fires a rich `UNUserNotificationCenter` banner — respecting the daemon's
+///    `notify_on_copy` setting.  This bridges background-clipboard-captures
+///    (items copied from other apps while the UI is running) to the Tauri
+///    bundle so they show the CopyPaste app icon rather than a generic icon.
 ///
-/// The refresh is intentionally cheap: 10-item `history_page` call, only runs
+/// The refresh is intentionally cheap: 1-item `history_page` call, only runs
 /// while the app is alive, stops after `GIVE_UP_AFTER` of daemon silence.
 fn spawn_tray_recent_resync(handle: tauri::AppHandle) {
     use std::sync::atomic::Ordering;
@@ -1636,6 +1773,21 @@ fn spawn_tray_recent_resync(handle: tauri::AppHandle) {
             thread::sleep(POLL_INTERVAL);
         }
 
+        // Seed the "last seen" wall_time so the first poll doesn't fire a
+        // spurious notification for an item that was already in history before
+        // the app launched.
+        let mut last_seen_wall_time: i64 = {
+            ipc::call(
+                "history_page",
+                serde_json::json!({ "limit": 1, "offset": 0 }),
+            )
+            .ok()
+            .and_then(|r| r.data)
+            .and_then(|d| d["items"].as_array().and_then(|a| a.first().cloned()))
+            .and_then(|item| item["wall_time"].as_i64())
+            .unwrap_or(0)
+        };
+
         // Phase 2: rebuild now and then periodically; exit when stop flag is set.
         loop {
             if stop_flag.load(Ordering::Relaxed) {
@@ -1644,9 +1796,75 @@ fn spawn_tray_recent_resync(handle: tauri::AppHandle) {
             if let Err(e) = rebuild_recent_submenu(&handle) {
                 tracing::warn!("tray Recent re-sync: rebuild failed: {e}");
             }
+
+            // Check for a background-captured item (clipboard copy from another
+            // app).  Query the most recent item and compare its wall_time.
+            // If it is newer AND the daemon config has notify_on_copy enabled,
+            // fire a rich UNUserNotificationCenter banner.
+            check_and_notify_new_capture(&mut last_seen_wall_time);
+
             thread::sleep(REFRESH_INTERVAL);
         }
     });
+}
+
+/// Poll for the most recent clipboard item and fire a notification if a new
+/// background capture appeared since the last check.
+///
+/// `last_seen` is updated in-place so subsequent calls only notify once per
+/// item.  Respects the daemon's `notify_on_copy` setting.
+fn check_and_notify_new_capture(last_seen: &mut i64) {
+    // Fetch the single most-recent item from history_page (limit=1).
+    let reply = match ipc::call(
+        "history_page",
+        serde_json::json!({ "limit": 1, "offset": 0 }),
+    ) {
+        Ok(r) if r.ok => r,
+        _ => return,
+    };
+
+    let item = match reply
+        .data
+        .as_ref()
+        .and_then(|d| d["items"].as_array())
+        .and_then(|a| a.first())
+    {
+        Some(i) => i.clone(),
+        None => return,
+    };
+
+    let wall_time = match item["wall_time"].as_i64() {
+        Some(t) => t,
+        None => return,
+    };
+
+    if wall_time <= *last_seen {
+        return; // no new item
+    }
+
+    *last_seen = wall_time;
+
+    // Check notify_on_copy setting before firing.
+    let notify_enabled = ipc::call("get_config", serde_json::json!({}))
+        .ok()
+        .and_then(|r| r.data)
+        .and_then(|d| d["notify_on_copy"].as_bool())
+        .unwrap_or(false);
+
+    if !notify_enabled {
+        return;
+    }
+
+    let content_type = item["content_type"].as_str().unwrap_or("").to_owned();
+    let preview = item["preview"].as_str().unwrap_or("").to_owned();
+    let (title, body) = notification_title_body(&content_type, &preview);
+
+    #[cfg(target_os = "macos")]
+    post_un_notification(title, body);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (title, body);
+    }
 }
 
 #[cfg(target_os = "macos")]
