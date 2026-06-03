@@ -125,9 +125,21 @@ class ClipboardRepository(context: Context) {
                 } else null
                 val withImage = if (item.isImage) item.copy(imagePng = displayBytes) else item
                 val isPinned = id in pinnedSet
+                // For binary payloads the synced blob is the full-res image / raw file, NOT the
+                // thumbnail shown in the row. Measure its stored byte size cheaply from the
+                // Base64 string length (no decode) against the same 8 MiB ceiling sync enforces.
+                // Text items keep the plaintextLen-derived flag set in parseItem().
+                val binaryTooLarge = when {
+                    item.isImage ->
+                        (prefs.getString("item_img_$id", null)?.let { base64RawByteSize(it).toLong() } ?: 0L) > SYNC_MAX_BLOB_BYTES
+                    item.isFile ->
+                        (prefs.getString("item_file_$id", null)?.let { base64RawByteSize(it).toLong() } ?: 0L) > SYNC_MAX_BLOB_BYTES
+                    else -> item.tooLargeToSync
+                }
                 withImage.copy(
                     pinned = isPinned,
                     pinnedSortIndex = if (isPinned) (pinnedIndex[id] ?: Int.MAX_VALUE) else -1,
+                    tooLargeToSync = binaryTooLarge,
                 )
             }.reversed()
         }
@@ -930,13 +942,22 @@ class ClipboardRepository(context: Context) {
 
         val snippet = if (plaintext == null) UNABLE_TO_PREVIEW else previewFromPlaintext(plaintext)
 
-        // pinned and imagePng are populated by getItems() after parseItem returns.
+        // Text payload byte size is the encoded plaintextLen field (parts[2]) — the UTF-8
+        // byte length recorded at capture by encodeItem(). Already in hand here, no blob load.
+        // Image/file items carry their real bytes under separate prefs keys, so getItems()
+        // overrides tooLargeToSync for those after this returns.
+        val plaintextLen = parts.getOrNull(2)?.toLongOrNull() ?: 0L
+        val tooLargeToSync = plaintextLen > SYNC_MAX_BLOB_BYTES
+
+        // pinned, imagePng, and image/file tooLargeToSync are populated by getItems()
+        // after parseItem returns.
         return ClipboardItem(
             id = id,
             contentType = contentType,
             isSensitive = sensitive,
             wallTimeMs = wallTimeMs,
             snippet = snippet,
+            tooLargeToSync = tooLargeToSync,
         )
     }
 
@@ -970,6 +991,14 @@ class ClipboardRepository(context: Context) {
 
     companion object {
         private const val TAG = "ClipboardRepository"
+
+        /**
+         * Sync size ceiling in bytes (8 MiB). Items whose stored payload exceeds this are
+         * flagged [ClipboardItem.tooLargeToSync] and will not propagate to other devices.
+         * Matches the macOS/daemon sync blob cap exactly — single source of truth, do not
+         * scatter the literal.
+         */
+        const val SYNC_MAX_BLOB_BYTES: Long = 8L * 1024 * 1024
 
         /** SharedPreferences file name — single source of truth, not scattered as string literals. */
         const val PREFS_NAME = "copypaste_items"

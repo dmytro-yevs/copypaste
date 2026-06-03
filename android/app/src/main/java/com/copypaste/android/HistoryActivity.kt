@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.AttachFile
@@ -961,6 +962,23 @@ private fun ContentTypeChip(contentType: String, isSensitive: Boolean) {
     }
 }
 
+/**
+ * Small warning-tinted indicator shown on a row whose payload exceeds the sync size
+ * cap ([ClipboardRepository.SYNC_MAX_BLOB_BYTES], 8 MiB) and therefore will not be
+ * propagated to other devices. Sized (12.dp) and tinted ([IdeWarning]) to match the
+ * adjacent pin indicator. Caller is responsible for the `!selectionMode` gating.
+ */
+@Composable
+private fun TooLargeBadge() {
+    Spacer(Modifier.width(4.dp))
+    Icon(
+        imageVector = Icons.Filled.CloudOff,
+        contentDescription = stringResource(R.string.cd_too_large_sync),
+        tint = IdeWarning.copy(alpha = 0.9f),
+        modifier = Modifier.size(12.dp),
+    )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // List
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1310,6 +1328,7 @@ private fun HistoryRow(
                 }
                 // §5 content-type chip (violet for images)
                 ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive)
+                if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(8.dp))
                 Image(
                     bitmap = bmp,
@@ -1411,6 +1430,7 @@ private fun HistoryRow(
                 }
                 // §3 content-type chip (file = dim/elevated)
                 ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive)
+                if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(6.dp))
                 // File icon
                 Icon(
@@ -1503,6 +1523,7 @@ private fun HistoryRow(
                 }
                 // §5 content-type chip (tinted by type)
                 ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive)
+                if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(8.dp))
                 // Preview text
                 Text(
