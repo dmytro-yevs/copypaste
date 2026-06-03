@@ -38,9 +38,11 @@ private const val TAG = "CopypasteBindings"
  *
  * BUMP this in lock-step with the Rust `ABI_VERSION` every time the FFI surface
  * changes. Bumped 8 → 9 for the multi-peer roster / config-via-FFI / revoke
- * audit surface.
+ * audit surface. Bumped 9 → 10 for the QR full-provisioning surface
+ * (`SyncProvisioning`, `BootstrapResult.peerProvisioning`, and the trailing
+ * `localProvisioning` param on `bootstrapPairInitiator`).
  */
-const val APP_ABI_VERSION: UInt = 9u
+const val APP_ABI_VERSION: UInt = 10u
 
 /** Mirrors `EncryptedBlob` in copypaste_android.udl — uses ByteArray for callers. */
 data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {

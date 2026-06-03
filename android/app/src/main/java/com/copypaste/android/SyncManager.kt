@@ -66,6 +66,30 @@ class SyncManager(
             }
         }
 
+        /**
+         * Single entry point for obtaining the 32-byte cross-device cloud sync key.
+         *
+         * PREFERS a directly-provisioned key ([Settings.cloudSyncKeyDirect]) when
+         * present — this is the key carried over QR pairing, so a provisioned phone
+         * decrypts cloud rows WITHOUT the user typing the shared passphrase and
+         * WITHOUT running Argon2id. Falls back to deriving the key from
+         * [Settings.cloudSyncPassphrase] via [derivedSyncKey] for users who entered
+         * a passphrase manually.
+         *
+         * Returns null when neither a direct key nor a passphrase is available, or
+         * when passphrase derivation fails. Hands back a defensive copy of the
+         * direct key so callers cannot mutate the wrapped-at-rest value.
+         *
+         * ALL cloud-key consumers (push/poll/resolveSyncContext) MUST route through
+         * here so the direct-key preference is honored uniformly. Never log the bytes.
+         */
+        private fun resolveCloudSyncKey(settings: Settings): ByteArray? {
+            settings.cloudSyncKeyDirect?.let { return it.copyOf() }
+            val passphrase = settings.cloudSyncPassphrase
+            if (passphrase.isBlank()) return null
+            return derivedSyncKey(passphrase)
+        }
+
         // ── JWT session cache ─────────────────────────────────────────────────
 
         /**
@@ -288,9 +312,10 @@ class SyncManager(
 
         val client = SupabaseClient(s.supabaseUrl, s.supabaseAnonKey)
 
-        // M8: cached Argon2id-derived sync key (re-derived only on passphrase change).
-        val syncKeyBytes = derivedSyncKey(s.cloudSyncPassphrase) ?: run {
-            Log.w(TAG, "pushToSupabase: key derivation failed")
+        // Prefer the QR-provisioned direct key; else cached Argon2id-derived key
+        // (re-derived only on passphrase change). See resolveCloudSyncKey.
+        val syncKeyBytes = resolveCloudSyncKey(s) ?: run {
+            Log.w(TAG, "pushToSupabase: no cloud sync key (no direct key, no passphrase)")
             return@withContext null
         }
 
@@ -413,10 +438,11 @@ class SyncManager(
 
         val client = SupabaseClient(s.supabaseUrl, s.supabaseAnonKey)
 
-        // M8: cached Argon2id-derived sync key (re-derived only on passphrase
-        // change). Returns null on derivation failure → abort.
-        val syncKeyBytes = derivedSyncKey(s.cloudSyncPassphrase) ?: run {
-            Log.w(TAG, "resolveSyncContext: key derivation failed")
+        // Prefer the QR-provisioned direct key; else cached Argon2id-derived key
+        // (re-derived only on passphrase change). Returns null when no key is
+        // available at all → abort. See resolveCloudSyncKey.
+        val syncKeyBytes = resolveCloudSyncKey(s) ?: run {
+            Log.w(TAG, "resolveSyncContext: no cloud sync key (no direct key, no passphrase)")
             return@withContext null
         }
 
