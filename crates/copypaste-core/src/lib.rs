@@ -6,6 +6,7 @@ pub mod logging;
 pub mod relay;
 pub mod sensitive;
 pub mod storage;
+pub mod text_kind;
 
 // Top-level re-exports
 pub use config::AppConfig;
