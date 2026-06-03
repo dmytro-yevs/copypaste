@@ -127,7 +127,50 @@ namespace copypaste_android {
   /// back to plaintext. Throws `P2pError` on a bad address, connect/TLS
   /// failure, or any sync-protocol error.
   [Throws=CopypasteError]
-  P2pSyncResult sync_with_peer(string peer_addr, string peer_fingerprint, sequence<u8> session_key, sequence<u8> cert_der, sequence<u8> key_der, sequence<LocalItem> local_items);
+  P2pSyncResult sync_with_peer(string peer_addr, string peer_fingerprint, sequence<u8> session_key, sequence<u8> cert_der, sequence<u8> key_der, sequence<LocalItem> local_items, sequence<string> revoked_fingerprints, string device_id);
+
+  // ── AppConfig over UniFFI (single source of truth, shared with macOS) ─────
+  // Android keeps its SharedPreferences store but SEEDS defaults from
+  // `default_config()` and pipes every write through `clamp_config()` so it
+  // enforces the SAME floors/ceilings and canonical defaults as the macOS
+  // daemon (fixes triage B2/B6/B7). Both functions are PURE — no file or DB
+  // I/O. There is intentionally NO config.toml path on Android.
+
+  /// Canonical default configuration: `AppConfig::default()` mapped to the
+  /// `Config` dictionary, with the same default values the macOS daemon uses.
+  /// PURE — performs no I/O.
+  Config default_config();
+
+  /// Clamp a `Config` into its valid ranges by mapping it onto `AppConfig`,
+  /// running `AppConfig::clamp_values()` (the SAME floors/ceilings the macOS
+  /// daemon enforces), and mapping back. PURE — performs no I/O.
+  Config clamp_config(Config cfg);
+
+  // ── Device-management parity (revoke / audit) ─────────────────────────────
+  // Mirrors the macOS daemon's revoke flow. The `revoked_devices` table lives
+  // in the SQLCipher `copypaste.db` under the same encryption key as the rest
+  // of the Android store. Feature-gated like the other live-DB calls; with the
+  // `android-uniffi-live` feature off, `revoke_device_audit` returns a
+  // timestamp without I/O and `list_revoked_*` return empty.
+
+  /// Record a manual peer revocation in the local `revoked_devices` audit
+  /// table and remove the matching `devices` row. Returns the unix-seconds
+  /// timestamp written to `revoked_at`. The caller (Kotlin) is responsible for
+  /// removing the peer from its roster and for passing the fingerprint into
+  /// `sync_with_peer`'s `revoked_fingerprints` so the trust layer refuses it.
+  [Throws=CopypasteError]
+  u64 revoke_device_audit(string db_path, [ByRef] sequence<u8> key, string fingerprint, string name);
+
+  /// List the fingerprints of all revoked devices, newest first. Drives the
+  /// local fast-skip in the dialer and the `revoked_fingerprints` denylist
+  /// passed to `sync_with_peer`.
+  [Throws=CopypasteError]
+  sequence<string> list_revoked_fingerprints(string db_path, [ByRef] sequence<u8> key);
+
+  /// Richer audit listing (fingerprint + name + revoked_at), newest first, for
+  /// a device-management UI. Same data source as `list_revoked_fingerprints`.
+  [Throws=CopypasteError]
+  sequence<RevokedPeer> list_revoked_peers(string db_path, [ByRef] sequence<u8> key);
 };
 
 [Error]
@@ -241,4 +284,54 @@ dictionary P2pSyncResult {
   // (legacy / non-rekeyed peer). Dropped (undecryptable with the shared sync
   // key) but logged + counted so build-skew is observable rather than silent.
   u32 items_skipped_legacy;
+};
+
+// CANONICAL user-tunable configuration shared with the macOS daemon.
+//
+// This dictionary mirrors the USER-TUNABLE subset of
+// `copypaste_core::AppConfig` (the single source of truth). Android keeps its
+// own SharedPreferences store but MUST seed defaults from `default_config()`
+// and route every write through `clamp_config()` so its floors, ceilings, and
+// defaults are byte-for-byte identical to macOS. Field names and types match
+// `AppConfig` exactly. There is intentionally NO config.toml path on Android —
+// these two functions are pure mappers, not loaders/savers.
+dictionary Config {
+  // Capture/size caps (bytes). Floored/ceilinged by `clamp_config`:
+  // max_text  >= 64 KiB, max_image >= 1 MiB, max_file in [1 MiB, 100 MiB],
+  // storage_quota >= 50 MiB.
+  u64 max_text_size_bytes;
+  u64 max_image_size_bytes;
+  u64 max_file_size_bytes;
+  u64 storage_quota_bytes;
+  // Local auto-wipe TTL for sensitive items (seconds). 0 = "never wipe"
+  // sentinel and is deliberately NOT clamped up.
+  u64 sensitive_ttl_secs;
+  // Clamped to [100, 5000] ms.
+  u64 poll_interval_ms;
+  boolean sound_on_copy;
+  boolean notify_on_copy;
+  // Whether to mask sensitive content in the UI. (Android-side display knob;
+  // no direct AppConfig field — preserved verbatim through clamp.)
+  boolean mask_sensitive_content;
+  boolean sync_on_wifi_only;
+  // Whether P2P sync is enabled. (Android runtime toggle; no direct AppConfig
+  // field — preserved verbatim through clamp.)
+  boolean p2p_enabled;
+  // 1..=100; clamped. Currently a no-op for PNG (kept for future JPEG).
+  u32 image_quality;
+  // Max decoded image height in px (Android display). Maps to AppConfig
+  // `max_decoded_image_mb` is NOT this; kept as an Android display knob and
+  // preserved verbatim through clamp.
+  u32 image_max_height;
+  boolean collect_public_ip;
+  boolean paste_as_plain_text;
+};
+
+// A single revoked-device audit row (mirror of
+// `copypaste_core::RevokedDevice`). Returned by `list_revoked_peers` newest
+// first for a device-management audit UI.
+dictionary RevokedPeer {
+  string fingerprint;
+  string name;
+  i64 revoked_at;
 };
