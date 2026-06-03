@@ -1155,6 +1155,7 @@ mod tests {
         );
         let (nonce, ct) = encrypt_item_with_aad(plaintext, &v2, &aad).expect("encrypt");
         ClipboardItem {
+            deleted: false,
             id: item_id.to_owned(),
             item_id: item_id.to_owned(),
             content_type: "text".to_owned(),

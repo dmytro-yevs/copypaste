@@ -51,6 +51,9 @@ fn make_db() -> Arc<Mutex<Database>> {
 
 fn make_wire(id: &str, lamport: i64, content: u8) -> WireItem {
     WireItem {
+        deleted: false,
+        pinned: false,
+        pin_order: None,
         id: id.to_string(),
         item_id: format!("{id}-iid"),
         content_type: "text".to_string(),

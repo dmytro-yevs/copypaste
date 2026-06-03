@@ -1539,6 +1539,9 @@ mod tests {
     /// Build a minimal `WireItem` for use in tests.
     fn test_wire_item(id: &str) -> WireItem {
         WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: id.to_string(),
             item_id: id.to_string(),
             content_type: "text".to_string(),

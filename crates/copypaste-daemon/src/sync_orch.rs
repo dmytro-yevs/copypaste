@@ -1343,6 +1343,9 @@ mod tests {
 
     fn make_wire(id: &str, lamport: i64, content: u8) -> WireItem {
         WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: id.to_string(),
             item_id: format!("{id}-iid"),
             content_type: "text".to_string(),
@@ -1397,6 +1400,9 @@ mod tests {
 
         // A's wire item carries A's at-rest ciphertext + nonce.
         let mut wire = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: "row-1".to_string(),
             item_id: item_id.clone(),
             content_type: "text".to_string(),
@@ -1517,6 +1523,9 @@ mod tests {
         let meta_json_a = format!(r#"{{"file_id":{file_id_a:?}}}"#);
 
         let mut wire = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: "img-row".to_string(),
             item_id: item_id.clone(),
             content_type: "image".to_string(),
@@ -1614,6 +1623,9 @@ mod tests {
         let meta_json_a = crate::clipboard::build_file_meta_json(&meta_a);
 
         let mut wire = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: "file-row".to_string(),
             item_id: item_id.clone(),
             content_type: "file".to_string(),
@@ -1802,19 +1814,21 @@ mod tests {
         handle.await.expect("task join");
     }
 
-    /// Fix-3 (pinned preserved on LWW TakeRemote): when the local row is pinned
-    /// and the incoming wire item wins LWW (newer lamport), the stored row must
-    /// keep `pinned = true`.  The wire protocol has no `pinned` field, so
-    /// `wire_to_local` always produces `pinned = false`; the merge path must
-    /// OR-merge the existing value before the atomic replace.
+    /// Op-propagation (v0.6.1): the wire now carries authoritative `pinned` /
+    /// `pin_order`, so on LWW TakeRemote the winning wire's pin state is applied
+    /// directly — this is what lets an explicit pin / UNPIN / reorder on one
+    /// device converge onto the others. (The previous semantic OR-merged the
+    /// local pin and was kept only because the wire had no pin field; that
+    /// would silently swallow a remote unpin, which the "sync all operations"
+    /// requirement forbids.)
     ///
-    /// The current lookup path uses `wire.id` as the lookup key, so the local
-    /// row's `id` must equal `wire.id` for TakeRemote to fire.
+    /// Here a locally-pinned row receives a newer remote that is unpinned →
+    /// the row must become unpinned (remote unpin propagated). The lookup uses
+    /// `wire.id`, so the local row's `id` must equal `wire.id` for TakeRemote.
     #[tokio::test]
-    async fn merge_incoming_takeremode_preserves_pinned() {
+    async fn merge_incoming_takeremote_propagates_wire_pin_state() {
         let db = make_db();
-        // Local row: id matches the wire id so the LWW lookup finds it.
-        // lamport 3 < wire lamport 9 → TakeRemote will fire.
+        // Local row pinned=true; lamport 3 < wire lamport 9 → TakeRemote fires.
         let mut local = ClipboardItem::new_text(vec![0x11], vec![0u8; 24], 3);
         local.id = "shared-id".to_string();
         local.item_id = "shared-id-iid".to_string();
@@ -1828,10 +1842,10 @@ mod tests {
             assert!(stored.pinned, "setup: local row must be pinned");
         }
 
-        // Wire id = "shared-id" so the lookup finds the existing row.
-        // make_wire("shared-id", …) sets item_id = "shared-id-iid" (matches).
+        // Newer remote, unpinned (make_wire sets pinned=false, pin_order=None).
         let wire = make_wire("shared-id", 9, 0xFF);
         assert_eq!(wire.id, "shared-id");
+        assert!(!wire.pinned, "setup: incoming wire is unpinned");
 
         let upserted = merge_incoming(&db, vec![wire]).await.unwrap();
         assert_eq!(upserted, 1, "newer remote must win LWW");
@@ -1840,8 +1854,8 @@ mod tests {
         let rows = copypaste_core::get_page(&g, 10, 0).unwrap();
         assert_eq!(rows.len(), 1, "must remain ONE row");
         assert!(
-            rows[0].pinned,
-            "pinned flag must be preserved after TakeRemote — got pinned={}",
+            !rows[0].pinned,
+            "remote unpin must propagate on TakeRemote — got pinned={}",
             rows[0].pinned
         );
     }

@@ -3237,6 +3237,7 @@ mod tests {
     /// about `id` for log lines and the serialised JSON body.
     fn test_item(id: &str) -> copypaste_core::ClipboardItem {
         copypaste_core::ClipboardItem {
+            deleted: false,
             id: id.to_owned(),
             item_id: id.to_owned(),
             content_type: "text".to_owned(),
@@ -4573,6 +4574,7 @@ mod e2e_live {
         let (nonce, ciphertext) =
             encrypt_item_with_aad(plaintext, &v2_key, &aad).expect("local encrypt");
         ClipboardItem {
+            deleted: false,
             id,
             item_id,
             content_type: "text".to_owned(),
@@ -5137,6 +5139,7 @@ mod bytea_e2e {
     /// the pre-encoded `payload_ct_b64` argument to `push_item_with_retries`.
     fn make_item(id: &str, item_id: &str) -> ClipboardItem {
         ClipboardItem {
+            deleted: false,
             id: id.to_owned(),
             item_id: item_id.to_owned(),
             content_type: "text".to_owned(),
@@ -5465,6 +5468,7 @@ mod bytea_e2e {
     /// `wrap_cloud_upload_plaintext` can read its name/MIME.
     fn file_item(id: &str, name: &str, mime: &str, original_size: usize) -> ClipboardItem {
         ClipboardItem {
+            deleted: false,
             id: id.to_owned(),
             item_id: id.to_owned(),
             content_type: "file".to_owned(),
