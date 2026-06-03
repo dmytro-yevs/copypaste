@@ -5391,6 +5391,103 @@ impl IpcServer {
                     }
                     post_stamp(&self.self_write_change_count);
                     Ok(())
+                } else if item.content_type == "file" {
+                    // ----- file: reassemble chunks → decrypt → write as file-URL -----
+                    //
+                    // 1. Parse FileMeta (filename, mime, file_id) from blob_ref JSON.
+                    // 2. Decrypt via chunks_from_blob → decode_file (v1 local_key, same as
+                    //    get_item_file / handle_file).
+                    // 3. Write bytes to ~/Library/Caches/CopyPaste/paste-files/<filename>.
+                    // 4. Put an NSURL file-URL for that path on the pasteboard as
+                    //    `public.file-url`.  The URL must outlive the paste so we do NOT
+                    //    delete immediately; prune_old_paste_files() removes files >10 min
+                    //    old on each call so the directory stays bounded.
+                    let meta_json = item.blob_ref.as_deref().ok_or_else(|| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        PasteboardError::other("file item missing blob_ref metadata")
+                    })?;
+                    let file_meta = parse_file_meta(meta_json).map_err(|e| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        PasteboardError::other(format!("file item blob_ref parse error: {e}"))
+                    })?;
+
+                    let chunks = chunks_from_blob(content).map_err(|e| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        PasteboardError::other(format!("file chunks_from_blob failed: {e}"))
+                    })?;
+                    // Decrypt with the v1 local key (same key family used at capture time;
+                    // mirrors the get_item_file handler at ~ipc.rs:2773).
+                    let local_key: [u8; 32] = **self.local_key;
+                    let raw_bytes =
+                        decode_file(&chunks, &local_key, &file_meta.file_id).map_err(|e| {
+                            self.self_write_change_count
+                                .store(-1, std::sync::atomic::Ordering::Release);
+                            PasteboardError::decrypt(format!("file decode failed: {e}"))
+                        })?;
+
+                    // Sanitise the filename: strip any leading path separators so the
+                    // stored name cannot escape the cache directory.
+                    let safe_name = std::path::Path::new(&file_meta.filename)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("paste-file"); // infallible fallback — filename came from our own capture
+                    let paste_dir = paste_file_cache_dir();
+                    // Prune stale entries before writing so the directory stays bounded;
+                    // errors inside prune are logged at DEBUG and never propagate.
+                    prune_old_paste_files(&paste_dir);
+                    std::fs::create_dir_all(&paste_dir).map_err(|e| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        PasteboardError::other(format!(
+                            "failed to create paste-files dir {paste_dir:?}: {e}"
+                        ))
+                    })?;
+                    let dest = paste_dir.join(safe_name);
+                    std::fs::write(&dest, &raw_bytes).map_err(|e| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        PasteboardError::other(format!("failed to write paste file {dest:?}: {e}"))
+                    })?;
+
+                    // Build the file:// URL string for the temp file.
+                    // `public.file-url` data is the absolute URL string (percent-encoded),
+                    // e.g. "file:///Users/.../paste-files/foo.txt".  This is what Finder,
+                    // Terminal, and most Cocoa apps accept when reading `public.file-url`
+                    // from the pasteboard.  We construct it via NSURL so percent-encoding
+                    // is handled correctly, then write the absolute-string as NSString data.
+                    use objc2_foundation::{NSString, NSURL};
+                    let file_url_str: String = unsafe {
+                        let path_ns = NSString::from_str(
+                            dest.to_str().unwrap_or_default(), // UTF-8 path; infallible on macOS
+                        );
+                        // fileURLWithPath: produces "file:///…" with proper percent-encoding.
+                        let nsurl = NSURL::fileURLWithPath(&path_ns);
+                        // absoluteString returns the full URL string; unwrap_or_default is
+                        // infallible in practice — a file URL always has an absolute string.
+                        nsurl
+                            .absoluteString()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("file://{}", dest.display()))
+                    };
+                    let write_ok = unsafe {
+                        let pb = NSPasteboard::generalPasteboard();
+                        pb.clearContents();
+                        let uti = NSString::from_str("public.file-url");
+                        let url_ns = NSString::from_str(&file_url_str);
+                        pb.setString_forType(&url_ns, &uti)
+                    };
+                    if !write_ok {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        return Err(PasteboardError::other(
+                            "NSPasteboard setString:forType: returned false for public.file-url",
+                        ));
+                    }
+                    post_stamp(&self.self_write_change_count);
+                    Ok(())
                 } else {
                     // Unknown content_type — keep a best-effort raw-bytes write,
                     // but map to a real UTI when possible. We do NOT attempt
@@ -5783,6 +5880,59 @@ fn map_content_type_to_uti(content_type: &str) -> String {
         "image" => "public.png".to_string(),
         "text" => "public.utf8-plain-text".to_string(),
         _ => "public.data".to_string(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// File copy-back helpers
+// ---------------------------------------------------------------------------
+
+/// Returns the directory used to stage decrypted files for paste-back.
+///
+/// Path: `<cache_dir>/paste-files`  (e.g. `~/Library/Caches/CopyPaste/paste-files` on macOS).
+///
+/// The directory is created lazily in [`write_file_to_paste_cache`]; callers that
+/// only need the path (e.g. [`prune_old_paste_files`]) do not require it to exist.
+pub(crate) fn paste_file_cache_dir() -> std::path::PathBuf {
+    crate::paths::cache_dir().join("paste-files")
+}
+
+/// Remove files in `dir` whose last-modified time is older than `PASTE_FILE_MAX_AGE_SECS`.
+///
+/// Called on every file copy-back so the staging directory does not grow
+/// unbounded.  We do NOT delete immediately after paste because the receiving
+/// app may read the file URL asynchronously (e.g. Finder copy).
+///
+/// Errors on individual entries are logged at DEBUG level and skipped; the
+/// prune is best-effort and must never block the paste path.
+pub(crate) fn prune_old_paste_files(dir: &std::path::Path) {
+    /// Files older than this are eligible for deletion.
+    const PASTE_FILE_MAX_AGE_SECS: u64 = 10 * 60; // 10 minutes
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return, // nothing to prune
+        Err(e) => {
+            tracing::debug!("paste-files prune: read_dir({dir:?}) failed: {e}");
+            return;
+        }
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let mtime = match entry.metadata().and_then(|m| m.modified()) {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::debug!("paste-files prune: metadata({path:?}) failed: {e}");
+                continue;
+            }
+        };
+        let age = now.duration_since(mtime).unwrap_or_default();
+        if age.as_secs() >= PASTE_FILE_MAX_AGE_SECS {
+            if let Err(e) = std::fs::remove_file(&path) {
+                tracing::debug!("paste-files prune: remove({path:?}) failed: {e}");
+            }
+        }
     }
 }
 
@@ -9499,5 +9649,147 @@ mod tests {
             preview.contains("doc.pdf"),
             "file item preview must include filename; got: {preview}"
         );
+    }
+
+    // --- write_to_pasteboard: file branch ---
+
+    /// `paste_file_cache_dir` must return a path that ends in `paste-files` and
+    /// lives under the platform cache directory (e.g. `~/Library/Caches/CopyPaste/paste-files`
+    /// on macOS). The test is platform-agnostic: it only checks the basename.
+    #[test]
+    fn paste_file_cache_dir_ends_with_paste_files() {
+        let dir = paste_file_cache_dir();
+        assert_eq!(
+            dir.file_name().and_then(|n| n.to_str()),
+            Some("paste-files"),
+            "paste_file_cache_dir must end in 'paste-files'; got: {dir:?}"
+        );
+    }
+
+    /// `prune_old_paste_files` must remove files whose mtime is older than the
+    /// retention window (~10 min) and leave recent files untouched.
+    #[test]
+    fn prune_old_paste_files_removes_stale_and_keeps_recent() {
+        let dir = tempdir().unwrap();
+        let cache = dir.path().to_path_buf();
+
+        // Write a "recent" file (mtime = now).
+        let recent = cache.join("recent.txt");
+        std::fs::write(&recent, b"keep me").unwrap();
+
+        // Write a "stale" file and backdate its mtime by 20 minutes.
+        let stale = cache.join("stale.txt");
+        std::fs::write(&stale, b"delete me").unwrap();
+        let twenty_min_ago = std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(20 * 60))
+            .expect("time subtraction is infallible on any plausible system clock");
+        // std::fs::FileTimes / File::set_times is stable since Rust 1.75 (MSRV = 1.89).
+        // set_modified lives on FileTimes directly (no platform extension trait needed).
+        {
+            let f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&stale)
+                .expect("open stale for set_times");
+            let times = std::fs::FileTimes::new().set_modified(twenty_min_ago);
+            f.set_times(times).expect("set_times on stale file");
+        }
+
+        prune_old_paste_files(&cache);
+
+        assert!(recent.exists(), "recent file must survive prune");
+        assert!(!stale.exists(), "stale (20-min-old) file must be pruned");
+    }
+
+    /// `write_to_pasteboard` must not return the `Unknown content_type` fallthrough
+    /// for a `file` item; instead it must attempt the file-decode path.
+    /// On non-macOS the non-macOS stub always returns `Ok(())` regardless of
+    /// content_type, so we assert `Ok` there.
+    /// On macOS we verify that either:
+    ///   a) a paste temp-file was created under `paste_file_cache_dir()`, OR
+    ///   b) an error was returned (e.g. NSPasteboard not available in headless CI) —
+    ///      the important invariant is that the error is NOT the old "Unknown content_type"
+    ///      fallthrough, which means the file branch was reached.
+    #[tokio::test]
+    async fn write_to_pasteboard_file_branch_is_reached() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("wtp_file.sock");
+
+        // Point COPYPASTE_CACHE_DIR at a temp path so paste-files land there
+        // and don't pollute ~/Library/Caches/CopyPaste during the test.
+        let cache_home = dir.path().join("cache");
+        std::fs::create_dir_all(&cache_home).unwrap();
+        // paste_file_cache_dir() calls crate::paths::cache_dir() which honours
+        // COPYPASTE_CACHE_DIR when set.
+        let _env = EnvGuard::set_all(&["COPYPASTE_CACHE_DIR"], &cache_home);
+
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // Build a real encoded file item with the same all-zero key as the test server.
+        let raw = b"hello paste file";
+        let key = [0u8; 32]; // matches the test server's local_key
+        let file_id = [0xBBu8; 16];
+        let (meta, chunks) =
+            copypaste_core::encode_file(raw, "paste.txt", "text/plain", &key, &file_id, 0)
+                .expect("encode_file must succeed");
+        let blob = copypaste_core::chunks_to_blob(&chunks).expect("chunks_to_blob must succeed");
+        let meta_json = crate::clipboard::build_file_meta_json(&meta);
+        let mut item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
+        // Align item_id with file_id (mirrors get_item_file_round_trips test).
+        item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+        let item_id = item.id.clone();
+        {
+            let db_guard = db.lock().await;
+            copypaste_core::insert_item_with_fts(&db_guard, &item, "")
+                .expect("insert must succeed");
+        }
+
+        // Trigger copy_item over IPC — this calls write_to_pasteboard internally.
+        let mut stream = tokio::net::UnixStream::connect(&sock).await.unwrap();
+        let req = format!(
+            "{{\"id\":\"wtp1\",\"method\":\"copy_item\",\"params\":{{\"id\":\"{item_id}\"}}}}\n"
+        );
+        stream.write_all(req.as_bytes()).await.unwrap();
+        let mut reader = BufReader::new(&mut stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        let resp: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+
+        // On macOS (with a real display/pasteboard) the call succeeds and a
+        // paste-files temp file must exist.
+        // In headless CI (macOS without a window server) the paste may fail, but
+        // must NOT report "Unknown content_type" — that would mean the file branch
+        // was bypassed entirely and we fell through to the old raw-bytes path.
+        #[cfg(target_os = "macos")]
+        {
+            if resp["ok"] == true {
+                // Verify a temp file was written.
+                let paste_dir = cache_home.join("paste-files");
+                let found = std::fs::read_dir(&paste_dir)
+                    .map(|rd| {
+                        rd.flatten()
+                            .any(|e| e.file_name().to_str() == Some("paste.txt"))
+                    })
+                    .unwrap_or(false);
+                assert!(
+                    found,
+                    "write_to_pasteboard file branch must create paste.txt under paste-files; dir: {paste_dir:?}"
+                );
+            } else {
+                // Headless / no pasteboard — acceptable failure, but must not be the unknown-fallthrough.
+                let err = resp["error"].as_str().unwrap_or("");
+                assert!(
+                    !err.contains("Unknown content_type"),
+                    "write_to_pasteboard must NOT fall through to Unknown content_type for file items; error: {err}"
+                );
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            // Non-macOS stub always returns Ok(()).
+            assert_eq!(
+                resp["ok"], true,
+                "write_to_pasteboard non-macOS stub must succeed for file items: {resp}"
+            );
+        }
     }
 }
