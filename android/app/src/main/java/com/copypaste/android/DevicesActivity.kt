@@ -26,6 +26,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -33,6 +34,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.CopyPasteTheme
@@ -127,12 +130,28 @@ fun DevicesScreen(
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
+    val deviceKeyStore = remember { DeviceKeyStore(ctx) }
     val scope = rememberCoroutineScope()
 
     // Refresh the roster every poll interval so the online dots and last-sync
     // labels update as FgsSyncLoop stamps presence.
     var peers by remember { mutableStateOf(settings.pairedPeers) }
     var ownIdentity by remember { mutableStateOf(settings.p2pIdentity) }
+
+    // ── LAN discovery + SAS pairing state ─────────────────────────────────────
+    // P2P must be enabled for discovery (parity with the daemon gating discovery
+    // behind start_p2p). When disabled we neither advertise nor browse.
+    val p2pEnabled = remember { settings.p2pSyncEnabled }
+    // Non-paired, SAS-capable peers discovered on the LAN (refreshed by the poll
+    // effect below). Paired peers are filtered out natively via `paired`.
+    var discovered by remember { mutableStateOf<List<DiscoveredPeer>>(emptyList()) }
+    // The peer a SAS pairing modal is currently open for, or null. Setting it
+    // non-null opens the modal (which begins polling pair_get_sas).
+    var pairingPeer by remember { mutableStateOf<DiscoveredPeer?>(null) }
+    // True while pair_with_discovered is in flight (before the modal opens).
+    var pairStarting by remember { mutableStateOf(false) }
+    // Inline error shown beneath the discovered list (e.g. another pairing busy).
+    var discoverError by remember { mutableStateOf<String?>(null) }
 
     fun refresh() {
         peers = settings.pairedPeers
@@ -143,6 +162,99 @@ fun DevicesScreen(
         while (true) {
             delay(PEER_POLL_MS)
             refresh()
+        }
+    }
+
+    // ── Start/stop mDNS discovery for the lifetime of this screen ─────────────
+    // Begin advertising + browsing when the screen opens (gated on P2P enabled),
+    // and stop on dispose. Uses the persisted device cert (peek, else generate)
+    // and the live inbound listener port; the bootstrap port is the fixed
+    // [SAS_BPORT] this device owns for SAS pairing.
+    DisposableEffect(p2pEnabled) {
+        val job = if (p2pEnabled) {
+            scope.launch {
+                try {
+                    val cert = withContext(Dispatchers.IO) {
+                        deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate()
+                    }
+                    val syncPort = ClipboardService.activeListenerPort.coerceAtLeast(0)
+                    withContext(Dispatchers.IO) {
+                        startDiscovery(
+                            deviceId = cert.deviceId,
+                            deviceName = android.os.Build.MODEL ?: "Android",
+                            syncPort = syncPort,
+                            bport = SAS_BPORT,
+                            certDer = cert.certDer,
+                            keyDer = cert.keyDer,
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "startDiscovery failed: ${e.message}", e)
+                    discoverError = "Could not start network discovery."
+                }
+            }
+        } else {
+            null
+        }
+        onDispose {
+            job?.cancel()
+            if (p2pEnabled) {
+                // Best-effort stop on the caller thread — stopDiscovery tolerates
+                // a stop without a completed start.
+                scope.launch(Dispatchers.IO) { stopDiscovery() }
+            }
+        }
+    }
+
+    // ── Poll the discovered peer list every ~2 s ──────────────────────────────
+    // listDiscovered stamps `paired` by cross-referencing the supplied paired
+    // fingerprints; we additionally drop already-paired entries defensively.
+    LaunchedEffect(p2pEnabled) {
+        if (!p2pEnabled) {
+            discovered = emptyList()
+            return@LaunchedEffect
+        }
+        while (true) {
+            try {
+                val pairedFps = settings.pairedPeers.map { it.fingerprint }
+                val list = withContext(Dispatchers.IO) { listDiscovered(pairedFps) }
+                discovered = list.filterNot { it.paired }
+            } catch (e: Exception) {
+                // Discovery is best-effort — keep the previous snapshot, log only.
+                Log.w(TAG, "listDiscovered failed: ${e.message}")
+            }
+            delay(DISCOVERED_POLL_MS)
+        }
+    }
+
+    // Begin a discovery-initiated SAS pairing as initiator, then open the modal.
+    fun startPairing(peer: DiscoveredPeer) {
+        if (pairStarting || pairingPeer != null) return
+        discoverError = null
+        pairStarting = true
+        scope.launch {
+            try {
+                val cert = withContext(Dispatchers.IO) {
+                    deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate()
+                }
+                withContext(Dispatchers.IO) {
+                    pairWithDiscovered(
+                        deviceId = peer.deviceId,
+                        certDer = cert.certDer,
+                        keyDer = cert.keyDer,
+                        // The peer (a configured Mac) provides provisioning; the
+                        // phone advertises no sync address / carries no config.
+                        syncAddr = "",
+                        localProvisioning = null,
+                    )
+                }
+                pairingPeer = peer
+            } catch (e: Exception) {
+                Log.w(TAG, "pairWithDiscovered failed: ${e.message}", e)
+                discoverError = e.message ?: "Failed to start pairing."
+            } finally {
+                pairStarting = false
+            }
         }
     }
 
@@ -237,6 +349,16 @@ fun DevicesScreen(
         )
     }
 
+    // ── SAS pairing modal (port of macOS SasPairingModal) ─────────────────────
+    pairingPeer?.let { peer ->
+        SasPairingDialog(
+            peer = peer,
+            settings = settings,
+            onClose = { pairingPeer = null },
+            onPaired = { refresh() },
+        )
+    }
+
     Scaffold(
         modifier = modifier,
         containerColor = IdeBg,
@@ -278,6 +400,37 @@ fun DevicesScreen(
             }
 
             Spacer(Modifier.height(8.dp))
+
+            // ── Discovered on your network ───────────────────────────────────
+            // Parity with the macOS DevicesView "Devices on your network" list:
+            // unpaired, SAS-capable LAN peers with a Pair button. Only shown when
+            // P2P is enabled (discovery is gated on it).
+            if (p2pEnabled) {
+                SectionLabel("Discovered on Your Network")
+                if (discovered.isNotEmpty()) {
+                    for (peer in discovered) {
+                        DiscoveredPeerCard(
+                            peer = peer,
+                            busy = pairStarting || pairingPeer != null,
+                            onPair = { startPairing(peer) },
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Searching for nearby devices…",
+                        color = IdeFaint,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                discoverError?.let { msg ->
+                    Text(
+                        text = msg,
+                        color = IdeDanger,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
 
             // ── This device ──────────────────────────────────────────────────
             ownIdentity?.let { identity ->
@@ -440,6 +593,400 @@ private fun OwnDeviceCard(identity: P2pIdentity) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Discovered-peer card (LAN, unpaired)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Short label for a discovered peer: name when set, else a short device id. */
+private fun DiscoveredPeer.displayName(): String =
+    deviceName.ifBlank { "Device ${deviceId.take(8)}" }
+
+/**
+ * One discovered (unpaired) LAN device row with a Pair button. Mirrors the macOS
+ * DiscoveredRow: the Pair button is DISABLED when the peer advertises no
+ * bootstrap port ([DiscoveredPeer.bport] == null) — a v1 peer that cannot do SAS
+ * pairing — or while another pairing is in flight ([busy]).
+ */
+@Composable
+private fun DiscoveredPeerCard(
+    peer: DiscoveredPeer,
+    busy: Boolean,
+    onPair: () -> Unit,
+) {
+    // v1 peers (no bootstrap port) cannot do SAS pairing → disable Pair.
+    val pairable = peer.bport != null
+    val ip = peer.ipAddrs.firstOrNull()
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = IdeElevated),
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = peer.displayName(),
+                    color = IdeText,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Spacer(Modifier.height(4.dp))
+                DeviceField(
+                    label = "Fingerprint",
+                    value = peer.deviceId.take(16),
+                )
+                if (ip != null) {
+                    Spacer(Modifier.height(4.dp))
+                    DeviceField(label = "Local IP", value = ip)
+                }
+            }
+            Button(
+                onClick = onPair,
+                enabled = pairable && !busy,
+            ) {
+                Text("Pair")
+            }
+        }
+        if (!pairable) {
+            Text(
+                text = "This device does not support secure pairing.",
+                color = IdeFaint,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SAS pairing modal (port of macOS DevicesView SasPairingModal)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Modal that drives a discovery-initiated SAS pairing to completion.
+ *
+ * Behaviour mirrors the macOS [SasPairingModal]:
+ *  - polls [pairGetSas] every [SAS_POLL_MS];
+ *  - `initiating` → spinner ("Connecting…");
+ *  - `awaiting_sas` with a code → shows the 6-digit SAS + Match / Doesn't match;
+ *  - `awaiting_sas` without a code → "Waiting for the other device…";
+ *  - `confirmed` → persists the peer (KEK-wrapped session key + fill-missing
+ *    provisioning) and shows success;
+ *  - `rejected` / `aborted` / `timed_out` → error;
+ *  - a TRAILING `idle` observed AFTER an active state is itself terminal
+ *    ("pairing ended"): if the user already accepted locally, treat as success,
+ *    else show a neutral "ended" close state — never loop on idle.
+ *
+ * Closing before a terminal state calls [pairAbort] exactly once; after any
+ * terminal state [pairReset] is called to clear the native state machine.
+ *
+ * SECURITY: the SAS code is shown on screen but NEVER logged; the session-key
+ * bytes are wrapped + zeroized and never logged.
+ */
+@Composable
+private fun SasPairingDialog(
+    peer: DiscoveredPeer,
+    settings: Settings,
+    onClose: () -> Unit,
+    onPaired: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+
+    // Current pairing status; starts optimistically at "initiating".
+    var status by remember { mutableStateOf(PairStatus("initiating", null, null, null, null, null, null)) }
+    // Transient (non-terminal) poll/confirm error.
+    var error by remember { mutableStateOf<String?>(null) }
+    // True while a pairConfirmSas call is in flight (disables the buttons).
+    var confirmPending by remember { mutableStateOf(false) }
+    // Neutral terminal close state — handshake ended on a trailing idle without a
+    // local confirm. Distinct from the wire `aborted` state.
+    var ended by remember { mutableStateOf(false) }
+    // True once a terminal Confirmed has been observed — closing then must NOT
+    // call pairAbort (the pairing already succeeded).
+    val confirmedRef = remember { mutableStateOf(false) }
+    // True once the user locally accepted (clicked Match): disambiguates a
+    // trailing idle (local-accepted + idle ⇒ success).
+    val localAcceptedRef = remember { mutableStateOf(false) }
+
+    val terminal = ended ||
+        status.state == "confirmed" ||
+        status.state == "rejected" ||
+        status.state == "aborted" ||
+        status.state == "timed_out"
+
+    // Persist a confirmed pairing: KEK-wrap the session key, upsert the peer, and
+    // apply peer provisioning fill-missing (copied from PairActivity). Runs on IO.
+    suspend fun persistConfirmed(st: PairStatus) {
+        val fingerprint = st.peerFingerprint ?: return
+        val keyUBytes = st.sessionKey ?: return
+        withContext(Dispatchers.IO) {
+            val rawSessionKey = ByteArray(keyUBytes.size) { keyUBytes[it].toByte() }
+            try {
+                val (wrappedB64, ivB64) = settings.wrapSessionKey(rawSessionKey)
+                settings.upsertPeer(
+                    PairedPeer(
+                        fingerprint = fingerprint,
+                        syncAddr = st.peerSyncAddr ?: "",
+                        name = peer.deviceName,
+                        sessionKeyWrappedB64 = wrappedB64,
+                        sessionKeyIvB64 = ivB64,
+                        lastSyncMs = System.currentTimeMillis(),
+                    )
+                )
+
+                // Apply peer provisioning fill-missing — NEVER overwrite a value
+                // this device already configured (mirror the daemon's rule and the
+                // PairActivity QR block). Never log the derived key bytes.
+                st.peerProvisioning?.let { prov ->
+                    val applied = mutableListOf<String>()
+                    prov.supabaseUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                        if (settings.supabaseUrl.isBlank()) {
+                            settings.supabaseUrl = url
+                            applied += "supabaseUrl"
+                        }
+                    }
+                    prov.supabaseAnonKey?.takeIf { it.isNotBlank() }?.let { anon ->
+                        if (settings.supabaseAnonKey.isBlank()) {
+                            settings.supabaseAnonKey = anon
+                            applied += "supabaseAnonKey"
+                        }
+                    }
+                    prov.relayUrl?.takeIf { it.isNotBlank() }?.let { relay ->
+                        if (settings.relayUrl.isBlank()) {
+                            settings.relayUrl = relay
+                            applied += "relayUrl"
+                        }
+                    }
+                    prov.derivedSyncKey?.takeIf { it.isNotEmpty() }?.let { keyU ->
+                        if (settings.cloudSyncKeyDirect == null) {
+                            val keyBytes = ByteArray(keyU.size) { keyU[it].toByte() }
+                            settings.cloudSyncKeyDirect = keyBytes
+                            applied += "derivedSyncKey"
+                        }
+                    }
+                    if (applied.isNotEmpty()) {
+                        Log.i(TAG, "SAS provisioning applied (fill-missing): ${applied.joinToString(", ")}")
+                    }
+                }
+            } finally {
+                // Zero the raw session key copy once it has been wrapped.
+                rawSessionKey.fill(0)
+            }
+        }
+    }
+
+    // Poll pair_get_sas until a terminal state. The native state machine resets to
+    // idle after a terminal outcome, so a trailing idle (after an active state) is
+    // itself terminal — never re-poll on it.
+    LaunchedEffect(peer.deviceId) {
+        var sawActive = false
+        while (true) {
+            val next = try {
+                withContext(Dispatchers.IO) { pairGetSas() }
+            } catch (e: Exception) {
+                error = e.message ?: "Pairing status unavailable"
+                return@LaunchedEffect
+            }
+
+            when (next.state) {
+                "initiating", "awaiting_sas" -> {
+                    sawActive = true
+                    status = next
+                    delay(SAS_POLL_MS)
+                }
+                "confirmed" -> {
+                    confirmedRef.value = true
+                    status = next
+                    persistConfirmed(next)
+                    onPaired()
+                    pairReset()
+                    return@LaunchedEffect
+                }
+                "rejected", "aborted", "timed_out" -> {
+                    status = next
+                    pairReset()
+                    return@LaunchedEffect
+                }
+                else -> {
+                    // state == "idle"
+                    if (sawActive) {
+                        if (confirmedRef.value || localAcceptedRef.value) {
+                            confirmedRef.value = true
+                            // Persist from the last status we held the keys on.
+                            persistConfirmed(status)
+                            status = PairStatus("confirmed", null, null, status.peerFingerprint, status.peerSyncAddr, null, null)
+                            onPaired()
+                        } else {
+                            ended = true
+                        }
+                        pairReset()
+                        return@LaunchedEffect
+                    }
+                    // Idle before any active state — keep waiting.
+                    status = next
+                    delay(SAS_POLL_MS)
+                }
+            }
+        }
+    }
+
+    // Close: abort the pairing unless it already succeeded (exactly once).
+    fun handleClose() {
+        if (!confirmedRef.value && !terminal) {
+            scope.launch(Dispatchers.IO) { pairAbort() }
+        }
+        onClose()
+    }
+
+    fun handleConfirm(accept: Boolean) {
+        confirmPending = true
+        error = null
+        // Record the local accept up-front so a trailing idle is read as success.
+        if (accept) localAcceptedRef.value = true
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { pairConfirmSas(accept) }
+                if (!accept) {
+                    // User said it doesn't match — abort path already handled by
+                    // the native side; close immediately.
+                    onClose()
+                    return@launch
+                }
+                // On accept keep polling; the next tick reflects confirmed/rejected.
+            } catch (e: Exception) {
+                // The decision never reached the native side — undo the optimistic
+                // accept flag so a later trailing idle isn't misread as success.
+                localAcceptedRef.value = false
+                error = e.message ?: "Failed to send decision"
+            } finally {
+                confirmPending = false
+            }
+        }
+    }
+
+    val title = peer.displayName()
+
+    AlertDialog(
+        onDismissRequest = { handleClose() },
+        title = { Text("Pair “$title”") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                when {
+                    ended -> {
+                        Text(
+                            "Pairing ended — check the other device.",
+                            color = IdeDim,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    status.state == "confirmed" -> {
+                        Text(
+                            "Paired ✓",
+                            color = IdeSuccess,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                    }
+                    status.state == "rejected" || status.state == "aborted" || status.state == "timed_out" -> {
+                        Text(
+                            when (status.state) {
+                                "timed_out" -> "Pairing timed out."
+                                "rejected" -> "Pairing was rejected."
+                                else -> "Pairing was cancelled."
+                            },
+                            color = IdeDanger,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    status.state == "awaiting_sas" && status.sas != null -> {
+                        Text(
+                            "Confirm this code matches the one shown on the other device.",
+                            color = IdeDim,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Text(
+                            text = status.sas ?: "",
+                            color = IdeText,
+                            textAlign = TextAlign.Center,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 32.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp),
+                        )
+                    }
+                    status.state == "awaiting_sas" -> {
+                        // Accepted locally; waiting for the peer to also accept.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                            Text(
+                                "Waiting for the other device…",
+                                color = IdeDim,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                    else -> {
+                        // initiating / idle-before-active → connecting spinner.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(18.dp))
+                            Text(
+                                "Connecting…",
+                                color = IdeDim,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
+                error?.let { msg ->
+                    if (!terminal) {
+                        Text(msg, color = IdeDanger, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            when {
+                terminal -> {
+                    TextButton(onClick = { onClose() }) { Text("Close") }
+                }
+                status.state == "awaiting_sas" && status.sas != null -> {
+                    TextButton(
+                        enabled = !confirmPending,
+                        onClick = { handleConfirm(true) },
+                    ) { Text(if (confirmPending) "…" else "Match") }
+                }
+                else -> {}
+            }
+        },
+        dismissButton = {
+            when {
+                terminal -> {}
+                status.state == "awaiting_sas" && status.sas != null -> {
+                    TextButton(
+                        enabled = !confirmPending,
+                        onClick = { handleConfirm(false) },
+                    ) { Text("Doesn't match", color = IdeDim) }
+                }
+                else -> {
+                    TextButton(onClick = { handleClose() }) { Text("Cancel", color = IdeFaint) }
+                }
+            }
+        },
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -464,3 +1011,16 @@ private const val TAG = "DevicesActivity"
 
 /** Poll cadence for refreshing peer state on the Devices screen. */
 private const val PEER_POLL_MS = 10_000L
+
+/** Poll cadence for refreshing the LAN-discovered peer list (~2 s). */
+private const val DISCOVERED_POLL_MS = 2_000L
+
+/** Poll cadence for the SAS pairing state machine (~500 ms). */
+private const val SAS_POLL_MS = 500L
+
+/**
+ * Fixed bootstrap (SAS-pairing) listener port this device advertises in its mDNS
+ * TXT record so peers can dial back to pair. A non-zero bport marks this device
+ * SAS-pairing-capable (v2); the native discovery service binds/owns this port.
+ */
+private const val SAS_BPORT = 47_654
