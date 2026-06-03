@@ -1302,7 +1302,19 @@ impl IpcServer {
     ///
     /// `pub(crate)` so the LAN/SAS Phase 2 standing responder in `p2p.rs` reuses
     /// the same metadata collection as the QR path.
-    pub(crate) fn collect_own_peer_meta() -> copypaste_p2p::bootstrap::PeerMeta {
+    ///
+    /// `public_ip` is THIS device's STUN-discovered global IP, read by the caller
+    /// from [`Self::cached_public_ip`] (the daemon's single existing STUN source)
+    /// BEFORE entering `spawn_blocking`, then passed in here. It is threaded as an
+    /// argument — rather than read inside this function — because the cache is an
+    /// async `RwLock` and this runs on a blocking thread, and to avoid spinning up
+    /// a second STUN client. `None` when the user opted out
+    /// (`collect_public_ip = false`) or STUN has not yet resolved. Advertised
+    /// in-band (B1) so the peer can show our global IP; informational only —
+    /// never used for auth/trust.
+    pub(crate) fn collect_own_peer_meta(
+        public_ip: Option<String>,
+    ) -> copypaste_p2p::bootstrap::PeerMeta {
         let meta = crate::device_meta::DeviceMeta::collect(BUILD_VERSION);
         copypaste_p2p::bootstrap::PeerMeta {
             model: meta.device_model,
@@ -1313,6 +1325,7 @@ impl IpcServer {
             // channel so the peer can persist it as our display name. Collected
             // from the OS hostname via DeviceMeta.
             device_name: meta.device_name,
+            public_ip,
         }
     }
 
@@ -1407,6 +1420,7 @@ impl IpcServer {
             os_version: peer_meta.os_version.clone(),
             app_version: peer_meta.app_version.clone(),
             local_ip: peer_meta.local_ip.clone(),
+            public_ip: peer_meta.public_ip.clone(),
             first_sync_at: prior_first_sync,
             last_sync_at: prior_last_sync,
         });
@@ -1524,9 +1538,14 @@ impl IpcServer {
         let password = copypaste_core::PairingToken::generate().to_pake_password();
         let (cert_der, key_der) = (cert.0.clone(), cert.1.clone());
         let own_sync_addr = self.own_sync_addr();
-        let own_meta = tokio::task::spawn_blocking(Self::collect_own_peer_meta)
-            .await
-            .unwrap_or_default();
+        // B1: our own STUN-discovered global IP, read from the shared cache and
+        // advertised in-band so the peer can show it. None if STUN unresolved or
+        // collection is disabled. Reuses the daemon's single STUN source.
+        let own_public_ip = self.cached_public_ip.read().await.clone();
+        let own_meta =
+            tokio::task::spawn_blocking(move || Self::collect_own_peer_meta(own_public_ip))
+                .await
+                .unwrap_or_default();
 
         let coordinator = Arc::clone(&self.pairing);
         // The confirm callback runs AFTER frame 9 (PAKE + channel binding), when
@@ -1580,6 +1599,7 @@ impl IpcServer {
                     app_version: outcome.peer_app_version.clone(),
                     local_ip: outcome.peer_local_ip.clone(),
                     device_name: outcome.peer_device_name.clone(),
+                    public_ip: outcome.peer_public_ip.clone(),
                 };
                 Self::persist_paired_peer(
                     &outcome.peer_fingerprint,
@@ -1638,13 +1658,18 @@ impl IpcServer {
         // Our own P2P sync-listener address, sent in-band so the initiator can
         // persist it; and used by nothing else here. Captured before the move.
         let own_sync_addr = self.own_sync_addr();
+        // B1: clone the public-IP cache Arc before the move so the detached task
+        // can read our current STUN-discovered global IP to advertise in-band.
+        let public_ip_cache = self.cached_public_ip.clone();
         tokio::spawn(async move {
             // P2P Phase 4: collect our own device metadata to advertise in-band.
             // DeviceMeta::collect spawns child processes (up to ~2 s), so run it
             // off the async worker. Falls back to empty metadata on join error.
-            let own_meta = tokio::task::spawn_blocking(Self::collect_own_peer_meta)
-                .await
-                .unwrap_or_default();
+            let own_public_ip = public_ip_cache.read().await.clone();
+            let own_meta =
+                tokio::task::spawn_blocking(move || Self::collect_own_peer_meta(own_public_ip))
+                    .await
+                    .unwrap_or_default();
             match responder.run(&password, &own_sync_addr, &own_meta).await {
                 Ok(outcome) => {
                     tracing::info!(
@@ -1672,6 +1697,7 @@ impl IpcServer {
                         app_version: outcome.peer_app_version.clone(),
                         local_ip: outcome.peer_local_ip.clone(),
                         device_name: outcome.peer_device_name.clone(),
+                        public_ip: outcome.peer_public_ip.clone(),
                     };
                     Self::persist_paired_peer(
                         &outcome.peer_fingerprint,
@@ -1741,12 +1767,16 @@ impl IpcServer {
         // Our own P2P sync-listener address, sent in-band so the responder can
         // persist it for its Phase 3 connector.
         let own_sync_addr = self.own_sync_addr();
+        // B1: our own STUN-discovered global IP, advertised in-band so the peer
+        // can show it. None if unresolved/disabled.
+        let own_public_ip = self.cached_public_ip.read().await.clone();
         // P2P Phase 4: collect our own device metadata to advertise in-band.
         // DeviceMeta::collect spawns child processes (up to ~2 s), so run it off
         // the async worker; empty metadata on join error.
-        let own_meta = tokio::task::spawn_blocking(Self::collect_own_peer_meta)
-            .await
-            .unwrap_or_default();
+        let own_meta =
+            tokio::task::spawn_blocking(move || Self::collect_own_peer_meta(own_public_ip))
+                .await
+                .unwrap_or_default();
         match copypaste_p2p::bootstrap::run_initiator(
             addr,
             cert_der,
@@ -1780,6 +1810,7 @@ impl IpcServer {
                     app_version: outcome.peer_app_version.clone(),
                     local_ip: outcome.peer_local_ip.clone(),
                     device_name: outcome.peer_device_name.clone(),
+                    public_ip: outcome.peer_public_ip.clone(),
                 };
                 Self::persist_paired_peer(
                     &outcome.peer_fingerprint,
@@ -8918,6 +8949,30 @@ mod tests {
         );
     }
 
+    /// B1: `collect_own_peer_meta` must copy the caller-supplied own public IP
+    /// (read from the cache before `spawn_blocking`) into the outgoing `PeerMeta`
+    /// so it is advertised in-band to the peer during pairing.
+    #[test]
+    fn collect_own_peer_meta_copies_public_ip_into_meta() {
+        let meta = IpcServer::collect_own_peer_meta(Some("198.51.100.7".to_owned()));
+        assert_eq!(
+            meta.public_ip.as_deref(),
+            Some("198.51.100.7"),
+            "collect_own_peer_meta must put the supplied public_ip into PeerMeta"
+        );
+    }
+
+    /// B1: when no own public IP is available (STUN unresolved or
+    /// `collect_public_ip` disabled), the outgoing `PeerMeta.public_ip` is `None`.
+    #[test]
+    fn collect_own_peer_meta_none_public_ip_yields_none() {
+        let meta = IpcServer::collect_own_peer_meta(None);
+        assert_eq!(
+            meta.public_ip, None,
+            "a None public_ip must not synthesise any value in PeerMeta"
+        );
+    }
+
     /// fix/p2p-c-review #1 — a session older than `PAKE_SESSION_TTL` is evicted
     /// on the next `insert_pake_session`, so the map cannot grow with abandoned
     /// (crashed-client) sessions.
@@ -10226,6 +10281,7 @@ mod tests {
             app_version: Some("0.6.0".to_string()),
             local_ip: Some("192.168.1.42".to_string()),
             device_name: Some("Alice's iPhone".to_string()),
+            public_ip: Some("203.0.113.42".to_string()),
         };
         // A dummy session key (all-zero is fine for this structural test).
         // SessionKey is a newtype tuple-struct: SessionKey([u8; 32]).
@@ -10249,6 +10305,14 @@ mod tests {
             record.name, "Alice's iPhone",
             "name must come from PeerMeta.device_name; got {:?}",
             record.name
+        );
+        // B1: the peer's reported public IP must be persisted on the record so
+        // list_peers can surface it to the Devices UI.
+        assert_eq!(
+            record.public_ip.as_deref(),
+            Some("203.0.113.42"),
+            "public_ip must come from PeerMeta.public_ip; got {:?}",
+            record.public_ip
         );
     }
 

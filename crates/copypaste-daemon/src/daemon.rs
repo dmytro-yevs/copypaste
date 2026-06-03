@@ -497,7 +497,15 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(256);
 
     #[cfg(unix)]
-    let (self_write_change_count_arc, p2p_sync_addr_slot, pairing_coordinator, _ipc_handle) = {
+    let (
+        self_write_change_count_arc,
+        p2p_sync_addr_slot,
+        pairing_coordinator,
+        _ipc_handle,
+        // B1: surfaced out of this block so the P2P subsystem (below) can share
+        // the SAME public-IP cache the IPC server reads and the STUN task writes.
+        public_ip_cache,
+    ) = {
         let mut server = IpcServer::new(
             db.clone(),
             private_mode.clone(),
@@ -601,7 +609,13 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 tracing::error!("IPC server error: {e}");
             }
         });
-        (swcc, sync_addr_slot, pairing_coordinator, handle)
+        (
+            swcc,
+            sync_addr_slot,
+            pairing_coordinator,
+            handle,
+            public_ip_cache,
+        )
     };
 
     // Subscriber loops (p2p outbound_loop, cloud orchestrator, sync_orch) log
@@ -686,6 +700,10 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 // state machine and advertises a routable sync address in-band.
                 std::sync::Arc::clone(&pairing_coordinator),
                 std::sync::Arc::clone(&p2p_sync_addr_slot),
+                // B1: the SAME public-IP cache the IPC server reads and the STUN
+                // refresh task writes, so the standing LAN/SAS responder advertises
+                // our own global IP in-band exactly like the IPC pairing paths.
+                std::sync::Arc::clone(&public_ip_cache),
             )
             .await
             {
