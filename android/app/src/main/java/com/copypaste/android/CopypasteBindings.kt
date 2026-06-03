@@ -25,6 +25,23 @@ import android.util.Log
 
 private const val TAG = "CopypasteBindings"
 
+/**
+ * App-side compiled-in UniFFI ABI version. MUST match the `ABI_VERSION` the
+ * Rust crate compiles in (`crates/copypaste-android` Step C / ABI-9 FFI merge).
+ *
+ * The native side exposes [uniffi.copypaste_android.checkCompatibility] (and
+ * [uniffi.copypaste_android.uniffiAbiVersion]); we hand it THIS constant at
+ * startup ([checkNativeAbiCompatibility]). When the app links a `.so` built for
+ * a different ABI, the native `check_compatibility` raises a
+ * [uniffi.copypaste_android.VersionException] which we surface (and log) rather
+ * than crashing on a later mismatched call signature.
+ *
+ * BUMP this in lock-step with the Rust `ABI_VERSION` every time the FFI surface
+ * changes. Bumped 8 → 9 for the multi-peer roster / config-via-FFI / revoke
+ * audit surface.
+ */
+const val APP_ABI_VERSION: UInt = 9u
+
 /** Mirrors `EncryptedBlob` in copypaste_android.udl — uses ByteArray for callers. */
 data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {
     override fun equals(other: Any?): Boolean {
@@ -456,4 +473,217 @@ fun parsePairing(payload: String): uniffi.copypaste_android.ScannedPairing {
     // bare CPPAIR1.… string. The Rust decoder only understands the bare magic, so
     // strip the wrapper first (no-op on the bare form).
     return uniffi.copypaste_android.parsePairingQr(stripPairingDeepLink(payload))
+}
+
+// ── ABI compatibility gate ────────────────────────────────────────────────────
+
+/**
+ * Hand [APP_ABI_VERSION] to the native `check_compatibility` so a mismatched
+ * `.so` is detected at startup instead of producing a confusing crash on a
+ * later call whose signature shifted between ABIs.
+ *
+ * Returns true when the native side accepts our ABI (or when the .so is absent —
+ * stub mode is always "compatible" because no FFI calls will be made). Returns
+ * false and logs when the native side rejects it; the caller decides how to
+ * degrade (we keep running in best-effort mode rather than hard-crashing).
+ */
+fun checkNativeAbiCompatibility(): Boolean {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "checkNativeAbiCompatibility: native library not loaded — stub mode (no ABI check)")
+        return true
+    }
+    return try {
+        uniffi.copypaste_android.checkCompatibility(APP_ABI_VERSION)
+        Log.i(TAG, "Native ABI compatible (app ABI=$APP_ABI_VERSION, native=${uniffi.copypaste_android.uniffiAbiVersion()})")
+        true
+    } catch (e: uniffi.copypaste_android.VersionException) {
+        Log.e(
+            TAG,
+            "Native ABI MISMATCH: app ABI=$APP_ABI_VERSION rejected by native lib " +
+                "(native reports ${runCatching { uniffi.copypaste_android.uniffiAbiVersion() }.getOrNull()}): ${e.message}",
+            e,
+        )
+        false
+    } catch (e: Exception) {
+        Log.e(TAG, "checkNativeAbiCompatibility: unexpected failure: ${e.message}", e)
+        false
+    }
+}
+
+// ── Config via FFI (defaults + clamp parity with macOS daemon) ─────────────────
+
+/**
+ * Kotlin fallback for [defaultConfig] used when the native `.so` is absent
+ * (JVM unit tests, devices without the Rust core). Mirrors
+ * `copypaste_core::AppConfig::default()` mapped through `default_config()` in
+ * `crates/copypaste-android/src/lib.rs` — keep the literals in sync with
+ * `crates/copypaste-core/src/config/defaults.rs`.
+ */
+private fun fallbackDefaultConfig(): uniffi.copypaste_android.Config =
+    uniffi.copypaste_android.Config(
+        maxTextSizeBytes = 10uL * 1024uL * 1024uL,         // MAX_TEXT_SIZE_BYTES (10 MiB)
+        maxImageSizeBytes = 64uL * 1024uL * 1024uL,        // MAX_IMAGE_SIZE_BYTES (64 MiB)
+        maxFileSizeBytes = 100uL * 1024uL * 1024uL,        // MAX_FILE_SIZE_BYTES (100 MiB)
+        storageQuotaBytes = 10uL * 1024uL * 1024uL * 1024uL, // STORAGE_QUOTA_BYTES (10 GiB)
+        sensitiveTtlSecs = 30uL,                           // SENSITIVE_TTL_SECS
+        pollIntervalMs = 500uL,                            // POLL_INTERVAL_MS
+        soundOnCopy = true,
+        notifyOnCopy = true,
+        maskSensitiveContent = true,                       // DEFAULT_MASK_SENSITIVE_CONTENT
+        syncOnWifiOnly = false,
+        p2pEnabled = false,                                // DEFAULT_P2P_ENABLED
+        imageQuality = 100u,                               // IMAGE_QUALITY
+        imageMaxHeight = 680u,                             // DEFAULT_IMAGE_MAX_HEIGHT
+        collectPublicIp = true,
+        pasteAsPlainText = false,
+    )
+
+/**
+ * The macOS-parity default [uniffi.copypaste_android.Config]. Delegates to the
+ * native `default_config()` (pure, no I/O) so Android seeds the SAME defaults the
+ * daemon uses. Falls back to [fallbackDefaultConfig] when the .so is unavailable.
+ */
+fun defaultConfig(): uniffi.copypaste_android.Config {
+    if (!isNativeLibraryLoaded) return fallbackDefaultConfig()
+    return try {
+        uniffi.copypaste_android.defaultConfig()
+    } catch (e: Exception) {
+        Log.w(TAG, "defaultConfig: native call failed — using Kotlin fallback: ${e.message}")
+        fallbackDefaultConfig()
+    }
+}
+
+/**
+ * Clamp [cfg] into the SAME floors/ceilings the macOS daemon enforces, via the
+ * native pure `clamp_config()`. When the .so is absent the input is returned
+ * unchanged (best-effort tightening, never a safety invariant) so config writes
+ * still succeed in stub mode.
+ */
+fun clampConfig(cfg: uniffi.copypaste_android.Config): uniffi.copypaste_android.Config {
+    if (!isNativeLibraryLoaded) return cfg
+    return try {
+        uniffi.copypaste_android.clampConfig(cfg)
+    } catch (e: Exception) {
+        Log.w(TAG, "clampConfig: native call failed — returning input unchanged: ${e.message}")
+        cfg
+    }
+}
+
+// ── Device-management parity (revoke / audit denylist) ─────────────────────────
+
+/** Plain mirror of [uniffi.copypaste_android.RevokedPeer] for app-side callers. */
+data class RevokedPeerInfo(val fingerprint: String, val name: String, val revokedAtMs: Long)
+
+/**
+ * Record a manual peer revocation in the local `revoked_devices` audit table at
+ * [dbPath] (and remove the matching `devices` row), returning the `revoked_at`
+ * timestamp (ms). Returns 0 in stub mode.
+ *
+ * Throws [CopypasteException.DatabaseError] on a native DB error.
+ */
+@Throws(CopypasteException::class)
+fun revokeDeviceAudit(dbPath: String, key: ByteArray, fingerprint: String, name: String): Long {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "revokeDeviceAudit: stub — native library not loaded")
+        return 0L
+    }
+    return try {
+        uniffi.copypaste_android.revokeDeviceAudit(
+            dbPath = dbPath,
+            key = key.toUByteList(),
+            fingerprint = fingerprint,
+            name = name,
+        ).toLong()
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "revokeDeviceAudit failed")
+    } catch (e: Exception) {
+        throw CopypasteException.DatabaseError(e.message ?: "revokeDeviceAudit failed")
+    }
+}
+
+/**
+ * List the fingerprints of all locally-revoked peers (the denylist). Used by the
+ * background dialer to skip revoked peers and to pass `revokedFingerprints` into
+ * [syncWithPeer]. Returns an empty list in stub mode.
+ *
+ * Throws [CopypasteException.DatabaseError] on a native DB error.
+ */
+@Throws(CopypasteException::class)
+fun listRevokedFingerprints(dbPath: String, key: ByteArray): List<String> {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "listRevokedFingerprints: stub — returns empty")
+        return emptyList()
+    }
+    return try {
+        uniffi.copypaste_android.listRevokedFingerprints(dbPath = dbPath, key = key.toUByteList())
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "listRevokedFingerprints failed")
+    } catch (e: Exception) {
+        throw CopypasteException.DatabaseError(e.message ?: "listRevokedFingerprints failed")
+    }
+}
+
+/**
+ * List the full revoked-device audit rows (fingerprint + name + revoked-at).
+ * Returns an empty list in stub mode.
+ *
+ * Throws [CopypasteException.DatabaseError] on a native DB error.
+ */
+@Throws(CopypasteException::class)
+fun listRevokedPeers(dbPath: String, key: ByteArray): List<RevokedPeerInfo> {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "listRevokedPeers: stub — returns empty")
+        return emptyList()
+    }
+    return try {
+        uniffi.copypaste_android.listRevokedPeers(dbPath = dbPath, key = key.toUByteList())
+            .map { RevokedPeerInfo(it.fingerprint, it.name, it.revokedAt) }
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw CopypasteException.DatabaseError(e.message ?: "listRevokedPeers failed")
+    } catch (e: Exception) {
+        throw CopypasteException.DatabaseError(e.message ?: "listRevokedPeers failed")
+    }
+}
+
+// ── P2P sync (ABI-9 signature) ─────────────────────────────────────────────────
+
+/**
+ * Dial [peerAddr] over mTLS and run one bidirectional P2P sync, delegating to the
+ * generated `uniffi.copypaste_android.syncWithPeer` (ABI 9). Converts the
+ * [sessionKey] ByteArray to the generated `List<UByte>` at the boundary
+ * ([certDer]/[keyDer] are already in the generated `List<UByte>` form, as held by
+ * `uniffi.copypaste_android.DeviceCert`) and threads the new ABI-9 parameters:
+ *  - [revokedFingerprints]: peers the local device has revoked; the native side
+ *    refuses to ingest items from any of them (server-side denylist enforcement).
+ *  - [deviceId]: this device's stable id, stamped onto pushed items.
+ *
+ * [localItems] and the returned [uniffi.copypaste_android.P2pSyncResult] use the
+ * generated UniFFI types directly (callers already depend on them).
+ *
+ * Throws [CopypasteException] / [IllegalStateException] mirroring the native call.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun syncWithPeer(
+    peerAddr: String,
+    peerFingerprint: String,
+    sessionKey: ByteArray,
+    certDer: List<UByte>,
+    keyDer: List<UByte>,
+    localItems: List<uniffi.copypaste_android.LocalItem>,
+    revokedFingerprints: List<String>,
+    deviceId: String,
+): uniffi.copypaste_android.P2pSyncResult {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; syncWithPeer is unavailable")
+    }
+    return uniffi.copypaste_android.syncWithPeer(
+        peerAddr = peerAddr,
+        peerFingerprint = peerFingerprint,
+        sessionKey = sessionKey.toUByteList(),
+        certDer = certDer,
+        keyDer = keyDer,
+        localItems = localItems,
+        revokedFingerprints = revokedFingerprints,
+        deviceId = deviceId,
+    )
 }

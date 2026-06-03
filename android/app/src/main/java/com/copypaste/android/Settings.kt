@@ -240,6 +240,16 @@ class Settings(context: Context) {
             }
         }
 
+    /**
+     * Absolute path to the encrypted SQLCipher database file. Mirrors
+     * [ClipboardService.databasePath] so FFI calls that take a `dbPath`
+     * (revoke/audit, [listRevokedFingerprints]) resolve the same file the rest of
+     * the app uses. Accessed via [appContext] so callers without a Context (e.g.
+     * [FgsSyncLoop]) can obtain it through their [Settings] reference.
+     */
+    val dbPath: String
+        get() = appContext.getDatabasePath("copypaste.db").absolutePath
+
     var showSensitiveWarnings: Boolean
         get() = prefs.getBoolean("show_sensitive_warnings", true)
         set(v) = prefs.edit().putBoolean("show_sensitive_warnings", v).apply()
@@ -329,37 +339,105 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("sync_on_wifi_only", false)
         set(v) = prefs.edit().putBoolean("sync_on_wifi_only", v).apply()
 
-    // ── Storage / size limits ───────────────────────────────────────────────
-    // Defaults match crates/copypaste-core/src/config/defaults.rs.
+    // ── Storage / size limits (config via FFI) ──────────────────────────────
+    // Defaults are SEEDED from the native `defaultConfig()` and every write is
+    // run through the native `clampConfig(...)` so Android uses the SAME
+    // defaults/floors/ceilings the macOS daemon enforces
+    // (crates/copypaste-core/src/config/defaults.rs). [configDefaults] is read
+    // once per process; [clampConfig] tightens each set. In stub mode (.so
+    // absent) both fall back gracefully (see CopypasteBindings).
+
+    /**
+     * Process-wide cached macOS-parity config defaults from the native
+     * `defaultConfig()`. Lazy so the FFI (or its Kotlin fallback) is invoked at
+     * most once per process; the values are immutable defaults.
+     */
+    private val configDefaults: uniffi.copypaste_android.Config
+        get() = cachedConfigDefaults ?: synchronized(configDefaultsLock) {
+            cachedConfigDefaults ?: defaultConfig().also { cachedConfigDefaults = it }
+        }
+
+    /**
+     * Clamp a candidate [Config]-shaped tuple of the size/quota/ttl knobs through
+     * the native `clampConfig(...)`, starting from [configDefaults] and overlaying
+     * only the byte/secs knobs Settings owns. Returns the clamped config so each
+     * setter can persist a daemon-valid value. Pure-ish: reads defaults, no writes.
+     */
+    private fun clampSizeKnobs(
+        maxTextSizeBytes: Long = this.maxTextSizeBytes,
+        maxImageSizeBytes: Long = this.maxImageSizeBytes,
+        maxFileSizeBytes: Long = this.maxFileSizeBytes,
+        storageQuotaBytes: Long = this.storageQuotaBytes,
+        sensitiveTtlSecs: Long = this.sensitiveTtlSecs,
+    ): uniffi.copypaste_android.Config {
+        val candidate = configDefaults.copy(
+            maxTextSizeBytes = maxTextSizeBytes.coerceAtLeast(0L).toULong(),
+            maxImageSizeBytes = maxImageSizeBytes.coerceAtLeast(0L).toULong(),
+            maxFileSizeBytes = maxFileSizeBytes.coerceAtLeast(0L).toULong(),
+            storageQuotaBytes = storageQuotaBytes.coerceAtLeast(0L).toULong(),
+            sensitiveTtlSecs = sensitiveTtlSecs.coerceAtLeast(0L).toULong(),
+        )
+        return clampConfig(candidate)
+    }
 
     /**
      * Maximum size in bytes for a text clipboard item. Items larger than this
-     * are silently dropped at capture time.
-     * Default: 10 MiB (10 485 760 B) — matches MAX_TEXT_SIZE_BYTES in defaults.rs.
+     * are silently dropped at capture time. Default seeded from `defaultConfig()`
+     * (MAX_TEXT_SIZE_BYTES). Writes are clamped via the native `clampConfig`.
      */
     var maxTextSizeBytes: Long
-        get() = prefs.getLong("max_text_size_bytes", 10L * 1024 * 1024)
-        set(v) = prefs.edit().putLong("max_text_size_bytes", v).apply()
+        get() = prefs.getLong("max_text_size_bytes", configDefaults.maxTextSizeBytes.toLong())
+        set(v) = prefs.edit()
+            .putLong("max_text_size_bytes", clampSizeKnobs(maxTextSizeBytes = v).maxTextSizeBytes.toLong())
+            .apply()
 
     /**
      * Maximum size in bytes for an image clipboard item. Images larger than this
-     * are silently dropped at capture time.
-     * Default: 64 MiB (67 108 864 B) — matches MAX_IMAGE_SIZE_BYTES in defaults.rs.
+     * are silently dropped at capture time. Default seeded from `defaultConfig()`
+     * (MAX_IMAGE_SIZE_BYTES). Writes are clamped via the native `clampConfig`.
      */
     var maxImageSizeBytes: Long
-        get() = prefs.getLong("max_image_size_bytes", 64L * 1024 * 1024)
-        set(v) = prefs.edit().putLong("max_image_size_bytes", v).apply()
+        get() = prefs.getLong("max_image_size_bytes", configDefaults.maxImageSizeBytes.toLong())
+        set(v) = prefs.edit()
+            .putLong("max_image_size_bytes", clampSizeKnobs(maxImageSizeBytes = v).maxImageSizeBytes.toLong())
+            .apply()
 
     /**
-     * Total local storage quota for the clipboard database, in bytes.
-     * When the database approaches this limit, the oldest non-sensitive items
-     * should be pruned by the repository.
-     * Default: 10 GiB (10 737 418 240 B) — matches STORAGE_QUOTA_BYTES in defaults.rs.
-     * NOTE: 10 GiB exceeds Int range — the literal and pref MUST be Long.
+     * Maximum size in bytes for a file clipboard item. Default seeded from
+     * `defaultConfig()` (MAX_FILE_SIZE_BYTES — 100 MiB storable cap). Writes are
+     * clamped via the native `clampConfig`. Added in the ABI-9 Config dict.
+     */
+    var maxFileSizeBytes: Long
+        get() = prefs.getLong("max_file_size_bytes", configDefaults.maxFileSizeBytes.toLong())
+        set(v) = prefs.edit()
+            .putLong("max_file_size_bytes", clampSizeKnobs(maxFileSizeBytes = v).maxFileSizeBytes.toLong())
+            .apply()
+
+    /**
+     * Total local storage quota for the clipboard database, in bytes. When the
+     * database approaches this limit the oldest non-sensitive items should be
+     * pruned by the repository — this is the SINGLE source of truth driving
+     * retention (NOT the item-count caps). Default seeded from `defaultConfig()`
+     * (STORAGE_QUOTA_BYTES — 10 GiB). Writes are clamped via `clampConfig`.
+     * NOTE: 10 GiB exceeds Int range — the pref MUST be Long.
      */
     var storageQuotaBytes: Long
-        get() = prefs.getLong("storage_quota_bytes", 10L * 1024 * 1024 * 1024)
-        set(v) = prefs.edit().putLong("storage_quota_bytes", v).apply()
+        get() = prefs.getLong("storage_quota_bytes", configDefaults.storageQuotaBytes.toLong())
+        set(v) = prefs.edit()
+            .putLong("storage_quota_bytes", clampSizeKnobs(storageQuotaBytes = v).storageQuotaBytes.toLong())
+            .apply()
+
+    /**
+     * Time-to-live (seconds) before a sensitive clipboard item is auto-wiped.
+     * Default seeded from `defaultConfig()` (SENSITIVE_TTL_SECS — 30 s). `0` is a
+     * valid "auto-wipe disabled" sentinel and is intentionally NOT clamped up by
+     * the daemon, so it survives `clampConfig`. Added in the ABI-9 Config dict.
+     */
+    var sensitiveTtlSecs: Long
+        get() = prefs.getLong("sensitive_ttl_secs", configDefaults.sensitiveTtlSecs.toLong())
+        set(v) = prefs.edit()
+            .putLong("sensitive_ttl_secs", clampSizeKnobs(sensitiveTtlSecs = v).sensitiveTtlSecs.toLong())
+            .apply()
 
     /**
      * When true, the app operates in private mode: clipboard items are not
@@ -480,65 +558,203 @@ class Settings(context: Context) {
         }
     }
 
-    /**
-     * Pinned fingerprint of the most recently paired P2P peer, or empty when no
-     * device has been paired. Stored after a successful [PairActivity] sync so a
-     * future sync can target the same peer without re-scanning a QR.
-     */
-    var pairedPeerFingerprint: String
-        get() = prefs.getString("paired_peer_fingerprint", "") ?: ""
-        set(v) = prefs.edit().putString("paired_peer_fingerprint", v).apply()
+    // ── Multi-peer roster ───────────────────────────────────────────────────
+    //
+    // A device may now be paired with several peers at once. The roster is a JSON
+    // array persisted under [KEY_PAIRED_PEERS_JSON]; each entry's PAKE session key
+    // stays KEK-wrapped (base64 ciphertext + IV) — raw key bytes are NEVER written
+    // to JSON. Use [pairedPeers] to read, [upsertPeer]/[removePeer] to mutate, and
+    // [sessionKeyFor] to KEK-unwrap a single peer's session key on demand.
+    //
+    // The legacy single-peer scalar getters ([pairedPeerFingerprint],
+    // [pairedPeerSyncAddr], [pairedPeerSessionKey]) are kept as thin shims over
+    // `pairedPeers.firstOrNull()` so existing callers keep working unchanged.
 
     /**
-     * Sync-listener address (host:port) reported by the most recently paired
-     * peer during bootstrap. The macOS daemon now advertises a real LAN-routable
-     * host:port (not loopback), so this is dialable from a real phone on the same
-     * Wi-Fi by [FgsSyncLoop]'s background dialer. It may still be loopback when
-     * the Mac has no LAN interface at all (e.g. emulator-only setups).
+     * The full paired-peer roster, newest-relevant order preserved as stored.
+     * Reads migrate the legacy single-peer fields on first access (see
+     * [migrateLegacyPairedPeer]); a parse failure yields an empty roster rather
+     * than crashing. Per-peer session keys remain KEK-wrapped in the entries.
      */
-    var pairedPeerSyncAddr: String
-        get() = prefs.getString("paired_peer_sync_addr", "") ?: ""
-        set(v) = prefs.edit().putString("paired_peer_sync_addr", v).apply()
-
-    /**
-     * 32-byte PAKE session key derived during the last successful [PairActivity]
-     * bootstrap. Required (alongside [pairedPeerFingerprint] and
-     * [pairedPeerSyncAddr]) for the background P2P dialer to re-establish a sync
-     * session with the paired peer without re-scanning a QR.
-     *
-     * Storage mirrors [encryptionKey]: the raw bytes are wrapped with the
-     * AndroidKeyStore-resident KEK so the secret never sits in SharedPreferences
-     * in cleartext. Reading returns an empty array when unset or unwrappable.
-     *
-     * DO NOT log or include in crash reports.
-     */
-    var pairedPeerSessionKey: ByteArray
+    var pairedPeers: List<PairedPeer>
         get() {
-            val wrappedB64 = prefs.getString(KEY_SESSION_WRAPPED_B64, null) ?: return ByteArray(0)
-            val ivB64 = prefs.getString(KEY_SESSION_IV_B64, null) ?: return ByteArray(0)
-            return runCatching {
-                unwrapKey(
-                    wrapped = Base64.decode(wrappedB64, Base64.DEFAULT),
-                    iv = Base64.decode(ivB64, Base64.DEFAULT),
-                )
-            }.getOrElse { e ->
-                Log.w(TAG, "Failed to unwrap paired-peer session key (${e.javaClass.simpleName})", e)
-                ByteArray(0)
-            }
+            migrateLegacyPairedPeer()
+            val raw = prefs.getString(KEY_PAIRED_PEERS_JSON, null) ?: return emptyList()
+            return parsePairedPeers(raw)
         }
         set(v) {
+            prefs.edit().putString(KEY_PAIRED_PEERS_JSON, serializePairedPeers(v)).apply()
+        }
+
+    /**
+     * Append [peer] to the roster, or replace the existing entry with the same
+     * [PairedPeer.fingerprint]. APPEND semantics: pairing a second device does NOT
+     * discard the first. Order is preserved; a replaced peer keeps its position.
+     */
+    fun upsertPeer(peer: PairedPeer) {
+        val current = pairedPeers
+        val idx = current.indexOfFirst { it.fingerprint == peer.fingerprint }
+        val next = if (idx >= 0) {
+            current.toMutableList().also { it[idx] = peer }
+        } else {
+            current + peer
+        }
+        pairedPeers = next
+    }
+
+    /** Remove the roster entry whose fingerprint matches [fingerprint] (no-op if absent). */
+    fun removePeer(fingerprint: String) {
+        val current = pairedPeers
+        val next = current.filterNot { it.fingerprint == fingerprint }
+        if (next.size != current.size) pairedPeers = next
+    }
+
+    /**
+     * KEK-unwrap and return the 32-byte PAKE session key for the peer with
+     * [fingerprint], or an empty array when the peer is unknown or the wrapped
+     * key can no longer be decrypted (lost KEK). DO NOT log the result.
+     */
+    fun sessionKeyFor(fingerprint: String): ByteArray {
+        val peer = pairedPeers.firstOrNull { it.fingerprint == fingerprint } ?: return ByteArray(0)
+        return unwrapPeerSessionKey(peer)
+    }
+
+    /**
+     * Build the KEK-wrapped (ciphertext-b64, iv-b64) pair for a raw session key so
+     * a caller (e.g. [PairActivity]) can construct a [PairedPeer] without touching
+     * the private KEK. The raw bytes never leave this call wrapped.
+     */
+    fun wrapSessionKey(raw: ByteArray): Pair<String, String> {
+        val (wrapped, iv) = wrapKey(raw)
+        return Base64.encodeToString(wrapped, Base64.NO_WRAP) to
+            Base64.encodeToString(iv, Base64.NO_WRAP)
+    }
+
+    /** Unwrap a single roster entry's KEK-wrapped session key; empty on failure. */
+    private fun unwrapPeerSessionKey(peer: PairedPeer): ByteArray {
+        if (peer.sessionKeyWrappedB64.isBlank() || peer.sessionKeyIvB64.isBlank()) return ByteArray(0)
+        return runCatching {
+            unwrapKey(
+                wrapped = Base64.decode(peer.sessionKeyWrappedB64, Base64.NO_WRAP),
+                iv = Base64.decode(peer.sessionKeyIvB64, Base64.NO_WRAP),
+            )
+        }.getOrElse { e ->
+            Log.w(TAG, "Failed to unwrap session key for peer ${peer.fingerprint.take(8)} (${e.javaClass.simpleName})", e)
+            ByteArray(0)
+        }
+    }
+
+    /**
+     * One-time migration: if the roster JSON is absent but a legacy single-peer
+     * `paired_peer_fingerprint` is non-blank, synthesize a [PairedPeer] from the
+     * legacy scalar fields (carrying the existing KEK-wrapped session key blob
+     * verbatim) and persist it as the roster. Idempotent — runs once because it
+     * writes [KEY_PAIRED_PEERS_JSON], after which the guard short-circuits.
+     */
+    private fun migrateLegacyPairedPeer() {
+        if (prefs.contains(KEY_PAIRED_PEERS_JSON)) return
+        val legacyFp = prefs.getString("paired_peer_fingerprint", "") ?: ""
+        if (legacyFp.isBlank()) return
+        val legacyAddr = prefs.getString("paired_peer_sync_addr", "") ?: ""
+        val wrappedB64 = prefs.getString(KEY_SESSION_WRAPPED_B64, null) ?: ""
+        val ivB64 = prefs.getString(KEY_SESSION_IV_B64, null) ?: ""
+        val migrated = PairedPeer(
+            fingerprint = legacyFp,
+            syncAddr = legacyAddr,
+            name = "",
+            sessionKeyWrappedB64 = wrappedB64,
+            sessionKeyIvB64 = ivB64,
+        )
+        Log.i(TAG, "Migrating legacy single paired peer into multi-peer roster")
+        prefs.edit().putString(KEY_PAIRED_PEERS_JSON, serializePairedPeers(listOf(migrated))).apply()
+    }
+
+    private fun parsePairedPeers(raw: String): List<PairedPeer> = runCatching {
+        val arr = org.json.JSONArray(raw)
+        (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            PairedPeer(
+                fingerprint = o.optString("fingerprint", ""),
+                syncAddr = o.optString("syncAddr", ""),
+                name = o.optString("name", ""),
+                sessionKeyWrappedB64 = o.optString("sessionKeyWrappedB64", ""),
+                sessionKeyIvB64 = o.optString("sessionKeyIvB64", ""),
+                lastSyncMs = o.optLong("lastSyncMs", 0L),
+            )
+        }.filter { it.fingerprint.isNotBlank() }
+    }.getOrElse { e ->
+        Log.w(TAG, "Failed to parse paired_peers_json (${e.javaClass.simpleName}); treating roster as empty", e)
+        emptyList()
+    }
+
+    private fun serializePairedPeers(peers: List<PairedPeer>): String {
+        val arr = org.json.JSONArray()
+        for (p in peers) {
+            val o = org.json.JSONObject()
+                .put("fingerprint", p.fingerprint)
+                .put("syncAddr", p.syncAddr)
+                .put("name", p.name)
+                .put("sessionKeyWrappedB64", p.sessionKeyWrappedB64)
+                .put("sessionKeyIvB64", p.sessionKeyIvB64)
+                .put("lastSyncMs", p.lastSyncMs)
+            arr.put(o)
+        }
+        return arr.toString()
+    }
+
+    // ── Legacy single-peer shims (over pairedPeers.firstOrNull()) ────────────
+    // Retained so existing single-peer callers compile and behave unchanged. The
+    // setters route through the roster (upsert by fingerprint) so writes do not
+    // silently bypass the new storage.
+
+    /**
+     * Fingerprint of the first roster peer (legacy shim), or empty when none.
+     * Setting it upserts/updates that peer's fingerprint in the roster.
+     */
+    var pairedPeerFingerprint: String
+        get() = pairedPeers.firstOrNull()?.fingerprint ?: ""
+        set(v) {
+            val first = pairedPeers.firstOrNull()
+            when {
+                // Blank clears the first peer — mirrors the legacy "forget peer"
+                // flow ([DevicesActivity.unpairPeer]) which set fingerprint = "".
+                v.isBlank() -> first?.let { removePeer(it.fingerprint) }
+                first == null -> upsertPeer(PairedPeer(fingerprint = v, syncAddr = "", name = ""))
+                first.fingerprint != v -> {
+                    // Fingerprint is the roster key; rename = remove old + insert
+                    // new carrying the existing addr/key so the shim is lossless.
+                    removePeer(first.fingerprint)
+                    upsertPeer(first.copy(fingerprint = v))
+                }
+            }
+        }
+
+    /**
+     * Sync-listener address (host:port) of the first roster peer (legacy shim).
+     * Setting it updates that peer's [PairedPeer.syncAddr].
+     */
+    var pairedPeerSyncAddr: String
+        get() = pairedPeers.firstOrNull()?.syncAddr ?: ""
+        set(v) {
+            val first = pairedPeers.firstOrNull() ?: return
+            if (first.syncAddr != v) upsertPeer(first.copy(syncAddr = v))
+        }
+
+    /**
+     * 32-byte PAKE session key of the first roster peer (legacy shim). Reading
+     * KEK-unwraps it; writing KEK-wraps [v] and stores it on that peer. Reading
+     * returns an empty array when unset or unwrappable. DO NOT log.
+     */
+    var pairedPeerSessionKey: ByteArray
+        get() = pairedPeers.firstOrNull()?.let { unwrapPeerSessionKey(it) } ?: ByteArray(0)
+        set(v) {
+            val first = pairedPeers.firstOrNull() ?: return
             if (v.isEmpty()) {
-                prefs.edit()
-                    .remove(KEY_SESSION_WRAPPED_B64)
-                    .remove(KEY_SESSION_IV_B64)
-                    .apply()
+                upsertPeer(first.copy(sessionKeyWrappedB64 = "", sessionKeyIvB64 = ""))
                 return
             }
-            val (wrapped, iv) = wrapKey(v)
-            prefs.edit()
-                .putString(KEY_SESSION_WRAPPED_B64, Base64.encodeToString(wrapped, Base64.DEFAULT))
-                .putString(KEY_SESSION_IV_B64, Base64.encodeToString(iv, Base64.DEFAULT))
-                .apply()
+            val (wrappedB64, ivB64) = wrapSessionKey(v)
+            upsertPeer(first.copy(sessionKeyWrappedB64 = wrappedB64, sessionKeyIvB64 = ivB64))
         }
 
     // ── P2P device identity (mTLS) ──────────────────────────────────────────
@@ -736,6 +952,14 @@ class Settings(context: Context) {
         soundOnCopy: Boolean,
         logcatCaptureEnabled: Boolean,
     ) {
+        // Clamp the size/quota knobs through the SAME native clampConfig the macOS
+        // daemon uses so a force-stop-safe batch write can never persist a
+        // sub-floor/over-ceiling value (mirrors the per-setter clamp above).
+        val clamped = clampSizeKnobs(
+            maxTextSizeBytes = maxTextSizeBytes,
+            maxImageSizeBytes = maxImageSizeBytes,
+            storageQuotaBytes = storageQuotaBytes,
+        )
         prefs.edit()
             .putBoolean("capture_enabled", captureEnabled)
             .putBoolean("private_mode", privateMode)
@@ -746,9 +970,9 @@ class Settings(context: Context) {
             .putInt("image_max_height", imageMaxHeight.coerceIn(1, 200))
             .putLong("preview_delay_ms", previewDelayMs.coerceIn(200L, 100_000L))
             .putInt("image_quality", imageQuality.coerceIn(1, 100))
-            .putLong("max_text_size_bytes", maxTextSizeBytes)
-            .putLong("max_image_size_bytes", maxImageSizeBytes)
-            .putLong("storage_quota_bytes", storageQuotaBytes)
+            .putLong("max_text_size_bytes", clamped.maxTextSizeBytes.toLong())
+            .putLong("max_image_size_bytes", clamped.maxImageSizeBytes.toLong())
+            .putLong("storage_quota_bytes", clamped.storageQuotaBytes.toLong())
             .putBoolean("sync_on_wifi_only", syncOnWifiOnly)
             .putString("sync_backend", syncBackend.name)
             .putBoolean(KEY_P2P_SYNC_ENABLED, p2pSyncEnabled)
@@ -911,6 +1135,16 @@ class Settings(context: Context) {
 
         private val keyCacheLock = Any()
 
+        /**
+         * Process-wide cache of the macOS-parity config defaults from the native
+         * `defaultConfig()` (or its Kotlin fallback). Seeded once; immutable
+         * defaults so a shared cache is safe across [Settings] instances.
+         */
+        @Volatile
+        private var cachedConfigDefaults: uniffi.copypaste_android.Config? = null
+
+        private val configDefaultsLock = Any()
+
         /** Guards the read-or-generate-UUID critical section in [deviceId]. */
         private val deviceIdLock = Any()
 
@@ -941,6 +1175,10 @@ class Settings(context: Context) {
         private const val KEY_LEGACY_PLAIN_KEY_B64 = "encryption_key_b64"
         private const val KEY_SESSION_WRAPPED_B64 = "paired_peer_session_key_wrapped_b64"
         private const val KEY_SESSION_IV_B64 = "paired_peer_session_key_iv_b64"
+
+        /** Multi-peer roster JSON (see [pairedPeers]); presence also gates the
+         *  one-time legacy-single-peer migration. */
+        private const val KEY_PAIRED_PEERS_JSON = "paired_peers_json"
 
         // ── KEK-wrapped cloud secrets (passphrase + Supabase password) ──────────
         // Plaintext pref keys retained for read-time migration only.
@@ -979,6 +1217,29 @@ class Settings(context: Context) {
         private const val LEGACY_CERT_CERT_DER = "cert_der_b64"
         private const val LEGACY_CERT_KEY_DER = "key_der_b64"
     }
+}
+
+/**
+ * One paired peer in the multi-peer roster ([Settings.pairedPeers]).
+ *
+ * The PAKE session key is stored KEK-wrapped: [sessionKeyWrappedB64] is the
+ * base64 AES-GCM ciphertext and [sessionKeyIvB64] its IV. Raw key bytes are
+ * NEVER held in this type or written to the roster JSON — use
+ * [Settings.sessionKeyFor] (or [Settings.wrapSessionKey] to build the wrapped
+ * fields). [fingerprint] is the roster key (peers are upserted/removed by it).
+ */
+data class PairedPeer(
+    val fingerprint: String,
+    val syncAddr: String,
+    val name: String,
+    val sessionKeyWrappedB64: String,
+    val sessionKeyIvB64: String,
+    val lastSyncMs: Long = 0L,
+) {
+    /** Convenience overload for callers that have no wrapped key yet (e.g. the
+     *  legacy-fingerprint shim). Defaults the wrapped fields to empty. */
+    constructor(fingerprint: String, syncAddr: String, name: String) :
+        this(fingerprint, syncAddr, name, "", "", 0L)
 }
 
 /**
