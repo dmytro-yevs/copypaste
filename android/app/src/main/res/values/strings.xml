@@ -306,4 +306,7 @@
     <string name="cd_attach_file">Pick file to send</string>
     <string name="snackbar_file_captured">File added to clipboard — syncing…</string>
     <string name="error_file_pick_failed">Could not capture file</string>
+
+    <!-- Long-press peek preview overlay -->
+    <string name="preview_drag_up_hint">Drag up to expand</string>
 </resources>
