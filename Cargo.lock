@@ -1051,6 +1051,7 @@ name = "copypaste-ui"
 version = "0.6.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "copypaste-ipc",
  "core-foundation 0.10.1",
  "core-graphics",

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
@@ -1088,6 +1089,12 @@ export function HistoryView() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; position: "above" | "below" } | null>(null);
 
+  // D3: OS-level file drag-drop state — true while files are hovering over the window
+  const [fileDragOver, setFileDragOver] = useState(false);
+
+  // Hidden file-input ref for D2 (browser-picker path)
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   // Track current signature to avoid unnecessary re-renders on identical data.
@@ -1654,18 +1661,142 @@ export function HistoryView() {
   }, [load, showToast]);
 
   // -------------------------------------------------------------------------
+  // D2: File picker — read the chosen file via the browser File API and send
+  // to the daemon. No Rust-side file dialog needed; <input type="file"> gives
+  // us the bytes directly so we can base64-encode and call add_file_item.
+  // -------------------------------------------------------------------------
+
+  const handleFileInputChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      if (files.length === 0) return;
+      // Reset the input so the same file can be picked again if needed.
+      e.target.value = "";
+
+      for (const file of files) {
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          await api.addFileItem(bytes, file.name, file.type || "application/octet-stream");
+          showToast(`Added "${file.name}"`, "success");
+        } catch (err) {
+          const msg = err instanceof IpcError ? err.message : String(err);
+          showToast(`Failed to add "${file.name}": ${msg}`, "error");
+        }
+      }
+      void load(true);
+    },
+    [load, showToast]
+  );
+
+  // -------------------------------------------------------------------------
+  // D3: OS file drag-drop — subscribe to Tauri's webview onDragDropEvent.
+  // On 'enter': show drop-zone overlay. On 'drop': ingest each file via
+  // add_file_item. On 'leave'/'cancel': hide overlay.
+  // NOTE: dragDropEnabled must be true in tauri.conf.json (already set).
+  // -------------------------------------------------------------------------
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (cancelled) return;
+        const { type } = event.payload;
+
+        if (type === "enter") {
+          setFileDragOver(true);
+        } else if (type === "leave") {
+          setFileDragOver(false);
+        } else if (type === "drop") {
+          setFileDragOver(false);
+          const paths = "paths" in event.payload ? (event.payload.paths as string[]) : [];
+          if (paths.length === 0) return;
+
+          void (async () => {
+            let added = 0;
+            let failed = 0;
+            for (const p of paths) {
+              try {
+                // Read via fetch with a file:// URL — works inside Tauri webview.
+                const resp = await fetch(`file://${p}`);
+                if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
+                const buf = await resp.arrayBuffer();
+                const bytes = new Uint8Array(buf);
+                const filename = p.split("/").pop() ?? "file";
+                // Infer MIME from the content-type header (best-effort).
+                const mime =
+                  resp.headers.get("content-type")?.split(";")[0]?.trim() ||
+                  "application/octet-stream";
+                await api.addFileItem(bytes, filename, mime);
+                added++;
+              } catch (err) {
+                failed++;
+                const msg = err instanceof Error ? err.message : String(err);
+                showToast(`Drop failed for "${p.split("/").pop()}": ${msg}`, "error");
+              }
+            }
+            if (added > 0) {
+              showToast(
+                `Added ${added} file${added === 1 ? "" : "s"}${failed > 0 ? ` (${failed} failed)` : ""}`,
+                "success"
+              );
+              void load(true);
+            }
+          })();
+        }
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        // Best-effort — drag-drop is a convenience, never block on its failure.
+      });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [load, showToast]);
+
+  // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
 
   const actions = (
-    <input
-      ref={searchRef}
-      type="search"
-      value={search}
-      onChange={(e) => setSearch(e.target.value)}
-      placeholder="Filter…"
-      className="h-7 w-44 rounded-ide px-2 text-[12px]"
-    />
+    <>
+      {/* D2: hidden file input + attach button */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => void handleFileInputChange(e)}
+        aria-label="Add file to clipboard history"
+        tabIndex={-1}
+      />
+      <button
+        type="button"
+        title="Add file to clipboard history"
+        aria-label="Add file"
+        onClick={() => fileInputRef.current?.click()}
+        className="flex h-7 w-7 items-center justify-center rounded-ide border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text"
+      >
+        {/* Paperclip / attach icon */}
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M13.5 7.5 7 14a4.243 4.243 0 0 1-6-6l7-7a2.828 2.828 0 1 1 4 4L5.5 12A1.414 1.414 0 0 1 3.5 10L9 4.5" />
+        </svg>
+      </button>
+      <input
+        ref={searchRef}
+        type="search"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Filter…"
+        className="h-7 w-44 rounded-ide px-2 text-[12px]"
+      />
+    </>
   );
 
   let body: React.ReactNode;
@@ -1870,7 +2001,31 @@ export function HistoryView() {
 
   return (
     <ViewShell title="History" actions={actions}>
-      {body}
+      {/*
+        D3 drop-zone overlay: shown while OS files are hovering over the window.
+        The overlay sits above the content (z-10) and shows a dashed border +
+        label so the user knows dropping is accepted. Pointer-events are none
+        on the inner label so the Tauri drag event fires on the webview, not
+        on a React element.
+      */}
+      <div className="relative h-full">
+        {fileDragOver && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-ide border-2 border-dashed border-ide-accent bg-ide-accent/5"
+          >
+            <div className="flex flex-col items-center gap-2 text-ide-accent">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              <span className="text-[13px] font-medium">Drop to add to clipboard</span>
+            </div>
+          </div>
+        )}
+        {body}
+      </div>
       {toast !== null && <Toast key={toast.id} message={toast.message} kind={toast.kind} />}
       {/* M10: Details modal */}
       {previewEntry !== null && (

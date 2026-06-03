@@ -31,6 +31,9 @@ copypaste-ipc = { path = "../../copypaste-ipc" }
 # QR rendering for device pairing. `svg` feature on; the heavier `image`
 # renderer stays off (we only emit an inline SVG string the frontend displays).
 qrcode = { workspace = true, features = ["svg"] }
+# Base64 encoding for the file-ingest path (drag-drop + file-picker).
+# Pinned to the same major version used by copypaste-daemon.
+base64 = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Translucent (NSVisualEffectView) window background for the JetBrains-style look.
