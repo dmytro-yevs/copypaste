@@ -453,10 +453,19 @@ class FgsSyncLoop(
 
         val localItems = repository.localItemsForSync(key, limit = P2P_LOCAL_ITEM_LIMIT)
 
+        // Snapshot the LAN discovery table ONCE per pass. Used by the per-peer
+        // mDNS IP-correlation fallback below. listDiscovered can throw if the
+        // native side is not yet started; treat that as "no peers discovered".
+        val discovered = runCatching {
+            listDiscovered(peers.map { it.fingerprint })
+        }.getOrElse { e ->
+            Log.d(TAG, "listDiscovered unavailable during dial pass: ${e.message}")
+            emptyList()
+        }
+
         // Iterate every paired peer. Per-peer try/catch so one unreachable or
         // failing peer does not abort dials to the others.
         for (peer in peers) {
-            val peerAddr = peer.syncAddr
             val peerFingerprint = peer.fingerprint
             val sessionKey = settings.sessionKeyFor(peerFingerprint)
 
@@ -464,6 +473,31 @@ class FgsSyncLoop(
             if (peerFingerprint in revoked) {
                 Log.i(TAG, "P2P dial: skipping revoked peer ${peerFingerprint.take(8)}")
                 continue
+            }
+
+            // Resolve the best available dial address. Start with the persisted
+            // syncAddr, then apply a proactive mDNS IP-correlation refresh so we
+            // use the peer's current ephemeral port even on the FIRST dial attempt
+            // after a Mac daemon restart.  This mirrors the Mac-side
+            // `resolve_addr_from_discovery_by_ip` fix.  The mDNS `device_id` is a
+            // per-device UUID — it never equals the cert fingerprint — so we
+            // correlate by the LAN IP instead.
+            val persistedAddr = peer.syncAddr
+            val peerAddr = resolveAddrByIp(persistedAddr, discovered) ?: persistedAddr
+
+            // If mDNS gave us a fresher address, persist it so the next tick starts
+            // from the correct port without re-correlating every time.
+            if (peerAddr != persistedAddr && peerAddr.isNotBlank()) {
+                Log.i(
+                    TAG,
+                    "P2P dial ${peerFingerprint.take(8)}: mDNS pre-refresh " +
+                        "$persistedAddr → $peerAddr — persisting",
+                )
+                runCatching {
+                    settings.upsertPeer(peer.copy(syncAddr = peerAddr))
+                }.onFailure { e ->
+                    Log.w(TAG, "Failed to persist refreshed addr for ${peerFingerprint.take(8)}: ${e.message}")
+                }
             }
 
             if (!P2pDialerGate.shouldDial(peerAddr, peerFingerprint, sessionKey)) continue
@@ -507,8 +541,67 @@ class FgsSyncLoop(
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "P2P dial to peer ${peerFingerprint.take(8)} failed: ${e.message}")
+
+                // mDNS post-failure IP-correlation: on dial failure (most commonly
+                // "Connection refused" from a stale port), consult the discovery
+                // snapshot for a fresher port from the same IP.  Only update when
+                // the discovered address actually differs — avoids a no-op write.
+                val freshAddr = resolveAddrByIp(peerAddr, discovered)
+                if (freshAddr != null && freshAddr != peerAddr) {
+                    Log.i(
+                        TAG,
+                        "P2P dial ${peerFingerprint.take(8)}: mDNS post-failure refresh " +
+                            "$peerAddr → $freshAddr — persisting",
+                    )
+                    runCatching {
+                        settings.upsertPeer(peer.copy(syncAddr = freshAddr))
+                    }.onFailure { e2 ->
+                        Log.w(TAG, "Failed to persist post-failure addr for ${peerFingerprint.take(8)}: ${e2.message}")
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * IP-correlation helper: mirror the Mac's `resolve_addr_from_discovery_by_ip`.
+     *
+     * Given a [currentAddr] in `"host:port"` form, find the [DiscoveredPeer] in
+     * [discovered] whose [DiscoveredPeer.ipAddrs] list contains the same host IP.
+     * If found and the discovered port differs from [currentAddr]'s port, return
+     * `"<host>:<freshPort>"`; otherwise return null (no actionable update).
+     *
+     * Self-heals the stale-port failure mode: both peers bind an EPHEMERAL
+     * sync-listener port that drifts on every daemon/app restart, so the port
+     * persisted at pairing time goes stale.  LAN IP is stable enough to act as
+     * the correlation key.  The mDNS `device_id` is a per-device UUID that never
+     * equals the cert fingerprint, so direct device_id matching is skipped.
+     */
+    private fun resolveAddrByIp(
+        currentAddr: String,
+        discovered: List<DiscoveredPeer>,
+    ): String? {
+        if (currentAddr.isBlank() || discovered.isEmpty()) return null
+
+        // Parse host from "host:port".  Handle plain IPv4 ("1.2.3.4:port") and
+        // bracketed-IPv6 ("[::1]:port") by stripping brackets from the host part.
+        val colonIdx = currentAddr.lastIndexOf(':')
+        if (colonIdx <= 0) return null
+        val host = currentAddr.substring(0, colonIdx).trimStart('[').trimEnd(']')
+        if (host.isBlank()) return null
+
+        // Find the first discovered peer that advertises this IP.
+        val match = discovered.firstOrNull { dp ->
+            dp.ipAddrs.any { it == host }
+        } ?: return null
+
+        val freshPort = match.port.toInt()
+        if (freshPort <= 0) return null
+
+        // Reconstruct "host:port" — keep the original host string (no bracket changes).
+        val hostPart = currentAddr.substring(0, colonIdx)
+        val refreshed = "$hostPart:$freshPort"
+        return if (refreshed != currentAddr) refreshed else null
     }
 
     /**
