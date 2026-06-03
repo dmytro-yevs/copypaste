@@ -76,9 +76,37 @@ pub const REG_LIMIT_MAX_ATTEMPTS: usize = 5;
 /// Hard cap on the rate-limiter map size to bound memory if an attacker rotates device_ids.
 const REG_LIMIT_MAX_KEYS: usize = 10_000;
 
+/// Maximum number of independent auth tokens a single `device_id` may hold at
+/// once (R1a co-registration). A shared-account inbox is co-registered by every
+/// device on the account — each co-registration mints a fresh, independent token
+/// bound to the same `device_id` — so a record now maps to a *set* of valid
+/// tokens, not one. This cap bounds per-device memory: an account churning
+/// re-registrations (key rotation, reinstalls) can't grow the token set without
+/// bound. When a new token would exceed the cap, expired tokens are pruned
+/// first and, if still over, the oldest-issued token is evicted (FIFO).
+const MAX_TOKENS_PER_DEVICE: usize = 16;
+
 // ---------------------------------------------------------------------------
 // Domain types
 // ---------------------------------------------------------------------------
+
+/// One independently-issued bearer credential for a device record.
+///
+/// A `device_id` maps to a *set* of these (R1a co-registration): every device
+/// on a shared account co-registers the same account-inbox `device_id` and is
+/// minted its own `TokenEntry`. All non-expired entries authorize the device_id
+/// equally, so any co-registered device can push to and read/subscribe the one
+/// shared inbox.
+#[derive(Debug, Clone)]
+pub struct TokenEntry {
+    /// Bearer token: 32 hex characters representing 16 random bytes from OsRng.
+    /// Generated at registration time and stored verbatim — never recomputed
+    /// from the public key (which would make it a deterministic oracle).
+    pub token: String,
+    /// Unix timestamp (seconds since epoch) when this token expires (1 year
+    /// after the issuing registration).
+    pub expires_at_unix: i64,
+}
 
 #[derive(Debug)]
 pub struct DeviceRecord {
@@ -86,18 +114,17 @@ pub struct DeviceRecord {
     pub device_name: String,
     #[allow(dead_code)]
     pub public_key_b64: String,
-    /// Bearer token: 32 hex characters representing 16 random bytes from OsRng.
-    /// Generated at registration time and stored verbatim — never recomputed
-    /// from the public key (which would make it a deterministic oracle).
-    pub bearer_token: String,
+    /// The set of currently-issued bearer tokens for this device_id, in
+    /// issuance order (oldest first). A device record maps to *many* tokens to
+    /// support shared-account co-registration (R1a): see [`TokenEntry`] and
+    /// [`DeviceRecord::add_token`]. `verify_token` accepts ANY non-expired entry.
+    pub tokens: Vec<TokenEntry>,
     pub registered_at: Instant,
     /// Last time this device was seen making an authenticated request (push or
     /// pull). Updated by `update_last_seen`. Used by `cleanup_inactive_devices`
     /// instead of `registered_at` so that an active device that has drained its
     /// inbox is not evicted simply because it registered long ago.
     pub last_seen: Instant,
-    /// Unix timestamp (seconds since epoch) when the token expires (1 year).
-    pub expires_at_unix: i64,
     /// Subscription tier — determines device count and history quotas.
     // Read by `push_item` via the per-device tier lookup, but live
     // registration always stores `Tier::Free` today (token-/SQLite-driven tier
@@ -111,6 +138,41 @@ pub struct DeviceRecord {
     /// without a real transport (unit/integration tests); all such devices
     /// share the single `None` scope, matching pre-IP behaviour.
     pub registered_from_ip: Option<IpAddr>,
+}
+
+impl DeviceRecord {
+    /// Append a freshly-issued token, enforcing the per-device token cap.
+    ///
+    /// Pruning order when at/over `MAX_TOKENS_PER_DEVICE`:
+    ///   1. drop every token already expired at `now_unix`;
+    ///   2. if still at the cap, evict the oldest-issued token (front of the Vec) until there is room for the new one.
+    ///
+    /// The new token is then pushed at the back so the Vec stays in issuance
+    /// order (oldest first), which is what the FIFO eviction relies on.
+    fn add_token(&mut self, token: String, expires_at_unix: i64, now_unix: i64) {
+        // 1. Reclaim space from already-expired tokens first.
+        self.tokens.retain(|t| now_unix <= t.expires_at_unix);
+        // 2. Still over the cap (all live)? Evict oldest until there is room
+        //    for one more. `> ` (not `>=`) because we want the post-push len
+        //    to be `<= MAX_TOKENS_PER_DEVICE`.
+        while self.tokens.len() + 1 > MAX_TOKENS_PER_DEVICE {
+            self.tokens.remove(0);
+        }
+        self.tokens.push(TokenEntry {
+            token,
+            expires_at_unix,
+        });
+    }
+
+    /// The latest expiry across all currently-held tokens, or 0 if none.
+    /// Surfaced via `GET /devices/:id` as the device's `expires_at`.
+    pub fn latest_expires_at(&self) -> i64 {
+        self.tokens
+            .iter()
+            .map(|t| t.expires_at_unix)
+            .max()
+            .unwrap_or(0)
+    }
 }
 
 /// A single encrypted item in the wall-clock push/pull sync protocol.
@@ -368,10 +430,11 @@ impl RelayStore {
     /// is placed in the shared `None` scope). Convenience wrapper over
     /// [`Self::register_device_with_tier_scoped`].
     ///
-    /// Returns `(bearer_token, expires_at_unix)` on success.
-    /// Returns `RelayError::DeviceConflict` if the device_id is already registered.
-    /// Returns `RelayError::DeviceQuotaExceeded` if the device count limit for
-    /// `tier` has been reached *within the device's scope*.
+    /// Returns `(bearer_token, expires_at_unix)` on success. A duplicate
+    /// `device_id` co-registers (mints an additional token) rather than
+    /// conflicting — see [`Self::register_device_with_tier_scoped`].
+    /// Returns `RelayError::DeviceQuotaExceeded` if registering a NEW device
+    /// would exceed the device count limit for `tier` *within the device's scope*.
     // Production registration goes through `register_device_scoped` (which
     // supplies the client IP); this unscoped wrapper is retained for the tier
     // unit/integration tests that exercise the quota without a transport.
@@ -386,19 +449,46 @@ impl RelayStore {
         self.register_device_with_tier_scoped(None, device_id, device_name, public_key_b64, tier)
     }
 
-    /// Register a new device with an explicit tier, scoped to `client_ip`.
+    /// Register a device with an explicit tier, scoped to `client_ip`, issuing
+    /// a fresh independent bearer token.
     ///
-    /// The device-count quota (H1) is enforced **per scope** — counting only
-    /// devices that registered from the same `client_ip` — rather than as a
-    /// single global cap across the whole relay. A global cap would reject the
-    /// 6th device across *all* users, breaking normal multi-user operation; a
-    /// per-scope cap bounds one source's footprint while letting independent
-    /// clients each register their own device set.
+    /// **Shared-account co-registration (R1a).** Unlike the original behaviour
+    /// (409 on a duplicate `device_id`), an *already-registered* `device_id` is
+    /// accepted: a new independent token is minted, appended to that device's
+    /// token set (capped at [`MAX_TOKENS_PER_DEVICE`]), and returned. This is
+    /// the mechanism that makes cross-device delivery possible: clients derive
+    /// ONE account-inbox `device_id` (a UUID via HKDF of the shared sync key)
+    /// and every device on the account co-registers THAT id, each getting its
+    /// own token. All of those tokens then authorize push to / read of / SSE
+    /// subscribe to the single shared inbox — so an item pushed by one device
+    /// is delivered to every other device on the account. Echo/dupes are
+    /// prevented client-side (LWW + item_id dedup).
     ///
-    /// Returns `(bearer_token, expires_at_unix)` on success.
-    /// Returns `RelayError::DeviceConflict` if the device_id is already registered.
-    /// Returns `RelayError::DeviceQuotaExceeded` if the device-count limit for
-    /// `tier` has been reached within `client_ip`'s scope.
+    /// SECURITY: the account-inbox `device_id` is a SECRET derived from the
+    /// sync key and is never transmitted in cleartext, so co-registration is
+    /// effectively gated by knowledge of that secret id — only a device that
+    /// already holds the account's sync key can derive the id and co-register.
+    /// The relay stores only opaque ciphertext (`content_b64`); a wrong id
+    /// simply addresses an inbox that doesn't exist (or isn't the account's)
+    /// and yields nothing useful. Tokens remain random (never derived from the
+    /// public key), so holding the id alone does not let an attacker forge a
+    /// token for an existing inbox without going through registration.
+    ///
+    /// The per-scope device-count quota (H1) and the conservative public-key
+    /// proof-of-possession check apply to a genuinely **new** device record;
+    /// co-registration of an existing id reuses the existing record (same
+    /// inbox, same name/key) and is therefore NOT re-charged against the device
+    /// quota — it only mints an additional token. The per-(ip, device)
+    /// registration rate limit in `routes/devices.rs` still bounds co-register
+    /// floods from a single source, and because it is keyed by `(client_ip,
+    /// device_id)` a legitimate co-registration from a *different* device/IP
+    /// for the same account id is not blocked by another device's bucket.
+    ///
+    /// Returns `(bearer_token, expires_at_unix)` — the freshly-minted token and
+    /// its expiry — on success.
+    /// Returns `RelayError::DeviceQuotaExceeded` if registering a NEW device
+    /// would exceed the device-count limit for `tier` within `client_ip`'s
+    /// scope. (No `DeviceConflict` is returned anymore — duplicates co-register.)
     pub fn register_device_with_tier_scoped(
         &mut self,
         client_ip: Option<IpAddr>,
@@ -407,28 +497,13 @@ impl RelayStore {
         public_key_b64: String,
         tier: Tier,
     ) -> Result<(String, i64), RelayError> {
-        if self.devices.contains_key(&device_id) {
-            return Err(RelayError::DeviceConflict);
-        }
-
-        // Enforce device-count quota *within this scope* before inserting.
-        // Count only devices that registered from the same client IP so the
-        // cap is per-scope, not a global ceiling (H1).
-        let scope_count = self
-            .devices
-            .values()
-            .filter(|r| r.registered_from_ip == client_ip)
-            .count();
-        quota::check_device_quota(tier, scope_count).map_err(|v| match v {
-            QuotaViolation::MaxDevicesExceeded { limit } => {
-                RelayError::DeviceQuotaExceeded { limit }
-            }
-            _ => unreachable!(),
-        })?;
+        let is_co_registration = self.devices.contains_key(&device_id);
 
         // Proof-of-possession (security MEDIUM #14):
         // Reject zero-length public_key_b64 and ensure base64 decodes to
-        // exactly 32 bytes (X25519 public-key size).
+        // exactly 32 bytes (X25519 public-key size). Validated on EVERY
+        // registration (including co-registration) so a co-register call with a
+        // malformed key is still rejected — the body validation stays.
         // TODO: v0.2 — require a signature over device_id with the
         // device's private key to fully prove possession of the keypair.
         if public_key_b64.is_empty() {
@@ -444,6 +519,27 @@ impl RelayStore {
                 "public_key_b64 must decode to exactly 32 bytes, got {}",
                 key_bytes.len()
             )));
+        }
+
+        // Enforce the device-count quota *within this scope* only for a NEW
+        // device record. Co-registration reuses an existing record (one inbox),
+        // so it must not be charged against the quota — otherwise the account's
+        // own subsequent devices would be rejected once the cap is reached even
+        // though they all share a single inbox. Count only devices that
+        // registered from the same client IP so the cap is per-scope, not a
+        // global ceiling (H1).
+        if !is_co_registration {
+            let scope_count = self
+                .devices
+                .values()
+                .filter(|r| r.registered_from_ip == client_ip)
+                .count();
+            quota::check_device_quota(tier, scope_count).map_err(|v| match v {
+                QuotaViolation::MaxDevicesExceeded { limit } => {
+                    RelayError::DeviceQuotaExceeded { limit }
+                }
+                _ => unreachable!(),
+            })?;
         }
 
         // Read the wall clock *before* issuing the token. A token whose
@@ -478,22 +574,37 @@ impl RelayStore {
         let bearer_token = hex_encode(&token_bytes);
 
         let now = Instant::now();
-        self.devices.insert(
-            device_id.clone(),
-            DeviceRecord {
-                device_id: device_id.clone(),
-                device_name,
-                public_key_b64,
-                bearer_token: bearer_token.clone(),
-                registered_at: now,
-                last_seen: now,
-                expires_at_unix,
-                tier,
-                registered_from_ip: client_ip,
-            },
-        );
-        // Pre-create an empty inbox so pull can work without a separate device-check.
-        self.sync_items.entry(device_id).or_default();
+        match self.devices.get_mut(&device_id) {
+            // Co-registration: keep the existing record (name, key, registered_at,
+            // inbox) and just add the new independent token to its token set.
+            // Do NOT advance `last_seen` here — that is reserved for actual
+            // authenticated push/pull/subscribe traffic via `update_last_seen`.
+            Some(record) => {
+                record.add_token(bearer_token.clone(), expires_at_unix, now_unix);
+            }
+            // First registration of this id: insert a fresh record.
+            None => {
+                self.devices.insert(
+                    device_id.clone(),
+                    DeviceRecord {
+                        device_id: device_id.clone(),
+                        device_name,
+                        public_key_b64,
+                        tokens: vec![TokenEntry {
+                            token: bearer_token.clone(),
+                            expires_at_unix,
+                        }],
+                        registered_at: now,
+                        last_seen: now,
+                        tier,
+                        registered_from_ip: client_ip,
+                    },
+                );
+                // Pre-create an empty inbox so pull works without a separate
+                // device-check.
+                self.sync_items.entry(device_id).or_default();
+            }
+        }
 
         Ok((bearer_token, expires_at_unix))
     }
@@ -609,17 +720,24 @@ impl RelayStore {
             .devices
             .get(device_id)
             .ok_or(RelayError::Unauthorized)?;
-        let token_ok: bool = record
-            .bearer_token
-            .as_bytes()
-            .ct_eq(token.as_bytes())
-            .into();
-        // Fail closed on clock error: None = unknown time = treat as expired.
-        let not_expired = match now_unix {
-            Some(now) => now <= record.expires_at_unix,
-            None => false,
-        };
-        if token_ok && not_expired {
+        // A device_id maps to a SET of co-registered tokens (R1a): the request
+        // authorizes if ANY currently-valid token matches. We evaluate every
+        // entry (no early break) so the comparison work does not vary with how
+        // many tokens precede the match — the per-entry compare is already
+        // constant-time via `ct_eq`. A token authorizes iff it both matches and
+        // is not expired; the equality check runs unconditionally so the
+        // constant-time path is taken regardless of expiry.
+        let mut authorized = subtle::Choice::from(0u8);
+        for entry in &record.tokens {
+            let matches = entry.token.as_bytes().ct_eq(token.as_bytes());
+            // Fail closed on clock error: None = unknown time = treat as expired.
+            let not_expired = match now_unix {
+                Some(now) => now <= entry.expires_at_unix,
+                None => false,
+            };
+            authorized |= matches & subtle::Choice::from(not_expired as u8);
+        }
+        if authorized.into() {
             Ok(())
         } else {
             Err(RelayError::Unauthorized)
@@ -1110,15 +1228,81 @@ mod tests {
     }
 
     #[test]
-    fn register_duplicate_is_conflict() {
+    fn co_registration_mints_new_token_and_both_are_valid() {
+        // R1a: re-registering an already-registered device_id no longer
+        // conflicts — it co-registers, minting a fresh independent token while
+        // keeping the original valid. BOTH tokens must authorize.
+        let mut store = make_store();
+        let (token1, _) = store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        let (token2, _) = store
+            .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+            .unwrap();
+        assert_ne!(token1, token2, "co-registration must mint a distinct token");
+        assert!(
+            store.verify_token(&device_a_id(), &token1).is_ok(),
+            "the original token must remain valid after co-registration"
+        );
+        assert!(
+            store.verify_token(&device_a_id(), &token2).is_ok(),
+            "the co-registered token must also be valid"
+        );
+        // Still one device record / one inbox — co-registration shares the inbox.
+        assert_eq!(store.devices.len(), 1);
+        assert_eq!(store.devices[&device_a_id()].tokens.len(), 2);
+    }
+
+    #[test]
+    fn token_cap_evicts_oldest() {
+        // Issuing more than MAX_TOKENS_PER_DEVICE tokens for one device_id
+        // evicts the oldest (FIFO): the first-issued token stops authorizing
+        // once the cap is exceeded, while the most recent cap-worth stay valid.
+        let mut store = make_store();
+        let mut tokens = Vec::new();
+        for _ in 0..(MAX_TOKENS_PER_DEVICE + 1) {
+            let (t, _) = store
+                .register_device(device_a_id(), "Device A".into(), valid_key_b64())
+                .unwrap();
+            tokens.push(t);
+        }
+        assert_eq!(
+            store.devices[&device_a_id()].tokens.len(),
+            MAX_TOKENS_PER_DEVICE,
+            "token set must be capped at MAX_TOKENS_PER_DEVICE"
+        );
+        // The very first token was evicted (oldest), the rest still authorize.
+        assert!(
+            store.verify_token(&device_a_id(), &tokens[0]).is_err(),
+            "oldest token must be evicted past the cap"
+        );
+        for t in &tokens[1..] {
+            assert!(
+                store.verify_token(&device_a_id(), t).is_ok(),
+                "the most recent cap-worth of tokens must remain valid"
+            );
+        }
+    }
+
+    #[test]
+    fn expired_token_is_pruned_on_co_registration() {
+        // add_token reclaims space from already-expired tokens before applying
+        // the oldest-eviction cap: an expired token is dropped on the next
+        // co-registration rather than counting toward the cap.
         let mut store = make_store();
         store
             .register_device(device_a_id(), "Device A".into(), valid_key_b64())
             .unwrap();
-        let err = store
+        // Forcibly expire the sole token.
+        store.devices.get_mut(&device_a_id()).unwrap().tokens[0].expires_at_unix = 1;
+        // Co-register: the expired entry is pruned, leaving only the new token.
+        let (fresh, _) = store
             .register_device(device_a_id(), "Device A".into(), valid_key_b64())
-            .unwrap_err();
-        assert!(matches!(err, RelayError::DeviceConflict));
+            .unwrap();
+        let tokens = &store.devices[&device_a_id()].tokens;
+        assert_eq!(tokens.len(), 1, "expired token must be pruned on add");
+        assert_eq!(tokens[0].token, fresh);
+        assert!(store.verify_token(&device_a_id(), &fresh).is_ok());
     }
 
     #[test]
@@ -1150,10 +1334,10 @@ mod tests {
         store
             .register_device(device_a_id(), "Device A".into(), valid_key_b64())
             .unwrap();
-        // Forcibly expire the device's token by rewinding `expires_at_unix`.
+        // Forcibly expire the device's sole token by rewinding `expires_at_unix`.
         let record = store.devices.get_mut(&device_a_id()).unwrap();
-        let token = record.bearer_token.clone();
-        record.expires_at_unix = 1; // 1970-01-01
+        let token = record.tokens[0].token.clone();
+        record.tokens[0].expires_at_unix = 1; // 1970-01-01
         let err = store.verify_token(&device_a_id(), &token).unwrap_err();
         assert!(matches!(err, RelayError::Unauthorized));
     }
@@ -1168,7 +1352,7 @@ mod tests {
         assert_eq!(record.device_id, device_a_id());
         assert_eq!(record.device_name, "My Mac");
         assert_eq!(record.public_key_b64, valid_key_b64());
-        assert!(record.expires_at_unix > 0);
+        assert!(record.latest_expires_at() > 0);
     }
 
     #[test]

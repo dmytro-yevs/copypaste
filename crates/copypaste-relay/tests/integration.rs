@@ -190,11 +190,73 @@ async fn test_register_device_success() {
 }
 
 #[tokio::test]
-async fn test_register_duplicate_is_409() {
+async fn test_co_registration_returns_201_and_new_token() {
+    // R1a shared-account co-registration: re-registering an already-registered
+    // device_id no longer returns 409 — it returns 201 with a fresh, distinct
+    // auth_token, and BOTH tokens authorize pull on the shared inbox.
     let (app, _state) = make_app();
-    let (_, _, app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
-    let (status, _body, _) = register_device(app, DEVICE_A, &valid_pub_key()).await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    let (status1, body1, app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
+    assert_eq!(status1, StatusCode::CREATED);
+    let (status2, body2, app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
+    assert_eq!(
+        status2,
+        StatusCode::CREATED,
+        "co-registration of a known device_id must succeed (201), not 409"
+    );
+    let token1 = body1["auth_token"].as_str().unwrap().to_string();
+    let token2 = body2["auth_token"].as_str().unwrap().to_string();
+    assert_ne!(token1, token2, "co-registration must mint a distinct token");
+    assert_eq!(body2["device_id"], DEVICE_A);
+
+    // Both tokens authorize a pull against the shared inbox.
+    let (s1, _) = get_json(
+        app.clone(),
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&token1),
+    )
+    .await;
+    assert_eq!(s1, StatusCode::OK, "original token must authorize pull");
+    let (s2, _) = get_json(
+        app.clone(),
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&token2),
+    )
+    .await;
+    assert_eq!(
+        s2,
+        StatusCode::OK,
+        "co-registered token must authorize pull"
+    );
+}
+
+#[tokio::test]
+async fn test_co_registered_tokens_share_one_inbox() {
+    // The core cross-device-delivery property (R1a): an item PUSHED with one
+    // co-registered token is READABLE via a different co-registered token from
+    // the same shared inbox. This is what lets one device's item reach another.
+    let (app, _state) = make_app();
+    let (_, body1, app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
+    let (_, body2, app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
+    let token1 = body1["auth_token"].as_str().unwrap().to_string();
+    let token2 = body2["auth_token"].as_str().unwrap().to_string();
+
+    // Push with token1.
+    let (push_status, _) = post_json(
+        app.clone(),
+        &format!("/devices/{DEVICE_A}/items"),
+        Some(&token1),
+        json!({ "content_type": "text", "content_b64": "aGVsbG8=", "wall_time": 1000u64 }),
+    )
+    .await;
+    assert_eq!(push_status, StatusCode::CREATED);
+
+    // Read with token2 — the item is visible on the shared inbox.
+    let (pull_status, pull_body) =
+        get_json(app, &format!("/devices/{DEVICE_A}/items"), Some(&token2)).await;
+    assert_eq!(pull_status, StatusCode::OK);
+    let items = pull_body.as_array().expect("pull returns a JSON array");
+    assert_eq!(items.len(), 1, "token2 must see the item token1 pushed");
+    assert_eq!(items[0]["content_b64"], "aGVsbG8=");
 }
 
 #[tokio::test]
