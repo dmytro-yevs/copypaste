@@ -958,6 +958,8 @@ mod tests {
             app_bundle_id: None,
             origin_device_id: "test-device".to_string(),
             key_version: 2,
+            file_name: None,
+            mime: None,
         }
     }
 

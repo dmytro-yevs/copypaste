@@ -48,6 +48,19 @@ pub struct WireItem {
     pub app_bundle_id: Option<String>,
     /// UUID of the device that originated this item.
     pub origin_device_id: String,
+    /// Original filename for `content_type = "file"` items (e.g. `"report.pdf"`).
+    ///
+    /// Populated by the sender so the receiver can reconstruct the local file
+    /// meta JSON with the correct name instead of falling back to `"file"`.
+    /// `#[serde(default)]` keeps the wire format backward-compatible: a peer on
+    /// an older build that omits this field deserializes as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+    /// MIME type for `content_type = "file"` items (e.g. `"application/pdf"`).
+    ///
+    /// Paired with [`file_name`]; same backward-compat contract.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mime: Option<String>,
     /// HKDF key generation the `content` ciphertext + AAD were produced under
     /// (mirrors `ClipboardItem::key_version`). The sender stamps the row's real
     /// `key_version` (2 for every freshly-captured item); the receiver MUST
@@ -223,6 +236,8 @@ mod tests {
             app_bundle_id: None,
             origin_device_id: "device-a".to_string(),
             key_version: 2,
+            file_name: None,
+            mime: None,
         };
         let msg = Message::Items { items: vec![item] };
         assert_eq!(round_trip(msg.clone()), msg);
@@ -246,5 +261,58 @@ mod tests {
     fn empty_want_round_trips() {
         let msg = Message::Want { item_ids: vec![] };
         assert_eq!(round_trip(msg.clone()), msg);
+    }
+
+    /// file_name and mime survive a JSON encode/decode round-trip.
+    #[test]
+    fn file_wire_item_carries_filename_and_mime() {
+        let item = WireItem {
+            id: "f-001".to_string(),
+            item_id: "f-iid-001".to_string(),
+            content_type: "file".to_string(),
+            content: Some(vec![0xDE, 0xAD]),
+            content_nonce: None, // sync-key-wrapped: no nonce
+            blob_ref: None,
+            is_sensitive: false,
+            lamport_ts: 42,
+            wall_time: 1_700_000_000_000,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "device-b".to_string(),
+            key_version: 2,
+            file_name: Some("report.pdf".to_string()),
+            mime: Some("application/pdf".to_string()),
+        };
+        let msg = Message::Items { items: vec![item] };
+        let decoded = round_trip(msg.clone());
+        assert_eq!(
+            decoded, msg,
+            "file_name and mime must survive wire round-trip"
+        );
+    }
+
+    /// Old peers (no file_name/mime fields) can still be deserialized —
+    /// the missing fields default to None.
+    #[test]
+    fn legacy_wire_item_missing_file_fields_defaults_to_none() {
+        // JSON without file_name / mime — as a pre-21b peer would send.
+        let json = r#"{"type":"ITEMS","items":[{
+            "id":"f-002","item_id":"f-iid-002","content_type":"file",
+            "content":null,"content_nonce":null,"blob_ref":null,
+            "is_sensitive":false,"lamport_ts":1,"wall_time":1000,
+            "expires_at":null,"app_bundle_id":null,
+            "origin_device_id":"old-peer","key_version":2
+        }]}"#;
+        let msg: Message = serde_json::from_str(json).expect("must deserialize legacy JSON");
+        if let Message::Items { items } = msg {
+            let item = &items[0];
+            assert!(
+                item.file_name.is_none(),
+                "absent file_name must default to None"
+            );
+            assert!(item.mime.is_none(), "absent mime must default to None");
+        } else {
+            panic!("expected Message::Items");
+        }
     }
 }

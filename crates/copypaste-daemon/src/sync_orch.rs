@@ -653,9 +653,21 @@ fn rekey_blob_outbound(crypto: &SyncCrypto, wire: &mut WireItem) -> RekeyOutcome
         Ok(blob) => {
             wire.content = Some(blob);
             // Self-framed blob → no item-level nonce; `None` is the receiver's
-            // sync-key-wrapped marker. blob_ref is rebuilt on the receiver from
-            // the recovered plaintext, so it must not travel on the wire.
+            // sync-key-wrapped marker.
             wire.content_nonce = None;
+            // For file items: stash filename + mime into the dedicated wire
+            // fields BEFORE clearing blob_ref, so the receiver can reconstruct
+            // the local file meta JSON with the correct identity. blob_ref
+            // itself must not travel (it is a local at-rest artefact; the
+            // receiver rebuilds it from recovered plaintext + these fields).
+            if wire.content_type == "file" {
+                if let Some((fname, fmime)) =
+                    wire.blob_ref.as_deref().and_then(parse_file_name_mime)
+                {
+                    wire.file_name = Some(fname);
+                    wire.mime = Some(fmime);
+                }
+            }
             wire.blob_ref = None;
             RekeyOutcome::Rewrapped
         }
@@ -869,13 +881,23 @@ fn rewrap_inbound_blob(
             }
         }
     } else {
-        // File: re-chunk verbatim. Carry over filename/mime from the sender's
-        // meta if present; otherwise fall back to neutral defaults.
-        let (filename, mime) = wire
-            .blob_ref
-            .as_deref()
-            .and_then(parse_file_name_mime)
-            .unwrap_or_else(|| ("file".to_string(), "application/octet-stream".to_string()));
+        // File: re-chunk verbatim. Prefer the dedicated wire fields
+        // (file_name / mime) stamped by `rekey_blob_outbound`; fall back to
+        // parsing blob_ref (pre-21b peers or direct non-rekey paths) and
+        // finally to neutral defaults when neither is available.
+        let (filename, mime) = if wire.file_name.is_some() || wire.mime.is_some() {
+            (
+                wire.file_name.clone().unwrap_or_else(|| "file".to_string()),
+                wire.mime
+                    .clone()
+                    .unwrap_or_else(|| "application/octet-stream".to_string()),
+            )
+        } else {
+            wire.blob_ref
+                .as_deref()
+                .and_then(parse_file_name_mime)
+                .unwrap_or_else(|| ("file".to_string(), "application/octet-stream".to_string()))
+        };
         match copypaste_core::encode_file(
             &plaintext,
             &filename,
@@ -949,6 +971,8 @@ mod tests {
             app_bundle_id: None,
             origin_device_id: "remote-device".to_string(),
             key_version: 2,
+            file_name: None,
+            mime: None,
         }
     }
 
@@ -1001,6 +1025,8 @@ mod tests {
             app_bundle_id: None,
             origin_device_id: "device-A".to_string(),
             key_version: 2,
+            file_name: None,
+            mime: None,
         };
 
         // A's peers.json holds the shared key (peer = B).
@@ -1119,6 +1145,8 @@ mod tests {
             app_bundle_id: None,
             origin_device_id: "device-A".to_string(),
             key_version: 1,
+            file_name: None,
+            mime: None,
         };
 
         let dir_a = tempdir().unwrap();
@@ -1214,6 +1242,8 @@ mod tests {
             app_bundle_id: None,
             origin_device_id: "device-A".to_string(),
             key_version: 1,
+            file_name: None,
+            mime: None,
         };
 
         let dir_a = tempdir().unwrap();
@@ -1232,8 +1262,22 @@ mod tests {
             RekeyOutcome::Rewrapped
         );
         assert!(wire.content_nonce.is_none());
-        assert!(wire.blob_ref.is_none());
+        assert!(
+            wire.blob_ref.is_none(),
+            "blob_ref must be cleared on the wire"
+        );
         assert_eq!(wire.content_type, "file");
+        // #21b: filename + mime must be stamped on the wire before blob_ref is cleared.
+        assert_eq!(
+            wire.file_name.as_deref(),
+            Some("notes.bin"),
+            "rekey_blob_outbound must stamp file_name onto the wire"
+        );
+        assert_eq!(
+            wire.mime.as_deref(),
+            Some("application/octet-stream"),
+            "rekey_blob_outbound must stamp mime onto the wire"
+        );
 
         let dir_b = tempdir().unwrap();
         let peers_b = dir_b.path().join("peers.json");
@@ -1252,6 +1296,18 @@ mod tests {
         assert_eq!(stored.item_id, item_id, "item_id converges");
 
         let meta_b = stored.blob_ref.expect("B meta json");
+        // #21b: verify that filename + mime survive the full rekey round-trip
+        // (outbound stamps wire fields; inbound reads them to rebuild file meta).
+        let (recovered_name, recovered_mime) =
+            parse_file_name_mime(&meta_b).expect("B meta must carry filename+mime");
+        assert_eq!(
+            recovered_name, "notes.bin",
+            "filename must survive outbound→wire→inbound"
+        );
+        assert_eq!(
+            recovered_mime, "application/octet-stream",
+            "mime must survive outbound→wire→inbound"
+        );
         let file_id_b = crate::ipc::parse_image_file_id(&meta_b).expect("parse B file_id");
         assert_eq!(file_id_b, file_id_a);
         let b_chunks =

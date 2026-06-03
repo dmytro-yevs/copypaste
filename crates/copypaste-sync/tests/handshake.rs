@@ -97,6 +97,8 @@ fn wire_from_local(item: &ClipboardItem, origin: &str) -> WireItem {
         app_bundle_id: item.app_bundle_id.clone(),
         origin_device_id: origin.to_string(),
         key_version: item.key_version,
+        file_name: None,
+        mime: None,
     }
 }
 

@@ -41,7 +41,14 @@
 /// merge/dedup/LWW on it instead of treating each re-sync as a new item. This
 /// changes both records' serialized FFI layout, so Kotlin generated against
 /// ABI 5 reads them with the wrong shape and must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 6;
+///
+/// **ABI 7 (file identity on the wire — task #21b):** `SyncedItem` gained two
+/// optional fields: `file_name: String?` and `mime: String?`. These are
+/// populated for `content_type == "file"` items so the receiver knows the
+/// original filename and MIME type without having to parse the at-rest
+/// `blob_ref` meta JSON. Kotlin generated against ABI 6 reads `SyncedItem`
+/// with the wrong shape (missing two fields) and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 7;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

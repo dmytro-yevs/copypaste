@@ -562,6 +562,10 @@ pub struct LocalItem {
 /// `item_id` is the peer's STABLE cross-device identity for this clip. Kotlin
 /// MUST persist it on the stored row and reuse it on any later re-sync so the
 /// same logical item is never re-minted (which would resurface as a duplicate).
+///
+/// `file_name` and `mime` are populated for `content_type == "file"` items only
+/// (sourced from the new `WireItem::file_name` / `WireItem::mime` fields added in
+/// task #21b). Both are `None` for text/image items.
 #[derive(Debug)]
 pub struct SyncedItem {
     pub id: String,
@@ -569,6 +573,10 @@ pub struct SyncedItem {
     pub content_type: String,
     pub plaintext: Vec<u8>,
     pub wall_time_ms: i64,
+    /// Original filename for file items (e.g. `"report.pdf"`). `None` for non-file types.
+    pub file_name: Option<String>,
+    /// MIME type for file items (e.g. `"application/pdf"`). `None` for non-file types.
+    pub mime: Option<String>,
 }
 
 /// Outcome of one completed P2P sync session.
@@ -723,6 +731,10 @@ pub fn sync_with_peer(
                 // Sync-key-wrapped blobs are version-independent on the wire;
                 // the daemon stamps the same default for re-keyed items.
                 key_version: P2P_WIRE_KEY_VERSION,
+                // Android send path does not carry file items today; these are
+                // always None on the outbound side until file-send is added.
+                file_name: None,
+                mime: None,
             });
         }
 
@@ -853,11 +865,6 @@ pub fn sync_with_peer(
                 continue;
             };
             match decrypt_from_cloud(&shared, &wire.item_id, blob) {
-                // TODO(v0.6 P3): `SyncedItem` has no `blob_ref` field, so the
-                // file's original name/mime (carried in the daemon's at-rest
-                // `blob_ref` meta) is not surfaced to Kotlin yet. File display
-                // is a follow-up (Android has no file UI); add a `blob_ref`
-                // field here when that lands so the filename can be shown.
                 Ok(plaintext) => items.push(SyncedItem {
                     id: wire.id.clone(),
                     // Carry the peer's STABLE item_id through so Kotlin can
@@ -866,6 +873,11 @@ pub fn sync_with_peer(
                     content_type: wire.content_type.clone(),
                     plaintext,
                     wall_time_ms: wire.wall_time,
+                    // Carry filename + mime for file items (populated by the
+                    // macOS sender's `rekey_blob_outbound` via #21b wire fields).
+                    // Both are None for text/image items — that is correct.
+                    file_name: wire.file_name.clone(),
+                    mime: wire.mime.clone(),
                 }),
                 Err(_) => continue,
             }
@@ -1695,6 +1707,8 @@ mod tests {
             app_bundle_id: None,
             origin_device_id: "loopback-peer".to_string(),
             key_version: 2,
+            file_name: None,
+            mime: None,
         };
 
         // Peer runs on its OWN runtime in a background OS thread so the main test
@@ -1854,6 +1868,8 @@ mod tests {
             app_bundle_id: None,
             origin_device_id: "loopback-peer".to_string(),
             key_version: 2,
+            file_name: None,
+            mime: None,
         };
 
         let (port_tx, port_rx) = mpsc::channel::<u16>();
@@ -2078,6 +2094,8 @@ mod tests {
             app_bundle_id: None,
             origin_device_id: "legacy-peer".to_string(),
             key_version: 1,
+            file_name: None,
+            mime: None,
         };
 
         let (port_tx, port_rx) = mpsc::channel::<u16>();
