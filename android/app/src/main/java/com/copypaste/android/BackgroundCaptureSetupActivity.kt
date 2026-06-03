@@ -96,7 +96,7 @@ import com.copypaste.android.ui.theme.IdeWarning
  *      alpha  = 0f (invisible)
  *  - `WindowManager.removeView(overlayView)` in ClipboardService.onDestroy().
  * Deferred because: (a) ClipboardService.kt is owned by another task, and (b)
- * the primary background path (ClipboardAccessibilityService) already functions.
+ * the primary background path (LogcatCaptureService + ClipboardFloatingActivity) already functions.
  * Once the service-side overlay hook is wired, this UI needs no changes.
  */
 class BackgroundCaptureSetupActivity : ComponentActivity() {

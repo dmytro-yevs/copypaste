@@ -1268,7 +1268,7 @@ class ClipboardRepository(context: Context) {
         // from the history list.  The capture listeners see an image/file MIME
         // clip whose URI is our own FileProvider URI — we must not re-store it.
         // 5-second window (same as text); does NOT clear on first match so that
-        // concurrent ClipboardService + ClipboardAccessibilityService callbacks
+        // concurrent ClipboardService + LogcatCaptureService callbacks
         // for the same user tap are both suppressed.
         @Volatile private var expectedImageUri: String = ""
         @Volatile private var expectedImageUriAtMs: Long = 0L

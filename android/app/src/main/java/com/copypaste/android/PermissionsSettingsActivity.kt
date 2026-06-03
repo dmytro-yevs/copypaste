@@ -275,7 +275,6 @@ fun PermissionsScreen(
             BgCaptureStatusCard(
                 readLogsGranted = readLogsGranted,
                 overlayGranted = overlayGranted,
-                ctx = ctx,
             )
 
             // 3. Battery Optimization exemption
@@ -342,7 +341,6 @@ fun PermissionsScreen(
 private fun BgCaptureStatusCard(
     readLogsGranted: Boolean,
     overlayGranted: Boolean,
-    ctx: android.content.Context,
 ) {
     val borderColor = if (readLogsGranted && overlayGranted) IdeSuccess else IdeBorder
     CopyPasteCard(accent = borderColor) {
