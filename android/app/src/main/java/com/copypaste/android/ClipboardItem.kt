@@ -56,6 +56,18 @@ data class ClipboardItem(
      * badge in the history row. Defaults to false for back-compat.
      */
     val tooLargeToSync: Boolean = false,
+    /**
+     * Stable device id (UUID) of the device that originally captured this clipboard item.
+     * Null for legacy items that pre-date origin tracking, and for items captured
+     * locally before the first sync key was established.
+     *
+     * Stored as pipe-delimited field 6 (index 6) in the blob:
+     * <wallTimeMs>|<contentType>|<plaintextLen>|<nonceB64>|<ctB64>|<lamportTs>|<originDeviceId>
+     *
+     * Drives per-row device attribution badges and device-filter UI
+     * (parity with macOS HistoryView DeviceBadge / device filter).
+     */
+    val originDeviceId: String? = null,
 ) {
     /** True when this item carries an image payload that can be rendered as a thumbnail. */
     val isImage: Boolean get() = contentTypeIsImage(contentType)
@@ -66,9 +78,10 @@ data class ClipboardItem(
     /** True when this item carries a plain-text payload (includes "url"). */
     val isText: Boolean get() = contentTypeIsText(contentType)
 
-    // No custom equals/hashCode: all fields are val primitives, String, Boolean, or Int
-    // (stable Kotlin value types) so data-class structural equality is correct and the
-    // Compose compiler can trust @Immutable for per-row skip decisions.
+    // No custom equals/hashCode: imagePng was removed, so all fields are val
+    // primitives, String, Boolean, Int, or nullable String (stable Kotlin value
+    // types incl. originDeviceId) — data-class structural equality is correct and
+    // the Compose compiler can trust @Immutable for per-row skip decisions.
 }
 
 /**

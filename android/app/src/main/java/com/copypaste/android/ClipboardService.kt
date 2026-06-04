@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -169,9 +170,22 @@ class ClipboardService : Service() {
 
         // P1.2/P1.4: Supabase Realtime WS client — constructed here so it can be
         // passed to FgsSyncLoop as the wsConnected gate.
-        realtimeClient = SupabaseRealtimeClient(settings, syncManager, repository, scope)
+        realtimeClient = SupabaseRealtimeClient(
+            settings = settings,
+            syncManager = syncManager,
+            repository = repository,
+            scope = scope,
+            onSyncedTextClip = { text -> applyTextToClipboard(text) },
+        )
         deviceKeyStore = DeviceKeyStore(this)
-        fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager, deviceKeyStore, realtimeClient, applicationContext)
+        fgsSyncLoop = FgsSyncLoop(
+            settings = settings,
+            repository = repository,
+            syncManager = syncManager,
+            deviceKeyStore = deviceKeyStore,
+            wsClient = realtimeClient,
+            onSyncedTextClip = { text -> applyTextToClipboard(text) },
+        )
 
         // Relay SSE subscription — the third independent receive transport.
         // Reuses the same syncManager (relay decrypt + LWW) and FGS scope.
@@ -593,6 +607,26 @@ class ClipboardService : Service() {
         captureClip(this, text, settings, repository, syncManager)
     }
 
+    /**
+     * Write [text] to the system clipboard as the result of an inbound sync.
+     *
+     * Called ONCE per catch-up drain or P2P batch with only the NEWEST text
+     * clip — never called per-item during a bulk sync, so the clipboard is
+     * never spammed and the capture loop is not re-triggered for intermediate
+     * items.
+     *
+     * Uses [ClipboardRepository.expectClip] to register the content-hash so
+     * that the capture listeners ([ClipboardService] / [ClipboardAccessibilityService])
+     * recognise the upcoming setPrimaryClip as an internal write and skip it —
+     * preventing a capture → re-push → re-sync round-trip.
+     */
+    private fun applyTextToClipboard(text: String) {
+        ClipboardRepository.expectClip(text)
+        val clip = ClipData.newPlainText("CopyPaste sync", text)
+        clipboardManager.setPrimaryClip(clip)
+        Log.d(TAG, "Auto-applied newest synced text clip (${text.length} chars)")
+    }
+
     override fun onDestroy() {
         // Stop the inbound listener (cancels its drain job + releases the bound
         // port) BEFORE scope.cancel() so the native accept loop is torn down
@@ -806,7 +840,7 @@ class ClipboardService : Service() {
             // Persist to the SharedPreferences repository — the single source the
             // UI reads. storeItem performs cross-listener dedup (HIGH-3) so a
             // single copy seen by multiple owners is stored (and counted) once.
-            val storedId = repository.storeItem(text, key, lamportTs = lamportTs)
+            val storedId = repository.storeItem(text, key, lamportTs = lamportTs, originDeviceId = settings.deviceId)
             if (storedId.isNotEmpty()) {
                 Log.d(TAG, "Clipboard item stored successfully")
                 bumpTodayCounter(context)
@@ -943,6 +977,7 @@ class ClipboardService : Service() {
                 key,
                 contentType = mimeType,
                 lamportTs = lamportTs,
+                originDeviceId = settings.deviceId,
             )
             if (storedId.isEmpty()) {
                 Log.d(TAG, "captureImageClip: storeItem returned empty (dedup/sensitive) — not storing bytes")
@@ -1077,6 +1112,7 @@ class ClipboardService : Service() {
                 key = key,
                 contentType = "file",
                 lamportTs = lamportTs,
+                originDeviceId = settings.deviceId,
             )
             if (storedId.isEmpty()) {
                 Log.d(TAG, "captureFileClip: storeItem returned empty (dedup/sensitive) — skipping")

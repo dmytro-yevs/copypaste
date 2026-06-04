@@ -590,6 +590,7 @@ class ClipboardRepository(context: Context) {
         contentType: String = "text/plain",
         lamportTs: Long = 0L,
         wallTimeMs: Long = System.currentTimeMillis(),
+        originDeviceId: String = "",
     ): String = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext ""
 
@@ -656,7 +657,7 @@ class ClipboardRepository(context: Context) {
             localAesEncrypt(textBytes, key)
         }
 
-        val encoded = encodeItem(blob, textBytes.size, contentType = contentType, lamportTs = lamportTs, wallTimeMs = wallTimeMs)
+        val encoded = encodeItem(blob, textBytes.size, contentType = contentType, lamportTs = lamportTs, wallTimeMs = wallTimeMs, originDeviceId = originDeviceId)
         synchronized(idsWriteLock) {
             // Append the id, removing any prior occurrence first so the index
             // stays canonical (no duplicate ids). A synced item re-stored under
@@ -704,6 +705,7 @@ class ClipboardRepository(context: Context) {
         itemId: String,
         incomingLamportTs: Long,
         wallTimeMs: Long = System.currentTimeMillis(),
+        originDeviceId: String = "",
     ): Boolean = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext false
 
@@ -751,7 +753,7 @@ class ClipboardRepository(context: Context) {
                 Log.w(TAG, "LWW replace: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
                 localAesEncrypt(plaintextBytes, key)
             }
-            val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs, wallTimeMs = wallTimeMs)
+            val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs, wallTimeMs = wallTimeMs, originDeviceId = originDeviceId)
             prefs.edit().putString("item_$existingStorageId", encoded).apply()
             evictParseCache(existingStorageId) // A: blob changed — evict stale decrypt entry
             Log.d(TAG, "LWW replaced item_id=$itemId storageId=$existingStorageId (lamport $storedTs→$incomingLamportTs)")
@@ -783,7 +785,7 @@ class ClipboardRepository(context: Context) {
             Log.w(TAG, "storeItemWithLww: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
             localAesEncrypt(plaintextBytes, key)
         }
-        val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs, wallTimeMs = wallTimeMs)
+        val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs, wallTimeMs = wallTimeMs, originDeviceId = originDeviceId)
 
         synchronized(idsWriteLock) {
             // TOCTOU guard: re-check inside the lock. A concurrent caller (FgsSyncLoop
@@ -817,6 +819,12 @@ class ClipboardRepository(context: Context) {
      * the entire append, so by the time storeItem returns the id is visible here.
      */
     fun lastStoredId(): String? = storedIds().lastOrNull()
+
+    /**
+     * Total number of stored items (pinned + unpinned).
+     * Used by the history header count display (parity with macOS).
+     */
+    fun totalItemCount(): Int = storedIds().size
 
     /**
      * Decrypt and return the FULL plaintext for item [id], or null when the item
@@ -1137,8 +1145,8 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Encode a stored item as a pipe-delimited string (v3 format, 7 fields):
-     * <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>|<deleted>
+     * Encode a stored item as a pipe-delimited string (v4 format, 8 fields):
+     * <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>|<deleted>|<originDeviceId>
      *
      * The lamportTs field (index 5) was added for LWW cloud sync. Legacy rows
      * (only 5 fields) are read back with lamportTs=0.
@@ -1147,6 +1155,11 @@ class ClipboardRepository(context: Context) {
      * Legacy rows (fewer than 7 fields) parse as deleted=false (back-compat).
      * A tombstone has deleted=1; its ciphertext/nonce are empty strings so the
      * encrypted payload is not retained on disk after a user delete.
+     *
+     * The originDeviceId field (index 7) was added for origin-device attribution
+     * (parity with macOS HistoryView device filter + DeviceBadge). Legacy rows
+     * (fewer than 8 fields) parse as originDeviceId=null (back-compat). Blank
+     * string is stored for locally-captured items with no known device id.
      */
     private fun encodeItem(
         blob: EncryptedBlob,
@@ -1155,11 +1168,12 @@ class ClipboardRepository(context: Context) {
         lamportTs: Long = 0L,
         wallTimeMs: Long = System.currentTimeMillis(),
         deleted: Boolean = false,
+        originDeviceId: String = "",
     ): String {
         val nonce64 = Base64.encodeToString(blob.nonce, Base64.NO_WRAP)
         val ct64 = Base64.encodeToString(blob.ciphertext, Base64.NO_WRAP)
         val deletedFlag = if (deleted) 1 else 0
-        return "$wallTimeMs|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs|$deletedFlag"
+        return "$wallTimeMs|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs|$deletedFlag|$originDeviceId"
     }
 
     /**
@@ -1167,33 +1181,34 @@ class ClipboardRepository(context: Context) {
      *
      * The tombstone keeps the entry in the id-index so a re-sync cannot
      * resurrect the deleted item, but clears the encrypted payload to avoid
-     * retaining plaintext on disk. Field layout mirrors [encodeItem] v3:
-     * <nowMs>|<contentType>|0||tombstone|<lamportTs>|1
+     * retaining plaintext on disk. Field layout mirrors [encodeItem] v4:
+     * <nowMs>|<contentType>|0||tombstone|<lamportTs>|1|<originDeviceId>
      *
      * The nonce field is empty and the ciphertext is the literal string
      * "tombstone" (harmless; the deleted flag prevents any decrypt attempt).
      * The lamportTs is bumped so LWW on the same item_id sees this as newer
      * and will not be overwritten by a stale re-sync of the original text.
+     * The original originDeviceId (index 7) is preserved so the tombstone still
+     * attributes to its source device.
      */
     private fun encodeTombstone(existingRaw: String, bumpedLamportTs: Long): String {
         val parts = existingRaw.split("|")
         val wallTimeMs = System.currentTimeMillis()
         // Preserve contentType from the original blob so tombstones are typed.
         val contentType = parts.getOrNull(1) ?: "text/plain"
-        return "$wallTimeMs|$contentType|0||tombstone|$bumpedLamportTs|1"
+        val originDeviceId = parts.getOrNull(7) ?: ""
+        return "$wallTimeMs|$contentType|0||tombstone|$bumpedLamportTs|1|$originDeviceId"
     }
 
     /**
      * Read the deleted flag from a raw blob string.
      * Field 6 (index 6) is the deleted flag: "1" = deleted, absent/other = false.
      * Back-compat: blobs with fewer than 7 fields (legacy v1/v2 format) are NOT deleted.
+     * NOTE: index 6 is read explicitly (not the LAST field) because v4 appended
+     * originDeviceId at index 7 — the deleted flag is no longer terminal.
      */
     private fun isDeletedBlob(raw: String): Boolean {
-        val idx = raw.lastIndexOf('|')
-        if (idx < 0) return false
-        // Only the last field is the deleted flag; avoid a full split for perf.
-        val tail = raw.substring(idx + 1)
-        return tail == "1"
+        return raw.split("|").getOrNull(6) == "1"
     }
 
     private fun parseItem(id: String, raw: String, key: ByteArray): ClipboardItem? {
@@ -1236,6 +1251,12 @@ class ClipboardRepository(context: Context) {
         val plaintextLen = parts.getOrNull(2)?.toLongOrNull() ?: 0L
         val tooLargeToSync = plaintextLen > SYNC_MAX_BLOB_BYTES
 
+        // Field 7 (index 7): originDeviceId — added for device-attribution parity with macOS.
+        // (Index 6 is the soft-delete flag; originDeviceId was appended after it.)
+        // Absent in legacy blobs (< 8 fields); blank string means "captured locally,
+        // no device id recorded yet". Both map to null in the ClipboardItem.
+        val originDeviceId = parts.getOrNull(7)?.takeIf { it.isNotBlank() }
+
         // pinned, imagePng, and image/file tooLargeToSync are populated by getItems()
         // after parseItem returns.
         return ClipboardItem(
@@ -1245,6 +1266,7 @@ class ClipboardRepository(context: Context) {
             wallTimeMs = wallTimeMs,
             snippet = snippet,
             tooLargeToSync = tooLargeToSync,
+            originDeviceId = originDeviceId,
         )
     }
 

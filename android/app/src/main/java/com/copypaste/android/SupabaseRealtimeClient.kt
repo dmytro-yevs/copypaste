@@ -50,6 +50,16 @@ class SupabaseRealtimeClient(
     private val syncManager: SyncManager,
     private val repository: ClipboardRepository,
     private val scope: CoroutineScope,
+    /**
+     * Called with the text of a NEWLY stored text clip delivered via WS push.
+     *
+     * WS push delivers ONE item at a time (live single-item delta), so we
+     * apply it immediately — there is no batch to reduce here. The same
+     * callback type is reused for symmetry with [FgsSyncLoop.onSyncedTextClip].
+     *
+     * Null (default) means "no auto-apply".
+     */
+    private val onSyncedTextClip: ((text: String) -> Unit)? = null,
 ) {
     companion object {
         private const val TAG = "SupabaseRealtimeClient"
@@ -564,13 +574,20 @@ class SupabaseRealtimeClient(
         } else {
             val text = item.plaintext.toString(Charsets.UTF_8)
             if (text.isBlank()) false
-            else repository.storeItemWithLww(
-                plaintext = text,
-                key = settings.encryptionKey,
-                itemId = item.itemId,
-                incomingLamportTs = item.lamportTs,
-                wallTimeMs = item.wallTime,
-            )
+            else {
+                val didStore = repository.storeItemWithLww(
+                    plaintext = text,
+                    key = settings.encryptionKey,
+                    itemId = item.itemId,
+                    incomingLamportTs = item.lamportTs,
+                    wallTimeMs = item.wallTime,
+                    originDeviceId = deviceId,
+                )
+                // WS delivers one item at a time (live delta, not a bulk batch),
+                // so apply it immediately — no reduction needed.
+                if (didStore) onSyncedTextClip?.invoke(text)
+                didStore
+            }
         }
 
         if (stored) {

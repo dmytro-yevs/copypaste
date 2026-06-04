@@ -75,12 +75,22 @@ class FgsSyncLoop(
      *  catch-up poll interval. Null-safe: when absent the loop treats WS as down. */
     private val wsClient: SupabaseRealtimeClient? = null,
     /**
-     * Application context used for auto-applying inbound text clips to the
-     * Android system clipboard via [storeDecryptedItem]. Must be the application
-     * context (not an Activity context) to avoid leaking. Null disables auto-apply
-     * (safe default for callers that don't need it, e.g. unit tests).
+     * Called AT MOST ONCE after a full Supabase catch-up drain or P2P batch
+     * with the text of the NEWEST (highest wall_time) text clip that was stored.
+     *
+     * Intent: auto-apply the latest synced text clip to the system clipboard so
+     * the user can paste it immediately — but only the newest one, not every clip
+     * in the batch (which would spam the clipboard and could re-trigger capture
+     * loops).
+     *
+     * Sensitive and private-mode guards in the store path already suppress the
+     * text before it reaches here: this callback only fires for clips that were
+     * actually stored.
+     *
+     * Null (default) means "no auto-apply" — used by unit tests and callers that
+     * do not have a live system clipboard context.
      */
-    private val appContext: Context? = null,
+    private val onSyncedTextClip: ((text: String) -> Unit)? = null,
 ) {
     private var job: Job? = null
 
@@ -170,6 +180,34 @@ class FgsSyncLoop(
          */
         fun intervalForEmptyStreak(consecutiveEmpty: Int): Long =
             pollIntervalMs(wsConnected = false, consecutiveEmpty = consecutiveEmpty)
+
+        /**
+         * Select the newest text clip from a list of (text, wallTime) pairs
+         * accumulated across a bulk-sync batch drain.
+         *
+         * "Newest" = highest wall_time. When two items share the same wall_time,
+         * the one that arrived LAST in batch order wins (latest row processed).
+         *
+         * Pure function — no Android runtime, no coroutines — intentionally kept
+         * in the companion object so it can be unit-tested on the plain JVM.
+         *
+         * @return the text of the newest clip, or null when [clips] is empty.
+         */
+        fun newestTextClip(clips: List<Pair<String, Long>>): String? {
+            if (clips.isEmpty()) return null
+            var bestText = clips[0].first
+            var bestWallTime = clips[0].second
+            for (i in 1 until clips.size) {
+                val (text, wallTime) = clips[i]
+                // >= so that a later item at the SAME wall_time replaces the
+                // current winner (last-in-order wins on ties).
+                if (wallTime >= bestWallTime) {
+                    bestText = text
+                    bestWallTime = wallTime
+                }
+            }
+            return bestText
+        }
     }
 
     /**
@@ -294,6 +332,11 @@ class FgsSyncLoop(
         // persisted after every cycle, so a re-poll continues from where the
         // previous cycle left off.
         var totalNewCount = 0
+        // Accumulate (text, wallTime) for every text clip stored across ALL
+        // batch cycles in this drain. After the full drain, we apply only the
+        // NEWEST text clip once — not one per item (which would spam the system
+        // clipboard and could re-trigger the capture loop).
+        val storedTextClips = mutableListOf<Pair<String, Long>>()
         while (isActive) {
             val batch = syncManager.pollFromSupabase(
                 sinceWallTime = settings.lastSupabasePollWallTime,
@@ -320,15 +363,79 @@ class FgsSyncLoop(
                 // Decrypt; skip rows that fail (wrong key, tampered blob).
                 val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
 
-                // Delegate to the shared canonical routine so image (thumbnail),
-                // file (real bytes/meta), and text (LWW + auto-apply) are handled
-                // identically across FgsSyncLoop and SupabasePollWorker (BUG 2).
-                val stored = storeDecryptedItem(
-                    item = item,
-                    repository = repository,
-                    settings = settings,
-                    appContext = appContext,
-                )
+                val isImage = item.contentType == "image" ||
+                    item.contentType.startsWith("image/")
+                val isFile = item.contentType == "file"
+
+                val stored = if (isImage) {
+                    // Image row: store a placeholder entry then persist raw bytes.
+                    // storeItem deduplicates via overrideId so re-polls are no-ops.
+                    if (item.plaintext.isEmpty()) {
+                        false
+                    } else {
+                        val storedId = repository.storeItem(
+                            plaintext = "[image]",
+                            key = settings.encryptionKey,
+                            overrideId = item.itemId,
+                            contentType = item.contentType,
+                            lamportTs = item.lamportTs,
+                            originDeviceId = item.deviceId,
+                        )
+                        if (storedId.isNotEmpty()) {
+                            repository.storeImageBytes(storedId, item.plaintext)
+                            // Generate thumbnail after full-res storage; non-fatal on failure.
+                            SyncThumbnailHelper.generateAndStore(item.plaintext) { thumbBytes ->
+                                repository.storeThumbnailBytes(storedId, thumbBytes)
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                } else if (isFile) {
+                    // File row: store actual bytes so the user can save/copy them.
+                    // Cloud-poll (DecryptedItem) has no file_name/mime columns in the
+                    // SELECT — those live in the encrypted payload, not separate columns.
+                    if (item.plaintext.isEmpty()) {
+                        false
+                    } else {
+                        val label = SyncFileHelper.buildFileLabel(null)
+                        val storedId = repository.storeItem(
+                            plaintext = label,
+                            key = settings.encryptionKey,
+                            overrideId = item.itemId,
+                            contentType = item.contentType,
+                            lamportTs = item.lamportTs,
+                            originDeviceId = item.deviceId,
+                        )
+                        if (storedId.isNotEmpty()) {
+                            repository.storeFileBytes(storedId, item.plaintext)
+                            repository.storeFileMeta(storedId, null, null)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                } else {
+                    // Text row: LWW replace — replace only when incoming lamport_ts
+                    // is strictly newer than the locally stored row for the same item_id.
+                    val text = item.plaintext.toString(Charsets.UTF_8)
+                    if (text.isBlank()) {
+                        false
+                    } else {
+                        val didStore = repository.storeItemWithLww(
+                            plaintext = text,
+                            key = settings.encryptionKey,
+                            itemId = item.itemId,
+                            incomingLamportTs = item.lamportTs,
+                            originDeviceId = item.deviceId,
+                        )
+                        // Track this text clip for the post-drain auto-apply
+                        // selection; we only apply the newest one at the end.
+                        if (didStore) storedTextClips.add(text to row.wallTime)
+                        didStore
+                    }
+                }
                 if (stored) newCount++
             }
 
@@ -348,6 +455,13 @@ class FgsSyncLoop(
             // Safety: if a full batch somehow failed to advance the cursor,
             // break rather than spin forever re-fetching the same window.
             if (cursorWallTime == startWallTime && cursorId == startId) break
+        }
+
+        // Auto-apply: after the full drain, apply only the NEWEST text clip once.
+        // This prevents N clipboard overwrites for a batch of N items and avoids
+        // re-triggering the capture loop for intermediate clips.
+        newestTextClip(storedTextClips)?.let { text ->
+            onSyncedTextClip?.invoke(text)
         }
 
         totalNewCount
@@ -459,11 +573,27 @@ class FgsSyncLoop(
                 deviceId = settings.deviceId,
             )
             var stored = 0
+            // Accumulate text clips from this P2P batch; apply only the newest
+            // after the full set is stored — mirrors the Supabase drain logic.
+            val p2pTextClips = mutableListOf<Pair<String, Long>>()
             for (item in result.items) {
                 // Store-mapping shared with the inbound listener poll (Android-as-
                 // responder). LWW dedup on item_id makes a re-dial / re-receipt a
                 // no-op, so no extra dedup is needed across the two paths.
-                if (storeSyncedItem(item)) stored += 1
+                val didStore = storeSyncedItem(item)
+                if (didStore) {
+                    stored += 1
+                    val isText = item.contentType != "image" &&
+                        !item.contentType.startsWith("image/") &&
+                        item.contentType != "file"
+                    if (isText) {
+                        val text = String(
+                            ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
+                            Charsets.UTF_8,
+                        )
+                        if (text.isNotBlank()) p2pTextClips.add(text to item.wallTimeMs)
+                    }
+                }
             }
             if (result.itemsReceived > 0uL || result.itemsSent > 0uL) {
                 Log.i(
@@ -471,6 +601,10 @@ class FgsSyncLoop(
                     "P2P dial ${peerFingerprint.take(8)}: received ${result.itemsReceived} " +
                         "(stored $stored), sent ${result.itemsSent}",
                 )
+            }
+            // Auto-apply the newest P2P text clip once (not per item).
+            newestTextClip(p2pTextClips)?.let { text ->
+                onSyncedTextClip?.invoke(text)
             }
             // E1: stamp a real-presence contact time on the roster entry so the
             // Devices screen "online" dot reflects an ACTUAL successful P2P sync
@@ -565,40 +699,6 @@ class FgsSyncLoop(
      * Returns true when a new (or replaced) row was stored, false on a dedup /
      * empty / blank no-op.
      */
-    /**
-     * Auto-apply a freshly-stored inbound TEXT clip to the Android system clipboard
-     * so the user can immediately paste it without opening the history list.
-     *
-     * Self-write guard: calls [ClipboardRepository.expectClip] BEFORE
-     * [ClipboardManager.setPrimaryClip] — the exact same mechanism used by
-     * [HistoryActivity] when the user taps a row to copy it. This sets a
-     * 5-second suppression window that causes every capture listener
-     * (ClipboardService, ClipboardAccessibilityService) to skip this write,
-     * preventing the auto-applied clip from creating a duplicate history row
-     * or triggering a redundant cloud re-push.
-     *
-     * Only applies TEXT clips. Images and files are left for a later task
-     * (TODO comment at each call site).
-     *
-     * No-op when [appContext] is null (constructor default, used in tests) or
-     * when [ClipboardManager] is unavailable.
-     */
-    private fun autoApplySyncedTextClip(text: String) {
-        val ctx = appContext ?: return
-        try {
-            // Register expectation BEFORE setPrimaryClip so all capture listeners
-            // see the suppression window when the clipboard-changed callback fires.
-            ClipboardRepository.expectClip(text)
-            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                ?: return
-            cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", text))
-            Log.d(TAG, "autoApplySyncedTextClip: applied ${text.length} chars to system clipboard")
-        } catch (e: Exception) {
-            // setPrimaryClip can throw SecurityException on some locked-screen OEM
-            // variants. Non-fatal — the clip is already stored in history.
-            Log.d(TAG, "autoApplySyncedTextClip: failed (non-fatal): ${e.message}")
-        }
-    }
 
     suspend fun storeSyncedItem(item: uniffi.copypaste_android.SyncedItem): Boolean =
         withContext(Dispatchers.IO) {
@@ -691,11 +791,11 @@ class FgsSyncLoop(
                         itemId = item.itemId,
                         incomingLamportTs = item.wallTimeMs,
                     )
-                    // Auto-apply: if this is a newly-stored (not LWW-deduped) inbound
-                    // text clip, push it to the Android system clipboard so the user can
-                    // immediately paste without opening the history list.
-                    // TODO: extend to image/file when a suitable clipboard URI scheme exists.
-                    if (didStore) autoApplySyncedTextClip(plaintext)
+                    // Auto-apply is intentionally NOT done per-frame here. The BATCH
+                    // callers (dialPairedPeer / the Supabase drain) apply only the
+                    // NEWEST stored text clip once via onSyncedTextClip — applying
+                    // per-frame would spam the system clipboard and re-trigger the
+                    // capture loop during a multi-item catch-up.
                     didStore
                 }
             }
