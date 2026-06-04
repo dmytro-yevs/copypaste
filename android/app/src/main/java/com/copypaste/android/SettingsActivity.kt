@@ -112,12 +112,35 @@ private const val TAB_STORAGE       = 2
 private const val TAB_SYNC          = 3
 private const val TAB_NOTIFICATIONS = 4
 
+/**
+ * Expose the unsaved-changes guard to external navigation controllers
+ * (e.g. the bottom navbar in [MainActivity]).
+ *
+ * Callers set this to a non-null function BEFORE triggering a tab switch.
+ * [SettingsScreen] calls it with the proposed navigation lambda; the screen
+ * either executes it immediately (no dirty changes) or shows the discard
+ * dialog and defers it until the user confirms.
+ *
+ * Usage in MainShell:
+ *   val settingsNavGuard = remember { mutableStateOf<((()-> Unit) -> Unit)?>(null) }
+ *   // Pass settingsNavGuard.value to SettingsScreen; intercept NavBar clicks
+ *   // through settingsNavGuard.value?.invoke { selectedTab = index } ?: run { selectedTab = index }
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     modifier: Modifier = Modifier,
     showBackButton: Boolean = true,
     onBack: () -> Unit = {},
+    /**
+     * Optional callback for external callers (e.g. bottom navbar) to route
+     * navigation through this screen's unsaved-changes guard.
+     * When non-null the screen stores this reference; callers invoke it with
+     * the pending navigation lambda. If there are no unsaved changes the
+     * lambda is executed immediately; otherwise the discard dialog is shown
+     * and the lambda is executed only if the user confirms Discard.
+     */
+    onRegisterNavGuard: ((guard: (proceed: () -> Unit) -> Unit) -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -285,9 +308,28 @@ fun SettingsScreen(
     }
 
     var showDiscardDialog by remember { mutableStateOf(false) }
+    // Pending navigation lambda: set when the discard dialog is triggered by an
+    // external navigation event (navbar tab switch). On "Discard" we execute it.
+    // On back-press the pending action is simply onBack(), so we unify both paths.
+    var pendingNavigation by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    // Register the nav-guard with external callers (e.g. MainShell's navbar).
+    // The guard either executes the navigation immediately (clean) or shows the
+    // discard dialog and stores the lambda for deferred execution.
+    LaunchedEffect(onRegisterNavGuard) {
+        onRegisterNavGuard?.invoke { proceed ->
+            if (isDirty) {
+                pendingNavigation = proceed
+                showDiscardDialog = true
+            } else {
+                proceed()
+            }
+        }
+    }
 
     // Intercept system back when there are unsaved changes.
     BackHandler(enabled = isDirty) {
+        pendingNavigation = onBack
         showDiscardDialog = true
     }
 
@@ -399,21 +441,32 @@ fun SettingsScreen(
     }
 
     // HW-A10: Discard-changes confirmation dialog shown when back is pressed with unsaved edits.
+    // Also shown when a navbar tab switch is intercepted (pendingNavigation holds the target).
     if (showDiscardDialog) {
         AlertDialog(
-            onDismissRequest = { showDiscardDialog = false },
+            onDismissRequest = {
+                showDiscardDialog = false
+                pendingNavigation = null
+            },
             title = { Text(stringResource(R.string.dialog_discard_title)) },
             text = { Text(stringResource(R.string.dialog_discard_message)) },
             confirmButton = {
+                // Discard: execute the pending navigation (back or navbar tab switch).
                 TextButton(onClick = {
                     showDiscardDialog = false
-                    onBack()
+                    val nav = pendingNavigation ?: onBack
+                    pendingNavigation = null
+                    nav()
                 }) {
                     Text(stringResource(R.string.dialog_discard_confirm))
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDiscardDialog = false }) {
+                // Keep editing: close dialog, stay on settings screen.
+                TextButton(onClick = {
+                    showDiscardDialog = false
+                    pendingNavigation = null
+                }) {
                     Text(stringResource(R.string.dialog_discard_keep))
                 }
             },
@@ -428,7 +481,14 @@ fun SettingsScreen(
                 title = stringResource(R.string.title_settings),
                 showBackButton = showBackButton,
                 // HW-A10: intercept the top-bar back arrow for dirty check too.
-                onBack = { if (isDirty) showDiscardDialog = true else onBack() },
+                onBack = {
+                    if (isDirty) {
+                        pendingNavigation = onBack
+                        showDiscardDialog = true
+                    } else {
+                        onBack()
+                    }
+                },
                 backContentDescription = stringResource(R.string.cd_back),
                 actions = {
                     Button(

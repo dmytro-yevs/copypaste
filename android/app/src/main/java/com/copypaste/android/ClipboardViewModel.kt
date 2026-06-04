@@ -51,6 +51,15 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     private var unpinnedOffset = 0
 
     /**
+     * Total number of stored items (pinned + unpinned) in the repository.
+     * Updated after each [loadItems] / [loadMore] call.
+     * Used by the history header to show the real total rather than the
+     * number of items loaded so far.
+     */
+    private val _totalCount = MutableLiveData(0)
+    val totalCount: LiveData<Int> = _totalCount
+
+    /**
      * Debounce job for the store-change listener. Rapid bursts of prefs writes
      * (e.g. a sync catch-up) are collapsed into a single [loadItems] call.
      */
@@ -84,6 +93,7 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     fun loadItems() {
         viewModelScope.launch {
             _loading.value = true
+            unpinnedOffset = 0
             try {
                 val page = repository.getItems(
                     key    = settings.encryptionKey,
@@ -95,6 +105,7 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
                     _items.value = next
                 }
                 unpinnedOffset = next.count { !it.pinned }
+                _totalCount.value = repository.totalItemCount()
                 // Check whether there are more unpinned rows beyond this page.
                 _hasMore.value = repository.unpinnedItemCount() > unpinnedOffset
             } catch (e: Exception) {
@@ -132,6 +143,7 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
                 val merged = (freshPinned + existingUnpinned + newUnpinned).distinctBy { it.id }
                 _items.value = merged
                 unpinnedOffset = merged.count { !it.pinned }
+                _totalCount.value = repository.totalItemCount()
                 _hasMore.value = repository.unpinnedItemCount() > unpinnedOffset
             } catch (e: Exception) {
                 Log.w(TAG, "loadMore failed", e)

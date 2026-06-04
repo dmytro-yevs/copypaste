@@ -44,7 +44,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -85,6 +88,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
@@ -94,6 +98,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -371,6 +378,8 @@ fun HistoryScreen(
     val items by viewModel.items.observeAsState(emptyList())
     val loading by viewModel.loading.observeAsState(false)
     val error by viewModel.errors.observeAsState(null)
+    val totalCount by viewModel.totalCount.observeAsState(0)
+    val hasMore by viewModel.hasMore.observeAsState(false)
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
@@ -428,6 +437,43 @@ fun HistoryScreen(
     // Recent searches are PERSISTED in Settings (SharedPreferences), not just
     // across rotation — so they survive process death. Seed once from settings.
     var recentSearches by remember { mutableStateOf(settings.recentSearches) }
+
+    // ── Device filter (parity with macOS HistoryView deviceFilter) ───────────
+    // "all" = no filter; any other value = UUID of the origin device to show.
+    // Reset to "all" when the set of known devices shrinks (e.g. after clearing
+    // all items from a peer device) so we never show an empty filter.
+    var deviceFilter by rememberSaveable { mutableStateOf("all") }
+
+    // ── Long-press peek preview state ─────────────────────────────────────────
+    // previewItemId + previewPhase survive rotation via rememberSaveable.
+    var previewItemId by rememberSaveable { mutableStateOf<String?>(null) }
+    var previewPhase by rememberSaveable(
+        stateSaver = androidx.compose.runtime.saveable.Saver(
+            save    = { phase: PreviewPhase ->
+                when (phase) {
+                    PreviewPhase.Idle    -> 0
+                    PreviewPhase.Peeking -> 1
+                    PreviewPhase.Pinned  -> 2
+                }
+            },
+            restore = { ord: Int ->
+                when (ord) {
+                    1    -> PreviewPhase.Peeking
+                    2    -> PreviewPhase.Pinned
+                    else -> PreviewPhase.Idle
+                }
+            },
+        )
+    ) { mutableStateOf<PreviewPhase>(PreviewPhase.Idle) }
+
+    // Auto-dismiss preview when item leaves the list
+    LaunchedEffect(items, previewItemId) {
+        val id = previewItemId ?: return@LaunchedEffect
+        if (items.none { it.id == id }) {
+            previewItemId = null
+            previewPhase = PreviewPhase.Idle
+        }
+    }
 
     // ── Selection state (survives rotation) ─────────────────────────────────
     var selectionMode by rememberSaveable { mutableStateOf(false) }
@@ -559,14 +605,42 @@ fun HistoryScreen(
         }
     }
 
+    // ── Device filter (parity with macOS) ────────────────────────────────────
+    // Collect distinct origin device ids from the FULL sorted list (not search-
+    // filtered) so the filter chips are stable while typing. Show the chips only
+    // when more than one device is present — mirrors macOS HistoryView.
+    val originDeviceIds = remember(sortedItems) { distinctOriginDeviceIds(sortedItems) }
+    val ownDeviceId = remember { settings.deviceId }
+    val pairedPeers = remember { settings.pairedPeers }
+
+    // Auto-reset device filter when the selected device disappears from the list
+    // (e.g. all items from that device were deleted).
+    LaunchedEffect(originDeviceIds, deviceFilter) {
+        if (deviceFilter != "all" && deviceFilter !in originDeviceIds) {
+            deviceFilter = "all"
+        }
+    }
+
+    // Apply device filter on top of search filter.
+    val deviceFilteredItems = remember(filteredItems, deviceFilter) {
+        filterByDevice(filteredItems, deviceFilter)
+    }
+
     BackHandler(enabled = selectionMode) {
         selectionMode = false
         selectedIds = emptySet()
     }
 
-    // Entering selection mode exits reorder mode
+    // Entering selection mode exits reorder mode and collapses any open preview
     LaunchedEffect(selectionMode) {
-        if (selectionMode) reorderMode = false
+        if (selectionMode) {
+            reorderMode = false
+            // Collapse preview when selection mode activates
+            if (previewPhase != PreviewPhase.Idle) {
+                previewItemId = null
+                previewPhase = PreviewPhase.Idle
+            }
+        }
     }
 
     // Drop selected ids that no longer exist when the underlying list changes
@@ -682,9 +756,11 @@ fun HistoryScreen(
                                     style = MaterialTheme.typography.titleLarge,
                                     color = IdeText,
                                 )
-                                // Clip count badge — updates reactively with the live list.
-                                // Shows total non-tombstone items (the full items list).
-                                if (items.isNotEmpty()) {
+                                // Clip count badge — shows the full stored total (not just
+                                // the loaded page count) for macOS parity. Driven by
+                                // ClipboardViewModel.totalCount which reads totalItemCount()
+                                // without decrypting items.
+                                if (totalCount > 0) {
                                     Box(
                                         modifier = Modifier
                                             .background(
@@ -694,7 +770,7 @@ fun HistoryScreen(
                                             .padding(horizontal = 6.dp, vertical = 2.dp),
                                     ) {
                                         Text(
-                                            text = "${items.size}",
+                                            text = "$totalCount",
                                             style = TextStyle(
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Normal,
@@ -924,23 +1000,41 @@ fun HistoryScreen(
                         keyboardController?.hide()
                     }
                 }
+
+                // ── Device filter chips — shown only when > 1 origin device present ──
+                // Mirrors macOS HistoryView: filter strip is hidden for a single device.
+                if (originDeviceIds.size > 1) {
+                    DeviceFilterRow(
+                        deviceIds = originDeviceIds,
+                        selected = deviceFilter,
+                        ownDeviceId = ownDeviceId,
+                        peers = pairedPeers,
+                        onSelect = { deviceFilter = it },
+                    )
+                }
             }
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
     ) { innerPadding ->
         // The preview overlay must be a sibling of the list inside this Box so
         // the long-press drag gesture remains one continuous pointer stream
-        // (not interrupted by a Dialog/Popup window boundary).
+        // (not interrupted by a Dialog/Popup window boundary). The overlay uses
+        // WindowInsets.statusBars top padding to ensure the card is never occluded
+        // by the status bar or app header.
         Box(modifier = Modifier.fillMaxSize()) {
             when {
                 loading && sortedItems.isEmpty() -> LoadingBox(innerPadding)
                 // §9: history completely empty
                 sortedItems.isEmpty() -> EmptyHistoryState(innerPadding)
-                // §9: search returned no results
-                filteredItems.isEmpty() -> EmptySearchState(innerPadding, searchQuery.trim())
+                // §9: search returned no results (counting device filter too)
+                deviceFilteredItems.isEmpty() -> EmptySearchState(innerPadding, searchQuery.trim())
                 else -> HistoryList(
-                    items = filteredItems,
+                    items = deviceFilteredItems,
                     padding = innerPadding,
+                    hasMore = hasMore,
+                    onLoadMore = { viewModel.loadMore() },
+                    ownDeviceId = ownDeviceId,
+                    peers = pairedPeers,
                     selectionMode = selectionMode,
                     selectedIds = selectedIds,
                     reorderMode = reorderMode,
@@ -959,8 +1053,7 @@ fun HistoryScreen(
                     },
                     onCopied = { id -> viewModel.copyItem(id) },
                     onLongPress = { id ->
-                        // Long-press repurposed for preview when NOT in selection mode.
-                        // (gesture gated in HistoryRow — this path is now selection-mode only)
+                        // Long-press enters selection mode when preview is not active.
                         selectionMode = true
                         selectedIds = setOf(id)
                     },
@@ -1027,122 +1120,124 @@ fun HistoryScreen(
                 )
             }
 
-            // ── Overlay — in-tree sibling of the list, never a Dialog/Popup ──
-            val previewItem = remember(previewItemId, sortedItems) {
-                previewItemId?.let { id -> sortedItems.find { it.id == id } }
-            }
-            val previewRepository = remember { ClipboardRepository(ctx) }
-            PreviewOverlay(
-                phase = previewPhase,
-                item = previewItem,
-                repository = previewRepository,
-                settings = settings,
-                maskSensitive = settings.maskSensitiveContent,
-                onDismiss = {
-                    previewItemId = null
-                    previewPhase = PreviewPhase.Idle
-                },
-                onCopy = {
-                    val item = previewItem ?: return@PreviewOverlay
-                    scope.launch {
-                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        when {
-                            item.isImage -> {
-                                val imageBytes = withContext(Dispatchers.IO) { previewRepository.getImageBytes(item.id) }
-                                if (imageBytes != null) {
-                                    val uri = withContext(Dispatchers.IO) {
-                                        try {
-                                            val dir = java.io.File(ctx.cacheDir, "image_copy").also { it.mkdirs() }
-                                            val file = java.io.File(dir, "${item.id}.png")
-                                            file.writeBytes(imageBytes)
-                                            androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
-                                        } catch (_: Exception) { null }
-                                    }
-                                    if (uri != null) {
-                                        val clip = android.content.ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
-                                        ctx.grantUriPermission("com.android.systemui", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                        cm.setPrimaryClip(clip)
-                                    }
-                                }
-                            }
-                            item.isFile -> {
-                                val fileBytes = withContext(Dispatchers.IO) { previewRepository.getFileBytes(item.id) }
-                                if (fileBytes != null) {
-                                    val uri = withContext(Dispatchers.IO) {
-                                        try {
-                                            val (fileName, _) = previewRepository.getFileMeta(item.id)
-                                            val safeName = fileName?.takeIf { it.isNotBlank() } ?: "${item.id}.bin"
-                                            val dir = java.io.File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
-                                            val file = java.io.File(dir, safeName)
-                                            file.writeBytes(fileBytes)
-                                            androidx.core.content.FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
-                                        } catch (_: Exception) { null }
-                                    }
-                                    if (uri != null) {
-                                        val clip = android.content.ClipData.newUri(ctx.contentResolver, "CopyPaste file", uri)
-                                        ctx.grantUriPermission("com.android.systemui", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                        cm.setPrimaryClip(clip)
-                                    }
-                                }
-                            }
-                            else -> {
-                                val fullText = withContext(Dispatchers.IO) {
-                                    previewRepository.loadFullPlaintext(item.id, settings.encryptionKey)
-                                } ?: item.snippet
-                                ClipboardRepository.expectClip(fullText)
-                                cm.setPrimaryClip(android.content.ClipData.newPlainText("CopyPaste", fullText))
-                            }
-                        }
-                        viewModel.copyItem(item.id)
-                    }
-                },
-                onSetPinned = { pinned ->
-                    val id = previewItemId ?: return@PreviewOverlay
-                    viewModel.setPinned(id, pinned)
-                },
-                onDelete = {
-                    val id = previewItemId ?: return@PreviewOverlay
-                    previewItemId = null
-                    previewPhase = PreviewPhase.Idle
-                    viewModel.deleteItem(id)
-                },
-                onSaveFile = {
-                    val id = previewItemId ?: return@PreviewOverlay
-                    scope.launch {
-                        val repository = ClipboardRepository(ctx)
-                        val saved = withContext(Dispatchers.IO) {
-                            try {
-                                val fileBytes = repository.getFileBytes(id) ?: return@withContext false
-                                val (fileName, mime) = repository.getFileMeta(id)
-                                val safeName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
-                                val mimeType = mime ?: "application/octet-stream"
-                                val values = ContentValues().apply {
-                                    put(MediaStore.Downloads.DISPLAY_NAME, safeName)
-                                    put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                                    put(MediaStore.Downloads.IS_PENDING, 1)
-                                }
-                                val resolver = ctx.contentResolver
-                                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                                    ?: return@withContext false
-                                resolver.openOutputStream(uri)?.use { it.write(fileBytes) }
-                                values.clear()
-                                values.put(MediaStore.Downloads.IS_PENDING, 0)
-                                resolver.update(uri, values, null, null)
-                                true
-                            } catch (e: Exception) {
-                                android.util.Log.w("HistoryActivity", "preview saveFile failed for $id: ${e.message}")
-                                false
-                            }
-                        }
-                        snackbarHostState.showSnackbar(
-                            if (saved) ctx.getString(R.string.file_saved_ok)
-                            else ctx.getString(R.string.file_save_failed)
-                        )
-                    }
-                },
-            )
+        // ── Preview overlay — in-tree sibling of the list, never a Dialog/Popup ──
+        // The overlay applies WindowInsets.statusBars top padding to ensure the card
+        // is never occluded by the status bar or app header on any device.
+        val previewItem = remember(previewItemId, sortedItems) {
+            previewItemId?.let { id -> sortedItems.find { it.id == id } }
         }
+        val previewRepository = remember { ClipboardRepository(ctx) }
+        PreviewOverlay(
+            phase = previewPhase,
+            item = previewItem,
+            repository = previewRepository,
+            settings = settings,
+            maskSensitive = settings.maskSensitiveContent,
+            onDismiss = {
+                previewItemId = null
+                previewPhase = PreviewPhase.Idle
+            },
+            onCopy = {
+                val item = previewItem ?: return@PreviewOverlay
+                scope.launch {
+                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    when {
+                        item.isImage -> {
+                            val imageBytes = withContext(Dispatchers.IO) { previewRepository.getImageBytes(item.id) }
+                            if (imageBytes != null) {
+                                val uri = withContext(Dispatchers.IO) {
+                                    try {
+                                        val dir = File(ctx.cacheDir, "image_copy").also { it.mkdirs() }
+                                        val file = File(dir, "${item.id}.png")
+                                        file.writeBytes(imageBytes)
+                                        FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
+                                    } catch (_: Exception) { null }
+                                }
+                                if (uri != null) {
+                                    val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
+                                    ctx.grantUriPermission("com.android.systemui", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    cm.setPrimaryClip(clip)
+                                }
+                            }
+                        }
+                        item.isFile -> {
+                            val fileBytes = withContext(Dispatchers.IO) { previewRepository.getFileBytes(item.id) }
+                            if (fileBytes != null) {
+                                val uri = withContext(Dispatchers.IO) {
+                                    try {
+                                        val (fileName, _) = previewRepository.getFileMeta(item.id)
+                                        val safeName = fileName?.takeIf { it.isNotBlank() } ?: "${item.id}.bin"
+                                        val dir = File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
+                                        val file = File(dir, safeName)
+                                        file.writeBytes(fileBytes)
+                                        FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
+                                    } catch (_: Exception) { null }
+                                }
+                                if (uri != null) {
+                                    val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste file", uri)
+                                    ctx.grantUriPermission("com.android.systemui", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    cm.setPrimaryClip(clip)
+                                }
+                            }
+                        }
+                        else -> {
+                            val fullText = withContext(Dispatchers.IO) {
+                                previewRepository.loadFullPlaintext(item.id, settings.encryptionKey)
+                            } ?: item.snippet
+                            ClipboardRepository.expectClip(fullText)
+                            cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
+                        }
+                    }
+                    viewModel.copyItem(item.id)
+                }
+            },
+            onSetPinned = { pinned ->
+                val id = previewItemId ?: return@PreviewOverlay
+                viewModel.setPinned(id, pinned)
+            },
+            onDelete = {
+                val id = previewItemId ?: return@PreviewOverlay
+                previewItemId = null
+                previewPhase = PreviewPhase.Idle
+                viewModel.deleteItem(id)
+            },
+            onSaveFile = {
+                val id = previewItemId ?: return@PreviewOverlay
+                scope.launch {
+                    val repository = ClipboardRepository(ctx)
+                    val saved = withContext(Dispatchers.IO) {
+                        try {
+                            val fileBytes = repository.getFileBytes(id) ?: return@withContext false
+                            val (fileName, mime) = repository.getFileMeta(id)
+                            val safeName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
+                            val mimeType = mime ?: "application/octet-stream"
+                            val values = ContentValues().apply {
+                                put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+                                put(MediaStore.Downloads.MIME_TYPE, mimeType)
+                                put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                                put(MediaStore.Downloads.IS_PENDING, 1)
+                            }
+                            val resolver = ctx.contentResolver
+                            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                                ?: return@withContext false
+                            resolver.openOutputStream(uri)?.use { it.write(fileBytes) }
+                            values.clear()
+                            values.put(MediaStore.Downloads.IS_PENDING, 0)
+                            resolver.update(uri, values, null, null)
+                            true
+                        } catch (e: Exception) {
+                            android.util.Log.w("HistoryActivity", "preview saveFile failed for $id: ${e.message}")
+                            false
+                        }
+                    }
+                    snackbarHostState.showSnackbar(
+                        if (saved) ctx.getString(R.string.file_saved_ok)
+                        else ctx.getString(R.string.file_save_failed)
+                    )
+                }
+            },
+        )
+        } // end Box
     }
 }
 
@@ -1447,6 +1542,10 @@ private fun HistoryList(
     selectionMode: Boolean,
     selectedIds: Set<String>,
     reorderMode: Boolean = false,
+    hasMore: Boolean = false,
+    onLoadMore: () -> Unit = {},
+    ownDeviceId: String = "",
+    peers: List<PairedPeer> = emptyList(),
     onDelete: (String) -> Unit,
     onSetPinned: (String, Boolean) -> Unit,
     /** Called with (itemId, direction) where direction is -1 (up) or +1 (down). */
@@ -1458,11 +1557,11 @@ private fun HistoryList(
     onSensitiveTap: () -> Unit = {},
     /** Called when the user taps Save on a file row; receives the item id. */
     onSaveFile: (String) -> Unit = {},
-    /** Called when a long-press hold starts on a row (not in selection mode). */
+    /** Called when long-press starts — shows the peek preview card. */
     onPreviewPeek: (String) -> Unit = {},
-    /** Called when the drag-up commit gesture fires on a row. */
+    /** Called when drag-up commits — pins the preview card. */
     onPreviewPin: (String) -> Unit = {},
-    /** Called when a plain release without drag-up ends the peek. */
+    /** Called when peek is dismissed without committing. */
     onPreviewDismiss: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
@@ -1603,7 +1702,25 @@ private fun HistoryList(
     @Suppress("RememberReturnType")
     val mountedIds = remember { mutableSetOf<String>() }
 
+    val listState = rememberLazyListState()
+
+    // Infinite scroll: trigger loadMore when within 10 items of the end and hasMore is true.
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            if (!hasMore) return@derivedStateOf false
+            val layoutInfo = listState.layoutInfo
+            val totalItems = layoutInfo.totalItemsCount
+            if (totalItems == 0) return@derivedStateOf false
+            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            lastVisible >= totalItems - 10
+        }
+    }
+    LaunchedEffect(shouldLoadMore) {
+        if (shouldLoadMore) onLoadMore()
+    }
+
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .background(IdeBg)
@@ -1635,7 +1752,15 @@ private fun HistoryList(
                     initialOffsetY = { it / 8 },
                 ) else androidx.compose.animation.EnterTransition.None,
             ) {
-                Column {
+                Column(
+                    modifier = Modifier.previewPeekGesture(
+                        itemId = item.id,
+                        selectionMode = selectionMode,
+                        onPeeking = onPreviewPeek,
+                        onPinned = onPreviewPin,
+                        onDismissPeek = onPreviewDismiss,
+                    ),
+                ) {
                     HistoryRow(
                         item = item,
                         repository = repository,
@@ -1647,6 +1772,8 @@ private fun HistoryList(
                         reorderMode = reorderMode,
                         pinnedIndex = item.pinnedSortIndex,
                         pinnedCount = pinnedCount,
+                        ownDeviceId = ownDeviceId,
+                        peers = peers,
                         onDelete = onDelete,
                         onSetPinned = onSetPinned,
                         onMoveUp = { onReorderPinned(item.id, -1) },
@@ -1663,6 +1790,23 @@ private fun HistoryList(
                     HorizontalDivider(
                         color = IdeBorder.copy(alpha = 0.5f),
                         thickness = 0.5.dp,
+                    )
+                }
+            }
+        }
+        // Footer: subtle loading indicator while next page loads
+        if (hasMore) {
+            item(key = "__load_more_footer__") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        color = IdeAccent.copy(alpha = 0.5f),
+                        strokeWidth = 1.5.dp,
+                        modifier = Modifier.size(16.dp),
                     )
                 }
             }
@@ -1694,6 +1838,8 @@ private fun HistoryRow(
     reorderMode: Boolean = false,
     pinnedIndex: Int = -1,
     pinnedCount: Int = 0,
+    ownDeviceId: String = "",
+    peers: List<PairedPeer> = emptyList(),
     onDelete: (String) -> Unit,
     onSetPinned: (String, Boolean) -> Unit,
     onMoveUp: () -> Unit = {},
@@ -2130,6 +2276,16 @@ private fun HistoryRow(
                     color = IdeFaint,
                     maxLines = 1,
                 )
+                // Origin-device badge — shown when originDeviceId is known
+                val originId = item.originDeviceId
+                if (!selectionMode && originId != null && ownDeviceId.isNotBlank()) {
+                    Spacer(Modifier.width(4.dp))
+                    OriginDeviceBadge(
+                        deviceId = originId,
+                        ownDeviceId = ownDeviceId,
+                        peers = peers,
+                    )
+                }
                 if (!selectionMode) {
                     Spacer(Modifier.width(2.dp))
                     if (reorderMode && item.pinned) {
@@ -2183,6 +2339,113 @@ private fun HistoryRow(
                 }
             }
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Device filter strip — parity with macOS HistoryView deviceFilter.
+// Shown only when more than one origin device is present in the list.
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun DeviceFilterRow(
+    deviceIds: Set<String>,
+    selected: String,
+    ownDeviceId: String,
+    peers: List<PairedPeer>,
+    onSelect: (String) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(IdePanel)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        // "All" chip — always first
+        item {
+            DeviceChip(
+                label = "All",
+                isSelected = selected == "all",
+                onClick = { onSelect("all") },
+            )
+        }
+        // One chip per distinct origin device, own device first
+        val sorted = deviceIds.sortedWith(
+            compareByDescending<String> { it == ownDeviceId }
+                .thenBy { deviceDisplayName(it, ownDeviceId, peers) }
+        )
+        items(sorted) { id ->
+            DeviceChip(
+                label = deviceDisplayName(id, ownDeviceId, peers),
+                isSelected = selected == id,
+                isOwn = id == ownDeviceId,
+                onClick = { onSelect(id) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeviceChip(
+    label: String,
+    isSelected: Boolean,
+    isOwn: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val bg = when {
+        isSelected -> IdeAccent
+        isOwn      -> IdeAccentDim
+        else       -> IdeElevated
+    }
+    val fg = if (isSelected) IdeBg else if (isOwn) IdeAccent else IdeDim
+
+    Box(
+        modifier = Modifier
+            .background(color = bg, shape = RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Text(
+            text = label,
+            style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+            color = fg,
+            maxLines = 1,
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Origin-device badge — parity with macOS HistoryView DeviceBadge chip.
+//
+// Shown per-row when the item's [ClipboardItem.originDeviceId] is non-null.
+// Displays "This device" (accented) for items captured locally, or the peer's
+// display name (dim) for items received from another device.
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun OriginDeviceBadge(
+    deviceId: String,
+    ownDeviceId: String,
+    peers: List<PairedPeer>,
+) {
+    val isOwn = deviceId == ownDeviceId
+    val label = deviceDisplayName(deviceId, ownDeviceId, peers)
+
+    Box(
+        modifier = Modifier
+            .background(
+                color = if (isOwn) IdeAccentDim else IdeElevated,
+                shape = RoundedCornerShape(4.dp),
+            )
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+    ) {
+        Text(
+            text = label,
+            style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Normal),
+            color = if (isOwn) IdeAccent else IdeFaint,
+            maxLines = 1,
+        )
     }
 }
 

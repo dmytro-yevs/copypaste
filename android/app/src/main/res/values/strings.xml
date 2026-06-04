@@ -220,6 +220,7 @@
     <string name="cd_refresh">Refresh</string>
     <string name="cd_copy">Copy</string>
     <string name="cd_delete">Delete item</string>
+    <string name="preview_drag_up_hint">Drag up to expand</string>
     <string name="cd_sensitive_icon">Sensitive content marker</string>
     <string name="cd_image_item">Image clipboard item</string>
     <string name="cd_image_thumbnail">Image thumbnail</string>
