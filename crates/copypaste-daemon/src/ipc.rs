@@ -11711,7 +11711,7 @@ mod tests {
         // The receiver is kept alive for the duration of the test so the
         // sender's `is_closed()` returns false (the channel is open).
         let (peer_tx, _peer_rx) =
-            tokio::sync::mpsc::channel::<copypaste_sync::protocol::WireItem>(1);
+            tokio::sync::mpsc::channel::<copypaste_sync::protocol::PeerFrame>(1);
         let sinks_map: crate::p2p::LivePeerSinks =
             Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::from([
                 (fp_canonical.clone(), peer_tx),

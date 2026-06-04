@@ -1669,13 +1669,13 @@ mod tests {
             StuckStream,
             tokio_util::codec::LengthDelimitedCodec::new(),
         );
-        let (peer_tx, peer_rx) = mpsc::channel::<WireItem>(8);
+        let (peer_tx, peer_rx) = mpsc::channel::<PeerFrame>(8);
         let (incoming_tx, _incoming_rx) = mpsc::channel::<WireItem>(8);
 
         // Queue an outbound item so the pump enters the write arm and blocks.
-        peer_tx.send(test_wire_item("a")).await.unwrap();
+        peer_tx.send(PeerFrame::Data(test_wire_item("a"))).await.unwrap();
 
-        let handle = tokio::spawn(run_peer_connection_framed(framed, peer_rx, incoming_tx));
+        let handle = tokio::spawn(run_peer_connection_framed(framed, peer_rx, incoming_tx, "testpeer".to_string()));
 
         // The sink Sender must close once the pump tears down on write timeout.
         // With paused time the timer advances automatically when the runtime is

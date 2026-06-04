@@ -196,6 +196,11 @@ pub enum ControlMsg {
 /// warning; that is acceptable — the local eviction already happened.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
+// `Data(WireItem)` is the overwhelmingly common variant (every synced clip) and
+// lives only transiently on the per-peer mpsc channel; `Control` is rare. Boxing
+// `WireItem` to shrink the enum would add a heap allocation on the hot sync path
+// for no real benefit, so we accept the size difference here.
+#[allow(clippy::large_enum_variant)]
 pub enum PeerFrame {
     /// A normal clipboard-item payload.
     Data(WireItem),
