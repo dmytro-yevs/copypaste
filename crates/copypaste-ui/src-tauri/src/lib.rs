@@ -147,6 +147,10 @@ struct RecentSubmenu(Mutex<Option<tauri::menu::Submenu<tauri::Wry>>>);
 /// `AppHandle` forever and blocking teardown.
 struct TrayResyncStop(std::sync::Arc<std::sync::atomic::AtomicBool>);
 
+/// Stop flag for `spawn_incoming_pairing_poller`. Same pattern as
+/// `TrayResyncStop` — set on `RunEvent::Exit` so the thread exits cleanly.
+struct PairingPollStop(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
 // ---------------------------------------------------------------------------
 // Tauri entry point
 // ---------------------------------------------------------------------------
@@ -168,6 +172,10 @@ pub fn run() {
         .manage(RecentSubmenu(Mutex::new(None)))
         // Stop flag for the recent-resync background thread; set on app exit.
         .manage(TrayResyncStop(std::sync::Arc::new(
+            std::sync::atomic::AtomicBool::new(false),
+        )))
+        // Stop flag for the incoming-pairing poller thread; set on app exit.
+        .manage(PairingPollStop(std::sync::Arc::new(
             std::sync::atomic::AtomicBool::new(false),
         )))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
@@ -293,6 +301,12 @@ pub fn run() {
             // then refreshes it periodically so the items stay current.
             spawn_tray_recent_resync(app.handle().clone());
 
+            // Incoming-pairing poller: detect responder-side SAS requests even
+            // when the user is not on the Devices tab.  Fires a system
+            // notification + brings the window forward + emits an
+            // `incoming-pairing` event that App.tsx routes to the modal.
+            spawn_incoming_pairing_poller(app.handle().clone());
+
             #[cfg(target_os = "macos")]
             {
                 setup_macos(app);
@@ -315,6 +329,10 @@ pub fn run() {
                 // tear down the daemon, so it doesn't make IPC calls against a
                 // dead socket during teardown.
                 if let Some(stop) = handle.try_state::<TrayResyncStop>() {
+                    stop.0.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                // Signal the incoming-pairing poller thread to exit.
+                if let Some(stop) = handle.try_state::<PairingPollStop>() {
                     stop.0.store(true, std::sync::atomic::Ordering::Relaxed);
                 }
                 // Release the macOS CGEventTap (tap, run-loop source, CFMachPort,
@@ -1883,6 +1901,124 @@ fn check_and_notify_new_capture(last_seen: &mut i64) {
     {
         let _ = (title, body);
     }
+}
+
+/// Always-on background poller for incoming (responder-side) pairing requests.
+///
+/// The frontend SAS poll lives inside `DevicesView` which is only mounted while
+/// the Devices tab is active.  An inbound discovery-pair from another device
+/// therefore goes unnoticed when the user is on any other tab.
+///
+/// This thread closes that gap: it polls `pair_get_sas` every ~1 s and, the
+/// first time it observes `state == "awaiting_sas"` with `role == "responder"`,
+/// it:
+///
+/// 1. Posts a system notification ("CopyPaste — Pairing request").
+/// 2. Brings the main window to the foreground (`show_main`).
+/// 3. Emits the `"incoming-pairing"` Tauri event carrying the full
+///    `pair_get_sas` JSON so `App.tsx` can switch to the Devices tab and open
+///    the SAS modal pre-seeded with the code.
+///
+/// ## De-duplication
+///
+/// We track the last SAS string for which we fired the notification.  As long
+/// as the daemon stays in `awaiting_sas` with the **same** SAS the notification
+/// is not repeated (avoids a banner every second while the user reads the
+/// code).  When the state leaves `awaiting_sas` we clear the last-seen SAS so
+/// a subsequent, distinct pairing episode triggers a fresh notification.
+///
+/// ## Error handling
+///
+/// Every IPC error is logged and the loop sleeps before retrying — the thread
+/// never panics.
+fn spawn_incoming_pairing_poller(handle: tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    use std::thread;
+    use std::time::Duration;
+
+    let stop_flag: std::sync::Arc<std::sync::atomic::AtomicBool> = handle
+        .try_state::<PairingPollStop>()
+        .map(|s| std::sync::Arc::clone(&s.0))
+        .unwrap_or_else(|| std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
+
+    thread::spawn(move || {
+        /// How often to poll `pair_get_sas`.
+        const POLL_INTERVAL: Duration = Duration::from_millis(1_000);
+
+        // The SAS code for which we already fired a notification this episode.
+        // `None` means no active episode; set once we fire, cleared when the
+        // daemon leaves `awaiting_sas`.
+        let mut notified_sas: Option<String> = None;
+
+        loop {
+            if stop_flag.load(Ordering::Relaxed) {
+                return;
+            }
+
+            match ipc::call("pair_get_sas", serde_json::json!({})) {
+                Err(e) => {
+                    // Socket errors (daemon offline, not yet started, etc.)
+                    // are expected during startup and are not worth logging
+                    // at warn level every second.  Debug-log and retry.
+                    tracing::debug!("incoming-pairing poller: pair_get_sas error: {e}");
+                    // Clear notified SAS so a recovered episode fires fresh.
+                    notified_sas = None;
+                }
+                Ok(reply) if !reply.ok => {
+                    // Daemon returned an error response — log and continue.
+                    tracing::debug!(
+                        "incoming-pairing poller: pair_get_sas not-ok: {:?}",
+                        reply.error
+                    );
+                    notified_sas = None;
+                }
+                Ok(reply) => {
+                    let data = reply.data.as_ref();
+                    let state = data.and_then(|d| d["state"].as_str()).unwrap_or("idle");
+                    let role = data.and_then(|d| d["role"].as_str()).unwrap_or("");
+
+                    if state == "awaiting_sas" && role == "responder" {
+                        let sas = data
+                            .and_then(|d| d["sas"].as_str())
+                            .unwrap_or("")
+                            .to_owned();
+
+                        // Only fire notification + focus once per SAS episode.
+                        if notified_sas.as_deref() != Some(sas.as_str()) {
+                            notified_sas = Some(sas.clone());
+
+                            // 1. Bring the main window to the foreground.
+                            show_main(&handle);
+
+                            // 2. Post a system notification.
+                            show_copy_notification(
+                                "CopyPaste — Pairing request".to_owned(),
+                                "A device wants to pair. Confirm the matching code in the app."
+                                    .to_owned(),
+                            );
+
+                            // 3. Emit the Tauri event so App.tsx can route to
+                            //    the Devices tab and open the SAS modal.
+                            if let Err(e) = handle.emit(
+                                "incoming-pairing",
+                                reply.data.unwrap_or(serde_json::Value::Null),
+                            ) {
+                                tracing::warn!("incoming-pairing poller: emit failed: {e}");
+                            }
+                        }
+                    } else {
+                        // Any non-awaiting_sas+responder state clears the
+                        // de-dup so the next episode fires a fresh notification.
+                        if notified_sas.is_some() {
+                            notified_sas = None;
+                        }
+                    }
+                }
+            }
+
+            thread::sleep(POLL_INTERVAL);
+        }
+    });
 }
 
 #[cfg(target_os = "macos")]

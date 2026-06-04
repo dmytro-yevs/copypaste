@@ -7,8 +7,6 @@ import {
   formatEpochSecs,
   pairingQrSvg,
   probeStatus,
-  focusMainWindow,
-  showPairingRequestNotification,
   type DiscoveredDevice,
   type OwnDeviceInfo,
   type PairedDevice,
@@ -259,11 +257,21 @@ const DISCOVERED_POLL_MS = 3000;
  */
 function SasPairingModal({
   device,
+  displayName: displayNameProp,
   initialStatus,
   onClose,
   onPaired,
 }: {
+  /**
+   * The discovered device being paired (initiator path). When absent, use
+   * `displayName` instead (responder/incoming-pairing path).
+   */
   device?: DiscoveredDevice | null;
+  /**
+   * Override display name — used on the responder side where no DiscoveredDevice
+   * is available. Resolved as: peer_device_name ?? peer_name ?? "A device".
+   */
+  displayName?: string;
   /** Seed status for responder path — avoids a spurious "idle" flash on open. */
   initialStatus?: PairSasStatus;
   onClose: () => void;
@@ -448,14 +456,16 @@ function SasPairingModal({
     );
   }, [status.sas]);
 
-  // Resolve the display name for the modal title. For the initiator we have the
-  // full DiscoveredDevice; for the responder we fall back to peer meta from the
-  // SAS status payload (daemon may not send it yet — TODO: bump PeerMeta proto
-  // to include name/model/os/version in pair_get_sas once the daemon is updated).
+  // Resolve the display name for the modal title. Initiator: the full
+  // DiscoveredDevice. Responder/incoming-pairing: an explicit displayName prop
+  // (from the App-level incoming-pairing event) or the peer meta the daemon
+  // surfaces in the SAS status payload.
   const peerName =
+    displayNameProp ||
     device?.device_name ||
+    status.peer_device_name ||
     status.peer_name ||
-    (device ? `Device ${device.device_id.slice(0, 8)}` : "Unknown device");
+    (device ? `Device ${device.device_id.slice(0, 8)}` : "A device");
 
   const isResponder = status.role === "responder";
 
@@ -676,7 +686,16 @@ const QR_REFRESH_MARGIN_SECS = 15;
 // Main view
 // ---------------------------------------------------------------------------
 
-export function DevicesView() {
+export function DevicesView({
+  incomingPairing = null,
+}: {
+  /**
+   * When the Tauri backend detects an inbound pairing request (responder side),
+   * App.tsx passes the `pair_get_sas` payload here so the modal opens regardless
+   * of which tab was active when the request arrived.
+   */
+  incomingPairing?: PairSasStatus | null;
+} = {}) {
   // --- Own device info ---
   const [ownState, setOwnState] = useState<OwnDeviceState>({ status: "loading" });
   // Ref that always holds the latest own fingerprint so loadPeers (a useCallback)
@@ -723,14 +742,25 @@ export function DevicesView() {
   const [discoverError, setDiscoverError] = useState<string | null>(null);
   // HB-9: true while a manual mDNS rescan is in flight (Refresh button).
   const [rescanning, setRescanning] = useState(false);
-  // Incoming (responder-role) pairing: set to the SAS status when the background
-  // poll detects awaiting_sas + role=responder and no modal is already open.
-  // Cleared when the modal closes.
-  const [incomingPairing, setIncomingPairing] = useState<PairSasStatus | null>(null);
-  // De-dupe guard: the session token for which we already fired a notification,
-  // keyed on sas code so we don't spam on every poll tick. Stored in a ref so
-  // it never triggers a re-render.
-  const notifiedSasRef = useRef<string | null>(null);
+  // --- Incoming (responder) pairing ---
+  // When the backend emits "incoming-pairing" (App.tsx routes it here), we open
+  // the SAS modal pre-seeded with the inbound status rather than waiting for the
+  // user to be on the Devices tab.  We track it separately from `pairingDevice`
+  // because the responder has no DiscoveredDevice — only the SAS status payload.
+  const [responderPairing, setResponderPairing] = useState<PairSasStatus | null>(
+    // Initialise from the prop so the modal opens immediately on first render
+    // if App.tsx already has an in-flight inbound pairing when it mounts/remounts
+    // DevicesView (e.g. because it just switched to the Devices tab).
+    incomingPairing ?? null
+  );
+
+  // Keep responderPairing in sync when the prop changes (App.tsx may update it
+  // after the component is already mounted).
+  useEffect(() => {
+    if (incomingPairing != null) {
+      setResponderPairing(incomingPairing);
+    }
+  }, [incomingPairing]);
 
   // --- QR pairing ---
   const [qrState, setQrState] = useState<QrState>({ status: "idle" });
@@ -1002,62 +1032,12 @@ export function DevicesView() {
       setRescanning(false);
     }
   }, [rescanning]);
-  // --- Background SAS poll (always running while the view is mounted) ---
-  //
-  // Continuously polls pair_get_sas at the same interval as the modal's own
-  // poll so that an INCOMING pairing (role=responder, state=awaiting_sas)
-  // detected here auto-opens the SAS modal — even when the user did NOT
-  // initiate the pairing on this device.
-  //
-  // Race safety: if a modal is already open (pairingDevice !== null OR
-  // incomingPairing !== null), we skip opening a second one. The modal's own
-  // internal poll takes over as soon as it mounts.
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async () => {
-      try {
-        const s = await api.pairGetSas();
-        if (cancelled) return;
-
-        const modalOpen = pairingDevice !== null || incomingPairing !== null;
-
-        if (
-          s.state === "awaiting_sas" &&
-          s.role === "responder" &&
-          !modalOpen
-        ) {
-          // Incoming pairing — open the modal seeded with the current status.
-          setIncomingPairing(s);
-
-          // Fire a notification + focus the window exactly once per SAS code
-          // (de-dupe across rapid poll ticks for the same pairing session).
-          const sasKey = s.sas ?? "pending";
-          if (notifiedSasRef.current !== sasKey) {
-            notifiedSasRef.current = sasKey;
-            const peer = s.peer_name ?? "A device";
-            void showPairingRequestNotification(peer);
-            void focusMainWindow();
-          }
-        }
-      } catch {
-        // Best-effort — poll errors are non-fatal; the view still works.
-      }
-
-      if (!cancelled) {
-        timer = setTimeout(() => void poll(), SAS_POLL_MS);
-      }
-    };
-
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer !== null) clearTimeout(timer);
-    };
-  // Re-run only when the "modal open" flags change so the guard stays current.
-  // pairingDevice and incomingPairing are the two flags that open/close a modal.
-  }, [pairingDevice, incomingPairing]);
+  // NOTE: the responder-side incoming-pairing detection used to live here as a
+  // view-level pair_get_sas poll, but that only ran while the Devices tab was
+  // mounted. It is now handled by an always-on poll in the Tauri backend
+  // (`spawn_incoming_pairing_poller`) which emits an "incoming-pairing" event;
+  // App.tsx routes the payload here via the `incomingPairing` prop → seeds
+  // `responderPairing` (above) → opens the modal regardless of the active tab.
 
   // Begin a discovery-initiated SAS pairing, then open the SAS modal.
   const handlePairDiscovered = useCallback(async (device: DiscoveredDevice) => {
@@ -1085,9 +1065,7 @@ export function DevicesView() {
   // background poll can detect a subsequent new pairing session.
   const handleClosePairing = useCallback(() => {
     setPairingDevice(null);
-    setIncomingPairing(null);
-    // Reset the notification de-dupe key so a future new pairing re-fires.
-    notifiedSasRef.current = null;
+    setResponderPairing(null);
     void loadPeers();
     void loadDiscovered();
   }, [loadPeers, loadDiscovered]);
@@ -1509,16 +1487,38 @@ export function DevicesView() {
         )}
       </section>
 
-      {/* ── SAS pairing modal — initiator (tapped "Pair") OR responder
-          (incoming pairing detected by background poll). Only one modal
-          renders at a time: pairingDevice takes priority (initiator), then
-          incomingPairing (responder). The background poll suppresses opening
-          a second modal while either is already open. */}
-      {(pairingDevice !== null || incomingPairing !== null) && (
+      {/* ── SAS pairing modal (discovery-initiated, initiator). The responder
+          path is handled by the dedicated `responderPairing` modal below,
+          driven by the always-on backend poll → "incoming-pairing" event. */}
+      {pairingDevice !== null && (
         <SasPairingModal
           device={pairingDevice ?? undefined}
           initialStatus={incomingPairing ?? undefined}
           onClose={handleClosePairing}
+          onPaired={loadPeers}
+        />
+      )}
+
+      {/* ── SAS pairing modal (incoming/responder) ───────────────────────
+           Opened when the Tauri backend detects an inbound pairing request
+           (pair_get_sas state="awaiting_sas" + role="responder") and emits
+           the "incoming-pairing" event.  App.tsx switches to the Devices tab
+           and passes the payload via the `incomingPairing` prop, which seeds
+           `responderPairing` on mount.  Only shown when no initiator modal is
+           already open (pairingDevice takes precedence). */}
+      {pairingDevice === null && responderPairing !== null && (
+        <SasPairingModal
+          displayName={
+            responderPairing.peer_device_name
+              ?? responderPairing.peer_name
+              ?? "A device"
+          }
+          initialStatus={responderPairing}
+          onClose={() => {
+            setResponderPairing(null);
+            void loadPeers();
+            void loadDiscovered();
+          }}
           onPaired={loadPeers}
         />
       )}
