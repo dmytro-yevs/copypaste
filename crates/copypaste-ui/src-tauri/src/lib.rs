@@ -201,6 +201,7 @@ pub fn run() {
             ipc::read_logs,
             ipc::log_dir_path,
             ipc::ingest_dropped_files,
+            focus_main_window,
         ])
         .setup(|app| {
             // Load persisted config now that we have the app handle.
@@ -1445,6 +1446,16 @@ fn show_main(app: &tauri::AppHandle) {
         let _ = win.unminimize();
         let _ = win.set_focus();
     }
+}
+
+/// Bring the main CopyPaste window to the foreground.
+///
+/// Called by the React layer when an incoming pairing request (role=responder,
+/// state=awaiting_sas) is detected so the SAS confirmation modal is visible
+/// to the user immediately, without requiring them to open the app manually.
+#[tauri::command]
+fn focus_main_window(handle: tauri::AppHandle) {
+    show_main(&handle);
 }
 
 /// V-21-A: Startup-race tray re-sync.

@@ -265,6 +265,19 @@ export interface PairSasStatus {
   sas?: string;
   /** "initiator" | "responder" — present only mid-pairing. */
   role?: string;
+  // Peer identity fields — included when the daemon has learned them during
+  // the pairing handshake. Optional for back-compat: older daemon builds do not
+  // emit these fields. The UI shows what is available and falls back gracefully.
+  /** Peer's user-visible device name (e.g. "Pixel 8"). */
+  peer_name?: string | null;
+  /** Peer's hardware model (e.g. "Pixel 8 Pro"). */
+  peer_model?: string | null;
+  /** Peer's OS name + version (e.g. "Android 15"). */
+  peer_os?: string | null;
+  /** Peer's app/daemon version. */
+  peer_app_version?: string | null;
+  /** Peer's best LAN-routable IP address. */
+  peer_ip?: string | null;
 }
 
 export interface PairedDevice {
@@ -826,4 +839,38 @@ export async function readLogs(maxLines: number): Promise<string> {
  */
 export async function logDirPath(): Promise<string> {
   return invoke<string>("log_dir_path");
+}
+
+/**
+ * Bring the main CopyPaste window to the foreground.
+ *
+ * Used when an incoming pairing request arrives on the responder side so the
+ * user sees the SAS confirmation modal without having to open the app manually.
+ * Non-blocking and failure-safe: any error is swallowed.
+ */
+export async function focusMainWindow(): Promise<void> {
+  try {
+    await invoke<void>("focus_main_window");
+  } catch {
+    // Best-effort — never block the pairing flow on a window-focus failure.
+  }
+}
+
+/**
+ * Fire a macOS notification informing the user that a remote device is
+ * requesting to pair. Reuses the existing UNUserNotificationCenter path via
+ * `show_copy_notification` so no new Tauri command is needed.
+ *
+ * Non-blocking and failure-safe.
+ *
+ * @param peerName  User-visible name of the peer requesting to pair.
+ */
+export async function showPairingRequestNotification(peerName: string): Promise<void> {
+  const title = "CopyPaste: Pairing Request";
+  const body = `"${peerName}" wants to pair — open CopyPaste to confirm.`;
+  try {
+    await invoke<void>("show_copy_notification", { title, body });
+  } catch {
+    // Best-effort — notification failure must never break the pairing flow.
+  }
 }

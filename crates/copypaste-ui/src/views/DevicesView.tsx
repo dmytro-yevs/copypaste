@@ -6,6 +6,8 @@ import {
   formatEpochSecs,
   pairingQrSvg,
   probeStatus,
+  focusMainWindow,
+  showPairingRequestNotification,
   type DiscoveredDevice,
   type OwnDeviceInfo,
   type PairedDevice,
@@ -208,14 +210,14 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs }: PeerRowP
             disabled={isPending}
             className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {isPending ? "…" : "Unpair"}
+            {isPending ? "..." : "Unpair"}
           </button>
           <button
             onClick={() => onRevoke(peer.fingerprint)}
             disabled={isPending}
             className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {isPending ? "…" : "Revoke"}
+            {isPending ? "..." : "Revoke"}
           </button>
         </div>
       </div>
@@ -244,20 +246,30 @@ const SAS_POLL_MS = 700;
 const DISCOVERED_POLL_MS = 3000;
 
 /**
- * Modal that drives the discovery-initiated SAS pairing handshake for a single
- * peer. On mount it polls `pair_get_sas`; closing it (without a terminal
- * Confirmed state) aborts the in-flight pairing.
+ * Modal that drives the SAS pairing handshake for a single peer. Works for
+ * BOTH the initiator (user clicked "Pair") and the responder (incoming pairing
+ * detected by the background poll). On mount it polls `pair_get_sas`; closing
+ * it (without a terminal Confirmed state) aborts the in-flight pairing.
+ *
+ * `device` is optional: present when the local user initiated (we already have
+ * the DiscoveredDevice), absent on the responder side where peer identity comes
+ * from the PairSasStatus fields returned by pair_get_sas.
  */
 function SasPairingModal({
   device,
+  initialStatus,
   onClose,
   onPaired,
 }: {
-  device: DiscoveredDevice;
+  device?: DiscoveredDevice | null;
+  /** Seed status for responder path — avoids a spurious "idle" flash on open. */
+  initialStatus?: PairSasStatus;
   onClose: () => void;
   onPaired: () => void;
 }) {
-  const [status, setStatus] = useState<PairSasStatus>({ state: "initiating" });
+  const [status, setStatus] = useState<PairSasStatus>(
+    initialStatus ?? { state: "initiating" }
+  );
   const [error, setError] = useState<string | null>(null);
   const [confirmPending, setConfirmPending] = useState(false);
   const [sasCopied, setSasCopied] = useState(false);
@@ -298,6 +310,9 @@ function SasPairingModal({
   // spinner forever). Interpretation: if the local user already accepted the
   // SAS, treat trailing idle as success (Paired + onPaired); otherwise show a
   // neutral "ended" close state.
+  //
+  // For the responder path, `initialStatus` seeds `awaiting_sas` so `sawActive`
+  // starts true — a trailing idle after the user acts is treated as terminal.
   useEffect(() => {
     // Per-effect cancellation flag captured by this closure. Each effect run's
     // cleanup authoritatively stops only its own poll loop, so re-creating the
@@ -305,7 +320,10 @@ function SasPairingModal({
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     // Whether this loop has ever seen a non-idle (active) handshake state.
-    let sawActive = false;
+    // Seed to true when the modal already starts in awaiting_sas (responder).
+    let sawActive =
+      initialStatus?.state === "initiating" ||
+      initialStatus?.state === "awaiting_sas";
 
     const poll = async () => {
       try {
@@ -365,7 +383,7 @@ function SasPairingModal({
       cancelled = true;
       if (timer !== null) clearTimeout(timer);
     };
-  }, [onPaired]);
+  }, [onPaired, initialStatus]);
 
   useEffect(() => {
     return () => {
@@ -428,7 +446,16 @@ function SasPairingModal({
     );
   }, [status.sas]);
 
-  const title = device.device_name || `Device ${device.device_id.slice(0, 8)}`;
+  // Resolve the display name for the modal title. For the initiator we have the
+  // full DiscoveredDevice; for the responder we fall back to peer meta from the
+  // SAS status payload (daemon may not send it yet — TODO: bump PeerMeta proto
+  // to include name/model/os/version in pair_get_sas once the daemon is updated).
+  const peerName =
+    device?.device_name ||
+    status.peer_name ||
+    (device ? `Device ${device.device_id.slice(0, 8)}` : "Unknown device");
+
+  const isResponder = status.role === "responder";
 
   return (
     <div
@@ -438,13 +465,25 @@ function SasPairingModal({
       aria-label="Pair device"
     >
       <div className="w-full max-w-sm rounded-ide-lg border border-ide-border bg-ide-elevated p-5 shadow-ide-lg">
-        <p className="mb-1 text-[13px] font-medium text-ide-text">Pair “{title}”</p>
+        <p className="mb-1 text-[13px] font-medium text-ide-text">
+          {isResponder ? `"${peerName}" wants to pair` : `Pair "${peerName}"`}
+        </p>
+
+        {/* Peer metadata (responder path, or when daemon provides it) */}
+        {(status.peer_model || status.peer_os || status.peer_app_version || status.peer_ip) && (
+          <div className="mt-1 mb-2 space-y-0.5">
+            <MetaRow label="Model" value={status.peer_model} />
+            <MetaRow label="OS" value={status.peer_os} />
+            <MetaRow label="Version" value={status.peer_app_version} />
+            <MetaRow label="IP" value={status.peer_ip} />
+          </div>
+        )}
 
         {/* Connecting / initiating */}
         {!ended && status.state === "initiating" && error === null && (
           <div className="flex items-center gap-2 py-4">
             <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ide-faint border-t-ide-accent" />
-            <p className="text-[12px] text-ide-dim">Connecting…</p>
+            <p className="text-[12px] text-ide-dim">Connecting...</p>
           </div>
         )}
 
@@ -469,14 +508,14 @@ function SasPairingModal({
                 disabled={confirmPending}
                 className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Doesn’t match
+                Doesn't match
               </button>
               <button
                 onClick={() => void handleConfirm(true)}
                 disabled={confirmPending}
                 className="rounded-ide border border-ide-accent/40 bg-ide-accent/15 px-3 py-1.5 text-[12px] font-medium text-ide-accent hover:bg-ide-accent/25 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {confirmPending ? "…" : "Match"}
+                {confirmPending ? "..." : "Match"}
               </button>
             </div>
           </div>
@@ -486,7 +525,7 @@ function SasPairingModal({
         {!ended && status.state === "awaiting_sas" && status.sas === undefined && (
           <div className="flex items-center gap-2 py-4">
             <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ide-faint border-t-ide-accent" />
-            <p className="text-[12px] text-ide-dim">Waiting for the other device…</p>
+            <p className="text-[12px] text-ide-dim">Waiting for the other device...</p>
           </div>
         )}
 
@@ -668,6 +707,14 @@ export function DevicesView() {
   const [discoverError, setDiscoverError] = useState<string | null>(null);
   // HB-9: true while a manual mDNS rescan is in flight (Refresh button).
   const [rescanning, setRescanning] = useState(false);
+  // Incoming (responder-role) pairing: set to the SAS status when the background
+  // poll detects awaiting_sas + role=responder and no modal is already open.
+  // Cleared when the modal closes.
+  const [incomingPairing, setIncomingPairing] = useState<PairSasStatus | null>(null);
+  // De-dupe guard: the session token for which we already fired a notification,
+  // keyed on sas code so we don't spam on every poll tick. Stored in a ref so
+  // it never triggers a re-render.
+  const notifiedSasRef = useRef<string | null>(null);
 
   // --- QR pairing ---
   const [qrState, setQrState] = useState<QrState>({ status: "idle" });
@@ -939,6 +986,62 @@ export function DevicesView() {
       setRescanning(false);
     }
   }, [rescanning]);
+  // --- Background SAS poll (always running while the view is mounted) ---
+  //
+  // Continuously polls pair_get_sas at the same interval as the modal's own
+  // poll so that an INCOMING pairing (role=responder, state=awaiting_sas)
+  // detected here auto-opens the SAS modal — even when the user did NOT
+  // initiate the pairing on this device.
+  //
+  // Race safety: if a modal is already open (pairingDevice !== null OR
+  // incomingPairing !== null), we skip opening a second one. The modal's own
+  // internal poll takes over as soon as it mounts.
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const s = await api.pairGetSas();
+        if (cancelled) return;
+
+        const modalOpen = pairingDevice !== null || incomingPairing !== null;
+
+        if (
+          s.state === "awaiting_sas" &&
+          s.role === "responder" &&
+          !modalOpen
+        ) {
+          // Incoming pairing — open the modal seeded with the current status.
+          setIncomingPairing(s);
+
+          // Fire a notification + focus the window exactly once per SAS code
+          // (de-dupe across rapid poll ticks for the same pairing session).
+          const sasKey = s.sas ?? "pending";
+          if (notifiedSasRef.current !== sasKey) {
+            notifiedSasRef.current = sasKey;
+            const peer = s.peer_name ?? "A device";
+            void showPairingRequestNotification(peer);
+            void focusMainWindow();
+          }
+        }
+      } catch {
+        // Best-effort — poll errors are non-fatal; the view still works.
+      }
+
+      if (!cancelled) {
+        timer = setTimeout(() => void poll(), SAS_POLL_MS);
+      }
+    };
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== null) clearTimeout(timer);
+    };
+  // Re-run only when the "modal open" flags change so the guard stays current.
+  // pairingDevice and incomingPairing are the two flags that open/close a modal.
+  }, [pairingDevice, incomingPairing]);
 
   // Begin a discovery-initiated SAS pairing, then open the SAS modal.
   const handlePairDiscovered = useCallback(async (device: DiscoveredDevice) => {
@@ -961,9 +1064,14 @@ export function DevicesView() {
   }, [pairStarting, pairingDevice]);
 
   // Close the SAS modal and refresh both lists (a freshly paired device should
-  // move from "Discovered" to the paired list).
+  // move from "Discovered" to the paired list). Clears both the initiator
+  // (pairingDevice) and responder (incomingPairing) modal state so the
+  // background poll can detect a subsequent new pairing session.
   const handleClosePairing = useCallback(() => {
     setPairingDevice(null);
+    setIncomingPairing(null);
+    // Reset the notification de-dupe key so a future new pairing re-fires.
+    notifiedSasRef.current = null;
     void loadPeers();
     void loadDiscovered();
   }, [loadPeers, loadDiscovered]);
@@ -1127,7 +1235,7 @@ export function DevicesView() {
           disabled={revokeAllPending || loadState !== "ready" || peers.length === 0}
           className="rounded-ide border border-ide-danger/35 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {revokeAllPending ? "Revoking…" : "Revoke all"}
+          {revokeAllPending ? "Revoking..." : "Revoke all"}
         </button>
       )}
     </div>
@@ -1214,7 +1322,7 @@ export function DevicesView() {
         {/* This device — always first */}
         {ownState.status === "loading" && (
           <div className="px-3 py-2.5">
-            <p className="text-[13px] text-ide-faint animate-pulse">Loading…</p>
+            <p className="text-[13px] text-ide-faint animate-pulse">Loading...</p>
           </div>
         )}
         {ownState.status === "offline" && (
@@ -1229,7 +1337,7 @@ export function DevicesView() {
         {/* Paired peers */}
         {loadState === "loading" && (
           <div className="px-3 py-2.5">
-            <p className="text-[13px] text-ide-faint animate-pulse">Loading peers…</p>
+            <p className="text-[13px] text-ide-faint animate-pulse">Loading peers...</p>
           </div>
         )}
         {loadState === "ready" && peers.length === 0 && (
@@ -1313,7 +1421,7 @@ export function DevicesView() {
 
       <section className="rounded-ide-lg border border-ide-border bg-ide-elevated p-4 space-y-3 shadow-ide-sm">
         {qrState.status === "loading" && (
-          <p className="text-[12px] text-ide-dim animate-pulse">Generating…</p>
+          <p className="text-[12px] text-ide-dim animate-pulse">Generating...</p>
         )}
 
         {qrState.status === "ready" && (
@@ -1378,14 +1486,19 @@ export function DevicesView() {
         )}
 
         {qrState.status === "idle" && (
-          <p className="text-[12px] text-ide-dim animate-pulse">Generating pairing code…</p>
+          <p className="text-[12px] text-ide-dim animate-pulse">Generating pairing code...</p>
         )}
       </section>
 
-      {/* ── SAS pairing modal (discovery-initiated) ──────────────── */}
-      {pairingDevice !== null && (
+      {/* ── SAS pairing modal — initiator (tapped "Pair") OR responder
+          (incoming pairing detected by background poll). Only one modal
+          renders at a time: pairingDevice takes priority (initiator), then
+          incomingPairing (responder). The background poll suppresses opening
+          a second modal while either is already open. */}
+      {(pairingDevice !== null || incomingPairing !== null) && (
         <SasPairingModal
-          device={pairingDevice}
+          device={pairingDevice ?? undefined}
+          initialStatus={incomingPairing ?? undefined}
           onClose={handleClosePairing}
           onPaired={loadPeers}
         />
@@ -1401,7 +1514,7 @@ export function DevicesView() {
         >
           <div className="w-full max-w-sm rounded-ide-lg border border-ide-border bg-ide-elevated p-5 shadow-ide-lg">
             <p className="mb-1 text-[13px] font-medium text-ide-text">
-              Revoke “{revokePrompt.name}”
+              Revoke "{revokePrompt.name}"
             </p>
             <p className="mb-3 text-[12px] leading-relaxed text-ide-dim">
               Revoking removes this device from P2P. To also cut off cloud/relay
@@ -1451,7 +1564,7 @@ export function DevicesView() {
                 }
                 className="rounded-ide border border-ide-danger/40 bg-ide-danger/15 px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {revokeBusy ? "…" : "Revoke & rotate"}
+                {revokeBusy ? "..." : "Revoke & rotate"}
               </button>
             </div>
           </div>
