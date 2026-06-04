@@ -37,28 +37,47 @@
 //!
 //! # Wire format
 //!
-//! The encoded payload is a single ASCII line, safe to embed in any QR code:
+//! Two versions are recognised:
+//!
+//! ## v2 (current — emitted by [`PairingPayload::encode`])
+//!
+//! ```text
+//! CPPAIR2.<fp_b64url43>.<token_b64url>.<device_id_b64url22>.<name_b64url>.<host:port>
+//! ```
+//!
+//! * `CPPAIR2` — magic + version (`2`).
+//! * `fp_b64url43` — the 32 raw fingerprint bytes encoded as base64url **without**
+//!   padding (43 chars). On encode the hex/colon-hex fingerprint is first
+//!   hex-decoded (colons stripped) to 32 bytes; on decode the bytes are
+//!   hex-encoded back to the lowercase bare-hex form callers expect.
+//! * `token_b64url` — the 32-byte pairing token, base64url **without** padding
+//!   (43 chars, unchanged from v1).
+//! * `device_id_b64url22` — the UUID's 16 raw bytes encoded as base64url **without**
+//!   padding (22 chars). On encode the UUID string is parsed to its 16-byte wire
+//!   form; on decode the bytes are formatted back as a standard UUID string.
+//! * `name_b64url` — the human-readable device name, base64url (unchanged from v1).
+//! * `host:port` — optional discovery hint (unchanged from v1).
+//!
+//! Compared to v1, `fp_b64url43` saves 21 chars (64→43) and `device_id_b64url22`
+//! saves 14 chars (36→22), for a total saving of 35 chars per payload.
+//!
+//! ## v1 (legacy — still accepted by [`PairingPayload::decode`])
 //!
 //! ```text
 //! CPPAIR1.<fp_hex>.<token_b64url>.<device_id>.<name_b64url>.<host:port>
 //! ```
 //!
-//! * `CPPAIR1` — magic + version (`1`). Bumping the trailing digit is a hard
-//!   version change; decoders reject any other value.
-//! * `fp_hex` — the displaying device's cert fingerprint in the user-facing
-//!   lowercase colon-hex form (`xx:xx:...`) the daemon pairing surface accepts.
+//! * `CPPAIR1` — magic + version (`1`). Decoders accept this for backward compat.
+//! * `fp_hex` — the cert fingerprint in lowercase hex (colons optional).
 //! * `token_b64url` — the 32-byte pairing token, base64url **without** padding.
 //! * `device_id` — the displaying device's UUID string.
-//! * `name_b64url` — the human-readable device name, base64url (so `.` and
-//!   non-ASCII in names cannot break field splitting).
-//! * `host:port` — optional discovery hint (`host` may be empty → mDNS only).
+//! * `name_b64url` — the human-readable device name, base64url.
+//! * `host:port` — optional discovery hint.
 //!
-//! Fields are `.`-separated. `fp_hex` is `.`-free hex, `token_b64url` and
-//! `name_b64url` use the URL-safe base64 alphabet (no `.`), `device_id` is a
-//! `.`-free UUID, and `host:port` is the final field — so `.` is an
-//! unambiguous separator. The format is deliberately delimiter-based (not
-//! JSON/CBOR) to keep the QR small: every byte saved lowers the QR version and
-//! improves scan reliability.
+//! Fields are `.`-separated. The base64url alphabet (`A-Z a-z 0-9 - _`) and hex
+//! digits never contain `.`, so `.` is an unambiguous separator. The format is
+//! deliberately delimiter-based (not JSON/CBOR) to keep the QR small: every byte
+//! saved lowers the QR version and improves scan reliability.
 
 use base64::Engine as _;
 use rand::rngs::OsRng;
@@ -67,15 +86,28 @@ use subtle::ConstantTimeEq;
 use thiserror::Error;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-/// Magic prefix + version digit for the encoded QR pairing payload.
+/// Magic prefix for the v1 (legacy) QR pairing payload.
 ///
-/// The trailing `1` is the format version. Decoders MUST reject any other
-/// version rather than attempting a best-effort parse — this prevents a
-/// downgrade attack that strips the token field.
+/// Still accepted by [`PairingPayload::decode`] for backward compatibility with
+/// devices that scanned a v1 QR code. [`PairingPayload::encode`] now emits
+/// [`PAIRING_QR_MAGIC_V2`] instead.
 pub const PAIRING_QR_MAGIC: &str = "CPPAIR1";
 
-/// Number of `.`-separated fields in the v1 payload after the magic prefix.
+/// Magic prefix for the v2 (current) QR pairing payload.
+///
+/// v2 encodes the fingerprint and device_id as base64url (raw bytes) instead of
+/// hex/UUID strings, saving 35 chars per payload and reducing QR code density.
+pub const PAIRING_QR_MAGIC_V2: &str = "CPPAIR2";
+
+/// Number of `.`-separated fields in the payload body after the magic prefix.
+/// Identical for both v1 and v2.
 const PAIRING_QR_FIELD_COUNT: usize = 5;
+
+/// Expected byte length of a SHA-256 certificate fingerprint.
+const FP_BYTE_LEN: usize = 32;
+
+/// Expected byte length of a UUID (version-agnostic, just the 16 wire bytes).
+const UUID_BYTE_LEN: usize = 16;
 
 /// Deep-link URI prefix wrapping the bare [`PAIRING_QR_MAGIC`] payload so that
 /// external QR scanners (e.g. Google Lens, the iOS/Android camera app) treat the
@@ -226,25 +258,28 @@ impl PairingPayload {
         })
     }
 
-    /// Serialise to the single-line QR string described in the module docs.
+    /// Serialise to the CPPAIR2 single-line QR string described in the module docs.
     ///
-    /// The fingerprint is lowercased but its colons are preserved: the daemon
-    /// pairing surface (`is_valid_fingerprint`) expects the user-facing
-    /// `XX:XX:...` colon-hex form and canonicalises (strips colons) itself
-    /// downstream. Hex digits and `:` never contain the `.` field separator, so
-    /// the fingerprint remains a single unambiguous field.
+    /// Emits `CPPAIR2.<fp_b64url43>.<token_b64url>.<device_id_b64url22>.<name_b64url>.<host:port>`.
+    ///
+    /// The fingerprint (hex or colon-hex) is stripped of colons and hex-decoded to
+    /// 32 raw bytes, then base64url-encoded (43 chars). If the fingerprint is not
+    /// valid 32-byte hex the field is passed through as base64url of whatever bytes
+    /// hex-decode produces — decode will reject it with [`PairingQrError::FingerprintLength`].
+    /// The device_id UUID is parsed to its 16 raw bytes and base64url-encoded (22 chars).
+    /// If the UUID cannot be parsed the bytes field is left empty and decode will reject it.
     pub fn encode(&self) -> String {
-        let fp = normalize_fingerprint(&self.fingerprint);
+        let fp_b64 = fp_hex_to_b64url(&self.fingerprint);
         let token_b64 = b64().encode(self.token.0);
+        let device_id_b64 = uuid_str_to_b64url(&self.device_id);
         let name_b64 = b64().encode(self.device_name.as_bytes());
-        // device_id (UUID) and addr_hint (host:port) are passed through.
         // addr_hint is the final field, so any ':' it contains is harmless.
         format!(
-            "{magic}.{fp}.{token_b64}.{device_id}.{name_b64}.{addr_hint}",
-            magic = PAIRING_QR_MAGIC,
-            fp = fp,
+            "{magic}.{fp_b64}.{token_b64}.{device_id_b64}.{name_b64}.{addr_hint}",
+            magic = PAIRING_QR_MAGIC_V2,
+            fp_b64 = fp_b64,
             token_b64 = token_b64,
-            device_id = self.device_id,
+            device_id_b64 = device_id_b64,
             name_b64 = name_b64,
             addr_hint = self.addr_hint,
         )
@@ -252,26 +287,35 @@ impl PairingPayload {
 
     /// Parse a scanned QR string back into a [`PairingPayload`].
     ///
+    /// Accepts both `CPPAIR2` (current) and `CPPAIR1` (legacy) prefixes.
+    ///
     /// # Errors
-    /// * [`PairingQrError::BadMagic`] — missing/unknown magic+version prefix
-    ///   (this is the anti-downgrade guard: a payload without the exact
-    ///   `CPPAIR1` prefix is rejected, never best-effort parsed).
+    /// * [`PairingQrError::BadMagic`] — missing or unrecognised magic+version prefix.
     /// * [`PairingQrError::FieldCount`] — wrong number of `.`-separated fields.
     /// * [`PairingQrError::Base64`] — a base64url field failed to decode.
     /// * [`PairingQrError::Utf8`] — the device-name field was not valid UTF-8.
     /// * [`PairingQrError::TokenLength`] — the token was not exactly 32 bytes.
+    /// * [`PairingQrError::FingerprintLength`] — the fingerprint b64 field did not
+    ///   decode to exactly [`FP_BYTE_LEN`] bytes (CPPAIR2 only).
+    /// * [`PairingQrError::DeviceIdLength`] — the device_id b64 field did not
+    ///   decode to exactly [`UUID_BYTE_LEN`] bytes (CPPAIR2 only).
     /// * [`PairingQrError::EmptyFingerprint`] — the fingerprint field was empty.
     pub fn decode(input: &str) -> Result<Self, PairingQrError> {
         let trimmed = input.trim();
 
-        // Anti-downgrade: require the exact magic+version prefix. Split on the
-        // first '.' to separate the magic from the body so the magic check is
-        // independent of the body's field count.
+        // Split on the first '.' to extract the magic prefix.
         let (magic, body) = trimmed.split_once('.').ok_or(PairingQrError::BadMagic)?;
-        if magic != PAIRING_QR_MAGIC {
-            return Err(PairingQrError::BadMagic);
-        }
 
+        // Branch on the version; reject unknown versions (anti-downgrade guard).
+        match magic {
+            PAIRING_QR_MAGIC_V2 => Self::decode_v2(body),
+            PAIRING_QR_MAGIC => Self::decode_v1(body),
+            _ => Err(PairingQrError::BadMagic),
+        }
+    }
+
+    /// Decode a CPPAIR1 body (the part after the magic prefix dot).
+    fn decode_v1(body: &str) -> Result<Self, PairingQrError> {
         // The body has exactly PAIRING_QR_FIELD_COUNT fields. addr_hint is the
         // last field and may itself contain ':' (host:port) but not '.', so
         // splitn keeps it intact even when host:port is empty.
@@ -291,6 +335,61 @@ impl PairingPayload {
         let token = PairingToken::from_bytes(&token_bytes)?;
 
         let device_id = parts[2].to_string();
+
+        let name_bytes = b64()
+            .decode(parts[3])
+            .map_err(|e| PairingQrError::Base64(format!("name: {e}")))?;
+        let device_name = String::from_utf8(name_bytes)
+            .map_err(|e| PairingQrError::Utf8(format!("name: {e}")))?;
+
+        let addr_hint = parts[4].to_string();
+
+        Ok(Self {
+            fingerprint,
+            token,
+            device_id,
+            device_name,
+            addr_hint,
+        })
+    }
+
+    /// Decode a CPPAIR2 body (the part after the magic prefix dot).
+    fn decode_v2(body: &str) -> Result<Self, PairingQrError> {
+        let parts: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT, '.').collect();
+        if parts.len() != PAIRING_QR_FIELD_COUNT {
+            return Err(PairingQrError::FieldCount(parts.len()));
+        }
+
+        // Fingerprint: b64url → 32 bytes → lowercase hex string.
+        let fp_bytes = b64()
+            .decode(parts[0])
+            .map_err(|e| PairingQrError::Base64(format!("fingerprint: {e}")))?;
+        if fp_bytes.len() != FP_BYTE_LEN {
+            return Err(PairingQrError::FingerprintLength(fp_bytes.len()));
+        }
+        let fingerprint = hex::encode(&fp_bytes);
+        if fingerprint.is_empty() {
+            // Unreachable: hex::encode of non-empty bytes is always non-empty.
+            return Err(PairingQrError::EmptyFingerprint);
+        }
+
+        let token_bytes = b64()
+            .decode(parts[1])
+            .map_err(|e| PairingQrError::Base64(format!("token: {e}")))?;
+        let token = PairingToken::from_bytes(&token_bytes)?;
+
+        // device_id: b64url → 16 bytes → UUID string.
+        let id_bytes = b64()
+            .decode(parts[2])
+            .map_err(|e| PairingQrError::Base64(format!("device_id: {e}")))?;
+        if id_bytes.len() != UUID_BYTE_LEN {
+            return Err(PairingQrError::DeviceIdLength(id_bytes.len()));
+        }
+        // SAFETY: id_bytes.len() == 16, so try_into() is infallible.
+        let id_arr: [u8; UUID_BYTE_LEN] = id_bytes
+            .try_into()
+            .expect("id_bytes.len() == UUID_BYTE_LEN == 16; infallible");
+        let device_id = uuid_bytes_to_str(&id_arr);
 
         let name_bytes = b64()
             .decode(parts[3])
@@ -421,14 +520,59 @@ fn hex_val(c: u8) -> Option<u8> {
     }
 }
 
-/// Lowercase a fingerprint while preserving its colon grouping.
+/// Lowercase a fingerprint while preserving its colon grouping (used for CPPAIR1).
 ///
 /// The colon-hex `XX:XX:...` form is the user-facing identifier the daemon's
 /// `is_valid_fingerprint` accepts and that `canonical_fingerprint` later strips
-/// for the mTLS verifier. Preserving it here keeps the QR payload compatible
+/// for the mTLS verifier. Preserving it here keeps the v1 QR payload compatible
 /// with the existing pairing surface without a separate translation step.
 fn normalize_fingerprint(fp: &str) -> String {
     fp.to_ascii_lowercase()
+}
+
+/// Encode a hex or colon-hex fingerprint as base64url (no padding) for CPPAIR2.
+///
+/// Strips colons, hex-decodes the remaining bytes, then base64url-encodes.
+/// A valid SHA-256 fingerprint (32 bytes = 64 hex chars) yields 43 base64url chars.
+/// If decoding fails (e.g. non-hex chars other than `:`) we return the b64url of
+/// whatever bytes were decoded — the downstream decoder will reject the wrong length.
+fn fp_hex_to_b64url(fp: &str) -> String {
+    // Strip colons to normalise both "aabbcc..." and "aa:bb:cc:..." forms.
+    let hex_only: String = fp.chars().filter(|&c| c != ':').collect();
+    match hex::decode(hex_only.to_ascii_lowercase()) {
+        Ok(bytes) => b64().encode(&bytes),
+        // Non-hex input: encode the raw UTF-8 bytes so the string is non-empty;
+        // decode_v2 will reject it with FingerprintLength.
+        Err(_) => b64().encode(fp.as_bytes()),
+    }
+}
+
+/// Encode a UUID string as base64url (no padding) for CPPAIR2.
+///
+/// Parses the UUID string (with or without hyphens) to its 16 raw bytes, then
+/// base64url-encodes them (22 chars). If parsing fails the raw UTF-8 bytes are
+/// encoded instead — decode_v2 will reject the wrong length.
+fn uuid_str_to_b64url(uuid: &str) -> String {
+    // Strip hyphens and hex-decode the 32 remaining hex chars → 16 bytes.
+    let hex_only: String = uuid.chars().filter(|&c| c != '-').collect();
+    match hex::decode(hex_only) {
+        Ok(bytes) => b64().encode(&bytes),
+        // Non-UUID input: encode raw UTF-8; decode_v2 will reject the wrong length.
+        Err(_) => b64().encode(uuid.as_bytes()),
+    }
+}
+
+/// Format 16 UUID bytes as a standard hyphenated UUID string (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
+fn uuid_bytes_to_str(bytes: &[u8; UUID_BYTE_LEN]) -> String {
+    // Standard UUID layout: 4-2-2-2-6 groups, all lowercase hex.
+    format!(
+        "{}-{}-{}-{}-{}",
+        hex::encode(&bytes[0..4]),
+        hex::encode(&bytes[4..6]),
+        hex::encode(&bytes[6..8]),
+        hex::encode(&bytes[8..10]),
+        hex::encode(&bytes[10..16]),
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -438,9 +582,9 @@ fn normalize_fingerprint(fp: &str) -> String {
 /// Errors from QR pairing payload encode/decode.
 #[derive(Debug, Error)]
 pub enum PairingQrError {
-    /// The magic + version prefix was missing or not exactly `CPPAIR1`.
-    /// Rejecting here (rather than guessing) is the anti-downgrade guard.
-    #[error("missing or unsupported pairing QR magic/version (expected {PAIRING_QR_MAGIC})")]
+    /// The magic + version prefix was missing or not a recognised version
+    /// (`CPPAIR1` or `CPPAIR2`). Rejecting here is the anti-downgrade guard.
+    #[error("missing or unsupported pairing QR magic/version")]
     BadMagic,
 
     /// The payload body had the wrong number of `.`-separated fields.
@@ -462,6 +606,16 @@ pub enum PairingQrError {
     /// The fingerprint field was empty.
     #[error("fingerprint must not be empty")]
     EmptyFingerprint,
+
+    /// (CPPAIR2) The fingerprint b64url field decoded to the wrong number of bytes.
+    /// Expected exactly [`FP_BYTE_LEN`] (32).
+    #[error("fingerprint must be {FP_BYTE_LEN} bytes, got {0}")]
+    FingerprintLength(usize),
+
+    /// (CPPAIR2) The device_id b64url field decoded to the wrong number of bytes.
+    /// Expected exactly [`UUID_BYTE_LEN`] (16).
+    #[error("device_id must be {UUID_BYTE_LEN} bytes, got {0}")]
+    DeviceIdLength(usize),
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -479,16 +633,6 @@ mod tests {
         match PairingToken::from_bytes(&bytes) {
             Ok(t) => t,
             Err(e) => panic!("from_bytes must succeed for {PAIRING_TOKEN_LEN} bytes: {e}"),
-        }
-    }
-
-    fn sample() -> PairingPayload {
-        PairingPayload {
-            fingerprint: "aabbccddeeff00112233445566778899".to_string(),
-            token: token([7u8; PAIRING_TOKEN_LEN]),
-            device_id: "11112222-3333-4444-5555-666677778888".to_string(),
-            device_name: "Dmytro's MacBook".to_string(),
-            addr_hint: "192.168.1.5:54321".to_string(),
         }
     }
 
@@ -551,7 +695,9 @@ mod tests {
 
     #[test]
     fn encode_decode_roundtrip() {
-        let original = sample();
+        // Use a proper 32-byte (64-char hex) fingerprint and UUID device_id so
+        // the CPPAIR2 encoder/decoder can validate field lengths.
+        let original = sample_v2();
         let encoded = original.encode();
         let decoded = decode(&encoded);
 
@@ -564,13 +710,15 @@ mod tests {
 
     #[test]
     fn encoded_starts_with_magic() {
-        let encoded = sample().encode();
-        assert!(encoded.starts_with("CPPAIR1."));
+        // encode() now emits CPPAIR2 (slimmer format).
+        let encoded = sample_v2().encode();
+        assert!(encoded.starts_with("CPPAIR2."));
     }
 
     #[test]
     fn decode_rejects_bad_magic() {
-        let encoded = sample().encode().replacen("CPPAIR1", "CPPAIR0", 1);
+        // encode() emits CPPAIR2; replace with an unknown version to trigger BadMagic.
+        let encoded = sample_v2().encode().replacen("CPPAIR2", "CPPAIR0", 1);
         let err = decode_err(&encoded);
         assert!(
             matches!(err, PairingQrError::BadMagic),
@@ -593,41 +741,53 @@ mod tests {
 
     #[test]
     fn decode_rejects_short_token() {
-        // Build a payload then swap the token field for a too-short base64url.
-        let original = sample();
-        let encoded = original.encode();
-        let parts: Vec<&str> = encoded.splitn(2, '.').collect();
-        let body: Vec<&str> = parts[1].splitn(PAIRING_QR_FIELD_COUNT, '.').collect();
+        // Craft a CPPAIR1 string directly with a too-short token field.
+        // We use CPPAIR1 (v1) format here to test the token-length validation
+        // path in decode_v1 with arbitrary (non-UUID/non-32fp) field values.
+        let fp = "aabbccdd";
         let short_token = b64().encode([0u8; 8]);
+        let device_id = "some-device-id";
+        let name_b64 = b64().encode(b"TestDevice");
         let tampered = format!(
             "{}.{}.{}.{}.{}.{}",
-            PAIRING_QR_MAGIC, body[0], short_token, body[2], body[3], body[4]
+            PAIRING_QR_MAGIC, fp, short_token, device_id, name_b64, ""
         );
         let err = decode_err(&tampered);
         assert!(matches!(err, PairingQrError::TokenLength(8)));
     }
 
     #[test]
-    fn fingerprint_is_lowercased_but_colons_preserved() {
-        // The daemon's `is_valid_fingerprint` expects the colon-hex form, so
-        // the QR must preserve colons (only case is normalised).
+    fn fingerprint_is_lowercased_in_v2() {
+        // In CPPAIR2, the fingerprint is round-tripped through bytes, so colons
+        // are stripped and the result is bare lowercase hex. This documents the
+        // v2 behavior: callers passing colon-hex get bare hex back.
         let payload = PairingPayload {
-            fingerprint: "AA:BB:CC:DD".to_string(),
+            // 32 bytes = 64 hex chars with colons (32 groups × "XX:")
+            fingerprint: "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:\
+                          aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"
+                .to_string(),
             token: token([0u8; PAIRING_TOKEN_LEN]),
-            device_id: "id".to_string(),
+            device_id: "11112222-3333-4444-5555-666677778888".to_string(),
             device_name: "n".to_string(),
             addr_hint: String::new(),
         };
         let decoded = decode(&payload.encode());
-        assert_eq!(decoded.fingerprint, "aa:bb:cc:dd");
+        // Colons stripped, lowercase hex only.
+        assert_eq!(
+            decoded.fingerprint,
+            "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+        );
+        assert!(!decoded.fingerprint.contains(':'));
     }
 
     #[test]
     fn empty_addr_hint_roundtrips() {
+        // Use valid 32-byte fingerprint and UUID so CPPAIR2 encode/decode succeeds.
         let payload = PairingPayload {
-            fingerprint: "deadbeef".to_string(),
+            fingerprint: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                .to_string(),
             token: token([3u8; PAIRING_TOKEN_LEN]),
-            device_id: "dev".to_string(),
+            device_id: "11112222-3333-4444-5555-666677778888".to_string(),
             device_name: "Phone".to_string(),
             addr_hint: String::new(),
         };
@@ -637,10 +797,12 @@ mod tests {
 
     #[test]
     fn device_name_with_special_chars_roundtrips() {
+        // Use valid 32-byte fingerprint and UUID so CPPAIR2 encode/decode succeeds.
         let payload = PairingPayload {
-            fingerprint: "cafe".to_string(),
+            fingerprint: "cafecafecafecafecafecafecafecafecafecafecafecafecafecafecafecafe"
+                .to_string(),
             token: token([9u8; PAIRING_TOKEN_LEN]),
-            device_id: "dev".to_string(),
+            device_id: "11112222-3333-4444-5555-666677778888".to_string(),
             // Dots, colons and unicode would break naive splitting; base64url
             // of the name field protects against that.
             device_name: "A.B:C — café".to_string(),
@@ -663,20 +825,21 @@ mod tests {
     fn deeplink_wrap_strip_decode_roundtrip() {
         // Full wrap → strip → decode cycle must recover the original payload,
         // exercising the cppair:// envelope external scanners (Google Lens) need.
-        let original = sample();
+        // Use sample_v2() so the CPPAIR2 format is exercised end-to-end.
+        let original = sample_v2();
         let wrapped = original.encode_deeplink();
         assert!(
             wrapped.starts_with(PAIRING_DEEPLINK_PREFIX),
             "deep-link must carry the cppair://pair?p= prefix: {wrapped}"
         );
-        // The bare CPPAIR1 magic must NOT appear before the prefix (i.e. it is
+        // The bare CPPAIR2 magic must NOT appear before the prefix (i.e. it is
         // wrapped, not concatenated), so external scanners see a URI.
         assert!(wrapped.starts_with("cppair://pair?p="));
 
         let stripped = strip_deeplink(&wrapped);
         assert!(
-            stripped.starts_with("CPPAIR1."),
-            "stripping the wrapper must yield the bare payload: {stripped}"
+            stripped.starts_with("CPPAIR2."),
+            "stripping the wrapper must yield the bare CPPAIR2 payload: {stripped}"
         );
         assert_eq!(stripped, original.encode(), "strip must invert wrap");
 
@@ -690,8 +853,8 @@ mod tests {
 
     #[test]
     fn strip_deeplink_passes_through_bare_payload() {
-        // Back-compat: a bare (unwrapped) CPPAIR1 string must be returned as-is.
-        let bare = sample().encode();
+        // Back-compat: a bare (unwrapped) CPPAIR2 string must be returned as-is.
+        let bare = sample_v2().encode();
         assert_eq!(strip_deeplink(&bare), bare);
         // Whitespace is trimmed.
         let padded = format!("  {bare}  ");
@@ -702,7 +865,7 @@ mod tests {
     fn deeplink_escapes_addr_hint_colon() {
         // addr_hint host:port contains ':', which must be percent-escaped in the
         // URI and faithfully restored on strip.
-        let original = sample(); // addr_hint = "192.168.1.5:54321"
+        let original = sample_v2(); // addr_hint = "192.168.1.5:54321"
         let wrapped = original.encode_deeplink();
         assert!(
             wrapped.contains("%3A"),
@@ -723,5 +886,198 @@ mod tests {
             Err(e) => panic!("new must succeed: {e}"),
         };
         assert!(a.token != b.token, "each payload must get a fresh token");
+    }
+
+    // ── CPPAIR2 tests ───────────────────────────────────────────────────────────
+
+    /// A sample payload with a valid 64-char (32-byte) hex fingerprint and a
+    /// proper UUID device_id, as required by the CPPAIR2 format.
+    fn sample_v2() -> PairingPayload {
+        PairingPayload {
+            // 64 lowercase hex chars = 32 bytes
+            fingerprint: "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+                .to_string(),
+            token: token([7u8; PAIRING_TOKEN_LEN]),
+            device_id: "11112222-3333-4444-5555-666677778888".to_string(),
+            device_name: "Dmytro's MacBook".to_string(),
+            addr_hint: "192.168.1.5:54321".to_string(),
+        }
+    }
+
+    #[test]
+    fn cppair2_encode_starts_with_v2_magic() {
+        let encoded = sample_v2().encode();
+        assert!(
+            encoded.starts_with("CPPAIR2."),
+            "encode must emit CPPAIR2 prefix, got: {encoded}"
+        );
+    }
+
+    #[test]
+    fn cppair2_roundtrip() {
+        let original = sample_v2();
+        let encoded = original.encode();
+        let decoded = decode(&encoded);
+
+        assert_eq!(decoded.fingerprint, original.fingerprint);
+        assert!(decoded.token == original.token);
+        assert_eq!(decoded.device_id, original.device_id);
+        assert_eq!(decoded.device_name, original.device_name);
+        assert_eq!(decoded.addr_hint, original.addr_hint);
+    }
+
+    #[test]
+    fn cppair2_is_shorter_than_cppair1_equivalent() {
+        // For the same data, a CPPAIR2 string must be shorter than its CPPAIR1
+        // equivalent (43 vs 64 for fp + 22 vs 36 for device_id = −35 chars).
+        let payload = sample_v2();
+        let v2_len = payload.encode().len();
+
+        // Build an equivalent v1 string manually using the same fields.
+        let v1_string = format!(
+            "CPPAIR1.{}.{}.{}.{}.{}",
+            payload.fingerprint,
+            b64().encode(payload.token.0),
+            payload.device_id,
+            b64().encode(payload.device_name.as_bytes()),
+            payload.addr_hint,
+        );
+        let v1_len = v1_string.len();
+
+        assert!(
+            v2_len < v1_len,
+            "CPPAIR2 ({v2_len} chars) must be shorter than CPPAIR1 ({v1_len} chars)"
+        );
+    }
+
+    #[test]
+    fn cppair2_fingerprint_field_is_43_chars() {
+        // 32 raw bytes base64url-no-pad = ceil(32*4/3) = 43 chars (no '=' padding).
+        let encoded = sample_v2().encode();
+        // Strip "CPPAIR2." and get the first field
+        let body = encoded
+            .strip_prefix("CPPAIR2.")
+            .expect("must start with CPPAIR2.");
+        let fp_field = body.split('.').next().expect("must have fields");
+        assert_eq!(
+            fp_field.len(),
+            43,
+            "CPPAIR2 fingerprint field must be 43 chars (32-byte base64url), got {} chars: {fp_field}",
+            fp_field.len()
+        );
+    }
+
+    #[test]
+    fn cppair2_device_id_field_is_22_chars() {
+        // 16 UUID bytes base64url-no-pad = ceil(16*4/3) = 22 chars.
+        let encoded = sample_v2().encode();
+        let body = encoded
+            .strip_prefix("CPPAIR2.")
+            .expect("must start with CPPAIR2.");
+        let fields: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT, '.').collect();
+        assert_eq!(fields.len(), PAIRING_QR_FIELD_COUNT, "must have 5 fields");
+        let device_id_field = fields[2];
+        assert_eq!(
+            device_id_field.len(),
+            22,
+            "CPPAIR2 device_id field must be 22 chars (16-byte base64url), got {} chars: {device_id_field}",
+            device_id_field.len()
+        );
+    }
+
+    #[test]
+    fn cppair2_decode_rejects_bad_fp_length() {
+        // Build a CPPAIR2 string with a bad fingerprint (wrong byte count after b64 decode).
+        let payload = sample_v2();
+        let encoded = payload.encode();
+        let body = encoded
+            .strip_prefix("CPPAIR2.")
+            .expect("must start with CPPAIR2.");
+        let mut fields: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT, '.').collect();
+        // Replace fingerprint field with b64url of 16 bytes (wrong: expected 32)
+        let bad_fp = b64().encode([0xffu8; 16]);
+        let bad_fp_owned = bad_fp.clone();
+        fields[0] = &bad_fp_owned;
+        let tampered = format!("CPPAIR2.{}", fields.join("."));
+        let err = decode_err(&tampered);
+        assert!(
+            matches!(err, PairingQrError::FingerprintLength(_)),
+            "wrong fp byte count must yield FingerprintLength, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn cppair2_decode_rejects_bad_device_id_length() {
+        // Build a CPPAIR2 string with a bad device_id (wrong byte count after b64 decode).
+        let payload = sample_v2();
+        let encoded = payload.encode();
+        let body = encoded
+            .strip_prefix("CPPAIR2.")
+            .expect("must start with CPPAIR2.");
+        let fields: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT, '.').collect();
+        assert_eq!(fields.len(), PAIRING_QR_FIELD_COUNT);
+        // Replace device_id field with b64url of 8 bytes (wrong: expected 16)
+        let bad_id = b64().encode([0xaau8; 8]);
+        let tampered = format!(
+            "CPPAIR2.{}.{}.{}.{}.{}",
+            fields[0], fields[1], bad_id, fields[3], fields[4]
+        );
+        let err = decode_err(&tampered);
+        assert!(
+            matches!(err, PairingQrError::DeviceIdLength(_)),
+            "wrong device_id byte count must yield DeviceIdLength, got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn cppair1_legacy_decode_still_works() {
+        // A hardcoded CPPAIR1 string must still decode successfully (backward compat).
+        // Build a v1 string manually to avoid calling encode() (which now emits v2).
+        let fp = "aabbccdd";
+        let token_b64 = b64().encode([5u8; PAIRING_TOKEN_LEN]);
+        let device_id = "11112222-3333-4444-5555-666677778888";
+        let name_b64 = b64().encode(b"My Phone");
+        let v1 = format!("CPPAIR1.{fp}.{token_b64}.{device_id}.{name_b64}.192.168.1.1:1234");
+        let decoded = decode(&v1);
+        assert_eq!(decoded.fingerprint, fp);
+        assert_eq!(decoded.device_id, device_id);
+        assert_eq!(decoded.device_name, "My Phone");
+        assert_eq!(decoded.addr_hint, "192.168.1.1:1234");
+    }
+
+    #[test]
+    fn cppair2_fingerprint_recovered_as_lowercase_hex() {
+        // After a CPPAIR2 round-trip, fingerprint must come back as lowercase hex
+        // (same form as keys.rs fingerprint(), which callers downstream expect).
+        let original = sample_v2();
+        let encoded = original.encode();
+        let decoded = decode(&encoded);
+        // Must be lowercase hex (no colons), same as input
+        assert_eq!(
+            decoded.fingerprint,
+            "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+        );
+        // Must not contain colons (CPPAIR2 uses bare hex on output)
+        assert!(!decoded.fingerprint.contains(':'));
+    }
+
+    #[test]
+    fn cppair2_colon_hex_fingerprint_roundtrips_without_colons() {
+        // If the caller encodes with a colon-separated fingerprint,
+        // CPPAIR2 decode returns it as bare hex (colons stripped during b64 encoding).
+        let payload = PairingPayload {
+            fingerprint: "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99".to_string(),
+            token: token([1u8; PAIRING_TOKEN_LEN]),
+            device_id: "11112222-3333-4444-5555-666677778888".to_string(),
+            device_name: "Test".to_string(),
+            addr_hint: String::new(),
+        };
+        let encoded = payload.encode();
+        let decoded = decode(&encoded);
+        // Colons removed, bare hex
+        assert_eq!(
+            decoded.fingerprint,
+            "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+        );
     }
 }
