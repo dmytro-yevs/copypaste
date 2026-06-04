@@ -5,8 +5,11 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import java.text.DateFormat
+import java.util.Date
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -961,19 +964,26 @@ private fun PeerCard(
             // Label column is [META_LABEL_WIDTH] wide; value column takes the
             // rest. Each row uses verticalAlignment = CenterVertically so
             // multi-line values don't cause the label to sit misaligned.
-            // Fingerprint intentionally omitted from display (kept in data model
-            // for crypto/pairing use). Only rows with non-blank values rendered
-            // — legacy pre-ABI-14 roster entries simply show fewer rows.
+            // Only rows with non-blank values rendered — legacy pre-ABI-14
+            // roster entries simply show fewer rows.
             val lastSyncText: String? = if (peer.lastSyncMs > 0L) {
                 val elapsed = (nowMs - peer.lastSyncMs) / 1_000L
                 when {
                     elapsed < 60 -> "${elapsed}s ago"
                     elapsed < 3600 -> "${elapsed / 60}m ago"
-                    else -> "${elapsed / 3600}h ago"
+                    elapsed < 86400 -> "${elapsed / 3600}h ago"
+                    else -> formatEpochMs(peer.lastSyncMs)
                 }
             } else null
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Fingerprint (short) — parity with macOS PeerRow.
+                MetaRow(
+                    label = "Fingerprint",
+                    value = if (peer.fingerprint.length > 24)
+                        "${peer.fingerprint.take(16)}…${peer.fingerprint.takeLast(8)}"
+                    else peer.fingerprint,
+                )
                 peer.peerModel?.takeIf { it.isNotBlank() }?.let {
                     MetaRow(label = "Model", value = it)
                 }
@@ -991,6 +1001,9 @@ private fun PeerCard(
                 }
                 if (peer.syncAddr.isNotBlank()) {
                     MetaRow(label = "Sync", value = peer.syncAddr)
+                }
+                if (peer.pairedAtMs > 0L) {
+                    MetaRow(label = "Paired", value = formatEpochMs(peer.pairedAtMs))
                 }
                 lastSyncText?.let {
                     MetaRow(label = "Last sync", value = it)
@@ -1075,9 +1088,8 @@ private fun OwnDeviceCard(
     // platform (Build/BuildConfig) and a LAN-IPv4 enumeration. No synchronous
     // public-IP source on-device, so that row is omitted (matches the bootstrap
     // path, which sends public_ip = None for this device).
-    // Fingerprint is intentionally omitted from display (kept in data model).
-    val model = android.os.Build.MODEL ?: "Android"
-    val osVersion = "Android " + android.os.Build.VERSION.RELEASE
+    val model = Build.MODEL.orEmpty().ifBlank { "Android" }
+    val osVersion = "Android " + Build.VERSION.RELEASE
     val appVersion = BuildConfig.VERSION_NAME
 
     // Live local IP — re-read every ~5 s (keyed on nowMs / 5000) so a network
@@ -1125,7 +1137,13 @@ private fun OwnDeviceCard(
                 MetaRow(label = "OS", value = osVersion)
                 MetaRow(label = "Version", value = appVersion)
                 localIp?.let { MetaRow(label = "Local IP", value = it) }
-                MetaRow(label = "Device ID", value = identity.deviceId)
+                // Fingerprint shown instead of raw Device ID — parity with macOS ThisDeviceCard.
+                MetaRow(
+                    label = "Fingerprint",
+                    value = if (identity.fingerprint.length > 24)
+                        "${identity.fingerprint.take(16)}…${identity.fingerprint.takeLast(8)}"
+                    else identity.fingerprint,
+                )
             }
         }
     }
@@ -1282,6 +1300,7 @@ private fun SasPairingDialog(
             val rawSessionKey = ByteArray(keyUBytes.size) { keyUBytes[it].toByte() }
             try {
                 val (wrappedB64, ivB64) = settings.wrapSessionKey(rawSessionKey)
+                val nowMs = System.currentTimeMillis()
                 settings.upsertPeer(
                     PairedPeer(
                         fingerprint = fingerprint,
@@ -1289,7 +1308,8 @@ private fun SasPairingDialog(
                         name = peer.deviceName,
                         sessionKeyWrappedB64 = wrappedB64,
                         sessionKeyIvB64 = ivB64,
-                        lastSyncMs = System.currentTimeMillis(),
+                        lastSyncMs = nowMs,
+                        pairedAtMs = nowMs,
                         // HB-1b (ABI 14): persist the peer's device metadata received
                         // over the discovery/SAS pairing for the Wave-3 device card.
                         peerModel = st.peerModel,
@@ -1632,6 +1652,27 @@ private fun DeviceField(label: String, value: String) {
 }
 
 private const val TAG = "DevicesActivity"
+
+/**
+ * Format a Unix epoch-millisecond timestamp as a short locale date+time string
+ * for device-info fields. Returns "—" for zero / negative values (unknown).
+ * Mirrors macOS formatEpochSecs (which uses toLocaleString()).
+ */
+private fun formatEpochMs(ms: Long): String {
+    if (ms <= 0L) return "—"
+    return DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+        .format(Date(ms))
+}
+
+/** Extract the host part from a "host:port" sync address, or return the full string. */
+private fun syncAddrToIp(syncAddr: String): String? {
+    if (syncAddr.isBlank()) return null
+    // IPv6: [::1]:4242 → ::1; IPv4: 192.168.1.2:4242 → 192.168.1.2
+    val v6 = Regex("""^\[(.+)]:\d+$""").find(syncAddr)
+    if (v6 != null) return v6.groupValues[1]
+    val colon = syncAddr.lastIndexOf(':')
+    return if (colon > 0) syncAddr.substring(0, colon) else syncAddr
+}
 
 /** Poll cadence for refreshing peer state on the Devices screen. */
 private const val PEER_POLL_MS = 10_000L

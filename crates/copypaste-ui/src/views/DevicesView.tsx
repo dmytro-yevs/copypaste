@@ -188,7 +188,6 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs }: PeerRowP
             <MetaRow label="Local IP" value={ip} />
             <MetaRow label="Public IP" value={peer.public_ip} />
             <MetaRow label="Paired" value={pairedStr} />
-            <MetaRow label="First sync" value={firstSyncStr} />
             <MetaRow label="Last sync" value={lastSyncStr} />
           </DeviceMetaGrid>
 

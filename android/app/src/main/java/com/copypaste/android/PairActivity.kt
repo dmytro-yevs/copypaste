@@ -564,6 +564,7 @@ fun PairScreen(
                     val rawSessionKey =
                         ByteArray(bootstrap.sessionKey.size) { bootstrap.sessionKey[it].toByte() }
                     val (wrappedB64, ivB64) = settings.wrapSessionKey(rawSessionKey)
+                    val nowMs = System.currentTimeMillis()
                     settings.upsertPeer(
                         PairedPeer(
                             fingerprint = bootstrap.peerFingerprint,
@@ -571,7 +572,8 @@ fun PairScreen(
                             name = peer.deviceName,
                             sessionKeyWrappedB64 = wrappedB64,
                             sessionKeyIvB64 = ivB64,
-                            lastSyncMs = System.currentTimeMillis(),
+                            lastSyncMs = nowMs,
+                            pairedAtMs = nowMs,
                             // HB-1b (ABI 14): persist the peer's device metadata
                             // received over the authenticated tunnel so Wave 3
                             // renders the device card.
