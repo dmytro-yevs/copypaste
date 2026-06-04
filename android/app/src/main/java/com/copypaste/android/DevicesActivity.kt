@@ -155,12 +155,28 @@ fun unpairPeer(settings: Settings, fingerprint: String) {
  * "Devices" row).
  */
 class DevicesActivity : ComponentActivity() {
+
+    companion object {
+        /**
+         * Boolean Intent extra: when true, [DevicesScreen] auto-opens the SAS modal on
+         * resume if [pairGetSas] returns `awaiting_sas`. Set by
+         * [ClipboardService.postIncomingPairNotification] so tapping the pairing-request
+         * notification takes the user directly to the SAS confirm dialog.
+         */
+        const val EXTRA_AUTO_OPEN_SAS = "auto_open_sas"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val autoOpenSas = intent?.getBooleanExtra(EXTRA_AUTO_OPEN_SAS, false) ?: false
         setContent {
             CopyPasteTheme {
-                DevicesScreen(showBackButton = true, onBack = { finish() })
+                DevicesScreen(
+                    showBackButton = true,
+                    onBack = { finish() },
+                    autoOpenSasOnEntry = autoOpenSas,
+                )
             }
         }
     }
@@ -175,6 +191,12 @@ fun DevicesScreen(
     modifier: Modifier = Modifier,
     showBackButton: Boolean = true,
     onBack: () -> Unit = {},
+    /**
+     * When true (set by tapping the incoming-pair notification), the screen
+     * immediately polls [pairGetSas] once on composition and auto-opens the SAS
+     * modal if the state is `awaiting_sas`. Consumed after the first check.
+     */
+    autoOpenSasOnEntry: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -305,6 +327,37 @@ fun DevicesScreen(
             peer.fingerprint to (viaMdns || viaRecent)
         }
     }
+
+    // ── Deliverable 1: auto-open SAS modal on screen entry ────────────────────
+    // Triggered when: (a) user tapped the incoming-pair notification
+    // (autoOpenSasOnEntry=true), OR (b) general entry — poll once to catch
+    // awaiting_sas for EITHER role so the modal appears regardless of who
+    // initiated. Uses a sentinel DiscoveredPeer with the state machine's peer
+    // info; if the native library is absent this is a safe no-op.
+    LaunchedEffect(Unit) {
+        if (!isNativeLibraryLoaded) return@LaunchedEffect
+        // Give mDNS a moment to start on first composition before probing.
+        if (!autoOpenSasOnEntry) delay(800L)
+        try {
+            val st = withContext(Dispatchers.IO) { pairGetSas() }
+            if (st.state == "awaiting_sas" && pairingPeer == null) {
+                // Build a sentinel DiscoveredPeer so SasPairingDialog can open.
+                // deviceId/deviceName are best-effort; the dialog only uses them
+                // for the title and (for responder) skips pairWithDiscovered.
+                pairingPeer = DiscoveredPeer(
+                    deviceId = st.peerFingerprint ?: "unknown",
+                    deviceName = "",   // unknown at this stage for responder role
+                    ipAddrs = emptyList(),
+                    port = 0u,
+                    bport = null,
+                    paired = false,
+                )
+            }
+        } catch (_: Exception) {
+            // pairGetSas not yet available — safe to ignore on first composition.
+        }
+    }
+
 
     // Publish live count so SyncStatusBadge (footer) reads the SAME value as the
     // peer cards — single source, zero divergence.

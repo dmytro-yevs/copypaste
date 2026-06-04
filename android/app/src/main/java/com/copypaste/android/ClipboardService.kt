@@ -104,6 +104,14 @@ class ClipboardService : Service() {
     private var p2pListenerJob: kotlinx.coroutines.Job? = null
 
     /**
+     * Coroutine that polls [pairGetSas] every ~1 s and posts a HIGH-priority
+     * notification when this device transitions to `awaiting_sas` with
+     * role="responder" (it received an incoming pairing request). Cancelled in
+     * [onDestroy]. Null when P2P is disabled or the native library is absent.
+     */
+    private var pairResponderPollJob: kotlinx.coroutines.Job? = null
+
+    /**
      * Supabase Realtime WS client — primary push-receive channel (~1 s latency).
      * Owned by this FGS: started in [onStartCommand], closed in [onDestroy].
      * Null when the WS client cannot be constructed (should not happen in practice).
@@ -273,6 +281,10 @@ class ClipboardService : Service() {
             // is known and advertised as the peer's sync port.
             startFgsDiscovery()
         }
+
+        // Deliverable 1: poll for incoming (responder-role) pairing requests so
+        // the user is notified even when DevicesActivity is not open.
+        startPairResponderPoller()
 
         return START_STICKY
     }
@@ -459,6 +471,52 @@ class ClipboardService : Service() {
     }
 
     /**
+     * Deliverable 1 — Incoming-pairing notification.
+     *
+     * Polls [pairGetSas] every ~1 s. When the state machine enters `awaiting_sas`
+     * with role="responder" (a peer dialed US), posts a HIGH-priority notification
+     * whose tap opens [DevicesActivity]. De-duped: only one notification is posted
+     * per pairing session (tracked by [pairNotifPosted]). Clears the notification
+     * when the state returns to a non-awaiting state.
+     *
+     * Idempotent: a no-op when the native library is absent (stub mode). Started
+     * once in [onStartCommand]; cancelled in [onDestroy].
+     */
+    private fun startPairResponderPoller() {
+        if (pairResponderPollJob?.isActive == true) return
+        if (!isNativeLibraryLoaded) return
+
+        pairResponderPollJob = scope.launch {
+            var notifPosted = false
+            while (isActive) {
+                try {
+                    val st = withContext(Dispatchers.IO) { pairGetSas() }
+                    if (st.state == "awaiting_sas" && st.role == "responder" && !notifPosted) {
+                        postIncomingPairNotification(
+                            context = this@ClipboardService,
+                            peerName = st.sas?.let { "" } ?: "", // sas field ≠ peer name; use empty
+                        )
+                        notifPosted = true
+                    } else if (st.state != "awaiting_sas") {
+                        if (notifPosted) {
+                            // Clear the notification once the pairing is no longer pending.
+                            val nm = getSystemService(NotificationManager::class.java)
+                            nm?.cancel(NOTIF_ID_PAIR_REQUEST)
+                            notifPosted = false
+                        }
+                    }
+                } catch (_: CancellationException) {
+                    throw CancellationException()
+                } catch (e: Exception) {
+                    // pairGetSas not available yet (discovery not started) — suppress.
+                    Log.v(TAG, "pairResponderPoll: pairGetSas unavailable: ${e.message}")
+                }
+                delay(PAIR_RESPONDER_POLL_MS)
+            }
+        }
+    }
+
+    /**
      * Called when the user swipes this app from the Recents list.
      *
      * We schedule a one-time expedited WorkManager request to restart the service.
@@ -582,6 +640,9 @@ class ClipboardService : Service() {
         realtimeClient?.close()
         // Stop the relay SSE subscription before the scope is cancelled.
         relayClient?.close()
+        // Stop the responder poller before the scope is cancelled.
+        pairResponderPollJob?.cancel()
+        pairResponderPollJob = null
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         settings.stopObserving(prefsListener)
         removeCaptureOverlay()
@@ -607,6 +668,16 @@ class ClipboardService : Service() {
         var activeListenerPort: Int = 0
             private set
 
+        // ── Deliverable 1: incoming-pair notification ─────────────────────────
+
+        /** HIGH-importance channel for incoming SAS pairing requests. */
+        const val CHANNEL_PAIR_REQUEST = "copypaste_pair_request"
+
+        /** Stable notification id for the incoming-pair prompt (one at a time). */
+        const val NOTIF_ID_PAIR_REQUEST = 1004
+
+        /** Poll cadence for the responder-role SAS watcher in [startPairResponderPoller]. */
+        private const val PAIR_RESPONDER_POLL_MS = 1_000L
         /**
          * Notification channel for per-copy event toasts (A-SET-6 parity).
          * IMPORTANCE_MIN = no sound, no heads-up, no status-bar icon — just a
@@ -1169,6 +1240,64 @@ class ClipboardService : Service() {
                         setSound(null, null)
                     }
                 )
+            }
+
+            // Deliverable 1: HIGH-importance channel for incoming pairing requests.
+            if (nm.getNotificationChannel(CHANNEL_PAIR_REQUEST) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_PAIR_REQUEST,
+                        context.getString(R.string.notif_channel_pair_request_name),
+                        NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = context.getString(R.string.notif_channel_pair_request_description)
+                        setShowBadge(true)
+                    }
+                )
+            }
+        }
+
+        /**
+         * Deliverable 1 — post (or refresh) a HIGH-priority notification alerting
+         * the user that a peer wants to pair with this device. The tap intent opens
+         * [DevicesActivity] where the SAS confirmation modal auto-opens.
+         *
+         * [peerName] is the discovered peer's device name (may be blank — falls back
+         * to the generic string). Idempotent (same stable [NOTIF_ID_PAIR_REQUEST]).
+         */
+        fun postIncomingPairNotification(context: Context, peerName: String) {
+            ensureChannel(context)
+            val nm = context.getSystemService(NotificationManager::class.java) ?: return
+
+            val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            val devicesIntent = Intent(context, DevicesActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                // Signal DevicesActivity to auto-open the SAS modal on resume.
+                putExtra(DevicesActivity.EXTRA_AUTO_OPEN_SAS, true)
+            }
+            val devicesPi = PendingIntent.getActivity(context, 20, devicesIntent, piFlags)
+
+            val content = if (peerName.isNotBlank()) {
+                context.getString(R.string.notif_pair_request_content, peerName)
+            } else {
+                context.getString(R.string.notif_pair_request_content_unknown)
+            }
+
+            val notification = NotificationCompat.Builder(context, CHANNEL_PAIR_REQUEST)
+                .setSmallIcon(android.R.drawable.ic_menu_share)
+                .setContentTitle(context.getString(R.string.notif_pair_request_title))
+                .setContentText(content)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_EVENT)
+                .setAutoCancel(true)
+                .setContentIntent(devicesPi)
+                .addAction(0, context.getString(R.string.notif_pair_action_confirm), devicesPi)
+                .build()
+
+            try {
+                nm.notify(NOTIF_ID_PAIR_REQUEST, notification)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "postIncomingPairNotification: POST_NOTIFICATIONS blocked: ${e.message}")
             }
         }
 

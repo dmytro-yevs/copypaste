@@ -184,6 +184,14 @@
     <string name="cd_sensitive_item">Sensitive content — preview hidden</string>
     <string name="sensitive_tap_hint">Sensitive — use Copy action</string>
 
+    <!-- Incoming pairing-request notification channel (Deliverable 1) -->
+    <string name="notif_channel_pair_request_name">Pairing Requests</string>
+    <string name="notif_channel_pair_request_description">High-priority alert when another device wants to pair with this one.</string>
+    <string name="notif_pair_request_title">CopyPaste: pairing request</string>
+    <string name="notif_pair_request_content">%1$s wants to pair — tap to confirm</string>
+    <string name="notif_pair_request_content_unknown">A device wants to pair — tap to confirm</string>
+    <string name="notif_pair_action_confirm">Confirm</string>
+
     <!-- Per-copy event notification channel -->
     <string name="notif_channel_copy_event_name">Copy Events</string>
     <string name="notif_channel_copy_event_description">Silent badge notification each time a clipboard item is captured.</string>

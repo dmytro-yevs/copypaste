@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -712,12 +713,19 @@ fun PairScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.Top)
         ) {
-            Text(
-                text = stringResource(R.string.pair_instructions),
-                style = MaterialTheme.typography.bodyLarge,
-                color = IdeText
-            )
+            // ── Deliverable 2: hide own-QR once a peer has been scanned ───────
+            // When scannedPeer is non-null we are in "confirm peer" mode. The own-QR
+            // card, instructions text, and Scan button belong only to the "show my QR"
+            // mode and are hidden so the screen focuses on the scanned-peer confirmation.
+            if (scannedPeer == null) {
+                Text(
+                    text = stringResource(R.string.pair_instructions),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = IdeText
+                )
+            }
 
+            if (scannedPeer == null) {
             CopyPasteCard {
                 Column(
                     modifier = Modifier
@@ -843,71 +851,79 @@ fun PairScreen(
                 }
             }
 
-            // HB-6: the "Scan a device's QR" button moved to the Devices screen.
-            // This screen now shows ONLY this device's own QR. The scan flow is
-            // still reachable here when launched with mode=scan (auto-invoked
-            // above) or via a cppair:// deep link; startScanFlow() remains used.
+            // ── Deliverable 2: Scan button — only shown in own-QR mode ──────
+            // Hidden when a peer has already been scanned (scannedPeer != null);
+            // in that state the screen shows only the peer confirmation UI below.
+            if (scannedPeer == null) {
+                OutlinedButton(
+                    onClick = { startScanFlow() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(text = stringResource(R.string.btn_scan_qr))
+                }
+            }
+            } // end if (scannedPeer == null) — closes the QR card block
 
-            // ── Paired device display ─────────────────────────────────────
-            // Show the persisted paired peer (fingerprint + sync address) so the
-            // user can confirm which device is paired after navigating away and
-            // returning. Reads directly from Settings each recomposition — the
-            // values are written by runPairAndSync and are stable once set.
-            val pairedFingerprint = settings.pairedPeerFingerprint
-            val pairedAddr = settings.pairedPeerSyncAddr
-            if (pairedFingerprint.isNotBlank()) {
+            // ── Deliverable 3: rich scanned-peer confirmation card ────────────
+            // Shown INSTEAD of the own-QR once a peer has been scanned. Surfaces
+            // all available fields from ScannedPairing: device name, address
+            // (host:port from addrHint), and fingerprint. Model/OS/appVersion are
+            // not available until after the PAKE meta-exchange (BootstrapResult
+            // fields); they will be shown on the post-pair success screen once
+            // runPairAndSync() completes and stores them in the peer roster.
+            // TODO(post-PAKE-meta): show peerModel/peerOs/peerAppVersion here
+            //   once the BootstrapResult is threaded back to the UI after
+            //   bootstrapPairInitiator completes. Those fields live in
+            //   BootstrapResult.peerModel/peerOs/peerAppVersion (ABI 14) but
+            //   runPairAndSync currently only persists them to Settings.pairedPeers.
+            scannedPeer?.let { peer ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                     border = BorderStroke(1.dp, IdeBorder),
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                    ) {
                         Text(
-                            text = "Paired device",
+                            text = "Device to pair with",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                         )
+                        // Device name (from QR payload field 5)
+                        val displayName = peer.deviceName.ifBlank { "Unknown device" }
                         Text(
-                            text = pairedFingerprint,
+                            text = displayName,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = IdeText,
+                        )
+                        // Address (host:port from QR payload field 6, if present)
+                        if (peer.addrHint.isNotBlank()) {
+                            Text(
+                                text = "Address: ${peer.addrHint}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = IdeDim,
+                            )
+                        }
+                        // Fingerprint (from QR payload field 2) — tappable to copy
+                        Text(
+                            text = "Fingerprint: ${peer.fingerprint}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.clickable {
-                                clipboardManager.setText(AnnotatedString(pairedFingerprint))
+                                clipboardManager.setText(AnnotatedString(peer.fingerprint))
                                 scope.launch {
                                     snackbarHostState.showSnackbar("Fingerprint copied")
                                 }
                             },
                         )
-                        if (pairedAddr.isNotBlank()) {
-                            Text(
-                                text = pairedAddr,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = IdeDim,
-                            )
-                        }
+                        // NOTE: model/OS/appVersion become available after the PAKE
+                        // bootstrap completes — see TODO above.
                     }
                 }
-            }
 
-            scannedInfo?.let { info ->
-                Text(
-                    text = "Scanned: $info",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = IdeText,
-                    modifier = Modifier.clickable {
-                        val fp = scannedPeer?.fingerprint ?: info
-                        clipboardManager.setText(AnnotatedString(fp))
-                        scope.launch {
-                            snackbarHostState.showSnackbar("Fingerprint copied")
-                        }
-                    },
-                )
-            }
-
-            scannedPeer?.let { peer ->
                 Button(
                     enabled = !syncing,
                     onClick = { runPairAndSync(peer) },
@@ -923,12 +939,57 @@ fun PairScreen(
                 )
             }
 
+            // ── Post-pair success message ──────────────────────────────────────
             syncResult?.let { msg ->
                 Text(
                     text = msg,
                     style = MaterialTheme.typography.bodyMedium,
                     color = IdeAccent
                 )
+            }
+
+            // ── Paired-device roster (own-QR mode only) ───────────────────────
+            // Show the persisted paired peer so the user can confirm which device
+            // is paired. Only shown when not in the scanned-peer confirmation flow.
+            if (scannedPeer == null && syncResult == null) {
+                val pairedFingerprint = settings.pairedPeerFingerprint
+                val pairedAddr = settings.pairedPeerSyncAddr
+                if (pairedFingerprint.isNotBlank()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        border = BorderStroke(1.dp, IdeBorder),
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Paired device",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                text = pairedFingerprint,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.clickable {
+                                    clipboardManager.setText(AnnotatedString(pairedFingerprint))
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Fingerprint copied")
+                                    }
+                                },
+                            )
+                            if (pairedAddr.isNotBlank()) {
+                                Text(
+                                    text = pairedAddr,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = IdeDim,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
