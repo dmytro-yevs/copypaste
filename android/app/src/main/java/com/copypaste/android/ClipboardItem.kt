@@ -49,6 +49,16 @@ data class ClipboardItem(
      * badge in the history row. Defaults to false for back-compat.
      */
     val tooLargeToSync: Boolean = false,
+    /**
+     * UUID of the device that originally captured this clipboard item.
+     * Null for legacy items captured before this field was added, or for
+     * items that arrived via sync without a device-id tag.
+     *
+     * Used by the origin-device filter strip (macOS HistoryView parity):
+     * shown when more than one origin device is present, lets the user
+     * filter the list to items from a specific device.
+     */
+    val originDeviceId: String? = null,
 ) {
     /** True when this item carries an image payload that can be rendered as a thumbnail. */
     val isImage: Boolean get() = contentType.startsWith("image/") || contentType == "image"
@@ -69,7 +79,8 @@ data class ClipboardItem(
             pinned == other.pinned &&
             pinnedSortIndex == other.pinnedSortIndex &&
             sourceApp == other.sourceApp &&
-            tooLargeToSync == other.tooLargeToSync
+            tooLargeToSync == other.tooLargeToSync &&
+            originDeviceId == other.originDeviceId
     }
 
     override fun hashCode(): Int {
@@ -83,6 +94,7 @@ data class ClipboardItem(
         result = 31 * result + pinnedSortIndex
         result = 31 * result + (sourceApp?.hashCode() ?: 0)
         result = 31 * result + tooLargeToSync.hashCode()
+        result = 31 * result + (originDeviceId?.hashCode() ?: 0)
         return result
     }
 }

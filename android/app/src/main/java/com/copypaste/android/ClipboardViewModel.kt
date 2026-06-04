@@ -30,6 +30,28 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     val errors: LiveData<String?> = _errors
 
     /**
+     * Total number of stored items (pinned + unpinned) in the repository.
+     * Updated after each [loadItems] / [loadMore] call.
+     * Used by the history header to show the real total rather than the
+     * number of items loaded so far.
+     */
+    private val _totalCount = MutableLiveData(0)
+    val totalCount: LiveData<Int> = _totalCount
+
+    /**
+     * True when there are more unpinned items beyond those already loaded.
+     * The LazyColumn watches this to gate [loadMore] calls.
+     */
+    private val _hasMore = MutableLiveData(false)
+    val hasMore: LiveData<Boolean> = _hasMore
+
+    /** Number of items in each paginated page (unpinned rows only). */
+    private val PAGE_SIZE = 50
+
+    /** Current paginated offset for unpinned items. Reset to 0 on [loadItems]. */
+    private var loadedPage = 0
+
+    /**
      * Auto-refresh the history whenever the backing store changes.
      * Watches [ClipboardRepository.KEY_ITEM_IDS] (rewritten on every add/delete).
      * Retained as a field — SharedPreferences holds a weak reference to the listener.
@@ -49,15 +71,45 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     fun loadItems() {
         viewModelScope.launch {
             _loading.value = true
+            loadedPage = 0
             try {
-                // Use historySize (Maccy-parity display cap) as the fetch limit so
-                // the list respects the user's configured max without requiring a
-                // separate trim pass. The on-disk retention cap (maxHistoryItems) is
-                // enforced at write time by the capture pipeline.
-                _items.value = repository.getItems(settings.encryptionKey, settings.historySize)
+                val page = repository.getItems(settings.encryptionKey, PAGE_SIZE)
+                _items.value = page
+                _totalCount.value = repository.totalItemCount()
+                // hasMore: true when the repository holds more items than we loaded.
+                // We compare against the TOTAL count (pinned + unpinned) because
+                // getItems returns pinned + up-to-PAGE_SIZE unpinned rows.
+                _hasMore.value = (_totalCount.value ?: 0) > page.size
             } catch (e: Exception) {
                 Log.w(TAG, "loadItems failed", e)
                 _errors.value = e.message ?: e.javaClass.simpleName
+            } finally {
+                _loading.value = false
+            }
+        }
+    }
+
+    /**
+     * Load the next page of unpinned items and append them to [items].
+     * Calling this when [hasMore] is false is a no-op.
+     * Called from the LazyColumn's scroll-near-end effect in [HistoryActivity].
+     */
+    fun loadMore() {
+        if (_loading.value == true) return
+        if (_hasMore.value != true) return
+        viewModelScope.launch {
+            _loading.value = true
+            try {
+                loadedPage++
+                val nextOffset = loadedPage * PAGE_SIZE
+                val next = repository.getItems(settings.encryptionKey, PAGE_SIZE + nextOffset)
+                _items.value = next
+                val total = repository.totalItemCount()
+                _totalCount.value = total
+                _hasMore.value = total > next.size
+            } catch (e: Exception) {
+                Log.w(TAG, "loadMore failed", e)
+                _errors.postValue(e.message ?: e.javaClass.simpleName)
             } finally {
                 _loading.value = false
             }

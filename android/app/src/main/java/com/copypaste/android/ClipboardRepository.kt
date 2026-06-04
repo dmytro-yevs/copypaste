@@ -145,6 +145,14 @@ class ClipboardRepository(context: Context) {
         }
 
     /**
+     * Return the total number of stored items (pinned + unpinned) without
+     * decrypting them. Cheaper than [getItems] — reads only the id index string.
+     * Used by [ClipboardViewModel] to populate the history header count and to
+     * determine whether more pages are available for infinite scroll.
+     */
+    fun totalItemCount(): Int = storedIds().size
+
+    /**
      * Return the raw PNG/JPEG bytes stored for image item [id], or null.
      * Image bytes are persisted under the key "item_img_<id>" as Base64 NO_WRAP.
      */
