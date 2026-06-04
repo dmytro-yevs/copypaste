@@ -154,44 +154,9 @@ class ClipboardService : Service() {
             return@OnPrimaryClipChangedListener
         }
 
-        // Detect image MIME before falling back to text. Check all MIME types on
-        // the ClipDescription; the first image/* type wins.
-        val imageMime = (0 until clip.description.mimeTypeCount)
-            .map { clip.description.getMimeType(it) }
-            .firstOrNull { it.startsWith("image/") }
-
-        if (imageMime != null) {
-            val uri = clip.getItemAt(0)?.uri
-            if (uri != null) {
-                scope.launch { captureImageClip(this@ClipboardService, uri, imageMime, settings, repository, syncManager) }
-            } else {
-                Log.w(TAG, "Image clip has no URI — skipping")
-            }
-            return@OnPrimaryClipChangedListener
-        }
-
-        // File branch: a URI whose MIME is not text/* and not image/* is a real
-        // file (PDF, ZIP, DOCX, etc.). Capture bytes + metadata and store as a
-        // "file" content-type item so it can sync to macOS via P2P.
-        val itemUri = clip.getItemAt(0)?.uri
-        if (itemUri != null) {
-            val mimeTypes = (0 until clip.description.mimeTypeCount)
-                .map { clip.description.getMimeType(it) }
-            val fileMime = mimeTypes.firstOrNull { mime ->
-                mime != null && !mime.startsWith("text/") && !mime.startsWith("image/")
-            }
-            if (fileMime != null) {
-                scope.launch {
-                    captureFileClip(this@ClipboardService, itemUri, fileMime, settings, repository, syncManager)
-                }
-                return@OnPrimaryClipChangedListener
-            }
-        }
-
-        val text = clip.getItemAt(0)?.text?.toString()
-            ?: return@OnPrimaryClipChangedListener
-
-        scope.launch { handleClipboardChange(text) }
+        // BUG 1 fix: delegate to the shared MIME-dispatch helper so the
+        // foreground-service path and the background-overlay path are identical.
+        dispatchClipData(clip, this@ClipboardService, settings, repository, syncManager, scope)
     }
 
     override fun onCreate() {
@@ -704,6 +669,66 @@ class ClipboardService : Service() {
         private const val KEY_TODAY_COUNT = "today_count"
 
         /**
+         * BUG 1 fix: shared MIME-dispatch helper.
+         *
+         * Both [ClipboardService.clipListener] and [ClipboardAccessibilityService]
+         * previously duplicated the three-phase image/file/text MIME resolution.
+         * The background overlay path historically dropped images because the two
+         * implementations diverged. This function is the ONE canonical dispatch;
+         * both call sites delegate here.
+         *
+         * Launches the appropriate capture coroutine on [scope] and returns
+         * immediately (fire-and-forget on the caller's SupervisorJob scope).
+         * The caller is responsible for cancelling [scope] after all coroutines
+         * have drained (see [ClipboardAccessibilityService.cleanupAndFinish]).
+         */
+        fun dispatchClipData(
+            clip: android.content.ClipData,
+            context: Context,
+            settings: Settings,
+            repository: ClipboardRepository,
+            syncManager: SyncManager,
+            scope: kotlinx.coroutines.CoroutineScope,
+        ) {
+            // Phase 1: image — check all MIME types; first image/* wins.
+            val imageMime = (0 until clip.description.mimeTypeCount)
+                .map { clip.description.getMimeType(it) }
+                .firstOrNull { it.startsWith("image/") }
+
+            if (imageMime != null) {
+                val uri = clip.getItemAt(0)?.uri
+                if (uri != null) {
+                    scope.launch { captureImageClip(context, uri, imageMime, settings, repository, syncManager) }
+                } else {
+                    Log.w(TAG, "dispatchClipData: image clip has no URI — skipping")
+                }
+                return
+            }
+
+            // Phase 2: file — non-text, non-image URI (PDF, ZIP, DOCX, …).
+            val itemUri = clip.getItemAt(0)?.uri
+            if (itemUri != null) {
+                val mimeTypes = (0 until clip.description.mimeTypeCount)
+                    .map { clip.description.getMimeType(it) }
+                val fileMime = mimeTypes.firstOrNull { mime ->
+                    mime != null && !mime.startsWith("text/") && !mime.startsWith("image/")
+                }
+                if (fileMime != null) {
+                    scope.launch { captureFileClip(context, itemUri, fileMime, settings, repository) }
+                    return
+                }
+            }
+
+            // Phase 3: text (most common path).
+            val text = clip.getItemAt(0)?.text?.toString()
+            if (!text.isNullOrBlank()) {
+                scope.launch { captureClip(context, text, settings, repository, syncManager) }
+            } else {
+                Log.d(TAG, "dispatchClipData: clip has no usable text/URI — skipping")
+            }
+        }
+
+        /**
          * Shared capture pipeline: store + count + sync. HIGH-2.
          *
          * The foreground [ClipboardService], [LogcatCaptureService] background
@@ -840,10 +865,20 @@ class ClipboardService : Service() {
                 return
             }
 
-            // Private mode: mirror the text-path check in captureClip (~417).
+            // Private mode: mirror the text-path check in captureClip.
             // Images must also be suppressed in private mode (privacy parity).
             if (settings.privateMode) {
                 Log.d(TAG, "Private mode enabled — dropping image clipboard change")
+                return
+            }
+
+            // BUG 3 fix: apply sensitive guard to image URIs. Use the URI string
+            // as a proxy; a sensitive screenshot URI (e.g. from a password manager
+            // sharing an image) will often embed identifiable path segments.
+            val uriStr = uri.toString()
+            val sensitive = try { isSensitive(uriStr) } catch (_: UnsatisfiedLinkError) { false }
+            if (sensitive) {
+                Log.d(TAG, "captureImageClip: sensitive URI detected — skipping capture")
                 return
             }
 
@@ -987,6 +1022,16 @@ class ClipboardService : Service() {
             }
             if (settings.privateMode) {
                 Log.d(TAG, "captureFileClip: private mode — dropping file clipboard change")
+                return
+            }
+
+            // BUG 3 fix: apply sensitive guard to file URIs. The URI path often
+            // contains the filename; isSensitive can detect credential-bearing
+            // filenames (e.g. "passwords.csv", "private_key.pem").
+            val uriStr = uri.toString()
+            val sensitiveUri = try { isSensitive(uriStr) } catch (_: UnsatisfiedLinkError) { false }
+            if (sensitiveUri) {
+                Log.d(TAG, "captureFileClip: sensitive URI detected — skipping capture")
                 return
             }
 

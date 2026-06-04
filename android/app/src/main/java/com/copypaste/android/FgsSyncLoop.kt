@@ -75,9 +75,10 @@ class FgsSyncLoop(
      *  catch-up poll interval. Null-safe: when absent the loop treats WS as down. */
     private val wsClient: SupabaseRealtimeClient? = null,
     /**
-     * Application context used for auto-applying synced text clips to the
-     * Android system clipboard (Deliverable 1). Must be the application context
-     * (not an Activity context) to avoid leaking.
+     * Application context used for auto-applying inbound text clips to the
+     * Android system clipboard via [storeDecryptedItem]. Must be the application
+     * context (not an Activity context) to avoid leaking. Null disables auto-apply
+     * (safe default for callers that don't need it, e.g. unit tests).
      */
     private val appContext: Context? = null,
 ) {
@@ -319,81 +320,15 @@ class FgsSyncLoop(
                 // Decrypt; skip rows that fail (wrong key, tampered blob).
                 val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
 
-                val isImage = item.contentType == "image" ||
-                    item.contentType.startsWith("image/")
-                val isFile = item.contentType == "file"
-
-                val stored = if (isImage) {
-                    // Image row: store a placeholder entry then persist raw bytes.
-                    // storeItem deduplicates via overrideId so re-polls are no-ops.
-                    if (item.plaintext.isEmpty()) {
-                        false
-                    } else {
-                        val storedId = repository.storeItem(
-                            plaintext = "[image]",
-                            key = settings.encryptionKey,
-                            overrideId = item.itemId,
-                            contentType = item.contentType,
-                            lamportTs = item.lamportTs,
-                            wallTimeMs = item.wallTime,
-                        )
-                        if (storedId.isNotEmpty()) {
-                            repository.storeImageBytes(storedId, item.plaintext)
-                            // Generate thumbnail after full-res storage; non-fatal on failure.
-                            SyncThumbnailHelper.generateAndStore(item.plaintext) { thumbBytes ->
-                                repository.storeThumbnailBytes(storedId, thumbBytes)
-                            }
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                } else if (isFile) {
-                    // File row: store actual bytes so the user can save/copy them.
-                    // AB-3: decryptRow already STRIPPED the cloud file-identity header
-                    // from item.plaintext and recovered the original name/MIME into
-                    // item.fileName/item.fileMime — store the real body + identity.
-                    if (item.plaintext.isEmpty()) {
-                        false
-                    } else {
-                        val label = SyncFileHelper.buildFileLabel(item.fileName)
-                        val storedId = repository.storeItem(
-                            plaintext = label,
-                            key = settings.encryptionKey,
-                            overrideId = item.itemId,
-                            contentType = item.contentType,
-                            lamportTs = item.lamportTs,
-                            wallTimeMs = item.wallTime,
-                        )
-                        if (storedId.isNotEmpty()) {
-                            repository.storeFileBytes(storedId, item.plaintext)
-                            repository.storeFileMeta(storedId, item.fileName, item.fileMime)
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                } else {
-                    // Text row: LWW replace — replace only when incoming lamport_ts
-                    // is strictly newer than the locally stored row for the same item_id.
-                    val text = item.plaintext.toString(Charsets.UTF_8)
-                    if (text.isBlank()) {
-                        false
-                    } else {
-                        val didStore = repository.storeItemWithLww(
-                            plaintext = text,
-                            key = settings.encryptionKey,
-                            itemId = item.itemId,
-                            incomingLamportTs = item.lamportTs,
-                            wallTimeMs = item.wallTime,
-                        )
-                        // Auto-apply: push the newest inbound text clip to the system
-                        // clipboard so the user can paste without opening history.
-                        // TODO: extend to image/file when a suitable clipboard URI scheme exists.
-                        if (didStore) autoApplySyncedTextClip(text)
-                        didStore
-                    }
-                }
+                // Delegate to the shared canonical routine so image (thumbnail),
+                // file (real bytes/meta), and text (LWW + auto-apply) are handled
+                // identically across FgsSyncLoop and SupabasePollWorker (BUG 2).
+                val stored = storeDecryptedItem(
+                    item = item,
+                    repository = repository,
+                    settings = settings,
+                    appContext = appContext,
+                )
                 if (stored) newCount++
             }
 
@@ -686,16 +621,13 @@ class FgsSyncLoop(
             }
 
             val key = settings.encryptionKey
-            val isImage = item.contentType == "image" ||
-                item.contentType.startsWith("image/")
-            val isFile = item.contentType == "file"
 
             // UniFFI maps `sequence<u8>` to List<UByte>; storeImageBytes and the
             // UTF-8 text decode below both want a ByteArray.
             val plaintextBytes = ByteArray(item.plaintext.size) { item.plaintext[it].toByte() }
 
             val stored = when {
-                isImage -> {
+                contentTypeIsImage(item.contentType) -> {
                     // Image frame: store a placeholder row under the peer's STABLE
                     // item_id, then persist the raw image bytes so HistoryActivity
                     // can render them. Re-dials dedup via overrideId.
@@ -720,7 +652,7 @@ class FgsSyncLoop(
                         }
                     }
                 }
-                isFile -> {
+                contentTypeIsFile(item.contentType) -> {
                     // File frame: store actual bytes so the user can save/copy them.
                     // file_name/mime are carried in-band so the label shows the real
                     // name ("[file: report.pdf]") instead of "[file]".

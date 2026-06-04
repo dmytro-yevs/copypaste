@@ -1,5 +1,7 @@
 package com.copypaste.android
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.util.Log
 import androidx.work.Constraints
@@ -95,47 +97,16 @@ class SupabasePollWorker(
                     // Decrypt the row; skip if decryption fails (wrong key / tampered).
                     val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
 
-                    val isImage = item.contentType == "image" ||
-                        item.contentType.startsWith("image/")
-
-                    val stored = if (isImage) {
-                        // Image row: store a placeholder entry then persist raw bytes.
-                        // Mirror the FgsSyncLoop.poll() image path so image rows are
-                        // not silently corrupted by UTF-8 decoding of binary data.
-                        if (item.plaintext.isEmpty()) {
-                            false
-                        } else {
-                            val storedId = repository.storeItem(
-                                plaintext = "[image]",
-                                key = settings.encryptionKey,
-                                overrideId = item.itemId,
-                                contentType = item.contentType,
-                                lamportTs = item.lamportTs,
-                                wallTimeMs = item.wallTime,
-                            )
-                            if (storedId.isNotEmpty()) {
-                                repository.storeImageBytes(storedId, item.plaintext)
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                    } else {
-                        val text = item.plaintext.toString(Charsets.UTF_8)
-                        if (text.isBlank()) {
-                            false
-                        } else {
-                            // Task 5: LWW replace — if item_id already exists locally, replace
-                            // only when the incoming lamport_ts is strictly newer.
-                            repository.storeItemWithLww(
-                                plaintext = text,
-                                key = settings.encryptionKey,
-                                itemId = item.itemId,
-                                incomingLamportTs = item.lamportTs,
-                                wallTimeMs = item.wallTime,
-                            )
-                        }
-                    }
+                    // BUG 2 fix: delegate to the same per-type store sequence as
+                    // FgsSyncLoop.poll() so file (with real bytes/meta), image (with
+                    // thumbnail), text (LWW), auto-apply, and pin state are all handled
+                    // identically regardless of which polling path runs.
+                    val stored = storeDecryptedItem(
+                        item = item,
+                        repository = repository,
+                        settings = settings,
+                        appContext = ctx,
+                    )
                     if (stored) newCount++
                 }
 
@@ -220,6 +191,111 @@ class SupabasePollWorker(
             val settings = Settings(context)
             val shouldRun = settings.syncEnabled && settings.syncBackend == SyncBackend.SUPABASE
             schedule(context, enabled = shouldRun)
+        }
+    }
+}
+
+/**
+ * Canonical store routine for a cloud-polled [SupabaseClient.DecryptedItem] (BUG 2 fix).
+ *
+ * Shared by [SupabasePollWorker.doWork] and [FgsSyncLoop.poll] so every Supabase
+ * receive path handles image (with thumbnail), file (with real bytes/meta), and
+ * text (LWW) identically. Previously [SupabasePollWorker] had no file branch
+ * (file bytes were UTF-8-decoded as garbage), no thumbnail generation, and no
+ * auto-apply of inbound text clips to the system clipboard.
+ *
+ * @param appContext Application context used for auto-apply (may be null in
+ *   [FgsSyncLoop] when the constructor's appContext is absent — treated as no-op).
+ * @return true when a new or replaced row was stored, false on dedup/blank/empty.
+ */
+internal suspend fun storeDecryptedItem(
+    item: SupabaseClient.DecryptedItem,
+    repository: ClipboardRepository,
+    settings: Settings,
+    appContext: Context? = null,
+): Boolean {
+    return when {
+        contentTypeIsImage(item.contentType) -> {
+            // Image row: store a placeholder entry then persist raw image bytes.
+            // Avoids the UTF-8 decoding of binary data that the old text-only
+            // path produced. Also generates a thumbnail for the history list.
+            if (item.plaintext.isEmpty()) {
+                false
+            } else {
+                val storedId = repository.storeItem(
+                    plaintext = "[image]",
+                    key = settings.encryptionKey,
+                    overrideId = item.itemId,
+                    contentType = item.contentType,
+                    lamportTs = item.lamportTs,
+                )
+                if (storedId.isNotEmpty()) {
+                    repository.storeImageBytes(storedId, item.plaintext)
+                    // Generate thumbnail after full-res storage; non-fatal on failure.
+                    SyncThumbnailHelper.generateAndStore(item.plaintext) { thumbBytes ->
+                        repository.storeThumbnailBytes(storedId, thumbBytes)
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+        contentTypeIsFile(item.contentType) -> {
+            // File row: store actual bytes so the user can save/copy them.
+            // The old text-only fallback would UTF-8-decode binary file bytes,
+            // producing garbage. Cloud-polled items have no separate fileName/mime
+            // columns — use null (the label will show "[file]" without a name).
+            if (item.plaintext.isEmpty()) {
+                false
+            } else {
+                val label = SyncFileHelper.buildFileLabel(null)
+                val storedId = repository.storeItem(
+                    plaintext = label,
+                    key = settings.encryptionKey,
+                    overrideId = item.itemId,
+                    contentType = item.contentType,
+                    lamportTs = item.lamportTs,
+                )
+                if (storedId.isNotEmpty()) {
+                    repository.storeFileBytes(storedId, item.plaintext)
+                    repository.storeFileMeta(storedId, null, null)
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+        else -> {
+            // Text row: LWW replace — replace only when incoming lamport_ts is
+            // strictly newer than the locally stored row for the same item_id.
+            val text = item.plaintext.toString(Charsets.UTF_8)
+            if (text.isBlank()) {
+                false
+            } else {
+                val didStore = repository.storeItemWithLww(
+                    plaintext = text,
+                    key = settings.encryptionKey,
+                    itemId = item.itemId,
+                    incomingLamportTs = item.lamportTs,
+                )
+                // Auto-apply: push the newest inbound text clip to the Android
+                // system clipboard so the user can paste without opening history.
+                // Register the expectation BEFORE setPrimaryClip so every capture
+                // listener suppresses the echo within its 5-second window.
+                if (didStore && appContext != null) {
+                    try {
+                        ClipboardRepository.expectClip(text)
+                        val cm = appContext.getSystemService(Context.CLIPBOARD_SERVICE)
+                            as? ClipboardManager
+                        cm?.setPrimaryClip(ClipData.newPlainText("CopyPaste", text))
+                        Log.d("StoreDecryptedItem", "auto-applied ${text.length} chars to clipboard")
+                    } catch (e: Exception) {
+                        Log.d("StoreDecryptedItem", "auto-apply failed (non-fatal): ${e.message}")
+                    }
+                }
+                didStore
+            }
         }
     }
 }

@@ -58,10 +58,13 @@ data class ClipboardItem(
     val tooLargeToSync: Boolean = false,
 ) {
     /** True when this item carries an image payload that can be rendered as a thumbnail. */
-    val isImage: Boolean get() = contentType.startsWith("image/") || contentType == "image"
+    val isImage: Boolean get() = contentTypeIsImage(contentType)
 
     /** True when this item is a synced file (content_type == "file"). */
-    val isFile: Boolean get() = contentType == "file"
+    val isFile: Boolean get() = contentTypeIsFile(contentType)
+
+    /** True when this item carries a plain-text payload (includes "url"). */
+    val isText: Boolean get() = contentTypeIsText(contentType)
 
     // No custom equals/hashCode: all fields are val primitives, String, Boolean, or Int
     // (stable Kotlin value types) so data-class structural equality is correct and the

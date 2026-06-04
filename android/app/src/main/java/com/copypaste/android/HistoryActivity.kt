@@ -1380,9 +1380,9 @@ private fun ContentTypeChip(
 ) {
     val (label, fg, bg) = when {
         isSensitive -> Triple("PRIVATE", IdeDanger, IdeDangerDim)
-        contentType.startsWith("image/") || contentType == "image" ->
+        contentTypeIsImage(contentType) ->
             Triple("IMAGE", IdeViolet, IdeVioletDim)
-        contentType == "text" || contentType.startsWith("text/") -> {
+        contentTypeIsText(contentType) -> {
             // Richer label: classify the snippet text and show e.g. "URL", "EMAIL",
             // "CODE", etc. instead of plain "TEXT" when the content matches.
             val kind = if (snippet.isNotBlank()) TextKind.classify(snippet) else "TEXT"
@@ -2225,13 +2225,11 @@ private fun TypeIcon(
     modifier: Modifier = Modifier,
 ) {
     val (icon, tint) = when {
-        isSensitive                          -> Icons.Filled.Lock to IdeDanger
-        contentType.startsWith("image/") ||
-            contentType == "image"           -> Icons.Filled.Image to IdeViolet
-        contentType == "text" ||
-            contentType.startsWith("text/")  -> Icons.Filled.ContentCopy to IdeAccent
-        contentType == "url"                 -> Icons.Filled.ContentCopy to IdeInfo
-        else                                 -> Icons.Filled.ContentCopy to IdeDim
+        isSensitive                -> Icons.Filled.Lock to IdeDanger
+        contentTypeIsImage(contentType) -> Icons.Filled.Image to IdeViolet
+        contentTypeIsText(contentType) -> Icons.Filled.ContentCopy to IdeAccent
+        contentType == "url"       -> Icons.Filled.ContentCopy to IdeInfo
+        else                       -> Icons.Filled.ContentCopy to IdeDim
     }
     Icon(
         imageVector = icon,

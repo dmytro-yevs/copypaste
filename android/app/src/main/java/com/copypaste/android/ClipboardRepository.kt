@@ -1646,8 +1646,8 @@ class ClipboardRepository(context: Context) {
                 val ciphertext = Base64.decode(parts[4], Base64.NO_WRAP)
                 val plain = decryptText(id, ciphertext, nonce, key)
 
-                val isImage = contentType == "image" || contentType.startsWith("image/")
-                if (contentType == "file") {
+                val isImage = contentTypeIsImage(contentType)
+                if (contentTypeIsFile(contentType)) {
                     // For file items the raw plaintext is just a label; the peer
                     // needs the actual file bytes. Fetch from the sidecar store.
                     val fileBytes = getFileBytes(id)
