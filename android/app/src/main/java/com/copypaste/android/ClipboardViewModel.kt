@@ -16,6 +16,15 @@ import kotlinx.coroutines.launch
  * ViewModel for clipboard history UI.
  * Extends [AndroidViewModel] to obtain [Application] context required by
  * [ClipboardRepository] for SharedPreferences access.
+ *
+ * ## Lazy pagination
+ *
+ * Items are loaded in pages of [ClipboardRepository.PAGE_SIZE] unpinned rows.
+ * Pinned items always appear on every page (at the top). The UI calls [loadMore]
+ * when the user scrolls near the end; [loadItems] resets to page 0.
+ *
+ * [hasMore] is false once we have loaded at least as many unpinned rows as exist
+ * in the store — the UI hides the "load more" trigger at that point.
  */
 class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -28,26 +37,29 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     private val _loading = MutableLiveData(false)
     val loading: LiveData<Boolean> = _loading
 
+    private val _loadingMore = MutableLiveData(false)
+    val loadingMore: LiveData<Boolean> = _loadingMore
+
+    /** True when there are more unpinned pages to load. */
+    private val _hasMore = MutableLiveData(true)
+    val hasMore: LiveData<Boolean> = _hasMore
+
     private val _errors = MutableLiveData<String?>(null)
     val errors: LiveData<String?> = _errors
 
+    /** Current pagination offset (count of unpinned rows already loaded). */
+    private var unpinnedOffset = 0
+
     /**
-     * Pending debounce job for the store-change listener. Cancelled and restarted
-     * on each prefs change so that a 262-item sync burst fires exactly one
-     * [loadItems] once the burst settles, rather than 262 back-to-back full
-     * [ClipboardRepository.getItems] calls (each decrypting every row) that
-     * saturate Dispatchers.IO and cause the "WaitForGcToComplete blocked Alloc"
-     * / Davey jank the user observed during sync.
+     * Debounce job for the store-change listener. Rapid bursts of prefs writes
+     * (e.g. a sync catch-up) are collapsed into a single [loadItems] call.
      */
     private var storeDebounceJob: Job? = null
 
     /**
-     * Auto-refresh the history whenever the backing store changes.
-     * Watches [ClipboardRepository.KEY_ITEM_IDS] (rewritten on every add/delete).
-     * Retained as a field — SharedPreferences holds a weak reference to the listener.
-     *
-     * Debounced: rapid bursts of prefs writes (e.g. 262-item sync catch-up) are
-     * collapsed into a single [loadItems] call after [STORE_DEBOUNCE_MS] of quiet.
+     * Auto-refresh whenever the backing store changes.
+     * Watches [ClipboardRepository.KEY_ITEM_IDS] / [KEY_PINNED_IDS].
+     * Retained as a field — SharedPreferences holds a weak reference.
      */
     private val storeListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -65,26 +77,67 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
         repository.observe(storeListener)
     }
 
+    /**
+     * Load (or reload) from page 0. Resets pagination state and replaces the
+     * current item list. Called on initial open and after any mutation.
+     */
     fun loadItems() {
         viewModelScope.launch {
             _loading.value = true
             try {
-                // Use historySize (Maccy-parity display cap) as the fetch limit so
-                // the list respects the user's configured max without requiring a
-                // separate trim pass. The on-disk retention cap (maxHistoryItems) is
-                // enforced at write time by the capture pipeline.
-                val next = repository.getItems(settings.encryptionKey, settings.historySize)
-                // B: skip the assignment (and the whole recomposition cascade) when the list is
-                // structurally equal. On no-op sync ticks the decrypt cache (A) returns identical
-                // ClipboardItem values, equals() is true, and the LiveData observer never fires.
+                val page = repository.getItems(
+                    key    = settings.encryptionKey,
+                    limit  = ClipboardRepository.PAGE_SIZE,
+                    offset = 0,
+                )
+                val next = page.distinctBy { it.id }
                 if (next != _items.value) {
                     _items.value = next
                 }
+                unpinnedOffset = next.count { !it.pinned }
+                // Check whether there are more unpinned rows beyond this page.
+                _hasMore.value = repository.unpinnedItemCount() > unpinnedOffset
             } catch (e: Exception) {
                 Log.w(TAG, "loadItems failed", e)
                 _errors.value = e.message ?: e.javaClass.simpleName
             } finally {
                 _loading.value = false
+            }
+        }
+    }
+
+    /**
+     * Append the next page of unpinned items. No-op when [hasMore] is false or a
+     * load is already in flight. Pinned items already present are deduplicated so
+     * they never appear twice in the combined list.
+     */
+    fun loadMore() {
+        if (_loadingMore.value == true || _loading.value == true) return
+        if (_hasMore.value == false) return
+        viewModelScope.launch {
+            _loadingMore.value = true
+            try {
+                val nextPage = repository.getItems(
+                    key    = settings.encryptionKey,
+                    limit  = ClipboardRepository.PAGE_SIZE,
+                    offset = unpinnedOffset,
+                )
+                // Pinned items are returned on every page — deduplicate by id.
+                val existing = _items.value ?: emptyList()
+                val existingIds = existing.mapTo(HashSet()) { it.id }
+                val newUnpinned = nextPage.filter { !it.pinned && it.id !in existingIds }
+                // Also refresh pinned items in case pin state changed.
+                val freshPinned = nextPage.filter { it.pinned }
+                val existingUnpinned = existing.filter { !it.pinned }
+                val merged = (freshPinned + existingUnpinned + newUnpinned).distinctBy { it.id }
+                _items.value = merged
+                unpinnedOffset = merged.count { !it.pinned }
+                _hasMore.value = repository.unpinnedItemCount() > unpinnedOffset
+            } catch (e: Exception) {
+                Log.w(TAG, "loadMore failed", e)
+                _errors.value = e.message ?: e.javaClass.simpleName
+            } finally {
+                _loadingMore.value = false
             }
         }
     }
@@ -202,9 +255,7 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
 
         /**
          * Quiet period after the last prefs change before [loadItems] fires.
-         * 300 ms is long enough to absorb a 262-item sync burst (≈ one write per
-         * ~1 ms) while short enough to feel instant to the user after a single
-         * manual add or delete.
+         * 300 ms absorbs rapid sync bursts while feeling instant for single edits.
          */
         private const val STORE_DEBOUNCE_MS = 300L
     }

@@ -105,13 +105,28 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Load history items for display, most-recent-first.
+     * Load history items for display, most-recent-first, with lazy pagination.
      *
      * Each stored blob is DECRYPTED with [key] so the row shows a real preview.
      * The [ClipboardItem.pinned] field is populated from the persisted [KEY_PINNED_IDS] set.
-     * Image bytes are attached when available (stored separately under "item_img_<id>").
+     * Image bytes are NOT attached here — callers must use [getImageBytes] lazily per-row.
+     *
+     * ## Pagination
+     *
+     * Pinned items are ALWAYS returned regardless of [offset] — they always float to
+     * the top of the history list. Unpinned items are paged: skip the [offset] most-
+     * recent unpinned items and return the next [limit] of them. There is NO hard
+     * item-count ceiling on the display — callers append pages as the user scrolls.
+     *
+     * @param key    AEAD decryption key.
+     * @param limit  max number of UNPINNED items to return for this page.
+     * @param offset number of UNPINNED items to skip before this page (0 = first page).
      */
-    suspend fun getItems(key: ByteArray, limit: Int = 200): List<ClipboardItem> =
+    suspend fun getItems(
+        key: ByteArray,
+        limit: Int = PAGE_SIZE,
+        offset: Int = 0,
+    ): List<ClipboardItem> =
         withContext(Dispatchers.IO) {
             // AB-13: run the retention TTL auto-wipe on the same cadence as load
             // (cheap general-age fast-path; sensitive pass only decrypts aged rows).
@@ -120,8 +135,19 @@ class ClipboardRepository(context: Context) {
             val pinnedSet = pinnedList.toHashSet()
             // Build index map: id → position in pinned list (0 = top of pinned section).
             val pinnedIndex: Map<String, Int> = pinnedList.mapIndexed { idx, id -> id to idx }.toMap()
-            val ids = storedIds().takeLast(limit)
-            ids.mapNotNull { id ->
+
+            // All stored ids, newest-first (storedIds returns oldest→newest, so reverse).
+            val allIds = storedIds().reversed()
+
+            // Split into pinned and unpinned preserving recency order.
+            val pinnedIds   = allIds.filter { it in pinnedSet }
+            val unpinnedIds = allIds.filter { it !in pinnedSet }
+
+            // Page of unpinned ids for this request.
+            val unpinnedPage = unpinnedIds.drop(offset).take(limit)
+
+            // Combine: pinned first (always), then the paged unpinned slice.
+            (pinnedIds + unpinnedPage).mapNotNull { id ->
                 val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
                 // Soft-delete tombstone: skip deleted items in the visible list
                 // (cheap last-field check, before any AEAD decrypt).
@@ -158,8 +184,18 @@ class ClipboardRepository(context: Context) {
                     pinnedSortIndex = if (isPinned) (pinnedIndex[id] ?: Int.MAX_VALUE) else -1,
                     tooLargeToSync = binaryTooLarge,
                 )
-            }.reversed()
+            }
         }
+
+    /**
+     * Returns the total number of non-deleted unpinned items in the store.
+     * Used by the pagination logic in [ClipboardViewModel] to detect when all
+     * pages have been loaded (no more items to fetch).
+     */
+    fun unpinnedItemCount(): Int {
+        val pinnedSet = storedPinnedIds()
+        return storedIds().count { it !in pinnedSet }
+    }
 
     /**
      * Return the raw PNG/JPEG bytes stored for image item [id], or null.
@@ -1271,6 +1307,13 @@ class ClipboardRepository(context: Context) {
          * auto-wiped by [pruneByAge] unless pinned.
          */
         const val DEFAULT_GENERAL_TTL_SECS: Long = 30L * 24 * 60 * 60
+
+        /**
+         * Default page size for [getItems] pagination.
+         * First page = pinned + 50 most-recent unpinned; each subsequent page appends
+         * 50 more unpinned rows as the user scrolls near the end of the list.
+         */
+        const val PAGE_SIZE = 50
 
         fun normalizeContentTypeForSync(stored: String): String =
             if (stored == "text" || stored.startsWith("text/")) "text" else stored
