@@ -444,37 +444,6 @@ fun HistoryScreen(
     // all items from a peer device) so we never show an empty filter.
     var deviceFilter by rememberSaveable { mutableStateOf("all") }
 
-    // ── Long-press peek preview state ─────────────────────────────────────────
-    // previewItemId + previewPhase survive rotation via rememberSaveable.
-    var previewItemId by rememberSaveable { mutableStateOf<String?>(null) }
-    var previewPhase by rememberSaveable(
-        stateSaver = androidx.compose.runtime.saveable.Saver(
-            save    = { phase: PreviewPhase ->
-                when (phase) {
-                    PreviewPhase.Idle    -> 0
-                    PreviewPhase.Peeking -> 1
-                    PreviewPhase.Pinned  -> 2
-                }
-            },
-            restore = { ord: Int ->
-                when (ord) {
-                    1    -> PreviewPhase.Peeking
-                    2    -> PreviewPhase.Pinned
-                    else -> PreviewPhase.Idle
-                }
-            },
-        )
-    ) { mutableStateOf<PreviewPhase>(PreviewPhase.Idle) }
-
-    // Auto-dismiss preview when item leaves the list
-    LaunchedEffect(items, previewItemId) {
-        val id = previewItemId ?: return@LaunchedEffect
-        if (items.none { it.id == id }) {
-            previewItemId = null
-            previewPhase = PreviewPhase.Idle
-        }
-    }
-
     // ── Selection state (survives rotation) ─────────────────────────────────
     var selectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedIds by rememberSaveable(
