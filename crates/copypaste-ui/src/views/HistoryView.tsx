@@ -1069,6 +1069,12 @@ interface VirtualListProps {
   listRef: React.RefObject<HTMLDivElement | null>;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
   renderRow: (entry: HistoryEntry) => React.ReactNode;
+  /**
+   * Called when the user scrolls to within LOAD_MORE_THRESHOLD_PX of the
+   * bottom of the list. The parent uses this to fetch the next page.
+   * Optional — omit when load-more is not needed.
+   */
+  onNearBottom?: () => void;
 }
 
 function VirtualList({
@@ -1078,6 +1084,7 @@ function VirtualList({
   listRef,
   onKeyDown,
   renderRow,
+  onNearBottom,
 }: VirtualListProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
@@ -1103,6 +1110,22 @@ function VirtualList({
   const visible = items.slice(start, end);
   const padTop = offsets[start] ?? 0;
 
+  const handleScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const el = e.target as HTMLDivElement;
+      setScrollTop(el.scrollTop);
+      // Fire onNearBottom when the user is within the threshold of the bottom.
+      // scrollHeight - scrollTop - clientHeight gives the remaining distance.
+      if (onNearBottom !== undefined) {
+        const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (remaining < LOAD_MORE_THRESHOLD_PX) {
+          onNearBottom();
+        }
+      }
+    },
+    [onNearBottom]
+  );
+
   return (
     <div
       ref={listRef}
@@ -1110,7 +1133,7 @@ function VirtualList({
       aria-label="Clipboard history"
       tabIndex={0}
       onKeyDown={onKeyDown}
-      onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
+      onScroll={handleScroll}
       className="h-full overflow-y-auto focus:outline-none"
       style={{ scrollbarWidth: "thin" }}
     >
@@ -1144,6 +1167,9 @@ function VirtualList({
 
 type LoadState = "loading" | "ready" | "offline" | "error";
 
+/** How many px from the bottom of the scroll container triggers load-more. */
+const LOAD_MORE_THRESHOLD_PX = 300;
+
 interface ToastState {
   id: number;
   message: string;
@@ -1163,10 +1189,15 @@ export function HistoryView() {
   // Empty string until the first successful load (back-compat with old daemons).
   const [ownDeviceId, setOwnDeviceId] = useState<string>("");
   // "all" | device UUID | "this" — filters the list to a specific origin device.
-  // Client-side over the loaded page (PAGE_SIZE=200 fits comfortably in memory).
   const [deviceFilter, setDeviceFilter] = useState<string>("all");
   // "recency" (default daemon order) | "device" (group by origin device, then recency within group)
   const [sortMode, setSortMode] = useState<"recency" | "device">("recency");
+  // Total count of stored items as reported by the daemon (all pages, not just
+  // what is currently loaded). Initialised to null so the badge is hidden until
+  // the first page arrives.
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  // True while a load-more fetch is in flight — prevents concurrent requests.
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1253,6 +1284,9 @@ export function HistoryView() {
         }
         // Capture own device UUID for the device badge (back-compat: empty string on old daemons).
         setOwnDeviceId(page.own_device_id ?? "");
+        // Always update the total from the daemon — it reflects the true DB count
+        // across all pages, not just the loaded slice.
+        setTotalCount(page.total);
         setDegraded(false);
         setErrorDetail(null);
         setLoadState("ready");
@@ -1291,6 +1325,67 @@ export function HistoryView() {
     []
   );
 
+  // -------------------------------------------------------------------------
+  // Load-more — fetches the next page and appends it (de-duped by id).
+  // Only fires when:
+  //   1. We're in the "ready" state (no active load or error).
+  //   2. The loaded item count is less than the daemon-reported total.
+  //   3. No other load-more is already in flight.
+  //
+  // We use a mutable ref for the implementation so the stable `handleNearBottom`
+  // callback always calls the latest version without needing to re-subscribe the
+  // VirtualList's scroll handler on every render.
+  // -------------------------------------------------------------------------
+
+  const itemsLengthRef = useRef(0);
+  const totalCountRef = useRef<number | null>(null);
+  const loadingMoreRef = useRef(false);
+  const loadStateRef = useRef<LoadState>(loadState);
+
+  // Keep refs in sync on every render (no extra effect needed — render-time
+  // assignment is safe because these are not used during render itself).
+  itemsLengthRef.current = items.length;
+  totalCountRef.current = totalCount;
+  loadingMoreRef.current = loadingMore;
+  loadStateRef.current = loadState;
+
+  const loadMoreRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  loadMoreRef.current = async () => {
+    const total = totalCountRef.current;
+    const loaded = itemsLengthRef.current;
+    // Guard: skip when all rows are already loaded or a fetch is in progress.
+    if (
+      total === null ||
+      loaded >= total ||
+      loadingMoreRef.current ||
+      loadStateRef.current !== "ready"
+    ) {
+      return;
+    }
+    setLoadingMore(true);
+    try {
+      const page = await api.historyPage(PAGE_SIZE, loaded);
+      if (page.items.length > 0) {
+        setItems((prev) => {
+          const existingIds = new Set(prev.map((it) => it.id));
+          const fresh = page.items.filter((it) => !existingIds.has(it.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
+      // Update total in case new items arrived since the last poll.
+      setTotalCount(page.total);
+    } catch {
+      // Load-more failure is non-fatal: the user can scroll up and the next
+      // near-bottom event will retry automatically.
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const handleNearBottom = useCallback(() => {
+    void loadMoreRef.current?.();
+  }, []);
+
   // Initial load
   useEffect(() => {
     void load(false);
@@ -1299,14 +1394,10 @@ export function HistoryView() {
   // Auto-refresh while the window is visible; backed off when the daemon is
   // unreachable so we don't hammer a dead daemon at full rate.
   //
-  // loadState is intentionally read via a ref rather than being a dep: adding it
-  // to the dep array would restart (and therefore double-fire) the effect on every
-  // state-recovery transition (e.g. "offline" → "ready"), causing a duplicate
-  // silent load immediately after the one that just recovered.
-  const loadStateRef = useRef<LoadState>(loadState);
-  useEffect(() => {
-    loadStateRef.current = loadState;
-  });
+  // loadState is intentionally read via the ref rather than being a dep: adding
+  // it to the dep array would restart (and therefore double-fire) the effect on
+  // every state-recovery transition (e.g. "offline" → "ready"), causing a
+  // duplicate silent load immediately after the one that just recovered.
 
   useEffect(() => {
     const ACTIVE_MS = 1200;
@@ -1988,10 +2079,15 @@ export function HistoryView() {
         </button>
       )}
 
-      {/* Clip count — reactive with the loaded list; hidden while loading */}
-      {loadState === "ready" && items.length > 0 && (
-        <span className="text-[11px] text-ide-faint select-none" aria-label={`${items.length} items`}>
-          {items.length} {items.length === 1 ? "item" : "items"}
+      {/* Total-count badge — shows the full DB count from the daemon, not just
+          the loaded slice. Hidden until the first page resolves (totalCount null). */}
+      {totalCount !== null && (
+        <span
+          data-testid="history-total-badge"
+          className="text-[11px] text-ide-faint tabular-nums"
+          title="Total items in clipboard history"
+        >
+          {totalCount} {totalCount === 1 ? "item" : "items"}
         </span>
       )}
       <input
@@ -2129,6 +2225,10 @@ export function HistoryView() {
           imageMaxHeight={imageMaxHeight}
           listRef={listRef}
           onKeyDown={(e) => void handleKeyDown(e)}
+          // Only trigger load-more when not filtering: filtered view operates
+          // over the already-loaded set, so near-bottom doesn't mean "more data
+          // to fetch" — it just means the user has reached the end of the match.
+          onNearBottom={search.trim() === "" ? handleNearBottom : undefined}
           renderRow={(entry) => (
             <HistoryRow
               key={entry.id}
