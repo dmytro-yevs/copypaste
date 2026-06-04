@@ -1709,7 +1709,10 @@ fn notification_title_body(content_type: &str, preview: &str) -> (String, String
 /// notification banner (macOS renders them as line breaks).
 fn build_text_preview_body(preview: &str) -> String {
     const MAX_CHARS: usize = 160;
-    if preview.len() <= MAX_CHARS {
+    // Compare CHARS, not bytes: `preview.len()` is the UTF-8 byte length, which
+    // for multibyte text (Cyrillic, emoji) overstates the visible length and
+    // would truncate far earlier than the intended 160-char budget.
+    if preview.chars().count() <= MAX_CHARS {
         return preview.to_owned();
     }
     // Truncate at MAX_CHARS chars (not bytes), preferring a word boundary.
