@@ -2016,12 +2016,33 @@ impl IpcServer {
         };
         let addr = std::net::SocketAddr::new(ip, bport);
 
+        // Build the peer snapshot from the mDNS PeerInfo resolved above.
+        // This is available immediately (pre-handshake) and is the richest
+        // source of peer identity data at `pair_get_sas` poll time. The PAKE
+        // metadata exchange (model/OS/version) happens AFTER the SAS confirm
+        // step and is surfaced in the final `pair_with_discovered` response.
+        let peer_snapshot = crate::pairing_sm::PeerSnapshot {
+            device_name: if peer.device_name.is_empty() {
+                None
+            } else {
+                Some(peer.device_name.clone())
+            },
+            ip_addrs: peer.ip_addrs.iter().map(|a| a.to_string()).collect(),
+            // device_id IS the cert fingerprint (hex SHA-256); use it directly
+            // so the UI can show the fingerprint before the TLS handshake.
+            fingerprint: if peer.device_id.is_empty() {
+                None
+            } else {
+                Some(peer.device_id.clone())
+            },
+        };
+
         // Claim the single-active-pairing slot. A concurrent request is rejected
         // with a rate-limited error (one pairing at a time, v0.6 simplicity).
-        if !self
-            .pairing
-            .try_begin(crate::pairing_sm::PairingRole::Initiator)
-        {
+        if !self.pairing.try_begin(
+            crate::pairing_sm::PairingRole::Initiator,
+            peer_snapshot.clone(),
+        ) {
             return Response::err_with_code(
                 req_id,
                 ERR_CODE_RATE_LIMITED,
@@ -2058,9 +2079,15 @@ impl IpcServer {
         let confirm = move |sas: &str| {
             let coordinator = Arc::clone(&coordinator);
             let sas = sas.to_string();
+            // Forward the already-captured peer snapshot so `pair_get_sas` polls
+            // surface the mDNS identity while the user is reading the SAS code.
+            let snap = peer_snapshot.clone();
             async move {
-                let rx =
-                    coordinator.enter_awaiting_sas(sas, crate::pairing_sm::PairingRole::Initiator);
+                let rx = coordinator.enter_awaiting_sas(
+                    sas,
+                    crate::pairing_sm::PairingRole::Initiator,
+                    snap,
+                );
                 // SAS_CONFIRM_TIMEOUT bounds the human decision; a dropped sender
                 // (abort) or elapsed timeout both yield a rejection.
                 match tokio::time::timeout(crate::pairing_sm::SAS_CONFIRM_TIMEOUT, rx).await {
@@ -4855,6 +4882,15 @@ impl IpcServer {
 
             // LAN/SAS Phase 2: poll the pairing state machine. Returns the
             // current state plus the SAS + role when awaiting confirmation.
+            // Also surfaces whatever peer metadata is known at this point:
+            //   • peer_device_name  — mDNS advertised name (initiator path)
+            //   • peer_ip_addrs     — resolved IP addresses (initiator path)
+            //   • peer_fingerprint  — cert fingerprint = mDNS device_id (initiator path)
+            // These are all Optional — absent on the responder path (inbound
+            // connection, no prior mDNS resolution) and gracefully omitted by
+            // the UI. Model/OS/version are NOT surfaced here: the PAKE metadata
+            // extension happens AFTER the SAS confirm step; they appear in the
+            // final `pair_with_discovered` response once both sides accept.
             "pair_get_sas" => {
                 let state = self.pairing.snapshot();
                 let mut body = serde_json::json!({ "state": state.as_str() });
@@ -4863,6 +4899,22 @@ impl IpcServer {
                 }
                 if let Some(role) = state.role() {
                     body["role"] = serde_json::Value::String(role.as_str().to_string());
+                }
+                if let Some(snap) = state.peer_snapshot() {
+                    if let Some(ref name) = snap.device_name {
+                        body["peer_device_name"] = serde_json::Value::String(name.clone());
+                    }
+                    if !snap.ip_addrs.is_empty() {
+                        body["peer_ip_addrs"] = serde_json::Value::Array(
+                            snap.ip_addrs
+                                .iter()
+                                .map(|a| serde_json::Value::String(a.clone()))
+                                .collect(),
+                        );
+                    }
+                    if let Some(ref fp) = snap.fingerprint {
+                        body["peer_fingerprint"] = serde_json::Value::String(fp.clone());
+                    }
                 }
                 Response::ok(req.id, body)
             }
@@ -10016,13 +10068,13 @@ mod tests {
     /// stuck rate-limited). Before the fix the second `try_begin` returned false.
     #[tokio::test]
     async fn pair_with_discovered_can_begin_twice_sequentially() {
-        use crate::pairing_sm::{PairingRole, PairingState};
+        use crate::pairing_sm::{PairingRole, PairingState, PeerSnapshot};
         let server = bare_server();
         let pairing = server.pairing_coordinator();
 
         // --- First pairing: success arm. ---
         assert!(
-            pairing.try_begin(PairingRole::Initiator),
+            pairing.try_begin(PairingRole::Initiator, PeerSnapshot::default()),
             "first pairing must begin from Idle"
         );
         // Handler records the terminal outcome, then resets (the fix).
@@ -10035,7 +10087,7 @@ mod tests {
 
         // --- Second pairing: must NOT be refused as rate-limited. ---
         assert!(
-            pairing.try_begin(PairingRole::Initiator),
+            pairing.try_begin(PairingRole::Initiator, PeerSnapshot::default()),
             "BUG A1: a second pair_with_discovered must be able to begin; \
              without the reset the SM stays terminal and try_begin returns false"
         );
@@ -10049,7 +10101,7 @@ mod tests {
 
         // --- Third pairing proves the failure arm reset works too. ---
         assert!(
-            pairing.try_begin(PairingRole::Initiator),
+            pairing.try_begin(PairingRole::Initiator, PeerSnapshot::default()),
             "a pairing after a failed one must also begin"
         );
     }

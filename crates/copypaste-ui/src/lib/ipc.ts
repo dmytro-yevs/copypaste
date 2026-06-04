@@ -266,18 +266,33 @@ export interface PairSasStatus {
   /** "initiator" | "responder" — present only mid-pairing. */
   role?: string;
   // Peer identity fields — included when the daemon has learned them during
-  // the pairing handshake. Optional for back-compat: older daemon builds do not
-  // emit these fields. The UI shows what is available and falls back gracefully.
-  /** Peer's user-visible device name (e.g. "Pixel 8"). */
+  // the pairing handshake. All optional for back-compat: older daemon builds
+  // omit them; the UI shows what is available and falls back gracefully.
+  // model/OS/app_version are surfaced post-SAS in the pair_with_discovered
+  // response, not here.
+  /** Peer's user-visible device name (legacy field name; see peer_device_name). */
   peer_name?: string | null;
-  /** Peer's hardware model (e.g. "Pixel 8 Pro"). */
+  /** Peer's hardware model (e.g. "Pixel 8 Pro") — post-SAS only. */
   peer_model?: string | null;
-  /** Peer's OS name + version (e.g. "Android 15"). */
+  /** Peer's OS name + version (e.g. "Android 15") — post-SAS only. */
   peer_os?: string | null;
-  /** Peer's app/daemon version. */
+  /** Peer's app/daemon version — post-SAS only. */
   peer_app_version?: string | null;
-  /** Peer's best LAN-routable IP address. */
+  /** Peer's best LAN-routable IP address (legacy single-IP field). */
   peer_ip?: string | null;
+  /**
+   * Peer's human-readable device name, advertised over mDNS before dialling.
+   * Present on the initiator path; absent on the responder path (inbound
+   * connection — no prior mDNS resolution).
+   */
+  peer_device_name?: string;
+  /** Peer's resolved IP addresses (IPv4-first), from mDNS. Initiator path only. */
+  peer_ip_addrs?: string[];
+  /**
+   * Peer's certificate fingerprint (the mDNS `device_id` = hex SHA-256).
+   * Present on the initiator path; absent on the responder path.
+   */
+  peer_fingerprint?: string;
 }
 
 export interface PairedDevice {

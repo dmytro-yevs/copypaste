@@ -1498,12 +1498,21 @@ async fn standing_pairing_responder_loop(
             let sas = sas.to_string();
             async move {
                 // Single active pairing: if the coordinator is busy, reject.
-                if !coordinator.try_begin(crate::pairing_sm::PairingRole::Responder) {
+                // Responder path: no prior mDNS resolution → empty PeerSnapshot.
+                // The inbound TLS peer fingerprint is available post-handshake
+                // but not threaded into the confirm callback yet; follow-up task.
+                if !coordinator.try_begin(
+                    crate::pairing_sm::PairingRole::Responder,
+                    crate::pairing_sm::PeerSnapshot::default(),
+                ) {
                     tracing::warn!("LAN/SAS: inbound pairing rejected — another pairing active");
                     return false;
                 }
-                let rx =
-                    coordinator.enter_awaiting_sas(sas, crate::pairing_sm::PairingRole::Responder);
+                let rx = coordinator.enter_awaiting_sas(
+                    sas,
+                    crate::pairing_sm::PairingRole::Responder,
+                    crate::pairing_sm::PeerSnapshot::default(),
+                );
                 match tokio::time::timeout(crate::pairing_sm::SAS_CONFIRM_TIMEOUT, rx).await {
                     Ok(Ok(accept)) => accept,
                     // Sender dropped (pair_abort) or timed out → reject.

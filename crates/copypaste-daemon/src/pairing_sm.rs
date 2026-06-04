@@ -36,6 +36,34 @@ use std::time::Instant;
 
 use tokio::sync::oneshot;
 
+/// Peer identity / address info available when the SAS confirmation step begins.
+///
+/// On the initiator path this comes from the mDNS [`PeerInfo`] snapshot taken
+/// before dialling (device name + resolved IP addresses + mDNS `device_id` which
+/// is the canonical cert fingerprint).  On the responder path the inbound
+/// connection arrives without prior mDNS resolution, so all fields are `None` /
+/// empty — the UI renders whatever is populated and silently omits the rest.
+///
+/// `peer_model`, `peer_os`, `peer_app_version` are NOT available here: the
+/// metadata extension exchange happens AFTER the SAS human-confirmation step
+/// (frames 10/11) and is surfaced in the `pair_with_discovered` / final response
+/// instead.
+///
+/// [`PeerInfo`]: copypaste_p2p::discovery::PeerInfo
+#[derive(Debug, Clone, Default)]
+pub struct PeerSnapshot {
+    /// Human-readable device name advertised over mDNS (initiator path only).
+    pub device_name: Option<String>,
+    /// Resolved IP addresses as display strings, IPv4-first (initiator path only).
+    pub ip_addrs: Vec<String>,
+    /// Cert fingerprint (the mDNS `device_id` = hex SHA-256 of the peer cert).
+    /// Available on the initiator path because we know the mDNS `device_id`
+    /// before dialling.  `None` on the responder path (inbound connection —
+    /// the TLS fingerprint is available post-handshake but not yet surfaced here;
+    /// follow-up: thread `tls_peer_fp` into the responder's confirm callback).
+    pub fingerprint: Option<String>,
+}
+
 /// How long the daemon waits for the local user to confirm or reject the SAS
 /// before auto-aborting the in-flight pairing.
 ///
@@ -80,6 +108,9 @@ pub enum PairingState {
     Initiating {
         /// Role this daemon is playing.
         role: PairingRole,
+        /// Peer metadata known before dialling (initiator: from mDNS snapshot;
+        /// responder: empty — the inbound connection carries no prior context).
+        peer: PeerSnapshot,
     },
     /// The handshake reached frame 9, the SAS is derived, and the daemon is
     /// waiting for the local user's accept/reject decision.
@@ -90,6 +121,10 @@ pub enum PairingState {
         role: PairingRole,
         /// Wall-clock deadline after which the pairing auto-aborts.
         expires_at: Instant,
+        /// Peer identity / address info available at SAS time (initiator: from
+        /// mDNS; responder: empty).  Surfaced in `pair_get_sas` so the UI can
+        /// show the peer's name, IPs, and fingerprint alongside the SAS code.
+        peer: PeerSnapshot,
     },
     /// Both sides accepted the SAS — keys are trusted and have been persisted.
     Confirmed,
@@ -152,8 +187,23 @@ impl PairingState {
     /// The role when in an active state, else `None`.
     pub fn role(&self) -> Option<PairingRole> {
         match self {
-            PairingState::Initiating { role } | PairingState::AwaitingSas { role, .. } => {
+            PairingState::Initiating { role, .. } | PairingState::AwaitingSas { role, .. } => {
                 Some(*role)
+            }
+            _ => None,
+        }
+    }
+
+    /// Peer metadata snapshot when in an active (non-idle, non-terminal) state.
+    ///
+    /// Returns `None` for `Idle` and all terminal states.  On the initiator
+    /// path the snapshot carries the mDNS device name, IP addresses, and
+    /// fingerprint.  On the responder path all fields are `None`/empty (the
+    /// inbound connection arrives without prior mDNS resolution).
+    pub fn peer_snapshot(&self) -> Option<&PeerSnapshot> {
+        match self {
+            PairingState::Initiating { peer, .. } | PairingState::AwaitingSas { peer, .. } => {
+                Some(peer)
             }
             _ => None,
         }
@@ -207,23 +257,35 @@ impl PairingCoordinator {
 
     /// Attempt to claim the machine for a new pairing as `role`.
     ///
+    /// `peer` carries whatever peer identity information is known before dialling
+    /// (initiator: mDNS device name / IPs / fingerprint; responder: default empty).
+    ///
     /// Returns `true` and transitions `Idle → Initiating` when no pairing is in
     /// flight; returns `false` (leaving state unchanged) when one already is, so
     /// the caller can reject the concurrent request with a rate-limited error.
-    pub fn try_begin(&self, role: PairingRole) -> bool {
+    pub fn try_begin(&self, role: PairingRole, peer: PeerSnapshot) -> bool {
         let mut slot = self.lock_state();
         if !slot.0.is_idle() {
             return false;
         }
-        slot.0 = PairingState::Initiating { role };
+        slot.0 = PairingState::Initiating { role, peer };
         true
     }
 
     /// Transition `Initiating → AwaitingSas`, storing the derived SAS and the
     /// confirmation channel. Called from the handshake's `confirm` callback.
     ///
+    /// `peer` is the same snapshot passed to [`try_begin`]; it is forwarded into
+    /// `AwaitingSas` so `pair_get_sas` can surface it while the user is reading
+    /// the code.
+    ///
     /// Returns the receiver the callback awaits for the user's decision.
-    pub fn enter_awaiting_sas(&self, sas: String, role: PairingRole) -> oneshot::Receiver<bool> {
+    pub fn enter_awaiting_sas(
+        &self,
+        sas: String,
+        role: PairingRole,
+        peer: PeerSnapshot,
+    ) -> oneshot::Receiver<bool> {
         let (confirm_tx, confirm_rx) = oneshot::channel();
         {
             let mut slot = self.lock_state();
@@ -231,6 +293,7 @@ impl PairingCoordinator {
                 sas,
                 role,
                 expires_at: Instant::now() + SAS_CONFIRM_TIMEOUT,
+                peer,
             };
         }
         *self.lock_pending() = Some(Pending { confirm_tx });
@@ -309,7 +372,7 @@ mod tests {
     #[test]
     fn begin_transitions_idle_to_initiating() {
         let c = PairingCoordinator::new();
-        assert!(c.try_begin(PairingRole::Initiator));
+        assert!(c.try_begin(PairingRole::Initiator, PeerSnapshot::default()));
         let s = c.snapshot();
         assert_eq!(s.as_str(), "initiating");
         assert_eq!(s.role(), Some(PairingRole::Initiator));
@@ -319,9 +382,9 @@ mod tests {
     #[test]
     fn concurrent_begin_is_rejected() {
         let c = PairingCoordinator::new();
-        assert!(c.try_begin(PairingRole::Initiator));
+        assert!(c.try_begin(PairingRole::Initiator, PeerSnapshot::default()));
         // A second begin while non-idle must be refused (single active pairing).
-        assert!(!c.try_begin(PairingRole::Responder));
+        assert!(!c.try_begin(PairingRole::Responder, PeerSnapshot::default()));
         // State unchanged.
         assert_eq!(c.snapshot().role(), Some(PairingRole::Initiator));
     }
@@ -329,8 +392,12 @@ mod tests {
     #[test]
     fn enter_awaiting_sas_exposes_sas_and_role() {
         let c = PairingCoordinator::new();
-        assert!(c.try_begin(PairingRole::Responder));
-        let _rx = c.enter_awaiting_sas("123456".to_string(), PairingRole::Responder);
+        assert!(c.try_begin(PairingRole::Responder, PeerSnapshot::default()));
+        let _rx = c.enter_awaiting_sas(
+            "123456".to_string(),
+            PairingRole::Responder,
+            PeerSnapshot::default(),
+        );
         let s = c.snapshot();
         assert_eq!(s.as_str(), "awaiting_sas");
         assert_eq!(s.sas(), Some("123456"));
@@ -340,8 +407,12 @@ mod tests {
     #[tokio::test]
     async fn deliver_decision_fires_oneshot() {
         let c = PairingCoordinator::new();
-        assert!(c.try_begin(PairingRole::Initiator));
-        let rx = c.enter_awaiting_sas("000000".to_string(), PairingRole::Initiator);
+        assert!(c.try_begin(PairingRole::Initiator, PeerSnapshot::default()));
+        let rx = c.enter_awaiting_sas(
+            "000000".to_string(),
+            PairingRole::Initiator,
+            PeerSnapshot::default(),
+        );
         assert!(c.deliver_decision(true));
         assert!(rx.await.unwrap());
     }
@@ -351,8 +422,12 @@ mod tests {
         // A reject must propagate `false` to the handshake so it sends REJECT in
         // frame 10a and drops/zeroizes the session key (no persist, no rotate).
         let c = PairingCoordinator::new();
-        assert!(c.try_begin(PairingRole::Initiator));
-        let rx = c.enter_awaiting_sas("424242".to_string(), PairingRole::Initiator);
+        assert!(c.try_begin(PairingRole::Initiator, PeerSnapshot::default()));
+        let rx = c.enter_awaiting_sas(
+            "424242".to_string(),
+            PairingRole::Initiator,
+            PeerSnapshot::default(),
+        );
         assert!(c.deliver_decision(false));
         assert!(!rx.await.unwrap());
         // The handshake task would then call finish(Rejected).
@@ -366,8 +441,12 @@ mod tests {
         // pair_abort must cancel the in-flight handshake: dropping the sender
         // resolves the await with an Err, which the callback treats as reject.
         let c = PairingCoordinator::new();
-        assert!(c.try_begin(PairingRole::Responder));
-        let rx = c.enter_awaiting_sas("999999".to_string(), PairingRole::Responder);
+        assert!(c.try_begin(PairingRole::Responder, PeerSnapshot::default()));
+        let rx = c.enter_awaiting_sas(
+            "999999".to_string(),
+            PairingRole::Responder,
+            PeerSnapshot::default(),
+        );
         c.abort();
         assert!(rx.await.is_err(), "dropping the sender must error the recv");
         assert_eq!(c.snapshot().as_str(), "aborted");
@@ -382,12 +461,55 @@ mod tests {
     #[test]
     fn reset_returns_to_idle_for_next_pairing() {
         let c = PairingCoordinator::new();
-        assert!(c.try_begin(PairingRole::Initiator));
+        assert!(c.try_begin(PairingRole::Initiator, PeerSnapshot::default()));
         c.finish(PairingState::Confirmed);
         assert_eq!(c.snapshot().as_str(), "confirmed");
         c.reset();
         assert!(c.snapshot().is_idle());
         // A fresh pairing may begin after reset.
-        assert!(c.try_begin(PairingRole::Responder));
+        assert!(c.try_begin(PairingRole::Responder, PeerSnapshot::default()));
+    }
+
+    // ── peer metadata surfacing ────────────────────────────────────────────────
+
+    /// `AwaitingSas` must carry peer metadata (device name, addresses,
+    /// fingerprint) so `pair_get_sas` can surface them in the IPC response for
+    /// the macOS UI to display before the user confirms the SAS.
+    #[test]
+    fn awaiting_sas_carries_peer_metadata() {
+        let c = PairingCoordinator::new();
+        let meta = PeerSnapshot {
+            device_name: Some("Alice's MacBook".to_string()),
+            ip_addrs: vec!["192.168.1.42".to_string()],
+            fingerprint: Some("ab:cd:ef".to_string()),
+        };
+        assert!(c.try_begin(PairingRole::Initiator, meta.clone()));
+        let _rx = c.enter_awaiting_sas("123456".to_string(), PairingRole::Initiator, meta);
+        let s = c.snapshot();
+        assert_eq!(s.as_str(), "awaiting_sas");
+        assert_eq!(s.sas(), Some("123456"));
+        let snap = s
+            .peer_snapshot()
+            .expect("peer_snapshot must be Some in AwaitingSas");
+        assert_eq!(snap.device_name.as_deref(), Some("Alice's MacBook"));
+        assert_eq!(snap.ip_addrs, vec!["192.168.1.42".to_string()]);
+        assert_eq!(snap.fingerprint.as_deref(), Some("ab:cd:ef"));
+    }
+
+    /// `pair_get_sas` metadata must be available even when no info is known
+    /// (responder path — mDNS info unavailable). All fields default to None/empty.
+    #[test]
+    fn awaiting_sas_empty_peer_metadata_is_valid() {
+        let c = PairingCoordinator::new();
+        assert!(c.try_begin(PairingRole::Responder, PeerSnapshot::default()));
+        let meta = PeerSnapshot::default();
+        let _rx = c.enter_awaiting_sas("654321".to_string(), PairingRole::Responder, meta);
+        let s = c.snapshot();
+        let snap = s
+            .peer_snapshot()
+            .expect("peer_snapshot must be Some in AwaitingSas");
+        assert!(snap.device_name.is_none());
+        assert!(snap.ip_addrs.is_empty());
+        assert!(snap.fingerprint.is_none());
     }
 }

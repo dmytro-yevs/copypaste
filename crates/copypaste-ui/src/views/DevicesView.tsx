@@ -504,6 +504,21 @@ function SasPairingModal({
               {status.sas}
               {sasCopied && <span className="ml-2 text-[12px] text-ide-success">✓</span>}
             </button>
+            {/* Peer metadata grid — rendered from whatever the daemon knows at
+                SAS time (mDNS: name, IPs, fingerprint). All rows are optional;
+                nothing renders when a field is absent (responder path). */}
+            {(status.peer_device_name ??
+              status.peer_ip_addrs?.length ??
+              status.peer_fingerprint) && (
+              <div className="mt-3 rounded-ide border border-ide-divider bg-ide-panel/40 px-3 py-2">
+                <MetaRow label="Name" value={status.peer_device_name} />
+                <MetaRow
+                  label="Addresses"
+                  value={status.peer_ip_addrs?.join(", ")}
+                />
+                <MetaRow label="Fingerprint" value={status.peer_fingerprint} />
+              </div>
+            )}
             <div className="mt-4 flex items-center justify-end gap-2">
               <button
                 onClick={() => void handleConfirm(false)}
@@ -620,7 +635,9 @@ function DiscoveredRow({
   onPair: (device: DiscoveredDevice) => void;
   busy: boolean;
 }) {
-  const ip = device.ip_addrs[0] ?? null;
+  // Show all resolved IPs (comma-joined); fall back to a single address.
+  const ips =
+    device.ip_addrs.length > 0 ? device.ip_addrs.join(", ") : null;
   // v1 peers without a bootstrap port cannot do SAS pairing.
   const pairable = device.bport !== null;
   return (
@@ -630,11 +647,8 @@ function DiscoveredRow({
           <p className="truncate text-[13px] font-medium text-ide-text">
             {device.device_name || `Device ${device.device_id.slice(0, 8)}`}
           </p>
-          {ip && (
-            <span className="text-[11px] text-ide-faint">
-              <span className="text-ide-dim">Local IP</span>{" "}{ip}
-            </span>
-          )}
+          <MetaRow label="Addresses" value={ips} />
+          <MetaRow label="Fingerprint" value={device.device_id || null} />
         </div>
         <button
           onClick={() => onPair(device)}
