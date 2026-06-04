@@ -861,6 +861,7 @@ class Settings(context: Context) {
                 sessionKeyWrappedB64 = o.optString("sessionKeyWrappedB64", ""),
                 sessionKeyIvB64 = o.optString("sessionKeyIvB64", ""),
                 lastSyncMs = o.optLong("lastSyncMs", 0L),
+                pairedAtMs = o.optLong("pairedAtMs", 0L),
             )
         }.filter { it.fingerprint.isNotBlank() }
     }.getOrElse { e ->
@@ -878,6 +879,7 @@ class Settings(context: Context) {
                 .put("sessionKeyWrappedB64", p.sessionKeyWrappedB64)
                 .put("sessionKeyIvB64", p.sessionKeyIvB64)
                 .put("lastSyncMs", p.lastSyncMs)
+                .put("pairedAtMs", p.pairedAtMs)
             arr.put(o)
         }
         return arr.toString()
@@ -1432,11 +1434,18 @@ data class PairedPeer(
     val sessionKeyWrappedB64: String,
     val sessionKeyIvB64: String,
     val lastSyncMs: Long = 0L,
+    /**
+     * Unix epoch ms when this device was paired (stamped at pairing time).
+     * Parity with macOS PairedDevice.added_at (stored as epoch seconds there;
+     * we store ms here and convert to seconds for display).
+     * Defaults to 0 (unknown) for peers persisted before this field was added.
+     */
+    val pairedAtMs: Long = 0L,
 ) {
     /** Convenience overload for callers that have no wrapped key yet (e.g. the
      *  legacy-fingerprint shim). Defaults the wrapped fields to empty. */
     constructor(fingerprint: String, syncAddr: String, name: String) :
-        this(fingerprint, syncAddr, name, "", "", 0L)
+        this(fingerprint, syncAddr, name, "", "", 0L, 0L)
 }
 
 /**

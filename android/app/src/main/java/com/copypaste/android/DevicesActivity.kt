@@ -1,8 +1,11 @@
 package com.copypaste.android
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import java.text.DateFormat
+import java.util.Date
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -494,23 +497,37 @@ private fun PeerCard(
 
             Spacer(Modifier.height(10.dp))
 
-            // ── Fingerprint (short) ─────────────────────────────────────────
-            DeviceField(label = "Fingerprint", value = peer.fingerprint.take(16))
+            // ── Parity field set (matches macOS PeerRow order) ──────────────
+            // 1. Fingerprint (short)
+            DeviceField(
+                label = "Fingerprint",
+                value = if (peer.fingerprint.length > 24)
+                    "${peer.fingerprint.take(16)}…${peer.fingerprint.takeLast(8)}"
+                else peer.fingerprint,
+            )
 
-            // ── Sync address ────────────────────────────────────────────────
-            if (peer.syncAddr.isNotBlank()) {
+            // 2. Local IP — extracted from the sync address (host:port)
+            val localIp = syncAddrToIp(peer.syncAddr)
+            if (localIp != null) {
                 Spacer(Modifier.height(6.dp))
-                DeviceField(label = "Sync address", value = peer.syncAddr)
+                DeviceField(label = "Local IP", value = localIp)
             }
 
-            // ── Last sync ───────────────────────────────────────────────────
+            // 3. Paired at — stamped when pairing completed
+            if (peer.pairedAtMs > 0L) {
+                Spacer(Modifier.height(6.dp))
+                DeviceField(label = "Paired", value = formatEpochMs(peer.pairedAtMs))
+            }
+
+            // 4. Last sync — shown as relative elapsed time when recent
             if (peer.lastSyncMs > 0L) {
                 Spacer(Modifier.height(6.dp))
                 val elapsed = (System.currentTimeMillis() - peer.lastSyncMs) / 1_000L
                 val lastSyncText = when {
                     elapsed < 60 -> "${elapsed}s ago"
                     elapsed < 3600 -> "${elapsed / 60}m ago"
-                    else -> "${elapsed / 3600}h ago"
+                    elapsed < 86400 -> "${elapsed / 3600}h ago"
+                    else -> formatEpochMs(peer.lastSyncMs)
                 }
                 DeviceField(label = "Last sync", value = lastSyncText)
             }
@@ -582,6 +599,19 @@ private fun NoPeerCard(onPair: () -> Unit) {
 
 @Composable
 private fun OwnDeviceCard(identity: P2pIdentity) {
+    // Rich identity — mirrors macOS ThisDeviceCard fields:
+    // Model / OS / Version / Fingerprint. Public IP is not available on Android
+    // (no relay probe in the Android client); Local IP omitted for own-device
+    // (syncAddr is a peer concept, not a self-IP).
+    val ctx = LocalContext.current
+    val model = Build.MODEL.orEmpty().ifBlank { null }
+    val osVersion = "Android ${Build.VERSION.RELEASE}"
+    val appVersion = remember(ctx) {
+        runCatching {
+            ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: ""
+        }.getOrElse { "" }
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -589,9 +619,46 @@ private fun OwnDeviceCard(identity: P2pIdentity) {
         border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            DeviceField(label = "Device ID", value = identity.deviceId)
+            // Header: online dot + device name
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(IdeSuccess),
+                )
+                Text(
+                    text = model ?: "This Device",
+                    color = IdeText,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = "This device",
+                    color = IdeDim,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // Model
+            if (model != null) {
+                DeviceField(label = "Model", value = model)
+                Spacer(Modifier.height(6.dp))
+            }
+            // OS
+            DeviceField(label = "OS", value = osVersion)
+            // Version
+            if (appVersion.isNotBlank()) {
+                Spacer(Modifier.height(6.dp))
+                DeviceField(label = "Version", value = appVersion)
+            }
+            // Fingerprint
             Spacer(Modifier.height(6.dp))
-            DeviceField(label = "My fingerprint", value = identity.fingerprint)
+            DeviceField(label = "Fingerprint", value = identity.fingerprint)
         }
     }
 }
@@ -732,6 +799,7 @@ private fun SasPairingDialog(
             val rawSessionKey = ByteArray(keyUBytes.size) { keyUBytes[it].toByte() }
             try {
                 val (wrappedB64, ivB64) = settings.wrapSessionKey(rawSessionKey)
+                val nowMs = System.currentTimeMillis()
                 settings.upsertPeer(
                     PairedPeer(
                         fingerprint = fingerprint,
@@ -739,7 +807,8 @@ private fun SasPairingDialog(
                         name = peer.deviceName,
                         sessionKeyWrappedB64 = wrappedB64,
                         sessionKeyIvB64 = ivB64,
-                        lastSyncMs = System.currentTimeMillis(),
+                        lastSyncMs = nowMs,
+                        pairedAtMs = nowMs,
                     )
                 )
 
@@ -1012,6 +1081,27 @@ private fun DeviceField(label: String, value: String) {
 }
 
 private const val TAG = "DevicesActivity"
+
+/**
+ * Format a Unix epoch-millisecond timestamp as a short locale date+time string
+ * for device-info fields. Returns "—" for zero / negative values (unknown).
+ * Mirrors macOS formatEpochSecs (which uses toLocaleString()).
+ */
+private fun formatEpochMs(ms: Long): String {
+    if (ms <= 0L) return "—"
+    return DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+        .format(Date(ms))
+}
+
+/** Extract the host part from a "host:port" sync address, or return the full string. */
+private fun syncAddrToIp(syncAddr: String): String? {
+    if (syncAddr.isBlank()) return null
+    // IPv6: [::1]:4242 → ::1; IPv4: 192.168.1.2:4242 → 192.168.1.2
+    val v6 = Regex("""^\[(.+)]:\d+$""").find(syncAddr)
+    if (v6 != null) return v6.groupValues[1]
+    val colon = syncAddr.lastIndexOf(':')
+    return if (colon > 0) syncAddr.substring(0, colon) else syncAddr
+}
 
 /** Poll cadence for refreshing peer state on the Devices screen. */
 private const val PEER_POLL_MS = 10_000L

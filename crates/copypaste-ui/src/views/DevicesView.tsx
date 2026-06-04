@@ -201,21 +201,15 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke }: PeerRowProps) {
             <MetaRow label="Version" value={peer.app_version} />
             <MetaRow label="Local IP" value={ip} />
 
-            {/* Paired / first-sync / last-sync timestamps. formatEpochSecs
-                returns "—" for null/0. */}
+            {/* Paired / last-sync timestamps. "First sync" removed —
+                superseded by "Paired at". formatEpochSecs returns "—"
+                for null/0. */}
             {(peer.added_at ?? 0) > 0 && (
-              <p className="text-[11px] text-ide-faint">
-                Paired {formatEpochSecs(peer.added_at)}
-              </p>
+              <MetaRow label="Paired" value={formatEpochSecs(peer.added_at)} />
             )}
-            <p className="text-[11px] text-ide-faint">
-              <span className="text-ide-dim">First sync</span>{" "}
-              <span>{formatEpochSecs(peer.first_sync_at)}</span>
-            </p>
-            <p className="text-[11px] text-ide-faint">
-              <span className="text-ide-dim">Last sync</span>{" "}
-              <span>{formatEpochSecs(peer.last_sync_at)}</span>
-            </p>
+            {(peer.last_sync_at ?? 0) > 0 && (
+              <MetaRow label="Last sync" value={formatEpochSecs(peer.last_sync_at)} />
+            )}
 
             {/* Revoked / error states */}
             {revokedAt !== null && (
