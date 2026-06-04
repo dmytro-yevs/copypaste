@@ -3,8 +3,9 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
-  formatWallTime,
+  ipcErrorMessage,
   IpcError,
+  isImageType,
   playCopySound,
   resetDatabase,
   showCopyNotification,
@@ -13,7 +14,9 @@ import {
   type HistoryPage,
 } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
+import { formatRelativeTime } from "../lib/time";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
+import { EmptyState } from "../components/EmptyState";
 import { useUI } from "../store";
 import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
@@ -84,15 +87,6 @@ function parseFilename(preview: string): string {
   return m ? m[1].trim() : preview || "file";
 }
 
-function relativeTime(ms: number): string {
-  if (ms <= 0) return "—";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`;
-  return formatWallTime(ms);
-}
 
 // ---------------------------------------------------------------------------
 // Content-type icon (colored SVG glyphs)
@@ -369,8 +363,7 @@ export function rowHeightFor(
   previewSize: number,
   imageMaxHeight: number
 ): number {
-  const isImage =
-    entry.content_type === "image" || entry.content_type.startsWith("image/");
+  const isImage = isImageType(entry.content_type);
   // File rows get a fixed height that fits the FileChip (icon + filename + buttons).
   const isFile = entry.content_type === "file";
   if (isImage) return Math.max(imageMaxHeight + 10, 34);
@@ -490,7 +483,7 @@ function HistoryRow({
   dragHandleProps,
 }: RowProps) {
   // Bare "image" content_type (legacy) or MIME-typed "image/*" future rows.
-  const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
+  const isImage = isImageType(entry.content_type);
   const isFile = entry.content_type === "file";
 
   let preview: string;
@@ -683,7 +676,7 @@ function HistoryRow({
         })()}
         {/* Timestamp — always shown; sits before the buttons */}
         <span className="text-[11px] text-ide-faint">
-          {relativeTime(entry.wall_time)}
+          {formatRelativeTime(entry.wall_time, "long")}
         </span>
 
         {/* Icon action buttons — invisible at rest, visible on hover.
@@ -914,7 +907,7 @@ function DetailsModal({
   entry: HistoryEntry;
   onClose: () => void;
 }) {
-  const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
+  const isImage = isImageType(entry.content_type);
   const isFile = entry.content_type === "file";
 
   // Close on Escape
@@ -1271,7 +1264,7 @@ export function HistoryView() {
         // The daemon is reachable but history failed. Surface the real error and,
         // when the daemon reports a degraded/not-ready DB, offer the reset escape
         // hatch instead of a dead-end "Failed to load history" screen.
-        setErrorDetail(err instanceof IpcError ? err.message : String(err));
+        setErrorDetail(ipcErrorMessage(err, String(err)));
         const notReady =
           err instanceof IpcError &&
           (err.code === "ipc_not_ready" || err.code === "IPC_NOT_READY");
@@ -1523,7 +1516,7 @@ export function HistoryView() {
         });
         void load(true);
       } catch (err) {
-        const msg = err instanceof IpcError ? err.message : "Copy failed";
+        const msg = ipcErrorMessage(err, "Copy failed");
         showToast(msg, "error");
       }
     },
@@ -1576,7 +1569,7 @@ export function HistoryView() {
           setSelectedId(newIdx >= 0 ? (filtered[newIdx]?.id ?? null) : null);
           void load(true);
         } catch (err) {
-          const msg = err instanceof IpcError ? err.message : "Delete failed";
+          const msg = ipcErrorMessage(err, "Delete failed");
           showToast(msg, "error");
         }
       }
@@ -1595,7 +1588,7 @@ export function HistoryView() {
         // Immediate refresh so the server's new state + re-sort is reflected.
         void load(true);
       } catch (err) {
-        const msg = err instanceof IpcError ? err.message : "Pin failed";
+        const msg = ipcErrorMessage(err, "Pin failed");
         showToast(msg, "error");
       }
     },
@@ -1609,7 +1602,7 @@ export function HistoryView() {
         if (selectedId === id) setSelectedId(null);
         void load(true);
       } catch (err) {
-        const msg = err instanceof IpcError ? err.message : "Delete failed";
+        const msg = ipcErrorMessage(err, "Delete failed");
         showToast(msg, "error");
       }
     },
@@ -1645,7 +1638,7 @@ export function HistoryView() {
         await api.reorderPinned(newIds);
         void load(true);
       } catch (err) {
-        const msg = err instanceof IpcError ? err.message : "Reorder failed";
+        const msg = ipcErrorMessage(err, "Reorder failed");
         showToast(msg, "error");
         // Revert to server state on failure.
         void load(true);
@@ -1746,7 +1739,7 @@ export function HistoryView() {
         try {
           await api.copyItem(firstId);
         } catch (err) {
-          const msg = err instanceof IpcError ? err.message : "Copy failed";
+          const msg = ipcErrorMessage(err, "Copy failed");
           showToast(msg, "error");
           // Return inside try so finally still runs and releases the busy flag (V-13).
           return;
@@ -1757,10 +1750,7 @@ export function HistoryView() {
       // preview text of all selected non-sensitive, non-image items. This is
       // best-effort — we don't surface an error if the API is unavailable.
       const textItems = selectedItems.filter(
-        (it) =>
-          !it.is_sensitive &&
-          it.content_type !== "image" &&
-          !it.content_type.startsWith("image/")
+        (it) => !it.is_sensitive && !isImageType(it.content_type)
       );
       if (textItems.length > 1 && typeof navigator?.clipboard?.writeText === "function") {
         const concatenated = textItems.map((it) => it.preview).join("\n");
@@ -1813,7 +1803,7 @@ export function HistoryView() {
       showToast("Database reset — local history erased", "success");
       await load(false);
     } catch (err) {
-      const msg = err instanceof IpcError ? err.message : String(err);
+      const msg = ipcErrorMessage(err, String(err));
       setErrorDetail(`Reset failed: ${msg}`);
       showToast(`Reset failed: ${msg}`, "error");
     } finally {
@@ -2025,17 +2015,17 @@ export function HistoryView() {
     );
   } else if (loadState === "offline") {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        {/* §9 hero icon — plug/zap 28px faint */}
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
-          <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-        <p className="text-[13px] text-ide-dim">Clipboard service offline</p>
-        <p className="text-[11px] text-ide-faint">The daemon is not running.</p>
-        <div className="mt-1">
-          <RestartDaemonButton onRestarted={() => void load()} />
-        </div>
-      </div>
+      <EmptyState
+        className="h-full"
+        icon={
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        }
+        title="Clipboard service offline"
+        body="The daemon is not running."
+        action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void load()} /></div>}
+      />
     );
   } else if (loadState === "error") {
     body = (
@@ -2088,28 +2078,32 @@ export function HistoryView() {
     );
   } else if (filtered.length === 0 && items.length === 0) {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        {/* §9 clipboard hero icon 28px faint */}
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
-          <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-        </svg>
-        <p className="text-[13px] text-ide-dim">Nothing copied yet</p>
-        <p className="text-[11px] text-ide-faint">Copy something and it will appear here.</p>
-      </div>
+      <EmptyState
+        className="h-full"
+        icon={
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+          </svg>
+        }
+        title="Nothing copied yet"
+        body="Copy something and it will appear here."
+      />
     );
   } else if (filtered.length === 0) {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        {/* §9 search-x hero icon 28px faint */}
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
-          <circle cx="11" cy="11" r="7" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          <line x1="8" y1="11" x2="14" y2="11" />
-        </svg>
-        <p className="text-[13px] text-ide-dim">No results for &ldquo;{search}&rdquo;</p>
-        <p className="text-[11px] text-ide-faint">Try a different search term.</p>
-      </div>
+      <EmptyState
+        className="h-full"
+        icon={
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="7" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+          </svg>
+        }
+        title={`No results for “${search}”`}
+        body="Try a different search term."
+      />
     );
   } else {
     body = (

@@ -3,12 +3,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { api, HistoryEntry, IpcError, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
+import { api, HistoryEntry, ipcErrorMessage, IpcError, isImageType, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
+import { formatRelativeTime } from "../lib/time";
 import { useUI } from "../store";
 import { clearImageCache, ImageThumb } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
+import { EmptyState } from "../components/EmptyState";
 
 // Max items fetched for the popup list. Intentionally compact — the popup is a
 // quick-access surface, not a full history browser.
@@ -55,7 +57,7 @@ function ContentChip({ type }: { type: string }) {
       </span>
     );
   }
-  if (type === "image" || type.startsWith("image/")) {
+  if (isImageType(type)) {
     return (
       <span className="chip" style={{ background: "rgba(198,120,221,0.14)", color: "#C678DD" }}>
         {/* mini image frame */}
@@ -79,24 +81,6 @@ function ContentChip({ type }: { type: string }) {
     <span className="chip" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.35)" }}>
       •
     </span>
-  );
-}
-
-// ── Empty state hero ─────────────────────────────────────────────────────────
-
-function EmptyState({ icon, title, body, action }: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center flex-1 gap-2 px-6 py-8 text-center">
-      <span style={{ color: "rgba(255,255,255,0.20)", fontSize: 28, lineHeight: 1 }}>{icon}</span>
-      <p className="text-[13px]" style={{ color: "rgba(255,255,255,0.45)" }}>{title}</p>
-      <p className="text-[11px]" style={{ color: "rgba(255,255,255,0.28)" }}>{body}</p>
-      {action}
-    </div>
   );
 }
 
@@ -247,7 +231,7 @@ export function Popup() {
     }
     const scored: Array<{ item: HistoryEntry; positions: number[]; score: number }> = [];
     for (const item of items) {
-      const isImage = item.content_type === "image" || item.content_type.startsWith("image/");
+      const isImage = isImageType(item.content_type);
       const isSensitive = item.is_sensitive;
       let label: string;
       if (isImage) {
@@ -380,7 +364,7 @@ export function Popup() {
           void showCopyNotification(contentType, preview);
         }
       } catch (e) {
-        const msg = e instanceof IpcError ? e.message : String(e);
+        const msg = ipcErrorMessage(e, String(e));
         console.error("popup copy/paste failed", e);
         // Surface the error while the popup is still visible.
         setError(`Copy failed: ${msg}`);
@@ -679,7 +663,7 @@ function PopupRow({
   onClick,
   onPin,
 }: PopupRowProps) {
-  const isImage = item.content_type === "image" || item.content_type.startsWith("image/");
+  const isImage = isImageType(item.content_type);
   const isSensitive = item.is_sensitive;
 
   const rowH = popupRowHeight(isImage, textRowHeight, imageMaxHeight);
@@ -701,7 +685,7 @@ function PopupRow({
   }
 
   // Relative time (tabular-nums)
-  const relTime = relativeTimeShort(item.wall_time);
+  const relTime = formatRelativeTime(item.wall_time, "short");
 
   return (
     <li
@@ -844,12 +828,3 @@ function PopupRow({
   );
 }
 
-/** Very short relative time for the popup right cluster (tabular-nums). */
-function relativeTimeShort(ms: number): string {
-  if (!ms || ms <= 0) return "";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
-  return `${Math.floor(diff / 86_400_000)}d`;
-}

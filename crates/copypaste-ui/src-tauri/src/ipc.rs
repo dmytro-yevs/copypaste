@@ -13,7 +13,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 /// Resolve the daemon socket path, matching `copypaste-daemon::paths::socket_path`.
-fn socket_path() -> PathBuf {
+pub(crate) fn socket_path() -> PathBuf {
     if let Ok(p) = std::env::var("COPYPASTE_SOCKET") {
         return PathBuf::from(p);
     }

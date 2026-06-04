@@ -4,7 +4,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
-  IpcError,
+  ipcErrorMessage,
   appVersion,
   getPopupShortcut,
   setPopupShortcut,
@@ -885,7 +885,7 @@ export function SettingsView() {
       await api.setConfig(buildConfigPatch(patch) as unknown as Parameters<typeof api.setConfig>[0]);
       showLimitsMsg(field, "Saved", 2000);
     } catch (err) {
-      const msg = err instanceof IpcError ? err.message : "Save failed";
+      const msg = ipcErrorMessage(err, "Save failed");
       showLimitsMsg(field, msg, 4000);
       // Revert only the specific field that failed, not all sliders.
       onRevert?.();
@@ -913,7 +913,7 @@ export function SettingsView() {
       } catch (err) {
         // Revert on failure and surface the error.
         setPrivateMode(!val);
-        const msg = err instanceof IpcError ? err.message : "Failed to update private mode";
+        const msg = ipcErrorMessage(err, "Failed to update private mode");
         setPrivateModeError(msg);
         if (pmErrTimer.current !== null) clearTimeout(pmErrTimer.current);
         pmErrTimer.current = setTimeout(() => setPrivateModeError(null), 3500);
@@ -964,7 +964,7 @@ export function SettingsView() {
         setSyncRestarting(false);
       }
     } catch (err) {
-      const msg = err instanceof IpcError ? err.message : "Save failed";
+      const msg = ipcErrorMessage(err, "Save failed");
       setSaveError(msg);
       if (saveErrTimer.current !== null) clearTimeout(saveErrTimer.current);
       saveErrTimer.current = setTimeout(() => setSaveError(null), 3500);
@@ -979,10 +979,7 @@ export function SettingsView() {
       const result = await api.testCloudConnection();
       setTestMsg({ text: result.message, ok: result.ok });
     } catch (err) {
-      const msg =
-        err instanceof IpcError
-          ? err.message
-          : "Connection test unavailable (daemon offline or cloud-sync not built in)";
+      const msg = ipcErrorMessage(err, "Connection test unavailable (daemon offline or cloud-sync not built in)");
       setTestMsg({ text: msg, ok: false });
     } finally {
       setTesting(false);
@@ -1029,7 +1026,7 @@ export function SettingsView() {
     } catch (err) {
       // Revert on set_config failure — no restart attempted.
       setConfig((c) => ({ ...c, p2p_enabled: prev }));
-      const msg = err instanceof IpcError ? err.message : "Failed to update P2P setting";
+      const msg = ipcErrorMessage(err, "Failed to update P2P setting");
       showLimitsMsg("p2p_enabled", msg, 4000);
     }
   };
@@ -1109,7 +1106,7 @@ export function SettingsView() {
       if (passphraseTimerRef.current !== null) clearTimeout(passphraseTimerRef.current);
       passphraseTimerRef.current = setTimeout(() => setPassphraseSavedMsg(null), 2500);
     } catch (err) {
-      const msg = err instanceof IpcError ? err.message : "Error";
+      const msg = ipcErrorMessage(err, "Error");
       setPassphraseSavedMsg(msg);
       if (passphraseTimerRef.current !== null) clearTimeout(passphraseTimerRef.current);
       passphraseTimerRef.current = setTimeout(() => setPassphraseSavedMsg(null), 3000);
@@ -1131,7 +1128,7 @@ export function SettingsView() {
       if (deleteTimerRef.current !== null) clearTimeout(deleteTimerRef.current);
       deleteTimerRef.current = setTimeout(() => setDeleteMsg(null), 3000);
     } catch (err) {
-      const msg = err instanceof IpcError ? err.message : "Clear failed";
+      const msg = ipcErrorMessage(err, "Clear failed");
       setDeleteMsg({ text: msg, isError: true });
       if (deleteTimerRef.current !== null) clearTimeout(deleteTimerRef.current);
       deleteTimerRef.current = setTimeout(() => setDeleteMsg(null), 4000);

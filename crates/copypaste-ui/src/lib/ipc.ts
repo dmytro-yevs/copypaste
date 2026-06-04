@@ -518,6 +518,27 @@ export function formatWallTime(ms: number): string {
   return new Date(ms).toLocaleString();
 }
 
+/**
+ * Returns true when a daemon content_type represents an image — either the
+ * bare legacy token "image" or any MIME-typed "image/*" variant.
+ * Single source of truth shared by HistoryView, Popup, and notification logic.
+ */
+export function isImageType(ct: string): boolean {
+  return ct === "image" || ct.startsWith("image/");
+}
+
+/**
+ * Extract a human-readable message from a caught error, falling back to
+ * `fallback` when the error is not an IpcError (e.g. a transport TypeError).
+ * Use at every catch site instead of the repeated ternary.
+ *
+ * @param err      The value caught in a catch clause (type `unknown`).
+ * @param fallback Fallback string when `err` is not an IpcError.
+ */
+export function ipcErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof IpcError ? err.message : fallback;
+}
+
 // ---------------------------------------------------------------------------
 // Tauri-direct commands (bypass daemon IPC — talk to the Tauri backend only)
 // ---------------------------------------------------------------------------

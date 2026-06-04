@@ -76,31 +76,11 @@ pub struct DaemonSpawnError(pub Mutex<Option<String>>);
 #[derive(Default)]
 pub struct DaemonLifecycleGen(pub AtomicU64);
 
-/// Resolve the daemon socket path. Mirrors
-/// `copypaste-daemon::paths::socket_path` and `ipc::socket_path` so the probe
-/// hits the same socket the IPC layer talks to.
+/// Resolve the daemon socket path. Delegates to `crate::ipc::socket_path`
+/// so there is a single definition shared by the IPC layer and the lifecycle
+/// probe.
 fn socket_path() -> PathBuf {
-    if let Ok(p) = std::env::var("COPYPASTE_SOCKET") {
-        return PathBuf::from(p);
-    }
-    let Some(home) = home::home_dir() else {
-        return PathBuf::from("/nonexistent/copypaste/daemon.sock");
-    };
-    #[cfg(target_os = "macos")]
-    {
-        home.join("Library/Application Support/CopyPaste/daemon.sock")
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-            return PathBuf::from(xdg).join("copypaste/daemon.sock");
-        }
-        home.join(".local/share/copypaste/daemon.sock")
-    }
-    #[cfg(not(unix))]
-    {
-        home.join("daemon.sock")
-    }
+    crate::ipc::socket_path()
 }
 
 /// Return `true` if the daemon is reachable on its IPC socket right now.

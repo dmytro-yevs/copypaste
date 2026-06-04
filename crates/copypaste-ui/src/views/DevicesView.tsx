@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   api,
+  ipcErrorMessage,
   IpcError,
   formatWallTime,
   formatEpochSecs,
@@ -16,6 +17,7 @@ import {
 } from "../lib/ipc";
 import { ViewShell } from "../components/ViewShell";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
+import { EmptyState } from "../components/EmptyState";
 
 type QrState =
   | { status: "idle" }
@@ -373,7 +375,7 @@ function SasPairingModal({
         timer = setTimeout(() => void poll(), SAS_POLL_MS);
       } catch (e) {
         if (cancelled) return;
-        const msg = e instanceof IpcError ? e.message : "Pairing status unavailable";
+        const msg = ipcErrorMessage(e, "Pairing status unavailable");
         setError(msg);
       }
     };
@@ -422,7 +424,7 @@ function SasPairingModal({
         // later trailing idle isn't misread as success.
         localAcceptedRef.current = false;
         if (unmountedRef.current) return;
-        const msg = e instanceof IpcError ? e.message : "Failed to send decision";
+        const msg = ipcErrorMessage(e, "Failed to send decision");
         setError(msg);
       } finally {
         if (!unmountedRef.current) setConfirmPending(false);
@@ -1055,7 +1057,7 @@ export function DevicesView() {
       if (e instanceof IpcError && e.code === "rate_limited") {
         setDiscoverError("Another pairing is already in progress.");
       } else {
-        const msg = e instanceof IpcError ? e.message : "Failed to start pairing";
+        const msg = ipcErrorMessage(e, "Failed to start pairing");
         setDiscoverError(msg);
       }
     } finally {
@@ -1123,7 +1125,7 @@ export function DevicesView() {
       await loadPeers();
     } catch (err) {
       if (peerActionCancelledRef.current) return;
-      const msg = err instanceof IpcError ? err.message : "Unpair failed";
+      const msg = ipcErrorMessage(err, "Unpair failed");
       setRowError(fingerprint, msg);
     }
   };
@@ -1143,7 +1145,7 @@ export function DevicesView() {
       await loadPeers();
     } catch (err) {
       if (peerActionCancelledRef.current) return;
-      const msg = err instanceof IpcError ? err.message : "Revoke failed";
+      const msg = ipcErrorMessage(err, "Revoke failed");
       setRowError(fingerprint, msg);
     }
   };
@@ -1173,7 +1175,7 @@ export function DevicesView() {
       await loadPeers();
     } catch (err) {
       if (peerActionCancelledRef.current) return;
-      const msg = err instanceof IpcError ? err.message : "Revoke & rotate failed";
+      const msg = ipcErrorMessage(err, "Revoke & rotate failed");
       setRowError(fingerprint, msg);
     } finally {
       if (!peerActionCancelledRef.current) setRevokeBusy(false);
@@ -1191,7 +1193,7 @@ export function DevicesView() {
       globalMsgTimer.current = setTimeout(() => setGlobalMsg(null), 3000);
       await loadPeers();
     } catch (err) {
-      const msg = err instanceof IpcError ? err.message : "Revoke all failed";
+      const msg = ipcErrorMessage(err, "Revoke all failed");
       if (globalMsgTimer.current !== null) clearTimeout(globalMsgTimer.current);
       setGlobalMsg({ text: msg, isError: true });
       globalMsgTimer.current = setTimeout(() => setGlobalMsg(null), 4000);
@@ -1245,16 +1247,17 @@ export function DevicesView() {
   if (loadState === "offline") {
     return (
       <ViewShell title="Devices" actions={actions}>
-        <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
-            <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-          <p className="text-[13px] text-ide-dim">Clipboard service offline</p>
-          <p className="text-[11px] text-ide-faint">The daemon is not running.</p>
-          <div className="mt-1">
-            <RestartDaemonButton onRestarted={() => void loadPeers()} />
-          </div>
-        </div>
+        <EmptyState
+          className="h-full"
+          icon={
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          }
+          title="Clipboard service offline"
+          body="The daemon is not running."
+          action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
+        />
       </ViewShell>
     );
   }
@@ -1263,18 +1266,19 @@ export function DevicesView() {
   if (loadState === "degraded") {
     return (
       <ViewShell title="Devices" actions={actions}>
-        <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-warning">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <p className="text-[13px] text-ide-dim">Database degraded</p>
-          <p className="text-[11px] text-ide-faint">Device list unavailable. Reset the database in History to recover.</p>
-          <div className="mt-1">
-            <RestartDaemonButton onRestarted={() => void loadPeers()} />
-          </div>
-        </div>
+        <EmptyState
+          className="h-full"
+          icon={
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-warning">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          }
+          title="Database degraded"
+          body="Device list unavailable. Reset the database in History to recover."
+          action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
+        />
       </ViewShell>
     );
   }
@@ -1283,18 +1287,19 @@ export function DevicesView() {
   if (loadState === "error") {
     return (
       <ViewShell title="Devices" actions={actions}>
-        <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <p className="text-[13px] text-ide-dim">Failed to load devices</p>
-          <p className="text-[11px] text-ide-faint">Try restarting the daemon.</p>
-          <div className="mt-1">
-            <RestartDaemonButton onRestarted={() => void loadPeers()} />
-          </div>
-        </div>
+        <EmptyState
+          className="h-full"
+          icon={
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+          }
+          title="Failed to load devices"
+          body="Try restarting the daemon."
+          action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
+        />
       </ViewShell>
     );
   }
