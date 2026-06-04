@@ -450,38 +450,36 @@ fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfig {
     }
 }
 
-/// Atomically write `cfg` to the `config.json` path with mode `0600`.
+/// Atomically write `bytes` to `path` with mode `0600` from the first byte.
 ///
-/// # Security (Fix-2)
-///
-/// The previous implementation called `std::fs::write(path, json)` (creates the
-/// file at the umask-derived mode, typically `0644`) and then
-/// `set_permissions(path, 0o600)`. Between the write and the chmod the file
-/// was world-readable for a brief window — long enough for a concurrent process
-/// running as the same user to read `supabase_password` or `supabase_anon_key`.
-///
-/// The fix uses the same atomic-0600 pattern as
-/// `keychain::file_store::write_secret_atomic_to`:
+/// Uses the same atomic-0600 pattern as `crate::peers::save_peers`:
 /// 1. Ensure the parent directory exists (tightened to `0700`).
-/// 2. Create a uniquely-named temp file in the SAME directory.
+/// 2. Create a uniquely-named temp file in the **same** directory (same
+///    filesystem → `rename` is POSIX-atomic).
 /// 3. Set mode `0600` on the temp file before writing any bytes.
-/// 4. Write + flush + sync the JSON payload.
-/// 5. `rename` the temp file over the destination.
-fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
+/// 4. Write + flush + sync the payload.
+/// 5. `rename` over the destination.
+///
+/// A crash between write and rename leaves an invisible `.tmp.*` file that
+/// will be cleaned up by the next successful write.
+fn atomic_write_0600(path: &std::path::Path, bytes: &[u8]) -> anyhow::Result<()> {
     use std::io::Write as _;
 
-    let path = config_path().ok_or_else(|| anyhow::anyhow!("cannot determine config dir"))?;
     let parent = path
         .parent()
-        .ok_or_else(|| anyhow::anyhow!("config path has no parent directory"))?;
+        .ok_or_else(|| anyhow::anyhow!("path has no parent directory: {}", path.display()))?;
     std::fs::create_dir_all(parent)?;
-    // Best-effort: tighten parent dir to user-only.
+    // Best-effort: tighten parent dir to user-only so secret files are not
+    // discoverable through a world-executable parent.
     let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
 
-    let json = serde_json::to_string_pretty(cfg)?;
-
+    let stem = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "tmp".to_owned());
     let tmp = parent.join(format!(
-        ".config.json.tmp.{}.{}",
+        ".{}.tmp.{}.{}",
+        stem,
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -498,12 +496,14 @@ fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
             opts.mode(0o600);
         }
         let mut f = opts.open(&tmp)?;
+        // Defence-in-depth: re-assert 0600 in case a restrictive parent umask
+        // or a non-honouring filesystem ignored the create mode above.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         }
-        f.write_all(json.as_bytes())?;
+        f.write_all(bytes)?;
         f.flush()?;
         f.sync_all()?;
         Ok(())
@@ -513,11 +513,28 @@ fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
         let _ = std::fs::remove_file(&tmp);
         return Err(e.into());
     }
-    if let Err(e) = std::fs::rename(&tmp, &path) {
+    if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e.into());
     }
     Ok(())
+}
+
+/// Atomically write `cfg` to the `config.json` path with mode `0600`.
+///
+/// # Security (Fix-2)
+///
+/// The previous implementation called `std::fs::write(path, json)` (creates the
+/// file at the umask-derived mode, typically `0644`) and then
+/// `set_permissions(path, 0o600)`. Between the write and the chmod the file
+/// was world-readable for a brief window — long enough for a concurrent process
+/// running as the same user to read `supabase_password` or `supabase_anon_key`.
+/// Delegates to [`atomic_write_0600`], which sets `0600` on the temp file
+/// before any bytes are written and `rename`s it over the destination.
+fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
+    let path = config_path().ok_or_else(|| anyhow::anyhow!("cannot determine config dir"))?;
+    let json = serde_json::to_string_pretty(cfg)?;
+    atomic_write_0600(&path, json.as_bytes())
 }
 
 // ---------------------------------------------------------------------------
@@ -742,64 +759,9 @@ fn paired_ip_hosts(peers: &[serde_json::Value]) -> std::collections::HashSet<Str
 /// removed by the dual-daemon fix (a losing daemon now exits on IPC-bind
 /// failure instead of running a second stack), so unification is deferred.
 fn save_peers(peers: &[serde_json::Value]) -> anyhow::Result<()> {
-    use std::io::Write as _;
-
     let path = peers_file_path();
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("peers path has no parent directory: {}", path.display()))?;
-    std::fs::create_dir_all(parent)?;
-    // Best-effort: tighten parent dir perms to user-only.
-    let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
-
     let json = serde_json::to_string_pretty(peers)?;
-
-    // Atomic 0600 write: uniquely-named temp file in the same directory so the
-    // final rename is guaranteed to be on the same filesystem (POSIX atomic).
-    let tmp = parent.join(format!(
-        ".peers.json.tmp.{}.{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-
-    let write_result = (|| -> std::io::Result<()> {
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            // Create with 0600 from the outset — the sync_key_b64 is never
-            // momentarily group/other-readable between create and chmod.
-            opts.mode(0o600);
-        }
-        let mut f = opts.open(&tmp)?;
-        // Defence-in-depth: re-assert 0600 in case a restrictive parent umask
-        // or a non-honouring filesystem ignored the create mode above.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        }
-        f.write_all(json.as_bytes())?;
-        f.flush()?;
-        f.sync_all()?;
-        Ok(())
-    })();
-
-    if let Err(e) = write_result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-
-    if let Err(e) = std::fs::rename(&tmp, &path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-
-    Ok(())
+    atomic_write_0600(&path, json.as_bytes())
 }
 
 /// Validate that a fingerprint string matches the XX:XX:... hex pattern.
@@ -893,6 +855,37 @@ fn send_unpair_signal_if_connected(
         let _ = tx.try_send(PeerFrame::Control(ControlMsg::Unpair));
         tracing::debug!(peer = %canonical_fp, "mutual unpair: sent Unpair signal to connected peer");
     }
+}
+
+/// Extract and validate a UUID `"id"` param from an IPC request, returning a
+/// typed `ERR_CODE_INVALID_ARGUMENT` error response on failure.
+///
+/// Used by the typed-error IPC arms (`delete_item`, `copy_item`, `pin_item`,
+/// `reorder_pinned`, `get_item_image`, `get_item_thumbnail`, `get_item_file`)
+/// to eliminate repeated boilerplate. Arms that use the legacy untyped
+/// `Response::err` style (`delete`, `copy`/`paste`, `pin`) are left unchanged.
+fn extract_uuid_param(
+    params: &serde_json::Value,
+    req_id: String,
+) -> Result<String, crate::protocol::Response> {
+    let id = match params.get("id").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            return Err(crate::protocol::Response::err_with_code(
+                req_id,
+                crate::protocol::ERR_CODE_INVALID_ARGUMENT,
+                "missing param: id",
+            ))
+        }
+    };
+    if uuid::Uuid::parse_str(&id).is_err() {
+        return Err(crate::protocol::Response::err_with_code(
+            req_id,
+            crate::protocol::ERR_CODE_INVALID_ARGUMENT,
+            "invalid param: id must be a valid UUID",
+        ));
+    }
+    Ok(id)
 }
 
 /// Maximum lifetime of an in-progress PAKE session before it is evicted as
@@ -1167,35 +1160,13 @@ impl IpcServer {
         local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
         device_public_key: Arc<[u8; 32]>,
     ) -> Self {
-        Self {
+        Self::new_with_ready(
             db,
             private_mode,
-            local_device_id: None,
             local_key,
             device_public_key,
-            ready: Arc::new(AtomicBool::new(true)),
-            pake_sessions: Arc::new(Mutex::new(HashMap::new())),
-            pending_qr_token: Arc::new(Mutex::new(None)),
-            p2p_peers: None,
-            cert_fingerprint: None,
-            p2p_cert: None,
-            discovery: None,
-            p2p_sync_addr: Arc::new(std::sync::Mutex::new(None)),
-            self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
-            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
-            sync_key: Arc::new(Mutex::new(None)),
-            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
-            last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
-            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
-            cloud_signed_in: Arc::new(AtomicBool::new(false)),
-            new_item_tx: None,
-            degraded_reason: Arc::new(std::sync::Mutex::new(None)),
-            core_config: None,
-            cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
-            pairing: Arc::new(crate::pairing_sm::PairingCoordinator::new()),
-            live_peer_sinks: Arc::new(std::sync::Mutex::new(None)),
-            p2p_live_sinks: Arc::new(std::sync::Mutex::new(None)),
-        }
+            Arc::new(AtomicBool::new(true)),
+        )
     }
 
     /// Mark this server as serving a degraded startup (e.g. keychain-locked /
@@ -2700,6 +2671,54 @@ impl IpcServer {
         }
     }
 
+    /// Soft-delete the item with primary key `id`, bump its `lamport_ts` and
+    /// `wall_time` so the tombstone wins LWW on all peers, then broadcast the
+    /// resulting tombstone row via `new_item_tx` so the sync orchestrator
+    /// propagates it to P2P peers and the cloud upload queue.
+    ///
+    /// Returns `Ok((changed, tombstone_opt))` where `changed` is the number of
+    /// rows modified (0 = not found). `Err` carries either the DB error string
+    /// or a spawn-join failure message. Used by both the legacy `"delete"` arm
+    /// and the typed `"delete_item"` arm; each arm formats its own distinct
+    /// response shape and error style.
+    async fn soft_delete_and_broadcast(
+        &self,
+        id: &str,
+    ) -> Result<(usize, Option<copypaste_core::ClipboardItem>), String> {
+        let db_arc = self.db.clone();
+        let id_owned = id.to_string();
+        let join = tokio::task::spawn_blocking(move || {
+            let db = db_arc.blocking_lock();
+            // Soft-delete: wipe content/nonce/thumb, set deleted=1, bump
+            // lamport_ts + wall_time so the tombstone wins LWW on peers.
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                // SAFETY: current time is always after UNIX_EPOCH.
+                .unwrap_or_default()
+                .as_millis() as i64;
+            // Look up the current row to derive the new lamport_ts.
+            let existing = get_item_by_id(&db, &id_owned).map_err(|e| e.to_string())?;
+            let new_lamport = existing.as_ref().map(|r| r.lamport_ts + 1).unwrap_or(1);
+            let changed =
+                soft_delete_item(&db, &id_owned, new_lamport, now_ms).map_err(|e| e.to_string())?;
+            // Re-read the tombstone row so we can broadcast it to peers.
+            let tombstone = get_item_by_id(&db, &id_owned).map_err(|e| e.to_string())?;
+            Ok::<_, String>((changed, tombstone))
+        })
+        .await
+        .map_err(|e| format!("blocking task failed: {e}"))?;
+
+        if let Ok((_, Some(ref tombstone))) = join {
+            // Broadcast the tombstone so P2P/cloud sync propagates the
+            // deletion to peers. Fire-and-forget: a failed send only
+            // means no sync receiver is currently active.
+            if let Some(ref tx) = self.new_item_tx {
+                let _ = tx.send(tombstone.clone());
+            }
+        }
+        join
+    }
+
     #[tracing::instrument(skip(self), fields(method), name = "ipc_dispatch")]
     async fn dispatch(&self, line: &str) -> Response {
         let req: Request = match serde_json::from_str(line) {
@@ -2802,42 +2821,9 @@ impl IpcServer {
                 if uuid::Uuid::parse_str(&id).is_err() {
                     return Response::err(req.id, "invalid param: id must be a valid UUID");
                 }
-                let db_arc = self.db.clone();
-                let id_for_task = id.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    let db = db_arc.blocking_lock();
-                    // Soft-delete: wipe content/nonce/thumb, set deleted=1, bump
-                    // lamport_ts + wall_time so the tombstone wins LWW on peers.
-                    let now_ms = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        // SAFETY: current time is always after UNIX_EPOCH.
-                        .unwrap_or_default()
-                        .as_millis() as i64;
-                    // Look up the current row to get its lamport_ts for the bump.
-                    let existing = get_item_by_id(&db, &id_for_task)?;
-                    let new_lamport = existing.as_ref().map(|r| r.lamport_ts + 1).unwrap_or(1);
-                    let changed = soft_delete_item(&db, &id_for_task, new_lamport, now_ms)?;
-                    // Re-read the tombstone row so we can broadcast it to peers.
-                    let tombstone = get_item_by_id(&db, &id_for_task)?;
-                    Ok::<_, copypaste_core::storage::items::ItemsError>((changed, tombstone))
-                })
-                .await;
-                match join {
-                    Ok(Ok((_, tombstone_opt))) => {
-                        // Broadcast the tombstone via the sync channel so peers
-                        // receive the deletion and apply it via LWW.
-                        if let (Some(tombstone), Some(ref tx)) = (tombstone_opt, &self.new_item_tx)
-                        {
-                            let _ = tx.send(tombstone);
-                        }
-                        Response::ok(req.id, serde_json::Value::Null)
-                    }
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("blocking task failed: {e}"),
-                    ),
+                match self.soft_delete_and_broadcast(&id).await {
+                    Ok(_) => Response::ok(req.id, serde_json::Value::Null),
+                    Err(e) => Response::err(req.id, e),
                 }
             }
             "count" => {
@@ -3098,23 +3084,10 @@ impl IpcServer {
             // UI can toggle from a single callback. A `pinned=false` request
             // clears the pin flag (restoring normal TTL behaviour).
             "pin_item" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
                 let pinned = match req.params.get("pinned").and_then(|v| v.as_bool()) {
                     Some(b) => b,
                     None => {
@@ -3228,64 +3201,16 @@ impl IpcServer {
             // branches on `error_code`) and returns a structured `{deleted,
             // id}` payload. FTS cleanup is best-effort (logged on failure).
             "delete_item" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
+                match self.soft_delete_and_broadcast(&id).await {
+                    Ok((changed, _)) => Response::ok(
                         req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
-                let db_arc = self.db.clone();
-                let id_for_task = id.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    let db = db_arc.blocking_lock();
-                    // Soft-delete: wipe content/nonce/thumb, set deleted=1, bump
-                    // lamport_ts + wall_time so the tombstone wins LWW on peers.
-                    let now_ms = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        // SAFETY: current time is always after UNIX_EPOCH.
-                        .unwrap_or_default()
-                        .as_millis() as i64;
-                    let existing = get_item_by_id(&db, &id_for_task)?;
-                    let new_lamport = existing.as_ref().map(|r| r.lamport_ts + 1).unwrap_or(1);
-                    let changed = soft_delete_item(&db, &id_for_task, new_lamport, now_ms)?;
-                    // Re-read the tombstone row so we can broadcast it to peers.
-                    let tombstone = get_item_by_id(&db, &id_for_task)?;
-                    Ok::<_, copypaste_core::storage::items::ItemsError>((changed, tombstone))
-                })
-                .await;
-                match join {
-                    Ok(Ok((changed, tombstone_opt))) => {
-                        // Broadcast the tombstone via the sync channel so peers
-                        // receive the deletion and apply it via LWW.
-                        if let (Some(tombstone), Some(ref tx)) = (tombstone_opt, &self.new_item_tx)
-                        {
-                            let _ = tx.send(tombstone);
-                        }
-                        // Report whether a row was actually soft-deleted so the
-                        // response matches reality: `deleted: false` for an id
-                        // that did not exist, instead of always claiming `true`.
-                        Response::ok(
-                            req.id,
-                            serde_json::json!({"deleted": changed > 0, "id": id}),
-                        )
-                    }
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("blocking task failed: {e}"),
+                        serde_json::json!({"deleted": changed > 0, "id": id}),
                     ),
+                    Err(e) => Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e),
                 }
             }
             // T5.x — copy an item back to the system clipboard by id. Same
@@ -3293,23 +3218,10 @@ impl IpcServer {
             // surfaces typed `invalid_argument` / `not_found` error codes so
             // the UI can branch on `error_code` rather than parsing strings.
             "copy_item" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
@@ -3417,23 +3329,10 @@ impl IpcServer {
             // the raw PNG bytes for the UI to render as a thumbnail without having
             // to hit the pasteboard.
             "get_item_image" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
@@ -3541,23 +3440,10 @@ impl IpcServer {
             //                          get_item_image (full-res).
             // Error: item not found, non-image content_type, parse/decode failure.
             "get_item_thumbnail" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
                 // Capture the local_key once before entering spawn_blocking;
@@ -3731,23 +3617,10 @@ impl IpcServer {
             // and returns the raw bytes as base64 plus the filename and MIME type
             // parsed from the `blob_ref` meta JSON.
             "get_item_file" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {

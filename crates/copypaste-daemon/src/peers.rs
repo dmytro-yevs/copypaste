@@ -81,17 +81,10 @@ pub struct PairedDevice {
     pub last_sync_at: Option<i64>,
 }
 
-/// Normalise a fingerprint to the canonical colon-free, lowercase hex form used
-/// by the mTLS/P2P layer.
-///
-/// `peers.json` stores fingerprints in the user-facing `XX:XX:…` colon-hex
-/// form, while the P2P layer reports colon-free hex. To match a peer record
-/// against a P2P-reported fingerprint both sides must be canonicalised. This
-/// mirrors `crate::ipc::canonical_fingerprint` (kept local so `peers` has no
-/// dependency on the IPC module).
-fn canonical_fp(fp: &str) -> String {
-    fp.replace(':', "").to_ascii_lowercase()
-}
+// Use the canonical fingerprint normaliser from the IPC module — single
+// implementation, zero drift risk. The local alias keeps call-site churn
+// minimal; any future rename only touches this one line.
+use crate::ipc::canonical_fingerprint as canonical_fp;
 
 /// Update the persisted `name`, `address`, and `local_ip` fields for a paired
 /// peer from a live mDNS snapshot.

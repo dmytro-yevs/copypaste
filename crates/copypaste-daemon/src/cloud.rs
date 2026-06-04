@@ -38,9 +38,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
+use copypaste_core::storage::items::soft_delete_item;
 use copypaste_core::{
-    decrypt_from_cloud, delete_item, encrypt_for_cloud, exists_item_by_item_id,
-    get_item_by_item_id, insert_item, prune_to_cap, ClipboardItem, Database, SyncKey,
+    decrypt_from_cloud, encrypt_for_cloud, exists_item_by_item_id, get_item_by_item_id,
+    insert_item, prune_to_cap, ClipboardItem, Database, SyncKey,
 };
 
 // Shared sync pipeline helpers (extracted so the relay path can reuse the
@@ -2217,12 +2218,18 @@ async fn ws_ingest_loop(
 
                                 // ── Tombstone fast-path ──────────────────────
                                 // Tombstone rows carry deleted=true and no payload.
-                                // Delete the local row (if present) and report
-                                // success so last_sync_ms is updated.
+                                // Apply as a soft-delete so the item becomes a local
+                                // tombstone (deleted=1, content wiped) with the remote
+                                // lamport/wall_time, exactly matching the P2P path.
                                 if ws_deleted {
                                     zeroize::Zeroize::zeroize(&mut key_arr);
                                     if let Some(local_pk) = preserved_pk.as_ref() {
-                                        match delete_item(&db_guard, local_pk) {
+                                        match soft_delete_item(
+                                            &db_guard,
+                                            local_pk,
+                                            lamport_ts,
+                                            wall_time,
+                                        ) {
                                             Ok(n) if n > 0 => {
                                                 tracing::info!(
                                                     "ws_ingest_loop: applied tombstone \
@@ -2233,7 +2240,7 @@ async fn ws_ingest_loop(
                                             Ok(_) => {}
                                             Err(e) => {
                                                 tracing::warn!(
-                                                    "ws_ingest_loop: delete_item failed \
+                                                    "ws_ingest_loop: soft_delete_item failed \
                                                      for item_id={item_id_owned}: {e}"
                                                 );
                                             }
@@ -2243,11 +2250,12 @@ async fn ws_ingest_loop(
                                 }
 
                                 // Decrypt with sync key.
+                                // `blob_opt` is always `Some` here — tombstones were
+                                // handled above and `blob_opt` is `None` only for
+                                // deleted rows (guarded by `ws_deleted`).
                                 let blob = match blob_opt {
                                     Some(b) => b,
                                     None => {
-                                        // Should not happen: non-tombstone rows always
-                                        // have a blob (checked above). Defensive guard.
                                         tracing::warn!(
                                             "ws_ingest_loop: no blob for non-tombstone \
                                              id={id_owned}; skipping"
@@ -2520,19 +2528,22 @@ async fn poll_once(
 
             // ── Tombstone fast-path ──────────────────────────────────────────
             // If the remote row carries `deleted = true` the remote device has
-            // soft-deleted this item. Apply the deletion locally: remove the
-            // matching row (if any) and skip payload decode — tombstones carry
-            // no usable content. The cursor still advances (batch_max was
-            // updated above) so tombstones are never re-requested.
+            // soft-deleted this item. Apply the deletion locally as a tombstone
+            // (soft-delete: wipe content, set deleted=1, propagate via LWW) so
+            // the item cannot resurrect on this device or re-broadcast incorrectly.
+            // The cursor still advances (batch_max was updated above) so tombstones
+            // are never re-requested.
             let remote_deleted = row["deleted"].as_bool().unwrap_or(false);
             if remote_deleted {
                 if let Some(local_pk) = preserved_pk.as_ref() {
-                    match delete_item(&db_guard, local_pk) {
+                    let remote_lamport = row["lamport_ts"].as_i64().unwrap_or(0);
+                    let remote_wall = row_wall;
+                    match soft_delete_item(&db_guard, local_pk, remote_lamport, remote_wall) {
                         Ok(n) if n > 0 => {
                             synced += 1;
                             tracing::info!(
                                 "cloud-sync poll_once: applied tombstone for \
-                                 item_id={item_id} (deleted {n} local row(s))"
+                                 item_id={item_id} (soft-deleted {n} local row(s))"
                             );
                         }
                         Ok(_) => {
@@ -2543,13 +2554,13 @@ async fn poll_once(
                         }
                         Err(e) => {
                             tracing::warn!(
-                                "cloud-sync poll_once: delete_item failed for \
+                                "cloud-sync poll_once: soft_delete_item failed for \
                                  item_id={item_id}: {e}"
                             );
                         }
                     }
                 }
-                // Either deleted or already absent — skip to the next row.
+                // Either soft-deleted or already absent — skip payload decode.
                 continue;
             }
 
@@ -4785,7 +4796,7 @@ mod e2e_live {
         // runs the real decode/decrypt/insert pipeline. Bounded poll: up to 10
         // tries, 1s apart.
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id,deleted,pinned,pin_order&order=wall_time.asc&limit=20"
         );
         let mut inserted = false;
         let mut last_diag = String::from("(no rows fetched)");
@@ -5224,7 +5235,7 @@ mod bytea_e2e {
 
         // Poll it back through the real GET path and the product decoder.
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id,deleted,pinned,pin_order&order=wall_time.asc&limit=20"
         );
         let rows = match fetch_remote_rows(&client, &poll_url, &cfg.anon_key, "anon-key-for-tests")
             .await
@@ -5291,7 +5302,7 @@ mod bytea_e2e {
             .await;
 
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id,deleted,pinned,pin_order&order=wall_time.asc&limit=20"
         );
         let rows = match fetch_remote_rows(&client, &poll_url, &cfg.anon_key, "anon-key-for-tests")
             .await
@@ -5365,7 +5376,7 @@ mod bytea_e2e {
             .await;
 
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id,deleted,pinned,pin_order&order=wall_time.asc&limit=20"
         );
         let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
         // Session-less auth client: this fake never returns 401, so the refresh

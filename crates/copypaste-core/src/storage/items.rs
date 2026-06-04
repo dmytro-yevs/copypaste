@@ -757,6 +757,46 @@ pub fn delete_item(db: &Database, id: &str) -> Result<usize, ItemsError> {
     Ok(removed)
 }
 
+/// Soft-delete an item: wipe its content/nonce/thumb blobs, set `deleted = 1`,
+/// and stamp the supplied `lamport_ts` / `wall_time` so the resulting tombstone
+/// wins LWW resolution on every peer it reaches.
+///
+/// Unlike [`delete_item`] (hard DELETE), the row is **kept** in the table as a
+/// tombstone so:
+///   1. The sync layer can broadcast it as a deletion event.
+///   2. An inbound delete from another device cannot resurrect the item (the
+///      tombstone absorbs the re-insert via LWW).
+///
+/// Also removes the FTS entry so tombstones are never returned by search.
+///
+/// Returns the number of rows modified (0 means the id was not found).
+pub fn soft_delete_item(
+    db: &Database,
+    id: &str,
+    lamport_ts: i64,
+    wall_time: i64,
+) -> Result<usize, ItemsError> {
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+    let changed = tx.execute(
+        "UPDATE clipboard_items
+         SET deleted = 1,
+             content = NULL,
+             content_nonce = NULL,
+             thumb = NULL,
+             lamport_ts = ?2,
+             wall_time = ?3
+         WHERE id = ?1",
+        params![id, lamport_ts, wall_time],
+    )?;
+    if changed > 0 {
+        // Remove from FTS so the tombstone is not returned by search queries.
+        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    }
+    tx.commit()?;
+    Ok(changed)
+}
+
 /// Pin an item so it is never auto-deleted by TTL or history-limit prunes.
 ///
 /// Sets `pinned = 1`, clears `expires_at`, and assigns `pin_order` to
@@ -1224,47 +1264,6 @@ fn row_to_item(row: &rusqlite::Row) -> rusqlite::Result<ClipboardItem> {
         thumb: row.get(17)?,
         deleted: row.get::<_, i64>(18)? != 0,
     })
-}
-
-/// Soft-delete a clipboard item, turning it into a tombstone.
-///
-/// Sets `deleted = 1` and wipes the encrypted payload columns (`content`,
-/// `content_nonce`, `thumb`) to reclaim storage, then removes the item's
-/// FTS5 entry so it no longer appears in search results. The row itself is
-/// kept so that the LWW sync protocol can propagate the deletion to peer
-/// devices: the tombstone travels on the wire as a `WireItem` with
-/// `deleted = true` and a higher `lamport_ts`, and peers apply it via the
-/// normal LWW merge path.
-///
-/// The existing hard [`delete_item`] is preserved for the reset/clear-all
-/// path where propagation is not needed (local-only destructive delete).
-///
-/// Returns the number of rows updated (`0` if `id` does not exist).
-pub fn soft_delete_item(
-    db: &Database,
-    id: &str,
-    lamport_ts: i64,
-    wall_time: i64,
-) -> Result<usize, ItemsError> {
-    let conn = db.conn();
-    let tx = conn.unchecked_transaction()?;
-    let changed = tx.execute(
-        "UPDATE clipboard_items
-         SET deleted = 1,
-             content = NULL,
-             content_nonce = NULL,
-             thumb = NULL,
-             lamport_ts = ?2,
-             wall_time = ?3
-         WHERE id = ?1",
-        params![id, lamport_ts, wall_time],
-    )?;
-    if changed > 0 {
-        // Remove from FTS so the tombstone is not returned by search queries.
-        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
-    }
-    tx.commit()?;
-    Ok(changed)
 }
 
 #[cfg(test)]
